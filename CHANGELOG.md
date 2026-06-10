@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Enterprise bootstrap mirror mode lets `install.sh`, `install.ps1`, and `apm self-update` use internal release, installer, and PyPI mirrors with fail-closed public fallback. (closes #1680)
 - `apm install <package> --target openclaw` adds OpenClaw as a new experimental
   skills consumer target (opt in via `apm experimental enable openclaw`). Skills
   deploy to `.agents/skills/<name>/SKILL.md` (project) or

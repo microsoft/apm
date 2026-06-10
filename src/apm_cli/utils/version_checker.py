@@ -5,6 +5,11 @@ import re
 import sys
 from pathlib import Path
 
+from apm_cli.bootstrap_mirror import (
+    get_release_metadata_url,
+    release_metadata_public_lookup_blocked,
+)
+
 _DEFAULT_REPO = "microsoft/apm"
 _PUBLIC_GITHUB_URL = "https://github.com"
 _PUBLIC_API_BASE = "https://api.github.com"
@@ -27,12 +32,16 @@ def _get_air_gap_version() -> str | None:
 
 
 def _build_releases_api_url(github_url: str, repo: str) -> str:
-    """Build the GitHub Releases API URL for the given host and repository.
+    """Build the release metadata URL for the given host and repository.
 
-    For public GitHub, targets api.github.com directly.  For GitHub Enterprise
-    Server (any other GITHUB_URL value), uses the /api/v3 prefix on the
-    configured host, which is the standard GHE REST API path.
+    ``APM_RELEASE_METADATA_URL`` wins when configured so enterprise mirrors can
+    publish a static ``latest.json`` without emulating the GitHub API path. For
+    public GitHub, targets api.github.com directly. For GitHub Enterprise Server
+    (any other GITHUB_URL value), uses the /api/v3 prefix on the configured host.
     """
+    release_metadata_url = get_release_metadata_url()
+    if release_metadata_url is not None:
+        return release_metadata_url
     if github_url == _PUBLIC_GITHUB_URL:
         return f"{_PUBLIC_API_BASE}/repos/{repo}/releases/latest"
     return f"{github_url}/api/v3/repos/{repo}/releases/latest"
@@ -60,6 +69,10 @@ def get_latest_version_from_github(repo: str | None = None, timeout: int = 2) ->
     Respects the following environment variables (matching install.sh semantics):
       - ``VERSION``: when set, the API call is skipped entirely and the pinned
         version is returned directly.  Required for fully air-gapped setups.
+      - ``APM_RELEASE_METADATA_URL``: exact mirror URL for release metadata.
+      - ``APM_NO_DIRECT_FALLBACK``: when set to ``1``/``true``/``yes``/``on``,
+        public GitHub metadata is not queried unless a mirror URL or ``VERSION``
+        is configured.
       - ``GITHUB_URL``: base URL of the GitHub host (default
         ``https://github.com``).  A non-default value is treated as a GitHub
         Enterprise Server instance and the API is addressed at
@@ -96,6 +109,8 @@ def get_latest_version_from_github(repo: str | None = None, timeout: int = 2) ->
     try:
         effective_repo = _get_air_gap_repo() if repo is None else repo
         github_url = _get_air_gap_github_url()
+        if release_metadata_public_lookup_blocked(github_url):
+            return None
         url = _build_releases_api_url(github_url, effective_repo)
         token = _get_github_token()
         headers = {"Authorization": f"token {token}"} if token else {}

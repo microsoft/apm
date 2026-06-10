@@ -33,8 +33,8 @@ apm --version
 ## Update
 
 ```bash
-apm update          # update APM itself
-apm update --check  # check for updates without installing
+apm self-update          # update APM itself
+apm self-update --check  # check for updates without installing
 ```
 
 ## Installer options (macOS / Linux)
@@ -66,6 +66,32 @@ $env:APM_REPO = "my-org/apm"
 $env:VERSION = "v1.2.3"
 irm https://aka.ms/apm-windows | iex
 ```
+
+## Enterprise bootstrap mirrors
+
+Use these env vars to install and update APM through an internal mirror and fail closed when a public fallback would be required:
+
+| Variable | Purpose |
+|----------|---------|
+| `APM_INSTALLER_BASE_URL` | Base URL containing `install.sh` and `install.ps1`. |
+| `APM_RELEASE_METADATA_URL` | Exact URL for mirrored `latest.json` release metadata. |
+| `APM_RELEASE_BASE_URL` | Base URL for release assets at `{base}/{tag}/{asset}`. |
+| `APM_PYPI_INDEX_URL` | PyPI proxy used by installer pip fallback. |
+| `APM_NO_DIRECT_FALLBACK` | Set to `1` to block public GitHub, `aka.ms`, and PyPI fallback. |
+
+```bash
+export APM_INSTALLER_BASE_URL="https://artifactory.mycorp.example/generic/apm-install"
+export APM_RELEASE_METADATA_URL="https://artifactory.mycorp.example/generic/apm-releases/latest.json"
+export APM_RELEASE_BASE_URL="https://artifactory.mycorp.example/generic/apm-releases"
+export APM_PYPI_INDEX_URL="https://artifactory.mycorp.example/api/pypi/python-proxy/simple"
+export APM_NO_DIRECT_FALLBACK=1
+curl -sSL "$APM_INSTALLER_BASE_URL/install.sh" | sh
+apm self-update --check
+```
+
+For dependency installs after bootstrap, keep using `PROXY_REGISTRY_URL` and `PROXY_REGISTRY_ONLY=1`. Homebrew and Scoop mirroring is package-manager documentation only in v0; these env vars do not rewrite Homebrew or Scoop internals.
+
+No-egress smoke test: run the installer on a disposable runner with a curl wrapper or egress proxy that denies `github.com`, `api.github.com`, `aka.ms`, `pypi.org`, `pythonhosted.org`, Homebrew, and Scoop upstreams. With all mirror env vars set, the only allowed outbound host should be your mirror. Run `apm self-update --check` under the same env vars and confirm proxy logs show only the mirror host.
 
 ## Troubleshooting
 

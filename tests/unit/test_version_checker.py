@@ -436,6 +436,58 @@ class TestAirGappedEnvVars(unittest.TestCase):
         self.assertEqual(result, "1.2.3")
 
     @patch("requests.get")
+    def test_release_metadata_url_overrides_github_api_url(self, mock_get):
+        """APM_RELEASE_METADATA_URL targets mirror metadata instead of GitHub's API."""
+        from urllib.parse import urlparse
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"tag_name": "v2.0.0"}
+        mock_get.return_value = mock_response
+
+        import os as _os
+
+        env = {
+            k: v
+            for k, v in _os.environ.items()
+            if k not in ("VERSION", "GITHUB_URL", "APM_REPO", "APM_RELEASE_METADATA_URL")
+        }
+        env["APM_RELEASE_METADATA_URL"] = "https://mirror.corp.example/apm/latest.json"
+        with patch.dict("os.environ", env, clear=True):
+            result = get_latest_version_from_github()
+
+        self.assertEqual(result, "2.0.0")
+        call_url = mock_get.call_args[0][0]
+        parsed = urlparse(call_url)
+        self.assertEqual(parsed.scheme, "https")
+        self.assertEqual(parsed.hostname, "mirror.corp.example")
+        self.assertEqual(parsed.path, "/apm/latest.json")
+
+    @patch("requests.get")
+    def test_no_direct_fallback_without_mirror_skips_public_request(self, mock_get):
+        """APM_NO_DIRECT_FALLBACK avoids public metadata requests when no mirror is set."""
+        import os as _os
+
+        env = {
+            k: v
+            for k, v in _os.environ.items()
+            if k
+            not in (
+                "VERSION",
+                "GITHUB_URL",
+                "APM_REPO",
+                "APM_RELEASE_METADATA_URL",
+                "APM_NO_DIRECT_FALLBACK",
+            )
+        }
+        env["APM_NO_DIRECT_FALLBACK"] = "1"
+        with patch.dict("os.environ", env, clear=True):
+            result = get_latest_version_from_github()
+
+        self.assertIsNone(result)
+        mock_get.assert_not_called()
+
+    @patch("requests.get")
     @patch.dict("os.environ", {"VERSION": "1.5.0"}, clear=False)
     def test_version_env_var_without_v_prefix(self, mock_get):
         """VERSION without 'v' prefix is accepted and API is skipped."""

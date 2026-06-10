@@ -7,6 +7,9 @@ set -e
 # Custom install dir:   curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/.local/bin sh
 # Custom repository:    APM_REPO=ghe-org/apm sh install.sh
 # GitHub Enterprise:    GITHUB_URL=https://gh.corp.com sh install.sh
+# Enterprise mirror:    APM_RELEASE_BASE_URL=https://mirror.example/apm VERSION=v1.2.3 sh install.sh
+# PyPI mirror fallback: APM_PYPI_INDEX_URL=https://mirror.example/pypi/simple sh install.sh
+# Fail closed:          APM_NO_DIRECT_FALLBACK=1 sh install.sh
 # For private repositories, use with authentication:
 #   curl -sSL -H "Authorization: token $GITHUB_APM_PAT" \
 #     https://raw.githubusercontent.com/microsoft/apm/main/install.sh | \
@@ -24,6 +27,11 @@ APM_REPO="${APM_REPO:-microsoft/apm}"
 APM_INSTALL_DIR="${APM_INSTALL_DIR:-/usr/local/bin}"
 BINARY_NAME="apm"
 GITHUB_URL="${GITHUB_URL:-https://github.com}"
+APM_RELEASE_BASE_URL="${APM_RELEASE_BASE_URL:-}"
+APM_RELEASE_METADATA_URL="${APM_RELEASE_METADATA_URL:-}"
+APM_INSTALLER_BASE_URL="${APM_INSTALLER_BASE_URL:-}"
+APM_PYPI_INDEX_URL="${APM_PYPI_INDEX_URL:-}"
+APM_NO_DIRECT_FALLBACK="${APM_NO_DIRECT_FALLBACK:-}"
 
 # Banner
 echo -e "${BLUE}"
@@ -80,6 +88,55 @@ if [ -z "$VERSION" ] && [ -n "$1" ]; then
     VERSION="${1#@}"
 fi
 
+# Enterprise bootstrap mirror helpers
+is_truthy() {
+    case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+is_public_github_url() {
+    [ "${GITHUB_URL%/}" = "https://github.com" ]
+}
+
+join_url_path() {
+    _base="${1%/}"
+    shift
+    for _part in "$@"; do
+        _part="${_part#/}"
+        _part="${_part%/}"
+        _base="$_base/$_part"
+    done
+    printf '%s' "$_base"
+}
+
+release_metadata_url() {
+    if [ -n "$APM_RELEASE_METADATA_URL" ]; then
+        printf '%s' "${APM_RELEASE_METADATA_URL%/}"
+    elif is_public_github_url; then
+        printf 'https://api.github.com/repos/%s/releases/latest' "$APM_REPO"
+    else
+        printf '%s/api/v3/repos/%s/releases/latest' "${GITHUB_URL%/}" "$APM_REPO"
+    fi
+}
+
+release_asset_url() {
+    _tag_name="$1"
+    _asset_name="$2"
+    if [ -n "$APM_RELEASE_BASE_URL" ]; then
+        join_url_path "$APM_RELEASE_BASE_URL" "$_tag_name" "$_asset_name"
+    else
+        printf '%s/%s/releases/download/%s/%s' "${GITHUB_URL%/}" "$APM_REPO" "$_tag_name" "$_asset_name"
+    fi
+}
+
+pip_index_args() {
+    if [ -n "$APM_PYPI_INDEX_URL" ]; then
+        printf '%s %s' '--index-url' "$APM_PYPI_INDEX_URL"
+    fi
+}
+
 # Function to check Python availability and version
 check_python_requirements() {
     # Check if Python is available
@@ -123,8 +180,21 @@ try_pip_installation() {
         return 1
     fi
     
-    # Try to install
-    if $PIP_CMD install --user apm-cli; then
+    # Try to install. In fail-closed mode, never fall back to public PyPI.
+    if [ -n "$APM_PYPI_INDEX_URL" ]; then
+        echo -e "${BLUE}Using APM_PYPI_INDEX_URL mirror for pip install.${NC}"
+        PIP_INSTALL_OK=0
+        $PIP_CMD install --user --index-url "$APM_PYPI_INDEX_URL" apm-cli || PIP_INSTALL_OK=$?
+    elif is_truthy "$APM_NO_DIRECT_FALLBACK"; then
+        echo -e "${RED}Error: APM_NO_DIRECT_FALLBACK is set, but APM_PYPI_INDEX_URL is not configured.${NC}"
+        echo "Set APM_PYPI_INDEX_URL to your internal PyPI proxy before using pip fallback."
+        return 1
+    else
+        PIP_INSTALL_OK=0
+        $PIP_CMD install --user apm-cli || PIP_INSTALL_OK=$?
+    fi
+
+    if [ "$PIP_INSTALL_OK" -eq 0 ]; then
         echo -e "${GREEN}[+] APM installed successfully via pip!${NC}"
         
         # Check if apm is now available
@@ -222,7 +292,12 @@ fi
 # When VERSION is provided, skip GitHub API and compute download URL directly
 if [ -n "$VERSION" ]; then
     TAG_NAME="$VERSION"
-    DOWNLOAD_URL="$GITHUB_URL/$APM_REPO/releases/download/$TAG_NAME/$DOWNLOAD_BINARY"
+    if is_truthy "$APM_NO_DIRECT_FALLBACK" && [ -z "$APM_RELEASE_BASE_URL" ] && is_public_github_url; then
+        echo -e "${RED}Error: APM_NO_DIRECT_FALLBACK is set, but APM_RELEASE_BASE_URL is not configured.${NC}"
+        echo "Set APM_RELEASE_BASE_URL to a mirror containing $TAG_NAME/$DOWNLOAD_BINARY."
+        exit 1
+    fi
+    DOWNLOAD_URL=$(release_asset_url "$TAG_NAME" "$DOWNLOAD_BINARY")
     echo -e "${GREEN}Version: $TAG_NAME${NC}"
     echo -e "${BLUE}Download URL: $DOWNLOAD_URL${NC}"
 fi
@@ -231,15 +306,30 @@ if [ -z "$TAG_NAME" ]; then
 # Get latest release info
 echo -e "${YELLOW}Fetching latest release information...${NC}"
 
+if is_truthy "$APM_NO_DIRECT_FALLBACK" && [ -z "$APM_RELEASE_METADATA_URL" ] && is_public_github_url; then
+    echo -e "${RED}Error: APM_NO_DIRECT_FALLBACK is set, but APM_RELEASE_METADATA_URL is not configured.${NC}"
+    echo "Set APM_RELEASE_METADATA_URL to mirrored latest.json, or set VERSION to a pinned release."
+    exit 1
+fi
+
+LATEST_RELEASE_URL=$(release_metadata_url)
+
 # Fetch release info; include Authorization header when a token is already resolved
 # (AUTH_HEADER_VALUE set earlier from GITHUB_APM_PAT > GITHUB_TOKEN > GH_TOKEN precedence).
 # This avoids anonymous rate-limiting behind shared IPs / corporate NAT.
 if [ -n "$AUTH_HEADER_VALUE" ]; then
-    LATEST_RELEASE=$(curl -s -H "Authorization: token $AUTH_HEADER_VALUE" "https://api.github.com/repos/$APM_REPO/releases/latest")
+    LATEST_RELEASE=$(curl -s -H "Authorization: token $AUTH_HEADER_VALUE" "$LATEST_RELEASE_URL")
 else
-    LATEST_RELEASE=$(curl -s "https://api.github.com/repos/$APM_REPO/releases/latest")
+    LATEST_RELEASE=$(curl -s "$LATEST_RELEASE_URL")
 fi
 CURL_EXIT_CODE=$?
+
+if [ -n "$APM_RELEASE_METADATA_URL" ] && { [ $CURL_EXIT_CODE -ne 0 ] || [ -z "$LATEST_RELEASE" ]; }; then
+    echo -e "${RED}Error: Failed to fetch release metadata from APM_RELEASE_METADATA_URL${NC}"
+    echo "Mirror URL: $APM_RELEASE_METADATA_URL"
+    echo "Check that the mirror is reachable and publishes GitHub-compatible latest.json."
+    exit 1
+fi
 
 # Check if the response indicates authentication is required (private repo)
 # Only try authentication if curl failed OR we got a "Not Found" message OR response is empty
@@ -265,7 +355,7 @@ if [ $CURL_EXIT_CODE -ne 0 ] || [ -z "$LATEST_RELEASE" ] || echo "$LATEST_RELEAS
     fi
 
     # Retry with authentication
-    LATEST_RELEASE=$(curl -s -H "Authorization: token $AUTH_HEADER_VALUE" "https://api.github.com/repos/$APM_REPO/releases/latest")
+    LATEST_RELEASE=$(curl -s -H "Authorization: token $AUTH_HEADER_VALUE" "$LATEST_RELEASE_URL")
     CURL_EXIT_CODE=$?
 fi
 
@@ -277,6 +367,12 @@ fi
 
 # Check if we got a valid response (should contain tag_name)
 if ! echo "$LATEST_RELEASE" | grep -q '"tag_name":'; then
+    if [ -n "$APM_RELEASE_METADATA_URL" ]; then
+        echo -e "${RED}Error: Invalid release metadata from APM_RELEASE_METADATA_URL${NC}"
+        echo "Mirror URL: $APM_RELEASE_METADATA_URL"
+        echo "Publish a GitHub-compatible JSON document with a tag_name field."
+        exit 1
+    fi
     echo -e "${RED}Error: Invalid API response received${NC}"
 
     # Check if the response contains an error message
@@ -290,10 +386,19 @@ fi
 # Extract tag name and download URLs
 # Use grep -o to extract just the matching portion (handles single-line JSON)
 TAG_NAME=$(echo "$LATEST_RELEASE" | grep -o '"tag_name": *"[^"]*"' | awk -F'"' '{print $4}')
-DOWNLOAD_URL="$GITHUB_URL/$APM_REPO/releases/download/$TAG_NAME/$DOWNLOAD_BINARY"
+if is_truthy "$APM_NO_DIRECT_FALLBACK" && [ -z "$APM_RELEASE_BASE_URL" ] && is_public_github_url; then
+    echo -e "${RED}Error: APM_NO_DIRECT_FALLBACK is set, but APM_RELEASE_BASE_URL is not configured.${NC}"
+    echo "Set APM_RELEASE_BASE_URL to a mirror containing $TAG_NAME/$DOWNLOAD_BINARY."
+    exit 1
+fi
+DOWNLOAD_URL=$(release_asset_url "$TAG_NAME" "$DOWNLOAD_BINARY")
 
-# Extract API asset URL for private repository downloads
-ASSET_URL=$(echo "$LATEST_RELEASE" | grep -B 3 "\"name\": \"$DOWNLOAD_BINARY\"" | grep -o '"url": *"[^"]*"' | awk -F'"' '{print $4}')
+# Extract API asset URL for private repository downloads. Do not use GitHub API
+# asset fallback when APM_RELEASE_BASE_URL is set; mirror mode must fail closed.
+ASSET_URL=""
+if [ -z "$APM_RELEASE_BASE_URL" ]; then
+    ASSET_URL=$(echo "$LATEST_RELEASE" | grep -B 3 "\"name\": \"$DOWNLOAD_BINARY\"" | grep -o '"url": *"[^"]*"' | awk -F'"' '{print $4}')
+fi
 
 if [ -z "$TAG_NAME" ]; then
     echo -e "${RED}Error: Could not determine latest release version${NC}"
@@ -361,6 +466,12 @@ else
             if curl -L --fail --silent --show-error -H "Authorization: token $AUTH_HEADER_VALUE" "$DOWNLOAD_URL" -o "$TMP_DIR/$DOWNLOAD_BINARY"; then
                 echo -e "${GREEN}[+] Download successful with authentication${NC}"
             else
+                if [ -n "$APM_RELEASE_BASE_URL" ]; then
+                    echo -e "${RED}Error: Failed to download APM CLI from APM_RELEASE_BASE_URL mirror${NC}"
+                    echo "Mirror URL: $DOWNLOAD_URL"
+                    echo "Check that the mirror is reachable and contains $TAG_NAME/$DOWNLOAD_BINARY."
+                    exit 1
+                fi
                 echo -e "${RED}Error: Failed to download APM CLI even with authentication${NC}"
                 echo "URL: $DOWNLOAD_URL"
                 echo "This might mean:"
@@ -377,6 +488,12 @@ else
             fi
         fi
     else
+        if [ -n "$APM_RELEASE_BASE_URL" ]; then
+            echo -e "${RED}Error: Failed to download APM CLI from APM_RELEASE_BASE_URL mirror${NC}"
+            echo "Mirror URL: $DOWNLOAD_URL"
+            echo "Check that the mirror is reachable and contains $TAG_NAME/$DOWNLOAD_BINARY."
+            exit 1
+        fi
         echo -e "${RED}Error: Failed to download APM${NC}"
         echo "URL: $DOWNLOAD_URL"
         echo "This might mean:"

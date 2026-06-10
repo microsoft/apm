@@ -15,6 +15,13 @@ import sys
 
 import click
 
+from ..bootstrap_mirror import (
+    append_url_path,
+    get_installer_base_url,
+    get_release_metadata_url,
+    installer_public_download_blocked,
+    release_metadata_public_lookup_blocked,
+)
 from ..core.command_logger import CommandLogger
 from ..update_policy import get_self_update_disabled_message, is_self_update_enabled
 from ..utils.subprocess_env import external_process_env
@@ -31,30 +38,30 @@ def _is_windows_platform() -> bool:
 
 
 def _get_update_installer_url() -> str:
-    """Return the installer URL for the current platform, respecting air-gapped env vars.
+    """Return the installer URL for the current platform, respecting mirror env vars.
 
-    When ``GITHUB_URL`` is set to a non-default host (i.e. a GitHub Enterprise
-    Server or Artifactory mirror), the installer script is fetched from that
-    host using the raw-content path:
-    ``{GITHUB_URL}/{APM_REPO}/raw/{_INSTALL_SCRIPT_REF}/install.sh`` (Unix) or
-    ``install.ps1`` (Windows).
-
-    When ``GITHUB_URL`` is unset or matches the public GitHub URL, the standard
-    shortlinks (``https://aka.ms/apm-unix`` / ``https://aka.ms/apm-windows``)
-    are used, preserving the existing behavior.
-
-    The ``APM_REPO`` env var (default ``microsoft/apm``) selects the repository
-    on the configured host.  The subprocess running the installer inherits
-    ``VERSION``, ``GITHUB_URL``, and ``APM_REPO`` from the process environment,
-    so the downloaded script also honours them automatically.
+    ``APM_INSTALLER_BASE_URL`` wins when configured, using ``install.sh`` on
+    Unix and ``install.ps1`` on Windows under that base URL. Otherwise existing
+    behaviour is preserved: public GitHub uses the aka.ms shortlinks, and a
+    custom ``GITHUB_URL`` uses the raw repository path.
     """
     github_url = os.environ.get("GITHUB_URL", _DEFAULT_GITHUB_URL).rstrip("/")
     apm_repo = os.environ.get("APM_REPO", _DEFAULT_APM_REPO)
+    script_name = "install.ps1" if _is_windows_platform() else "install.sh"
+
+    installer_base_url = get_installer_base_url()
+    if installer_base_url is not None:
+        return append_url_path(installer_base_url, script_name)
+
+    if installer_public_download_blocked(github_url):
+        raise RuntimeError(
+            "APM_NO_DIRECT_FALLBACK is set, but APM_INSTALLER_BASE_URL is not configured. "
+            "Set APM_INSTALLER_BASE_URL to a mirror containing install.sh/install.ps1."
+        )
 
     if github_url == _DEFAULT_GITHUB_URL:
         return "https://aka.ms/apm-windows" if _is_windows_platform() else "https://aka.ms/apm-unix"
 
-    script_name = "install.ps1" if _is_windows_platform() else "install.sh"
     return f"{github_url}/{apm_repo}/raw/{_INSTALL_SCRIPT_REF}/{script_name}"
 
 
@@ -65,9 +72,23 @@ def _get_update_installer_suffix() -> str:
 
 def _get_manual_update_command() -> str:
     """Return the manual update command for the current platform."""
+    try:
+        installer_url = _get_update_installer_url()
+    except RuntimeError:
+        installer_url = "<set APM_INSTALLER_BASE_URL>/install.ps1"
+        if not _is_windows_platform():
+            installer_url = "<set APM_INSTALLER_BASE_URL>/install.sh"
     if _is_windows_platform():
-        return 'powershell -ExecutionPolicy Bypass -c "irm https://aka.ms/apm-windows | iex"'
-    return "curl -sSL https://aka.ms/apm-unix | sh"
+        return f'powershell -ExecutionPolicy Bypass -c "irm {installer_url} | iex"'
+    return f"curl -sSL {installer_url} | sh"
+
+
+def _log_no_direct_metadata_error(logger: CommandLogger) -> None:
+    """Emit the actionable fail-closed metadata configuration error."""
+    logger.error("APM_NO_DIRECT_FALLBACK is set, but no release metadata mirror is configured.")
+    logger.info(
+        "Set APM_RELEASE_METADATA_URL to mirrored latest.json, or set VERSION to a pinned release."
+    )
 
 
 def _get_installer_run_command(script_path: str) -> list[str]:
@@ -120,9 +141,16 @@ def self_update(check):
         _github_url = os.environ.get("GITHUB_URL", "").rstrip("/")
         if _github_url and _github_url != _DEFAULT_GITHUB_URL:
             logger.progress(f"GITHUB_URL override active -- using host: {_github_url!r}")
+        _release_metadata_url = get_release_metadata_url()
+        if _release_metadata_url:
+            logger.progress("APM_RELEASE_METADATA_URL override active -- using mirrored metadata")
         _pinned = os.environ.get("VERSION", "")
         if _pinned:
             logger.progress(f"VERSION env var set -- API call skipped, using: {_pinned!r}")
+
+        if release_metadata_public_lookup_blocked(_github_url or _DEFAULT_GITHUB_URL):
+            _log_no_direct_metadata_error(logger)
+            sys.exit(1)
 
         # Check for latest version
         from ..utils.version_checker import get_latest_version_from_github
@@ -130,8 +158,14 @@ def self_update(check):
         latest_version = get_latest_version_from_github()
 
         if not latest_version:
-            logger.error("Unable to fetch latest version from remote")
-            logger.progress("Please check your internet connection or try again later")
+            if _release_metadata_url:
+                logger.error("Unable to fetch latest version from APM_RELEASE_METADATA_URL mirror")
+                logger.info(
+                    "Check the mirror URL, publish latest.json, or set VERSION to a pinned release."
+                )
+            else:
+                logger.error("Unable to fetch latest version from remote")
+                logger.progress("Please check your internet connection or try again later")
             sys.exit(1)
 
         from ..utils.version_checker import is_newer_version
@@ -157,7 +191,14 @@ def self_update(check):
         try:
             import requests
 
-            install_script_url = _get_update_installer_url()
+            try:
+                install_script_url = _get_update_installer_url()
+            except RuntimeError as e:
+                logger.error(str(e))
+                logger.info(
+                    "Unset APM_NO_DIRECT_FALLBACK only if public installer fallback is allowed."
+                )
+                sys.exit(1)
             response = requests.get(install_script_url, timeout=10)
             response.raise_for_status()
 
