@@ -7,10 +7,12 @@ import threading
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Optional, Protocol
 
 from ..models.apm_package import APMPackage, DependencyReference
+from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
+from ..utils.paths import portable_relpath
 from .dependency_graph import (
     CircularRef,
     DependencyGraph,
@@ -261,6 +263,24 @@ class APMDependencyResolver:
             child_dep.reference if child_dep.reference is not None else parent_dep.reference
         )
 
+        return self._inherit_remote_parent_fields(
+            parent_dep,
+            child_dep,
+            virtual_path=child_dep.virtual_path,
+            reference=merged_ref,
+            is_virtual=True,
+        )
+
+    @staticmethod
+    def _inherit_remote_parent_fields(
+        parent_dep: DependencyReference,
+        child_dep: DependencyReference,
+        *,
+        virtual_path: str | None,
+        reference: str | None,
+        is_virtual: bool,
+    ) -> DependencyReference:
+        """Return *child_dep* with remote identity inherited from *parent_dep*."""
         return replace(
             child_dep,
             repo_url=parent_dep.repo_url,
@@ -273,12 +293,124 @@ class APMDependencyResolver:
             artifactory_prefix=parent_dep.artifactory_prefix,
             is_insecure=parent_dep.is_insecure,
             allow_insecure=parent_dep.allow_insecure,
-            reference=merged_ref,
-            is_virtual=True,
+            source=parent_dep.source,
+            registry_name=None,
+            reference=reference,
+            virtual_path=virtual_path,
+            is_virtual=is_virtual,
             is_parent_repo_inheritance=False,
             is_local=False,
             local_path=None,
         )
+
+    @staticmethod
+    def _is_absolute_local_path(local_path: str) -> bool:
+        """Return True for POSIX, home-expanded, or Windows absolute paths."""
+        raw = local_path.strip()
+        return Path(raw).expanduser().is_absolute() or PureWindowsPath(raw).is_absolute()
+
+    def _remote_repo_root_for_parent(
+        self,
+        parent_dep: DependencyReference,
+        parent_pkg: APMPackage,
+    ) -> Path:
+        """Return the on-disk clone root for a remote parent package."""
+        if self._apm_modules_dir is None or parent_pkg.source_path is None:
+            raise PathTraversalError(
+                "remote parent package has no source path to anchor local path"
+            )
+        source_path = ensure_path_within(parent_pkg.source_path, self._apm_modules_dir)
+        repo_root = source_path
+        if parent_dep.virtual_path:
+            validate_path_segments(parent_dep.virtual_path, context="virtual_path")
+            for _segment in parent_dep.virtual_path.replace("\\", "/").split("/"):
+                if _segment:
+                    repo_root = repo_root.parent
+        return ensure_path_within(repo_root, self._apm_modules_dir)
+
+    def _expand_remote_parent_local_path(
+        self,
+        parent_dep: DependencyReference,
+        parent_pkg: APMPackage,
+        child_dep: DependencyReference,
+    ) -> DependencyReference:
+        """Expand a remote package's relative ``path:`` dep to a same-repo virtual dep.
+
+        The security boundary is the authenticated parent repository root: a
+        relative path must resolve inside that root. The returned dependency keeps
+        the parent's host/repo/ref fields so downstream download code reuses the
+        same origin and shared clone cache instead of treating the path as a
+        consumer-filesystem local dependency.
+        """
+        if not child_dep.local_path:
+            raise PathTraversalError("remote local dependency has no path")
+        if child_dep.source == "registry" or parent_dep.source == "registry":
+            raise PathTraversalError("registry packages cannot declare same-repo local paths")
+        if not self._remote_parent_eligible(parent_dep):
+            raise PathTraversalError("remote local dependency has no eligible git parent")
+        local_str = str(child_dep.local_path)
+        if self._is_absolute_local_path(local_str):
+            raise PathTraversalError("absolute paths inside remote packages are not allowed")
+
+        repo_root = self._remote_repo_root_for_parent(parent_dep, parent_pkg)
+        parent_source = ensure_path_within(parent_pkg.source_path, repo_root)
+        local_path = Path(local_str.replace("\\", "/"))
+        resolved = ensure_path_within(parent_source / local_path, repo_root)
+        virtual_path = portable_relpath(resolved, repo_root)
+        if virtual_path in ("", "."):
+            return self._inherit_remote_parent_fields(
+                parent_dep,
+                child_dep,
+                virtual_path=None,
+                reference=parent_dep.reference,
+                is_virtual=False,
+            )
+        validate_path_segments(virtual_path, context="same-repo path")
+        return self._inherit_remote_parent_fields(
+            parent_dep,
+            child_dep,
+            virtual_path=virtual_path,
+            reference=parent_dep.reference,
+            is_virtual=True,
+        )
+
+    def _reject_remote_parent_local_path(
+        self,
+        dep_ref: DependencyReference,
+        parent_pkg: APMPackage | None,
+        detail: str,
+    ) -> None:
+        """Record and report a rejected ``path:`` dep declared by a remote package."""
+        local_str = str(dep_ref.local_path or "")
+        package_name = parent_pkg.name if parent_pkg else "?"
+        try:
+            from apm_cli.utils.console import _rich_error
+
+            _rich_error(
+                f"Refusing to install local_path dependency '{local_str}' "
+                f"declared by remote package '{package_name}': {detail} "
+                "Use a relative path that stays inside the same remote repo, "
+                "or publish/reference the dependency as a standalone package."
+            )
+        except Exception:
+            _logger.debug("Could not emit remote-parent rejection notice", exc_info=True)
+        with self._download_lock:
+            self._rejected_remote_local_keys.add(dep_ref.get_unique_key())
+
+    def _expand_or_reject_remote_parent_local_path(
+        self,
+        parent_dep: DependencyReference,
+        parent_pkg: APMPackage,
+        child_dep: DependencyReference,
+    ) -> DependencyReference | None:
+        """Expand eligible remote ``path:`` deps, otherwise fail closed."""
+        if not (child_dep.is_local and child_dep.local_path and self._is_remote_parent(parent_pkg)):
+            return child_dep
+        try:
+            return self._expand_remote_parent_local_path(parent_dep, parent_pkg, child_dep)
+        except PathTraversalError as exc:
+            self._reject_remote_parent_local_path(child_dep, parent_pkg, str(exc))
+            return None
 
     def _resolve_marketplace_dep(self, dep_ref: DependencyReference) -> DependencyReference:
         """Resolve a marketplace dependency to a concrete DependencyReference.
@@ -570,6 +702,13 @@ class APMDependencyResolver:
                     for sub_dep in sub_dependencies:
                         if sub_dep.is_parent_repo_inheritance:
                             sub_dep = self.expand_parent_repo_decl(node.dependency_ref, sub_dep)
+                        sub_dep = self._expand_or_reject_remote_parent_local_path(
+                            node.dependency_ref,
+                            node.package,
+                            sub_dep,
+                        )
+                        if sub_dep is None:
+                            continue
                         if sub_dep.is_marketplace:
                             resolved = self._resolve_marketplace_or_record_error(
                                 sub_dep, tree, f"required by {node.dependency_ref.repo_url}"
@@ -752,11 +891,11 @@ class APMDependencyResolver:
                 that led here (e.g. "root-pkg > mid-pkg").  Forwarded to the
                 download callback for contextual error messages.
             parent_pkg: APMPackage that declared *dep_ref*, or None if this is
-                a direct dep from the root project. Used to (a) anchor relative
+                a direct dep from the root project. Used to anchor relative
                 ``local_path`` resolution to the declaring package's source
-                directory (#857) and (b) reject ``local_path`` deps declared
-                inside REMOTE packages -- a remote package can't reasonably
-                refer to a path on the consumer's filesystem (#940).
+                directory (#857). Remote same-repo local paths are expanded
+                before this loader; any remaining remote local path is rejected
+                fail-closed (#940 / #1571).
 
         Returns:
             APMPackage: Loaded package if found, None otherwise
@@ -768,43 +907,17 @@ class APMDependencyResolver:
         if self._apm_modules_dir is None:
             return None
 
-        # Reject local_path deps declared by remote packages BEFORE asking the
-        # download callback to materialize them. A remote package referencing
-        # a local path on the consumer's filesystem is a path-confusion vector
-        # whether the path is relative (resolves against the parent's
-        # apm_modules clone) or absolute (presumes filesystem layout). Both
-        # branches reject at ERROR severity so the operator sees red, not the
-        # yellow of an advisory warning (#940 F3).
+        # Fallback fail-closed guard for local_path deps declared by remote
+        # packages. Normal BFS expansion converts eligible same-repo relative
+        # paths into remote virtual deps before they reach this loader. Anything
+        # still local here lacks trusted parent repo coordinates, so refuse it
+        # before the download callback can copy from the consumer filesystem.
         if dep_ref.is_local and dep_ref.local_path and self._is_remote_parent(parent_pkg):
-            local_str = str(dep_ref.local_path)
-            try:
-                from apm_cli.utils.console import _rich_error
-
-                if Path(local_str).expanduser().is_absolute():
-                    _rich_error(
-                        f"Refusing to install local_path dependency '{local_str}' "
-                        f"declared by remote package '{parent_pkg.name if parent_pkg else '?'}': "
-                        "absolute paths inside remote packages are a security risk. "
-                        "Publish the dependency as a standalone package and reference "
-                        "it via owner/repo or marketplace handle."
-                    )
-                else:
-                    _rich_error(
-                        f"Refusing to install local_path dependency '{local_str}' "
-                        f"declared by remote package '{parent_pkg.name if parent_pkg else '?'}': "
-                        "remote packages cannot reference paths on the consumer "
-                        "filesystem. Publish the dependency as a standalone package "
-                        "and reference it via owner/repo or marketplace handle."
-                    )
-            except Exception:
-                _logger.debug("Could not emit remote-parent rejection notice", exc_info=True)
-            # Mark the dep as failed at resolve time so the integrate phase
-            # skips it (PR #1111 review C2). Without this, the dep would
-            # remain in the dep tree -> ``deps_to_install`` -> the integrate
-            # loop would still call ``_copy_local_package`` and copy the
-            # very path we just refused.
-            with self._download_lock:
-                self._rejected_remote_local_keys.add(dep_ref.get_unique_key())
+            self._reject_remote_parent_local_path(
+                dep_ref,
+                parent_pkg,
+                "remote package path could not be tied to its authenticated repo root.",
+            )
             return None
 
         # Get the canonical install path for this dependency
