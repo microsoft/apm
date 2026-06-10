@@ -72,8 +72,9 @@ def build_dependency_unique_key(
         key = f"{key}/{virtual_path}"
 
     host_value = (host or "").strip()
-    if host_value and host_value.lower() != "github.com":
-        return f"{host_value}/{key}"
+    normalized_host = host_value.lower()
+    if normalized_host and normalized_host != "github.com":
+        return f"{normalized_host}/{key}"
     return key
 
 

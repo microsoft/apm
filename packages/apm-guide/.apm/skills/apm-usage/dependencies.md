@@ -464,6 +464,7 @@ of the ref format in apm.yml. Running `apm install` without `--update` always
 uses the locked SHA, ensuring reproducible installs across machines.
 
 Lockfile keys keep `github.com` implicit for migration stability: existing
-GitHub entries stay keyed as `owner/repo`. Non-default hosts add the host
-segment, for example `gitea.myorg.com/owner/repo`, so same-name repositories
-on different hosts no longer collide.
+GitHub entries stay keyed as `owner/repo`. Non-default hosts add the lowercased
+host segment, for example `gitea.myorg.com/owner/repo`, so same-name
+repositories on different hosts no longer collide and host casing cannot create
+duplicate keys.

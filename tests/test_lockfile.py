@@ -36,6 +36,13 @@ class TestLockedDependency:
         dep = LockedDependency(repo_url="team/skills", host="gitea.myorg.com")
         assert dep.get_unique_key() == "gitea.myorg.com/team/skills"
 
+    def test_get_unique_key_lowercases_non_default_host(self):
+        mixed_case = LockedDependency(repo_url="team/skills", host="Gitea.MyOrg.com")
+        lower_case = LockedDependency(repo_url="team/skills", host="gitea.myorg.com")
+
+        assert mixed_case.get_unique_key() == lower_case.get_unique_key()
+        assert lower_case.get_unique_key() == "gitea.myorg.com/team/skills"
+
     def test_get_unique_key_includes_non_default_host_for_virtual_dep(self):
         dep = LockedDependency(
             repo_url="team/skills",

@@ -118,7 +118,7 @@ Each item in `dependencies` describes one resolved package.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `repo_url` | string | yes | Canonical repo URL (e.g. `github.com/owner/repo`). Unique key for the entry, except for virtual and local entries (see below). |
+| `repo_url` | string | yes | Canonical repository path or URL. Entry identity is derived from `repo_url`, `host`, and virtual/local markers; see [lockfile identity keys](#lockfile-identity-keys). |
 | `host` | string | no | FQDN when not inferable from `repo_url` (e.g. for registry proxies or non-GitHub hosts). |
 | `host_type` | string | no | Explicit host-kind hint, currently `gitlab`, copied from object-form `type: gitlab`. |
 | `port` | int | no | Non-standard SSH/HTTPS port. Validated to `1..65535` on read. |
@@ -151,10 +151,15 @@ Each item in `dependencies` describes one resolved package.
 Fields are emitted only when set. A minimal entry is just `repo_url` plus
 `resolved_commit`.
 
+## Lockfile identity keys
+
 Lockfile dependency keys keep `github.com` implicit for migration stability:
-existing `github.com` entries remain keyed as `owner/repo`. Entries for
-non-default hosts are keyed as `host/owner/repo`, so `github.com/team/skills`
-and `gitea.myorg.com/team/skills` can coexist without overwriting each other.
+existing `github.com` entries remain keyed as `owner/repo`. Local dependencies
+use `local_path` directly. Virtual dependencies append `virtual_path` to the
+base repo key. Entries for non-default hosts prefix the key with the lowercased
+host (`host/owner/repo`), so `github.com/team/skills` and
+`gitea.myorg.com/team/skills` can coexist without overwriting each other, and
+host casing cannot create duplicate keys.
 
 ## Self entry
 
