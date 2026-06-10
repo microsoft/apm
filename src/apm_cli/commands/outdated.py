@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Iterable
 
 import click
 
@@ -19,6 +20,7 @@ from ..deps.revision_pins import (
     find_latest_annotated_tag,
     is_full_revision_pin,
 )
+from ..models.dependency.types import RemoteRef
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +213,7 @@ def _check_revision_pin_ref(
     current_ref: str,
     package_name: str,
     package_basename: str,
-    remote_refs,
+    remote_refs: Iterable[RemoteRef],
 ) -> OutdatedRow | None:
     """Return an outdated row for full-SHA pins, or None for other refs."""
     if not is_full_revision_pin(current_ref):

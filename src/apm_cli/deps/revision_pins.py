@@ -6,15 +6,28 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
 
 from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
+from apm_cli.utils.console import STATUS_SYMBOLS
+
+if TYPE_CHECKING:
+    from apm_cli.deps.lockfile import LockedDependency
 
 _SHA_RE = re.compile(r"^[a-fA-F0-9]{40}$")
 
 
 class RevisionPinResolutionError(RuntimeError):
     """Raised when a SHA pin cannot be safely mapped to an annotated tag."""
+
+
+class _RemoteRefDownloader(Protocol):
+    """Downloader surface needed for authoritative remote-ref checks."""
+
+    def list_remote_refs(self, dep_ref: DependencyReference) -> Iterable[RemoteRef]:
+        """List refs from the dependency's authoritative upstream."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -93,7 +106,7 @@ def find_latest_annotated_tag(
 
 def resolve_revision_pin_updates(
     dependencies: Iterable[DependencyReference],
-    downloader,
+    downloader: _RemoteRefDownloader,
     *,
     only_packages: set[str] | None = None,
 ) -> list[RevisionPinUpdate]:
@@ -132,7 +145,7 @@ def render_revision_pin_update_plan(updates: Iterable[RevisionPinUpdate]) -> str
         return ""
     lines = ["[i] Revision pin updates for apm.yml", ""]
     for update in ordered:
-        lines.append(f"  [~] {update.display_name}")
+        lines.append(f"  {STATUS_SYMBOLS['update']} {update.display_name}")
         lines.append(f"      ref: {update.old_sha[:7]} -> {update.new_sha[:7]} (# {update.tag})")
         lines.append("")
     lines.append(f"  {len(ordered)} revision pin {'update' if len(ordered) == 1 else 'updates'}")
@@ -197,6 +210,6 @@ def _replace_one_revision_pin_line(
     return lines
 
 
-def dependency_ref_from_locked(locked) -> DependencyReference:
+def dependency_ref_from_locked(locked: LockedDependency) -> DependencyReference:
     """Rebuild a DependencyReference suitable for authoritative upstream checks."""
     return locked.to_dependency_ref()

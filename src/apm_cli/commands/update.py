@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
@@ -74,6 +75,9 @@ from ..install.plan import UpdatePlan, render_plan_text
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
 from ._helpers import UnknownPackageError, _find_apm_yml, resolve_requested_packages
 
+if TYPE_CHECKING:
+    from ..models.dependency.reference import DependencyReference
+
 
 def _stdin_is_tty() -> bool:
     """Return True only when stdin is connected to a real terminal.
@@ -90,7 +94,7 @@ def _stdin_is_tty() -> bool:
 
 def _resolve_and_maybe_apply_revision_pin_updates(
     *,
-    all_declared_deps,
+    all_declared_deps: list[DependencyReference],
     only_packages: list[str] | None,
     assume_yes: bool,
     dry_run: bool,
@@ -453,15 +457,32 @@ def _run_dep_update(
         dry_run=dry_run,
         manifest_path=Path("apm.yml"),
     )
-    if dry_run and revision_pin_updates:
-        return
     if revision_pin_updates:
         from apm_cli.models.apm_package import clear_apm_yml_cache
 
         clear_apm_yml_cache()
         apm_package = APMPackage.from_apm_yml(Path("apm.yml"))
 
-    plan_state: dict[str, UpdatePlan | bool] = {"plan": None, "proceeded": False}
+    plan_state: dict[str, UpdatePlan | bool | None] = {"plan": None, "proceeded": False}
+
+    def _confirm_plan_application() -> bool:
+        """Run the main update consent gate."""
+        if assume_yes:
+            plan_state["proceeded"] = True
+            return True
+
+        if not _stdin_is_tty():
+            _rich_error(
+                "Cannot prompt for confirmation in non-interactive shell. "
+                "Re-run with --yes to apply, or --dry-run to preview."
+            )
+            sys.exit(1)
+
+        proceed = click.confirm("Apply these changes?", default=False, show_default=True)
+        plan_state["proceeded"] = proceed
+        if not proceed:
+            _rich_info("No changes applied.", symbol="info")
+        return proceed
 
     def _plan_callback(plan: UpdatePlan) -> bool:
         """Render plan, prompt, and decide whether to proceed."""
@@ -469,8 +490,9 @@ def _run_dep_update(
 
         if not plan.has_changes:
             if revision_pin_updates:
-                plan_state["proceeded"] = True
-                return True
+                if dry_run:
+                    return False
+                return _confirm_plan_application()
             _rich_success(
                 "All dependencies already at their latest matching refs.",
                 symbol="check",
@@ -489,26 +511,7 @@ def _run_dep_update(
             )
             return False
 
-        if revision_pin_updates:
-            plan_state["proceeded"] = True
-            return True
-
-        if assume_yes:
-            plan_state["proceeded"] = True
-            return True
-
-        if not _stdin_is_tty():
-            _rich_error(
-                "Cannot prompt for confirmation in non-interactive shell. "
-                "Re-run with --yes to apply, or --dry-run to preview."
-            )
-            sys.exit(1)
-
-        proceed = click.confirm("Apply these changes?", default=False, show_default=True)
-        plan_state["proceeded"] = proceed
-        if not proceed:
-            _rich_info("No changes applied.", symbol="info")
-        return proceed
+        return _confirm_plan_application()
 
     try:
         result = _install_apm_dependencies(

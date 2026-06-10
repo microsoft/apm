@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `apm update` and `apm outdated` now understand full-SHA revision pins, resolving the latest annotated semver tag SHA and annotating updated manifest pins with the tag. (#1209)
+- `apm update` and `apm outdated` now understand full-SHA revision pins, resolving the latest annotated semver tag SHA and annotating updated manifest pins with the tag. (#1738)
 - `apm install --target hermes` and `apm compile -t hermes` add the Hermes
   agent (Nous Research) as a new experimental target (opt in via
   `apm experimental enable hermes`). Skills deploy to `.agents/skills/<name>/SKILL.md`

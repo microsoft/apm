@@ -81,7 +81,9 @@ class TestUpdateDryRun:
             assert "Dry run" in result.output
             assert captured["proceeded"] is False
 
-    def test_dry_run_renders_revision_pin_plan_without_writing_manifest(self, runner, tmp_path):
+    def test_dry_run_renders_revision_pin_and_standard_plans_without_writing_manifest(
+        self, runner, tmp_path
+    ):
         old_sha = "a" * 40
         new_sha = "b" * 40
         with runner.isolated_filesystem(temp_dir=tmp_path):
@@ -93,6 +95,13 @@ class TestUpdateDryRun:
             original = manifest.read_text(encoding="utf-8")
 
             from apm_cli.deps.revision_pins import RevisionPinUpdate
+            from apm_cli.models.results import InstallResult
+
+            captured = {}
+
+            def fake_install(_apm, **kwargs):
+                captured["proceeded"] = kwargs["plan_callback"](_stub_plan_with_changes())
+                return InstallResult()
 
             with (
                 patch(
@@ -101,15 +110,19 @@ class TestUpdateDryRun:
                         RevisionPinUpdate("org/pkg", old_sha, new_sha, "v2.0.0", "org/pkg")
                     ],
                 ),
-                patch("apm_cli.commands.install._install_apm_dependencies") as mock_install,
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
             ):
                 result = runner.invoke(cli, ["update", "--dry-run"])
 
             assert result.exit_code == 0, result.output
             assert "Revision pin updates" in result.output
+            assert "Update plan" in result.output
             assert "v2.0.0" in result.output
+            assert captured["proceeded"] is False
             assert manifest.read_text(encoding="utf-8") == original
-            mock_install.assert_not_called()
 
 
 class TestUpdateAssumeYes:
@@ -172,6 +185,53 @@ class TestUpdateAssumeYes:
             assert f"org/pkg#{new_sha} # v2.0.0" in manifest.read_text(encoding="utf-8")
             assert captured["dep_ref"] == new_sha
             assert captured["plan_proceeded"] is True
+
+    def test_revision_pin_updates_do_not_auto_confirm_main_plan(self, runner, tmp_path):
+        old_sha = "a" * 40
+        new_sha = "b" * 40
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            manifest = Path.cwd() / "apm.yml"
+            manifest.write_text(
+                f"name: test\nversion: 1.0.0\ndependencies:\n  apm:\n    - org/pkg#{old_sha}\n",
+                encoding="utf-8",
+            )
+
+            from apm_cli.deps.revision_pins import RevisionPinUpdate
+            from apm_cli.models.results import InstallResult
+
+            captured = {}
+
+            def fake_install(apm_package, **kwargs):
+                captured["dep_ref"] = apm_package.get_apm_dependencies()[0].reference
+                captured["plan_proceeded"] = kwargs["plan_callback"](_stub_plan_with_changes())
+                return InstallResult(installed_count=1 if captured["plan_proceeded"] else 0)
+
+            with (
+                patch(
+                    "apm_cli.commands.update.resolve_revision_pin_updates",
+                    return_value=[
+                        RevisionPinUpdate("org/pkg", old_sha, new_sha, "v2.0.0", "org/pkg")
+                    ],
+                ),
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                patch("apm_cli.commands.update._annotate_lockfile_revision_tags") as annotate,
+                patch("apm_cli.commands.update._stdin_is_tty", return_value=True),
+                patch(
+                    "apm_cli.commands.update.click.confirm", side_effect=[True, False]
+                ) as confirm,
+            ):
+                result = runner.invoke(cli, ["update"])
+
+            assert result.exit_code == 0, result.output
+            assert f"org/pkg#{new_sha} # v2.0.0" in manifest.read_text(encoding="utf-8")
+            assert captured["dep_ref"] == new_sha
+            assert captured["plan_proceeded"] is False
+            assert confirm.call_count == 2
+            annotate.assert_not_called()
+            assert "no changes" in result.output.lower()
 
 
 class TestRevisionPinLockfileAnnotation:
