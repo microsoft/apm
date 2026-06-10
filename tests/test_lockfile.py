@@ -28,6 +28,25 @@ class TestLockedDependency:
         )
         assert dep.get_unique_key() == "owner/repo/prompts/file.md"
 
+    def test_get_unique_key_preserves_github_default_host(self):
+        dep = LockedDependency(repo_url="owner/repo", host="github.com")
+        assert dep.get_unique_key() == "owner/repo"
+
+    def test_get_unique_key_includes_non_default_host(self):
+        dep = LockedDependency(repo_url="team/skills", host="gitea.myorg.com")
+        assert dep.get_unique_key() == "gitea.myorg.com/team/skills"
+
+    def test_get_unique_key_includes_non_default_host_for_virtual_dep(self):
+        dep = LockedDependency(
+            repo_url="team/skills",
+            host="git.internal.example.com",
+            virtual_path="prompts/review.prompt.md",
+            is_virtual=True,
+        )
+        assert (
+            dep.get_unique_key() == "git.internal.example.com/team/skills/prompts/review.prompt.md"
+        )
+
     def test_to_dict_minimal(self):
         dep = LockedDependency(repo_url="owner/repo")
         result = dep.to_dict()
@@ -99,6 +118,27 @@ class TestLockedDependency:
         locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None)
         assert locked.port == 7999
 
+    def test_host_type_round_trip(self):
+        dep = LockedDependency(
+            repo_url="team/repo",
+            host="code.acme.com",
+            host_type="gitlab",
+        )
+        data = dep.to_dict()
+        assert data["host_type"] == "gitlab"
+        restored = LockedDependency.from_dict(data)
+        assert restored.host_type == "gitlab"
+        assert restored.to_dependency_ref().host_type == "gitlab"
+
+    def test_host_type_from_dependency_ref(self):
+        dep_ref = DependencyReference(
+            repo_url="team/repo",
+            host="code.acme.com",
+            host_type="gitlab",
+        )
+        locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None)
+        assert locked.host_type == "gitlab"
+
     def test_deployed_file_hashes_round_trip(self):
         dep = LockedDependency(
             repo_url="owner/repo",
@@ -146,6 +186,23 @@ class TestLockFile:
         lock.add_dependency(dep)
         assert lock.has_dependency("owner/repo")
         assert not lock.has_dependency("other/repo")
+
+    def test_add_dependency_keeps_same_repo_from_different_hosts(self):
+        lock = LockFile()
+        lock.add_dependency(LockedDependency(repo_url="team/skills", host="github.com"))
+        lock.add_dependency(LockedDependency(repo_url="team/skills", host="gitea.myorg.com"))
+
+        assert set(lock.dependencies) == {"team/skills", "gitea.myorg.com/team/skills"}
+        assert lock.get_dependency("team/skills").host == "github.com"
+        assert lock.get_dependency("gitea.myorg.com/team/skills").host == "gitea.myorg.com"
+
+    def test_dependency_reference_key_includes_non_default_host(self):
+        dep = DependencyReference.parse("gitea.myorg.com/team/skills")
+        assert dep.get_unique_key() == "gitea.myorg.com/team/skills"
+
+    def test_dependency_reference_key_preserves_github_com_default(self):
+        dep = DependencyReference.parse("github.com/team/skills")
+        assert dep.get_unique_key() == "team/skills"
 
     def test_to_yaml(self):
         lock = LockFile(apm_version="1.0.0")

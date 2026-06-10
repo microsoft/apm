@@ -632,13 +632,22 @@ class DownloadDelegate:
     ) -> bytes:
         """Download a file via GitLab REST v4 ``repository/files/.../raw``."""
         host = dep_ref.host or default_host()
-        host_info = self._host.auth_resolver.classify_host(host)
+        host_info = self._host.auth_resolver.classify_host(
+            host,
+            port=dep_ref.port,
+            host_type=getattr(dep_ref, "host_type", None),
+        )
         project_path = dep_ref.repo_url
         if not project_path:
             raise RuntimeError("Missing repository path for GitLab file download")
 
         org = project_path.split("/")[0]
-        file_ctx = self._host.auth_resolver.resolve(host, org, port=dep_ref.port)
+        file_ctx = self._host.auth_resolver.resolve(
+            host,
+            org,
+            port=dep_ref.port,
+            host_type=getattr(dep_ref, "host_type", None),
+        )
         token = file_ctx.token
         headers = AuthResolver.gitlab_rest_headers(token)
 
@@ -733,14 +742,11 @@ class DownloadDelegate:
         # Parse owner/repo from repo_url
         owner, repo = dep_ref.repo_url.split("/", 1)
 
-        # Resolve token via AuthResolver for CDN fast-path decision
-        org = None
-        if dep_ref and dep_ref.repo_url:
-            parts = dep_ref.repo_url.split("/")
-            if parts:
-                org = parts[0]
-        file_ctx = self._host.auth_resolver.resolve(host, org, port=dep_ref.port)
-        token = file_ctx.token
+        # Resolve tokens through the same per-dependency boundary used by
+        # clone URLs. Generic hosts intentionally return None here so APM
+        # does not attach managed PATs to ad-hoc HTTP requests.
+        token = self._host._resolve_dep_token(dep_ref)
+        file_ctx = self._host._resolve_dep_auth_ctx(dep_ref)
 
         # --- CDN fast-path for github.com without a token ---
         # raw.githubusercontent.com is served from GitHub's CDN and is not
@@ -775,16 +781,20 @@ class DownloadDelegate:
                 verbose_callback(f"Trying raw URL on generic host {host}: {raw_url}")
             try:
                 response = self._host._resilient_get(raw_url, headers=raw_headers, timeout=30)
-                if response.status_code == 200:
-                    if verbose_callback:
-                        verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
-                    return response.content
             except (requests.RequestException, OSError) as raw_err:
+                raise RuntimeError(
+                    self._build_download_network_error(host, file_path, raw_url, "raw URL", raw_err)
+                ) from raw_err
+            if response.status_code == 200:
                 if verbose_callback:
-                    verbose_callback(
-                        f"Raw URL on {host} failed for {file_path}@{ref}: "
-                        f"{type(raw_err).__name__}; falling back to Contents API."
+                    verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
+                return response.content
+            if response.status_code != 404:
+                raise RuntimeError(
+                    self._build_download_http_error(
+                        host, file_path, raw_url, response.status_code, "raw URL"
                     )
+                )
 
         # --- Contents API path (authenticated, enterprise, or raw fallback) ---
         # Build API URL candidates - format differs by host type
@@ -806,7 +816,7 @@ class DownloadDelegate:
 
         # Try to download with the specified ref
         try:
-            if verbose_callback and not is_github_host:
+            if verbose_callback:
                 verbose_callback(f"Trying Contents API on {host}: {api_url}")
             response = self._host._resilient_get(api_url, headers=headers, timeout=30)
             response.raise_for_status()
@@ -814,7 +824,8 @@ class DownloadDelegate:
                 verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
             return self._extract_contents_api_payload(response, is_github_host)
         except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 404:
+            status = e.response.status_code if e.response is not None else "unknown"
+            if status == 404:
                 # For generic hosts, try remaining API version candidates before ref fallback
                 for candidate_url in api_url_candidates[1:]:
                     try:
@@ -832,10 +843,19 @@ class DownloadDelegate:
                             )
                         return self._extract_contents_api_payload(candidate_resp, is_github_host)
                     except requests.exceptions.HTTPError as ce:
-                        if ce.response.status_code != 404:
+                        status = ce.response.status_code if ce.response is not None else "unknown"
+                        if status != 404:
                             raise RuntimeError(  # noqa: B904
-                                f"Failed to download {file_path}: HTTP {ce.response.status_code}"
+                                self._build_download_http_error(
+                                    host, file_path, candidate_url, status, "Contents API"
+                                )
                             )
+                    except requests.exceptions.RequestException as ce:
+                        raise RuntimeError(  # noqa: B904
+                            self._build_download_network_error(
+                                host, file_path, candidate_url, "Contents API", ce
+                            )
+                        )
 
                 # Try fallback branches if the specified ref fails
                 if ref not in ["main", "master"]:
@@ -853,11 +873,18 @@ class DownloadDelegate:
                 # Try the other default branch
                 fallback_ref = "master" if ref == "main" else "main"
                 fallback_url_candidates = self._build_contents_api_urls(
-                    host, owner, repo, file_path, fallback_ref
+                    host,
+                    owner,
+                    repo,
+                    file_path,
+                    fallback_ref,
+                    is_github_host=is_github_host,
                 )
 
                 for fallback_url in fallback_url_candidates:
                     try:
+                        if verbose_callback:
+                            verbose_callback(f"Trying Contents API on {host}: {fallback_url}")
                         response = self._host._resilient_get(
                             fallback_url, headers=headers, timeout=30
                         )
@@ -868,10 +895,19 @@ class DownloadDelegate:
                             )
                         return self._extract_contents_api_payload(response, is_github_host)
                     except requests.exceptions.HTTPError as fe:
-                        if fe.response.status_code != 404:
+                        status = fe.response.status_code if fe.response is not None else "unknown"
+                        if status != 404:
                             raise RuntimeError(  # noqa: B904
-                                f"Failed to download {file_path}: HTTP {fe.response.status_code}"
+                                self._build_download_http_error(
+                                    host, file_path, fallback_url, status, "Contents API"
+                                )
                             )
+                    except requests.exceptions.RequestException as fe:
+                        raise RuntimeError(  # noqa: B904
+                            self._build_download_network_error(
+                                host, file_path, fallback_url, "Contents API", fe
+                            )
+                        )
 
                 raise RuntimeError(  # noqa: B904
                     self._build_unsupported_or_missing_error(
@@ -884,7 +920,7 @@ class DownloadDelegate:
                         fallback_ref=fallback_ref,
                     )
                 )
-            elif e.response.status_code in (401, 403):
+            elif status in (401, 403):
                 # Distinguish rate limiting from auth failure.
                 # X-RateLimit-* headers are GitHub-specific; treat as
                 # rate-limit only when the host is in the GitHub family.
@@ -967,13 +1003,18 @@ class DownloadDelegate:
                         f"GITHUB_HOST={host} when this host is your GitHub "
                         "Enterprise Server."
                     )
+                error_msg += f" Endpoint: {api_url}."
                 raise RuntimeError(error_msg)  # noqa: B904
             else:
                 raise RuntimeError(
-                    f"Failed to download {file_path}: HTTP {e.response.status_code}"
+                    self._build_download_http_error(
+                        host, file_path, api_url, status, "Contents API"
+                    )
                 ) from e
         except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Network error downloading {file_path}: {e}")  # noqa: B904
+            raise RuntimeError(
+                self._build_download_network_error(host, file_path, api_url, "Contents API", e)
+            ) from e
 
     # ------------------------------------------------------------------
     # Helpers for download_github_file
@@ -1061,24 +1102,13 @@ class DownloadDelegate:
     ) -> dict[str, str]:
         """Build HTTP headers for a generic-host (non-GitHub) request.
 
-        SECURITY GUARD: Only attach Authorization when the token is
-        unambiguously intended for this host. A token resolved from a
-        global env var (GITHUB_APM_PAT, GITHUB_TOKEN, GH_TOKEN) MUST NOT
-        be sent to an arbitrary non-GitHub host -- doing so leaks the
-        user's GitHub PAT to whatever FQDN is in the dependency line.
-        The clone path at ``get_clone_url`` already enforces the same
-        guard via ``is_github_hostname``; this mirrors it for HTTP file
-        downloads.
+        SECURITY GUARD: HTTP single-file downloads use the same token
+        boundary as clone URLs. Generic hosts receive no APM-managed
+        Authorization header; they must succeed unauthenticated or use a
+        host-specific backend such as ``type: gitlab``.
 
-        Forwarding is allowed when:
-        - source == ``git-credential-fill``: git's credential helper
-          looks tokens up by host, so they are host-scoped by
-          construction.
-        - source == ``GITHUB_APM_PAT_<ORG>``: per-org env var is
-          explicit user opt-in for that org's host.
-        - the user opted into this host as their GitHub Enterprise
-          Server via ``GITHUB_HOST=<host>``: the token is intended for
-          this host, even if the FQDN is not under ``*.ghe.com``.
+        Forwarding is allowed only when the caller passes a non-generic
+        auth context whose token is unambiguously intended for this host.
         """
         headers: dict[str, str] = {}
         if accept:
@@ -1140,6 +1170,31 @@ class DownloadDelegate:
         if isinstance(content_field, str):
             return content_field.encode("utf-8")
         return body
+
+    @staticmethod
+    def _build_download_http_error(
+        host: str,
+        file_path: str,
+        url: str,
+        status: int | str,
+        endpoint: str,
+    ) -> str:
+        """Build a host- and endpoint-specific HTTP download error."""
+        return f"Failed to download {file_path} from {host}: HTTP {status} at {url} ({endpoint})."
+
+    @staticmethod
+    def _build_download_network_error(
+        host: str,
+        file_path: str,
+        url: str,
+        endpoint: str,
+        error: BaseException,
+    ) -> str:
+        """Build a host- and endpoint-specific network download error."""
+        return (
+            f"Network error downloading {file_path} from {host}: "
+            f"{type(error).__name__} at {url} ({endpoint})."
+        )
 
     @staticmethod
     def _build_unsupported_or_missing_error(

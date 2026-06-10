@@ -49,6 +49,34 @@ _NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
 _REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
 
 
+def build_dependency_unique_key(
+    repo_url: str,
+    *,
+    host: str | None = None,
+    source: str | None = None,
+    local_path: str | None = None,
+    is_virtual: bool = False,
+    virtual_path: str | None = None,
+) -> str:
+    """Return the lockfile/dedup key for a dependency identity.
+
+    github.com remains the implicit default so existing lockfiles keep bare
+    ``owner/repo`` keys. Non-default hosts include the host segment to avoid
+    collisions between the same ``owner/repo`` on different servers.
+    """
+    if source == "local" and local_path:
+        return local_path
+
+    key = repo_url
+    if is_virtual and virtual_path:
+        key = f"{key}/{virtual_path}"
+
+    host_value = (host or "").strip()
+    if host_value and host_value.lower() != "github.com":
+        return f"{host_value}/{key}"
+    return key
+
+
 def _path_segment_pattern(is_ado_host: bool) -> str:
     """Return the allowed-character regex for a single repo path segment."""
     return _ADO_PATH_SEGMENT_RE if is_ado_host else _NON_ADO_PATH_SEGMENT_RE
@@ -79,6 +107,7 @@ class DependencyReference:
 
     repo_url: str  # e.g., "user/repo" for GitHub or "org/project/repo" for Azure DevOps
     host: str | None = None  # Optional host (github.com, dev.azure.com, or enterprise host)
+    host_type: str | None = None  # Explicit host kind override (currently: "gitlab")
     port: int | None = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
     explicit_scheme: str | None = (
         None  # User-stated transport: "ssh", "https", "http", or None for shorthand
@@ -301,11 +330,14 @@ class DependencyReference:
         Returns:
             str: Unique key for this dependency
         """
-        if self.is_local and self.local_path:
-            return self.local_path
-        if self.is_virtual and self.virtual_path:
-            return f"{self.repo_url}/{self.virtual_path}"
-        return self.repo_url
+        return build_dependency_unique_key(
+            self.repo_url,
+            host=self.host,
+            source=self.source,
+            local_path=self.local_path,
+            is_virtual=self.is_virtual,
+            virtual_path=self.virtual_path,
+        )
 
     def to_canonical(self) -> str:
         """Return the canonical scheme-free identity string for this dependency.
@@ -747,9 +779,12 @@ class DependencyReference:
         git_url = entry["git"]
         if not isinstance(git_url, str) or not git_url.strip():
             raise ValueError("'git' field must be a non-empty string")
+        host_type = cls._parse_host_type(entry.get("type"))
 
         # Monorepo parent inheritance (literal ``git: parent`` only; resolver expands)
         if git_url == "parent":
+            if host_type is not None:
+                raise ValueError("'type' is only supported for remote git dependencies")
             path_raw = entry.get("path")
             if path_raw is None:
                 raise ValueError(
@@ -807,6 +842,7 @@ class DependencyReference:
 
         # Parse the git URL using the standard parser
         dep = cls.parse(git_url)
+        dep.host_type = host_type
         dep.allow_insecure = allow_insecure
         # Object-form ``- git:`` is an explicit Git resolver pin, even when
         # a top-level ``registries.default`` is set. Mark source so the
@@ -858,6 +894,18 @@ class DependencyReference:
             dep.skill_subset = sorted(validated)
 
         return dep
+
+    @staticmethod
+    def _parse_host_type(raw: object) -> str | None:
+        """Parse the optional object-form ``type`` host-kind hint."""
+        if raw is None:
+            return None
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError("'type' field must be a non-empty string")
+        value = raw.strip().lower()
+        if value != "gitlab":
+            raise ValueError("'type' field currently supports only 'gitlab'")
+        return value
 
     @classmethod
     def virtual_suffix_is_installable_shape(cls, virtual_path: str) -> bool:

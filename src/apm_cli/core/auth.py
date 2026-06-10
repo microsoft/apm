@@ -220,7 +220,11 @@ class AuthResolver:
     # -- host classification ------------------------------------------------
 
     @staticmethod
-    def classify_host(host: str, port: int | None = None) -> HostInfo:
+    def classify_host(
+        host: str,
+        port: int | None = None,
+        host_type: str | None = None,
+    ) -> HostInfo:
         """Return a ``HostInfo`` describing *host*.
 
         ``port`` is carried through onto the returned ``HostInfo`` so that
@@ -228,8 +232,11 @@ class AuthResolver:
         can discriminate between the same hostname on different ports.
         Host-kind classification itself is transport-agnostic -- the port
         never influences whether a host is GitHub/GHES/ADO/generic.
+        ``host_type`` is an explicit manifest hint for hosts whose names do
+        not reveal the backing service.
         """
         h = host.lower()
+        host_type_value = (host_type or "").strip().lower()
 
         if h == "github.com":
             return HostInfo(
@@ -257,6 +264,20 @@ class AuthResolver:
                 api_base="https://dev.azure.com",
                 port=port,
             )
+
+        if host_type_value == "gitlab":
+            api_base = (
+                "https://gitlab.com/api/v4" if h == "gitlab.com" else f"https://{host}/api/v4"
+            )
+            return HostInfo(
+                host=host,
+                kind="gitlab",
+                has_public_repos=True,
+                api_base=api_base,
+                port=port,
+            )
+        if host_type_value:
+            raise ValueError(f"Unsupported dependency host type: {host_type}")
 
         # GHES: GITHUB_HOST is set to a non-github.com, non-ghe.com FQDN
         ghes_host = os.environ.get("GITHUB_HOST", "").lower()
@@ -359,6 +380,7 @@ class AuthResolver:
         org: str | None = None,
         *,
         port: int | None = None,
+        host_type: str | None = None,
     ) -> AuthContext:
         """Resolve auth for *(host, port, org)*.  Cached & thread-safe.
 
@@ -371,6 +393,7 @@ class AuthResolver:
         key = (
             host.lower() if host else host,
             port,
+            (host_type or "").strip().lower(),
             org.lower() if org else "",
         )
         with self._lock:
@@ -384,7 +407,7 @@ class AuthResolver:
             # all subsequent callers for the same key become O(1) cache hits.
             # Bounded by APM_GIT_CREDENTIAL_TIMEOUT (default 60s). No deadlock
             # risk: single lock, never nested.
-            host_info = self.classify_host(host, port=port)
+            host_info = self.classify_host(host, port=port, host_type=host_type)
             token, source, scheme = self._resolve_token(host_info, org)
             token_type = self.detect_token_type(token) if token else "unknown"
             git_env = self._build_git_env(token, scheme=scheme, host_kind=host_info.kind)
@@ -412,7 +435,12 @@ class AuthResolver:
             parts = dep_ref.repo_url.split("/")
             if parts:
                 org = parts[0]
-        return self.resolve(host, org, port=dep_ref.port)
+        return self.resolve(
+            host,
+            org,
+            port=dep_ref.port,
+            host_type=getattr(dep_ref, "host_type", None),
+        )
 
     # -- fallback strategy --------------------------------------------------
 

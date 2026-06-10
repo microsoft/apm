@@ -14,6 +14,7 @@ from typing import Any
 import yaml
 
 from ..models.apm_package import DependencyReference
+from ..models.dependency.reference import build_dependency_unique_key
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class LockedDependency:
 
     repo_url: str
     host: str | None = None
+    host_type: str | None = None
     port: int | None = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
     registry_prefix: str | None = None  # Registry path prefix, e.g. "artifactory/github"
     resolved_commit: str | None = None
@@ -80,17 +82,22 @@ class LockedDependency:
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
-        if self.source == "local" and self.local_path:
-            return self.local_path
-        if self.is_virtual and self.virtual_path:
-            return f"{self.repo_url}/{self.virtual_path}"
-        return self.repo_url
+        return build_dependency_unique_key(
+            self.repo_url,
+            host=self.host,
+            source=self.source,
+            local_path=self.local_path,
+            is_virtual=self.is_virtual,
+            virtual_path=self.virtual_path,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for YAML output."""
         result: dict[str, Any] = {"repo_url": self.repo_url}
         if self.host:
             result["host"] = self.host
+        if self.host_type:
+            result["host_type"] = self.host_type
         if self.port:
             result["port"] = self.port
         if self.registry_prefix:
@@ -184,6 +191,7 @@ class LockedDependency:
         _known_keys = {
             "repo_url",
             "host",
+            "host_type",
             "port",
             "registry_prefix",
             "resolved_commit",
@@ -218,6 +226,7 @@ class LockedDependency:
         return cls(
             repo_url=data["repo_url"],
             host=data.get("host"),
+            host_type=data.get("host_type"),
             port=port,
             registry_prefix=data.get("registry_prefix"),
             resolved_commit=data.get("resolved_commit"),
@@ -329,6 +338,7 @@ class LockedDependency:
         return cls(
             repo_url=dep_ref.repo_url,
             host=host,
+            host_type=dep_ref.host_type,
             port=dep_ref.port,
             registry_prefix=registry_prefix,
             resolved_commit=resolved_commit,
@@ -388,6 +398,7 @@ class LockedDependency:
         return DependencyReference(
             repo_url=self.repo_url,
             host=self.host,
+            host_type=self.host_type,
             port=self.port,
             reference=ref,
             virtual_path=self.virtual_path,

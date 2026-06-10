@@ -120,6 +120,7 @@ Each item in `dependencies` describes one resolved package.
 |---|---|---|---|
 | `repo_url` | string | yes | Canonical repo URL (e.g. `github.com/owner/repo`). Unique key for the entry, except for virtual and local entries (see below). |
 | `host` | string | no | FQDN when not inferable from `repo_url` (e.g. for registry proxies or non-GitHub hosts). |
+| `host_type` | string | no | Explicit host-kind hint, currently `gitlab`, copied from object-form `type: gitlab`. |
 | `port` | int | no | Non-standard SSH/HTTPS port. Validated to `1..65535` on read. |
 | `registry_prefix` | string | no | URL path prefix when resolved through a registry proxy (e.g. `artifactory/github`). |
 | `resolved_ref` | string | no | The user-supplied ref from `apm.yml` (`main`, `v1.2.0`, a SHA). |
@@ -149,6 +150,11 @@ Each item in `dependencies` describes one resolved package.
 
 Fields are emitted only when set. A minimal entry is just `repo_url` plus
 `resolved_commit`.
+
+Lockfile dependency keys keep `github.com` implicit for migration stability:
+existing `github.com` entries remain keyed as `owner/repo`. Entries for
+non-default hosts are keyed as `host/owner/repo`, so `github.com/team/skills`
+and `gitea.myorg.com/team/skills` can coexist without overwriting each other.
 
 ## Self entry
 

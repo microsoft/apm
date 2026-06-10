@@ -436,14 +436,12 @@ class GitLabBackend:
 
 @dataclass(frozen=True)
 class GenericGitBackend:
-    """Backend for non-GitHub non-ADO managed hosts (GitLab, Gitea, Gogs, Bitbucket).
+    """Backend for non-GitHub non-ADO generic hosts (Gitea, Gogs, Bitbucket).
 
     These hosts have heterogeneous APIs but support a common shape:
     HTTPS / SSH clones plus a Gitea-compatible Contents API at
     ``/api/v1/`` with a ``/api/v3/`` fallback for v3-only deployments.
-
-    GitLab is currently classified as ``"generic"`` and accessed via the
-    full repo URL (clone + sparse checkout), not the Contents API.
+    GitLab-class hosts use :class:`GitLabBackend` instead.
     """
 
     host_info: HostInfo
@@ -562,7 +560,11 @@ def backend_for(
     if dep_ref is not None:
         try:
             if dep_ref.is_azure_devops():
-                info = auth_resolver.classify_host(host, port=port)
+                info = auth_resolver.classify_host(
+                    host,
+                    port=port,
+                    host_type=getattr(dep_ref, "host_type", None),
+                )
                 if not isinstance(info, HostInfo):
                     info = HostInfo(
                         host=host,
@@ -575,7 +577,11 @@ def backend_for(
         except (AttributeError, TypeError):
             pass
 
-    info = auth_resolver.classify_host(host, port=port)
+    info = auth_resolver.classify_host(
+        host,
+        port=port,
+        host_type=getattr(dep_ref, "host_type", None) if dep_ref is not None else None,
+    )
     cls: type | None = None
     if isinstance(info, HostInfo):
         cls = _BACKEND_BY_KIND.get(info.kind)

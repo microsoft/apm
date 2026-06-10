@@ -409,7 +409,14 @@ class GitHubPackageDownloader:
         dep_host = dep_ref.host
         if not dep_host or is_github_hostname(dep_host):
             return False
-        return self.auth_resolver.classify_host(dep_host, port=dep_ref.port).kind != "gitlab"
+        return (
+            self.auth_resolver.classify_host(
+                dep_host,
+                port=dep_ref.port,
+                host_type=getattr(dep_ref, "host_type", None),
+            ).kind
+            != "gitlab"
+        )
 
     def _parse_artifactory_base_url(self) -> tuple | None:
         """Backward-compat stub -- delegates to ArtifactoryRouter."""
@@ -792,7 +799,14 @@ class GitHubPackageDownloader:
     ) -> bytes:
         """Backward-compat stub -- delegates to backend-specific strategies."""
         host = dep_ref.host or default_host()
-        if self.auth_resolver.classify_host(host).kind == "gitlab":
+        if (
+            self.auth_resolver.classify_host(
+                host,
+                port=dep_ref.port,
+                host_type=getattr(dep_ref, "host_type", None),
+            ).kind
+            == "gitlab"
+        ):
             return self._download_gitlab_file(
                 dep_ref, file_path, ref, verbose_callback=verbose_callback
             )

@@ -68,6 +68,19 @@ def _make_host(
         api_base="https://api.github.com",
     )
     auth.build_error_context.return_value = "Set GITHUB_APM_PAT."
+
+    def _is_generic_dep(dep_ref) -> bool:
+        dep_host = getattr(dep_ref, "host", None)
+        if not dep_host:
+            return False
+        return dep_host != "github.com" and not str(dep_host).endswith(".ghe.com")
+
+    host._resolve_dep_token.side_effect = lambda dep_ref=None: (
+        None if _is_generic_dep(dep_ref) else github_token
+    )
+    host._resolve_dep_auth_ctx.side_effect = lambda dep_ref=None: (
+        None if _is_generic_dep(dep_ref) else ctx
+    )
     host.auth_resolver = auth
     return host
 

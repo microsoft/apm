@@ -1389,10 +1389,10 @@ class TestDownloaderCredentialFallback:
             assert downloader._github_token_from_credential_fill is False
             mock_cred.assert_not_called()
 
-    def test_credential_fill_for_non_default_host(self):
-        """Non-default hosts should try credential fill on demand in _download_github_file."""
+    def test_credential_fill_for_configured_enterprise_host(self):
+        """Configured GHES hosts try credential fill on demand in _download_github_file."""
         with (
-            patch.dict(os.environ, {}, clear=True),
+            patch.dict(os.environ, {"GITHUB_HOST": "ghes.company.com"}, clear=True),
             patch(
                 "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
             ) as mock_cred,
@@ -2352,13 +2352,8 @@ class TestGiteaRawUrlDownload:
         api_headers = mock_get.call_args_list[0][1].get("headers", {})
         assert api_headers.get("Authorization") == "token ghp_ghe"
 
-    def test_git_credential_helper_token_sent_to_generic_host(self):
-        """Host-scoped credentials (git credential helper) ARE sent to generic hosts.
-
-        The credential helper is host-scoped by construction, so forwarding
-        is safe and necessary for private Gitea/Gogs repos. This is the
-        symmetric case to the security guard test above.
-        """
+    def test_git_credential_helper_token_is_not_sent_by_generic_http_download(self):
+        """Generic HTTP file downloads use the same token boundary as clone URLs."""
         dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
         raw_ok = _make_resp(200, b"data")
 
@@ -2372,9 +2367,28 @@ class TestGiteaRawUrlDownload:
                     downloader.download_raw_file(dep_ref, "README.md", "main")
 
         raw_headers = mock_get.call_args_list[0][1].get("headers", {})
-        assert raw_headers.get("Authorization") == "token gitea-host-scoped-token"
+        assert "Authorization" not in raw_headers
 
-    def test_falls_back_to_api_v1_when_raw_returns_non_200(self):
+    def test_generic_download_uses_resolve_dep_token_boundary(self):
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+        raw_ok = _make_resp(200, b"data")
+
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            downloader = GitHubPackageDownloader()
+            with (
+                patch.object(downloader, "_resolve_dep_token", return_value=None) as mock_resolve,
+                patch.object(
+                    downloader.auth_resolver,
+                    "resolve",
+                    side_effect=AssertionError("generic download bypassed _resolve_dep_token"),
+                ),
+                patch.object(downloader, "_resilient_get", return_value=raw_ok),
+            ):
+                assert downloader.download_raw_file(dep_ref, "README.md", "main") == b"data"
+
+        mock_resolve.assert_called_once_with(dep_ref)
+
+    def test_falls_back_to_api_v1_when_raw_returns_404(self):
         """When the raw URL returns 404, the API v1 path is tried next."""
         dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
         expected = b"file via API"
@@ -2391,29 +2405,38 @@ class TestGiteaRawUrlDownload:
         assert urls[0] == "https://gitea.myorg.com/owner/repo/raw/main/README.md"
         assert urlparse(urls[1]).path.startswith("/api/v1/")
 
-    def test_raw_url_request_exception_falls_through_to_api(self):
-        """RequestException on the raw URL path must not abort -- API path runs.
-
-        Regression trap for the ``except (RequestException, OSError)``
-        swallow at the raw-URL try block. Previously this only had unit
-        coverage that pinned the swallow itself; this test exercises the
-        downstream "fallthrough must reach the API path" promise.
-        """
+    def test_raw_url_request_exception_surfaces_with_endpoint_context(self):
+        """Only 404 falls through; network errors name the failed endpoint."""
         dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
-        expected = b"recovered via api"
-        api_ok = _make_resp(200, expected)
 
-        side_effects = [
-            requests_lib.exceptions.ConnectionError("boom"),
-            api_ok,
-        ]
-        with patch.object(self.downloader, "_resilient_get", side_effect=side_effects) as mock_get:
-            result = self.downloader.download_raw_file(dep_ref, "README.md", "main")
+        with patch.object(
+            self.downloader,
+            "_resilient_get",
+            side_effect=requests_lib.exceptions.ConnectionError("boom"),
+        ):
+            with pytest.raises(RuntimeError) as exc_info:
+                self.downloader.download_raw_file(dep_ref, "README.md", "main")
 
-        assert result == expected
-        urls = [c[0][0] for c in mock_get.call_args_list]
-        assert urls[0].endswith("/owner/repo/raw/main/README.md")
-        assert urlparse(urls[1]).path.startswith("/api/v1/")
+        urls = [tok for tok in str(exc_info.value).split() if tok.startswith("https://")]
+        assert len(urls) == 1
+        parsed = urlparse(urls[0].rstrip("."))
+        assert parsed.hostname == "gitea.myorg.com"
+        assert parsed.path == "/owner/repo/raw/main/README.md"
+        assert "network error" in str(exc_info.value).lower()
+
+    def test_raw_url_500_surfaces_with_endpoint_context(self):
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+
+        with patch.object(self.downloader, "_resilient_get", return_value=_make_resp(500)):
+            with pytest.raises(RuntimeError) as exc_info:
+                self.downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        urls = [tok for tok in str(exc_info.value).split() if tok.startswith("https://")]
+        assert len(urls) == 1
+        parsed = urlparse(urls[0].rstrip("."))
+        assert parsed.hostname == "gitea.myorg.com"
+        assert parsed.path == "/owner/repo/raw/main/README.md"
+        assert "HTTP 500" in str(exc_info.value)
 
 
 class TestGiteaGogsApiVersionNegotiation:
@@ -2428,6 +2451,27 @@ class TestGiteaGogsApiVersionNegotiation:
     def setup_method(self):
         with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
             self.downloader = GitHubPackageDownloader()
+
+    def test_object_form_type_gitlab_routes_bespoke_host_to_gitlab_api(self):
+        dep_ref = DependencyReference.parse_from_dict(
+            {"git": "https://code.acme.com/group/sub/repo.git", "type": "gitlab"}
+        )
+        expected = b"gitlab raw"
+        response = _make_resp(200, expected)
+
+        with patch.dict(os.environ, {"GITLAB_APM_PAT": "glpat-bespoke"}, clear=True):
+            downloader = GitHubPackageDownloader()
+            with patch.object(downloader, "_resilient_get", return_value=response) as mock_get:
+                result = downloader._download_github_file(dep_ref, "SKILL.md", "main")
+
+        assert result == expected
+        request_url = mock_get.call_args[0][0]
+        parsed = urlparse(request_url)
+        assert parsed.hostname == "code.acme.com"
+        assert parsed.path.endswith("/repository/files/SKILL.md/raw")
+        headers = mock_get.call_args[1]["headers"]
+        assert headers.get("PRIVATE-TOKEN") == "glpat-bespoke"
+        assert dep_ref.host_type == "gitlab"
 
     def test_v1_falls_back_to_v3_for_generic_hosts(self):
         """When Gitea raw URL and v1 both return 404, v3 is tried and succeeds."""
@@ -2510,12 +2554,7 @@ class TestGiteaGogsApiVersionNegotiation:
         assert result == expected
 
     def test_fallback_candidate_loop_reraises_non_404(self):
-        """500 on a candidate URL must surface as RuntimeError, not silent skip.
-
-        Pins the symmetry-fix between the primary loop (already re-raised
-        non-404) and the fallback-ref loop (previously swallowed all
-        HTTPErrors via bare ``pass``).
-        """
+        """500 on a candidate URL must surface as RuntimeError, not silent skip."""
         dep_ref = DependencyReference.parse("gitea.example.com/owner/repo")
 
         # raw=404, v1=404 (forces ref-fallback), v1@master=500

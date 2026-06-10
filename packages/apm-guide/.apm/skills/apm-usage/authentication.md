@@ -18,6 +18,20 @@ APM checks the active `gh` CLI account before invoking OS credential helpers. Th
 
 For multi-account Git Credential Manager setups, see the [Multi-account Git Credential Manager](https://microsoft.github.io/apm/getting-started/authentication/#multi-account-git-credential-manager) section in the main authentication guide.
 
+## GitLab hosts
+
+`gitlab.com` is detected automatically. For self-managed GitLab, set
+`GITLAB_HOST`, list multiple hosts in `APM_GITLAB_HOSTS`, or mark a single
+object-form dependency with `type: gitlab`:
+
+```yaml
+- git: https://code.acme.com/platform/standards.git
+  type: gitlab
+```
+
+GitLab credentials use `GITLAB_APM_PAT`, then `GITLAB_TOKEN`, then host
+credentials. GitHub PAT variables are not used for GitLab-class hosts.
+
 ## Per-org setup
 
 Use per-org tokens when accessing packages across multiple organizations:

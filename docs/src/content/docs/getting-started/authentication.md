@@ -263,8 +263,17 @@ APM must classify a host as GitLab to use **GitLab REST v4** (for example `marke
 |----------|---------|
 | `GITLAB_HOST` | One self-managed GitLab FQDN (e.g. `git.company.com`) |
 | `APM_GITLAB_HOSTS` | Several self-managed GitLab FQDNs, comma-separated |
+| `type: gitlab` | Per-dependency object-form hint for one bespoke GitLab host |
 
-`gitlab.com` is detected automatically. For GitLab-class hosts, resolved credentials follow **`GITLAB_APM_PAT` → `GITLAB_TOKEN`** and then **`git credential fill`** (see [GitLab-class hosts](#gitlab-class-hosts-gitlabcom-gitlab_host-apm_gitlab_hosts) under [Token lookup](#token-lookup)). GitHub PAT env vars are not used on GitLab. Use a GitLab personal or project access token with API read access where your policy requires it.
+`gitlab.com` is detected automatically. For a single dependency on a bespoke
+hostname, use object form instead of a hostname convention:
+
+```yaml
+- git: https://code.acme.com/platform/standards.git
+  type: gitlab
+```
+
+For GitLab-class hosts, resolved credentials follow **`GITLAB_APM_PAT` → `GITLAB_TOKEN`** and then **`git credential fill`** (see [GitLab-class hosts](#gitlab-class-hosts-gitlabcom-gitlab_host-apm_gitlab_hosts) under [Token lookup](#token-lookup)). GitHub PAT env vars are not used on GitLab. Use a GitLab personal or project access token with API read access where your policy requires it.
 
 ### REST headers (GitLab vs GitHub)
 

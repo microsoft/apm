@@ -287,7 +287,14 @@ def _validate_ado_git_package(
     # from APM-managed auth; they rely on git credential helpers via the
     # relaxed validate_env below. GitLab hosts are managed when classified
     # as GitLab because they need oauth2 HTTPS token formatting.
-    is_gitlab = auth_resolver.classify_host(dep_ref.host).kind == "gitlab"
+    is_gitlab = (
+        auth_resolver.classify_host(
+            dep_ref.host,
+            port=getattr(dep_ref, "port", None),
+            host_type=getattr(dep_ref, "host_type", None),
+        ).kind
+        == "gitlab"
+    )
     is_generic = (
         not is_github_hostname(dep_ref.host)
         and not is_azure_devops_hostname(dep_ref.host)
