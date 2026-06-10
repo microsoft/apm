@@ -18,6 +18,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unrelated config keys and refusing to overwrite a malformed file). `HERMES_HOME`
   overrides the Hermes home directory. See the [Hermes integration guide](https://microsoft.github.io/apm/integrations/hermes/).
 
+### Fixed
+
+- `apm compile --target copilot` no longer writes empty AGENTS.md shell files
+  (header + footer only, no instruction body) when `.github/instructions/`
+  already holds the deployed instructions. Previously, the instruction-dedup
+  logic introduced in #1550 correctly omitted instruction bodies but still
+  created content-free files for the root placement and every distributed
+  subdir placement (e.g. `docs/AGENTS.md`, `src/AGENTS.md`). Placements whose
+  only content would have been the now-elided instruction block are now
+  suppressed entirely; an INFO-style message ("AGENTS.md not generated --
+  Copilot reads `.github/instructions/` directly, no further action needed")
+  is emitted instead, mirroring the analogous CLAUDE.md behaviour. Placements
+  that carry non-instruction content (constitution, context links) are still
+  written. Suppression fires only when `can_dedup_agents_md_instructions`
+  returns True (Copilot-only target), so Codex / OpenCode / Windsurf / Gemini
+  multi-target builds are unaffected. `apm compile --clean` now also removes
+  pre-existing APM-generated AGENTS.md files that would be empty shells under
+  the current configuration; hand-authored AGENTS.md files (no APM marker) are
+  never deleted. (closes #1730, related: #1138, #1550)
+
 ## [0.19.0] - 2026-06-09
 
 ### Added

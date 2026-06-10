@@ -521,6 +521,20 @@ class AgentsCompiler:
                 stats=distributed_result.stats,
             )
 
+        # Emit the user-visible INFO message for suppressed empty-shell placements.
+        # Mirrors the CLAUDE.md analogue (agents_compiler.py:785-791).
+        # This fires for both normal and dry-run modes so the user understands
+        # why certain AGENTS.md files are absent.
+        if distributed_result.suppressed_empty_paths:
+            suppressed_count = len(distributed_result.suppressed_empty_paths)
+            noun = "file" if suppressed_count == 1 else "files"
+            self._log(
+                "progress",
+                f"AGENTS.md not generated ({suppressed_count} {noun}) -- Copilot reads"
+                " `.github/instructions/` directly, no further action needed",
+                symbol="info",
+            )
+
         # Handle dry-run mode (preview placement without writing files)
         if config.dry_run:
             # Count files that would be written (directories that exist)
