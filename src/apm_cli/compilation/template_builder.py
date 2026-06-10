@@ -1,10 +1,8 @@
 """Template building system for AGENTS.md compilation."""
 
-import re  # noqa: F401
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from ..primitives.models import Chatmode, Instruction
 from ..utils.paths import portable_relpath
@@ -126,11 +124,19 @@ def build_attributed_instructions(
     )
 
 
-def build_conditional_sections(instructions: list[Instruction]) -> str:
+def build_conditional_sections(
+    instructions: list[Instruction],
+    source_dir: Path | None = None,
+) -> str:
     """Build sections grouped by applyTo patterns.
 
     Args:
-        instructions (List[Instruction]): List of instruction primitives.
+        instructions: List of instruction primitives.
+        source_dir: Root used to compute display-relative paths in
+            ``<!-- Source: ... -->`` comments.  Defaults to ``Path.cwd()``;
+            callers using ``apm compile --root`` should pass the source
+            root so attribution paths render relative to the user's
+            working directory rather than the deploy target.
 
     Returns:
         str: Formatted conditional sections content.
@@ -138,12 +144,16 @@ def build_conditional_sections(instructions: list[Instruction]) -> str:
     if not instructions:
         return ""
 
-    cwd = Path.cwd()
+    # ``source_dir`` is the project source root.  Defaults to ``Path.cwd()``;
+    # callers using ``apm compile --root`` pass the captured ``$PWD`` so
+    # ``<!-- Source: ... -->`` paths render against the user's working
+    # directory rather than the deploy target.
+    relpath_root = source_dir if source_dir is not None else Path.cwd()
 
     def emit(instruction: Instruction) -> list[str]:
         try:
             if instruction.file_path.is_absolute():
-                relative_path = portable_relpath(instruction.file_path, cwd)
+                relative_path = portable_relpath(instruction.file_path, relpath_root)
             else:
                 relative_path = str(instruction.file_path)
         except (ValueError, OSError):
@@ -156,7 +166,7 @@ def build_conditional_sections(instructions: list[Instruction]) -> str:
             "",
         ]
 
-    sections = render_instructions_block(instructions, base_dir=cwd, emit_instruction=emit)
+    sections = render_instructions_block(instructions, base_dir=relpath_root, emit_instruction=emit)
     return "\n".join(sections)
 
 

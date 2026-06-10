@@ -54,11 +54,15 @@ def apply_managed_section(
     end_count = existing_content.count(end_marker)
 
     if start_count > 1 or end_count > 1:
+        duplicated = []
+        if start_count > 1:
+            duplicated.append(f"start marker ({start_marker!r}) {start_count} time(s)")
+        if end_count > 1:
+            duplicated.append(f"end marker ({end_marker!r}) {end_count} time(s)")
         raise ManagedSectionError(
             "Managed-section markers must appear exactly once in the file, but found "
-            f"start marker ({start_marker!r}) {start_count} time(s) and "
-            f"end marker ({end_marker!r}) {end_count} time(s). "
-            "Remove the duplicate markers before running APM again."
+            + " and ".join(duplicated)
+            + ". Remove the duplicate markers before running APM again."
         )
 
     if start_count == 0 or end_count == 0:
@@ -70,7 +74,7 @@ def apply_managed_section(
         raise ManagedSectionError(
             f"Managed-section markers not found in the target file "
             f"({', '.join(missing)} absent). "
-            "Add both markers to AGENTS.md to enable managed-section mode. "
+            "Add the missing marker(s) to AGENTS.md to enable managed-section mode. "
             f"Example:\n  {start_marker}\n  <APM will insert content here>\n  {end_marker}"
         )
 

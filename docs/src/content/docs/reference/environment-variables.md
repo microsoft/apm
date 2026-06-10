@@ -77,6 +77,20 @@ Controls how APM clones packages from Git hosts. These settings can also be pers
 |---|---|---|---|
 | `APM_POLICY_DISABLE` | Set to `1` to skip policy discovery and enforcement for **the entire shell session**. Loudly logged. | unset | Equivalent to the per-invocation `--no-policy` on commands that expose it. The only escape hatch for `apm deps update`. See [`apm policy`](./cli/policy/). |
 
+## External scanners
+
+These keys are consumed by a third-party SARIF scanner (e.g. SkillSpector), not
+by APM itself. APM forwards them to the scanner subprocess **only** when LLM
+mode is active for that run (`apm audit --external <name> --external-llm` or
+`external.<name>.llm true`); otherwise they are stripped from the scanner's
+environment. APM never stores them. Requires the `external-scanners`
+experimental flag.
+
+| Variable | Purpose | Default | Notes |
+|---|---|---|---|
+| `OPENAI_API_KEY` | API key SkillSpector uses for LLM-powered analysis. | unset | Forwarded only when LLM mode is active. If `--external-llm` is set and no key is present, the scan fails closed. |
+| `NVIDIA_INFERENCE_KEY` | Alternative API key SkillSpector accepts for LLM-powered analysis. | unset | Same forwarding / fail-closed semantics as `OPENAI_API_KEY`. |
+
 ## Debugging and output
 
 | Variable | Purpose | Default | Notes |

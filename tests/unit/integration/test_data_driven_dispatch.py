@@ -13,12 +13,24 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from apm_cli.commands.install import _integrate_package_primitives
+from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+def _to_bundle(d: dict) -> IntegratorBundle:
+    return IntegratorBundle(
+        prompt=d["prompt_integrator"],
+        agent=d["agent_integrator"],
+        skill=d["skill_integrator"],
+        instruction=d["instruction_integrator"],
+        command=d["command_integrator"],
+        hook=d["hook_integrator"],
+    )
 
 
 def _make_integration_result(n=0):
@@ -45,6 +57,7 @@ def _make_skill_result():
     sr = MagicMock()
     sr.skill_created = False
     sr.sub_skills_promoted = 0
+    sr.bin_deployed = 0
     sr.target_paths = []
     return sr
 
@@ -96,7 +109,7 @@ def _dispatch(targets, integrators=None, package_info=None, project_root=None):
         force=False,
         managed_files=set(),
         diagnostics=None,
-        **integrators,
+        integrators=_to_bundle(integrators),
     ), integrators
 
 
@@ -731,7 +744,7 @@ class TestForScope:
         assert resolved.root_dir == ".claude"
 
     def test_filters_unsupported_primitives(self):
-        """for_scope removes only unsupported primitives from the dict."""
+        """for_scope keeps instructions with a different mapping for copilot user scope."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         copilot = KNOWN_TARGETS["copilot"]
@@ -739,7 +752,9 @@ class TestForScope:
         assert "instructions" in copilot.primitives
         resolved = copilot.for_scope(user_scope=True)
         assert "prompts" in resolved.primitives
-        assert "instructions" not in resolved.primitives
+        # instructions now supported at user scope via concat (#650)
+        assert "instructions" in resolved.primitives
+        assert resolved.primitives["instructions"].format_id == "copilot_user_instructions"
         # Supported primitives remain
         assert "agents" in resolved.primitives
         assert "skills" in resolved.primitives

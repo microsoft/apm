@@ -32,6 +32,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from apm_cli.install.sources import (
     Materialization,
     _format_package_type_label,
@@ -543,3 +545,84 @@ class TestCachedDependencySourceWithApmYml:
         result = source.acquire()
         assert result is not None
         assert result.deltas.get("unpinned") == 1
+
+
+# ---------------------------------------------------------------------------
+# LocalDependencySource.acquire -- real install pipeline symlink dereference
+#
+# These exercise the FULL local-install path through
+# ``LocalDependencySource.acquire`` WITHOUT mocking ``_copy_local_package``,
+# pinning the #1668 in-package symlink dereference + containment contract at
+# the install-pipeline boundary (supply-chain-security-expert follow-up).
+# ---------------------------------------------------------------------------
+
+
+def _make_local_pkg_with_symlink(root: Path) -> Path:
+    """Build a minimal local APM package with an in-package symlink.
+
+    Layout::
+
+        pkg/
+          apm.yml
+          real.txt          (regular file)
+          link.txt -> real.txt (in-package symlink)
+    """
+    pkg = root / "local_pkg"
+    pkg.mkdir()
+    (pkg / "apm.yml").write_text("name: test-pkg\nversion: 1.0.0\n")
+    (pkg / "real.txt").write_text("payload-content")
+    (pkg / "link.txt").symlink_to(pkg / "real.txt")
+    return pkg
+
+
+class TestLocalInstallSymlinkDerefThroughPipeline:
+    def test_in_package_symlink_materialized_as_real_file(self, tmp_path):
+        from apm_cli.install.sources import LocalDependencySource
+        from apm_cli.models.apm_package import PackageType
+
+        pkg = _make_local_pkg_with_symlink(tmp_path)
+        install_path = tmp_path / "apm_modules" / "_local" / "test-pkg"
+
+        ctx = _make_ctx(project_root=tmp_path)
+        ctx.source_root = tmp_path
+        dep_ref = _make_dep_ref(local_path=str(pkg))
+
+        with patch("apm_cli.models.validation.detect_package_type") as mock_detect:
+            mock_detect.return_value = (PackageType.APM_PACKAGE, None)
+            source = LocalDependencySource(ctx, dep_ref, install_path, "owner/test-pkg")
+            result = source.acquire()
+
+        assert result is not None
+        staged_link = install_path / "link.txt"
+        # The symlink must be materialized as a real file, not preserved as a
+        # symlink -- matching remote-install behavior.
+        assert staged_link.is_file()
+        assert not staged_link.is_symlink()
+        assert staged_link.read_text() == "payload-content"
+
+    def test_escaping_symlink_hard_fails_through_pipeline(self, tmp_path):
+        from apm_cli.install.sources import LocalDependencySource
+        from apm_cli.models.apm_package import PackageType
+        from apm_cli.utils.path_security import PathTraversalError
+
+        outside = tmp_path / "outside_secret.txt"
+        outside.write_text("secret")
+        pkg = tmp_path / "local_pkg"
+        pkg.mkdir()
+        (pkg / "apm.yml").write_text("name: test-pkg\nversion: 1.0.0\n")
+        (pkg / "escape.txt").symlink_to(outside)
+
+        install_path = tmp_path / "apm_modules" / "_local" / "test-pkg"
+
+        ctx = _make_ctx(project_root=tmp_path)
+        ctx.source_root = tmp_path
+        dep_ref = _make_dep_ref(local_path=str(pkg))
+
+        with patch("apm_cli.models.validation.detect_package_type") as mock_detect:
+            mock_detect.return_value = (PackageType.APM_PACKAGE, None)
+            source = LocalDependencySource(ctx, dep_ref, install_path, "owner/test-pkg")
+            with pytest.raises(PathTraversalError, match=r"escapes"):
+                source.acquire()
+
+        # The hard-fail must leave no partial staged content behind.
+        assert not install_path.exists()

@@ -26,7 +26,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -42,7 +42,6 @@ from .errors import (
     BuildError,
     HeadNotAllowedError,
     NoMatchingVersionError,
-    OfflineMissError,  # noqa: F401
     RefNotFoundError,
 )
 from .output_mappers import (
@@ -60,9 +59,9 @@ from .output_profiles import (
     DEFAULT_MARKETPLACE_OUTPUT,
     MarketplaceOutputProfile,
 )
-from .ref_resolver import RefResolver, RemoteRef  # noqa: F401
+from .ref_resolver import RefResolver
 from .semver import SemVer, parse_semver, satisfies_range
-from .tag_pattern import build_tag_regex, render_tag  # noqa: F401
+from .tag_pattern import build_tag_regex
 from .yml_schema import MarketplaceYml, PackageEntry, load_marketplace_yml
 
 logger = logging.getLogger(__name__)

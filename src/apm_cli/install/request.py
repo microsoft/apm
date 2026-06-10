@@ -9,7 +9,7 @@ the ``InstallService`` consumes.  This is the typed-IO companion to
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Any, Callable  # noqa: UP035
 
 if TYPE_CHECKING:
     from apm_cli.core.auth import AuthResolver
@@ -43,6 +43,7 @@ class InstallRequest:
     protocol_pref: Any = None  # ProtocolPreference (NONE/SSH/HTTPS) for shorthand transport
     allow_protocol_fallback: bool | None = None  # None => read APM_ALLOW_PROTOCOL_FALLBACK env
     no_policy: bool = False  # W2-escape-hatch: skip org policy enforcement
+    audit_override: str | None = None  # --audit/--no-audit override (off|warn|block)
     skill_subset: tuple[str, ...] | None = None  # --skill filter for SKILL_BUNDLE packages
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
     legacy_skill_paths: bool = False  # --legacy-skill-paths / APM_LEGACY_SKILL_PATHS
@@ -51,6 +52,11 @@ class InstallRequest:
     # to apm.yml.  Enforced in InstallService.run() BEFORE delegating to
     # the pipeline, so the failure surfaces without running resolve.
     frozen: bool = False
+
+    # --lockfile-only: resolve and download deps to get commit SHAs, then
+    # write apm.lock.yaml WITHOUT deploying any files to targets.  Set
+    # internally by the ``apm lock`` command (mirrors cargo generate-lockfile / pnpm lock).
+    lockfile_only: bool = False
 
     # --refresh: re-resolve all refs against upstream (bypass lockfile
     # pins).  Unlike --update (which restructures the whole graph),

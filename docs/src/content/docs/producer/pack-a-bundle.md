@@ -61,8 +61,25 @@ fields:
 | `name`         | `name` (required) |
 | `version`      | `version` |
 | `description`  | `description` |
-| `author`       | `author: {name: ...}` |
+| `author`       | author |
 | `license`      | `license` |
+| `homepage`     | `homepage` |
+| `repository`   | `repository` |
+| `keywords`     | `keywords` |
+
+The `author` field accepts a plain string (`"Jane Doe"` maps to `{name: "Jane Doe"}`) or a
+structured object (`{name, email?, url?}` -- all keys optional except `name`):
+
+```yaml
+# String form (backward-compatible):
+author: Jane Doe
+
+# Structured form:
+author:
+  name: Jane Doe
+  email: jane@example.com
+  url: https://example.com/jane
+```
 
 Author your own `plugin.json` at the project root (or under `.github/plugin/`,
 `.claude-plugin/`, or `.cursor-plugin/`) when you need fields APM does not
@@ -100,6 +117,107 @@ Three common ways to hand off a bundle:
 
 For the consumer flags that apply (`--target`, `--global`, `--force`,
 `--dry-run`), see [Deploy a local bundle](../consumer/deploy-a-bundle/).
+
+## Source layout and install-time discovery
+
+`apm pack` is intentionally liberal: it collects primitives from both
+`.apm/<type>/` subdirectories and from convention directories at the
+package root (`agents/`, `skills/`, `instructions/`, etc.). This lets
+you author in whichever layout feels natural during development.
+
+`apm install` is per-primitive and stricter. Each integrator has its own
+discovery rules. For some primitive types the root convention directory
+is not scanned at install time, so a file that appears in the pack
+bundle may be silently skipped by a downstream `apm install` call.
+
+The table below shows what `apm install` actually scans for each
+primitive type:
+
+| Primitive | `apm install` scans | Root alternative accepted? |
+|-----------|---------------------|---------------------------|
+| instruction | `.apm/instructions/*.instructions.md` | No |
+| command (prompt) | `.apm/prompts/*.prompt.md` | No |
+| hook | `.apm/hooks/*.json` | Yes: `hooks/*.json` |
+| agent | `.apm/agents/**/*.agent.md`, `.apm/chatmodes/*.chatmode.md` | Yes: `*.agent.md` and `*.chatmode.md` at package root |
+| skill | `.apm/skills/<name>/SKILL.md` | Yes: `skills/<name>/SKILL.md` (SKILL_BUNDLE or MARKETPLACE_PLUGIN) |
+
+Source: `src/apm_cli/integration/instruction_integrator.py`,
+`src/apm_cli/integration/command_integrator.py`,
+`src/apm_cli/integration/hook_integrator.py`,
+`src/apm_cli/integration/agent_integrator.py`,
+`src/apm_cli/integration/skill_integrator.py`.
+
+### Canonical layout for marketplace publishers
+
+:::caution[Silent install drops can remove intended guardrails]
+`apm pack` accepts primitives from both `.apm/<type>/` and root convention
+directories (for example, an `instructions/` folder at the plugin root).
+`apm install` does NOT discover instructions, commands, or prompts placed
+in root convention directories. Packages that rely on these primitives for
+security guardrails or policy enforcement will install silently incomplete,
+potentially removing those guardrails from consumer environments.
+:::
+
+If you publish a plugin that consumers install via `apm install`, use
+`.apm/<type>/` for **every** primitive type. This layout is the only
+one that works symmetrically through both `apm pack` (export) and
+`apm install` (discovery).
+
+```
+plugins/my-plugin/
+  apm.yml                          # minimal: name, version, description
+  .apm/
+    agents/
+      security.agent.md
+    skills/
+      my-skill/
+        SKILL.md
+    instructions/
+      style.instructions.md        # ONLY discovered from .apm/instructions/
+    prompts/
+      review.prompt.md             # ONLY discovered from .apm/prompts/
+    hooks/
+      pre-tool.json
+```
+
+To verify what your bundle actually contains before distributing it,
+run:
+
+```bash
+apm pack --dry-run --verbose
+```
+
+The verbose output lists every file and any path remappings. Any
+instruction or prompt you expect to be included should appear there
+before you share the bundle.
+
+### Multi-plugin marketplace publisher
+
+When one repo ships multiple plugins and a marketplace index, give each
+plugin its own `apm.yml` and `.apm/<type>/` source tree:
+
+```
+my-publisher-repo/
+  apm.yml                          # root: marketplace: block only
+  plugins/
+    plugin-a/
+      apm.yml                      # per-plugin manifest
+      .apm/
+        agents/
+          expert.agent.md
+        instructions/
+          rules.instructions.md
+    plugin-b/
+      apm.yml
+      .apm/
+        skills/
+          my-skill/
+            SKILL.md
+```
+
+Per-plugin `apm pack` (run from each plugin directory) emits the plugin
+bundle. The root `apm pack` builds the marketplace index. See
+[Repo shapes](./repo-shapes/) for the full layout options.
 
 ## Pitfalls
 

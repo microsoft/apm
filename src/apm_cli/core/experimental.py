@@ -94,6 +94,29 @@ FLAGS: dict[str, ExperimentalFlag] = {
         default=False,
         hint=("Use registries: in apm.yml. See https://microsoft.github.io/apm/guides/registries/"),
     ),
+    "external_scanners": ExperimentalFlag(
+        name="external_scanners",
+        description="External SARIF scanner ingestion + optional audit at install time.",
+        default=False,
+        hint=(
+            "Opt-in per run with 'apm audit --external sarif --external-sarif "
+            "report.sarif' (any SARIF 2.1.0 tool), or '--external skillspector' "
+            "when its CLI is on PATH. Also unlocks running 'apm audit' during "
+            "'apm install' -- set the mode with 'apm config set audit-on-install "
+            "warn|block' or an apm-policy.yml 'security.audit.on_install' rule. "
+            "See https://microsoft.github.io/apm/integrations/external-scanners/"
+        ),
+    ),
+    "openclaw": ExperimentalFlag(
+        name="openclaw",
+        description="Deploy skills to OpenClaw agent runtime directories.",
+        default=False,
+        hint=(
+            "Use '--target openclaw' to deploy skills to your project, "
+            "or '--target openclaw --global' for your personal OpenClaw "
+            "skills at ~/.openclaw/skills/."
+        ),
+    ),
 }
 
 

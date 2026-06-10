@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, List, Optional  # noqa: F401, UP035
+from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 import requests as _requests

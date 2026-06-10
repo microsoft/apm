@@ -34,7 +34,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional  # noqa: F401, UP035
 
 from .base_integrator import BaseIntegrator
 

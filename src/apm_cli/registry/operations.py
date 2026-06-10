@@ -3,7 +3,6 @@
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
 
 import requests
 

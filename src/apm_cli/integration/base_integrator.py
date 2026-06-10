@@ -3,9 +3,8 @@
 import errno
 import os
 import re
-from dataclasses import dataclass, field  # noqa: F401
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.primitives.discovery import discover_primitives
@@ -45,6 +44,12 @@ class IntegrationResult:
     # ``files_integrated`` so the install summary can surface the work
     # done in adopt-only runs instead of looking like a no-op.
     files_adopted: int = 0
+
+    # Hook transparency: per-file display metadata populated by HookIntegrator.
+    # Each entry is a dict with keys: target_label, output_path, source_hook_file,
+    # actions (list of {event, summary}), rendered_json.
+    # Faithfully reflects post-path-rewrite data actually written to disk.
+    display_payloads: list = field(default_factory=list)
 
 
 def _read_bytes_no_follow(path: Path) -> bytes:
@@ -234,6 +239,23 @@ class BaseIntegrator:
             return target_bytes == source_bytes
         except OSError:
             return False
+
+    @staticmethod
+    def try_adopt_identical(target_path: Path, source_path: Path, target_paths: list) -> bool:
+        """Adopt *target_path* when it is byte-identical to *source_path*.
+
+        Encapsulates the ``is_content_identical_to_source`` + append pattern
+        so secondary call sites in agent/prompt/hook integrators share a
+        single predicate call instead of repeating the three-line block.
+
+        Returns ``True`` and appends *target_path* to *target_paths* when the
+        files are identical; returns ``False`` and leaves *target_paths*
+        unchanged otherwise.
+        """
+        if BaseIntegrator.is_content_identical_to_source(target_path, source_path):
+            target_paths.append(target_path)
+            return True
+        return False
 
     def _check_adopt_or_skip(
         self,
@@ -593,7 +615,13 @@ class BaseIntegrator:
         except Exception:
             self.link_resolver = None
 
-    def resolve_links(self, content: str, source: Path, target: Path) -> tuple:
+    def resolve_links(
+        self,
+        content: str,
+        source: Path,
+        target: Path,
+        preserved_source_root: Path | None = None,
+    ) -> tuple:
         """Resolve context links in *content*.
 
         Returns:
@@ -606,6 +634,7 @@ class BaseIntegrator:
             content=content,
             source_file=source,
             target_file=target,
+            preserved_source_root=preserved_source_root,
         )
         if resolved == content:
             return content, 0

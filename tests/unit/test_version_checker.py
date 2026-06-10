@@ -422,3 +422,102 @@ class TestCachePathPlatform(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAirGappedEnvVars(unittest.TestCase):
+    """Test that air-gapped env vars are honoured by the version checker."""
+
+    @patch("requests.get")
+    @patch.dict("os.environ", {"VERSION": "v1.2.3"}, clear=False)
+    def test_version_env_var_skips_api_call(self, mock_get):
+        """When VERSION is set the API is never called and the pinned version is returned."""
+        result = get_latest_version_from_github()
+        mock_get.assert_not_called()
+        self.assertEqual(result, "1.2.3")
+
+    @patch("requests.get")
+    @patch.dict("os.environ", {"VERSION": "1.5.0"}, clear=False)
+    def test_version_env_var_without_v_prefix(self, mock_get):
+        """VERSION without 'v' prefix is accepted and API is skipped."""
+        result = get_latest_version_from_github()
+        mock_get.assert_not_called()
+        self.assertEqual(result, "1.5.0")
+
+    @patch("requests.get")
+    @patch.dict("os.environ", {"VERSION": "not-a-version"}, clear=False)
+    def test_invalid_version_env_var_returns_none(self, mock_get):
+        """An invalid VERSION value returns None without calling the API."""
+        result = get_latest_version_from_github()
+        mock_get.assert_not_called()
+        self.assertIsNone(result)
+
+    @patch("requests.get")
+    @patch.dict("os.environ", {"APM_REPO": "corp/apm-fork"}, clear=False)
+    def test_apm_repo_env_var_used_in_api_url(self, mock_get):
+        """When APM_REPO is set, the API request targets that repository."""
+        from urllib.parse import urlparse
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"tag_name": "v0.9.0"}
+        mock_get.return_value = mock_response
+
+        # Remove VERSION so it does not short-circuit
+        import os as _os
+
+        env = {k: v for k, v in _os.environ.items() if k != "VERSION"}
+        with patch.dict("os.environ", env, clear=True):
+            with patch.dict("os.environ", {"APM_REPO": "corp/apm-fork"}):
+                result = get_latest_version_from_github()
+
+        self.assertEqual(result, "0.9.0")
+        call_url = mock_get.call_args[0][0]
+        parsed = urlparse(call_url)
+        self.assertIn("corp/apm-fork", parsed.path)
+
+    @patch("requests.get")
+    def test_github_url_env_var_uses_ghe_api_endpoint(self, mock_get):
+        """When GITHUB_URL is set to a GHE host, the API URL uses /api/v3."""
+        from urllib.parse import urlparse
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"tag_name": "v0.9.0"}
+        mock_get.return_value = mock_response
+
+        import os as _os
+
+        env = {k: v for k, v in _os.environ.items() if k not in ("VERSION", "GITHUB_URL")}
+        with patch.dict("os.environ", env, clear=True):
+            with patch.dict("os.environ", {"GITHUB_URL": "https://gh.corp.com"}):
+                result = get_latest_version_from_github()
+
+        self.assertEqual(result, "0.9.0")
+        call_url = mock_get.call_args[0][0]
+        parsed = urlparse(call_url)
+        self.assertEqual(parsed.hostname, "gh.corp.com")
+        self.assertTrue(parsed.path.startswith("/api/v3/"))
+
+    @patch("requests.get")
+    def test_default_behavior_without_env_vars(self, mock_get):
+        """Without env vars, the public api.github.com endpoint is used."""
+        from urllib.parse import urlparse
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"tag_name": "v0.9.0"}
+        mock_get.return_value = mock_response
+
+        import os as _os
+
+        env = {
+            k: v for k, v in _os.environ.items() if k not in ("VERSION", "GITHUB_URL", "APM_REPO")
+        }
+        with patch.dict("os.environ", env, clear=True):
+            result = get_latest_version_from_github()
+
+        self.assertEqual(result, "0.9.0")
+        call_url = mock_get.call_args[0][0]
+        parsed = urlparse(call_url)
+        self.assertEqual(parsed.hostname, "api.github.com")
+        self.assertIn("microsoft/apm", parsed.path)

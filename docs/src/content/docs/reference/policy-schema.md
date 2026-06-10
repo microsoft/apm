@@ -41,7 +41,9 @@ The `<ref>` accepts:
 | `compilation`      | object              | see section      | no       | Rules over `apm compile` outputs.                                                 |
 | `manifest`         | object              | see section      | no       | Rules over `apm.yml` content.                                                     |
 | `unmanaged_files`  | object              | see section      | no       | Rules over files in target directories not tracked by the lockfile.               |
+| `security`         | object              | see section      | no       | Rules over APM's security checks (install-time content audit + external scanners; requires `external-scanners` flag). |
 | `registry_source`  | object              | see section      | no       | Mandate registry usage and block non-registry sources (requires `registries` flag). |
+| `bin_deploy`       | object              | see section      | no       | Control whether `marketplace_plugin` bin/ executables are deployed to `~/.claude/skills/<name>/bin/`. |
 
 Unknown top-level keys produce a warning, never an error -- so newer policy files load on older clients.
 
@@ -151,6 +153,48 @@ Files in primitive target directories that are not recorded in `apm.lock.yaml`.
 | `action`      | enum           | `ignore` | `ignore` / `warn` / `deny`. `deny` blocks installs that would leave drift.      |
 | `directories` | list of paths  | `[]`     | Subset of target directories to check. Empty = all known target directories.     |
 
+## security
+
+Rules over APM's security checks. Requires the `external-scanners`
+experimental flag to take effect; ignored otherwise.
+
+| Field                | Type            | Default | Notes                                                                            |
+|----------------------|-----------------|---------|----------------------------------------------------------------------------------|
+| `audit.on_install`   | enum or null    | `null`  | `off` / `warn` / `block`. Minimum install-time audit mode (a **floor**). `null` = no opinion. `warn` records findings; `block` halts installs on critical findings. |
+| `audit.external`     | list of strings | `null`  | External SARIF scanner names (e.g. `skillspector`) that MUST run during the install audit. A required scanner that is unavailable fails the install closed. |
+| `audit.scanners`     | mapping or null | `null`  | Per-scanner governance, keyed by scanner name. Each value accepts `allow_args` (boolean). **Restrict-only**: see below. Unknown scanner names are a warning, not an error (forward-compat). |
+
+### Per-scanner governance (`audit.scanners`)
+
+```yaml
+security:
+  audit:
+    scanners:
+      skillspector:
+        allow_args: false      # forbid extra-args passthrough at install time
+```
+
+`audit.scanners` is **restrict-only**. A policy may tighten a scanner's
+behaviour but can never expand it:
+
+- `allow_args: false` strips any user/CLI `external.<name>.args` (and
+  `--external-args`) for that scanner at install time, locking it to a vetted
+  invocation. `true` / omitted leaves the user's args in place (still
+  allowlist-validated by the adapter).
+- Policy **never contributes argv tokens** itself and **never forces LLM mode
+  on**. LLM opt-in stays a local user decision (`--external-llm` or
+  `external.<name>.llm`). This removes any project-policy argv-injection or
+  egress-coercion surface.
+
+The floor is enforced during `apm install` (where org policy is loaded). A bare
+`apm audit --external` run does not load org policy and relies on the adapter's
+allowlist validation for arg safety.
+
+`audit.on_install` is a floor: it can only raise the effective mode chosen by
+`apm install --audit` / `apm config audit-on-install`, never relax it. `apm
+install --force` downgrades a `block` to `warn` for that invocation; `apm
+install --no-policy` skips the policy floor entirely.
+
 ## Inheritance
 
 `extends:` resolves a parent policy. Maximum chain depth is **5**; cycles are rejected.
@@ -183,6 +227,9 @@ inherited list (see the tri-state table below).
 | `mcp.trust_transitive`      | Logical AND (`true` only if both sides true).                                    |
 | `manifest.scripts`          | Stricter wins (`deny` > `allow`).                                                |
 | `unmanaged_files.action`    | Stricter wins (`deny` > `warn` > `ignore`).                                      |
+| `security.audit.on_install` | Stricter wins (`block` > `warn` > `off`). `null` is transparent.                 |
+| `security.audit.external`   | Union, deduplicated. `null` is transparent.                                      |
+| `security.audit.scanners`   | Union of scanner names; per scanner `allow_args` is AND-merged (any ancestor `false` wins -- tightening). `null` is transparent.                  |
 | `compilation.*.enforce`     | First non-null wins (parent precedence).                                         |
 | `compilation.source_attribution` | Logical OR.                                                                 |
 
@@ -288,6 +335,36 @@ registry_source:
   require:
     - jf-skills
   allow_non_registry: false
+```
+
+## bin_deploy
+
+Controls whether `apm install -g` deploys `bin/` executables from `marketplace_plugin` packages into `~/.claude/skills/<name>/bin/`, alongside the package's `.claude-plugin/plugin.json`. Here `<name>` is the package's install directory name (typically the repository name).
+
+This realizes Claude Code's "skills-directory plugin" contract: a folder under a skills directory that contains `.claude-plugin/plugin.json` loads as `<name>@skills-dir`, and its root `bin/` is added to the Bash tool's `PATH`. The package's `.claude-plugin/plugin.json` is required for Claude to load the folder as a plugin; APM copies it alongside `bin/` when the package ships one. The contract is Claude-specific, so deployment only targets Claude. Restart Claude Code (or run `/reload-plugins`) after install for new executables to be picked up.
+
+**Security note:** deployed executables are made executable (user-only execute bit; group and other execute bits are cleared) and placed on Claude Code's `PATH`, so Claude can invoke them without further confirmation. By default, APM mirrors npm's trust model: installing a package implies trusting its declared artifacts, including executables. Use this field to opt out globally or per-package in enterprise environments.
+
+**Scope:** bin/ deployment only activates for global (`-g`, user-scope) installs. Project-scope installs do not deploy executables.
+
+**Authoring plugins that ship `bin/`:** see [Repo shapes for marketplace producers](../producer/repo-shapes/#shipping-bin-executables-claude-code-only) for the producer-side contract (directory layout, executable bit, scope and trust posture).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `deny_all` | `bool` | `false` | When `true`, suppresses bin/ deployment for every `marketplace_plugin` package, regardless of individual `deny` entries. |
+| `deny` | `list<string>` | `[]` | Package canonical strings whose bin/ executables must not be deployed. Entries are matched case-sensitively; copy each string verbatim from `apm deps list` (e.g. `myorg/myplugin`). |
+
+```yaml
+bin_deploy:
+  # Block all bin/ deploys organisation-wide:
+  deny_all: true
+```
+
+```yaml
+bin_deploy:
+  # Allow bin/ deploys except for one specific package:
+  deny:
+    - myorg/untrusted-plugin
 ```
 
 ## See also

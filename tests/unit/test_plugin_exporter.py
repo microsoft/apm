@@ -629,8 +629,8 @@ class TestExportPluginBundle:
         out = tmp_path / "build"
 
         with (
-            patch("apm_cli.bundle.plugin_exporter._rich_info") as mock_info,
-            patch("apm_cli.bundle.plugin_exporter._rich_warning") as mock_warn,
+            patch("apm_cli.core.plugin_manifest._rich_info") as mock_info,
+            patch("apm_cli.core.plugin_manifest._rich_warning") as mock_warn,
         ):
             result = export_plugin_bundle(project, out)
 
@@ -655,7 +655,7 @@ class TestExportPluginBundle:
         )
         out = tmp_path / "build"
 
-        with patch("apm_cli.bundle.plugin_exporter._rich_info") as mock_info:
+        with patch("apm_cli.core.plugin_manifest._rich_info") as mock_info:
             export_plugin_bundle(project, out)
 
         assert not any("deriving it from apm.yml" in str(c) for c in mock_info.call_args_list), (

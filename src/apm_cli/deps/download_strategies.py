@@ -22,8 +22,6 @@ from ..core.auth import AuthResolver, HostInfo
 from ..models.apm_package import DependencyReference
 from ..utils.github_host import (
     build_ado_api_url,
-    build_ado_https_clone_url,  # noqa: F401  -- re-exported for tests/back-compat
-    build_ado_ssh_url,  # noqa: F401  -- re-exported for tests/back-compat
     build_artifactory_archive_url,
     build_https_clone_url,
     build_raw_content_url,
@@ -497,8 +495,6 @@ class DownloadDelegate:
         Returns:
             bytes: File content
         """
-        import base64
-
         # Validate required ADO fields before proceeding
         if not all([dep_ref.ado_organization, dep_ref.ado_project, dep_ref.ado_repo]):
             raise ValueError(
@@ -518,15 +514,61 @@ class DownloadDelegate:
             host,
         )
 
-        # Set up authentication headers - ADO uses Basic auth with PAT
+        # Set up authentication headers.
+        # PAT path is first and unchanged; bearer is strictly the fallback
+        # when no PAT is present.  Bearer acquisition is routed through
+        # AuthResolver.resolve() so this module stays inside the auth-protocol
+        # boundary (scripts/lint-auth-signals.sh Rule A); auth.py's resolver
+        # handles the AAD bearer lookup internally.
         headers: dict[str, str] = {}
         if self._host.ado_token:
             # ADO uses Basic auth: username can be empty, password is the PAT
             auth = base64.b64encode(f":{self._host.ado_token}".encode()).decode()
             headers["Authorization"] = f"Basic {auth}"
+        else:
+            # No PAT: ask the resolver for an AAD bearer token.  If az-cli is
+            # available and the user is signed in, AuthResolver._resolve_token()
+            # returns a bearer token and auth_scheme="bearer" transparently.
+            auth_ctx = self._host.auth_resolver.resolve(
+                host,
+                dep_ref.ado_organization,
+                port=dep_ref.port,
+            )
+            if auth_ctx.token and auth_ctx.auth_scheme == "bearer":
+                headers["Authorization"] = f"Bearer {auth_ctx.token}"
+
+        def _check_html_signin(response) -> None:
+            """Fail-closed when ADO returns an interactive sign-in HTML page.
+
+            Azure DevOps responds with HTTP 200 + text/html when auth is
+            missing or insufficient instead of a 401.  Writing that HTML to
+            disk produces a corrupt file (the #1671 bug).  Detect it by
+            Content-Type only on 200 responses so 404/403 error pages with
+            text/html bodies still fall through to raise_for_status and the
+            existing 404-fallback / 401-403 error paths.  Content-Type is
+            lowercased before comparison per RFC 7230 case-insensitivity.
+            """
+            if response.status_code != 200:
+                return
+            content_type = response.headers.get("Content-Type", "").lower()
+            if "text/html" in content_type:
+                error_msg = (
+                    f"Azure DevOps returned a sign-in page for {dep_ref.repo_url}. "
+                    "The server responded with HTML instead of the requested file, "
+                    "which means authentication is missing or insufficient. "
+                )
+                error_msg += self._host.auth_resolver.build_error_context(
+                    host,
+                    "download",
+                    org=dep_ref.ado_organization if dep_ref else None,
+                    port=dep_ref.port if dep_ref else None,
+                    dep_url=dep_ref.repo_url if dep_ref else None,
+                )
+                raise RuntimeError(error_msg)
 
         try:
             response = self._host._resilient_get(api_url, headers=headers, timeout=30)
+            _check_html_signin(response)
             response.raise_for_status()
             return response.content
         except requests.exceptions.HTTPError as e:
@@ -549,6 +591,7 @@ class DownloadDelegate:
 
                 try:
                     response = self._host._resilient_get(fallback_url, headers=headers, timeout=30)
+                    _check_html_signin(response)
                     response.raise_for_status()
                     return response.content
                 except requests.exceptions.HTTPError as fallback_err:

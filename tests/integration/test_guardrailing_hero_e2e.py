@@ -10,7 +10,8 @@ Exercises a guardrailing workflow with mixed package types:
 
 This validates that:
 - Multiple APM packages can be installed (full package + virtual instruction)
-- AGENTS.md is generated with combined instructions from both packages
+- Compilation produces combined instructions from both packages (distributed
+  across AGENTS.md and .github/instructions/)
 - Prompts from installed packages can be executed
 """
 
@@ -117,7 +118,7 @@ class TestGuardrailingHeroScenario:
         1. apm init my-project creates minimal project
         2. apm install microsoft/apm-sample-package succeeds
         3. apm install github/awesome-copilot/instructions/code-review-generic.instructions.md succeeds
-        4. apm compile generates AGENTS.md with instructions from both packages
+        4. apm compile produces combined instructions from both packages
         5. apm run design-review executes prompt from first installed package
         """
 
@@ -190,15 +191,26 @@ class TestGuardrailingHeroScenario:
             agents_md = project_dir / "AGENTS.md"
             assert agents_md.exists(), "AGENTS.md not generated"
 
-            # Verify AGENTS.md contains instructions from both packages
-            agents_content = agents_md.read_text()
-            assert "design" in agents_content.lower(), (
-                "AGENTS.md doesn't contain design-related content from apm-sample-package"
+            # The distributed-primitives compile model routes instruction content
+            # into per-glob files under .github/instructions/ (and, when present,
+            # .github/copilot-instructions.md), leaving the root AGENTS.md as a thin
+            # stub. Aggregate the full compiled corpus so the assertions hold
+            # regardless of where each instruction lands.
+            compiled_sources = [agents_md, project_dir / ".github" / "copilot-instructions.md"]
+            compiled_sources.extend(sorted((project_dir / ".github" / "instructions").glob("*.md")))
+            compiled_content = "\n".join(
+                p.read_text() for p in compiled_sources if p.exists()
+            ).lower()
+
+            # Verify the compiled corpus contains instructions from both packages
+            assert "design" in compiled_content, (
+                "Compiled instructions don't contain design-related content from apm-sample-package"
             )
-            assert "review" in agents_content.lower() or "code" in agents_content.lower(), (
-                "AGENTS.md doesn't contain code-review content from awesome-copilot"
+            assert "review" in compiled_content or "code" in compiled_content, (
+                "Compiled instructions don't contain code-review content from awesome-copilot"
             )
 
+            agents_content = agents_md.read_text()
             print(f"[OK] AGENTS.md generated ({len(agents_content)} bytes)")
             print("  Contains design instructions: [OK]")
             print("  Contains code-review instructions: [OK]")

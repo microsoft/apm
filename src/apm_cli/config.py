@@ -3,7 +3,6 @@
 import contextlib
 import json
 import os
-from typing import Optional  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Public env-var names (re-declared here to avoid a circular import with the
@@ -465,3 +464,225 @@ def get_apm_temp_dir() -> str | None:
     if config_val:
         return config_val
     return None
+
+
+# ---------------------------------------------------------------------------
+# Install-time audit default (external_scanners experimental feature)
+# ---------------------------------------------------------------------------
+
+#: Valid modes for the install-time audit. ``off`` skips it; ``warn`` runs the
+#: audit and surfaces findings without failing; ``block`` fails the install on
+#: critical findings.
+AUDIT_ON_INSTALL_MODES = ("off", "warn", "block")
+
+
+def get_audit_on_install() -> str:
+    """Get the user-level default mode for running ``apm audit`` at install time.
+
+    This is only consulted when the ``external_scanners`` experimental flag is
+    enabled and an ``apm-policy.yml`` ``security.audit.on_install`` rule does
+    not already mandate a stricter mode.
+
+    Returns:
+        One of :data:`AUDIT_ON_INSTALL_MODES`; defaults to ``"off"``.
+    """
+    value = get_config().get("audit_on_install", "off")
+    return value if value in AUDIT_ON_INSTALL_MODES else "off"
+
+
+def set_audit_on_install(mode: str) -> None:
+    """Set the install-time audit default mode.
+
+    Args:
+        mode: One of :data:`AUDIT_ON_INSTALL_MODES`.
+
+    Raises:
+        ValueError: If *mode* is not a recognised value.
+    """
+    normalized = (mode or "").strip().lower()
+    if normalized not in AUDIT_ON_INSTALL_MODES:
+        raise ValueError(
+            f"Invalid value '{mode}'. Use one of: {', '.join(AUDIT_ON_INSTALL_MODES)}."
+        )
+    update_config({"audit_on_install": normalized})
+
+
+def unset_audit_on_install() -> None:
+    """Remove the ``audit_on_install`` key from the config file.
+
+    No-op if the key is not present.  After this call
+    :func:`get_audit_on_install` falls through to the built-in default
+    (``"off"``).
+    """
+    _unset_config_key("audit_on_install")
+
+
+# ---------------------------------------------------------------------------
+# External scanner options (external_scanners experimental feature)
+# ---------------------------------------------------------------------------
+#
+# Stored under the ``external_scanners`` JSON section, mirroring the
+# ``registries`` nested-dict shape:
+#
+#     {"external_scanners": {"skillspector": {"llm": true,
+#                                             "args": ["--model", "gpt-4o"]}}}
+#
+# Only consulted when the ``external_scanners`` experimental flag is enabled
+# and an external scan actually runs. ``llm`` opts into a scanner's LLM mode;
+# ``args`` are extra argv tokens (allowlist-validated by the adapter before
+# use). The user-facing config key is ``external.<name>.{llm,args}``; the JSON
+# section name stays ``external_scanners`` (internal, like ``registries``).
+
+
+def _get_external_scanners_section() -> dict:
+    """Return the ``external_scanners`` section from config.json as a dict."""
+    section = get_config().get("external_scanners", {})
+    return section if isinstance(section, dict) else {}
+
+
+def get_scanner_config(name: str) -> "dict | None":
+    """Return the config.json entry for external scanner *name*, or None."""
+    entry = _get_external_scanners_section().get(name)
+    return entry if isinstance(entry, dict) else None
+
+
+def set_scanner_llm(name: str, llm: bool) -> None:
+    """Write external_scanners.<name>.llm to config.json."""
+    scanners = dict(_get_external_scanners_section())
+    entry = dict(scanners.get(name) or {})
+    entry["llm"] = bool(llm)
+    scanners[name] = entry
+    update_config({"external_scanners": scanners})
+
+
+def set_scanner_args(name: str, args: "list[str]") -> None:
+    """Write external_scanners.<name>.args to config.json as a list."""
+    scanners = dict(_get_external_scanners_section())
+    entry = dict(scanners.get(name) or {})
+    entry["args"] = list(args)
+    scanners[name] = entry
+    update_config({"external_scanners": scanners})
+
+
+def unset_scanner_llm(name: str) -> None:
+    """Remove external_scanners.<name>.llm from config.json."""
+    _unset_scanner_field(name, "llm")
+
+
+def unset_scanner_args(name: str) -> None:
+    """Remove external_scanners.<name>.args from config.json."""
+    _unset_scanner_field(name, "args")
+
+
+def _unset_scanner_field(name: str, field: str) -> None:
+    """Remove one field from external_scanners.<name>, pruning empties."""
+    scanners = dict(_get_external_scanners_section())
+    entry = dict(scanners.get(name) or {})
+    entry.pop(field, None)
+    if entry:
+        scanners[name] = entry
+    else:
+        scanners.pop(name, None)
+    update_config({"external_scanners": scanners})
+
+
+def unset_scanner(name: str) -> None:
+    """Remove the entire external_scanners.<name> entry from config.json."""
+    scanners = dict(_get_external_scanners_section())
+    if name in scanners:
+        del scanners[name]
+        update_config({"external_scanners": scanners})
+
+
+def get_scanner_options(name: str) -> "tuple[bool | None, tuple[str, ...] | None]":
+    """Return ``(llm, args)`` configured for scanner *name*.
+
+    ``llm`` is ``None`` when unset (no opinion); ``args`` is ``None`` when
+    unset (distinct from an explicitly empty list).
+    """
+    entry = get_scanner_config(name)
+    if not entry:
+        return None, None
+    llm = entry.get("llm")
+    llm = bool(llm) if isinstance(llm, bool) else None
+    raw_args = entry.get("args")
+    args = tuple(str(a) for a in raw_args) if isinstance(raw_args, list) else None
+    return llm, args
+
+
+# ---------------------------------------------------------------------------
+# MCP registry URL (issue #818)
+# ---------------------------------------------------------------------------
+
+_MCP_REGISTRY_URL_KEY = "mcp_registry_url"
+_MCP_REGISTRY_ALLOWED_SCHEMES = frozenset({"http", "https"})
+_MCP_REGISTRY_URL_MAX_LENGTH = 2048
+
+
+def _validate_mcp_registry_url(url: str) -> str:
+    """Validate and normalise a registry URL.  Returns the trimmed URL.
+
+    Raises:
+        ValueError: If the URL is empty, too long, missing a scheme/host,
+            or uses a scheme outside ``http``/``https``.
+    """
+    from urllib.parse import urlparse
+
+    normalized = url.strip().rstrip("/")
+    if not normalized:
+        raise ValueError("mcp-registry-url: URL cannot be empty")
+    if len(normalized) > _MCP_REGISTRY_URL_MAX_LENGTH:
+        raise ValueError(
+            f"mcp-registry-url: URL is too long "
+            f"({len(normalized)} > {_MCP_REGISTRY_URL_MAX_LENGTH} characters)"
+        )
+    parsed = urlparse(normalized)
+    if not parsed.scheme:
+        raise ValueError(
+            f"mcp-registry-url: Invalid URL '{normalized}': expected scheme://host "
+            f"(e.g. https://mcp.internal.example.com)"
+        )
+    scheme = parsed.scheme.lower()
+    if scheme not in _MCP_REGISTRY_ALLOWED_SCHEMES:
+        raise ValueError(
+            f"mcp-registry-url: scheme '{scheme}' is not supported; "
+            f"use http:// or https://. "
+            f"WebSocket URLs (ws/wss) and file:// paths are rejected for security."
+        )
+    if parsed.username is not None:
+        raise ValueError(
+            "mcp-registry-url: URL must not contain credentials; "
+            "use the MCP_REGISTRY_URL environment variable or a credential helper instead."
+        )
+    if not parsed.hostname:
+        raise ValueError(
+            f"mcp-registry-url: Invalid URL '{normalized}': expected scheme://host "
+            f"(e.g. https://mcp.internal.example.com)"
+        )
+    return normalized
+
+
+def get_mcp_registry_url() -> str | None:
+    """Return the user-configured MCP registry URL, or None if not set."""
+    return get_config().get(_MCP_REGISTRY_URL_KEY)
+
+
+def set_mcp_registry_url(url: str) -> None:
+    """Persist *url* as the user-scope MCP registry URL.
+
+    Args:
+        url: Registry URL (``http://`` or ``https://`` only).
+
+    Raises:
+        ValueError: If the URL is invalid.
+    """
+    normalized = _validate_mcp_registry_url(url)
+    update_config({_MCP_REGISTRY_URL_KEY: normalized})
+
+
+def unset_mcp_registry_url() -> None:
+    """Remove the ``mcp_registry_url`` key from the config file.
+
+    No-op if the key is not present.
+    """
+    _unset_config_key(_MCP_REGISTRY_URL_KEY)

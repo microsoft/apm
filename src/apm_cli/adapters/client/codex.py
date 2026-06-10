@@ -150,19 +150,7 @@ class CodexClientAdapter(MCPClientAdapter):
             if server_info is None:
                 return False
 
-            # Determine the server name for configuration key
-            if server_name:
-                # Use explicitly provided server name
-                config_key = server_name
-            else:  # noqa: PLR5501
-                # Extract name from server_url (part after last slash)
-                # For URLs like "microsoft/azure-devops-mcp" -> "azure-devops-mcp"
-                # For URLs like "github/github-mcp-server" -> "github-mcp-server"
-                if "/" in server_url:  # noqa: SIM108
-                    config_key = server_url.split("/")[-1]
-                else:
-                    # Fallback to full server_url if no slash
-                    config_key = server_url
+            config_key = self._determine_config_key(server_url, server_name)
 
             # Generate server configuration with environment variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)

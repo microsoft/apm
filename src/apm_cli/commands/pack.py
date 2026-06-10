@@ -28,6 +28,7 @@ Reads apm.yml to decide what to produce:
 
   dependencies: block  ->  bundle (directory or .tar.gz)
   marketplace: block   ->  selected marketplace artifacts
+  target: / targets:   ->  ecosystem-specific plugin.json (claude/copilot)
   both blocks present  ->  bundle plus selected marketplace artifacts
 
 The lockfile (apm.lock.yaml) pins bundle contents. An enriched copy
@@ -75,6 +76,79 @@ def _emit_json_error_or_raise(ctx, json_output: bool, code: str, message: str):
         raise click.ClickException(message)
 
 
+def _parse_path_overrides(
+    marketplace_path_overrides: "tuple[str, ...]",
+    ctx,
+    json_output: bool,
+) -> "dict[str, str] | None":
+    """Parse --marketplace-path KEY=VALUE pairs.
+
+    Returns a dict mapping format name -> path, or ``None`` on the first
+    validation error (after emitting the error via *ctx*).
+    """
+    from ..marketplace.output_profiles import known_output_names
+    from ..utils.path_security import validate_path_segments
+
+    path_overrides: dict[str, str] = {}
+    for override in marketplace_path_overrides:
+        if "=" not in override:
+            msg = f"--marketplace-path must be FORMAT=PATH, got: {override!r}"
+            _emit_json_error_or_raise(ctx, json_output, "cli_error", msg)
+            return None
+        fmt_name, path_val = override.split("=", 1)
+        fmt_name = fmt_name.strip()
+        path_val = path_val.strip()
+        if fmt_name not in known_output_names():
+            msg = (
+                f"Unknown marketplace format '{fmt_name}' in --marketplace-path. "
+                f"Known formats: {', '.join(sorted(known_output_names()))}"
+            )
+            _emit_json_error_or_raise(ctx, json_output, "unknown_format", msg)
+            return None
+        # Security: validate path to prevent traversal attacks
+        try:
+            validate_path_segments(path_val, context="--marketplace-path", allow_current_dir=True)
+        except Exception as exc:
+            _emit_json_error_or_raise(ctx, json_output, "path_error", str(exc))
+            return None
+        path_overrides[fmt_name] = path_val
+    return path_overrides
+
+
+def _parse_marketplace_filter(
+    marketplace_filter: "str | None",
+    ctx,
+    json_output: bool,
+) -> "tuple[str, ...] | None":
+    """Parse the --marketplace filter value.
+
+    Returns:
+      - ``None``           -- build all configured outputs
+      - empty ``tuple``    -- skip marketplace entirely (``--marketplace none``)
+      - non-empty tuple    -- build only the named formats
+      - ``None`` on validation error (after emitting the error via *ctx*)
+    """
+    from ..marketplace.output_profiles import known_output_names
+
+    if marketplace_filter is None:
+        return None
+    if marketplace_filter.strip().lower() == "none":
+        return ()
+    if marketplace_filter.strip().lower() == "all":
+        return None  # all configured
+    requested = [f.strip() for f in marketplace_filter.split(",") if f.strip()]
+    known = known_output_names()
+    for r in requested:
+        if r not in known:
+            msg = (
+                f"Unknown marketplace format '{r}' in --marketplace. "
+                f"Known formats: {', '.join(sorted(known))}"
+            )
+            _emit_json_error_or_raise(ctx, json_output, "unknown_format", msg)
+            return None
+    return tuple(requested)
+
+
 @click.command(name="pack", help=_PACK_HELP)
 @click.option(
     "--format",
@@ -107,7 +181,11 @@ def _emit_json_error_or_raise(ctx, json_output: bool, code: str, message: str):
     "--dry-run", is_flag=True, default=False, help="Show what would be packed without writing"
 )
 @click.option(
-    "--force", is_flag=True, default=False, help="On collision (plugin format), last writer wins."
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Allow overwriting on collision: last-writer-wins in plugin bundles; "
+    "overwrites any existing plugin.json at the generated manifest path.",
 )
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed packing information.")
 @click.option(
@@ -184,7 +262,7 @@ def _emit_json_error_or_raise(ctx, json_output: bool, code: str, message: str):
     ),
 )
 @click.pass_context
-def pack_cmd(
+def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     ctx,
     fmt,
     target,
@@ -203,9 +281,6 @@ def pack_cmd(
     check_clean,
 ):
     """Pack APM artifacts: bundle and/or marketplace.json."""
-    from ..marketplace.output_profiles import known_output_names
-    from ..utils.path_security import validate_path_segments
-
     # -- Stream discipline: under --json, route ALL output to stderr --
     if json_output:
         set_console_stderr(True)
@@ -213,49 +288,14 @@ def pack_cmd(
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)
 
     # -- Parse --marketplace-path overrides --
-    path_overrides: dict[str, str] = {}
-    for override in marketplace_path_overrides:
-        if "=" not in override:
-            msg = f"--marketplace-path must be FORMAT=PATH, got: {override!r}"
-            _emit_json_error_or_raise(ctx, json_output, "cli_error", msg)
-            return
-        fmt_name, path_val = override.split("=", 1)
-        fmt_name = fmt_name.strip()
-        path_val = path_val.strip()
-        if fmt_name not in known_output_names():
-            msg = (
-                f"Unknown marketplace format '{fmt_name}' in --marketplace-path. "
-                f"Known formats: {', '.join(sorted(known_output_names()))}"
-            )
-            _emit_json_error_or_raise(ctx, json_output, "unknown_format", msg)
-            return
-        # Security: validate path to prevent traversal attacks
-        try:
-            validate_path_segments(path_val, context="--marketplace-path", allow_current_dir=True)
-        except Exception as exc:
-            _emit_json_error_or_raise(ctx, json_output, "path_error", str(exc))
-            return
-        path_overrides[fmt_name] = path_val
+    path_overrides_result = _parse_path_overrides(marketplace_path_overrides, ctx, json_output)
+    if path_overrides_result is None:
+        return
+    path_overrides = path_overrides_result
 
     # -- Parse --marketplace filter --
-    marketplace_formats: tuple[str, ...] | None = None
-    if marketplace_filter is not None:
-        if marketplace_filter.strip().lower() == "none":
-            marketplace_formats = ()
-        elif marketplace_filter.strip().lower() == "all":
-            marketplace_formats = None  # all configured
-        else:
-            requested = [f.strip() for f in marketplace_filter.split(",") if f.strip()]
-            known = known_output_names()
-            for r in requested:
-                if r not in known:
-                    msg = (
-                        f"Unknown marketplace format '{r}' in --marketplace. "
-                        f"Known formats: {', '.join(sorted(known))}"
-                    )
-                    _emit_json_error_or_raise(ctx, json_output, "unknown_format", msg)
-                    return
-            marketplace_formats = tuple(requested)
+    marketplace_formats = _parse_marketplace_filter(marketplace_filter, ctx, json_output)
+    # _parse_marketplace_filter raises/exits on error via _emit_json_error_or_raise
     project_root = Path(".").resolve()
     # Issue #1207 D1: when --target is not given, detect the project's
     # actual target so the embedded ``pack.target`` reflects what was
@@ -403,11 +443,13 @@ def pack_cmd(
                                 logger.info(f"    {out.path}  [unchanged]")
                             elif out.status == "missing":
                                 logger.info(f"    {out.path}  [missing on disk; would be created]")
+                                _emit_drift_recipe(logger, out.path)
                             else:
                                 count = len(out.differences)
                                 logger.info(f"    {out.path}  [drift: {count} differences]")
                                 for line in render_diff_lines(out):
                                     logger.info(line)
+                                _emit_drift_recipe(logger, out.path)
                     for msg in d_report.error_messages():
                         gate_errors.append({"code": "marketplace_drift", "message": msg})
 
@@ -420,6 +462,7 @@ def pack_cmd(
             "errors": [],
             "marketplace": {"outputs": []},
             "bundle": None,
+            "plugin_manifests": {"written": [], "skipped": [], "dry_run": []},
             "version_alignment": version_alignment_payload,
             "drift": drift_payload,
         }
@@ -428,7 +471,8 @@ def pack_cmd(
                 payload = sub.payload.to_json_dict()
                 envelope["warnings"] = payload.get("warnings", [])
                 envelope["marketplace"] = payload.get("marketplace", {"outputs": []})
-                break
+            elif sub.kind is OutputKind.PLUGIN_MANIFEST and isinstance(sub.payload, dict):
+                envelope["plugin_manifests"] = sub.payload
         if gate_errors:
             envelope["errors"] = list(envelope["errors"]) + gate_errors
             envelope["ok"] = False
@@ -450,6 +494,30 @@ def pack_cmd(
         ctx.exit(3)
     if drift_gate_failed:
         ctx.exit(4)
+
+
+def _emit_drift_recipe(logger, out_path: str) -> None:
+    """Emit the canonical recovery recipe when marketplace.json drift is detected.
+
+    Teaches producers the amend+force-with-lease pattern so they can fix the
+    drift without a noisy follow-up commit.
+    """
+    logger.info("")
+    logger.info("    To recover cleanly (fold into the current commit):")
+    logger.info("")
+    logger.info("      apm pack                       # regenerate locally")
+    logger.info(f"      git add -- {out_path}")
+    logger.info("      git commit --amend --no-edit   # fold into the current commit")
+    logger.info("      git push --force-with-lease    # safe re-push")
+    logger.info("")
+    logger.info("    Or as a follow-up commit:")
+    logger.info("")
+    logger.info(f"      apm pack && git add -- {out_path}")
+    logger.info("      git commit -m 'chore(marketplace): regen'")
+    logger.info("")
+    logger.info("    Why this exists: marketplace.json is checked in (lockfile pattern)")
+    logger.info("    so consumers can resolve packages without running 'apm pack'. CI")
+    logger.info("    enforces that the checked-in copy matches the apm.yml source of truth.")
 
 
 def _render_bundle_result(logger, pack_result, fmt, target, dry_run):

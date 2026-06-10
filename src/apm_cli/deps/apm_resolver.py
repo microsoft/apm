@@ -8,12 +8,11 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
-from typing import List, Optional, Protocol, Set, Tuple  # noqa: F401, UP035
+from typing import Optional, Protocol
 
 from ..models.apm_package import APMPackage, DependencyReference
 from .dependency_graph import (
     CircularRef,
-    ConflictInfo,  # noqa: F401
     DependencyGraph,
     DependencyNode,
     DependencyTree,
@@ -63,6 +62,7 @@ class APMDependencyResolver:
         apm_modules_dir: Path | None = None,
         download_callback: DownloadCallback | None = None,
         max_parallel: int | None = None,
+        auth_resolver: object | None = None,
     ):
         """Initialize the resolver with maximum recursion depth.
 
@@ -79,6 +79,7 @@ class APMDependencyResolver:
                 ``_DEFAULT_RESOLVE_PARALLEL`` (4). Set to ``1`` ONLY
                 for parity-testing against the legacy sequential path
                 -- this is a diagnostic knob, not a user toggle.
+            auth_resolver: Optional auth resolver for marketplace dependency resolution.
         """
         self.max_depth = max_depth
         self._apm_modules_dir: Path | None = apm_modules_dir
@@ -112,6 +113,7 @@ class APMDependencyResolver:
         # acquires the lock -- the overhead is negligible and the
         # symmetry simplifies reasoning.
         self._download_lock = threading.Lock()
+        self._auth_resolver = auth_resolver
         self._max_parallel = self._resolve_max_parallel(max_parallel)
 
     @staticmethod
@@ -222,6 +224,9 @@ class APMDependencyResolver:
             circular_dependencies=circular_deps,
         )
 
+        for error in dependency_tree.resolution_errors:
+            graph.add_error(error)
+
         return graph
 
     def _remote_parent_eligible(self, parent_dep: DependencyReference) -> bool:
@@ -275,6 +280,91 @@ class APMDependencyResolver:
             local_path=None,
         )
 
+    def _resolve_marketplace_dep(self, dep_ref: DependencyReference) -> DependencyReference:
+        """Resolve a marketplace dependency to a concrete DependencyReference.
+
+        Uses :func:`resolve_marketplace_plugin` to look up the plugin in the
+        registered marketplace and returns a resolved git-backed reference.
+        Prefers the structured ``dependency_reference`` from the resolution
+        when available (GitLab-class hosts, in-marketplace subdirectory
+        plugins) over parsing the canonical string.
+
+        Args:
+            dep_ref: An unresolved marketplace DependencyReference.
+
+        Returns:
+            A concrete (non-marketplace) DependencyReference.
+
+        Raises:
+            MarketplaceNotFoundError: Marketplace is not registered.
+            PluginNotFoundError: Plugin not found in the marketplace.
+            MarketplaceFetchError: Network/auth error fetching marketplace data.
+            ValueError: Invalid marketplace or plugin configuration.
+        """
+        from apm_cli.marketplace.resolver import resolve_marketplace_plugin
+
+        resolution = resolve_marketplace_plugin(
+            dep_ref.marketplace_plugin_name,
+            dep_ref.marketplace_name,
+            version_spec=dep_ref.marketplace_version_spec,
+            auth_resolver=self._auth_resolver,
+            warning_handler=_logger.warning,
+        )
+        if resolution.dependency_reference is not None:
+            return resolution.dependency_reference
+        return DependencyReference.parse(resolution.canonical)
+
+    def _resolve_marketplace_or_record_error(
+        self,
+        dep_ref: DependencyReference,
+        tree: DependencyTree,
+        context: str,
+    ) -> DependencyReference | None:
+        """Try to resolve a marketplace dep; record an error on the tree on failure.
+
+        Catches known marketplace exceptions and records them as resolution
+        errors.  Unknown exceptions propagate so programmer errors are not
+        silently swallowed.
+
+        Args:
+            dep_ref: Unresolved marketplace dependency.
+            tree: The dependency tree to record errors on.
+            context: Human-readable context for error messages
+                     (e.g. ``"required by owner/repo"``).
+
+        Returns:
+            Resolved DependencyReference on success, ``None`` on known failure.
+        """
+        from apm_cli.marketplace.errors import (
+            BuildError,
+            MarketplaceFetchError,
+            MarketplaceNotFoundError,
+            PluginNotFoundError,
+        )
+
+        try:
+            return self._resolve_marketplace_dep(dep_ref)
+        except (
+            MarketplaceNotFoundError,
+            PluginNotFoundError,
+            MarketplaceFetchError,
+            BuildError,
+            ValueError,
+        ) as exc:
+            _logger.debug(
+                "Marketplace resolution failed for %s@%s: %s",
+                dep_ref.marketplace_plugin_name,
+                dep_ref.marketplace_name,
+                exc,
+            )
+            tree.resolution_errors.append(
+                f"Failed to resolve marketplace dependency "
+                f"'{dep_ref.marketplace_plugin_name}' from "
+                f"marketplace '{dep_ref.marketplace_name}'"
+                f"{f' ({context})' if context else ''}: {exc}"
+            )
+            return None
+
     def build_dependency_tree(self, root_apm_yml: Path) -> DependencyTree:
         """
         Build complete tree of all dependencies and sub-dependencies.
@@ -323,6 +413,12 @@ class APMDependencyResolver:
                     "specify an explicit repository URL. "
                     "The git: parent form is only valid for transitive dependencies."
                 )
+            if dep_ref.is_marketplace:
+                resolved = self._resolve_marketplace_or_record_error(dep_ref, tree, "")
+                if resolved is not None:
+                    dep_ref = resolved
+                else:
+                    continue
             processing_queue.append((dep_ref, 1, None, False))
             queued_keys.add(dep_ref.get_unique_key())
 
@@ -335,6 +431,12 @@ class APMDependencyResolver:
                     "specify an explicit repository URL. "
                     "The git: parent form is only valid for transitive dependencies."
                 )
+            if dep_ref.is_marketplace:
+                resolved = self._resolve_marketplace_or_record_error(dep_ref, tree, "")
+                if resolved is not None:
+                    dep_ref = resolved
+                else:
+                    continue
             key = dep_ref.get_unique_key()
             if key not in queued_keys:
                 processing_queue.append((dep_ref, 1, None, True))
@@ -468,6 +570,14 @@ class APMDependencyResolver:
                     for sub_dep in sub_dependencies:
                         if sub_dep.is_parent_repo_inheritance:
                             sub_dep = self.expand_parent_repo_decl(node.dependency_ref, sub_dep)
+                        if sub_dep.is_marketplace:
+                            resolved = self._resolve_marketplace_or_record_error(
+                                sub_dep, tree, f"required by {node.dependency_ref.repo_url}"
+                            )
+                            if resolved is not None:
+                                sub_dep = resolved
+                            else:
+                                continue
                         # Avoid infinite recursion by checking if we're already processing this dep
                         # Use O(1) set lookup instead of O(n) list comprehension
                         if sub_dep.get_unique_key() not in queued_keys:

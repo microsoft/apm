@@ -1,12 +1,10 @@
 """Discovery functionality for primitive files."""
 
 import fnmatch
-import glob  # noqa: F401
 import logging
 import os
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from ..constants import DEFAULT_SKIP_DIRS
 from ..utils import perf_stats

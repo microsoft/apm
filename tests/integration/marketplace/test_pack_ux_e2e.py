@@ -237,35 +237,20 @@ class TestPathTraversal:
 
 
 class TestDeprecationRouting:
-    """--marketplace-output deprecation warning must go to stderr, not stdout."""
+    """--marketplace-output was removed; Click rejects it as an unknown option."""
 
-    def test_deprecation_on_stderr(self, tmp_path):
-        """Deprecation message for --marketplace-output should be on stderr."""
+    def test_marketplace_output_removed(self, tmp_path):
+        """--marketplace-output is no longer a valid option."""
         _setup_project(tmp_path)
-        mock_result = _mock_build_result()
 
-        with patch("apm_cli.commands.pack.BuildOrchestrator") as MockOrch:
-            MockOrch.return_value.run.return_value = mock_result
-            runner = CliRunner()
-            result = runner.invoke(
-                pack_cmd,
-                ["--marketplace-output", "test.json", "--json"],
-                catch_exceptions=False,
-            )
-            stdout = result.output.strip()
-            # Under --json, deprecation uses click.echo(err=True) so
-            # with default CliRunner (mix_stderr=True) it appears in output.
-            # Key assertion: the JSON portion is still parseable — strip
-            # the deprecation line and parse the rest.
-            lines = stdout.split("\n")
-            json_lines = [line for line in lines if not line.startswith("Warning:")]
-            json_str = "\n".join(json_lines).strip()
-            if json_str:
-                try:
-                    data = json.loads(json_str)
-                    assert data["ok"] is True
-                except json.JSONDecodeError:
-                    pytest.fail(f"Non-JSON content leaked to stdout:\n{json_str[:500]}")
+        runner = CliRunner()
+        result = runner.invoke(
+            pack_cmd,
+            ["--marketplace-output", "test.json", "--json"],
+        )
+        assert result.exit_code != 0
+        assert "no such option" in (result.output or "").lower()
+        assert "--marketplace-output" in (result.output or "")
 
 
 # ---------------------------------------------------------------------------

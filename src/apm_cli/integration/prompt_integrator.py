@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Set  # noqa: F401, UP035
+from typing import TYPE_CHECKING
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
@@ -301,10 +301,7 @@ class PromptIntegrator(BaseIntegrator):
                 continue
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.is_content_identical_to_source(target_path, source_file):
-                # Pre-existing file is byte-identical to source -- silently
-                # adopt. See BaseIntegrator.is_content_identical_to_source.
-                target_paths.append(target_path)
+            if self.try_adopt_identical(target_path, source_file, target_paths):
                 files_adopted += 1
                 continue
 

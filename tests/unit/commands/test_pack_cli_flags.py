@@ -241,6 +241,33 @@ class TestCheckCleanFlag:
         assert data["drift"] is not None
         assert data["drift"]["ok"] is False
 
+    def test_drift_error_includes_amend_recipe(self, tmp_path: _Path, monkeypatch) -> None:
+        """Drift error output must include the commit --amend recovery recipe."""
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline"])
+        assert result.exit_code == 4
+        assert "commit --amend" in result.output
+
+    def test_drift_error_includes_force_with_lease(self, tmp_path: _Path, monkeypatch) -> None:
+        """Drift error output must include the force-with-lease recovery recipe."""
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline"])
+        assert result.exit_code == 4
+        assert "force-with-lease" in result.output
+
+    def test_drift_error_includes_output_path(self, tmp_path: _Path, monkeypatch) -> None:
+        """Drift error output must embed the affected path in the git add recipe line."""
+        _write_project(tmp_path, _APM_ALIGNED)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline"])
+        assert result.exit_code == 4
+        # Assert on a recipe-specific line that embeds the path; "marketplace.json"
+        # alone was already present in the pre-recipe drift output (path display line).
+        assert "git add" in result.output
+        assert "marketplace.json" in result.output
+
 
 class TestBothFlagsCombined:
     """Combined --check-versions + --check-clean: version exit (3) wins."""

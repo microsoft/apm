@@ -24,7 +24,6 @@ and never block resolution.
 import json
 import logging
 import os
-from typing import Optional  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

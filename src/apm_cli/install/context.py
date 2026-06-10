@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
+from typing import Any
 
 
 @dataclass
@@ -34,9 +34,17 @@ class InstallContext:
     # ------------------------------------------------------------------
     project_root: Path
     apm_dir: Path
-
-    # ------------------------------------------------------------------
-    # Inputs: populated by the caller from CLI args / APMPackage
+    # Source root for reads (``apm.yml``, ``.apm/``, local-path
+    # packages).  Equal to ``project_root`` unless ``apm install --root``
+    # redirects writes -- then ``source_root`` stays at ``$PWD`` while
+    # ``project_root`` is the override.
+    #
+    # Resolved at the CLI boundary (``run_install_pipeline``).  When a
+    # caller does not pass it, ``__post_init__`` defaults it to
+    # ``project_root`` -- the correct value whenever ``--root`` is absent.
+    # Phases always read ``ctx.source_root`` (never re-derive from
+    # ``project_root``); only the ``--root`` path makes the two diverge.
+    source_root: Path | None = None
     # ------------------------------------------------------------------
     apm_package: Any = None  # APMPackage
     update_refs: bool = False
@@ -50,6 +58,7 @@ class InstallContext:
     allow_insecure_hosts: tuple[str, ...] = ()
 
     dry_run: bool = False
+    lockfile_only: bool = False
     force: bool = False
     verbose: bool = False
     refresh: bool = False
@@ -143,10 +152,12 @@ class InstallContext:
     policy_fetch: Any = None  # Optional[PolicyFetchResult] from discovery
     policy_enforcement_active: bool = False
     no_policy: bool = False  # W2-escape-hatch will wire --no-policy here
+    audit_override: str | None = None  # --audit/--no-audit CLI override (off|warn|block)
     skill_subset: tuple[str, ...] | None = None  # --skill filter for SKILL_BUNDLE packages
     skill_subset_from_cli: bool = False  # True when user passed --skill (even --skill '*')
     early_lockfile: Any = None  # LockFile read before pipeline phases (avoids re-read)
     direct_mcp_deps: list[Any] | None = None  # Direct MCP deps from apm.yml for policy gate
+    direct_lsp_deps: list[Any] | None = None  # Direct LSP deps from apm.yml for LSP integration
 
     # ------------------------------------------------------------------
     # Post-deps local content tracking (F3)
@@ -175,3 +186,11 @@ class InstallContext:
     # Legacy skill paths opt-out (convergence §3)
     # ------------------------------------------------------------------
     legacy_skill_paths: bool = False  # --legacy-skill-paths flag or APM_LEGACY_SKILL_PATHS env
+
+    def __post_init__(self) -> None:
+        # ``source_root`` defaults to ``project_root`` (the correct value
+        # whenever ``apm install --root`` is not used).  Only the --root
+        # CLI path passes a distinct source_root; every other caller and
+        # test gets source_root == project_root for free.
+        if self.source_root is None:
+            self.source_root = self.project_root

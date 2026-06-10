@@ -5,11 +5,17 @@ from __future__ import annotations
 import textwrap as _tw
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from click.testing import CliRunner
 
-from apm_cli.commands.pack import _render_marketplace_result, pack_cmd
+from apm_cli.commands.pack import (
+    _parse_marketplace_filter,
+    _parse_path_overrides,
+    _render_marketplace_result,
+    pack_cmd,
+)
 from apm_cli.marketplace.builder import BuildReport, MarketplaceOutputReport
 
 
@@ -42,6 +48,139 @@ def test_pack_help_recommends_manifest_marketplace_output_config() -> None:
     # The removed --marketplace-output flag is gone entirely
     assert "--marketplace-output" not in result.output
     assert "--claude-output" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# _parse_path_overrides unit tests
+# ---------------------------------------------------------------------------
+
+
+def _make_ctx(json_output: bool = False):
+    """Return a minimal Click context mock for helper tests."""
+    ctx = MagicMock()
+    exited = []
+
+    def _exit(code=0):
+        exited.append(code)
+
+    ctx.exit.side_effect = _exit
+    ctx._exited = exited
+    return ctx
+
+
+class TestParsePathOverrides:
+    """Unit tests for _parse_path_overrides()."""
+
+    def test_empty_tuple_returns_empty_dict(self) -> None:
+        ctx = _make_ctx()
+        result = _parse_path_overrides((), ctx, json_output=False)
+        assert result == {}
+
+    def test_valid_single_override(self) -> None:
+        ctx = _make_ctx()
+        result = _parse_path_overrides(("claude=dist/marketplace.json",), ctx, json_output=False)
+        assert result == {"claude": "dist/marketplace.json"}
+
+    def test_valid_multiple_overrides(self) -> None:
+        ctx = _make_ctx()
+        result = _parse_path_overrides(
+            ("claude=dist/claude.json", "codex=dist/codex.json"),
+            ctx,
+            json_output=False,
+        )
+        assert result == {"claude": "dist/claude.json", "codex": "dist/codex.json"}
+
+    def test_missing_equals_returns_none(self) -> None:
+        ctx = _make_ctx(json_output=True)
+        result = _parse_path_overrides(("claude-no-equals",), ctx, json_output=True)
+        assert result is None
+
+    def test_unknown_format_returns_none(self) -> None:
+        ctx = _make_ctx(json_output=True)
+        result = _parse_path_overrides(("unknown_format=dist/foo.json",), ctx, json_output=True)
+        assert result is None
+
+    def test_path_traversal_returns_none(self) -> None:
+        ctx = _make_ctx(json_output=True)
+        result = _parse_path_overrides(("claude=../../etc/passwd",), ctx, json_output=True)
+        assert result is None
+
+    def test_missing_equals_raises_click_exception_non_json(self) -> None:
+        import click as _click
+
+        ctx = _make_ctx()
+        with pytest.raises(_click.ClickException):
+            _parse_path_overrides(("no-equals",), ctx, json_output=False)
+
+    def test_path_traversal_raises_click_exception_non_json(self) -> None:
+        import click as _click
+
+        ctx = _make_ctx()
+        with pytest.raises(_click.ClickException):
+            _parse_path_overrides(("claude=../../etc/passwd",), ctx, json_output=False)
+
+    def test_strips_whitespace_around_name_and_path(self) -> None:
+        ctx = _make_ctx()
+        result = _parse_path_overrides(
+            (" claude = dist/marketplace.json ",), ctx, json_output=False
+        )
+        assert result == {"claude": "dist/marketplace.json"}
+
+
+# ---------------------------------------------------------------------------
+# _parse_marketplace_filter unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestParseMarketplaceFilter:
+    """Unit tests for _parse_marketplace_filter()."""
+
+    def test_none_returns_none(self) -> None:
+        ctx = _make_ctx()
+        result = _parse_marketplace_filter(None, ctx, json_output=False)
+        assert result is None
+
+    def test_none_string_returns_empty_tuple(self) -> None:
+        ctx = _make_ctx()
+        result = _parse_marketplace_filter("none", ctx, json_output=False)
+        assert result == ()
+
+    def test_none_string_case_insensitive(self) -> None:
+        ctx = _make_ctx()
+        result = _parse_marketplace_filter("NONE", ctx, json_output=False)
+        assert result == ()
+
+    def test_all_string_returns_none(self) -> None:
+        ctx = _make_ctx()
+        result = _parse_marketplace_filter("all", ctx, json_output=False)
+        assert result is None
+
+    def test_all_string_case_insensitive(self) -> None:
+        ctx = _make_ctx()
+        result = _parse_marketplace_filter("ALL", ctx, json_output=False)
+        assert result is None
+
+    def test_single_known_format(self) -> None:
+        ctx = _make_ctx()
+        result = _parse_marketplace_filter("claude", ctx, json_output=False)
+        assert result == ("claude",)
+
+    def test_multiple_known_formats(self) -> None:
+        ctx = _make_ctx()
+        result = _parse_marketplace_filter("claude,codex", ctx, json_output=False)
+        assert result == ("claude", "codex")
+
+    def test_formats_with_whitespace(self) -> None:
+        ctx = _make_ctx()
+        result = _parse_marketplace_filter(" claude , codex ", ctx, json_output=False)
+        assert result == ("claude", "codex")
+
+    def test_unknown_format_exits_with_error(self) -> None:
+        ctx = _make_ctx(json_output=True)
+        result = _parse_marketplace_filter("unknown_format", ctx, json_output=True)
+        # With json_output=True, ctx.exit(1) is called and function returns None
+        assert result is None
+        assert ctx._exited == [1]
 
 
 def test_marketplace_fallback_renders_warnings_and_package_count() -> None:

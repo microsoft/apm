@@ -122,6 +122,8 @@ targets:
 For the full reach map of which primitive lands where on each
 harness, see [Primitives and targets](../../concepts/primitives-and-targets/).
 
+Rule sync to Cursor (`.cursor/rules/`), Claude Code (`.claude/rules/`), and Windsurf (`.windsurf/rules/`) is automatic and idempotent -- re-running `apm install` adopts unchanged rules without rewriting them.
+
 ## Transitive dependencies and the lockfile
 
 `apm install` resolves the full dependency graph, not just your

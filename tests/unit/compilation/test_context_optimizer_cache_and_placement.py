@@ -2,17 +2,21 @@
 
 Covers:
 - ``_cached_glob`` reusing cached results across repeated calls without
-  re-invoking the underlying ``glob.glob`` (cache layer populated via
-  ``_glob_cache``).
+  re-running the underlying scan (``_safe_recursive_glob``; cache layer
+  populated via ``_glob_cache``).
+- ``_safe_recursive_glob`` excluding ``node_modules`` and not following
+  directory symlinks, so a pnpm-style symlink cycle cannot make
+  compilation hang (regression for the recursive-glob hang).
 - Lowest-common-ancestor placement when matches share a deep subtree, for
   both placement strategies that can route through the LCA helper:
     * ``_optimize_selective_placement`` (medium distribution, 0.3-0.7).
     * ``_optimize_single_point_placement`` (low distribution, < 0.3).
 """
 
-import glob as glob_module
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from apm_cli.compilation.context_optimizer import ContextOptimizer
 from apm_cli.primitives.models import Instruction
@@ -32,25 +36,52 @@ class TestCachedGlobUsesFileList:
 
         Regression coverage for the cache layer added in #871: once a pattern
         has been resolved, subsequent calls must hit the cache and never
-        re-invoke ``glob.glob`` for the same pattern.
+        re-run the underlying scan for the same pattern.
         """
         (tmp_path / "a.py").touch()
         optimizer = ContextOptimizer(base_dir=str(tmp_path))
 
-        with patch(
-            "apm_cli.compilation.context_optimizer.glob.glob",
-            wraps=glob_module.glob,
-        ) as glob_spy:
+        with patch.object(
+            optimizer,
+            "_safe_recursive_glob",
+            wraps=optimizer._safe_recursive_glob,
+        ) as scan_spy:
             first = optimizer._cached_glob("**/*.py")
             second = optimizer._cached_glob("**/*.py")
 
-        assert first == second
+        assert first == second == ["a.py"]
         assert "**/*.py" in optimizer._glob_cache
         assert first == optimizer._glob_cache["**/*.py"]
-        # No-rescan guarantee: glob.glob must run exactly once for the pattern.
-        assert glob_spy.call_count == 1, (
-            f"expected exactly one glob.glob invocation, got {glob_spy.call_count}"
-        )
+        # No-rescan guarantee: the scan must run exactly once for the pattern.
+        assert scan_spy.call_count == 1, f"expected exactly one scan, got {scan_spy.call_count}"
+
+    def test_cached_glob_excludes_node_modules_and_symlink_cycles(self, tmp_path: Path) -> None:
+        """A ``**`` pattern must not descend ``node_modules`` or follow symlinks.
+
+        Regression for the recursive-glob hang: ``glob.glob(recursive=True)``
+        follows directory symlinks and descends excluded trees, so a pnpm-style
+        ``node_modules`` (a symlink forest with cycles) made ``apm compile``
+        walk an unbounded path space and never terminate. Filtering the
+        ``os.walk``-based project file list (no symlink following, excluded
+        dirs pruned) makes the cycle below harmless and drops ``node_modules``.
+        """
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "app.ts").touch()
+
+        pkg = tmp_path / "node_modules" / "pkg"
+        pkg.mkdir(parents=True)
+        (pkg / "index.ts").touch()
+        try:
+            # pnpm-style self-referential symlink -> infinite loop if followed.
+            (pkg / "loop").symlink_to(tmp_path / "node_modules", target_is_directory=True)
+        except OSError:
+            pytest.skip("symlink creation not supported on this platform")
+
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+        matches = optimizer._cached_glob("**/*.ts")  # must terminate
+
+        assert "src/app.ts" in matches
+        assert not any(m.startswith("node_modules") for m in matches)
 
 
 class TestSelectivePlacementNonRootLCA:

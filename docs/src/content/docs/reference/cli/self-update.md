@@ -33,6 +33,27 @@ The command compares the installed version against the latest GitHub release and
 Some package-manager distributions (for example, Homebrew) disable self-update at build time. In those builds, `apm self-update` prints a distributor-defined message (such as `brew upgrade apm`) and exits without running the installer. The startup update notification is also suppressed in those builds.
 :::
 
+## Air-gapped and GitHub Enterprise environments
+
+`apm self-update` respects the same environment variables that `install.sh` honours
+for air-gapped networks and GitHub Enterprise Server (GHE):
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `GITHUB_URL` | `https://github.com` | Base URL of the GitHub host. When set to a GHE host (e.g. `https://gh.corp.com`), the version-check API uses `{GITHUB_URL}/api/v3` and the installer script is fetched from `{GITHUB_URL}/{APM_REPO}/raw/main/install.sh` (Unix) or `install.ps1` (Windows). |
+| `APM_REPO` | `microsoft/apm` | Repository in `owner/repo` form. Overrides the default when using a fork or an internal mirror. |
+| `VERSION` | _(unset)_ | Pin a specific release (e.g. `v1.2.3`). Skips the GitHub API call entirely -- required for fully offline setups. The pinned version is passed through to the installer subprocess. |
+
+Examples:
+
+```bash
+# Air-gapped update: skip API, fetch installer from internal mirror
+GITHUB_URL=https://gh.corp.com APM_REPO=corp/apm VERSION=v1.2.3 apm self-update
+
+# GHE host with version check (no VERSION pin -- API is queried via /api/v3)
+GITHUB_URL=https://gh.corp.com APM_REPO=corp/apm apm self-update --check
+```
+
 ## Options
 
 | Flag | Description |

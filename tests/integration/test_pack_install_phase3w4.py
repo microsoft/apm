@@ -99,7 +99,7 @@ class TestPackCmd:
         assert result.exit_code == 0
         assert "deprecated" in result.output.lower() or result.exit_code == 0
 
-    def test_pack_marketplace_output_deprecated_translates(self, runner, tmp_path, monkeypatch):
+    def test_pack_marketplace_output_removed(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         plugin_dir = tmp_path / ".github" / "plugins" / "mypkg"
         plugin_dir.mkdir(parents=True)
@@ -121,8 +121,10 @@ marketplace:
 """,
         )
         result = runner.invoke(pack_cmd, ["--marketplace-output", "dist/marketplace.json"])
-        # Deprecation warning should be printed
-        assert "deprecated" in result.output.lower()
+        # Flag was removed; Click rejects it with a usage error.
+        assert result.exit_code != 0
+        assert "no such option" in (result.output or "").lower()
+        assert "--marketplace-output" in (result.output or "")
 
     def test_pack_marketplace_path_invalid_format(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

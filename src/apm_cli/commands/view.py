@@ -8,7 +8,6 @@ reused by the backward-compatible ``apm deps info`` alias.
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
 
 import click
 
@@ -17,7 +16,7 @@ from ..core.auth import AuthResolver
 from ..core.command_logger import CommandLogger
 from ..deps.github_downloader import GitHubPackageDownloader
 from ..models.dependency.reference import DependencyReference
-from ..models.dependency.types import GitReferenceType, RemoteRef  # noqa: F401
+from ..models.dependency.types import RemoteRef
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
 from .deps._utils import _get_detailed_package_info
 

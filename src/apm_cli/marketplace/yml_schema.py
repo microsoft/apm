@@ -34,7 +34,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple  # noqa: F401, UP035
+from typing import Any, Mapping  # noqa: UP035
 
 import yaml
 

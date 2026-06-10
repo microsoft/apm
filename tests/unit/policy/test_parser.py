@@ -5,7 +5,12 @@ import tempfile
 import textwrap
 import unittest
 
-from apm_cli.policy.parser import PolicyValidationError, load_policy, validate_policy
+from apm_cli.policy.parser import (
+    PolicyValidationError,
+    _build_policy,
+    load_policy,
+    validate_policy,
+)
 from apm_cli.policy.schema import ApmPolicy
 
 
@@ -392,6 +397,33 @@ class TestLoadPolicyFromFile(unittest.TestCase):
             self.assertEqual(policy.name, "pathlib-test")
         finally:
             os.unlink(str(path))
+
+
+class TestSecurityAuditParsing(unittest.TestCase):
+    """Validation + build for the security.audit policy section."""
+
+    def test_valid_security_audit(self):
+        data = {"security": {"audit": {"on_install": "block", "external": ["skillspector"]}}}
+        errors, _ = validate_policy(data)
+        self.assertEqual(errors, [])
+        policy = _build_policy(data)
+        self.assertEqual(policy.security.audit.on_install, "block")
+        self.assertEqual(policy.security.audit.external, ("skillspector",))
+
+    def test_invalid_on_install_value(self):
+        errors, _ = validate_policy({"security": {"audit": {"on_install": "nope"}}})
+        self.assertTrue(errors)
+        self.assertIn("on_install", errors[0])
+
+    def test_security_is_known_top_level_key(self):
+        # Should not surface an "unknown key" warning.
+        _, warnings = validate_policy({"security": {"audit": {"on_install": "warn"}}})
+        self.assertFalse(any("security" in w for w in warnings))
+
+    def test_missing_security_defaults_to_none(self):
+        policy = _build_policy({})
+        self.assertIsNone(policy.security.audit.on_install)
+        self.assertIsNone(policy.security.audit.external)
 
 
 if __name__ == "__main__":

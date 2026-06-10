@@ -642,3 +642,167 @@ class TestUpdatePlanStatePaths:
                 result = runner.invoke(cli, ["update"])
             assert result.exit_code == 0, result.output
             assert "update applied" in result.output.lower()
+
+
+# -----------------------------------------------------------------------------
+# apm update -- superset flags from issue #1525:
+# [PACKAGES]... / --force / --parallel-downloads / -g
+# -----------------------------------------------------------------------------
+
+
+def _capturing_install(captured: dict, *, installed_count: int = 0):
+    """Build a fake _install_apm_dependencies that records kwargs.
+
+    Drives the plan_callback with an empty (no-change) plan so the command
+    completes the happy path without prompting.
+    """
+
+    def fake_install(_apm, **kwargs):
+        from apm_cli.models.results import InstallResult
+
+        captured.update(kwargs)
+        kwargs["plan_callback"](UpdatePlan(entries=()))
+        return InstallResult(installed_count=installed_count)
+
+    return fake_install
+
+
+class TestUpdatePerPackage:
+    def test_packages_forwarded_as_only_packages(self, runner, tmp_path):
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured: dict = {}
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=_capturing_install(captured),
+            ):
+                result = runner.invoke(cli, ["update", "microsoft/apm"])
+            assert result.exit_code == 0, result.output
+            assert captured["only_packages"] == ["microsoft/apm"]
+
+    def test_no_packages_forwards_none(self, runner, tmp_path):
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured: dict = {}
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=_capturing_install(captured),
+            ):
+                result = runner.invoke(cli, ["update"])
+            assert result.exit_code == 0, result.output
+            assert captured["only_packages"] is None
+
+    def test_unknown_package_exits_1_without_installing(self, runner, tmp_path):
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            engine = MagicMock()
+            with patch("apm_cli.commands.install._install_apm_dependencies", engine):
+                result = runner.invoke(cli, ["update", "no/such-pkg"])
+            assert result.exit_code == 1
+            assert "not found in apm.yml" in result.output
+            assert "Available:" in result.output
+            engine.assert_not_called()
+
+
+class TestUpdateForceAndParallel:
+    def test_force_forwarded(self, runner, tmp_path):
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured: dict = {}
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=_capturing_install(captured),
+            ):
+                result = runner.invoke(cli, ["update", "--force"])
+            assert result.exit_code == 0, result.output
+            assert captured["force"] is True
+
+    def test_parallel_downloads_forwarded(self, runner, tmp_path):
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            captured: dict = {}
+            with patch(
+                "apm_cli.commands.install._install_apm_dependencies",
+                side_effect=_capturing_install(captured),
+            ):
+                result = runner.invoke(cli, ["update", "--parallel-downloads", "0"])
+            assert result.exit_code == 0, result.output
+            assert captured["parallel_downloads"] == 0
+
+
+class TestUpdateGlobalScope:
+    def test_global_flag_uses_user_scope(self, runner, tmp_path):
+        from apm_cli.core.scope import InstallScope
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            user_apm = Path.cwd() / "user_apm"
+            user_apm.mkdir()
+            _make_apm_yml(user_apm)
+            captured: dict = {}
+            with (
+                patch("apm_cli.core.scope.get_apm_dir", return_value=user_apm),
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=_capturing_install(captured),
+                ),
+            ):
+                result = runner.invoke(cli, ["update", "-g"])
+            assert result.exit_code == 0, result.output
+            assert captured["scope"] == InstallScope.USER
+
+    def test_global_flag_missing_user_manifest_exits_1(self, runner, tmp_path):
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            user_apm = Path.cwd() / "user_apm"  # intentionally not created
+            engine = MagicMock()
+            with (
+                patch("apm_cli.core.scope.get_apm_dir", return_value=user_apm),
+                patch("apm_cli.commands.install._install_apm_dependencies", engine),
+            ):
+                result = runner.invoke(cli, ["update", "-g"])
+            assert result.exit_code == 1
+            assert "No apm.yml found" in result.output
+            engine.assert_not_called()
+
+
+class TestResolveRequestedPackages:
+    """Direct unit tests for the shared package-token resolver."""
+
+    @staticmethod
+    def _dep(repo_url, *, unique_key=None, display=None, alias=None):
+        dep = MagicMock()
+        dep.repo_url = repo_url
+        dep.alias = alias
+        dep.get_unique_key.return_value = unique_key or repo_url
+        dep.get_display_name.return_value = display or repo_url
+        return dep
+
+    def test_empty_returns_none(self):
+        from apm_cli.commands._helpers import resolve_requested_packages
+
+        assert resolve_requested_packages((), [self._dep("org/a")]) is None
+
+    def test_short_name_maps_to_canonical(self):
+        from apm_cli.commands._helpers import resolve_requested_packages
+
+        deps = [self._dep("owner/compliance-rules")]
+        assert resolve_requested_packages(("compliance-rules",), deps) == ["owner/compliance-rules"]
+
+    def test_dedup_preserves_order(self):
+        from apm_cli.commands._helpers import resolve_requested_packages
+
+        deps = [self._dep("org/a"), self._dep("org/b")]
+        assert resolve_requested_packages(("org/b", "org/a", "org/b"), deps) == ["org/b", "org/a"]
+
+    def test_unknown_token_raises(self):
+        from apm_cli.commands._helpers import UnknownPackageError, resolve_requested_packages
+
+        with pytest.raises(UnknownPackageError) as exc:
+            resolve_requested_packages(("nope",), [self._dep("org/a")])
+        assert exc.value.token == "nope"
+        assert "org/a" in exc.value.available
+
+    def test_alias_maps_to_canonical(self):
+        from apm_cli.commands._helpers import resolve_requested_packages
+
+        deps = [self._dep("org/compliance-rules", alias="my-rules")]
+        assert resolve_requested_packages(("my-rules",), deps) == ["org/compliance-rules"]

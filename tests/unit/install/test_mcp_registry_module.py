@@ -89,6 +89,79 @@ class TestResolveRegistryUrl:
         assert source == "default"
 
 
+class TestResolveRegistryUrlConfigLayer:
+    """Precedence chain: flag > env > apm config > default."""
+
+    def test_config_layer_returns_config_value(self, monkeypatch):
+        """Config value is used when flag and env are absent."""
+        import apm_cli.install.mcp.registry as _reg
+
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        monkeypatch.setattr(
+            _reg,
+            "resolve_registry_url",
+            resolve_registry_url,  # keep reference for clarity
+        )
+        monkeypatch.setattr(
+            "apm_cli.config.get_mcp_registry_url",
+            lambda: "https://config.example.com",
+        )
+        url, source = resolve_registry_url(None)
+        assert url == "https://config.example.com"
+        assert source == "config"
+
+    def test_env_wins_over_config(self, monkeypatch):
+        """MCP_REGISTRY_URL env overrides the config layer."""
+        monkeypatch.setenv("MCP_REGISTRY_URL", "https://env.example.com")
+        monkeypatch.setattr(
+            "apm_cli.config.get_mcp_registry_url",
+            lambda: "https://config.example.com",
+        )
+        url, source = resolve_registry_url(None)
+        assert url == "https://env.example.com"
+        assert source == "env"
+
+    def test_flag_wins_over_config(self, monkeypatch):
+        """CLI --registry flag overrides the config layer."""
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        monkeypatch.setattr(
+            "apm_cli.config.get_mcp_registry_url",
+            lambda: "https://config.example.com",
+        )
+        url, source = resolve_registry_url("https://flag.example.com")
+        assert url == "https://flag.example.com"
+        assert source == "flag"
+
+    def test_config_layer_emits_diagnostic(self, monkeypatch):
+        """Config layer emits a visible diagnostic naming the source."""
+        from urllib.parse import urlparse
+
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        monkeypatch.setattr(
+            "apm_cli.config.get_mcp_registry_url",
+            lambda: "https://config.example.com",
+        )
+        logger = MagicMock()
+        resolve_registry_url(None, logger=logger)
+        assert logger.progress.called
+        msg = logger.progress.call_args.args[0]
+        urls = [tok for tok in msg.split() if "://" in tok]
+        assert len(urls) == 1
+        assert urlparse(urls[0]).hostname == "config.example.com"
+        assert "apm config" in msg
+
+    def test_default_when_config_unset(self, monkeypatch):
+        """Default source when all layers are absent."""
+        monkeypatch.delenv("MCP_REGISTRY_URL", raising=False)
+        monkeypatch.setattr(
+            "apm_cli.config.get_mcp_registry_url",
+            lambda: None,
+        )
+        url, source = resolve_registry_url(None)
+        assert url is None
+        assert source == "default"
+
+
 class TestRegistryEnvOverride:
     """Exception-safety for the env-export context manager."""
 

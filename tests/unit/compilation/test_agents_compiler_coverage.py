@@ -53,7 +53,7 @@ def _make_primitives(*instructions):
 
 
 # ---------------------------------------------------------------------------
-# CompilationConfig.from_apm_yml() – additional fields
+# CompilationConfig.from_apm_yml() - additional fields
 # ---------------------------------------------------------------------------
 
 
@@ -157,7 +157,7 @@ class TestCompilationConfigPostInit(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# AgentsCompiler.compile() – exception path
+# AgentsCompiler.compile() - exception path
 # ---------------------------------------------------------------------------
 
 
@@ -199,7 +199,7 @@ class TestAgentsCompilerCompileException(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# AgentsCompiler.validate_primitives() – error branches
+# AgentsCompiler.validate_primitives() - error branches
 # ---------------------------------------------------------------------------
 
 
@@ -286,7 +286,7 @@ class TestValidatePrimitivesErrors(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# AgentsCompiler._write_output_file() – error path
+# AgentsCompiler._write_output_file() - error path
 # ---------------------------------------------------------------------------
 
 
@@ -547,7 +547,7 @@ class TestMergeResults(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# compile_agents_md() convenience function – error path
+# compile_agents_md() convenience function - error path
 # ---------------------------------------------------------------------------
 
 
@@ -608,7 +608,7 @@ class TestCompileAgentsMdFunction(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# _compile_claude_md – constitution injection failure path (G2)
+# _compile_claude_md - constitution injection failure path (G2)
 # ---------------------------------------------------------------------------
 
 

@@ -26,7 +26,9 @@ from .base import (
     _extract_legacy_angle_vars,
     _has_env_placeholder,
     _stringify_env_literal,
-    _translate_env_placeholder,
+)
+from .base import (
+    _translate_env_placeholder as _translate_env_placeholder,
 )
 
 
@@ -117,12 +119,12 @@ class CopilotClientAdapter(MCPClientAdapter):
         """
         current_config = self.get_current_config()
 
-        # Ensure mcpServers section exists
-        if "mcpServers" not in current_config:
-            current_config["mcpServers"] = {}
+        # Ensure servers section exists and is a dict (guard against malformed config).
+        if not isinstance(current_config.get(self.mcp_servers_key), dict):
+            current_config[self.mcp_servers_key] = {}
 
         # Apply updates
-        current_config["mcpServers"].update(config_updates)
+        current_config[self.mcp_servers_key].update(config_updates)
 
         # Write back to file
         config_path = Path(self.get_config_path())
@@ -204,19 +206,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             # Generate server configuration with environment and runtime variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
 
-            # Determine the server name for configuration key
-            if server_name:
-                # Use explicitly provided server name
-                config_key = server_name
-            else:  # noqa: PLR5501
-                # Extract name from server_url (part after last slash)
-                # For URLs like "microsoft/azure-devops-mcp" -> "azure-devops-mcp"
-                # For URLs like "github/github-mcp-server" -> "github-mcp-server"
-                if "/" in server_url:  # noqa: SIM108
-                    config_key = server_url.split("/")[-1]
-                else:
-                    # Fallback to full server_url if no slash
-                    config_key = server_url
+            config_key = self._determine_config_key(server_url, server_name)
 
             # Update configuration using the chosen key
             self.update_config({config_key: server_config})
@@ -259,7 +249,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             current = self.get_current_config()
         except Exception:
             return set(), False
-        servers = current.get("mcpServers") or {}
+        servers = current.get(self.mcp_servers_key) or {}
         # Match the same key resolution rule used below.
         if server_name:
             key = server_name
@@ -678,9 +668,9 @@ class CopilotClientAdapter(MCPClientAdapter):
         # ({NAME: value-or-placeholder}); registry-sourced deps pass a list
         # of {name, description, required} dicts. Translate-mode handling
         # for the dict shape: each value is either already a placeholder
-        # (translate it to the canonical ${VAR} form) or a literal (record
-        # the key as a placeholder reference and emit ${NAME} so the
-        # value never lands on disk). See issue #1152.
+        # (translate it to the adapter's runtime form) or a literal
+        # (record the key as a placeholder reference and emit a runtime
+        # placeholder so the value never lands on disk). See issue #1152.
         if isinstance(env_vars, dict) and self._supports_runtime_env_substitution:
             translated = {}
             placeholder_keys = []
@@ -694,9 +684,7 @@ class CopilotClientAdapter(MCPClientAdapter):
                     continue
                 if _has_env_placeholder(raw_value):
                     self._last_legacy_angle_vars.update(_extract_legacy_angle_vars(raw_value))
-                    translated[name] = _translate_env_placeholder(raw_value)
-                    # Record every ${VAR} in the translated value (handles
-                    # both ${env:VAR} -> ${VAR} and bare ${VAR} cases).
+                    translated[name] = self._translate_env_placeholder_for_runtime(raw_value)
                     for match in _ENV_VAR_RE.finditer(translated[name]):
                         placeholder_keys.append(match.group(1))
                 elif name in default_github_env and raw_value == default_github_env[name]:
@@ -704,7 +692,7 @@ class CopilotClientAdapter(MCPClientAdapter):
                 else:
                     # Literal value present in apm.yml -- replace with a
                     # runtime placeholder so the secret never touches disk.
-                    translated[name] = "${" + name + "}"
+                    translated[name] = self._format_runtime_env_placeholder(name)
                     placeholder_keys.append(name)
             self._last_env_placeholder_keys = set(placeholder_keys)
             return translated
@@ -722,10 +710,9 @@ class CopilotClientAdapter(MCPClientAdapter):
                     # Non-secret literal default -- preserve as-is.
                     resolved[name] = default_github_env[name]
                 else:
-                    # Emit a runtime-substitution placeholder; Copilot CLI
-                    # resolves ``${NAME}`` from the host environment at
-                    # server-start. APM never reads or stores the value.
-                    resolved[name] = "${" + name + "}"
+                    # Emit a runtime-substitution placeholder; APM never reads
+                    # or stores the value.
+                    resolved[name] = self._format_runtime_env_placeholder(name)
                     placeholder_keys.append(name)
             # Record for the post-install summary line and the
             # security-improvement notice.
@@ -783,7 +770,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             # them (the env-block path tracks via _resolve_environment_variables).
             for match in _ENV_VAR_RE.finditer(value):
                 self._last_env_placeholder_keys.add(match.group(1))
-            return _translate_env_placeholder(value)
+            return self._translate_env_placeholder_for_runtime(value)
 
         import sys
 

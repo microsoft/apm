@@ -20,6 +20,10 @@ from ..update_policy import get_self_update_disabled_message, is_self_update_ena
 from ..utils.subprocess_env import external_process_env
 from ..version import get_version
 
+_DEFAULT_GITHUB_URL = "https://github.com"
+_DEFAULT_APM_REPO = "microsoft/apm"
+_INSTALL_SCRIPT_REF = "main"
+
 
 def _is_windows_platform() -> bool:
     """Return True when running on native Windows."""
@@ -27,8 +31,31 @@ def _is_windows_platform() -> bool:
 
 
 def _get_update_installer_url() -> str:
-    """Return the official installer URL for the current platform."""
-    return "https://aka.ms/apm-windows" if _is_windows_platform() else "https://aka.ms/apm-unix"
+    """Return the installer URL for the current platform, respecting air-gapped env vars.
+
+    When ``GITHUB_URL`` is set to a non-default host (i.e. a GitHub Enterprise
+    Server or Artifactory mirror), the installer script is fetched from that
+    host using the raw-content path:
+    ``{GITHUB_URL}/{APM_REPO}/raw/{_INSTALL_SCRIPT_REF}/install.sh`` (Unix) or
+    ``install.ps1`` (Windows).
+
+    When ``GITHUB_URL`` is unset or matches the public GitHub URL, the standard
+    shortlinks (``https://aka.ms/apm-unix`` / ``https://aka.ms/apm-windows``)
+    are used, preserving the existing behavior.
+
+    The ``APM_REPO`` env var (default ``microsoft/apm``) selects the repository
+    on the configured host.  The subprocess running the installer inherits
+    ``VERSION``, ``GITHUB_URL``, and ``APM_REPO`` from the process environment,
+    so the downloaded script also honours them automatically.
+    """
+    github_url = os.environ.get("GITHUB_URL", _DEFAULT_GITHUB_URL).rstrip("/")
+    apm_repo = os.environ.get("APM_REPO", _DEFAULT_APM_REPO)
+
+    if github_url == _DEFAULT_GITHUB_URL:
+        return "https://aka.ms/apm-windows" if _is_windows_platform() else "https://aka.ms/apm-unix"
+
+    script_name = "install.ps1" if _is_windows_platform() else "install.sh"
+    return f"{github_url}/{apm_repo}/raw/{_INSTALL_SCRIPT_REF}/{script_name}"
 
 
 def _get_update_installer_suffix() -> str:
@@ -90,13 +117,20 @@ def self_update(check):
         logger.progress(f"Current version: {current_version}")
         logger.start("Checking for updates...")
 
+        _github_url = os.environ.get("GITHUB_URL", "").rstrip("/")
+        if _github_url and _github_url != _DEFAULT_GITHUB_URL:
+            logger.progress(f"GITHUB_URL override active -- using host: {_github_url!r}")
+        _pinned = os.environ.get("VERSION", "")
+        if _pinned:
+            logger.progress(f"VERSION env var set -- API call skipped, using: {_pinned!r}")
+
         # Check for latest version
         from ..utils.version_checker import get_latest_version_from_github
 
         latest_version = get_latest_version_from_github()
 
         if not latest_version:
-            logger.error("Unable to fetch latest version from GitHub")
+            logger.error("Unable to fetch latest version from remote")
             logger.progress("Please check your internet connection or try again later")
             sys.exit(1)
 

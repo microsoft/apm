@@ -193,7 +193,7 @@ class TestPackUnified:
         )
         claude_override = tmp_path / "dist" / "legacy-override.json"
 
-        result = runner.invoke(pack_cmd, ["--marketplace-output", str(claude_override)])
+        result = runner.invoke(pack_cmd, ["--marketplace-path", f"claude={claude_override}"])
 
         assert result.exit_code == 0, result.output
         assert claude_override.exists()
@@ -274,7 +274,7 @@ marketplace:
         _write_marketplace_block_yml(tmp_path)
 
         out_path = tmp_path / "out" / "m.json"
-        result = runner.invoke(pack_cmd, ["--marketplace-output", str(out_path)])
+        result = runner.invoke(pack_cmd, ["--marketplace-path", f"claude={out_path}"])
 
         assert result.exit_code == 0, result.output
         assert out_path.exists()
@@ -366,3 +366,43 @@ class TestMarketplaceBuildSubcommandRemoved:
         assert result.exit_code == 2
         assert "apm pack" in result.output
         assert "was removed" in result.output
+
+
+# ---------------------------------------------------------------------------
+# --check-clean drift recipe (issue #1381 acceptance criterion)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckCleanDriftRecipe:
+    """Integration tests: --check-clean drift detection emits the recovery recipe."""
+
+    def test_drift_recipe_contains_amend_and_force_with_lease(self, runner, tmp_path, monkeypatch):
+        """Missing marketplace.json triggers exit 4 with both recovery incantations.
+
+        Issue #1381 AC: the error text must contain both 'commit --amend' and
+        'force-with-lease' so producers can recover without consulting external docs.
+        """
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+
+        result = runner.invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline"])
+
+        assert result.exit_code == 4, f"Expected exit 4, got {result.exit_code}:\n{result.output}"
+        assert "commit --amend" in result.output, (
+            "--check-clean drift output must include the amend recipe"
+        )
+        assert "force-with-lease" in result.output, (
+            "--check-clean drift output must include the force-with-lease recipe"
+        )
+
+    def test_drift_recipe_embeds_marketplace_json_path(self, runner, tmp_path, monkeypatch):
+        """The git add line in the recipe must embed the marketplace.json path."""
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+
+        result = runner.invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline"])
+
+        assert result.exit_code == 4
+        # Verify the git add -- <path> line embeds the path so producers can copy-paste.
+        assert "git add" in result.output
+        assert "marketplace.json" in result.output

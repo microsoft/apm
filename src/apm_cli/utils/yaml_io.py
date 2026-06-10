@@ -13,7 +13,7 @@ Public API::
 """
 
 from pathlib import Path
-from typing import Any, Dict, Optional, Union  # noqa: F401, UP035
+from typing import Any
 
 import yaml
 

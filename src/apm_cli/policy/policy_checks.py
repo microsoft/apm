@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
 
 from .models import CheckResult, CIAuditResult
 
@@ -207,7 +206,11 @@ def _check_required_packages_deployed(
     return CheckResult(
         name="required-packages-deployed",
         passed=False,
-        message=f"{len(not_deployed)} required package(s) not deployed",
+        message=(
+            f"{len(not_deployed)} required package(s) not deployed. "
+            "Hint: run `apm install --no-policy` to repair the lockfile, "
+            "then reinstall normally."
+        ),
         details=not_deployed,
     )
 
@@ -995,51 +998,36 @@ def run_dependency_policy_checks(
     if _run(_check_transitive_depth(lockfile, policy.dependencies)):
         return result
 
-    # -- Registry source check (7) ---------------------------------
-    if _run(_check_registry_source(deps_list, policy.registry_source, registries)):
-        return result
-
-    # -- Pinned-constraint check (7b) ------------------------------
-    # Property check on declared refs; runs alongside allow/deny/require.
-    # Cheap (O(N) string classification, no I/O) so it always runs.
-    # When direct_dep_keys is supplied, restrict to direct deps -- a
-    # transitive package with an unbounded ref in its own manifest is
-    # not actionable by the consumer (see Copilot review on #1494).
-    if _run(_check_pinned_constraints(deps_list, policy.dependencies, direct_dep_keys)):
-        return result
-
-    # -- MCP checks (8-11) ----------------------------------------
-    # When mcp_deps is None (not provided), skip MCP checks entirely.
+    # -- Registry source + pinned-constraint + MCP + tail checks -----
+    # Collect all remaining checks into a single loop so the function
+    # stays within the max-returns threshold.
+    remaining_checks: list[CheckResult] = [
+        _check_registry_source(deps_list, policy.registry_source, registries),
+        # Pinned-constraint: property check on declared refs. Cheap
+        # (O(N) string classification, no I/O) so it always runs.
+        # When direct_dep_keys is supplied, restrict to direct deps -- a
+        # transitive package with an unbounded ref in its own manifest is
+        # not actionable by the consumer (see Copilot review on #1494).
+        _check_pinned_constraints(deps_list, policy.dependencies, direct_dep_keys),
+    ]
+    # MCP checks -- when mcp_deps is None (not provided), skip entirely.
     # When mcp_deps is an empty list (provided but no MCP deps), still
     # run MCP checks so they report "no X configured" for completeness.
     if mcp_deps is not None:
-        if _run(_check_mcp_allowlist(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_denylist(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_transport(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_self_defined(mcp_list, policy.mcp)):
-            return result
-
-    # -- Target / compilation checks (11-13) -----------------------
-    # Skipped when effective_target is None -- those run in a separate
-    # post-targets call (W2-target-aware).
+        remaining_checks += [
+            _check_mcp_allowlist(mcp_list, policy.mcp),
+            _check_mcp_denylist(mcp_list, policy.mcp),
+            _check_mcp_transport(mcp_list, policy.mcp),
+            _check_mcp_self_defined(mcp_list, policy.mcp),
+        ]
+    # Target / compilation + manifest tail checks.
     if effective_target is not None:
-        # Build a minimal raw_yml dict so _check_compilation_target
-        # sees the effective (possibly CLI-overridden) target value
-        # rather than what is literally on disk.
         synthetic_yml = {"target": effective_target}
-        if _run(_check_compilation_target(synthetic_yml, policy.compilation)):
-            return result
-
-    # -- Manifest-level explicit-includes check --------------------
-    # Only run when the caller supplied the manifest includes value.
-    # Dep-only seams that lack manifest context (legacy callers) skip
-    # this check; the install pipeline and ``apm audit`` wrappers both
-    # supply it.
+        remaining_checks.append(_check_compilation_target(synthetic_yml, policy.compilation))
     if manifest_includes is not _INCLUDES_NOT_PROVIDED:
-        if _run(_check_includes_explicit(manifest_includes, policy.manifest)):
+        remaining_checks.append(_check_includes_explicit(manifest_includes, policy.manifest))
+    for check in remaining_checks:
+        if _run(check):
             return result
 
     # NOTE: compilation strategy, source attribution, manifest fields,

@@ -27,7 +27,7 @@ external callers keep working.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional  # noqa: F401
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - import for type hints only
     from apm_cli.policy.models import CIAuditResult

@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Literal, Optional  # noqa: F401, UP035
+from typing import Literal
 
 from ..utils.paths import portable_relpath
 from .content_scanner import ContentScanner, ScanFinding

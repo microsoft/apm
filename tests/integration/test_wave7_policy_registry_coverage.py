@@ -53,7 +53,7 @@ from apm_cli.marketplace.resolver import (
 )
 from apm_cli.models.dependency.mcp import MCPDependency
 from apm_cli.models.dependency.reference import DependencyReference
-from apm_cli.policy.models import CheckResult  # noqa: F401 – used implicitly
+from apm_cli.policy.models import CheckResult  # noqa: F401 - used implicitly
 from apm_cli.policy.policy_checks import (
     _INCLUDES_NOT_PROVIDED,
     _check_compilation_strategy,
@@ -792,6 +792,35 @@ class TestRunDependencyPolicyChecks:
         names = [c.name for c in result.checks]
         assert "dependency-allowlist" in names
         assert "dependency-denylist" in names
+
+    def test_consolidated_tail_checks_cover_all_categories(self):
+        """Regression trap for the consolidated tail_checks loop (PR #1464).
+
+        Exercises compilation-target AND manifest-includes in a single
+        call together with an MCP denylist violation, confirming no check
+        category is silently dropped by the consolidated loop.
+        """
+        policy = ApmPolicy(
+            compilation=CompilationPolicy(
+                target=CompilationTargetPolicy(enforce="vscode"),
+            ),
+            manifest=ManifestPolicy(require_explicit_includes=True),
+            mcp=McpPolicy(deny=("evil-srv",)),
+        )
+        mcp = _mcp("evil-srv")
+        result = run_dependency_policy_checks(
+            [],
+            policy=policy,
+            fail_fast=False,
+            effective_target="claude",
+            manifest_includes=None,
+            mcp_deps=[mcp],
+        )
+        names = [c.name for c in result.checks]
+        assert "mcp-denylist" in names
+        assert "compilation-target" in names
+        assert "explicit-includes" in names
+        assert not result.passed
 
 
 _MINIMAL_APM_YML = dedent("""\

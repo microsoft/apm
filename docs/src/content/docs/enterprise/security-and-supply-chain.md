@@ -129,6 +129,28 @@ place, `-f sarif|json|markdown -o <path>` for CI reporting. Exit codes:
 `0` clean, `1` critical, `2` warnings only. Source:
 `src/apm_cli/commands/audit.py`.
 
+## External scanner hardening
+
+The experimental `external-scanners` feature can invoke a third-party SARIF
+scanner (e.g. SkillSpector) and optionally run its LLM-powered analysis. That
+adds a subprocess + network-egress surface, hardened as follows:
+
+- **Allowlisted args only.** `--external-args` / `external.<name>.args` tokens
+  are validated against a per-adapter allowlist of safe flag prefixes. Any
+  non-allowlisted flag, secret-looking flag (`--token`, `--api-key`, ...), or
+  path resolving outside the working directory is **rejected fail-closed** --
+  the scan does not run. argv is always passed as a list (no `shell=True`).
+- **Restrict-only policy.** A project `apm-policy.yml` can `allow_args: false`
+  to strip args, but can never *add* argv tokens nor force LLM mode on. Only the
+  local user opts into LLM egress (`--external-llm` / `external.<name>.llm`).
+- **Credential hygiene.** LLM API keys (`OPENAI_API_KEY`,
+  `NVIDIA_INFERENCE_KEY`) are forwarded to the scanner subprocess **only** when
+  LLM mode is active for that run, and stripped otherwise. Scanner stderr is
+  secret-redacted before it is surfaced in any error or log.
+- **Project-vs-org trust boundary.** LLM mode sends scanned content to a
+  third-party API, so it requires explicit user consent and is never triggered
+  by an untrusted project-local policy file.
+
 ## Policy gates that block install
 
 `apm-policy.yml` is evaluated **before** any download or write. The

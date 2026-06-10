@@ -28,12 +28,14 @@ For operations with automatic auth/unauth fallback::
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, NamedTuple, Optional, TypeVar  # noqa: F401
+from typing import TYPE_CHECKING, NamedTuple, TypeVar
 
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.utils.github_host import (
@@ -47,6 +49,67 @@ if TYPE_CHECKING:
     from apm_cli.models.dependency.reference import DependencyReference
 
 T = TypeVar("T")
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Secret redaction -- applied by SecretRedactionFilter to all debug records
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate a secret value follows.  Covers:
+#   token=VALUE, Authorization: Bearer VALUE, Authorization: Basic VALUE,
+#   URL credentials (https://user:pass@host), and bare bearer strings.
+_SECRET_RE = re.compile(
+    r"(?:"
+    r"(?:token|password|secret|authorization|bearer)"  # keyword prefix
+    r"(?:\s*[:=]\s*|\s+)"  # separator
+    r"[\w.~!*\'();:@&=+$,/?#\[\]\-]{4,}"  # value (>= 4 chars)
+    r"|"
+    r"://[^:@/\s]+:[^:@/\s]+@"  # URL user:pass@
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _redact_secrets(text: str) -> str:
+    """Replace obvious credential patterns in ``text`` with ``[REDACTED]``.
+
+    Called by :class:`SecretRedactionFilter` before log records are emitted.
+    Also safe to call directly in tests.  Preserves text that contains no
+    secret patterns so non-sensitive messages are returned verbatim.
+    """
+    return _SECRET_RE.sub("[REDACTED]", text)
+
+
+class SecretRedactionFilter(logging.Filter):
+    """Logging filter that redacts secret patterns from all emitted log records.
+
+    Install on the ``apm_cli`` logger (or a sub-logger) when debug logging is
+    enabled so that exception messages carrying HTTP client error strings --
+    which some libraries embed auth headers or token values in -- do not leak
+    credentials into the debug stream.
+
+    Usage::
+
+        logging.getLogger("apm_cli").addFilter(SecretRedactionFilter())
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+            redacted = _redact_secrets(msg)
+            if redacted != msg:
+                record.msg = redacted
+                record.args = ()
+        except Exception:
+            pass
+        return True
+
+
+_PORT_CREDENTIAL_DOCS_URL = (
+    "https://microsoft.github.io/apm/getting-started/authentication/"
+    "#custom-port-hosts-and-per-port-credentials"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -463,11 +526,26 @@ class AuthResolver:
                 # Success on fallback -- emit deferred diagnostic warning
                 self.emit_stale_pat_diagnostic(auth_ctx.host_info.display_name)
                 return result
-            except AzureCliBearerError:
-                pass  # Bearer acquisition itself failed; fall through to original error
-            except Exception:
-                # Bearer also failed (Case 4). Re-raise the ORIGINAL PAT exception.
-                pass
+            except AzureCliBearerError as bearer_exc:
+                # az CLI bearer acquisition failed (not logged in, token expired, etc.).
+                # Fall through to the original PAT error.
+                # Safe: str() emits message only, not stderr attribute.
+                logger.debug(
+                    "ADO bearer acquisition failed for %s; falling through to PAT error: %s",
+                    host_info.display_name,
+                    bearer_exc,
+                )
+            except Exception as bearer_op_exc:
+                # The operation callable may raise any exception type; broad catch is
+                # required because we cannot restrict the caller API without a behavior
+                # change (Case 4: bearer op itself failed after PAT rejection).
+                # Use %r so the exception type is visible in the debug record.
+                logger.debug(
+                    "ADO bearer fallback operation raised for %s; re-raising original PAT"
+                    " exception: %r",
+                    host_info.display_name,
+                    bearer_op_exc,
+                )
             raise exc
 
         # Hosts that never have public repos -> auth-only
@@ -476,6 +554,13 @@ class AuthResolver:
             try:
                 return operation(auth_ctx.token, git_env)
             except Exception as exc:
+                # operation is caller-provided; broad catch required -- cannot narrow
+                # without restricting the caller API.  Use %r so the type is visible.
+                logger.debug(
+                    "Auth-only operation failed for ghe_cloud host %s: %r",
+                    host_info.display_name,
+                    exc,
+                )
                 return _try_credential_fallback(exc)
 
         # ADO: auth-first with bearer fallback when PAT fails
@@ -484,6 +569,13 @@ class AuthResolver:
             try:
                 return operation(auth_ctx.token, git_env)
             except Exception as exc:
+                # operation is caller-provided; broad catch required -- cannot narrow
+                # without restricting the caller API.  Use %r so the type is visible.
+                logger.debug(
+                    "Auth-only operation failed for ado host %s; trying bearer fallback: %r",
+                    host_info.display_name,
+                    exc,
+                )
                 return _try_ado_bearer_fallback(exc)
 
         if unauth_first:
@@ -491,13 +583,26 @@ class AuthResolver:
             try:
                 _log(f"Trying unauthenticated access to {host_info.display_name}")
                 return operation(None, git_env)
-            except Exception:
+            except Exception as exc:
+                # operation is caller-provided; broad catch required -- cannot narrow
+                # without restricting the caller API.  Use %r so the type is visible.
+                logger.debug(
+                    "Unauthenticated access failed for %s; will retry with token: %r",
+                    host_info.display_name,
+                    exc,
+                )
                 if auth_ctx.token:
                     _log(f"Unauthenticated failed, retrying with token (source: {auth_ctx.source})")
                     try:
                         return operation(auth_ctx.token, git_env)
-                    except Exception as exc:
-                        return _try_credential_fallback(exc)
+                    except Exception as retry_exc:
+                        # operation is caller-provided; broad catch required.
+                        logger.debug(
+                            "Authenticated retry also failed for %s: %r",
+                            host_info.display_name,
+                            retry_exc,
+                        )
+                        return _try_credential_fallback(retry_exc)
                 raise
         # Download path: auth-first for higher rate limits
         elif auth_ctx.token:
@@ -508,11 +613,24 @@ class AuthResolver:
                 )
                 return operation(auth_ctx.token, git_env)
             except Exception as exc:
+                # operation is caller-provided; broad catch required -- cannot narrow
+                # without restricting the caller API.  Use %r so the type is visible.
+                logger.debug(
+                    "Authenticated access failed for %s; will retry unauthenticated: %r",
+                    host_info.display_name,
+                    exc,
+                )
                 if host_info.has_public_repos:
                     _log("Authenticated failed, retrying without token")
                     try:
                         return operation(None, git_env)
-                    except Exception:
+                    except Exception as unauth_exc:
+                        # operation is caller-provided; broad catch required.
+                        logger.debug(
+                            "Unauthenticated retry also failed for %s: %r",
+                            host_info.display_name,
+                            unauth_exc,
+                        )
                         return _try_credential_fallback(exc)
                 return _try_credential_fallback(exc)
         else:
@@ -709,8 +827,10 @@ class AuthResolver:
         # return the wrong credential. Point the user at the concrete fix.
         if host_info.port is not None:
             lines.append(
-                f"[i] Host '{display}' -- verify your credential helper stores per-port entries "
-                f"(some helpers key by host only)."
+                f"[i] Host '{display}' -- this helper may key by host only.\n"
+                f"    Verify with: printf 'protocol=https\\nhost={display}\\n\\n'"
+                f" | git credential fill\n"
+                f"    Docs: {_PORT_CREDENTIAL_DOCS_URL}"
             )
 
         lines.append("Run with --verbose for detailed auth diagnostics.")
@@ -750,10 +870,14 @@ class AuthResolver:
                 try:
                     bearer = provider.get_bearer_token()
                     return bearer, GitHubTokenManager.ADO_BEARER_SOURCE, "bearer"
-                except AzureCliBearerError:
+                except AzureCliBearerError as exc:
                     # az is on PATH but token acquisition failed (e.g., not logged in).
                     # Fall through to token=None; build_error_context will render Case 3.
-                    pass
+                    logger.debug(
+                        "ADO bearer token acquisition failed for %s: %s",
+                        host_info.display_name,
+                        exc,
+                    )
             return None, "none", "basic"
 
         # ADO uses ADO_APM_PAT (single var) + AAD bearer fallback;
@@ -884,8 +1008,8 @@ class AuthResolver:
 
             _rich_warning(msg, symbol="warning")
             _rich_warning(f"    {detail}", symbol="warning")
-        except ImportError:
-            pass  # console module not importable in some test contexts
+        except ImportError as exc:
+            logger.debug("Console module unavailable for stale-PAT warning; skipping: %s", exc)
 
     # Backwards-compat alias for any in-tree caller still importing the
     # private name. Safe to remove once all callers move to the public name.
@@ -924,8 +1048,10 @@ class AuthResolver:
 
                 _rich_echo(line, color="dim")
                 return
-            except ImportError:
-                pass
+            except ImportError as exc:
+                logger.debug(
+                    "Console module unavailable for auth-source logging; skipping: %s", exc
+                )
         # No logger wired -- the install path always wires one in the
         # bearer branch, so this fallback only fires in unit-test contexts
         # that opt-in via APM_VERBOSE=1.
@@ -975,18 +1101,29 @@ class AuthResolver:
             return BearerFallbackOutcome(primary, False)
         try:
             from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
-        except ImportError:
+        except ImportError as exc:
+            logger.debug(
+                "azure_cli module unavailable for bearer fallback in execute_with_bearer_fallback;"
+                " skipping: %s",
+                exc,
+            )
             return BearerFallbackOutcome(primary, False)
         provider = get_bearer_provider()
         if not provider.is_available():
             return BearerFallbackOutcome(primary, False)
         try:
             bearer = provider.get_bearer_token()
-        except AzureCliBearerError:
+        except AzureCliBearerError as exc:
+            logger.debug("Bearer token acquisition failed in execute_with_bearer_fallback: %s", exc)
             return BearerFallbackOutcome(primary, False)
         try:
             fallback = bearer_op(bearer)
-        except Exception:
+        except Exception as exc:
+            # bearer_op is caller-provided; broad catch required -- cannot narrow
+            # without restricting the caller API.
+            logger.debug(
+                "bearer_op raised an exception during execute_with_bearer_fallback: %s", exc
+            )
             return BearerFallbackOutcome(primary, True)
         if fallback is None or is_auth_failure(fallback):
             return BearerFallbackOutcome(primary, True)

@@ -9,12 +9,10 @@ under ``pack.bundle_files`` (issue #1098).
 
 import hashlib
 import json
-import os  # noqa: F401
 import re
 import shutil
 import tarfile
 from pathlib import Path, PurePosixPath
-from typing import Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
 
 import yaml
 
@@ -25,7 +23,7 @@ from ..deps.lockfile import (
     migrate_lockfile_if_needed,
 )
 from ..models.apm_package import APMPackage, DependencyReference
-from ..utils.console import _rich_info, _rich_warning
+from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from .packer import PackResult
 
@@ -270,17 +268,9 @@ def _collect_hooks_from_root(package_root: Path) -> dict:
 
 def _collect_mcp(package_root: Path) -> dict:
     """Return ``mcpServers`` dict from ``.mcp.json``."""
-    mcp_file = package_root / ".mcp.json"
-    if not mcp_file.is_file() or mcp_file.is_symlink():
-        return {}
-    try:
-        data = json.loads(mcp_file.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            servers = data.get("mcpServers", {})
-            return dict(servers) if isinstance(servers, dict) else {}
-    except (json.JSONDecodeError, OSError):
-        pass
-    return {}
+    from ..core.plugin_manifest import collect_mcp_servers
+
+    return collect_mcp_servers(package_root)
 
 
 # ---------------------------------------------------------------------------
@@ -339,42 +329,15 @@ def _find_or_synthesize_plugin_json(
     suppress_missing_warning: bool = False,
     logger=None,
 ) -> dict:
-    """Locate an existing ``plugin.json`` or synthesise one from ``apm.yml``.
+    """Locate an existing ``plugin.json`` or synthesise one from ``apm.yml``."""
+    from ..core.plugin_manifest import find_or_synthesize_plugin_json
 
-    ``suppress_missing_warning`` silences the "no plugin.json on disk"
-    message when the caller knows synthesis is the expected path -- for
-    example a marketplace-publishing run that happens to have
-    ``dependencies:`` for local dev. Genuine parse errors on an existing
-    file are always surfaced.
-    """
-    from ..deps.plugin_parser import synthesize_plugin_json_from_apm_yml
-    from ..utils.helpers import find_plugin_json
-
-    plugin_json_path = find_plugin_json(project_root)
-    if plugin_json_path is not None:
-        try:
-            return json.loads(plugin_json_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
-            _warn_msg = (
-                f"Found plugin.json at {plugin_json_path} but could not parse it: {exc}. "
-                "Falling back to synthesis from apm.yml."
-            )
-            if logger:
-                logger.warning(_warn_msg)
-            else:
-                _rich_warning(_warn_msg)
-
-    elif not suppress_missing_warning:
-        # Demoted from warning to info: synthesis from apm.yml is the
-        # APM-native happy path for plugin authoring, not a defect.
-        _info_msg = (
-            "No plugin.json on disk; deriving it from apm.yml (the APM-native source of truth)."
-        )
-        if logger:
-            logger.info(_info_msg)
-        else:
-            _rich_info(_info_msg)
-    return synthesize_plugin_json_from_apm_yml(apm_yml_path)
+    return find_or_synthesize_plugin_json(
+        project_root,
+        apm_yml_path,
+        suppress_missing_warning=suppress_missing_warning,
+        logger=logger,
+    )
 
 
 def _has_marketplace_block(apm_yml_path: Path) -> bool:

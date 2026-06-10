@@ -14,14 +14,15 @@ from colorama import Fore, Style
 from colorama import init as colorama_init
 
 from ..constants import (
-    APM_LOCK_FILENAME,  # noqa: F401
     APM_MODULES_DIR,
     APM_MODULES_GITIGNORE_PATTERN,
     APM_YML_FILENAME,
     GITIGNORE_FILENAME,
 )
 from ..update_policy import get_update_hint_message, is_self_update_enabled
-from ..utils.atomic_io import atomic_write_text as _atomic_write  # noqa: F401
+from ..utils.atomic_io import (
+    atomic_write_text as _atomic_write,  # noqa: F401 -- re-exported; tests import from apm_cli.commands._helpers
+)
 from ..utils.console import _rich_echo, _rich_info, _rich_warning
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from ..utils.version_checker import check_for_updates
@@ -329,6 +330,74 @@ def _check_orphaned_packages():
         return sorted(p for p in installed if p not in expected_with_ancestors)
     except Exception:
         return []
+
+
+# ------------------------------------------------------------------
+# Dependency-update helpers (shared by `apm update` and `apm deps update`)
+# ------------------------------------------------------------------
+
+
+class UnknownPackageError(Exception):
+    """A requested package token matched no declared dependency.
+
+    Carries the offending *token* and the list of *available* display
+    names so the CLI caller can render a consistent error message.
+    """
+
+    def __init__(self, token: str, available: list[str]):
+        self.token = token
+        self.available = available
+        super().__init__(f"Package '{token}' not found")
+
+
+def resolve_requested_packages(
+    packages: tuple[str, ...] | list[str],
+    all_deps: list,
+) -> list[str] | None:
+    """Map requested package tokens to canonical dependency keys.
+
+    The install engine matches ``only_packages`` by ``DependencyReference``
+    identity (e.g. ``owner/repo``), so short names like ``compliance-rules``
+    must be normalised to their canonical key before the engine is called.
+
+    Args:
+        packages: Raw tokens from the CLI ``[PACKAGES]...`` argument.
+        all_deps: Declared dependencies (direct + dev) to match against.
+
+    Returns:
+        An order-preserving, de-duplicated list of canonical keys, or
+        ``None`` when *packages* is empty (meaning "refresh everything").
+
+    Raises:
+        UnknownPackageError: when a token matches no declared dependency.
+    """
+    if not packages:
+        return None
+
+    token_to_canonical: dict[str, str] = {}
+    for dep in all_deps:
+        canonical_key = dep.get_unique_key() or dep.repo_url or dep.get_display_name()
+        tokens = {canonical_key, dep.get_display_name(), dep.repo_url}
+        if getattr(dep, "alias", None):
+            tokens.add(dep.alias)
+        parts = dep.repo_url.split("/")
+        if len(parts) >= 2:
+            tokens.add(parts[-1])
+        for token in tokens:
+            if token and token not in token_to_canonical:
+                token_to_canonical[token] = canonical_key
+
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for pkg in packages:
+        canonical = token_to_canonical.get(pkg)
+        if not canonical:
+            available = [dep.get_display_name() for dep in all_deps]
+            raise UnknownPackageError(pkg, available)
+        if canonical not in seen:
+            seen.add(canonical)
+            resolved.append(canonical)
+    return resolved
 
 
 def print_version(ctx, param, value):
@@ -656,3 +725,23 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
         content = content.replace("dependencies:", skeleton + "\ndependencies:", 1)
 
     out_file.write_text(content, encoding="utf-8")
+
+
+def _find_apm_yml(start: Path | None = None) -> Path | None:
+    """Walk parent directories from ``start`` (or cwd) to find ``apm.yml``.
+
+    Matches the npm / cargo / poetry ergonomic: a developer running
+    an ``apm`` command from a subdirectory of their project (``src/``,
+    ``docs/``, ``scripts/``) finds the manifest and operates on it.
+
+    The walk stops at the filesystem root or when an ``apm.yml`` is
+    found, whichever comes first. Returns the absolute path to the
+    ``apm.yml`` file when found; ``None`` when no project root is
+    discoverable from ``start`` upward.
+    """
+    cwd = (start or Path.cwd()).resolve()
+    for candidate in (cwd, *cwd.parents):
+        manifest = candidate / "apm.yml"
+        if manifest.is_file():
+            return manifest
+    return None

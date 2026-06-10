@@ -32,9 +32,10 @@ Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, and Codex by default (see [Skills convergence](#skills-convergence)
 below). Claude and Windsurf keep target-native skill directories.
 
-`copilot-cowork` (Microsoft 365 Copilot) and `copilot-app` (GitHub
-Copilot desktop App) are gated behind experimental flags and not listed
-above. See [Experimental](./experimental/).
+`copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
+Copilot desktop App), and `openclaw` (OpenClaw agent runtime) are
+gated behind experimental flags and not listed above. See
+[Experimental](./experimental/).
 
 ## Detection and resolution
 
@@ -61,10 +62,14 @@ list before `compile` or `install`.
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
 
-`agent-skills`, `copilot-cowork`, and `copilot-app` are never
-auto-detected. Select them explicitly with `--target`, or list them in
-a project's `apm.yml` `targets:` field so contributors running plain
-`apm install` pick them up automatically.
+`agent-skills` is never auto-detected but is a canonical target: select it
+with `--target` or list it in a project's `apm.yml` `targets:` field so
+contributors running plain `apm install` pick it up automatically.
+
+`copilot-cowork`, `copilot-app`, and `openclaw` are experimental targets
+that require `apm experimental enable <name>` before use. They are selected
+with `--target` only and cannot be listed in `apm.yml` (the canonical
+targets validator will reject them).
 
 ## copilot
 
@@ -80,7 +85,7 @@ GitHub Copilot (CLI and IDE).
   - skills: `.agents/skills/<name>/SKILL.md`
   - hooks: `.github/hooks/<name>.json`
   - generated: `.github/copilot-instructions.md` (compile output)
-- **User scope.** Partial. `prompts` deploy under `~/.copilot/prompts/`; `instructions` are not supported at user scope. User-scope deploys land under `~/.copilot/`, not `~/.github/`.
+- **User scope.** Partial. `prompts` deploy under `~/.copilot/prompts/`; `instructions` from all packages are concatenated into `~/.copilot/copilot-instructions.md` (Copilot CLI reads only that single file at user scope). User-scope deploys land under `~/.copilot/`, not `~/.github/`.
 
 ## claude
 
@@ -176,6 +181,23 @@ Cross-client shared skills directory.
 - **Supported primitives.** skills only.
 - **File conventions.** `.agents/skills/<name>/SKILL.md`.
 - **Use case.** Author-time target for shipping a SKILL bundle that any Skills-aware client (Codex, Copilot CLI, Claude Code, etc.) can read without per-tool deployment.
+
+## openclaw (experimental)
+
+[OpenClaw](https://github.com/openclaw/openclaw) agent runtime.
+
+- **Detection.** Never auto-detected. Select with `--target openclaw`
+  after enabling the experimental flag.
+- **Enable.** `apm experimental enable openclaw`.
+- **Deploy directory.** `.agents/skills/` at project scope (identical to
+  `agent-skills`); `~/.openclaw/skills/` at user scope (`--global`).
+- **Supported primitives.** skills only.
+- **File conventions.** `.agents/skills/<name>/SKILL.md` (project) or
+  `~/.openclaw/skills/<name>/SKILL.md` (user).
+- **Note.** At project scope the output is identical to `agent-skills`.
+  The `--global` user path is the distinguishing capability, deploying
+  skills where OpenClaw reads its managed/local skill directory
+  (priority 4 in the OpenClaw loading order).
 
 ## Skills convergence
 

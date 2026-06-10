@@ -16,6 +16,7 @@ from apm_cli.core.build_orchestrator import (
     BuildResult,  # noqa: F401
     MarketplaceProducer,
     OutputKind,
+    PluginManifestProducer,
     ProducerResult,
     detect_outputs,
 )
@@ -87,6 +88,33 @@ class TestDetectOutputs:
         _write(apm, "- a\n- b\n")
         with pytest.raises(BuildError, match="must be a YAML mapping"):
             detect_outputs(apm)
+
+    def test_target_claude_returns_plugin_manifest(self, tmp_path: Path):
+        apm = tmp_path / "apm.yml"
+        _write(apm, "name: x\nversion: 0.1.0\ndescription: y\ntarget: claude\n")
+        assert OutputKind.PLUGIN_MANIFEST in detect_outputs(apm)
+
+    def test_target_copilot_returns_plugin_manifest(self, tmp_path: Path):
+        apm = tmp_path / "apm.yml"
+        _write(apm, "name: x\nversion: 0.1.0\ndescription: y\ntarget: copilot\n")
+        assert OutputKind.PLUGIN_MANIFEST in detect_outputs(apm)
+
+    def test_target_without_plugin_ecosystem_no_plugin_manifest(self, tmp_path: Path):
+        apm = tmp_path / "apm.yml"
+        _write(apm, "name: x\nversion: 0.1.0\ndescription: y\ntarget: cursor\n")
+        assert OutputKind.PLUGIN_MANIFEST not in detect_outputs(apm)
+
+    def test_target_and_dependencies_returns_both(self, tmp_path: Path):
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: x\nversion: 0.1.0\ndescription: y\n"
+            "target: claude\n"
+            "dependencies:\n  apm:\n    - owner/repo\n",
+        )
+        result = detect_outputs(apm)
+        assert OutputKind.BUNDLE in result
+        assert OutputKind.PLUGIN_MANIFEST in result
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +217,20 @@ class TestBuildOrchestrator:
         kinds = [p.kind for p in orch._producers]
         assert OutputKind.BUNDLE in kinds
         assert OutputKind.MARKETPLACE in kinds
+
+    def test_default_producers_include_plugin_manifest(self):
+        orch = BuildOrchestrator()
+        kinds = [p.kind for p in orch._producers]
+        assert OutputKind.PLUGIN_MANIFEST in kinds
+
+    def test_plugin_manifest_producer_ordering(self):
+        orch = BuildOrchestrator()
+        kinds = [p.kind for p in orch._producers]
+        bundle_idx = kinds.index(OutputKind.BUNDLE)
+        marketplace_idx = kinds.index(OutputKind.MARKETPLACE)
+        plugin_idx = kinds.index(OutputKind.PLUGIN_MANIFEST)
+        assert plugin_idx > bundle_idx
+        assert plugin_idx > marketplace_idx
 
 
 class TestMarketplaceProducer:
@@ -367,3 +409,153 @@ class TestMarketplaceProducer:
         assert result.payload is not None
         assert result.payload.warnings == ("duplicate package warning",)
         assert result.warnings == ["duplicate package warning"]
+
+
+# ---------------------------------------------------------------------------
+# TestPluginManifestProducer
+# ---------------------------------------------------------------------------
+
+
+class TestPluginManifestProducer:
+    """Tests for PluginManifestProducer end-to-end behaviour."""
+
+    def _apm_yml(self, tmp_path: Path, target: str) -> Path:
+        apm = tmp_path / "apm.yml"
+        _write(apm, f"name: test-plugin\nversion: 1.0.0\ndescription: d\ntarget: {target}\n")
+        return apm
+
+    def test_produces_claude_plugin_json(self, tmp_path: Path) -> None:
+        apm = self._apm_yml(tmp_path, "claude")
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        expected = tmp_path / ".claude-plugin" / "plugin.json"
+        assert expected in result.outputs
+        assert expected.exists()
+
+    def test_produces_copilot_plugin_json(self, tmp_path: Path) -> None:
+        apm = self._apm_yml(tmp_path, "copilot")
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        expected = tmp_path / ".github" / "plugin" / "plugin.json"
+        assert expected in result.outputs
+        assert expected.exists()
+
+    def test_produces_both_when_target_has_both(self, tmp_path: Path) -> None:
+        apm = tmp_path / "apm.yml"
+        _write(
+            apm,
+            "name: test-plugin\nversion: 1.0.0\ndescription: d\ntarget: [claude, copilot]\n",
+        )
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        claude_out = tmp_path / ".claude-plugin" / "plugin.json"
+        copilot_out = tmp_path / ".github" / "plugin" / "plugin.json"
+        assert claude_out in result.outputs
+        assert copilot_out in result.outputs
+        assert claude_out.exists()
+        assert copilot_out.exists()
+
+    def test_deduplicates_by_output_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Targets mapping to the same output path yield only one written file."""
+        apm = tmp_path / "apm.yml"
+        _write(apm, "name: test-plugin\nversion: 1.0.0\ndescription: d\ntarget: copilot\n")
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
+
+        # Patch parse_targets_field at its source module so the lazy import
+        # inside PluginManifestProducer.produce picks it up. Only canonical
+        # plugin ecosystems (claude, copilot) survive the path filter; a
+        # repeated copilot entry must not write the file twice.
+        monkeypatch.setattr(
+            "apm_cli.core.apm_yml.parse_targets_field",
+            lambda data: ["copilot", "copilot"],
+        )
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        copilot_out = tmp_path / ".github" / "plugin" / "plugin.json"
+        # Only one output (path deduplication removes the vscode alias)
+        assert result.outputs == [copilot_out]
+        assert len(result.outputs) == 1
+
+    def test_dry_run_does_not_write_files(self, tmp_path: Path) -> None:
+        apm = self._apm_yml(tmp_path, "claude")
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm, dry_run=True)
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        expected = tmp_path / ".claude-plugin" / "plugin.json"
+        assert not expected.exists()
+        assert result.outputs == []
+
+    def test_skips_non_plugin_targets(self, tmp_path: Path) -> None:
+        apm = self._apm_yml(tmp_path, "cursor")
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        assert result.outputs == []
+        assert result.kind == OutputKind.PLUGIN_MANIFEST
+
+    def test_empty_targets_produces_nothing(self, tmp_path: Path) -> None:
+        apm = tmp_path / "apm.yml"
+        _write(apm, "name: test-plugin\nversion: 1.0.0\ndescription: d\n")
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        assert result.outputs == []
+
+    def test_missing_apm_yml_produces_nothing(self, tmp_path: Path) -> None:
+        apm = tmp_path / "apm.yml"  # does not exist
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        assert result.outputs == []
+
+    def test_existing_file_preserved_without_force(self, tmp_path: Path) -> None:
+        apm = self._apm_yml(tmp_path, "claude")
+        existing = tmp_path / ".claude-plugin" / "plugin.json"
+        _write(existing, '{"name": "hand-authored"}')
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        # Without --force the existing file is preserved and not listed as output.
+        assert result.outputs == []
+        assert '"hand-authored"' in existing.read_text(encoding="utf-8")
+
+    def test_force_overwrites_existing_file(self, tmp_path: Path) -> None:
+        apm = self._apm_yml(tmp_path, "claude")
+        existing = tmp_path / ".claude-plugin" / "plugin.json"
+        _write(existing, '{"name": "hand-authored"}')
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm, bundle_force=True)
+
+        result = PluginManifestProducer().produce(opts, logger=None)
+
+        assert existing in result.outputs
+        assert '"test-plugin"' in existing.read_text(encoding="utf-8")
+
+    def test_conflicting_targets_raises_build_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.core.errors import ConflictingTargetsError
+
+        apm = self._apm_yml(tmp_path, "claude")
+        opts = BuildOptions(project_root=tmp_path, apm_yml_path=apm)
+
+        def _raise(data: dict) -> list[str]:
+            raise ConflictingTargetsError("both target and targets set")
+
+        monkeypatch.setattr("apm_cli.core.apm_yml.parse_targets_field", _raise)
+
+        with pytest.raises(BuildError, match=r"both target and targets set"):
+            PluginManifestProducer().produce(opts, logger=None)

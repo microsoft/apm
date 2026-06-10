@@ -1,12 +1,10 @@
 """Helper utility functions for APM."""
 
-import os  # noqa: F401
 import platform
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional  # noqa: F401
 
 
 def is_tool_available(tool_name):

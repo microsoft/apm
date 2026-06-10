@@ -3,11 +3,11 @@
 import builtins
 from pathlib import Path
 
-from ...constants import APM_MODULES_DIR, APM_YML_FILENAME  # noqa: F401
+from ...constants import APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
 from ...deps.lockfile import LockFile
 from ...integration.mcp_integrator import MCPIntegrator
-from ...models.apm_package import APMPackage, DependencyReference  # noqa: F401
+from ...models.apm_package import DependencyReference
 from ...utils.path_security import PathTraversalError, safe_rmtree
 from ...utils.paths import portable_relpath
 

@@ -294,14 +294,15 @@ class TestAuditContentScan:
         assert exc.value.code == 0
 
     def test_format_json_incompatible_with_strip(self, tmp_path):
+        import click
+
         from apm_cli.commands.audit import _audit_content_scan
 
         f = tmp_path / "f.md"
         f.write_text("x\n", encoding="utf-8")
         cfg = self._make_cfg(tmp_path, output_format="json")
-        with pytest.raises(SystemExit) as exc:
+        with pytest.raises(click.UsageError, match=r"cannot be combined"):
             _audit_content_scan(cfg, package=None, file_path=str(f), strip=True, dry_run=False)
-        assert exc.value.code == 1
 
     def test_text_format_with_output_path_errors(self, tmp_path):
         from apm_cli.commands.audit import _audit_content_scan
@@ -564,3 +565,104 @@ class TestAuditContentScanPackage:
                 dry_run=False,
             )
         assert exc.value.code == 0
+
+
+# ---------------------------------------------------------------------------
+# Source-column helpers (external scanner provenance)
+# ---------------------------------------------------------------------------
+
+
+class TestFindingSourceHelpers:
+    """Tests for _finding_source, _has_external_findings, and _findings_title."""
+
+    def test_native_finding_source_is_apm(self):
+        from apm_cli.commands.audit import _finding_source
+
+        f = _make_finding()
+        assert _finding_source(f) == "apm"
+
+    def test_external_finding_source_extracted(self):
+        from apm_cli.commands.audit import _finding_source
+        from apm_cli.security.content_scanner import ScanFinding
+
+        f = ScanFinding(
+            file="x.md",
+            line=1,
+            column=1,
+            char="",
+            codepoint="",
+            severity="warning",
+            category="skillspector/TOOL_INJECTION",
+            description="test",
+        )
+        assert _finding_source(f) == "skillspector"
+
+    def test_apm_prefixed_category_returns_apm(self):
+        from apm_cli.commands.audit import _finding_source
+        from apm_cli.security.content_scanner import ScanFinding
+
+        f = ScanFinding(
+            file="x.md",
+            line=1,
+            column=1,
+            char="x",
+            codepoint="U+200B",
+            severity="critical",
+            category="apm/hidden-unicode/bidi-override",
+            description="test",
+        )
+        assert _finding_source(f) == "apm"
+
+    def test_has_external_findings_false_for_native_only(self):
+        from apm_cli.commands.audit import _has_external_findings
+
+        rows = [_make_finding()]
+        assert _has_external_findings(rows) is False
+
+    def test_has_external_findings_true_with_external(self):
+        from apm_cli.commands.audit import _has_external_findings
+        from apm_cli.security.content_scanner import ScanFinding
+
+        rows = [
+            _make_finding(),
+            ScanFinding(
+                file="y.md",
+                line=1,
+                column=1,
+                char="",
+                codepoint="",
+                severity="warning",
+                category="skillspector/RULE",
+                description="ext",
+            ),
+        ]
+        assert _has_external_findings(rows) is True
+
+    def test_findings_title_native_only(self):
+        from apm_cli.commands.audit import _findings_title
+
+        rows = [_make_finding()]
+        title = _findings_title(rows, has_external=False)
+        assert "Content Scan Findings" in title
+
+    def test_findings_title_mixed_includes_counts(self):
+        from apm_cli.commands.audit import _findings_title
+        from apm_cli.security.content_scanner import ScanFinding
+
+        rows = [
+            _make_finding(),
+            ScanFinding(
+                file="y.md",
+                line=1,
+                column=1,
+                char="",
+                codepoint="",
+                severity="warning",
+                category="skillspector/RULE",
+                description="ext",
+            ),
+        ]
+        title = _findings_title(rows, has_external=True)
+        assert "Audit Findings" in title
+        assert "apm: 1" in title
+        assert "skillspector: 1" in title

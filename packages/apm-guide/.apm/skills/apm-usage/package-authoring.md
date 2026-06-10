@@ -58,6 +58,31 @@ my-package/
         resource2.md
 ```
 
+## Install-time discovery rules
+
+`apm pack` (export) is liberal: it collects primitives from both
+`.apm/<type>/` and root convention directories (`agents/`, `skills/`,
+`instructions/`, etc.). `apm install` (integration) is per-primitive
+and stricter. Authors who rely on root convention directories for
+instructions or prompts will produce bundles that pack but install
+silently incomplete.
+
+Per-primitive scan paths for `apm install`:
+
+| Primitive | Scanned path | Root alternative? |
+|-----------|-------------|------------------|
+| instruction | `.apm/instructions/` | No |
+| command (prompt) | `.apm/prompts/` | No |
+| hook | `.apm/hooks/` | Yes: `hooks/` |
+| agent | `.apm/agents/`, `.apm/chatmodes/` | Yes: `*.agent.md` and `*.chatmode.md` at root |
+| skill | `.apm/skills/<name>/` | Yes: `skills/<name>/` (SKILL_BUNDLE or MARKETPLACE_PLUGIN) |
+
+**Recommendation for marketplace publishers:** use `.apm/<type>/` for
+every primitive. This is the only layout that is symmetric between
+`apm pack` and `apm install`. Authoring `instructions/` at the plugin
+root will pack cleanly but instructions will be silently dropped when
+consumers run `apm install`.
+
 ## Hook files
 
 Packages can ship hooks (pre/post tool-use scripts) by placing JSON
@@ -151,11 +176,12 @@ tags: [security, validation]
 ```
 
 `applyTo` accepts a single glob (`"**/*.py"`) or a comma-separated list
-(`"**/src/**,**/api/**"`). Commas inside brace alternation
-(`**/*.{css,scss}`) are part of the glob and are NOT separators -- only
-top-level commas split the list. On Copilot the value is preserved
-verbatim; on Claude/Cursor/Windsurf comma-lists are expanded to a YAML
-array under `paths:` / `globs:`.
+(`"**/src/**,**/api/**"`). A YAML sequence (`applyTo: ['**/*.py']`) is also
+accepted; when multiple sequence elements are given, the first is used.
+Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
+and are NOT separators -- only top-level commas split the list. On Copilot
+the value is preserved verbatim; on Claude/Cursor/Windsurf comma-lists are
+expanded to a YAML array under `paths:` / `globs:`.
 
 ### 2. Chatmode (`*.chatmode.md`)
 
@@ -316,6 +342,30 @@ my-skill/
 ### 7. Marketplace Plugin (`plugin.json`)
 
 Packaged distribution format created with `apm pack --format plugin`.
+
+When `apm.yml` declares `target: claude` or `target: copilot` (or the plural `targets:` equivalent), `apm pack` also generates an ecosystem-specific `plugin.json` automatically -- authors no longer need to maintain this file manually. The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `description`, `author`, `license`). See the apm pack reference (reference/cli/pack/#plugin-manifests) for output paths, credential stripping, and per-ecosystem differences, or run `apm pack --help`.
+
+#### Shipping `bin/` executables (Claude Code only)
+
+A marketplace plugin may ship a root `bin/` directory of executable
+scripts. On `apm install`, APM deploys them under the Claude Code skills
+directory as a skills-directory plugin (a folder containing
+`.claude-plugin/plugin.json`), which puts `bin/` on Claude Code's Bash
+tool PATH so the agent can invoke them as bare commands.
+
+This is a **Claude-Code-specific** contract -- no other harness has an
+equivalent, so `bin/` deploys only when an active Claude Code skills
+target is present. Authoring rules:
+
+- Place executables in a top-level `bin/` directory; APM marks them
+  `0o755` on POSIX.
+- Deploy is **user-scope only**. A project-scope install (`apm install`
+  without `-g`) skips `bin/` and prints a hint to re-run with `-g`.
+- Deployed executables land on Claude Code's PATH and are invoked
+  **without per-call confirmation** -- treat them as trusted code and
+  keep them minimal.
+- Governance: a `bin_deploy` policy rule can deny deployment per package.
+  See the [policy schema](../../../../../docs/src/content/docs/reference/policy-schema.md#bin_deploy).
 
 ## Step-by-step: create and publish
 

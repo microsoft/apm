@@ -1,6 +1,7 @@
 """APM init command."""
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -28,6 +29,25 @@ from ._helpers import (
     _validate_plugin_name,
     _validate_project_name,
 )
+
+
+def _detect_agentrc(project_root: Path) -> tuple[bool, bool]:
+    """Return (agentrc_installed, has_instructions).
+
+    has_instructions is True when any known agent-instructions artifact exists
+    under project_root, meaning the user already has instructions and does not
+    need a suggestion.
+    """
+    installed = shutil.which("agentrc") is not None
+    has_instructions = any(
+        (
+            (project_root / ".github" / "copilot-instructions.md").exists(),
+            (project_root / "AGENTS.md").exists(),
+            (project_root / ".github" / "instructions").is_dir(),
+        )
+    )
+    return installed, has_instructions
+
 
 # Display order for the prompt (matches scope S1 UX spec)
 _PROMPT_TARGETS_ORDERED: list[str] = [
@@ -141,6 +161,7 @@ def _perform_init(
         else:
             project_dir = Path.cwd()
             final_project_name = project_dir.name
+        project_root = Path.cwd()
 
         # Validate plugin name early
         if plugin and not _validate_plugin_name(final_project_name):
@@ -177,7 +198,7 @@ def _perform_init(
         # --- Target selection (must run before the confirmation panel so
         #     the chosen targets render in the "About to create" summary). ---
         resolved_targets = _resolve_init_targets(
-            project_root=Path.cwd(),
+            project_root=project_root,
             target_flag=target_flag,
             yes=yes,
             apm_yml_exists=apm_yml_exists,
@@ -272,6 +293,23 @@ def _perform_init(
                 "Author your own plugin:         apm pack",
             ]
 
+        # Agentrc integration (#518): suggest agentrc when no instructions exist.
+        # Only applies to consumer init (not plugin mode).
+        agentrc_tip: str | None = None
+        if not plugin and source == "init":
+            agentrc_installed, has_instructions = _detect_agentrc(project_root)
+            if not has_instructions:
+                if agentrc_installed:
+                    next_steps.insert(
+                        1,
+                        "Generate agent instructions:     agentrc init",
+                    )
+                else:
+                    agentrc_tip = (
+                        "Tip: Use agentrc to generate tailored agent instructions "
+                        "from your codebase. https://github.com/microsoft/agentrc"
+                    )
+
         try:
             _rich_panel(
                 "\n".join(f"* {step}" for step in next_steps),
@@ -282,6 +320,9 @@ def _perform_init(
             logger.progress("Next steps:")
             for step in next_steps:
                 click.echo(f"  * {step}")
+
+        if agentrc_tip:
+            logger.progress(agentrc_tip, symbol="info")
 
         # Codex tip: suggest agent-skills target when .codex/ exists
         if Path(".codex").is_dir():

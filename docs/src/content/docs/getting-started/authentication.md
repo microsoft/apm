@@ -457,7 +457,13 @@ For self-hosted Git instances on non-standard ports (e.g. Bitbucket Datacenter o
 | `libsecret` (Linux) | Yes (port in URI) |
 | `gh auth git-credential` | No -- but only used for GitHub hosts, which do not use custom ports |
 
-If APM resolves the wrong credential for a custom-port host, confirm your helper keys by `host:port`; otherwise either switch helpers or store credentials under fully qualified `https://<host>:<port>/` URLs.
+If APM resolves the wrong credential for a custom-port host, confirm your helper keys by `host:port` using the helper-agnostic verification command:
+
+```sh
+printf 'protocol=https\nhost=<host>:<port>\n\n' | git credential fill
+```
+
+This reproduces exactly what APM sends to the credential helper. If the returned `username`/`password` are wrong or empty, either switch helpers or store credentials under a fully qualified `https://<host>:<port>/` URL.
 
 ### SSH connection hangs on corporate/VPN networks
 

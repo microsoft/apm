@@ -74,6 +74,7 @@ use `apm install` or `apm deps update` when you want shared
 
 | Flag | Description |
 |------|-------------|
+| `--root DIR` | Redirect generated artifacts (AGENTS.md and per-target files) under `DIR` while `apm.yml`, `.apm/`, and `apm_modules/` still resolve from the current working directory. Mirrors `pip install --target`. `DIR` is created if missing. Not valid with `--watch`. |
 | `-o, --output PATH` | Output file path. Only applies in single-file mode (`--single-agents`). Default: `AGENTS.md`. |
 | `--single-agents` | Force single-file compilation (legacy). Writes one combined file at `--output` instead of a distributed per-directory target-file tree. Applies to every target that uses distributed placement. |
 | `--clean` | Remove orphaned AGENTS.md files no longer produced by the current primitive set. |
@@ -149,6 +150,13 @@ Remove stale AGENTS.md files after deleting primitives:
 
 ```bash
 apm compile --clean
+```
+
+Redirect generated files to a scratch directory (sources stay in `$PWD`):
+
+```bash
+apm compile --root /tmp/agents-out --target copilot
+ls /tmp/agents-out   # AGENTS.md / per-target files; the source tree stays clean
 ```
 
 ## Watch mode
@@ -239,7 +247,7 @@ output.
 |------|---------|
 | 0 | Compilation succeeded (or `--validate` passed). |
 | 1 | No `apm.yml`, no primitives to compile, validation failure, hidden-Unicode finding, or compilation error. |
-| 2 | Conflicting flags (e.g. `--all` combined with `--target`). |
+| 2 | Conflicting flags (e.g. `--all` combined with `--target`, or `--root` combined with `--watch`). |
 
 ## Related
 

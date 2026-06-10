@@ -4,6 +4,7 @@ Thin wiring layer  -- all command logic lives in ``apm_cli.commands.*`` modules.
 """
 
 import ctypes
+import logging
 import os
 import sys
 import warnings
@@ -24,9 +25,11 @@ from apm_cli.commands.config import config
 from apm_cli.commands.deps import deps
 from apm_cli.commands.doctor import doctor
 from apm_cli.commands.experimental import experimental
+from apm_cli.commands.find import find as find_cmd
 from apm_cli.commands.init import init
 from apm_cli.commands.install import install
 from apm_cli.commands.list_cmd import list as list_cmd
+from apm_cli.commands.lock import lock
 from apm_cli.commands.marketplace import marketplace
 from apm_cli.commands.marketplace import search as marketplace_search
 from apm_cli.commands.mcp import mcp
@@ -50,12 +53,55 @@ _CLI_EPILOG = (
     "  apm init                       Scaffold a new project\n"
     "  apm install                    Install dependencies from apm.yml\n"
     "  apm install --frozen           Reproduce lockfile exactly (CI-safe)\n"
+    "  apm lock                       Resolve deps and write lockfile only\n"
     "  apm outdated                   See what's drifted from upstream\n"
     "  apm update                     Refresh refs and rewrite the lockfile\n"
     "  apm audit --ci                 Validate lockfile integrity for CI gates\n"
     "  apm doctor                     Diagnose environment problems\n"
     "  apm run <script>               Execute a script from apm.yml"
 )
+
+
+def _configure_logging(verbose: bool = False) -> None:
+    """Configure stdlib logging for the ``apm_cli`` package.
+
+    Two mechanisms activate debug-level output (either is sufficient):
+
+    * ``--verbose`` / ``-v`` flag on the ``apm`` command.
+    * ``APM_LOG_LEVEL=DEBUG`` environment variable (accepts any stdlib
+      level name: DEBUG, INFO, WARNING, ERROR, CRITICAL).
+
+    When neither is set the ``apm_cli`` logger defaults to WARNING so
+    routine runs stay silent.  A :class:`~apm_cli.core.auth.SecretRedactionFilter`
+    is always installed on the ``apm_cli`` logger to strip token-bearing
+    exception strings from debug records regardless of which mechanism
+    activated debug mode.
+    """
+    env_level_str = os.environ.get("APM_LOG_LEVEL", "").strip().upper()
+    env_level: int | None = (
+        getattr(logging, env_level_str, None) if env_level_str.isalpha() else None
+    )
+
+    if verbose:
+        level = logging.DEBUG
+    elif env_level is not None:
+        level = env_level
+    else:
+        level = logging.WARNING
+
+    logging.basicConfig(
+        level=level,
+        format="%(levelname)s %(name)s %(message)s",
+        stream=sys.stderr,
+    )
+    apm_logger = logging.getLogger("apm_cli")
+    apm_logger.setLevel(level)
+
+    # Install secret-redaction filter (idempotent: skip if already present).
+    from apm_cli.core.auth import SecretRedactionFilter
+
+    if not any(isinstance(f, SecretRedactionFilter) for f in apm_logger.filters):
+        apm_logger.addFilter(SecretRedactionFilter())
 
 
 @click.group(
@@ -70,10 +116,22 @@ _CLI_EPILOG = (
     is_eager=True,
     help="Show version and exit.",
 )
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    default=False,
+    help="Enable debug-level logging (equivalent to APM_LOG_LEVEL=DEBUG).",
+)
 @click.pass_context
-def cli(ctx):
+def cli(ctx, verbose: bool) -> None:
     """Main entry point for the APM CLI."""
     ctx.ensure_object(dict)
+    ctx.obj["verbose"] = verbose
+
+    if verbose:
+        # Upgrade to DEBUG when the flag is set; env-var path runs in main().
+        _configure_logging(verbose=True)
 
     # Suppress only the agents-target deprecation warning so CLI users see
     # the formatted logger.warning() in the install phase, not a double print.
@@ -108,6 +166,7 @@ cli.add_command(unpack_cmd, name="unpack")
 cli.add_command(publish_cmd, name="publish")
 cli.add_command(init)
 cli.add_command(install)
+cli.add_command(lock)
 cli.add_command(uninstall)
 cli.add_command(prune)
 cli.add_command(update)
@@ -126,6 +185,7 @@ cli.add_command(policy)
 cli.add_command(outdated_cmd, name="outdated")
 cli.add_command(doctor)
 cli.add_command(marketplace)
+cli.add_command(find_cmd)
 cli.add_command(marketplace_search, name="search")
 
 
@@ -262,6 +322,7 @@ def _configure_encoding() -> None:
 
 def main():
     """Main entry point for the CLI."""
+    _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
     try:
         cli(obj={})

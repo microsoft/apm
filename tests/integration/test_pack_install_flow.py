@@ -97,9 +97,187 @@ class TestPackCmd:
         _write_lockfile(tmp_path)
         result = runner.invoke(pack_cmd, ["--target", "claude"])
         assert result.exit_code == 0
-        assert "deprecated" in result.output.lower() or result.exit_code == 0
+        assert "deprecated" in result.output.lower()
 
-    def test_pack_marketplace_output_deprecated_translates(self, runner, tmp_path, monkeypatch):
+    def test_pack_produces_claude_plugin_json_from_apm_yml_target(
+        self, runner, tmp_path, monkeypatch
+    ):
+        """End-to-end: `apm pack` writes .claude-plugin/plugin.json for target: claude."""
+        import json as json_mod
+
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(
+            tmp_path,
+            "name: my-plugin\nversion: 1.2.3\ndescription: a plugin\ntarget: claude\n",
+        )
+        _write_lockfile(tmp_path)
+
+        result = runner.invoke(pack_cmd, [])
+        assert result.exit_code == 0
+
+        out = tmp_path / ".claude-plugin" / "plugin.json"
+        assert out.exists()
+        manifest = json_mod.loads(out.read_text(encoding="utf-8"))
+        assert manifest["name"] == "my-plugin"
+        assert manifest["version"] == "1.2.3"
+
+    def test_pack_strips_mcp_credentials_in_claude_plugin_json(self, runner, tmp_path, monkeypatch):
+        """Credential-bearing keys in .mcp.json never reach the written plugin.json."""
+        import json as json_mod
+
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(
+            tmp_path,
+            "name: my-plugin\nversion: 1.0.0\ndescription: d\ntarget: claude\n",
+        )
+        _write_lockfile(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json_mod.dumps(
+                {
+                    "mcpServers": {
+                        "srv": {"command": "node", "env": {"API_TOKEN": "secret"}},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(pack_cmd, [])
+        assert result.exit_code == 0
+
+        out = tmp_path / ".claude-plugin" / "plugin.json"
+        raw = out.read_text(encoding="utf-8")
+        assert "secret" not in raw
+        manifest = json_mod.loads(raw)
+        assert manifest["mcpServers"]["srv"] == {"command": "node"}
+
+    def test_pack_redacts_secret_values_in_claude_plugin_json(self, runner, tmp_path, monkeypatch):
+        """Secret-shaped VALUES (not just keys) in .mcp.json never reach the written plugin.json.
+
+        Guards the secret-never-committed promise end-to-end through the CLI for
+        the value-redaction paths: an inline --token= flag in args and a
+        basic-auth URL whose key carries no credential signal.
+        """
+        import json as json_mod
+
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(
+            tmp_path,
+            "name: my-plugin\nversion: 1.0.0\ndescription: d\ntarget: claude\n",
+        )
+        _write_lockfile(tmp_path)
+        (tmp_path / ".mcp.json").write_text(
+            json_mod.dumps(
+                {
+                    "mcpServers": {
+                        "srv": {
+                            "command": "node",
+                            "args": ["--token=sk-supersecret", "--verbose"],
+                            "url": "https://alice:hunter2@api.example.com/v1",
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(pack_cmd, [])
+        assert result.exit_code == 0
+
+        out = tmp_path / ".claude-plugin" / "plugin.json"
+        raw = out.read_text(encoding="utf-8")
+        assert "sk-supersecret" not in raw
+        assert "hunter2" not in raw
+        # The non-secret arg survives; the server itself is still emitted.
+        manifest = json_mod.loads(raw)
+        assert "--verbose" in manifest["mcpServers"]["srv"]["args"]
+
+    def test_pack_preserves_existing_plugin_json_without_force(self, runner, tmp_path, monkeypatch):
+        """An existing plugin.json is preserved (warn + skip) when --force is absent."""
+        import json as json_mod
+
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(
+            tmp_path,
+            "name: my-plugin\nversion: 2.0.0\ndescription: d\ntarget: claude\n",
+        )
+        _write_lockfile(tmp_path)
+        out = tmp_path / ".claude-plugin" / "plugin.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            json_mod.dumps({"name": "hand-authored", "version": "0.0.1"}), encoding="utf-8"
+        )
+
+        result = runner.invoke(pack_cmd, [])
+        assert result.exit_code == 0
+        # The hand-authored file is left untouched.
+        preserved = json_mod.loads(out.read_text(encoding="utf-8"))
+        assert preserved == {"name": "hand-authored", "version": "0.0.1"}
+
+    def test_pack_force_overwrites_existing_plugin_json(self, runner, tmp_path, monkeypatch):
+        """`apm pack --force` replaces an existing plugin.json with the generated one."""
+        import json as json_mod
+
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(
+            tmp_path,
+            "name: my-plugin\nversion: 2.0.0\ndescription: d\ntarget: claude\n",
+        )
+        _write_lockfile(tmp_path)
+        out = tmp_path / ".claude-plugin" / "plugin.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            json_mod.dumps({"name": "hand-authored", "version": "0.0.1"}), encoding="utf-8"
+        )
+
+        result = runner.invoke(pack_cmd, ["--force"])
+        assert result.exit_code == 0
+        # The generated manifest now reflects apm.yml identity, not the old file.
+        manifest = json_mod.loads(out.read_text(encoding="utf-8"))
+        assert manifest["name"] == "my-plugin"
+        assert manifest["version"] == "2.0.0"
+
+    def test_pack_json_reports_plugin_manifest_outcomes(self, runner, tmp_path, monkeypatch):
+        """`apm pack --json` machine-reports written vs skipped plugin manifests.
+
+        CI consumers must distinguish a fresh write from a preserved (skipped)
+        file without scraping stderr -- the JSON envelope carries a
+        plugin_manifests section with written/skipped/dry_run path lists.
+        """
+        import json as json_mod
+
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(
+            tmp_path,
+            "name: my-plugin\nversion: 1.0.0\ndescription: d\ntarget: claude\n",
+        )
+        _write_lockfile(tmp_path)
+
+        # First run: nothing on disk -> the manifest is written.
+        result = runner.invoke(pack_cmd, ["--json"])
+        assert result.exit_code == 0
+        # Logger lines route to stderr (mixed by CliRunner); parse from the JSON.
+        env_start = result.output.find("{")
+        assert env_start >= 0, f"No JSON found in output: {result.output!r}"
+        envelope = json_mod.loads(result.output[env_start:])
+        written = envelope["plugin_manifests"]["written"]
+        assert any(p.endswith(".claude-plugin/plugin.json") for p in written)
+        assert envelope["plugin_manifests"]["skipped"] == []
+
+        # Second run without --force: the existing file is preserved (skipped).
+        result2 = runner.invoke(pack_cmd, ["--json"])
+        assert result2.exit_code == 0
+        env2_start = result2.output.find("{")
+        assert env2_start >= 0, f"No JSON found in output: {result2.output!r}"
+        envelope2 = json_mod.loads(result2.output[env2_start:])
+        assert envelope2["plugin_manifests"]["written"] == []
+        assert any(
+            p.endswith(".claude-plugin/plugin.json")
+            for p in envelope2["plugin_manifests"]["skipped"]
+        )
+
+    def test_pack_marketplace_output_flag_removed(self, runner, tmp_path, monkeypatch):
+        """The legacy --marketplace-output flag was removed in favour of --marketplace-path."""
         monkeypatch.chdir(tmp_path)
         plugin_dir = tmp_path / ".github" / "plugins" / "mypkg"
         plugin_dir.mkdir(parents=True)
@@ -121,8 +299,10 @@ marketplace:
 """,
         )
         result = runner.invoke(pack_cmd, ["--marketplace-output", "dist/marketplace.json"])
-        # Deprecation warning should be printed
-        assert "deprecated" in result.output.lower()
+        # The flag no longer exists; Click rejects it with a usage error.
+        assert result.exit_code != 0
+        assert "no such option" in result.output.lower()
+        assert "--marketplace-path" in result.output
 
     def test_pack_marketplace_path_invalid_format(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

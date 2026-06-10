@@ -10,8 +10,13 @@ import click
 from ...constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
-from ...models.apm_package import APMPackage, ValidationResult, validate_apm_package  # noqa: F401
-from .._helpers import _expand_with_ancestors, _standalone_installed_packages
+from ...models.apm_package import APMPackage
+from .._helpers import (
+    UnknownPackageError,
+    _expand_with_ancestors,
+    _standalone_installed_packages,
+    resolve_requested_packages,
+)
 from ._utils import (
     _count_primitives,
     _get_package_display_info,
@@ -761,10 +766,21 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     """
     from ...core.auth import AuthResolver
     from ...core.command_logger import InstallLogger
+    from ...utils.console import _rich_warning
     from ..install import (
         _APM_IMPORT_ERROR,
         APM_DEPS_AVAILABLE,
         _install_apm_dependencies,
+    )
+
+    # Soft-deprecation (issue #1525): `apm update` is now a strict superset
+    # of this command. Kept working for one release; removed in the next
+    # breaking release.
+    _rich_warning(
+        "'apm deps update' is deprecated; use 'apm update' instead. "
+        "'apm update' now supports -g/--global, [PACKAGES]..., --force, and "
+        "--parallel-downloads, plus an interactive plan, --dry-run, and --yes.",
+        symbol="warning",
     )
 
     logger = InstallLogger(verbose=verbose, partial=bool(packages))
@@ -798,36 +814,14 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
         return
 
     # Validate and normalize requested packages to canonical dependency keys.
-    # The install engine matches only_packages by DependencyReference identity
-    # (e.g. "owner/repo"), so short names like "compliance-rules" must be
-    # mapped to their canonical form before calling the engine.
-    only_pkgs = None
-    if packages:
-        token_to_canonical: dict[str, str] = {}
-        for dep in all_deps:
-            canonical_key = dep.get_unique_key() or dep.repo_url or dep.get_display_name()
-            tokens = {canonical_key, dep.get_display_name(), dep.repo_url}
-            if hasattr(dep, "alias") and dep.alias:
-                tokens.add(dep.alias)
-            parts = dep.repo_url.split("/")
-            if len(parts) >= 2:
-                tokens.add(parts[-1])
-            for token in tokens:
-                if token and token not in token_to_canonical:
-                    token_to_canonical[token] = canonical_key
-
-        only_pkgs = []
-        seen: dict[str, bool] = {}
-        for pkg in packages:
-            canonical = token_to_canonical.get(pkg)
-            if not canonical:
-                available = ", ".join(dep.get_display_name() for dep in all_deps)
-                logger.error(f"Package '{pkg}' not found in {APM_YML_FILENAME}")
-                logger.progress(f"Available: {available}")
-                sys.exit(1)
-            if canonical not in seen:
-                seen[canonical] = True
-                only_pkgs.append(canonical)
+    # Shared with `apm update` (see commands/_helpers.py) so the two update
+    # surfaces resolve short names identically.
+    try:
+        only_pkgs = resolve_requested_packages(packages, all_deps)
+    except UnknownPackageError as e:
+        logger.error(f"Package '{e.token}' not found in {APM_YML_FILENAME}")
+        logger.progress(f"Available: {', '.join(e.available)}")
+        sys.exit(1)
 
     # Migrate legacy lockfile first, then snapshot SHAs for before/after diff
     from ...deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed

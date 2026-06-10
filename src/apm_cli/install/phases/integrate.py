@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import builtins
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.phases._redownload import _should_skip_redownload
+from apm_cli.install.phases._skip_logic import _compute_skip_download
 from apm_cli.install.phases.heal import run_heal_chain
 from apm_cli.install.services import integrate_local_content
 from apm_cli.install.sources import make_dependency_source
@@ -213,13 +214,43 @@ def _resolve_download_strategy(
         ref_changed=ref_changed,
     )
 
-    skip_download = install_path.exists() and (
-        (is_cacheable and not update_refs)
-        or (already_resolved and not update_refs)
-        or lockfile_match
+    # Issue #551: skip re-download when the BFS callback already fetched this
+    # dep during resolution AND the remote SHA still matches what was captured.
+    # This eliminates redundant network I/O in --update mode when apm_modules/
+    # is empty but the lockfile SHA is stale: the callback downloads the latest
+    # content (recording its SHA), and the sequential loop would otherwise
+    # re-download identical bytes because lockfile_match=False (stale SHA).
+    _callback_sha = ctx.callback_downloaded.get(dep_key)
+    _already_resolved_sha_match = (
+        already_resolved
+        and update_refs
+        and bool(resolved_ref)
+        and bool(_callback_sha)
+        and getattr(resolved_ref, "resolved_commit", None) not in (None, "cached")
+        and _callback_sha == resolved_ref.resolved_commit
     )
 
-    # Verify content integrity when lockfile has a hash
+    if _already_resolved_sha_match and logger:
+        logger.verbose_detail(f"  {dep_key}: callback SHA matches remote -- skipping re-download")
+
+    skip_download = _already_resolved_sha_match or _compute_skip_download(
+        install_path_exists=install_path.exists(),
+        is_cacheable=is_cacheable,
+        update_refs=update_refs,
+        already_resolved=already_resolved,
+        lockfile_match=lockfile_match,
+    )
+
+    # Verify content integrity when lockfile has a hash.
+    # NOTE: when _already_resolved_sha_match is True, the callback has already
+    # written the correct content for the current remote SHA -- but the lockfile
+    # content_hash still refers to the *previous* content. If the remote content
+    # changed (which is the typical stale-lockfile scenario), verify_package_hash
+    # will mismatch, safe_rmtree fires, and skip_download resets to False, causing
+    # a re-download. This is the correct safety behaviour but means the
+    # optimisation is a no-op for update scenarios where content_hash is present
+    # and stale. A follow-up can target this by propagating the callback-downloaded
+    # content_hash into the verified set before this guard runs.
     if (
         skip_download
         and _dep_locked_chk
@@ -315,6 +346,7 @@ def _integrate_root_project(
             diagnostics=diagnostics,
             logger=logger,
             scope=ctx.scope,
+            source_root=ctx.source_root,
             ctx=ctx,
         )
 

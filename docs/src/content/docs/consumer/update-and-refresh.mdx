@@ -26,15 +26,22 @@ apm update
 
 Re-resolves every dependency in `apm.yml` to its latest matching Git
 reference, prints the planned changes, and prompts for consent before
-rewriting `apm.lock.yaml` and redeploying primitives.
+rewriting `apm.lock.yaml` and redeploying primitives. Pass one or more
+package names (`apm update org/pkg-a org/pkg-b`) to refresh only those.
 
 Useful flags:
 
 - `--dry-run` -- show the resolution plan and exit; never writes.
 - `--yes` -- skip the consent prompt (for scripts and CI).
 - `-v, --verbose` -- show per-dependency resolution detail.
+- `-g, --global` -- refresh user-scope dependencies under `~/.apm/`
+  instead of the current project (pairs with `apm outdated -g`).
+- `--force` -- overwrite locally-authored files on collision.
+- `--parallel-downloads N` -- cap concurrent downloads (default 4;
+  `0` disables parallelism).
 
-This is the command that actually changes versions in your project.
+This is the command that actually changes versions in your project. It
+is a strict superset of the deprecated `apm deps update`.
 
 ## Inspect first
 

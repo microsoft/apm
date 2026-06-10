@@ -4,7 +4,42 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from apm_cli.integration.targets import KNOWN_TARGETS, active_targets
+import pytest
+
+from apm_cli.integration.targets import (
+    KNOWN_TARGETS,
+    RULE_FORMATS,
+    PrimitiveMapping,
+    active_targets,
+)
+
+
+class TestPrimitiveMappingValidation:
+    """output_compare must stay in lockstep with RULE_FORMATS (apm#1662)."""
+
+    @pytest.mark.parametrize("fmt", sorted(RULE_FORMATS))
+    def test_rule_format_without_output_compare_raises(self, fmt):
+        with pytest.raises(ValueError, match="output_compare=True"):
+            PrimitiveMapping("rules", ".md", fmt)
+
+    @pytest.mark.parametrize("fmt", sorted(RULE_FORMATS))
+    def test_rule_format_with_output_compare_ok(self, fmt):
+        m = PrimitiveMapping("rules", ".md", fmt, output_compare=True)
+        assert m.output_compare is True
+
+    def test_output_compare_on_non_rule_format_raises(self):
+        with pytest.raises(ValueError, match="not a known rule format"):
+            PrimitiveMapping("instructions", ".md", "copilot", output_compare=True)
+
+    def test_non_rule_format_default_ok(self):
+        m = PrimitiveMapping("agents", ".md", "claude_agent")
+        assert m.output_compare is False
+
+    def test_known_rule_targets_set_output_compare(self):
+        for name in ("claude", "cursor", "windsurf"):
+            mapping = KNOWN_TARGETS[name].primitives["instructions"]
+            assert mapping.format_id in RULE_FORMATS
+            assert mapping.output_compare is True
 
 
 class TestActiveTargets:

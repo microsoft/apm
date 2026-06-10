@@ -168,6 +168,7 @@ class TestTargetProfileUserScope:
             "copilot-cowork",
             "copilot-app",
             "agent-skills",
+            "openclaw",
         }
         assert set(KNOWN_TARGETS.keys()) == expected
 
@@ -201,7 +202,8 @@ class TestTargetProfileUserScope:
         assert KNOWN_TARGETS["claude"].user_root_dir is None
 
     def test_copilot_unsupported_user_primitives(self):
-        assert "instructions" in KNOWN_TARGETS["copilot"].unsupported_user_primitives
+        # Instructions are now supported at user scope via concat (#650).
+        assert "instructions" not in KNOWN_TARGETS["copilot"].unsupported_user_primitives
 
     def test_effective_root_project_scope(self):
         assert KNOWN_TARGETS["copilot"].effective_root(user_scope=False) == ".github"
@@ -217,10 +219,11 @@ class TestTargetProfileUserScope:
         assert KNOWN_TARGETS["claude"].supports_at_user_scope("commands") is True
 
     def test_supports_at_user_scope_partial(self):
-        # Copilot supports agents and prompts at user scope but not instructions.
+        # Copilot supports agents, prompts, and instructions at user scope.
+        # Instructions are concatenated into copilot-instructions.md (#650).
         assert KNOWN_TARGETS["copilot"].supports_at_user_scope("agents") is True
         assert KNOWN_TARGETS["copilot"].supports_at_user_scope("prompts") is True
-        assert KNOWN_TARGETS["copilot"].supports_at_user_scope("instructions") is False
+        assert KNOWN_TARGETS["copilot"].supports_at_user_scope("instructions") is True
 
     def test_supports_at_user_scope_cursor_partial(self):
         # Cursor supports agents at user scope but not instructions
@@ -294,8 +297,8 @@ class TestScopeWarnings:
 
     def test_warn_message_includes_unsupported_primitives(self):
         msg = warn_unsupported_user_scope()
-        # Copilot excludes instructions.
-        assert "copilot (instructions)" in msg
+        # Copilot now supports instructions at user scope (#650); not in warning.
+        assert "copilot (instructions)" not in msg
         # Cursor excludes instructions
         assert "cursor (instructions)" in msg
         # OpenCode excludes hooks

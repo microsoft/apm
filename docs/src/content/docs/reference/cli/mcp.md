@@ -116,6 +116,13 @@ Network failures against an overridden registry surface an explicit
 hint pointing at `MCP_REGISTRY_URL` so misconfigurations are easy to
 spot in CI logs.
 
+Registry URL resolution order (first set value wins):
+
+1. `--registry <url>` flag on `apm mcp install` / `apm install --mcp` (this invocation only)
+2. `MCP_REGISTRY_URL` environment variable -- prints `Registry: <url>` diagnostic
+3. `mcp-registry-url` in `~/.apm/config.json` (set via `apm config set mcp-registry-url`) -- prints `Registry (config): <url>` diagnostic
+4. Built-in public default (silent)
+
 ## Examples
 
 Discover and inspect:
@@ -138,11 +145,20 @@ apm mcp install api --transport http --url https://example.com/mcp \
   --header "Authorization=Bearer $TOKEN"
 ```
 
-Point at an enterprise registry mirror:
+Point at an enterprise registry mirror (session only):
 
 ```bash
 export MCP_REGISTRY_URL=https://mcp.internal.example.com
 apm mcp list
+```
+
+Point at an enterprise registry mirror (persistent across sessions):
+
+```bash
+apm config set mcp-registry-url https://mcp.internal.example.com
+apm mcp list
+# Remove the persisted URL:
+apm config unset mcp-registry-url
 ```
 
 The registry must implement the [MCP Registry v0.1 spec](https://github.com/modelcontextprotocol/registry) (apm calls `/v0.1/servers/...`). Registries serving only the legacy `/v0/` paths will return 404.

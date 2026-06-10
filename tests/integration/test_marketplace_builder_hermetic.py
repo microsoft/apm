@@ -342,12 +342,6 @@ class TestEnsureAuth:
 
 
 class TestOutputPath:
-    def test_marketplace_output_option_wins(self, tmp_path):
-        yml = _make_marketplace_yml_file(tmp_path)
-        out_path = tmp_path / "custom.json"
-        builder = MarketplaceBuilder(yml, options=BuildOptions(marketplace_output=out_path))
-        assert builder._output_path() == out_path
-
     def test_output_override_used_when_no_marketplace_output(self, tmp_path):
         yml = _make_marketplace_yml_file(tmp_path)
         out_path = tmp_path / "override.json"

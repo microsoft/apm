@@ -12,7 +12,6 @@ primitives are dispatched per-target in the outer loop.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Type  # noqa: F401, UP035
 
 from apm_cli.integration.base_integrator import BaseIntegrator
 

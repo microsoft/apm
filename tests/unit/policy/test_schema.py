@@ -4,6 +4,7 @@ import unittest
 
 from apm_cli.policy.schema import (
     ApmPolicy,
+    AuditPolicy,
     CompilationPolicy,
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
@@ -12,6 +13,7 @@ from apm_cli.policy.schema import (
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
+    SecurityPolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -118,6 +120,10 @@ class TestApmPolicyDefaults(unittest.TestCase):
         self.assertIsInstance(policy.compilation, CompilationPolicy)
         self.assertIsInstance(policy.manifest, ManifestPolicy)
         self.assertIsInstance(policy.unmanaged_files, UnmanagedFilesPolicy)
+        self.assertIsInstance(policy.security, SecurityPolicy)
+        self.assertIsInstance(policy.security.audit, AuditPolicy)
+        self.assertIsNone(policy.security.audit.on_install)
+        self.assertIsNone(policy.security.audit.external)
 
     def test_custom_construction(self):
         policy = ApmPolicy(
@@ -137,6 +143,27 @@ class TestApmPolicyDefaults(unittest.TestCase):
         policy = ApmPolicy()
         with self.assertRaises(AttributeError):
             policy.name = "modified"  # type: ignore[misc]
+
+
+class TestSecurityPolicyDefaults(unittest.TestCase):
+    """Test SecurityPolicy / AuditPolicy defaults and construction."""
+
+    def test_defaults(self):
+        sec = SecurityPolicy()
+        self.assertIsInstance(sec.audit, AuditPolicy)
+        self.assertIsNone(sec.audit.on_install)
+        self.assertIsNone(sec.audit.external)
+
+    def test_custom_construction(self):
+        audit = AuditPolicy(on_install="block", external=("skillspector",))
+        sec = SecurityPolicy(audit=audit)
+        self.assertEqual(sec.audit.on_install, "block")
+        self.assertEqual(sec.audit.external, ("skillspector",))
+
+    def test_frozen(self):
+        audit = AuditPolicy()
+        with self.assertRaises(AttributeError):
+            audit.on_install = "block"  # type: ignore[misc]
 
 
 if __name__ == "__main__":

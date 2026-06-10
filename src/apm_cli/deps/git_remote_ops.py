@@ -6,7 +6,6 @@ no side effects.
 """
 
 import re
-from typing import Dict, List  # noqa: F401, UP035
 
 from ..models.apm_package import GitReferenceType, RemoteRef
 

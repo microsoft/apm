@@ -60,6 +60,10 @@ unmanaged_files:
 registry_source:                        # experimental: requires `apm experimental enable registries`
   require: []                           # registry names that MUST be reachable in the merged registry map
   allow_non_registry: true              # when false, blocks any dep not routed through a configured registry
+
+bin_deploy:                             # marketplace_plugin bin/ executable deployment (Claude, global installs)
+  deny_all: false                       # when true, suppress bin/ deploy for every plugin
+  deny: []                              # canonical strings (owner/name) whose bin/ must not deploy
 ```
 
 ## Registry source governance (experimental)
@@ -85,6 +89,66 @@ The check fires from all four call sites (`policy_gate`,
 `policy_target_check`, `run_policy_checks`, `run_policy_preflight`) so
 `apm install`, `apm install <pkg>`, `apm deps update`, and
 `apm audit --ci` all enforce the same gate.
+
+## External scanner governance (experimental)
+
+Gate the behaviour of third-party SARIF scanners run by `apm audit
+--external <name>` (behind `apm experimental enable external-scanners`).
+The stance is **restrict-only**: policy can tighten scanner behaviour but
+never adds argv tokens itself and never forces LLM egress from an
+untrusted project-local policy.
+
+```yaml
+# .github/apm-policy.yml
+security:
+  audit:
+    external: [skillspector]              # scanners the org permits
+    scanners:                             # NEW, optional per-scanner governance
+      skillspector:
+        allow_args: false                 # strip all user/CLI extra-args (kill-switch)
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `scanners.<name>.allow_args` | unset (no opinion) | When `false`, all user/CLI `--external-args` and config `external.<name>.args` are stripped to an empty list before the scanner runs -- locks the scanner to its vetted invocation. AND-merged across inheritance: any ancestor setting `false` wins. |
+
+Notes:
+- Policy **never injects argv** -- only the local user contributes scanner
+  flags (via `--external-args` or `external.<name>.args`), and those are
+  allowlist-validated by the adapter.
+- `allow_args: false` is enforced at the **install-time** audit path (which
+  loads org policy). A bare `apm audit` does not load org policy, so it
+  relies on the adapter's allowlist for arg safety.
+- LLM mode is opt-in by the user only; a project-local policy cannot mandate
+  it (this avoids turning a checked-in policy file into a content-exfiltration
+  channel).
+
+## Plugin bin/ deployment governance
+
+When a `marketplace_plugin` package ships a `bin/` directory, a global
+install (`apm install -g`) deploys those executables into
+`~/.claude/skills/<name>/bin/` so Claude Code invokes them as bare
+commands (the skills-directory plugin contract). Deployment is
+Claude-only and user-scope only; project-scope installs never deploy
+executables.
+
+```yaml
+# .github/apm-policy.yml
+bin_deploy:
+  deny_all: true                        # block every plugin's bin/ deploy org-wide
+  # or target specific packages:
+  deny:
+    - myorg/untrusted-plugin            # canonical owner/name string
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `deny_all` | `false` | When `true`, suppresses bin/ deployment for every `marketplace_plugin`, regardless of `deny`. |
+| `deny` | `[]` | Canonical package strings (`owner/name`) whose bin/ executables must not deploy. |
+
+Deployed executables are placed on Claude Code's `PATH` and invoked
+without further confirmation, so use this field to opt out in
+environments where plugin executables are not trusted by default.
 
 ## Local content governance
 

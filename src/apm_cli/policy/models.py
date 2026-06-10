@@ -7,7 +7,6 @@ baseline checks (``ci_checks``) and policy checks (``policy_checks``).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List  # noqa: F401, UP035
 
 # Check name -> most relevant artifact for SARIF locations.
 _CHECK_ARTIFACT_MAP: dict[str, str] = {

@@ -10,12 +10,14 @@ Refresh the dependencies declared in `apm.yml` to the latest matching Git refs, 
 ## Synopsis
 
 ```bash
-apm update [OPTIONS]
+apm update [OPTIONS] [PACKAGES...]
 ```
 
 ## Description
 
 `apm update` re-resolves every dependency in your project's `apm.yml` against the newest Git ref allowed by its constraint, prints a structured plan -- **added**, **updated**, **removed**, **unchanged** -- and prompts before touching anything. Decline the prompt and APM exits cleanly: no lockfile writes, no filesystem changes.
+
+Pass one or more `PACKAGES` to refresh only those dependencies, or `-g/--global` to refresh the user-scope dependencies under `~/.apm/` instead of the current project. With these flags `apm update` is a strict superset of the deprecated [`apm deps update`](../deps/#apm-deps-update).
 
 This is the dependency-refresh command. To upgrade the APM CLI binary itself, see [`apm self-update`](../self-update/).
 
@@ -25,6 +27,12 @@ The interactive prompt defaults to **No**. In non-interactive contexts (CI, pipe
 
 For a read-only install that pins to whatever is already in `apm.lock.yaml` -- the right command for CI -- use [`apm install --frozen`](../install/).
 
+## Arguments
+
+| Argument | Description |
+| --- | --- |
+| `PACKAGES...` | Optional. One or more dependency names to refresh (short name like `compliance-rules` or canonical `owner/repo`). Omit to refresh everything. Unknown names exit non-zero with the available list. |
+
 ## Options
 
 | Flag | Default | Description |
@@ -32,6 +40,9 @@ For a read-only install that pins to whatever is already in `apm.lock.yaml` -- t
 | `--yes`, `-y` | off | Skip the interactive prompt and accept the plan. Required for non-interactive use. |
 | `--dry-run` | off | Compute and print the plan without prompting and without writing the lockfile or filesystem. |
 | `--verbose`, `-v` | off | Show per-dependency resolution detail (old ref, new ref, source) and full error context. |
+| `--global`, `-g` | off | Refresh user-scope dependencies under `~/.apm/` instead of the current project (mirrors `apm install -g`). |
+| `--force` | off | Overwrite locally-authored files on collision. |
+| `--parallel-downloads N` | `4` | Max concurrent package downloads. `0` disables parallelism. |
 | `--target TARGET`, `-t TARGET` | auto-detect | Agent harness(es) to update for. Accepts a single value (`claude`, `copilot`, `cursor`, `windsurf`, `codex`, `opencode`, `gemini`) or comma-separated list (`--target claude,cursor`). Overrides `apm.yml targets:` and auto-detection. |
 
 ## Examples
@@ -53,6 +64,18 @@ Accept non-interactively (CI, scripts):
 
 ```bash
 apm update --yes
+```
+
+Refresh only specific packages:
+
+```bash
+apm update org/pkg-a org/pkg-b
+```
+
+Refresh user-scope dependencies installed with `apm install -g`:
+
+```bash
+apm update -g
 ```
 
 Decline the prompt -- nothing is written:

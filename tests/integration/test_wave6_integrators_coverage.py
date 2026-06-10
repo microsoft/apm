@@ -1379,7 +1379,7 @@ class TestSkillIntegratorDirsEqual:
         b.mkdir()
         (a / "SKILL.md").write_text("content")
         (b / "SKILL.md").write_text("content")
-        assert SkillIntegrator._dirs_equal(a, b) is True
+        assert SkillIntegrator.is_skill_dir_identical_to_source(a, b) is True
 
     def test_different_content(self, tmp_path):
         a = tmp_path / "a"
@@ -1388,7 +1388,7 @@ class TestSkillIntegratorDirsEqual:
         b.mkdir()
         (a / "SKILL.md").write_text("content A")
         (b / "SKILL.md").write_text("content B")
-        assert SkillIntegrator._dirs_equal(a, b) is False
+        assert SkillIntegrator.is_skill_dir_identical_to_source(a, b) is False
 
     def test_extra_file_in_one(self, tmp_path):
         a = tmp_path / "a"
@@ -1398,7 +1398,7 @@ class TestSkillIntegratorDirsEqual:
         (a / "SKILL.md").write_text("content")
         (b / "SKILL.md").write_text("content")
         (a / "extra.md").write_text("extra")
-        assert SkillIntegrator._dirs_equal(a, b) is False
+        assert SkillIntegrator.is_skill_dir_identical_to_source(a, b) is False
 
 
 class TestPromoteSubSkills:

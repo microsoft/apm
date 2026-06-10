@@ -44,14 +44,14 @@ edit-in-place), plus optional label sweeps.
 
 | Role | Agent | Always active? |
 |---|---|---|
-| Classifier | [doc-analyser](../../agents/doc-analyser.agent.md) inside [docs-impact-classifier](../docs-impact-classifier/SKILL.md) | Yes (every run) |
-| Localizer | [docs-impact-localizer](../docs-impact-localizer/SKILL.md) | Only on `in_place` verdict |
-| Architect | [docs-impact-architect](../docs-impact-architect/SKILL.md) | Only on `structural` verdict |
-| Writer | [doc-writer](../../agents/doc-writer.agent.md) | Per candidate page (fan-out) |
-| Verifier | [python-architect](../../agents/python-architect.agent.md) | Per candidate page (fan-out, S7) |
-| Editorial | [editorial-owner](../../agents/editorial-owner.agent.md) | Once across all redrafts |
-| Growth | [oss-growth-hacker](../../agents/oss-growth-hacker.agent.md) | Once across all redrafts |
-| Synthesizer | [cdo](../../agents/cdo.agent.md) | Once, with ALIGNMENT LOOP up to 3 redrafts |
+| Classifier | [doc-analyser](../../../.apm/agents/doc-analyser.agent.md) inside [docs-impact-classifier](../../../.apm/skills/docs-impact-classifier/SKILL.md) | Yes (every run) |
+| Localizer | [docs-impact-localizer](../../../.apm/skills/docs-impact-localizer/SKILL.md) | Only on `in_place` verdict |
+| Architect | [docs-impact-architect](../../../.apm/skills/docs-impact-architect/SKILL.md) | Only on `structural` verdict |
+| Writer | [doc-writer](../../../.apm/agents/doc-writer.agent.md) | Per candidate page (fan-out) |
+| Verifier | [python-architect](../../../.apm/agents/python-architect.agent.md) | Per candidate page (fan-out, S7) |
+| Editorial | [editorial-owner](../../../.apm/agents/editorial-owner.agent.md) | Once across all redrafts |
+| Growth | [oss-growth-hacker](../../../.apm/agents/oss-growth-hacker.agent.md) | Once across all redrafts |
+| Synthesizer | [cdo](../../../.apm/agents/cdo.agent.md) | Once, with ALIGNMENT LOOP up to 3 redrafts |
 
 ## Topology
 

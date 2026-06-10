@@ -2,7 +2,6 @@
 
 import hashlib
 from pathlib import Path
-from typing import Optional  # noqa: F401
 
 from apm_cli.install.cache_pin import MARKER_FILENAME as _APM_PIN_MARKER
 

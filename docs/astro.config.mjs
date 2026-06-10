@@ -166,6 +166,7 @@ export default defineConfig({
 						{ label: 'Run scripts', slug: 'consumer/run-scripts' },
 						{ label: 'Update and refresh', slug: 'consumer/update-and-refresh' },
 						{ label: 'Install MCP servers', slug: 'consumer/install-mcp-servers' },
+						{ label: 'Install LSP servers', slug: 'consumer/install-lsp-servers' },
 						{ label: 'Authentication', slug: 'consumer/authentication' },
 						{ label: 'Private and org packages', slug: 'consumer/private-and-org-packages' },
 						{ label: 'Deploy a local bundle', slug: 'consumer/deploy-a-bundle' },

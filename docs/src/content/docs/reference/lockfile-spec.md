@@ -84,6 +84,15 @@ mcp_configs:
     type: stdio
     command: docker
     args: ["run", "-i", "--rm", "ghcr.io/github/github-mcp-server"]
+lsp_servers:
+  - pyright
+lsp_configs:
+  pyright:
+    name: pyright
+    command: pyright-langserver
+    args: ["--stdio"]
+    extensionToLanguage:
+      ".py": python
 local_deployed_files:
   - .github/skills/my-local-skill/SKILL.md
 local_deployed_file_hashes:
@@ -98,6 +107,8 @@ local_deployed_file_hashes:
 | `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
 | `mcp_servers` | list of strings | no | Names of MCP servers declared in the manifest at install time. |
 | `mcp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect MCP drift. |
+| `lsp_servers` | list of strings | no | Names of LSP servers declared in the manifest at install time. |
+| `lsp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect LSP drift. |
 | `local_deployed_files` | list | no | Files this project itself contributes (sources its own primitives). See [self entry](#self-entry). |
 | `local_deployed_file_hashes` | map | no | `path -> sha256` for `local_deployed_files`. |
 

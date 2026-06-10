@@ -8,9 +8,9 @@ output format specifically optimized for Claude's project memory system.
 import builtins
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 
 from ..primitives.models import Chatmode, Instruction, PrimitiveCollection
+from ..utils.paths import resolve_base_and_source_dirs
 from ..version import get_version
 from .constants import BUILD_ID_PLACEHOLDER
 from .constitution import read_constitution
@@ -62,16 +62,20 @@ class ClaudeFormatter:
     not included in CLAUDE.md (same as AGENTS.md behavior).
     """
 
-    def __init__(self, base_dir: str = "."):
+    def __init__(self, base_dir: str = ".", source_dir: str | None = None):
         """Initialize the Claude formatter.
 
         Args:
-            base_dir (str): Base directory for compilation.
+            base_dir (str): Base directory for compilation -- where CLAUDE.md
+                outputs are written.  Defaults to the current directory.
+            source_dir (Optional[str]): Where source primitives and the
+                constitution are read from.  Defaults to ``base_dir`` for
+                back-compat; set explicitly when ``apm compile --root``
+                redirects writes but sources remain in ``$PWD`` so that
+                ``<!-- Source: ... -->`` provenance comments render relative
+                to the user's working directory rather than the deploy root.
         """
-        try:
-            self.base_dir = Path(base_dir).resolve()
-        except (OSError, FileNotFoundError):
-            self.base_dir = Path(base_dir).absolute()
+        self.base_dir, self.source_dir = resolve_base_and_source_dirs(base_dir, source_dir)
 
         self.warnings: builtins.list[str] = []
         self.errors: builtins.list[str] = []
@@ -172,7 +176,7 @@ class ClaudeFormatter:
 
         # Handle empty placement map with constitution or dependencies
         if not placement_map:
-            constitution = read_constitution(self.base_dir)
+            constitution = read_constitution(self.source_dir)
             dependencies = self._collect_dependencies()
             if constitution or dependencies:
                 root_path = self.base_dir / "CLAUDE.md"
@@ -298,7 +302,7 @@ class ClaudeFormatter:
 
         # Constitution section (only for root CLAUDE.md)
         if placement.is_root:
-            constitution = read_constitution(self.base_dir)
+            constitution = read_constitution(self.source_dir)
             if constitution:
                 sections.append("# Constitution")
                 sections.append("")
@@ -317,7 +321,7 @@ class ClaudeFormatter:
                 build_attributed_instructions(
                     placement.instructions,
                     placement.source_attribution,
-                    self.base_dir,
+                    self.source_dir,
                 )
             )
 

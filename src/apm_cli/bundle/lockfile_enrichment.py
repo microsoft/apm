@@ -2,7 +2,6 @@
 
 import posixpath
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple, Union  # noqa: F401, UP035
 
 from ..deps.lockfile import LockFile
 from ..integration.targets import KNOWN_TARGETS
@@ -50,6 +49,9 @@ _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
         ".github/agents/": ".windsurf/skills/",
     },
     "agent-skills": {
+        ".github/skills/": ".agents/skills/",
+    },
+    "openclaw": {
         ".github/skills/": ".agents/skills/",
     },
 }

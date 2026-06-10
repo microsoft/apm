@@ -624,17 +624,20 @@ class TestNestedGroupSupport:
         assert dep.reference == "v2.0"
         assert dep.is_virtual is False
 
-    def test_nested_group_with_alias_shorthand_removed(self):
-        """Shorthand @alias on nested groups is no longer supported."""
-        with pytest.raises(ValueError):
+    def test_nested_group_alias_rejected(self):
+        """Shorthand @alias on nested groups is rejected."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
             DependencyReference.parse("gitlab.com/group/subgroup/repo@my-alias")
 
-    def test_nested_group_with_ref_and_alias_shorthand_not_parsed(self):
-        """Shorthand #ref@alias on nested groups — @ is no longer parsed as alias separator."""
-        dep = DependencyReference.parse("gitlab.com/group/subgroup/repo#main@alias")
-        assert dep.repo_url == "group/subgroup/repo"
-        assert dep.reference == "main@alias"
-        assert dep.alias is None
+    def test_nested_group_with_ref_and_alias_rejected(self):
+        """Shorthand #ref@alias on nested groups is rejected at parse time."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("gitlab.com/group/subgroup/repo#main@alias")
+
+    def test_nested_group_with_subpath_and_alias_rejected(self):
+        """Subpath + alias under a nested group is rejected (silent-miscoercion bug fix)."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("gitlab.com/group/subgroup/repo/skills/foo@my-alias")
 
     # --- SSH URLs ---
 
@@ -1226,3 +1229,67 @@ class TestDefaultPortNormalisation:
         dep_bare = DependencyReference.parse("https://github.com/owner/repo")
         assert dep_with_port.port == dep_bare.port
         assert dep_with_port.to_canonical() == dep_bare.to_canonical()
+
+
+class TestGHESFQDNSubpathParsing:
+    """GHES hosts configured via GITHUB_HOST get owner/repo + virtual-path split (#1673)."""
+
+    def test_ghes_subpath_split(self, monkeypatch):
+        """FQDN shorthand with subpath on configured GHES splits at owner/repo."""
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        dep = DependencyReference.parse("ghe.example.com/org/repo/packages/skill")
+        assert dep.host == "ghe.example.com"
+        assert dep.repo_url == "org/repo"
+        assert dep.virtual_path == "packages/skill"
+        assert dep.is_virtual is True
+
+    def test_ghes_subpath_with_ref(self, monkeypatch):
+        """GHES FQDN shorthand with ref correctly splits subpath and ref."""
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        dep = DependencyReference.parse("ghe.example.com/org/repo/packages/skill#v1.0")
+        assert dep.host == "ghe.example.com"
+        assert dep.repo_url == "org/repo"
+        assert dep.virtual_path == "packages/skill"
+        assert dep.reference == "v1.0"
+
+    def test_ghes_owner_repo_only(self, monkeypatch):
+        """GHES FQDN shorthand without subpath is a normal repo reference."""
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        dep = DependencyReference.parse("ghe.example.com/org/repo")
+        assert dep.host == "ghe.example.com"
+        assert dep.repo_url == "org/repo"
+        assert dep.virtual_path is None
+        assert dep.is_virtual is False
+
+    def test_ghes_deep_subpath(self, monkeypatch):
+        """GHES FQDN shorthand with multiple subpath segments."""
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        dep = DependencyReference.parse("ghe.example.com/org/repo/skills/security/audit")
+        assert dep.host == "ghe.example.com"
+        assert dep.repo_url == "org/repo"
+        assert dep.virtual_path == "skills/security/audit"
+
+    def test_generic_host_unchanged_without_ghes_env(self, monkeypatch):
+        """Without GITHUB_HOST, generic hosts still treat all segments as repo path."""
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        dep = DependencyReference.parse("ghe.example.com/org/repo/packages/skill")
+        assert dep.host == "ghe.example.com"
+        assert dep.repo_url == "org/repo/packages/skill"
+        assert dep.is_virtual is False
+
+    def test_existing_generic_host_unaffected_by_different_ghes(self, monkeypatch):
+        """A generic host that is NOT GITHUB_HOST keeps all-segments-as-repo."""
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        dep = DependencyReference.parse("git.company.internal/team/skills/brand-guidelines")
+        assert dep.host == "git.company.internal"
+        assert dep.repo_url == "team/skills/brand-guidelines"
+        assert dep.is_virtual is False
+
+    def test_ghes_virtual_file_extension(self, monkeypatch):
+        """GHES FQDN shorthand with virtual file extension splits correctly."""
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        dep = DependencyReference.parse("ghe.example.com/org/repo/prompts/review.prompt.md")
+        assert dep.host == "ghe.example.com"
+        assert dep.repo_url == "org/repo"
+        assert dep.virtual_path == "prompts/review.prompt.md"
+        assert dep.is_virtual is True

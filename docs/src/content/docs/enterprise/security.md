@@ -162,6 +162,10 @@ apm audit -f markdown -o report.md     # Step summaries
 
 See [Content scanning with `apm audit`](../reference/cli/audit/) for usage details and exit codes.
 
+:::tip[External scanners (Experimental)]
+`apm audit` can also ingest findings from **third-party SARIF scanners** (Semgrep, CodeQL, NVIDIA SkillSpector, etc.) so a single audit run reports both APM's native findings and external tool results. See [External scanners](../integrations/external-scanners/) for setup.
+:::
+
 ### Limitations
 
 Content scanning detects hidden Unicode characters. It does not detect:
@@ -220,18 +224,47 @@ A path must pass all three checks. Failure on any check prevents the file from b
 
 ### Symlink handling
 
-Symlinks are never followed during file discovery or artifact operations:
+Symlinks are rejected in most APM operations; the only context where in-package
+symlinks are followed is local-path install, under a per-symlink containment
+check (see below):
 
 - **Primitive discovery** (instructions, agents, prompts, contexts, skills) rejects symlinked files during glob-based file enumeration. Symlinks are silently skipped.
 - **Prompt resolution** (`apm preview`, `apm run`) rejects symlinked `.prompt.md` files with an explicit error message.
 - **Integrator file discovery** (agents, instructions, prompts, skills, hooks) rejects symlinked files via `is_symlink()` checks in `find_files_by_glob` and `find_hook_files`.
-- **Tree copy operations** skip symlinks entirely -- they are excluded from the copy via an ignore filter.
+- **Deploy tree copy operations** skip symlinks entirely -- they are excluded from the copy via an ignore filter.
 - **MCP configuration files** that are symlinks are rejected with a warning and not parsed.
 - **Manifest parsing** requires files to pass both `.is_file()` and `not .is_symlink()` checks.
 - **Manifest integrity** -- a malformed `apm.yml` (invalid YAML or non-mapping content) triggers a failing `manifest-parse` audit check. Policy and baseline CI checks never silently pass when the manifest cannot be parsed. If this check fires, fix the YAML syntax error in your `apm.yml` and re-run the audit.
 - **Archive creation** -- `apm pack` excludes symlinks from bundled archives. Packaged artifacts contain no symbolic links, preventing symlink-based escape attacks in distributed bundles.
 
-This prevents symlink-based attacks that could escape allowed directories or cause APM to read or write outside the project root.
+#### Local-install symlink dereference and containment guarantee
+
+When installing a local-path dependency (`apm install /path/to/pkg`), APM
+dereferences in-package symlinks so that the staged copy in `apm_modules/`
+contains regular files, giving local and remote installs the same deployed
+output for in-package shared references.
+
+**Threat model.** A symlink inside a local package could point to a file
+outside the package root, giving a malicious package a path-traversal vector.
+APM prevents this with a per-symlink containment check (see also
+[Path traversal prevention](#path-traversal-prevention)):
+
+1. Each symlink is resolved per-file (resolve -> validate -> copy2) before that
+   symlink target is copied into the staging tree.
+2. The resolved target is verified to remain inside the package root using
+   the `ensure_path_within()` containment helper.
+3. If a symlink is broken or unresolvable, APM **hard-fails the install** with a
+   `PathTraversalError` instead of staging a dangling reference.
+4. If the resolved target escapes the package root, APM **hard-fails the
+   install** with a `PathTraversalError` and a human-readable message naming
+   the offending link. No warn-and-skip; no silent follow.
+5. Only symlinks that resolve within the package root are dereferenced and
+   copied as regular files. External symlinks are never followed.
+6. Circular directory-symlink chains are detected deterministically with an
+   explicit visited-set guard, independent of OS-level ELOOP limits.
+7. An unreadable package directory (e.g. a `PermissionError` while listing its
+   entries) hard-fails the install with a `PathTraversalError` rather than
+   leaking a bare OS error up the install stack.
 
 ### Collision detection
 

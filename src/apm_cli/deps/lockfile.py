@@ -411,6 +411,8 @@ class LockFile:
     dependencies: dict[str, LockedDependency] = field(default_factory=dict)
     mcp_servers: list[str] = field(default_factory=list)
     mcp_configs: dict[str, dict] = field(default_factory=dict)
+    lsp_servers: list[str] = field(default_factory=list)
+    lsp_configs: dict[str, dict] = field(default_factory=dict)
     local_deployed_files: list[str] = field(default_factory=list)
     local_deployed_file_hashes: dict[str, str] = field(default_factory=dict)
 
@@ -489,6 +491,10 @@ class LockFile:
                 data["mcp_servers"] = sorted(self.mcp_servers)
             if self.mcp_configs:
                 data["mcp_configs"] = dict(sorted(self.mcp_configs.items()))
+            if self.lsp_servers:
+                data["lsp_servers"] = sorted(self.lsp_servers)
+            if self.lsp_configs:
+                data["lsp_configs"] = dict(sorted(self.lsp_configs.items()))
             if self.local_deployed_files:
                 data["local_deployed_files"] = sorted(self.local_deployed_files)
             if self.local_deployed_file_hashes:
@@ -519,6 +525,8 @@ class LockFile:
             lock.add_dependency(LockedDependency.from_dict(dep_data))
         lock.mcp_servers = list(data.get("mcp_servers", []))
         lock.mcp_configs = dict(data.get("mcp_configs") or {})
+        lock.lsp_servers = list(data.get("lsp_servers", []))
+        lock.lsp_configs = dict(data.get("lsp_configs") or {})
         lock.local_deployed_files = list(data.get("local_deployed_files", []))
         lock.local_deployed_file_hashes = dict(data.get("local_deployed_file_hashes") or {})
         # Synthesize a virtual self-entry representing the project's own
@@ -653,7 +661,7 @@ class LockFile:
         self.write(path)
 
     def is_semantically_equivalent(self, other: LockFile) -> bool:
-        """Return True if *other* has the same deps, MCP servers, and configs.
+        """Return True if *other* has the same deps, MCP/LSP servers, and configs.
 
         Ignores ``generated_at`` and ``apm_version`` so that a no-change
         install does not dirty the lockfile.
@@ -669,6 +677,10 @@ class LockFile:
         if sorted(self.mcp_servers) != sorted(other.mcp_servers):
             return False
         if self.mcp_configs != other.mcp_configs:
+            return False
+        if sorted(self.lsp_servers) != sorted(other.lsp_servers):
+            return False
+        if self.lsp_configs != other.lsp_configs:
             return False
         if sorted(self.local_deployed_files) != sorted(other.local_deployed_files):
             return False

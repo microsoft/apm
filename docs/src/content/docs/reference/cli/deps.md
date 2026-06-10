@@ -89,6 +89,10 @@ Exit codes: `0` on success, `1` when the package is not installed or the query m
 
 ### `apm deps update`
 
+:::caution[Deprecated]
+`apm deps update` is deprecated in favor of [`apm update`](../update/), which is now a strict superset: it supports `-g/--global`, `[PACKAGES...]`, `--force`, and `--parallel-downloads`, plus an interactive plan, `--dry-run`, and `--yes`. `apm deps update` keeps working for one release and is removed in the next breaking release.
+:::
+
 Re-resolve git references for installed dependencies (direct and transitive), download updated content, re-integrate primitives, and regenerate `apm.lock.yaml`.
 
 ```bash

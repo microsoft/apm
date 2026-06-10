@@ -33,7 +33,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional  # noqa: F401, UP035
+from typing import Any
 
 import yaml
 

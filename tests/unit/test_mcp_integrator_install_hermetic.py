@@ -371,6 +371,121 @@ class TestRunMcpInstallOptInRuntimes:
         assert result >= 0
 
 
+class TestRunMcpInstallIntelliJDetection:
+    """Fixture-backed coverage for the JetBrains (intellij) auto-detect branch."""
+
+    def _make_reg_dep(self, name):
+        dep = MagicMock()
+        dep.name = name
+        dep.is_registry_resolved = True
+        dep.is_self_defined = False
+        return dep
+
+    def test_intellij_detected_when_config_dir_exists(self, tmp_path):
+        from apm_cli.integration.mcp_integrator_install import run_mcp_install
+
+        # Fake the JetBrains user-scope config dir so detection fires.
+        ij_dir = tmp_path / "github-copilot" / "intellij"
+        ij_dir.mkdir(parents=True)
+
+        dep = self._make_reg_dep("srv")
+        logger = MagicMock()
+        logger.mcp_lookup_heartbeat = MagicMock()
+
+        mock_client = MagicMock()
+        mock_manager = MagicMock()
+        mock_manager.is_runtime_available.return_value = False
+
+        mock_ops = MagicMock()
+        mock_ops.validate_servers_exist.return_value = (["srv"], [])
+        mock_ops.check_servers_needing_installation.return_value = []
+
+        captured_targets: list = []
+
+        def _capture_gate(rts, **_kw):
+            captured_targets.extend(rts)
+            return rts
+
+        with (
+            patch("apm_cli.factory.ClientFactory.create_client", return_value=mock_client),
+            patch("apm_cli.runtime.manager.RuntimeManager", return_value=mock_manager),
+            patch(
+                "apm_cli.adapters.client.intellij._intellij_config_dir",
+                return_value=ij_dir,
+            ),
+            patch(
+                "apm_cli.registry.operations.MCPServerOperations",
+                return_value=mock_ops,
+            ),
+            patch(
+                "apm_cli.integration.mcp_integrator.MCPIntegrator._gate_project_scoped_runtimes",
+                side_effect=_capture_gate,
+            ),
+            patch(
+                "apm_cli.integration.mcp_integrator._is_vscode_available",
+                return_value=False,
+            ),
+        ):
+            result = run_mcp_install(
+                mcp_deps=[dep],
+                project_root=tmp_path,
+                logger=logger,
+            )
+        assert result >= 0
+        assert "intellij" in captured_targets
+
+    def test_intellij_skipped_when_config_dir_missing(self, tmp_path):
+        from apm_cli.integration.mcp_integrator_install import run_mcp_install
+
+        # Point detection at a directory that does not exist.
+        ij_dir = tmp_path / "github-copilot" / "intellij"
+
+        dep = self._make_reg_dep("srv")
+        logger = MagicMock()
+        logger.mcp_lookup_heartbeat = MagicMock()
+
+        mock_client = MagicMock()
+        mock_manager = MagicMock()
+        mock_manager.is_runtime_available.return_value = False
+
+        mock_ops = MagicMock()
+        mock_ops.validate_servers_exist.return_value = (["srv"], [])
+        mock_ops.check_servers_needing_installation.return_value = []
+
+        captured_targets: list = []
+
+        def _capture_gate(rts, **_kw):
+            captured_targets.extend(rts)
+            return rts
+
+        with (
+            patch("apm_cli.factory.ClientFactory.create_client", return_value=mock_client),
+            patch("apm_cli.runtime.manager.RuntimeManager", return_value=mock_manager),
+            patch(
+                "apm_cli.adapters.client.intellij._intellij_config_dir",
+                return_value=ij_dir,
+            ),
+            patch(
+                "apm_cli.registry.operations.MCPServerOperations",
+                return_value=mock_ops,
+            ),
+            patch(
+                "apm_cli.integration.mcp_integrator.MCPIntegrator._gate_project_scoped_runtimes",
+                side_effect=_capture_gate,
+            ),
+            patch(
+                "apm_cli.integration.mcp_integrator._is_vscode_available",
+                return_value=False,
+            ),
+        ):
+            run_mcp_install(
+                mcp_deps=[dep],
+                project_root=tmp_path,
+                logger=logger,
+            )
+        assert "intellij" not in captured_targets
+
+
 # ---------------------------------------------------------------------------
 # run_mcp_install -- no runtimes installed warnings
 # ---------------------------------------------------------------------------

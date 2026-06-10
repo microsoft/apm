@@ -705,6 +705,18 @@ def resolve_plugin_source(
         raise ValueError(f"Plugin '{plugin.name}' has unsupported source type: '{source_type}'")
 
 
+def _extract_token(auth_resolver: object | None, host: str, org: str | None = None) -> str | None:
+    """Extract a token from the auth resolver for the given host."""
+    if auth_resolver is None:
+        return None
+    try:
+        ctx = auth_resolver.resolve(host, org=org)  # type: ignore[union-attr]
+        return ctx.token if ctx and ctx.token else None
+    except Exception as exc:
+        logger.debug("Could not extract token for host '%s': %s", host, type(exc).__name__)
+        return None
+
+
 def resolve_marketplace_plugin(
     plugin_name: str,
     marketplace_name: str,
@@ -830,18 +842,55 @@ def resolve_marketplace_plugin(
         plugin, source, canonical, dep_ref
     )
 
-    # ---- Raw ref override ----
-    # When version_spec is provided it is treated as a raw git ref that
-    # overrides whatever ref came from the marketplace source field.
+    # ---- Version spec override ----
+    # When version_spec is provided it either triggers semver-aware tag
+    # resolution (for range expressions like ~2.1.0) or a raw ref override
+    # (for plain tags/branches/SHAs like v2.0.0).
     if version_spec and dep_ref is None:
+        from .version_resolver import is_semver_range, is_version_constraint
+
         base = canonical.split("#", 1)[0]
-        canonical = f"{base}#{version_spec}"
-        logger.debug(
-            "Using raw git ref '%s' for %s@%s",
-            version_spec,
-            plugin_name,
-            marketplace_name,
-        )
+        if is_version_constraint(version_spec):
+            from .errors import NoMatchingVersionError
+            from .version_resolver import resolve_version_constraint
+
+            owner_repo = f"{source.owner}/{source.repo}"
+            token = _extract_token(auth_resolver, source.host, org=source.owner)
+            try:
+                tag_name, _sha = resolve_version_constraint(
+                    plugin_name,
+                    owner_repo,
+                    version_spec,
+                    host=source.host,
+                    token=token,
+                )
+                canonical = f"{base}#{tag_name}"
+                logger.debug(
+                    "Version constraint '%s' for %s@%s resolved to tag '%s'",
+                    version_spec,
+                    plugin_name,
+                    marketplace_name,
+                    tag_name,
+                )
+            except NoMatchingVersionError:
+                if is_semver_range(version_spec):
+                    raise
+                canonical = f"{base}#{version_spec}"
+                logger.debug(
+                    "No '%s--v*' tags matched '%s' on %s@%s, falling back to raw git ref",
+                    plugin_name,
+                    version_spec,
+                    plugin_name,
+                    marketplace_name,
+                )
+        else:
+            canonical = f"{base}#{version_spec}"
+            logger.debug(
+                "Using raw git ref '%s' for %s@%s",
+                version_spec,
+                plugin_name,
+                marketplace_name,
+            )
 
     # ---- Ref immutability check (advisory) ----
     # Record the plugin -> ref mapping (scoped by version) and warn if

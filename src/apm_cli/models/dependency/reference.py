@@ -46,6 +46,7 @@ _DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
 # list-form ``argv`` so there is no shell-expansion vector.
 _ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._\- ]+$"
 _NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
+_REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
 
 
 def _path_segment_pattern(is_ado_host: bool) -> str:
@@ -58,6 +59,18 @@ def _is_valid_registry_semver_range(spec: str) -> bool:
     from ...deps.registry.semver import is_semver_range
 
     return is_semver_range(spec)
+
+
+_RANGE_PREFIX_RE = re.compile(r"^(>=|<=|>|<|\^|~|=)")
+
+
+class InvalidSemverRangeError(ValueError):
+    """Raised when a ref starts like a semver range but is invalid."""
+
+
+def _looks_like_invalid_semver_range(spec: str) -> bool:
+    """Return whether *spec* starts like a semver range but is invalid."""
+    return bool(_RANGE_PREFIX_RE.match(spec.strip()))
 
 
 @dataclass
@@ -117,6 +130,12 @@ class DependencyReference:
     source: str | None = None
     registry_name: str | None = None
 
+    # Marketplace dependency fields (parsed from plugin.json dict format)
+    is_marketplace: bool = False
+    marketplace_name: str | None = None
+    marketplace_plugin_name: str | None = None
+    marketplace_version_spec: str | None = None
+
     @property
     def ref_kind(self) -> str | None:
         """Classify ``reference`` for routing purposes.
@@ -150,6 +169,13 @@ class DependencyReference:
         # routed through the git-semver resolver.
         if _is_valid_registry_semver_range(self.reference):
             return "semver"
+        if _looks_like_invalid_semver_range(self.reference):
+            raise InvalidSemverRangeError(
+                f"Invalid semver range in ref {self.reference!r}. "
+                "The ref field expects a plain semver range. "
+                "Use a range like '^1.2.0' or pin a literal tag like "
+                "'pkg-a-v1.2.0'."
+            )
         return "literal"
 
     # Supported file extensions for virtual packages
@@ -405,10 +431,17 @@ class DependencyReference:
             apm_modules_dir: Path to the apm_modules directory
 
         Raises:
+            ValueError: If this is an unresolved marketplace dependency
             PathTraversalError: If the computed path escapes apm_modules_dir
         Returns:
             Path: Absolute path to the package installation directory
         """
+        if self.is_marketplace:
+            raise ValueError(
+                f"Cannot compute install path for unresolved marketplace dependency "
+                f"'{self.marketplace_plugin_name}@{self.marketplace_name}'"
+            )
+
         if self.is_local and self.local_path:
             pkg_dir_name = Path(self.local_path).name
             validate_path_segments(
@@ -470,6 +503,40 @@ class DependencyReference:
         # Security: ensure the computed path stays within apm_modules/
         ensure_path_within(result, apm_modules_dir)
         return result
+
+    @staticmethod
+    def _reject_shorthand_alias(dependency_str: str) -> None:
+        """Reject bare-shorthand ``@alias`` with an actionable migration error.
+
+        Bare ``@alias`` is not part of the supported reference grammar (#340
+        retired the ``@`` separator to avoid the npm/go/cargo ``@version``
+        collision). The dedicated SSH parsers handle ``@`` in ``ssh://`` URLs
+        and SCP shorthand (``<user>@host:path``) as userinfo, not aliases; this
+        guard rejects ``@`` in the pre-fragment shorthand portion and keeps the
+        retired ``#ref@alias`` shape rejected, while version-style tag suffixes
+        such as ``owner/repo#package@v1.0.1`` remain valid literal refs.
+        """
+        stripped = dependency_str.strip()
+        if "@" not in stripped:
+            return
+        if stripped.lower().startswith(("https://", "http://", "ssh://")):
+            return
+        if SCP_LIKE_RE.match(stripped):
+            return
+        shorthand_part, _, ref_part = stripped.partition("#")
+        if "@" not in shorthand_part:
+            _, _, ref_suffix = ref_part.rpartition("@")
+            if _REF_VERSION_SUFFIX_RE.fullmatch(ref_suffix):
+                return
+        preview = "".join(ch if 32 <= ord(ch) <= 126 else "?" for ch in stripped)
+        if len(preview) > 160:
+            preview = f"{preview[:157]}..."
+        raise ValueError(
+            f"Shorthand '@alias' is not supported in '{preview}'. "
+            f"Use object form with 'git:', optional 'path:', and 'alias:' "
+            f"fields to install a dependency under a custom directory name. "
+            f"See: https://microsoft.github.io/apm/consumer/manage-dependencies/#reference-formats"
+        )
 
     @staticmethod
     def _parse_ssh_protocol_url(url: str):
@@ -580,8 +647,19 @@ class DependencyReference:
 
             - path: ./packages/my-shared-skills
 
+        And marketplace dependency entries:
+
+            - name: gopls-lsp
+              marketplace: claude-plugins-official
+
+            - name: secrets-vault
+              marketplace: acme-tools
+              version: "~2.1.0"
+
         Args:
-            entry: Dictionary with 'git' or 'path' (required), plus optional fields
+            entry: Dictionary with 'git', 'path', or 'marketplace' key.
+                   Marketplace entries support 'name', 'marketplace', and
+                   optional 'version' (semver range) fields.
 
         Returns:
             DependencyReference: Parsed dependency reference
@@ -589,6 +667,52 @@ class DependencyReference:
         Raises:
             ValueError: If the entry is missing required fields or has invalid format
         """
+        # Support marketplace dependencies: { name: X, marketplace: Y, version: Z }
+        if "marketplace" in entry:
+            source_keys = {"git", "path", "registry", "id"}.intersection(entry)
+            if source_keys:
+                joined = "', '".join(sorted(source_keys))
+                raise ValueError(
+                    f"Ambiguous dependency: 'marketplace' cannot be combined with '{joined}'"
+                )
+            _MARKETPLACE_KEYS = {"name", "marketplace", "version"}
+            unknown = set(entry.keys()) - _MARKETPLACE_KEYS
+            if unknown:
+                raise ValueError(
+                    f"Unknown keys in marketplace dependency: {sorted(unknown)}. "
+                    f"Allowed keys: {sorted(_MARKETPLACE_KEYS)}"
+                )
+            name = entry.get("name")
+            marketplace = entry["marketplace"]
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("Marketplace dependency must have a non-empty 'name' field")
+            if not isinstance(marketplace, str) or not marketplace.strip():
+                raise ValueError("'marketplace' field must be a non-empty string")
+            name = name.strip()
+            marketplace = marketplace.strip()
+            if not re.match(r"^[a-zA-Z0-9._-]+$", name):
+                raise ValueError(
+                    f"Invalid marketplace plugin name: '{name}'. "
+                    "Names can only contain letters, numbers, dots, underscores, and hyphens"
+                )
+            if not re.match(r"^[a-zA-Z0-9._-]+$", marketplace):
+                raise ValueError(
+                    f"Invalid marketplace name: '{marketplace}'. "
+                    "Names can only contain letters, numbers, dots, underscores, and hyphens"
+                )
+            version_spec = entry.get("version")
+            if version_spec is not None:
+                if not isinstance(version_spec, str) or not version_spec.strip():
+                    raise ValueError("'version' field must be a non-empty string")
+                version_spec = version_spec.strip()
+            return cls(
+                repo_url=f"_marketplace/{marketplace}/{name}",
+                is_marketplace=True,
+                marketplace_name=marketplace,
+                marketplace_plugin_name=name,
+                marketplace_version_spec=version_spec,
+            )
+
         # Object-form registry package — design §3.2.
         # Discriminated by the ``registry:`` or ``id:`` key (``registry:`` is
         # optional when a ``registries.default:`` is configured).  Mutually
@@ -764,7 +888,7 @@ class DependencyReference:
     ) -> tuple[str, list[str], str | None] | None:
         """If *package* is bare host/path shorthand, return (host, path_segments, ref_str).
 
-        Returns ``None`` for ``https://``, ``git@``, or non–GitLab-class hosts.
+        Returns ``None`` for ``https://``, ``git@``, or non-GitLab-class hosts.
         """
         s = package.strip()
         ref_out: str | None = None
@@ -1645,8 +1769,6 @@ class DependencyReference:
         - user/repo#v1.0.0
         - user/repo#commit_sha
         - github.com/user/repo#ref
-        - user/repo@alias
-        - user/repo#ref@alias
         - user/repo/path/to/file.prompt.md (virtual file package)
         - user/repo/skills/foo (virtual subdirectory package)
         - user/repo/collections/foo (virtual subdirectory package)
@@ -1703,6 +1825,8 @@ class DependencyReference:
             raise ValueError(
                 unsupported_host_error("//...", context="Protocol-relative URLs are not supported")
             )
+
+        cls._reject_shorthand_alias(dependency_str)
 
         maybe_raise_bare_fqdn_github_gitlab_conflict(dependency_str)
 
@@ -1776,7 +1900,15 @@ class DependencyReference:
 
         Returns:
             str or dict: String for simple deps; dict for HTTP or skill-subset deps.
+
+        Raises:
+            ValueError: If this is an unresolved marketplace dependency.
         """
+        if self.is_marketplace:
+            raise ValueError(
+                f"Cannot serialize unresolved marketplace dependency "
+                f"'{self.marketplace_plugin_name}@{self.marketplace_name}'"
+            )
         if self.is_insecure:
             host = self.host or default_host()
             entry = {"git": f"http://{host}/{self.repo_url}"}

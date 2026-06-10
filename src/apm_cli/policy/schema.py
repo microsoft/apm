@@ -16,7 +16,6 @@ Deny/require list semantics:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple  # noqa: F401, UP035
 
 
 @dataclass(frozen=True)
@@ -144,6 +143,76 @@ class RegistrySourcePolicy:
 
 
 @dataclass(frozen=True)
+class ScannerGovernance:
+    """Per-scanner governance applied at install-time audit (org floor).
+
+    Restrict-only by design: policy may tighten what a user/CLI can do, but it
+    never injects argv tokens of its own.
+
+      * ``allow_args`` -- ``False`` forbids *all* extra-args passthrough for the
+        scanner (a governance kill-switch: user/CLI ``--external-args`` and the
+        ``external.<name>.args`` config are stripped to ``()``). ``None``/``True``
+        permit the (allowlist-validated) passthrough.
+
+    ``llm`` mandation is intentionally NOT modelled in v1: forcing outbound LLM
+    egress from a project-shipped ``apm-policy.yml`` would be a trust-domain
+    change, so orgs forbid LLM by not enabling it / denylisting the scanner.
+    """
+
+    allow_args: bool | None = None
+
+
+@dataclass(frozen=True)
+class AuditPolicy:
+    """Rules governing the ``apm audit`` content scan, including at install time.
+
+    ``on_install`` semantics (mirrors the ``None = no opinion`` convention so
+    inheritance merge stays transparent):
+      * ``None``    -- no opinion (inherit parent / fall through to config).
+      * ``"off"``   -- never run audit during ``apm install``.
+      * ``"warn"``  -- run audit at install, surface findings, never block.
+      * ``"block"`` -- run audit at install, fail the install on critical findings.
+
+    ``external`` lists external SARIF scanner names (see
+    ``security/external/registry.SUPPORTED_SCANNERS``) that MUST run as part of
+    the install-time audit.  ``None`` = no opinion; ``()`` = explicitly none.
+    Requires the ``external_scanners`` experimental flag to take effect.
+
+    ``scanners`` carries optional per-scanner governance (see
+    :class:`ScannerGovernance`) as a tuple of ``(name, governance)`` pairs to
+    stay frozen/hashable, consistent with the other tuple-typed policy fields.
+    ``None`` = no opinion. Enforced only at the install-time audit phase and
+    only while the ``external_scanners`` flag is enabled.
+    """
+
+    on_install: str | None = None  # None | off | warn | block
+    external: tuple[str, ...] | None = None  # required external scanners at install
+    scanners: tuple[tuple[str, ScannerGovernance], ...] | None = None
+
+
+@dataclass(frozen=True)
+class SecurityPolicy:
+    """Rules governing APM's security checks (content audit and scanners)."""
+
+    audit: AuditPolicy = field(default_factory=AuditPolicy)
+
+
+@dataclass(frozen=True)
+class BinDeployPolicy:
+    """Policy controls for marketplace_plugin bin/ deployment.
+
+    ``deny_all``: when ``True``, bin/ deployment is suppressed for all
+    marketplace_plugin packages regardless of the ``deny`` list.
+
+    ``deny``: package canonical dependency strings (e.g. ``owner/repo``)
+    whose bin/ executables must NOT be deployed. Matched as exact strings.
+    """
+
+    deny_all: bool = False
+    deny: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ApmPolicy:
     """Top-level APM policy model."""
 
@@ -159,3 +228,5 @@ class ApmPolicy:
     manifest: ManifestPolicy = field(default_factory=ManifestPolicy)
     unmanaged_files: UnmanagedFilesPolicy = field(default_factory=UnmanagedFilesPolicy)
     registry_source: RegistrySourcePolicy = field(default_factory=RegistrySourcePolicy)
+    security: SecurityPolicy = field(default_factory=SecurityPolicy)
+    bin_deploy: BinDeployPolicy = field(default_factory=BinDeployPolicy)

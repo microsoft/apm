@@ -3,7 +3,6 @@
 import contextlib
 import os
 import re
-import stat  # noqa: F401
 import subprocess
 import sys
 import tempfile
@@ -14,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Union
 
-import git  # noqa: F401  # re-exported for tests that patch github_downloader.git
+import git  # noqa: F401  -- re-exported; tests patch apm_cli.deps.github_downloader.git
 import requests
 from git import RemoteProgress, Repo
 from git.exc import GitCommandError
@@ -30,10 +29,11 @@ from ..models.apm_package import (
     ResolvedReference,
     validate_apm_package,
 )
-from ..utils.console import _rich_warning  # noqa: F401  # re-exported for tests
+from ..utils.console import (
+    _rich_warning,  # noqa: F401  -- re-exported; tests patch github_downloader._rich_warning
+)
 from ..utils.github_host import (
     default_host,
-    is_azure_devops_hostname,  # noqa: F401
     is_github_hostname,
     sanitize_token_url_in_message,
 )

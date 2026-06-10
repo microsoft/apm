@@ -11,10 +11,9 @@ extends: values:
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
-
 from .schema import (
     ApmPolicy,
+    AuditPolicy,
     CompilationPolicy,
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
@@ -23,6 +22,8 @@ from .schema import (
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
+    ScannerGovernance,
+    SecurityPolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -34,6 +35,7 @@ _RESOLUTION_LEVELS = {"project-wins": 0, "policy-wins": 1, "block": 2}
 _SELF_DEFINED_LEVELS = {"allow": 0, "warn": 1, "deny": 2}
 _UNMANAGED_ACTION_LEVELS = {"ignore": 0, "warn": 1, "deny": 2}
 _SCRIPTS_LEVELS = {"allow": 0, "deny": 1}
+_AUDIT_ON_INSTALL_LEVELS = {"off": 0, "warn": 1, "block": 2}
 
 
 class PolicyInheritanceError(Exception):
@@ -63,6 +65,7 @@ def merge_policies(parent: ApmPolicy, child: ApmPolicy) -> ApmPolicy:
         compilation=_merge_compilation(parent.compilation, child.compilation),
         manifest=_merge_manifest(parent.manifest, child.manifest),
         unmanaged_files=_merge_unmanaged_files(parent.unmanaged_files, child.unmanaged_files),
+        security=_merge_security(parent.security, child.security),
     )
 
 
@@ -234,6 +237,74 @@ def _merge_unmanaged_files(
     eff_dirs_out: tuple[str, ...] = () if eff_dirs is None else eff_dirs
 
     return UnmanagedFilesPolicy(action=eff_action, directories=eff_dirs_out)
+
+
+def _merge_security(parent: SecurityPolicy, child: SecurityPolicy) -> SecurityPolicy:
+    """Merge the security section: audit tightens but never relaxes.
+
+    ``on_install`` escalates on the off < warn < block ladder with
+    None-transparency (``None`` means "no opinion"; the other side flows
+    through).  ``external`` (required scanners) is union-merged like other
+    require lists -- a child can add scanners but not drop a parent's.
+    """
+    p, c = parent.audit, child.audit
+    if p.on_install is None:
+        on_install = c.on_install
+    elif c.on_install is None:
+        on_install = p.on_install
+    else:
+        on_install = _escalate(_AUDIT_ON_INSTALL_LEVELS, p.on_install, c.on_install)
+    return SecurityPolicy(
+        audit=AuditPolicy(
+            on_install=on_install,
+            external=_merge_list_field(p.external, c.external),
+            scanners=_merge_scanners(p.scanners, c.scanners),
+        ),
+    )
+
+
+def _merge_scanners(
+    parent: tuple[tuple[str, ScannerGovernance], ...] | None,
+    child: tuple[tuple[str, ScannerGovernance], ...] | None,
+) -> tuple[tuple[str, ScannerGovernance], ...] | None:
+    """Merge per-scanner governance: union of names; ``allow_args`` AND-merged.
+
+    Restrict-only -- any ancestor forbidding args (``allow_args=False``) wins,
+    so a child can tighten but never relax a parent's kill-switch. ``None``
+    means "no opinion" and flows through transparently.
+    """
+    if parent is None and child is None:
+        return None
+    p_map = dict(parent or ())
+    c_map = dict(child or ())
+    merged: list[tuple[str, ScannerGovernance]] = []
+    seen: set[str] = set()
+    for name in list(p_map) + [n for n in c_map if n not in p_map]:
+        if name in seen:
+            continue
+        seen.add(name)
+        merged.append((name, _merge_governance(p_map.get(name), c_map.get(name))))
+    return tuple(merged)
+
+
+def _merge_governance(
+    parent: ScannerGovernance | None,
+    child: ScannerGovernance | None,
+) -> ScannerGovernance:
+    """AND-merge two governance blocks (``allow_args=False`` always wins).
+
+    ``None`` is "no opinion" and flows through transparently; ``False``
+    (forbid args) beats ``True`` so an org floor can never be relaxed.
+    """
+    p_allow = parent.allow_args if parent is not None else None
+    c_allow = child.allow_args if child is not None else None
+    if p_allow is False or c_allow is False:
+        allow_args: bool | None = False
+    elif p_allow is None and c_allow is None:
+        allow_args = None
+    else:
+        allow_args = True
+    return ScannerGovernance(allow_args=allow_args)
 
 
 # ---------------------------------------------------------------------------

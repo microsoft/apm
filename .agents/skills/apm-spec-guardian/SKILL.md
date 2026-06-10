@@ -95,11 +95,11 @@ The maintainer's general `docs-sync` skill covers those.
 
 | Agent | Role | Always active? |
 |-------|------|----------------|
-| [Swagger / OpenAPI Editor](../../agents/spec-swagger-editor.agent.md) | Interface-contract discipline (schemas, $ref hygiene, oneOf discriminators, conformance enumeration) | Yes |
-| [OCI Distribution Editor](../../agents/spec-oci-editor.agent.md) | Registry-HTTP rigor (hash envelopes, mirror tolerance, fail-closed extraction, supply-chain threat model) | Yes |
-| [Package-Manager Registry-Contract Editor](../../agents/spec-pkgmgr-editor.agent.md) | Dependency-resolution rigor (semver dialect pinning, lockfile determinism, transitive conflict policy, reserved-slot defensive MUSTs) | Yes |
-| [W3C TAG Architect](../../agents/spec-tag-architect.agent.md) | Web-platform integration / architecture (extensibility, layering, fingerprinting, machine-readable contract surface) | Yes |
-| [Spec Editor Synthesizer](../../agents/spec-editor-synthesizer.agent.md) | Same hand that drafted; aggregates panel returns, computes shocked_meter_avg, clusters convergent themes, produces fold-now / defer / reject lists and ship_decision | Yes |
+| [Swagger / OpenAPI Editor](../../../.apm/agents/spec-swagger-editor.agent.md) | Interface-contract discipline (schemas, $ref hygiene, oneOf discriminators, conformance enumeration) | Yes |
+| [OCI Distribution Editor](../../../.apm/agents/spec-oci-editor.agent.md) | Registry-HTTP rigor (hash envelopes, mirror tolerance, fail-closed extraction, supply-chain threat model) | Yes |
+| [Package-Manager Registry-Contract Editor](../../../.apm/agents/spec-pkgmgr-editor.agent.md) | Dependency-resolution rigor (semver dialect pinning, lockfile determinism, transitive conflict policy, reserved-slot defensive MUSTs) | Yes |
+| [W3C TAG Architect](../../../.apm/agents/spec-tag-architect.agent.md) | Web-platform integration / architecture (extensibility, layering, fingerprinting, machine-readable contract surface) | Yes |
+| [Spec Editor Synthesizer](../../../.apm/agents/spec-editor-synthesizer.agent.md) | Same hand that drafted; aggregates panel returns, computes shocked_meter_avg, clusters convergent themes, produces fold-now / defer / reject lists and ship_decision | Yes |
 
 The roster is invariant for the v0.1 lineage. Changing it requires
 bumping the skill version.

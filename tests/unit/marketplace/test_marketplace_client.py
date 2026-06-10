@@ -12,7 +12,7 @@ import pytest
 from apm_cli.core.auth import AuthResolver
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.marketplace import client as client_mod
-from apm_cli.marketplace.errors import MarketplaceFetchError
+from apm_cli.marketplace.errors import MarketplaceError, MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
 
 
@@ -821,3 +821,126 @@ class TestFetchFileHostKindGuard:
             result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=mock_resolver)
 
         assert result == {"name": "ok", "plugins": []}
+
+
+class TestFetchRaw:
+    """``fetch_raw`` -- public primitive for fetching arbitrary files at a ref."""
+
+    def test_wraps_auth_failure_in_marketplace_error_not_fetch_error(self):
+        # Audit relies on this contract: fetch_raw raises the neutral
+        # MarketplaceError so callers can craft per-plugin context, instead
+        # of inheriting MarketplaceFetchError's "run apm marketplace update"
+        # hint -- which is wrong at plugin granularity.
+        auth_resolver = MagicMock()
+        auth_resolver.try_with_fallback.side_effect = RuntimeError("connection reset")
+
+        with patch(
+            "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
+            return_value=None,
+        ):
+            with pytest.raises(MarketplaceError) as excinfo:
+                client_mod.fetch_raw(
+                    host="github.com",
+                    owner="acme",
+                    repo="forge",
+                    file_path="agents/x/apm.yml",
+                    ref="abc123",
+                    auth_resolver=auth_resolver,
+                )
+
+        # Must NOT be the marketplace-specific subclass (whose default
+        # message format embeds "Run 'apm marketplace update X' to retry").
+        assert not isinstance(excinfo.value, MarketplaceFetchError)
+        # Must preserve the underlying reason and the file coords so the
+        # caller can build a useful per-plugin diagnostic.
+        msg = str(excinfo.value)
+        assert "connection reset" in msg
+        assert "acme/forge/agents/x/apm.yml@abc123" in msg
+
+    def test_returns_proxy_bytes_when_proxy_hits(self):
+        # Proxy success short-circuits before any auth path is consulted.
+        with patch(
+            "apm_cli.marketplace.client._try_proxy_fetch_raw",
+            return_value=b"hello",
+        ):
+            result = client_mod.fetch_raw(
+                host="github.com",
+                owner="o",
+                repo="r",
+                file_path="f",
+                ref="main",
+            )
+        assert result == b"hello"
+
+    def test_raises_when_proxy_only_blocks_github(self):
+        # PROXY_REGISTRY_ONLY=1 must keep us off GitHub even when the
+        # proxy has no entry.  Because that path cannot verify whether
+        # the file exists, fetch_raw must raise MarketplaceError instead
+        # of returning None -- otherwise audit would silently report the
+        # plugin as NO_MANIFEST in proxy-only environments rather than
+        # surfacing it as unverifiable.
+        cfg = MagicMock(enforce_only=True)
+        with (
+            patch(
+                "apm_cli.marketplace.client._try_proxy_fetch_raw",
+                return_value=None,
+            ),
+            patch(
+                "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
+                return_value=cfg,
+            ),
+        ):
+            with pytest.raises(MarketplaceError) as excinfo:
+                client_mod.fetch_raw(
+                    host="github.com",
+                    owner="o",
+                    repo="r",
+                    file_path="f",
+                    ref="main",
+                )
+
+        msg = str(excinfo.value)
+        assert "PROXY_REGISTRY_ONLY" in msg
+        # File coordinates surface so the audit log line is actionable.
+        assert "o/r/f@main" in msg
+        # Must remain the neutral base class, not the marketplace-specific
+        # subclass whose default message embeds an "apm marketplace update"
+        # retry hint that does not apply here.
+        assert not isinstance(excinfo.value, MarketplaceFetchError)
+
+    def test_non_github_host_rejected_before_request(self):
+        # Defense-in-depth, mirrors TestFetchFileHostKindGuard for
+        # _fetch_file: if a plugin source somehow surfaces a non-GitHub
+        # host (e.g. ``gitlab.com``) we MUST NOT attach a GitHub PAT to
+        # the fallback request -- doing so would leak credentials.
+        # ``fetch_raw`` must fail closed with MarketplaceError and never
+        # invoke requests.get.
+        with (
+            patch(
+                "apm_cli.marketplace.client._try_proxy_fetch_raw",
+                return_value=None,
+            ),
+            patch(
+                "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
+                return_value=None,
+            ),
+            patch(
+                "apm_cli.marketplace.client.requests.get",
+            ) as mock_get,
+        ):
+            with pytest.raises(MarketplaceError) as excinfo:
+                client_mod.fetch_raw(
+                    host="gitlab.com",
+                    owner="acme",
+                    repo="forge",
+                    file_path="apm.yml",
+                    ref="v1",
+                )
+
+        # No HTTP request must be issued -- proves credentials cannot leak.
+        mock_get.assert_not_called()
+        msg = str(excinfo.value)
+        assert _quoted_hosts(msg) == {"gitlab.com"}
+        assert "not a supported plugin source" in msg
+        # Coordinates remain in the message so audit's per-plugin line is actionable.
+        assert "acme/forge/apm.yml@v1" in msg

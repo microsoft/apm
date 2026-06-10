@@ -85,6 +85,15 @@ def _refs_only_bare() -> list[RemoteRef]:
     ]
 
 
+def _refs_virtual_subdir_single_dash() -> list[RemoteRef]:
+    """Monorepo tags two packages with the ``{name}-v{version}`` pattern."""
+    return [
+        RemoteRef(name="refs/heads/main", sha="0" * 40),
+        RemoteRef(name="refs/tags/pkg-a-v0.1.0", sha="a" * 40),
+        RemoteRef(name="refs/tags/pkg-b-v9.9.9", sha="b" * 40),
+    ]
+
+
 def _refs_no_match() -> list[RemoteRef]:
     """No tag in any pattern satisfies a ^1.2.0 constraint."""
     return [
@@ -395,6 +404,37 @@ class TestTagPatternFallback:
         assert locked is not None
         assert locked.get("resolved_tag") == "1.4.2"
         assert locked.get("version") == "1.4.2"
+
+    def test_virtual_subdir_single_dash_pattern_uses_subpath_name(
+        self,
+        runner: CliRunner,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Virtual subdirectory deps use their path segment for tag matching."""
+        project = tmp_path / "promise-d-virtual-subdir"
+        _write_apm_yml(
+            project,
+            [{"git": "acme/mono", "path": "packages/pkg-a", "ref": "^0.1.0"}],
+        )
+
+        rr = _RefResolverCallRecorder({"acme/mono": _refs_virtual_subdir_single_dash()})
+        dl = _DownloaderStub({"pkg-a-v0.1.0": "a" * 40})
+        rr.install(monkeypatch)
+        dl.install(monkeypatch)
+
+        result = _run_install(runner, project, monkeypatch)
+        assert result.exit_code == 0, result.output
+
+        lockfile = _read_lockfile(project)
+        locked = _find_locked(lockfile, "acme/mono")
+        assert locked is not None, lockfile
+        assert locked.get("is_virtual") is True
+        assert locked.get("virtual_path") == "packages/pkg-a"
+        assert locked.get("resolved_tag") == "pkg-a-v0.1.0"
+        assert locked.get("version") == "0.1.0"
+        assert locked.get("resolved_commit") == "a" * 40
+        assert rr.calls == ["acme/mono"]
 
 
 # ---------------------------------------------------------------------------

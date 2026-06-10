@@ -51,8 +51,9 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import replace as _dataclass_replace
-from pathlib import Path  # noqa: F401
 from typing import TYPE_CHECKING, Any
+
+from apm_cli.install.phases._skip_logic import _should_use_locked_ref
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -337,8 +338,9 @@ def build_download_ref(
             reg_replay = _registry_replay_overrides_from_lock(locked_dep)
             if reg_replay is not None:
                 overrides.update(reg_replay)
-            # Use locked commit SHA for byte-for-byte reproducibility.
-            elif locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
+            # Use locked commit SHA for byte-for-byte reproducibility
+            # (bypassed during --update, also guarded by the helper itself).
+            elif _should_use_locked_ref(locked_dep.resolved_commit, update_refs):
                 overrides["reference"] = locked_dep.resolved_commit
             # For proxy deps without a commit SHA (Artifactory zip archives),
             # preserve the locked ref so we download the same ref on replay.

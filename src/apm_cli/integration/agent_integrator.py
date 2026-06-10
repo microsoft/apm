@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List  # noqa: F401, UP035
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -398,8 +398,7 @@ class AgentIntegrator(BaseIntegrator):
                 continue
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.is_content_identical_to_source(target_path, source_file):
-                target_paths.append(target_path)
+            if self.try_adopt_identical(target_path, source_file, target_paths):
                 files_adopted += 1
             else:
                 if self.check_collision(
@@ -430,8 +429,7 @@ class AgentIntegrator(BaseIntegrator):
                         )
                     continue
                 claude_rel = portable_relpath(claude_path, project_root)
-                if self.is_content_identical_to_source(claude_path, source_file):
-                    target_paths.append(claude_path)
+                if self.try_adopt_identical(claude_path, source_file, target_paths):
                     files_adopted += 1
                 elif not self.check_collision(
                     claude_path, claude_rel, managed_files, force, diagnostics=diagnostics
@@ -457,8 +455,7 @@ class AgentIntegrator(BaseIntegrator):
                         )
                     continue
                 cursor_rel = portable_relpath(cursor_path, project_root)
-                if self.is_content_identical_to_source(cursor_path, source_file):
-                    target_paths.append(cursor_path)
+                if self.try_adopt_identical(cursor_path, source_file, target_paths):
                     files_adopted += 1
                 elif not self.check_collision(
                     cursor_path, cursor_rel, managed_files, force, diagnostics=diagnostics

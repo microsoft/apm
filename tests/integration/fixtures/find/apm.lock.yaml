@@ -1,0 +1,34 @@
+lockfile_version: "2"
+generated_at: "2024-01-01T00:00:00+00:00"
+dependencies:
+  - repo_url: github.com/acme/oci-tools
+    resolved_commit: abc123def456
+    resolved_ref: main
+    depth: 1
+    source: registry
+    resolved_url: oci://registry.example.com/acme/oci-tools@sha256:abc123
+    resolved_hash: sha256:abc123
+    deployed_files:
+      - .github/instructions/oci-tools.instructions.md
+      - .claude/skills/oci-tools/
+
+  - repo_url: github.com/acme/git-utils
+    resolved_commit: def789ghi012
+    resolved_ref: v2.0.0
+    depth: 1
+    deployed_files:
+      - .github/instructions/git-utils.instructions.md
+      - AGENTS.md
+      - CLAUDE.md
+
+  - repo_url: github.com/acme/local-helper
+    source: local
+    local_path: ./packages/local-helper
+    depth: 1
+    deployed_files:
+      - .github/instructions/local-helper.instructions.md
+      - AGENTS.md
+      - CLAUDE.md
+
+local_deployed_files:
+  - .github/instructions/workspace.instructions.md

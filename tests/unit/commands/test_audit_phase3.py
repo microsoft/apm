@@ -453,6 +453,8 @@ class TestAuditContentScanBranches:
         assert exc_info.value.code == 0
 
     def test_format_incompatible_with_strip_exits(self, tmp_path: Path) -> None:
+        import click
+
         logger = _make_logger()
         cfg = _AuditConfig(
             project_root=tmp_path,
@@ -463,10 +465,8 @@ class TestAuditContentScanBranches:
         )
         from apm_cli.commands.audit import _audit_content_scan
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(click.UsageError, match=r"cannot be combined"):
             _audit_content_scan(cfg, None, None, strip=True, dry_run=False)
-        assert exc_info.value.code == 1
-        logger.error.assert_called()
 
     def test_text_format_with_output_path_exits(self, tmp_path: Path) -> None:
         """Text format + --output path is unsupported."""

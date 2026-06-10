@@ -41,6 +41,7 @@ from apm_cli.utils.guards import _ReadOnlyProjectGuard
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.integration.targets import TargetProfile
 
 
 # ---------------------------------------------------------------------------
@@ -93,9 +94,7 @@ class CacheMissError(RuntimeError):
 # the drift module.
 # ---------------------------------------------------------------------------
 
-from apm_cli.utils.normalization import (  # noqa: E402, F401  -- re-exported for back-compat
-    _BOM,
-    _BUILD_ID_PATTERN,
+from apm_cli.utils.normalization import (  # noqa: E402, F401  -- re-exported; tests import helpers from apm_cli.install.drift
     _normalize,
     _normalize_line_endings,
     _strip_bom,
@@ -409,7 +408,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         Surfaced verbatim when a locked dep is not in the cache.
     """
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
-    from apm_cli.install.services import integrate_package_primitives
+    from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
     from apm_cli.integration.targets import resolve_targets
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -489,12 +488,14 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     package_info,
                     scratch_root,
                     targets=targets,
-                    prompt_integrator=integrators["prompt"],
-                    agent_integrator=integrators["agent"],
-                    skill_integrator=integrators["skill"],
-                    instruction_integrator=integrators["instruction"],
-                    command_integrator=integrators["command"],
-                    hook_integrator=integrators["hook"],
+                    integrators=IntegratorBundle(
+                        prompt=integrators["prompt"],
+                        agent=integrators["agent"],
+                        skill=integrators["skill"],
+                        instruction=integrators["instruction"],
+                        command=integrators["command"],
+                        hook=integrators["hook"],
+                    ),
                     force=True,
                     managed_files=set(),
                     diagnostics=diagnostics,
@@ -530,13 +531,29 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 _INLINE_DIFF_BYTE_CAP = 100 * 1024  # 100 KB
 
 
-def _governed_root_dirs(targets) -> set[str]:
-    """Return the set of top-level managed directory names to walk."""
+def _governed_root_dirs(targets: list[TargetProfile]) -> set[str]:
+    """Return the set of top-level managed directory names to walk.
+
+    Includes each target's top-level ``root_dir`` (plus ``.apm``) AND every
+    per-primitive ``deploy_root`` override (e.g. the ``copilot`` target routing
+    ``skills`` to ``.agents``). Walking the deploy roots is what lets the drift
+    differ compare committed skill bundles under ``.agents/skills/`` against the
+    replay, closing the gap where deployed skill content could silently diverge
+    from source (issue #1716). The replay reproduces the deploy-time link
+    rewrite faithfully, so byte-identical skills do not surface as false drift.
+    Only the first path segment is kept so nested deploy roots collapse to a
+    single walk root.
+    """
     roots: set[str] = {".apm"}
     for t in targets or []:
         root = getattr(t, "root_dir", None)
         if root:
             roots.add(str(root).split("/", 1)[0])
+        primitives = getattr(t, "primitives", None) or {}
+        for mapping in primitives.values():
+            deploy_root = getattr(mapping, "deploy_root", None)
+            if deploy_root:
+                roots.add(str(deploy_root).split("/", 1)[0])
     return roots
 
 

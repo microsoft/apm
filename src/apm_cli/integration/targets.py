@@ -19,8 +19,18 @@ the result is an empty list (no silent ``[copilot]`` fallback).
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field  # noqa: F401
-from typing import Dict, List, Optional, Tuple, Union  # noqa: F401, UP035
+from dataclasses import dataclass
+
+RULE_FORMATS: frozenset[str] = frozenset({"cursor_rules", "claude_rules", "windsurf_rules"})
+"""Canonical set of format-transforming rule ``format_id``s.
+
+Single home for "which instruction formats transform their source on
+deploy".  A mapping with one of these ``format_id``s MUST set
+``output_compare=True`` (enforced by :meth:`PrimitiveMapping.__post_init__`),
+and :meth:`InstructionIntegrator._render_instruction` dispatches on this same
+set.  Adding a new rule format means: add it here, set ``output_compare=True``
+on the mapping, and add a ``_convert_to_*`` branch in ``_render_instruction``.
+"""
 
 
 @dataclass(frozen=True)
@@ -47,6 +57,55 @@ class PrimitiveMapping:
     directory) rather than ``.codex/``.  Default ``None`` preserves
     existing behavior for all other targets.
     """
+
+    output_compare: bool = False
+    """Whether this primitive's deployed file is a format-transform of its
+    source, so the integrator must adopt/collision-check against the
+    rendered *output* rather than the source bytes.
+
+    This is the single source of truth for the rule-dir formats
+    (``cursor_rules``, ``claude_rules``, ``windsurf_rules``).  When ``True``:
+
+    * The deployed file is never byte-identical to its source, so a
+      source-based adopt always misses (apm#1662).  The integrator instead
+      compares against the rendered output and (re)writes when stale.
+    * The target is APM-owned per-file (``target_name`` derives 1:1 from a
+      source instruction), so ``managed_files`` is NOT consulted -- any
+      existing file at the target path is APM's, not user-authored.
+    * The deployed filename is renamed from ``<x>.instructions.md`` to
+      ``<x>{extension}``.
+
+    Adding a future format-transformed rule type requires two coordinated
+    edits: set ``output_compare=True`` here (add the ``format_id`` to
+    ``RULE_FORMATS``) *and* add the matching ``_convert_to_*`` branch to
+    :meth:`InstructionIntegrator._render_instruction`, which dispatches on the
+    ``format_id`` to perform the transform.
+    """
+
+    def __post_init__(self) -> None:
+        """Keep ``output_compare`` and :data:`RULE_FORMATS` in lockstep.
+
+        A rule ``format_id`` that transforms its source MUST compare against
+        the rendered output; otherwise the integrator would fall through to a
+        verbatim copy and silently deploy untransformed content (apm#1662).
+        The converse is also enforced so the canonical set stays the one home
+        for "which formats transform".
+        """
+        is_rule = self.format_id in RULE_FORMATS
+        if is_rule and not self.output_compare:
+            raise ValueError(
+                f"PrimitiveMapping(format_id={self.format_id!r}) is a rule "
+                f"format ({sorted(RULE_FORMATS)}) and must set "
+                "output_compare=True; otherwise its source is deployed "
+                "untransformed."
+            )
+        if self.output_compare and not is_rule:
+            raise ValueError(
+                f"PrimitiveMapping(format_id={self.format_id!r}) sets "
+                "output_compare=True but is not a known rule format "
+                f"({sorted(RULE_FORMATS)}); add it to RULE_FORMATS and a "
+                "_render_instruction branch, or unset output_compare."
+            )
 
 
 @dataclass(frozen=True)
@@ -94,6 +153,21 @@ class TargetProfile:
     unsupported_user_primitives: tuple[str, ...] = ()
     """Primitives that are **not** available at user scope even when the
     target itself is partially supported."""
+
+    user_primitive_overrides: dict[str, PrimitiveMapping] | None = None
+    """Primitive mapping overrides applied at user scope only.
+
+    When set, these entries replace the corresponding entries in
+    ``primitives`` after ``unsupported_user_primitives`` filtering in
+    ``for_scope(user_scope=True)``.
+
+    Use this when a primitive must be deployed to a *different* location
+    or via a *different* transform at user scope.  The canonical example
+    is the Copilot target: at project scope each ``*.instructions.md``
+    file deploys individually to ``.github/instructions/``; at user scope
+    they are all concatenated into the single file that Copilot CLI reads
+    (``~/.copilot/copilot-instructions.md``).
+    """
 
     user_root_resolver: Callable[[], Path | None] | None = None  # noqa: F821
     """Optional callable that resolves the deploy root at runtime.
@@ -291,6 +365,10 @@ class TargetProfile:
                 }
             else:
                 filtered = self.primitives
+            if self.user_primitive_overrides:
+                merged = dict(filtered)
+                merged.update(self.user_primitive_overrides)
+                filtered = merged
             return replace(
                 self,
                 primitives=filtered,
@@ -340,6 +418,11 @@ class TargetProfile:
         else:
             filtered = self.primitives
 
+        if self.user_primitive_overrides:
+            merged = dict(filtered)
+            merged.update(self.user_primitive_overrides)
+            filtered = merged
+
         return replace(self, root_dir=new_root, primitives=filtered)
 
 
@@ -358,6 +441,7 @@ class TargetProfile:
 RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
     "vscode": "copilot",
     "agents": "copilot",
+    "intellij": "copilot",
 }
 
 
@@ -367,7 +451,9 @@ RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
 
 KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Copilot (GitHub) -- at user scope, Copilot CLI reads ~/.copilot/
-    # instead of ~/.github/.  Instructions are not supported at user scope.
+    # instead of ~/.github/.  Instructions are concatenated into
+    # ~/.copilot/copilot-instructions.md because Copilot CLI reads only
+    # that single file at user scope (not individual *.instructions.md).
     # Ref: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-custom-agents-for-cli
     "copilot": TargetProfile(
         name="copilot",
@@ -390,7 +476,10 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported="partial",
         user_root_dir=".copilot",
-        unsupported_user_primitives=("instructions",),
+        unsupported_user_primitives=(),
+        user_primitive_overrides={
+            "instructions": PrimitiveMapping("", ".md", "copilot_user_instructions"),
+        },
         generated_files=("copilot-instructions.md",),
         compile_family="vscode",
     ),
@@ -405,7 +494,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         name="claude",
         root_dir=".claude",
         primitives={
-            "instructions": PrimitiveMapping("rules", ".md", "claude_rules"),
+            "instructions": PrimitiveMapping(
+                "rules",
+                ".md",
+                "claude_rules",
+                output_compare=True,
+            ),
             "agents": PrimitiveMapping("agents", ".md", "claude_agent"),
             "commands": PrimitiveMapping("commands", ".md", "claude_command"),
             "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
@@ -425,7 +519,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         name="cursor",
         root_dir=".cursor",
         primitives={
-            "instructions": PrimitiveMapping("rules", ".mdc", "cursor_rules"),
+            "instructions": PrimitiveMapping(
+                "rules",
+                ".mdc",
+                "cursor_rules",
+                output_compare=True,
+            ),
             "agents": PrimitiveMapping("agents", ".md", "cursor_agent"),
             # TODO(cursor-command-format): track via dedicated issue once
             # filed.  Cursor command deployment reuses the shared command
@@ -547,7 +646,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         name="windsurf",
         root_dir=".windsurf",
         primitives={
-            "instructions": PrimitiveMapping("rules", ".md", "windsurf_rules"),
+            "instructions": PrimitiveMapping(
+                "rules",
+                ".md",
+                "windsurf_rules",
+                output_compare=True,
+            ),
             "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
             "commands": PrimitiveMapping("workflows", ".md", "windsurf_workflow"),
             "hooks": PrimitiveMapping("", "hooks.json", "windsurf_hooks"),
@@ -579,6 +683,31 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported=True,
         user_root_dir=".agents",
         generated_files=(),
+    ),
+    # OpenClaw -- experimental, skills-only target for the OpenClaw agent
+    # runtime (github.com/openclaw/openclaw).  OpenClaw reads SKILL.md
+    # directories from several locations; APM deploys to:
+    #   project scope: <workspace>/.agents/skills/ (agentskills.io standard,
+    #                  OpenClaw priority-2 load path)
+    #   user scope:    ~/.openclaw/skills/ (OpenClaw managed dir, priority-4)
+    # At project scope the output is identical to the agent-skills target;
+    # the --global user path is the distinguishing capability.
+    # Ref: https://docs.openclaw.ai/tools/skills
+    "openclaw": TargetProfile(
+        name="openclaw",
+        root_dir=".agents",
+        primitives={
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+            ),
+        },
+        auto_create=True,
+        detect_by_dir=False,
+        user_supported=True,
+        user_root_dir=".openclaw",
+        requires_flag="openclaw",
     ),
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.

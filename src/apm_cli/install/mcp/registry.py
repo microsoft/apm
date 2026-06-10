@@ -23,7 +23,6 @@ import contextlib
 import ipaddress
 import os
 from collections.abc import Iterator, Mapping, Sequence
-from typing import Any, Optional, Tuple  # noqa: F401, UP035
 from urllib.parse import urlparse, urlunparse
 
 import click
@@ -143,16 +142,17 @@ def resolve_registry_url(
     *,
     logger=None,
 ) -> tuple[str | None, str]:
-    """Apply precedence chain: CLI flag > ``MCP_REGISTRY_URL`` env > default.
+    """Apply precedence chain: flag > env > apm config > default.
 
     Returns ``(resolved_url_or_None, source)`` where source is one of
-    ``"flag"``, ``"env"``, or ``"default"``. ``None`` is returned for the
-    default case so callers can treat default as "no override".
+    ``"flag"``, ``"env"``, ``"config"``, or ``"default"``. ``None`` is
+    returned for the default case so callers can treat default as "no
+    override".
 
     When the flag is provided AND an env var is also set with a different
-    value, emits a one-line ``[i]`` diagnostic naming both so users can
-    confirm the flag won. Stays silent otherwise (defaults are quiet,
-    overrides are visible).
+    value, emits a one-line diagnostic naming both so users can confirm the
+    flag won. Stays silent otherwise (defaults are quiet, overrides are
+    visible).
     """
     env_value = os.environ.get("MCP_REGISTRY_URL")
     if env_value is not None and env_value.strip() == "":
@@ -178,6 +178,20 @@ def resolve_registry_url(
             )
         _maybe_warn_local_host(env_value, logger)
         return env_value, "env"
+
+    # Layer 3: user-persisted config (apm config set mcp-registry-url <url>)
+    from ...config import get_mcp_registry_url as _get_mcp_registry_url
+
+    config_value = _get_mcp_registry_url()
+    if config_value:
+        if logger is not None:
+            logger.progress(
+                f"Using MCP registry: {_redact_url_credentials(config_value)} (from apm config)",
+                symbol="info",
+            )
+        _maybe_warn_local_host(config_value, logger)
+        return config_value, "config"
+
     return None, "default"
 
 

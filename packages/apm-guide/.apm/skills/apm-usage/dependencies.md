@@ -117,6 +117,24 @@ both protocols.
 
 ## Object form (complex cases)
 
+Use the object form when the string shorthand cannot express what you need:
+nested-group repos with virtual paths, custom SSH ports, local path deps,
+aliases, or marketplace dependencies.
+
+Three mutually exclusive keys select the form: `git`, `path`, or `marketplace`.
+
+The legacy string suffix `@alias` is not supported; write `alias:` explicitly
+instead so `@` remains reserved for git usernames and version syntax.
+
+### Remote (`git`)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `git` | REQUIRED | Clone URL (HTTPS, SSH, or FQDN shorthand). The literal `parent` inherits the consuming package's repo. |
+| `path` | OPTIONAL | Subdirectory or file within the repo (virtual package). |
+| `ref` | OPTIONAL | Branch, tag, or commit SHA. |
+| `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
+
 ```yaml
 - git: https://gitlab.com/acme/repo.git
   path: instructions/security                   # virtual sub-path
@@ -128,8 +146,45 @@ both protocols.
 
 - git: ssh://git@bitbucket.example.com:7999/project/repo.git   # custom SSH port
   ref: v1.0
+```
 
-- path: ./packages/my-skills                    # local only
+### Local (`path`)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `path` | REQUIRED | Filesystem path (must start with `./`, `../`, `/`, or `~/`). |
+
+Local-path deps inside another local package resolve relative to that
+package's directory, not the project root.
+
+```yaml
+- path: ./packages/my-skills
+```
+
+### Marketplace (`name` + `marketplace`)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | REQUIRED | Plugin identifier within the marketplace (`^[a-zA-Z0-9._-]+$`). |
+| `marketplace` | REQUIRED | Registered marketplace name (`^[a-zA-Z0-9._-]+$`). |
+| `version` | OPTIONAL | Semver range or exact version (e.g. `~2.1.0`, `^2.0`, `>=1.4`, `2.1.0`). Resolved against `{name}--v{version}` git tags on the marketplace repo. |
+
+During resolution, marketplace entries are looked up in the marketplace's
+`marketplace.json` and replaced with concrete git coordinates. When `version`
+is a semver range or bare version number, the resolver lists git tags
+matching `{name}--v{version}`, filters by the constraint, and picks the
+highest matching tag. Raw git refs (e.g. `v2.0.0`, `main`) bypass tag
+resolution and override the source ref directly. The lockfile records the
+resolved ref, not the marketplace placeholder. Unknown keys in a marketplace
+entry are rejected.
+
+```yaml
+- name: sec-check
+  marketplace: acme-plugins
+
+- name: secrets-vault
+  marketplace: acme-plugins
+  version: "~2.1.0"
 ```
 
 ## Registry-sourced APM dependencies (experimental)
@@ -257,7 +312,8 @@ dependencies:
         # Env-var placeholders in headers/env values:
         #   ${VAR} or ${env:VAR}  -> Copilot CLI: preserved as ${VAR} and resolved
         #                            from host env at server-start (no plaintext on disk).
-        #                            VS Code: rewritten to ${env:VAR} and resolved at runtime.
+        #                            VS Code and JetBrains: rewritten to ${env:VAR}
+        #                            and resolved at runtime.
         #                            Cursor/Windsurf/OpenCode/Claude/Gemini: resolved at install time.
         #                            Codex: passed through unchanged.
         #   ${input:<id>}         -> VS Code prompts user at runtime
@@ -281,6 +337,51 @@ dependencies:
       url: "https://mcp.internal.example.com"
 ```
 
+## LSP dependency formats
+
+LSP (Language Server Protocol) servers give supported runtimes real-time
+code intelligence. APM currently writes LSP config for Claude Code and
+GitHub Copilot CLI while keeping the dependency schema runtime-neutral.
+
+```yaml
+dependencies:
+  lsp:
+    # String reference (name only)
+    - gopls
+
+    # Full object
+    - name: pyright
+      command: pyright-langserver
+      args: ["--stdio"]
+      extensionToLanguage:
+        ".py": python
+        ".pyi": python
+      transport: stdio                          # stdio (default) | socket
+      env:
+        PYTHONPATH: "./src"
+      startupTimeout: 10000
+
+    - name: rust-analyzer
+      command: rust-analyzer
+      extensionToLanguage:
+        ".rs": rust
+      restartOnCrash: true
+      maxRestarts: 3
+```
+
+Required fields (object form): `name`, `command`, `extensionToLanguage`.
+
+Optional fields: `args`, `transport`, `env`, `initializationOptions`,
+`settings`, `workspaceFolder`, `startupTimeout`, `shutdownTimeout`,
+`restartOnCrash`, `maxRestarts`.
+
+`apm install` writes LSP config to the detected runtime targets:
+Claude Code uses `.lsp.json` or `~/.claude.json`, and GitHub Copilot CLI
+uses `.github/lsp.json` or `~/.copilot/lsp-config.json`. Copilot CLI
+uses `fileExtensions` on disk; manifests continue to use
+`extensionToLanguage`. Plugin `.lsp.json` files may use either a flat
+server map or a `{ "lspServers": { ... } }` envelope.
+
 ## Version pinning
 
 | Strategy | Syntax | When to use |
@@ -298,9 +399,12 @@ highest tag matching the range; the resolved tag, commit SHA, version,
 and original constraint are pinned in the lockfile. Subsequent
 `apm install` runs replay the lockfile without network. Use
 `apm install --update` (or change the manifest constraint) to
-re-resolve against current remote tags. Two tag patterns are tried in
-order: `v{version}` and `{name}--v{version}`, then a bare `{version}`
-fallback.
+re-resolve against current remote tags. Tag patterns are tried in order:
+`v{version}`, `{name}--v{version}`, and `{name}-v{version}`, then a bare
+`{version}` fallback. For virtual subdirectory deps, `{name}` is the
+final path segment (for example `pkg-a` in `acme/mono/packages/pkg-a`). A
+malformed range-like ref is rejected; use a plain range such as `^1.2.0`
+or pin a literal tag such as `pkg-a-v1.2.0`.
 
 ## Marketplace ref override
 
