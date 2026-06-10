@@ -728,6 +728,21 @@ class AgentsCompiler:
             for claude_path in claude_result.content_map.keys():  # noqa: SIM118
                 rel_path = portable_relpath(claude_path, self.base_dir)
                 preview_lines.append(f"  {rel_path}")
+            # Preview stale CLAUDE.md removal so --dry-run --clean is self-explanatory.
+            # Read the file here (safe in dry-run: we never mutate it) to check for
+            # the APM marker, mirroring the Copilot root-instructions convention.
+            if skip_instructions and config.clean_orphaned:
+                root_claude_md = self.base_dir / "CLAUDE.md"
+                if root_claude_md.exists():
+                    try:
+                        existing_content = root_claude_md.read_text(encoding="utf-8")
+                    except OSError:
+                        existing_content = None
+                    if existing_content is not None and CLAUDE_HEADER in existing_content:
+                        preview_lines.append(
+                            "  (would remove stale CLAUDE.md -- instructions now live"
+                            " in .claude/rules/)"
+                        )
 
             return CompilationResult(
                 success=len(all_errors) == 0,
@@ -794,17 +809,17 @@ class AgentsCompiler:
             # a warning is emitted instead to match the Copilot-root convention.
             root_claude_md = self.base_dir / "CLAUDE.md"
             if root_claude_md.exists() and not config.dry_run:
+                rel = portable_relpath(root_claude_md, self.base_dir)
                 try:
                     existing_content = root_claude_md.read_text(encoding="utf-8")
                 except OSError as exc:
-                    all_warnings.append(f"Could not read {root_claude_md}: {exc!s}")
+                    all_warnings.append(f"Could not read {rel}: {exc!s}")
                     existing_content = None
                 if existing_content is not None:
                     if CLAUDE_HEADER in existing_content:
                         if config.clean_orphaned:
                             try:
                                 root_claude_md.unlink()
-                                rel = portable_relpath(root_claude_md, self.base_dir)
                                 self._log(
                                     "progress",
                                     f"Removed stale {rel} -- instructions now live in"
@@ -812,14 +827,14 @@ class AgentsCompiler:
                                     symbol="success",
                                 )
                             except OSError as exc:
-                                all_warnings.append(f"Could not remove {root_claude_md}: {exc!s}")
+                                all_warnings.append(f"Could not remove {rel}: {exc!s}")
                         # plain apm compile (no --clean): leave the file, stay non-destructive
-                    else:
-                        rel = portable_relpath(root_claude_md, self.base_dir)
+                    elif config.clean_orphaned:
                         all_warnings.append(
                             f"Skipped removal of {rel}: hand-authored file will not be"
                             " deleted. To remove the duplicate context, delete or rename"
-                            " the file manually, then re-run 'apm compile'."
+                            f" the file manually, or prepend the line '{CLAUDE_HEADER}'"
+                            " to let APM manage it. Then re-run 'apm compile'."
                         )
         elif distributed_compiler is None and files_written > 0 and not config.dry_run:
             # Single-file strategy bypasses the distributed display formatter

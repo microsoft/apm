@@ -231,6 +231,28 @@ class TestPlainCompileIsNonDestructive:
         assert (tmp_path / "CLAUDE.md").exists()
         assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == original_content
 
+    def test_plain_compile_hand_authored_emits_no_warning(self, tmp_path):
+        """Plain apm compile (no --clean) must emit NO 'Skipped removal' warning
+        when a hand-authored CLAUDE.md coexists with a populated .claude/rules/
+        directory.  The warning is misleading when no removal was even attempted
+        (issue #1729 follow-up)."""
+        _make_project(tmp_path, populate_rules=True)
+        _hand_authored_claude_md(tmp_path)
+
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=False,
+            dry_run=False,
+        )
+        primitives = _make_primitives(tmp_path)
+        result = compiler._compile_claude_md(config, primitives)
+
+        assert not any("Skipped removal" in w for w in result.warnings), (
+            "Plain compile (no --clean) must not emit 'Skipped removal' warnings; "
+            f"got: {result.warnings}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Clean-checkout behavior from #1138 unchanged
@@ -328,3 +350,73 @@ class TestNoDedupPreventsRemoval:
 
         assert result.success
         assert (tmp_path / "CLAUDE.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# Dry-run must never mutate files and must preview stale-removal
+# ---------------------------------------------------------------------------
+
+
+class TestDryRunCleanBehavior:
+    """apm compile --clean --dry-run must preview what would happen without
+    touching the filesystem (issue #1729 follow-up)."""
+
+    def test_dry_run_clean_leaves_apm_generated_file(self, tmp_path):
+        """APM-generated CLAUDE.md + populated rules + clean_orphaned=True + dry_run=True
+        -> file STILL EXISTS (dry-run must never delete)."""
+        _make_project(tmp_path, populate_rules=True)
+        _apm_generated_claude_md(tmp_path)
+
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=True,
+            dry_run=True,
+        )
+        primitives = _make_primitives(tmp_path)
+        result = compiler._compile_claude_md(config, primitives)
+
+        assert result.success, f"Expected success, got errors: {result.errors}"
+        assert (tmp_path / "CLAUDE.md").exists(), (
+            "dry-run must NEVER delete the stale CLAUDE.md -- only preview the removal"
+        )
+
+    def test_dry_run_clean_preview_mentions_stale_removal(self, tmp_path):
+        """Dry-run output must include a line saying the stale CLAUDE.md would
+        be removed (so users know --clean would act on it)."""
+        _make_project(tmp_path, populate_rules=True)
+        _apm_generated_claude_md(tmp_path)
+
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=True,
+            dry_run=True,
+        )
+        primitives = _make_primitives(tmp_path)
+        result = compiler._compile_claude_md(config, primitives)
+
+        assert "would remove stale CLAUDE.md" in result.content, (
+            "Dry-run --clean preview must mention 'would remove stale CLAUDE.md'; "
+            f"got content:\n{result.content}"
+        )
+
+    def test_dry_run_no_clean_does_not_preview_removal(self, tmp_path):
+        """Dry-run WITHOUT --clean must NOT preview a stale-removal line
+        (removal is not going to happen; the mention would be misleading)."""
+        _make_project(tmp_path, populate_rules=True)
+        _apm_generated_claude_md(tmp_path)
+
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=False,
+            dry_run=True,
+        )
+        primitives = _make_primitives(tmp_path)
+        result = compiler._compile_claude_md(config, primitives)
+
+        assert "would remove stale CLAUDE.md" not in result.content, (
+            "Dry-run without --clean must not mention stale-removal; "
+            f"got content:\n{result.content}"
+        )
