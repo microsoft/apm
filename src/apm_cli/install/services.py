@@ -174,6 +174,95 @@ def _log_hook_display_payloads(
                 logger.verbose_detail(f"  |     {_jline}")
 
 
+def _log_bin_status(
+    skill_result: Any,
+    suffix: str,
+    package_name: str,
+    package_info: Any,
+    log_fn,
+) -> None:
+    """Emit integration-tree lines for bin/ deployment or skip reasons."""
+    if skill_result.bin_deployed > 0:
+        log_fn(
+            f"  |-- {skill_result.bin_deployed} executable(s) deployed to "
+            f"Claude Code's PATH -> {suffix} (invoked without confirmation)"
+        )
+        log_fn("  |-- run /reload-plugins or restart Claude Code to activate")
+    elif skill_result.bin_skipped_reason == "project_scope":
+        log_fn(
+            "  |-- plugin ships executables; re-run with -g (global) to deploy them to Claude Code"
+        )
+    elif skill_result.bin_skipped_reason == "no_claude_target":
+        log_fn(
+            "  |-- plugin ships executables; no active Claude Code skills target to receive them"
+        )
+    elif skill_result.bin_skipped_reason == "not_approved":
+        _pkg_label = package_name or getattr(package_info, "name", "unknown")
+        log_fn(
+            f"  |-- bin/ executables skipped (not approved in allowExecutables). "
+            f"Run 'apm approve {_pkg_label}' to approve."
+        )
+
+
+def _check_executable_approval(
+    package_name: str,
+    package_info: Any,
+    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
+) -> tuple[bool, bool]:
+    """Return ``(hooks_approved, bin_approved)`` for a package.
+
+    Local project content (``_local``) is always trusted.  Dependency
+    packages are checked against the ``allowExecutables`` block.  When
+    no ``allowExecutables`` block exists (``None``), all executables are
+    considered approved (opt-in enforcement).
+    """
+    is_local = package_name == "_local"
+    if is_local or allow_executables is None:
+        return True, True
+
+    from apm_cli.security.executables import (
+        EXEC_TYPE_BIN,
+        EXEC_TYPE_HOOKS,
+        is_package_approved,
+    )
+
+    pkg_key = _resolve_package_key(package_info, package_name)
+    hooks_ok = is_package_approved(allow_executables, pkg_key, EXEC_TYPE_HOOKS)
+    bin_ok = is_package_approved(allow_executables, pkg_key, EXEC_TYPE_BIN)
+    return hooks_ok, bin_ok
+
+
+def _resolve_package_key(package_info: Any, package_name: str) -> str:
+    """Build the ``allowExecutables`` lookup key for a package.
+
+    Tries ``dependency_ref`` first (canonical dependency string), then
+    falls back to ``name#version`` from the package's own metadata.
+    """
+    from apm_cli.security.executables import build_approval_key
+
+    # Prefer the dependency reference's canonical string (includes version/ref)
+    dep_ref = getattr(package_info, "dependency_ref", None)
+    if dep_ref is not None:
+        canonical = getattr(dep_ref, "canonical_string", None)
+        if callable(canonical):
+            cs = canonical()
+            if cs:
+                return cs
+        # Fall back to str(dep_ref)
+        s = str(dep_ref)
+        if s:
+            return s
+
+    # Fall back to package metadata
+    pkg = getattr(package_info, "package", None)
+    if pkg is not None:
+        name = getattr(pkg, "name", package_name) or package_name
+        version = getattr(pkg, "version", "") or ""
+        return build_approval_key(name, version)
+
+    return package_name
+
+
 def integrate_package_primitives(
     package_info: Any,
     project_root: Path,
@@ -190,6 +279,7 @@ def integrate_package_primitives(
     ctx: InstallContext | None = None,
     scratch_root: Path | None = None,
     policy: Any = None,
+    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -204,6 +294,11 @@ def integrate_package_primitives(
     When *ctx* is provided, the cowork non-skill primitive warning
     (Amendment 6) is emitted once per install run for packages that
     contain non-skill primitives when the cowork target is active.
+
+    When *allow_executables* is provided, executable primitives (hooks,
+    bin/) are only deployed for packages whose key appears in the dict
+    with the matching type set to ``True``.  Local project content
+    (``package_name == "_local"``) is always trusted.
 
     Returns a dict with integration counters and the list of deployed file paths.
     """
@@ -245,6 +340,11 @@ def integrate_package_primitives(
         # ``project_root`` is the redirect target; it must equal scratch_root
         # OR sit inside it.  ensure_path_within(child, parent) raises if not.
         ensure_path_within(Path(project_root).resolve(), scratch_root)
+
+    # Executable approval gate (npm v12-style default-deny).
+    _hooks_approved, _bin_approved = _check_executable_approval(
+        package_name, package_info, allow_executables
+    )
 
     # --- Amendment 6: cowork non-skill primitive warning (once per run) ---
     _cowork_active = any(t.name == "copilot-cowork" for t in targets)
@@ -332,6 +432,16 @@ def integrate_package_primitives(
     for _prim_name, _entry in _dispatch.items():
         if _entry.multi_target:
             continue  # skills handled separately
+        # Executable approval gate: skip hooks if not approved.
+        if _prim_name == "hooks" and not _hooks_approved:
+            _pkg_label = package_name or getattr(package_info, "name", "unknown")
+            if logger:
+                logger.warning(
+                    f"{_pkg_label}: hooks skipped (not approved in allowExecutables). "
+                    f"Run 'apm approve {_pkg_label}' to approve.",
+                    symbol="warning",
+                )
+            continue
         _integrator = _INTEGRATOR_KWARGS[_prim_name]
         _agg_files = 0
         _agg_adopted = 0
@@ -477,6 +587,7 @@ def integrate_package_primitives(
         skill_subset=skill_subset,
         scope=scope,
         policy=policy,
+        skip_bin=not _bin_approved,
     )
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:
@@ -509,20 +620,8 @@ def integrate_package_primitives(
             _log_integration(
                 f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_suffix}"
             )
-    if skill_result.bin_deployed > 0:
-        _log_integration(
-            f"  |-- {skill_result.bin_deployed} executable(s) deployed to "
-            f"Claude Code's PATH -> {_skill_suffix} (invoked without confirmation)"
-        )
-        _log_integration("  |-- run /reload-plugins or restart Claude Code to activate")
-    elif skill_result.bin_skipped_reason == "project_scope":
-        _log_integration(
-            "  |-- plugin ships executables; re-run with -g (global) to deploy them to Claude Code"
-        )
-    elif skill_result.bin_skipped_reason == "no_claude_target":
-        _log_integration(
-            "  |-- plugin ships executables; no active Claude Code skills target to receive them"
-        )
+    if skill_result.bin_deployed > 0 or skill_result.bin_skipped_reason:
+        _log_bin_status(skill_result, _skill_suffix, package_name, package_info, _log_integration)
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
         # #1716: also record the bundle's contained files so per-file

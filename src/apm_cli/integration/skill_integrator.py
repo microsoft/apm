@@ -1195,6 +1195,7 @@ class SkillIntegrator(BaseIntegrator):
         skill_subset=None,
         scope=None,
         policy=None,
+        skip_bin: bool = False,
     ) -> SkillIntegrationResult:
         """Integrate a package's skill into all active target directories.
 
@@ -1213,6 +1214,10 @@ class SkillIntegrator(BaseIntegrator):
             project_root: Root directory of the project
             targets: Optional explicit list of TargetProfile objects.
             skill_subset: Optional tuple of skill names or paths to install (None = all).
+            skip_bin: When True, skip bin/ executable deployment even if the
+                package ships one.  Used by the executable approval gate to
+                block unapproved bin/ executables while still deploying text
+                primitives (skills, sub-skills).
 
         Returns:
             SkillIntegrationResult: Results of the integration operation
@@ -1270,15 +1275,18 @@ class SkillIntegrator(BaseIntegrator):
         from apm_cli.models.apm_package import PackageType as _PackageType
 
         if package_info.package_type == _PackageType.MARKETPLACE_PLUGIN:
-            bin_paths, bin_skip_reason = self._deploy_plugin_bin(
-                package_info,
-                project_root,
-                targets,
-                scope=scope,
-                policy=policy,
-                force=force,
-                logger=logger,
-            )
+            if skip_bin:
+                bin_skip_reason = "not_approved"
+            else:
+                bin_paths, bin_skip_reason = self._deploy_plugin_bin(
+                    package_info,
+                    project_root,
+                    targets,
+                    scope=scope,
+                    policy=policy,
+                    force=force,
+                    logger=logger,
+                )
 
         # Check if this is a native Skill (already has SKILL.md at root)
         source_skill_md = package_path / "SKILL.md"
