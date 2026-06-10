@@ -184,51 +184,143 @@ def _install_registry_group(
     return configured_count
 
 
-_MCP_RUNTIME_ORDER = (
-    "copilot",
-    "codex",
-    "vscode",
-    "cursor",
-    "opencode",
-    "gemini",
-    "windsurf",
-    "kiro",
-    "claude",
-    "intellij",
-)
+def _hermes_runtime_opted_in() -> bool:
+    """Return ``True`` when Hermes MCP writes are opted into.
 
-_DIRECTORY_OPT_IN_RUNTIMES = {
-    "cursor": ".cursor",
-    "opencode": ".opencode",
-    "gemini": ".gemini",
-    "windsurf": ".windsurf",
-    "kiro": ".kiro",
-}
+    Gate: the ``hermes`` experimental flag is enabled AND Hermes is actually
+    present on the host (its home dir exists, or the ``hermes`` binary is on
+    PATH).  Prevents surprise writes to ``~/.hermes/`` on hosts where Hermes
+    was never installed.  Any import/path error is treated as "not opted in".
+    """
+    try:
+        from apm_cli.core.experimental import is_enabled
+        from apm_cli.integration.targets import resolve_hermes_root
+
+        if not is_enabled("hermes"):
+            return False
+        return resolve_hermes_root().is_dir() or find_runtime_binary("hermes") is not None
+    except (ImportError, ValueError):
+        return False
 
 
-def _is_runtime_available_for_mcp(
-    runtime_name: str,
-    project_root_path: Path,
-    *,
-    user_scope: bool,
-    manager: Any,
+def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list[str]:
+    """Detect which MCP-capable runtimes are installed on the host.
+
+    Each runtime is opt-in via a binary-on-PATH and/or directory-presence
+    signal (see per-runtime comments).  The primary path constructs each
+    adapter via :class:`ClientFactory`; the ``ImportError`` fallback degrades
+    to a binary/directory probe when optional deps are unavailable.
+    """
+    from apm_cli.integration.mcp_integrator import _is_vscode_available
+
+    # Directory-signal opt-in runtimes: name -> required project dir.
+    dir_signal = {
+        "cursor": ".cursor",
+        "opencode": ".opencode",
+        "gemini": ".gemini",
+        "windsurf": ".windsurf",
+        "kiro": ".kiro",
+    }
+    try:
+        from apm_cli.factory import ClientFactory
+        from apm_cli.runtime.manager import RuntimeManager
+
+        manager = RuntimeManager()
+        installed_runtimes: list[str] = []
+
+        for runtime_name in [
+            "copilot",
+            "codex",
+            "vscode",
+            "cursor",
+            "opencode",
+            "gemini",
+            "windsurf",
+            "kiro",
+            "claude",
+            "intellij",
+            "hermes",
+        ]:
+            try:
+                if not _runtime_is_present(
+                    runtime_name, project_root_path, manager, dir_signal, user_scope=user_scope
+                ):
+                    continue
+                ClientFactory.create_client(
+                    runtime_name,
+                    project_root=project_root_path,
+                    user_scope=user_scope,
+                )
+                installed_runtimes.append(runtime_name)
+            except (ValueError, ImportError):
+                continue
+        return installed_runtimes
+    except ImportError:
+        return _discover_installed_runtimes_fallback(
+            project_root_path, _is_vscode_available, user_scope=user_scope
+        )
+
+
+def _runtime_is_present(
+    runtime_name, project_root_path, manager, dir_signal, *, user_scope: bool
 ) -> bool:
-    """Return True when *runtime_name* should receive MCP config writes."""
+    """Return ``True`` when *runtime_name*'s opt-in presence signal fires."""
     from apm_cli.integration.mcp_integrator import _is_vscode_available
 
     if runtime_name == "vscode":
         return _is_vscode_available(project_root=project_root_path)
     if runtime_name == "kiro" and user_scope:
         return True
-    if runtime_name in _DIRECTORY_OPT_IN_RUNTIMES:
-        return (project_root_path / _DIRECTORY_OPT_IN_RUNTIMES[runtime_name]).is_dir()
+    if runtime_name in dir_signal:
+        return (project_root_path / dir_signal[runtime_name]).is_dir()
     if runtime_name == "claude":
+        # .claude/ (project-scope) OR `claude` on PATH (user-scope). The PATH
+        # gate prevents writing ~/.claude.json on hosts without Claude Code.
         return (project_root_path / ".claude").is_dir() or find_runtime_binary("claude") is not None
     if runtime_name == "intellij":
+        # JetBrains Copilot writes its config dir on first run -> presence
+        # reliably signals the plugin is installed.
         from apm_cli.adapters.client.intellij import _intellij_config_dir
 
         return _intellij_config_dir().is_dir()
+    if runtime_name == "hermes":
+        return _hermes_runtime_opted_in()
     return manager.is_runtime_available(runtime_name)
+
+
+def _discover_installed_runtimes_fallback(
+    project_root_path, _is_vscode_available, *, user_scope: bool
+) -> list[str]:
+    """Binary/directory-only runtime probe used when adapters fail to import."""
+    installed_runtimes = [rt for rt in ["copilot", "codex"] if find_runtime_binary(rt) is not None]
+    if _is_vscode_available(project_root=project_root_path):
+        installed_runtimes.append("vscode")
+    for name, signal in (
+        ("cursor", ".cursor"),
+        ("opencode", ".opencode"),
+        ("gemini", ".gemini"),
+        ("windsurf", ".windsurf"),
+        ("kiro", ".kiro"),
+    ):
+        if (name == "kiro" and user_scope) or (project_root_path / signal).is_dir():
+            installed_runtimes.append(name)
+    # Claude Code: directory-presence OR binary-on-PATH
+    if (project_root_path / ".claude").is_dir() or find_runtime_binary("claude") is not None:
+        installed_runtimes.append("claude")
+    # JetBrains Copilot: user-scope config directory presence
+    try:
+        from apm_cli.adapters.client.intellij import _intellij_config_dir
+
+        if _intellij_config_dir().is_dir():
+            installed_runtimes.append("intellij")
+    except (ImportError, ValueError):
+        # ValueError (PathTraversalError) when LOCALAPPDATA/XDG_DATA_HOME is
+        # misconfigured -- treat as "not installed" rather than crash.
+        pass
+    # Hermes: experimental flag enabled AND home-dir/binary present.
+    if _hermes_runtime_opted_in():
+        installed_runtimes.append("hermes")
+    return installed_runtimes
 
 
 def _resolve_target_runtimes(
@@ -269,68 +361,7 @@ def _resolve_target_runtimes(
                 apm_config = None
 
         # Step 1: Get all installed runtimes on the system
-        try:
-            from apm_cli.factory import ClientFactory
-            from apm_cli.runtime.manager import RuntimeManager
-
-            manager = RuntimeManager()
-            installed_runtimes: list[str] = []
-
-            for runtime_name in _MCP_RUNTIME_ORDER:
-                try:
-                    if _is_runtime_available_for_mcp(
-                        runtime_name,
-                        project_root_path,
-                        user_scope=user_scope,
-                        manager=manager,
-                    ):
-                        ClientFactory.create_client(
-                            runtime_name,
-                            project_root=project_root_path,
-                            user_scope=user_scope,
-                        )
-                        installed_runtimes.append(runtime_name)
-                except (ValueError, ImportError):
-                    continue
-        except ImportError:
-            from apm_cli.integration.mcp_integrator import _is_vscode_available
-
-            installed_runtimes = [
-                rt for rt in ["copilot", "codex"] if find_runtime_binary(rt) is not None
-            ]
-            # VS Code: check binary on PATH or .vscode/ directory presence
-            if _is_vscode_available(project_root=project_root_path):
-                installed_runtimes.append("vscode")
-            # Cursor is directory-presence based, not binary-based
-            if (project_root_path / ".cursor").is_dir():
-                installed_runtimes.append("cursor")
-            # OpenCode is directory-presence based
-            if (project_root_path / ".opencode").is_dir():
-                installed_runtimes.append("opencode")
-            # Gemini CLI is directory-presence based
-            if (project_root_path / ".gemini").is_dir():
-                installed_runtimes.append("gemini")
-            # Windsurf is directory-presence based
-            if (project_root_path / ".windsurf").is_dir():
-                installed_runtimes.append("windsurf")
-            # Kiro is directory-presence based at project scope, always valid at user scope
-            if user_scope or (project_root_path / ".kiro").is_dir():
-                installed_runtimes.append("kiro")
-            # Claude Code: directory-presence OR binary-on-PATH
-            if (project_root_path / ".claude").is_dir() or (
-                find_runtime_binary("claude") is not None
-            ):
-                installed_runtimes.append("claude")
-            # JetBrains Copilot: user-scope config directory presence
-            try:
-                from apm_cli.adapters.client.intellij import _intellij_config_dir
-
-                if _intellij_config_dir().is_dir():
-                    installed_runtimes.append("intellij")
-            except (ImportError, ValueError):
-                # ValueError (PathTraversalError) when LOCALAPPDATA/XDG_DATA_HOME
-                # is misconfigured -- treat as "not installed" rather than crash.
-                pass
+        installed_runtimes = _discover_installed_runtimes(project_root_path, user_scope=user_scope)
 
         # Step 2: Get runtimes referenced in apm.yml scripts
         script_runtimes = MCPIntegrator._detect_runtimes(

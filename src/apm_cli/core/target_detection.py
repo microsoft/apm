@@ -232,7 +232,17 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
     """
     if isinstance(target, frozenset):
         return "agents" in target or "gemini" in target
-    return target in ("vscode", "opencode", "codex", "gemini", "windsurf", "kiro", "all", "minimal")
+    return target in (
+        "vscode",
+        "opencode",
+        "codex",
+        "gemini",
+        "windsurf",
+        "kiro",
+        "hermes",
+        "all",
+        "minimal",
+    )
 
 
 def should_compile_claude_md(target: CompileTargetType) -> bool:
@@ -342,6 +352,7 @@ def get_target_description(target: UserTargetType) -> str:
         "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
+        "hermes": "AGENTS.md + .agents/skills/ (project) or ~/.hermes/skills/ + config.yaml MCP (--global) -- experimental",
         "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
@@ -362,7 +373,9 @@ ALL_CANONICAL_TARGETS = frozenset(
 #: ``is_enabled()`` in ``core/experimental.py`` and ``_flag_gated()`` in
 #: ``integration/targets.py``.  They are NOT included in the
 #: ``parse_target_arg("all")`` expansion -- explicit opt-in only.
-EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"copilot-cowork", "copilot-app", "openclaw"})
+EXPERIMENTAL_TARGETS: frozenset[str] = frozenset(
+    {"copilot-cowork", "copilot-app", "openclaw", "hermes"}
+)
 
 #: Stable targets excluded from "all" expansion (cross-client deploy
 #: locations). Unlike EXPERIMENTAL_TARGETS, these are GA -- they just do

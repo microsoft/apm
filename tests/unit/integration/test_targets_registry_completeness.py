@@ -21,6 +21,7 @@ from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
 from apm_cli.adapters.client.cursor import CursorClientAdapter
 from apm_cli.adapters.client.gemini import GeminiClientAdapter
+from apm_cli.adapters.client.hermes import HermesClientAdapter
 from apm_cli.adapters.client.intellij import IntelliJClientAdapter
 from apm_cli.adapters.client.kiro import KiroClientAdapter
 from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
@@ -59,6 +60,7 @@ _ADAPTER_CLASSES = (
     OpenCodeClientAdapter,
     VSCodeClientAdapter,
     WindsurfClientAdapter,
+    HermesClientAdapter,
 )
 
 

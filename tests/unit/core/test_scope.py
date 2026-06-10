@@ -170,6 +170,7 @@ class TestTargetProfileUserScope:
             "copilot-app",
             "agent-skills",
             "openclaw",
+            "hermes",
         }
         assert set(KNOWN_TARGETS.keys()) == expected
 
