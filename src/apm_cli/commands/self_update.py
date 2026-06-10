@@ -72,15 +72,24 @@ def _get_update_installer_suffix() -> str:
 
 def _get_manual_update_command() -> str:
     """Return the manual update command for the current platform."""
-    try:
-        installer_url = _get_update_installer_url()
-    except RuntimeError:
-        installer_url = "<set APM_INSTALLER_BASE_URL>/install.ps1"
-        if not _is_windows_platform():
-            installer_url = "<set APM_INSTALLER_BASE_URL>/install.sh"
     if _is_windows_platform():
-        return f'powershell -ExecutionPolicy Bypass -c "irm {installer_url} | iex"'
-    return f"curl -sSL {installer_url} | sh"
+        if get_installer_base_url() is not None:
+            installer_url = "$env:APM_INSTALLER_BASE_URL/install.ps1"
+        else:
+            try:
+                installer_url = _get_update_installer_url()
+            except RuntimeError:
+                installer_url = "$env:APM_INSTALLER_BASE_URL/install.ps1"
+        return f"powershell -ExecutionPolicy Bypass -c 'irm \"{installer_url}\" | iex'"
+
+    if get_installer_base_url() is not None:
+        installer_url = "$APM_INSTALLER_BASE_URL/install.sh"
+    else:
+        try:
+            installer_url = _get_update_installer_url()
+        except RuntimeError:
+            installer_url = "$APM_INSTALLER_BASE_URL/install.sh"
+    return f'curl -sSL "{installer_url}" | sh'
 
 
 def _log_no_direct_metadata_error(logger: CommandLogger) -> None:

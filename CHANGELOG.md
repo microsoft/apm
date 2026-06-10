@@ -17,12 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of `~/.hermes/config.yaml` (written atomically with `0o600` perms, preserving
   unrelated config keys and refusing to overwrite a malformed file). `HERMES_HOME`
   overrides the Hermes home directory. See the [Hermes integration guide](https://microsoft.github.io/apm/integrations/hermes/).
+- Enterprise bootstrap mirror mode lets `install.sh`, `install.ps1`, and `apm self-update` use internal release, installer, and PyPI mirrors with fail-closed public fallback, and closes #1680. (#1733)
 
 ## [0.19.0] - 2026-06-09
 
 ### Added
 
-- Enterprise bootstrap mirror mode lets `install.sh`, `install.ps1`, and `apm self-update` use internal release, installer, and PyPI mirrors with fail-closed public fallback. (closes #1680)
 - `apm install <package> --target openclaw` adds OpenClaw as a new experimental
   skills consumer target (opt in via `apm experimental enable openclaw`). Skills
   deploy to `.agents/skills/<name>/SKILL.md` (project) or

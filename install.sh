@@ -111,6 +111,10 @@ join_url_path() {
     printf '%s' "$_base"
 }
 
+redact_url_credentials() {
+    printf '%s' "$1" | sed -E 's#([A-Za-z][A-Za-z0-9+.-]*://)[^/@[:space:]]+@#\1***@#g'
+}
+
 release_metadata_url() {
     if [ -n "$APM_RELEASE_METADATA_URL" ]; then
         printf '%s' "${APM_RELEASE_METADATA_URL%/}"
@@ -299,7 +303,7 @@ if [ -n "$VERSION" ]; then
     fi
     DOWNLOAD_URL=$(release_asset_url "$TAG_NAME" "$DOWNLOAD_BINARY")
     echo -e "${GREEN}Version: $TAG_NAME${NC}"
-    echo -e "${BLUE}Download URL: $DOWNLOAD_URL${NC}"
+    echo -e "${BLUE}Download URL: $(redact_url_credentials "$DOWNLOAD_URL")${NC}"
 fi
 
 if [ -z "$TAG_NAME" ]; then
@@ -326,7 +330,7 @@ CURL_EXIT_CODE=$?
 
 if [ -n "$APM_RELEASE_METADATA_URL" ] && { [ $CURL_EXIT_CODE -ne 0 ] || [ -z "$LATEST_RELEASE" ]; }; then
     echo -e "${RED}Error: Failed to fetch release metadata from APM_RELEASE_METADATA_URL${NC}"
-    echo "Mirror URL: $APM_RELEASE_METADATA_URL"
+    echo "Mirror URL: $(redact_url_credentials "$APM_RELEASE_METADATA_URL")"
     echo "Check that the mirror is reachable and publishes GitHub-compatible latest.json."
     exit 1
 fi
@@ -369,7 +373,7 @@ fi
 if ! echo "$LATEST_RELEASE" | grep -q '"tag_name":'; then
     if [ -n "$APM_RELEASE_METADATA_URL" ]; then
         echo -e "${RED}Error: Invalid release metadata from APM_RELEASE_METADATA_URL${NC}"
-        echo "Mirror URL: $APM_RELEASE_METADATA_URL"
+        echo "Mirror URL: $(redact_url_credentials "$APM_RELEASE_METADATA_URL")"
         echo "Publish a GitHub-compatible JSON document with a tag_name field."
         exit 1
     fi
@@ -414,7 +418,7 @@ if [ -z "$TAG_NAME" ]; then
 fi
 
 echo -e "${GREEN}Latest version: $TAG_NAME${NC}"
-echo -e "${BLUE}Download URL: $DOWNLOAD_URL${NC}"
+echo -e "${BLUE}Download URL: $(redact_url_credentials "$DOWNLOAD_URL")${NC}"
 fi
 
 # Create temporary directory
@@ -446,8 +450,8 @@ else
                     echo -e "${GREEN}[+] Download successful with authentication${NC}"
                 else
                     echo -e "${RED}Error: Failed to download APM CLI even with authentication${NC}"
-                    echo "Direct URL: $DOWNLOAD_URL"
-                    echo "API URL: $ASSET_URL"
+                    echo "Direct URL: $(redact_url_credentials "$DOWNLOAD_URL")"
+                    echo "API URL: $(redact_url_credentials "$ASSET_URL")"
                     echo "This might mean:"
                     echo "  1. No binary available for your platform ($PLATFORM-$ARCH)"
                     echo "  2. Network connectivity issues"
@@ -468,12 +472,12 @@ else
             else
                 if [ -n "$APM_RELEASE_BASE_URL" ]; then
                     echo -e "${RED}Error: Failed to download APM CLI from APM_RELEASE_BASE_URL mirror${NC}"
-                    echo "Mirror URL: $DOWNLOAD_URL"
+                    echo "Mirror URL: $(redact_url_credentials "$DOWNLOAD_URL")"
                     echo "Check that the mirror is reachable and contains $TAG_NAME/$DOWNLOAD_BINARY."
                     exit 1
                 fi
                 echo -e "${RED}Error: Failed to download APM CLI even with authentication${NC}"
-                echo "URL: $DOWNLOAD_URL"
+                echo "URL: $(redact_url_credentials "$DOWNLOAD_URL")"
                 echo "This might mean:"
                 echo "  1. No binary available for your platform ($PLATFORM-$ARCH)"
                 echo "  2. Network connectivity issues"
@@ -490,12 +494,12 @@ else
     else
         if [ -n "$APM_RELEASE_BASE_URL" ]; then
             echo -e "${RED}Error: Failed to download APM CLI from APM_RELEASE_BASE_URL mirror${NC}"
-            echo "Mirror URL: $DOWNLOAD_URL"
+            echo "Mirror URL: $(redact_url_credentials "$DOWNLOAD_URL")"
             echo "Check that the mirror is reachable and contains $TAG_NAME/$DOWNLOAD_BINARY."
             exit 1
         fi
         echo -e "${RED}Error: Failed to download APM${NC}"
-        echo "URL: $DOWNLOAD_URL"
+        echo "URL: $(redact_url_credentials "$DOWNLOAD_URL")"
         echo "This might mean:"
         echo "  1. No binary available for your platform ($PLATFORM-$ARCH)"
         echo "  2. Network connectivity issues"

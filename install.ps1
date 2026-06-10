@@ -128,6 +128,14 @@ function Join-UrlPath {
     return $result
 }
 
+function Redact-UrlCredentials {
+    param([string]$Url)
+    if (-not $Url) {
+        return $Url
+    }
+    return ($Url -replace '([A-Za-z][A-Za-z0-9+.\-]*://)[^/@\s]+@', '$1***@')
+}
+
 function Get-ReleaseMetadataUri {
     if ($releaseMetadataUrl) {
         return $releaseMetadataUrl
@@ -480,8 +488,8 @@ if ($pinnedVersion) {
 
     if ($releaseMetadataUrl -and (-not $release -or -not $release.tag_name)) {
         Write-ErrorText "Failed to fetch release metadata from APM_RELEASE_METADATA_URL."
-        Write-Host "Mirror URL: $releaseMetadataUrl"
-        if ($metadataError) { Write-Host "Details: $metadataError" }
+        Write-Host "Mirror URL: $(Redact-UrlCredentials -Url $releaseMetadataUrl)"
+        if ($metadataError) { Write-Host "Details: $(Redact-UrlCredentials -Url $metadataError)" }
         Write-Host "Publish a GitHub-compatible latest.json document with a tag_name field."
         exit 1
     }
@@ -615,14 +623,14 @@ try {
 
     if (-not $downloadOk -and $releaseBaseUrl) {
         Write-ErrorText "Failed to download APM CLI from APM_RELEASE_BASE_URL mirror."
-        Write-Host "Mirror URL was: $directUrl"
+        Write-Host "Mirror URL was: $(Redact-UrlCredentials -Url $directUrl)"
         Write-Host "Check that the mirror is reachable and contains $tagName/$assetName."
         exit 1
     }
 
     if (-not $downloadOk) {
         Write-ErrorText "All download attempts failed."
-        Write-Host "Direct URL was: $directUrl"
+        Write-Host "Direct URL was: $(Redact-UrlCredentials -Url $directUrl)"
         Write-Host "This might mean:"
         Write-Host "  - Network connectivity issues"
         Write-Host "  - Invalid GitHub token or insufficient permissions"

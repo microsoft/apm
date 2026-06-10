@@ -188,6 +188,49 @@ class TestInstallerUrlAirGap:
         assert parsed.hostname == "mirror.corp.example"
         assert parsed.path == "/apm-install/install.ps1"
 
+    def test_manual_command_no_direct_fallback_unix_uses_env_reference(self) -> None:
+        """Fail-closed manual Unix guidance should reference the mirror env var."""
+        env = self._clean_env()
+        env["APM_NO_DIRECT_FALLBACK"] = "1"
+        with patch.dict("os.environ", env, clear=True):
+            with patch(
+                "apm_cli.commands.self_update._is_windows_platform",
+                return_value=False,
+            ):
+                command = update_module._get_manual_update_command()
+
+        assert command == 'curl -sSL "$APM_INSTALLER_BASE_URL/install.sh" | sh'
+
+    def test_manual_command_no_direct_fallback_windows_uses_env_reference(self) -> None:
+        """Fail-closed manual Windows guidance should reference the mirror env var."""
+        env = self._clean_env()
+        env["APM_NO_DIRECT_FALLBACK"] = "1"
+        with patch.dict("os.environ", env, clear=True):
+            with patch(
+                "apm_cli.commands.self_update._is_windows_platform",
+                return_value=True,
+            ):
+                command = update_module._get_manual_update_command()
+
+        assert command == (
+            "powershell -ExecutionPolicy Bypass -c "
+            "'irm \"$env:APM_INSTALLER_BASE_URL/install.ps1\" | iex'"
+        )
+
+    def test_manual_command_mirror_base_does_not_print_credentials(self) -> None:
+        """Manual guidance should not echo credentials embedded in mirror URLs."""
+        env = self._clean_env()
+        env["APM_INSTALLER_BASE_URL"] = "https://user:secret@mirror.corp.example/apm-install"
+        with patch.dict("os.environ", env, clear=True):
+            with patch(
+                "apm_cli.commands.self_update._is_windows_platform",
+                return_value=False,
+            ):
+                command = update_module._get_manual_update_command()
+
+        assert command == 'curl -sSL "$APM_INSTALLER_BASE_URL/install.sh" | sh'
+        assert "secret" not in command
+
 
 class TestEnterpriseBootstrapSelfUpdate:
     """Self-update honours enterprise bootstrap mirrors and fail-closed mode."""
