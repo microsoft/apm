@@ -53,6 +53,29 @@ class TestConfigUtf8RoundTrip:
         json.loads(isolated_config.read_bytes().decode("utf-8"))
 
 
+class TestUnsetConfigHelpers:
+    """Unset helpers route through the shared update_config write path."""
+
+    @pytest.mark.parametrize(
+        ("unset_func", "key"),
+        (
+            (config_mod.unset_temp_dir, "temp_dir"),
+            (config_mod.unset_copilot_cowork_skills_dir, "copilot_cowork_skills_dir"),
+        ),
+    )
+    def test_unset_helpers_use_update_config(self, monkeypatch, unset_func, key):
+        calls = []
+
+        def fake_update_config(updates, *, remove_keys=()):
+            calls.append((updates, tuple(remove_keys)))
+
+        monkeypatch.setattr(config_mod, "update_config", fake_update_config)
+
+        unset_func()
+
+        assert calls == [({}, (key,))]
+
+
 class TestAuditOnInstallConfig:
     """get/set/unset for the audit-on-install user default."""
 

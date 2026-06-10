@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 RULE_FORMATS: frozenset[str] = frozenset({"cursor_rules", "claude_rules", "windsurf_rules"})
 """Canonical set of format-transforming rule ``format_id``s.
@@ -169,7 +170,7 @@ class TargetProfile:
     (``~/.copilot/copilot-instructions.md``).
     """
 
-    user_root_resolver: Callable[[], Path | None] | None = None  # noqa: F821
+    user_root_resolver: Callable[[], Path | None] | None = None
     """Optional callable that resolves the deploy root at runtime.
 
     When set, ``for_scope(user_scope=True)`` calls this resolver instead of
@@ -181,7 +182,7 @@ class TargetProfile:
     staticmethod) so ``frozen=True`` is preserved.
     """
 
-    resolved_deploy_root: Path | None = None  # noqa: F821
+    resolved_deploy_root: Path | None = None
     """Absolute deploy root populated by ``for_scope()`` when
     ``user_root_resolver`` returns a concrete ``Path``.
 
@@ -297,22 +298,37 @@ class TargetProfile:
             return False
         return primitive in self.primitives
 
-    def deploy_path(self, project_root: Path, *parts: str) -> Path:  # noqa: F821
+    def deploy_path(
+        self, project_root: Path, *parts: str, primitive: str | None = None
+    ) -> Path:
         """Return the filesystem path for deployment.
 
         When ``resolved_deploy_root`` is set (dynamic-root targets like
         cowork), the path is rooted there.  Otherwise falls back to the
-        standard ``project_root / root_dir`` pattern.
+        standard ``project_root / root_dir`` pattern.  When ``primitive``
+        names a mapping with ``deploy_root``, that primitive-specific root is
+        used instead of ``root_dir``.
 
         Args:
             project_root: Workspace or home directory root.
-            *parts: Additional path segments (e.g. ``"skills"``, ``"my-skill"``).
+            *parts: Additional path segments below the resolved deployment
+                root. For primitive-aware calls, pass segments below the
+                primitive root, e.g. ``deploy_path(root, "my-skill",
+                primitive="skills")`` rather than including ``"skills"`` in
+                ``parts``.
+            primitive: Optional primitive name whose mapping can override
+                ``root_dir`` via ``deploy_root`` and append its mapped
+                ``subdir``.
         """
+        mapping = self.primitives.get(primitive) if primitive is not None else None
         if self.resolved_deploy_root is not None:
             return (
                 self.resolved_deploy_root.joinpath(*parts) if parts else self.resolved_deploy_root
             )
-        base = project_root / self.root_dir
+        deploy_root = mapping.deploy_root if mapping is not None else None
+        base = project_root / (deploy_root or self.root_dir)
+        if mapping is not None and mapping.subdir:
+            base = base / mapping.subdir
         return base.joinpath(*parts) if parts else base
 
     def for_scope(self, user_scope: bool = False) -> TargetProfile | None:
@@ -800,7 +816,7 @@ def should_use_legacy_skill_paths() -> bool:
     return val in ("1", "true", "yes")
 
 
-def _resolve_copilot_cowork_root() -> Path | None:  # noqa: F821
+def _resolve_copilot_cowork_root() -> Path | None:
     """Thin wrapper around ``copilot_cowork_paths.resolve_copilot_cowork_skills_dir()``.
 
     Used as the ``user_root_resolver`` callable for the cowork target.
@@ -811,7 +827,7 @@ def _resolve_copilot_cowork_root() -> Path | None:  # noqa: F821
     return resolve_copilot_cowork_skills_dir()
 
 
-def _resolve_copilot_app_root() -> Path | None:  # noqa: F821
+def _resolve_copilot_app_root() -> Path | None:
     """Thin wrapper around ``copilot_app_db.resolve_copilot_app_root()``.
 
     Used as the ``user_root_resolver`` callable for the ``copilot-app``

@@ -61,14 +61,18 @@ def _invalidate_config_cache():
     _config_cache = None
 
 
-def update_config(updates):
+def update_config(updates, *, remove_keys=()):
     """Update the configuration with new values.
 
     Args:
         updates (dict): Dictionary of configuration values to update.
+        remove_keys: Optional iterable of keys to remove before applying
+            updates.
     """
     _invalidate_config_cache()
     config = get_config()
+    for key in remove_keys:
+        config.pop(key, None)
     config.update(updates)
 
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -147,19 +151,13 @@ def set_temp_dir(path: str) -> None:
 def _unset_config_key(key: str) -> None:
     """Remove *key* from the config file atomically.
 
-    No-op when *key* is not present.  Invalidates the in-process cache
-    before and after the write so subsequent reads see the updated state.
+    No-op when *key* is not present.  Routes through ``update_config()``
+    so all config writes share the same read-modify-write path.
 
     Args:
         key: The JSON key to remove from ``~/.apm/config.json``.
     """
-    _invalidate_config_cache()
-    config = get_config()
-    if key in config:
-        del config[key]
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-    _invalidate_config_cache()
+    update_config({}, remove_keys=(key,))
 
 
 def unset_temp_dir() -> None:
