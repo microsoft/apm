@@ -23,7 +23,7 @@ import pytest
 
 from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
 from apm_cli.compilation.distributed_compiler import (
-    _AGENTS_MD_GENERATED_MARKER,
+    AGENTS_MD_GENERATED_MARKER,
     DistributedAgentsCompiler,
     PlacementResult,
 )
@@ -64,7 +64,7 @@ def _apm_generated_marker_content(extra: str = "") -> str:
     """Produce minimal APM-generated AGENTS.md content (marker present)."""
     return (
         f"# AGENTS.md\n"
-        f"{_AGENTS_MD_GENERATED_MARKER}\n"
+        f"{AGENTS_MD_GENERATED_MARKER}\n"
         f"<!-- Build ID: abc123def456 -->\n"
         f"<!-- APM Version: 0.0.0 -->\n"
         f"\n"
@@ -285,11 +285,21 @@ class TestInfoLogMessage:
             encoding="utf-8",
         )
 
+        # Write the source instruction on disk so the fixture mirrors real
+        # project state and stays hermetic if filesystem-based validation tightens.
+        apm_instr_dir = tmp_path / ".apm" / "instructions"
+        apm_instr_dir.mkdir(parents=True)
+        apm_instr_file = apm_instr_dir / "global.instructions.md"
+        apm_instr_file.write_text(
+            "---\ndescription: Global\n---\nGlobal guidance.\n",
+            encoding="utf-8",
+        )
+
         instruction = _make_instruction(
             name="global",
             content="Global guidance.",
             apply_to=None,
-            file_path=tmp_path / ".apm" / "instructions" / "global.instructions.md",
+            file_path=apm_instr_file,
         )
         primitives = _make_primitives(instruction)
 

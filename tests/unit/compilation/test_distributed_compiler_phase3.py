@@ -24,7 +24,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.compilation.distributed_compiler import (
-    _AGENTS_MD_GENERATED_MARKER,
+    AGENTS_MD_GENERATED_MARKER,
     CompilationResult,
     DirectoryMap,
     DistributedAgentsCompiler,
@@ -33,7 +33,7 @@ from apm_cli.compilation.distributed_compiler import (
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
 # APM-generated AGENTS.md content (marker present) for orphan tests
-_GENERATED_CONTENT = f"{_AGENTS_MD_GENERATED_MARKER}\n# Generated content\n"
+_GENERATED_CONTENT = f"{AGENTS_MD_GENERATED_MARKER}\n# Generated content\n"
 
 # ---------------------------------------------------------------------------
 # Helpers

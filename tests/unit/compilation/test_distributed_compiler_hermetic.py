@@ -24,7 +24,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.compilation.distributed_compiler import (
-    _AGENTS_MD_GENERATED_MARKER,
+    AGENTS_MD_GENERATED_MARKER,
     CompilationResult,
     DirectoryMap,
     DistributedAgentsCompiler,
@@ -33,7 +33,7 @@ from apm_cli.compilation.distributed_compiler import (
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
 # Content used by tests that need an APM-generated AGENTS.md
-_GENERATED_CONTENT = f"{_AGENTS_MD_GENERATED_MARKER}\n# Generated content\n"
+_GENERATED_CONTENT = f"{AGENTS_MD_GENERATED_MARKER}\n# Generated content\n"
 # Content used by tests that need a hand-authored AGENTS.md (no APM marker)
 _HAND_AUTHORED_CONTENT = "# My custom AGENTS.md\nThis file was written by hand.\n"
 
