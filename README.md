@@ -34,7 +34,7 @@ dependencies:
     # A full APM package with instructions, skills, prompts, hooks...
     - microsoft/apm-sample-package#v1.0.0
   mcp:
-    # MCP servers -- installed into every detected client
+    # MCP servers — installed into every detected client
     - name: io.github.github/github-mcp-server
       transport: http   # MCP transport name, not URL scheme -- connects over HTTPS
 ```
@@ -59,7 +59,7 @@ Same install gesture. You also get a [manifest, lockfile, and reproducibility](h
 apm compile -t copilot   # writes .github/copilot-instructions.md
 ```
 
-One command, no configuration -- VS Code and GitHub Copilot read the file automatically. APM dogfoods this target on its own repository.
+One command, no configuration — VS Code and GitHub Copilot read the file automatically. APM dogfoods this target on its own repository.
 
 ## The three promises
 
