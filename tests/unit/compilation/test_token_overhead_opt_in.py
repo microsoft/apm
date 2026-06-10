@@ -2,7 +2,9 @@
 
 These tests verify:
 1. source_attribution defaults to False (cuts per-instruction Source: comments).
-2. Cosmetic debug comments (APM Version, footer, CLAUDE_HEADER) are absent by default.
+2. Cosmetic debug comments (APM Version, footer) are absent by default.
+   CLAUDE_HEADER is a FUNCTIONAL marker (always present, like
+   _COPILOT_ROOT_GENERATED_MARKER) -- it enables stale-file removal (#1729).
 3. Debug comments appear when source_attribution=True is opted in.
 4. The FUNCTIONAL marker _COPILOT_ROOT_GENERATED_MARKER is ALWAYS present in
    copilot-instructions.md (drift/injection/uninstall coupling guard).
@@ -81,8 +83,15 @@ class TestClaudeFormatterDefaultNoCosmetic:
     def primitives(self, tmp_project):
         return _make_primitives(tmp_project)
 
-    def test_no_claude_header_by_default(self, tmp_project, primitives):
-        """CLAUDE_HEADER must NOT appear in default output (source_attribution=False)."""
+    def test_claude_header_always_present(self, tmp_project, primitives):
+        """CLAUDE_HEADER must ALWAYS appear regardless of source_attribution.
+
+        CLAUDE_HEADER is a functional marker (not a cosmetic comment): it lets
+        ``apm compile --clean`` distinguish APM-generated files from hand-authored
+        ones and remove stale CLAUDE.md files (issue #1729). It must be present
+        even when source_attribution=False, matching the always-present behaviour
+        of _COPILOT_ROOT_GENERATED_MARKER in copilot-instructions.md.
+        """
         formatter = ClaudeFormatter(str(tmp_project))
         placement_map = {tmp_project: list(primitives.instructions)}
         result = formatter.format_distributed(
@@ -90,7 +99,7 @@ class TestClaudeFormatterDefaultNoCosmetic:
         )
         assert result.success
         content = result.content_map[tmp_project / "CLAUDE.md"]
-        assert CLAUDE_HEADER not in content
+        assert CLAUDE_HEADER in content
 
     def test_no_apm_version_by_default(self, tmp_project, primitives):
         """APM Version comment must NOT appear when source_attribution=False."""

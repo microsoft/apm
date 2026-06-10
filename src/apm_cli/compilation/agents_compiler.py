@@ -23,7 +23,7 @@ from ..primitives.discovery import discover_primitives
 from ..primitives.models import PrimitiveCollection
 from ..utils.paths import portable_relpath
 from ..version import get_version
-from .claude_formatter import ClaudeFormatter
+from .claude_formatter import CLAUDE_HEADER, ClaudeFormatter
 from .constants import BUILD_ID_PLACEHOLDER
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from .template_builder import (
@@ -789,6 +789,38 @@ class AgentsCompiler:
                 " no further action needed",
                 symbol="info",
             )
+            # Remove a stale APM-generated CLAUDE.md when --clean is set.
+            # A hand-authored file (no CLAUDE_HEADER marker) is never deleted;
+            # a warning is emitted instead to match the Copilot-root convention.
+            root_claude_md = self.base_dir / "CLAUDE.md"
+            if root_claude_md.exists() and not config.dry_run:
+                try:
+                    existing_content = root_claude_md.read_text(encoding="utf-8")
+                except OSError as exc:
+                    all_warnings.append(f"Could not read {root_claude_md}: {exc!s}")
+                    existing_content = None
+                if existing_content is not None:
+                    if CLAUDE_HEADER in existing_content:
+                        if config.clean_orphaned:
+                            try:
+                                root_claude_md.unlink()
+                                rel = portable_relpath(root_claude_md, self.base_dir)
+                                self._log(
+                                    "progress",
+                                    f"Removed stale {rel} -- instructions now live in"
+                                    " .claude/rules/",
+                                    symbol="success",
+                                )
+                            except OSError as exc:
+                                all_warnings.append(f"Could not remove {root_claude_md}: {exc!s}")
+                        # plain apm compile (no --clean): leave the file, stay non-destructive
+                    else:
+                        rel = portable_relpath(root_claude_md, self.base_dir)
+                        all_warnings.append(
+                            f"Skipped removal of {rel}: hand-authored file will not be"
+                            " deleted. To remove the duplicate context, delete or rename"
+                            " the file manually, then re-run 'apm compile'."
+                        )
         elif distributed_compiler is None and files_written > 0 and not config.dry_run:
             # Single-file strategy bypasses the distributed display formatter
             # (which has no analysis to render). Emit a minimal progress line

@@ -283,11 +283,13 @@ class ClaudeFormatter:
         """
         sections = []
 
-        # Header - Build ID is always present (drift normalization reads it).
-        # Cosmetic comments are opt-in via source_attribution.
+        # Header - Build ID and CLAUDE_HEADER are always present.
+        # CLAUDE_HEADER is a functional marker used by `apm compile --clean` to
+        # distinguish APM-generated files from hand-authored ones (stale-file
+        # removal for issue #1729). Build ID is always present for drift
+        # normalization. The APM version comment is cosmetic and opt-in.
         sections.append("# CLAUDE.md")
-        if source_attribution:
-            sections.append(CLAUDE_HEADER)
+        sections.append(CLAUDE_HEADER)
         sections.append(BUILD_ID_PLACEHOLDER)
         if source_attribution:
             sections.append(f"<!-- APM Version: {get_version()} -->")
