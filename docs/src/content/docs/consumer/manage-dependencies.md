@@ -184,6 +184,20 @@ SHAs. The lockfile pins the resolved commit either way, so two clones
 running `apm install` get the same bytes -- but a branch ref will resolve
 to a new SHA on the next `apm update`.
 
+When a dependency is pinned to a full 40-character SHA, `apm update`
+checks the authoritative upstream for the latest annotated semver tag,
+updates the SHA to that tag's commit, and leaves the tag as a YAML comment:
+
+```yaml
+dependencies:
+  apm:
+    - acme/playbooks#b1c2d3e4f5... # v2.0.0
+```
+
+`apm update --dry-run` previews the SHA/tag rewrite without changing the
+manifest. Branches and lightweight tags are not accepted as revision-pin
+update targets.
+
 ### Marketplace ref override
 
 When installing from a marketplace via the CLI, append `#<ref>` to

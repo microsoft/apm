@@ -15,7 +15,7 @@ apm update [OPTIONS] [PACKAGES...]
 
 ## Description
 
-`apm update` re-resolves every dependency in your project's `apm.yml` against the newest Git ref allowed by its constraint, prints a structured plan -- **added**, **updated**, **removed**, **unchanged** -- and prompts before touching anything. Decline the prompt and APM exits cleanly: no lockfile writes, no filesystem changes.
+`apm update` re-resolves every dependency in your project's `apm.yml` against the newest Git ref allowed by its constraint, prints a structured plan -- **added**, **updated**, **removed**, **unchanged** -- and prompts before touching anything. Full-SHA revision pins are refreshed by resolving the latest annotated semver tag from the authoritative upstream, rewriting the SHA in `apm.yml`, and annotating the line with the tag (for example `# v2.0.0`). Decline the prompt and APM exits cleanly: no lockfile writes, no filesystem changes.
 
 Pass one or more `PACKAGES` to refresh only those dependencies, or `-g/--global` to refresh the user-scope dependencies under `~/.apm/` instead of the current project. With these flags `apm update` is a strict superset of the deprecated [`apm deps update`](../deps/#apm-deps-update).
 
@@ -88,7 +88,7 @@ apm update
 
 ## Behavior
 
-- **Re-resolve every dep.** Each entry in `apm.yml` is resolved against its remote source for the newest ref allowed by the constraint (branch tip, latest matching tag, etc.). Local-path deps are skipped.
+- **Re-resolve every dep.** Each entry in `apm.yml` is resolved against its remote source for the newest ref allowed by the constraint (branch tip, latest matching tag, etc.). Full-SHA revision pins move only to the commit behind the latest annotated semver tag; branch refs and lightweight tags are refused. Local-path deps are skipped.
 - **Structured plan.** Output is grouped into four sections:
   - **added** -- present in the new resolution but not in the previous lockfile.
   - **updated** -- ref or version moved.
@@ -96,7 +96,7 @@ apm update
   - **unchanged** -- already at the latest matching ref.
 - **Consent gate.** The prompt defaults to **No**. Without `--yes`, declining (or running in a non-interactive context) aborts with a clean exit; the lockfile and workspace are untouched.
 - **No partial writes.** The plan is applied atomically: either the new `apm.lock.yaml` is written and `apm install` is invoked to materialize the result, or nothing changes.
-- **`--dry-run` skips the prompt.** It only computes and prints the plan; it never writes and never asks.
+- **`--dry-run` skips the prompt.** It computes and prints the plan, including revision-pin SHA/tag rewrites, but never writes and never asks.
 
 ## Back-compat: `apm update` used to be the self-updater
 

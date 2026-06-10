@@ -12,6 +12,8 @@ Public API::
     yaml_to_str(data)      -- serialize dict -> YAML string
 """
 
+import os
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -53,3 +55,26 @@ def yaml_to_str(data: Any, *, sort_keys: bool = False) -> str:
     for later file writes or string returns.
     """
     return yaml.safe_dump(data, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
+
+
+def write_yaml_text_atomic(
+    path: str | Path,
+    content: str,
+    *,
+    tmp_suffix: str = ".tmp",
+) -> None:
+    """Atomically replace a YAML file with already-rendered text.
+
+    The replacement is written to a sibling file first and then moved into
+    place with ``os.replace``. If the write or replace fails, the original
+    file remains untouched.
+    """
+    target = Path(path)
+    tmp_path = target.with_name(f".{target.name}{tmp_suffix}")
+    try:
+        tmp_path.write_text(content, encoding="utf-8")
+        os.replace(tmp_path, target)
+    except Exception:
+        with suppress(OSError):
+            tmp_path.unlink()
+        raise

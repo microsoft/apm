@@ -30,6 +30,7 @@ def parse_ls_remote_output(output: str) -> list[RemoteRef]:
         Unsorted list of RemoteRef.
     """
     tags: dict[str, str] = {}  # tag name -> commit sha
+    annotated_tags: set[str] = set()
     branches: list[RemoteRef] = []
 
     for line in output.splitlines():
@@ -44,11 +45,13 @@ def parse_ls_remote_output(output: str) -> list[RemoteRef]:
         if refname.startswith("refs/tags/"):
             tag_name = refname[len("refs/tags/") :]
             if tag_name.endswith("^{}"):
-                # Dereferenced commit -- overwrite with the real commit SHA
+                # Dereferenced commit -- overwrite with the real commit SHA.
+                # Only annotated tags have this peeled ref in ls-remote output.
                 tag_name = tag_name[:-3]
                 tags[tag_name] = sha
+                annotated_tags.add(tag_name)
             else:
-                # Only store if we haven't seen the deref line yet
+                # Only store if we haven't seen the deref line yet.
                 tags.setdefault(tag_name, sha)
 
         elif refname.startswith("refs/heads/"):
@@ -62,7 +65,12 @@ def parse_ls_remote_output(output: str) -> list[RemoteRef]:
             )
 
     tag_refs = [
-        RemoteRef(name=name, ref_type=GitReferenceType.TAG, commit_sha=sha)
+        RemoteRef(
+            name=name,
+            ref_type=GitReferenceType.TAG,
+            commit_sha=sha,
+            annotated=name in annotated_tags,
+        )
         for name, sha in tags.items()
     ]
     return tag_refs + branches

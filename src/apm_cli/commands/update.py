@@ -56,6 +56,14 @@ import click
 
 from ..core.command_logger import InstallLogger
 from ..core.target_detection import TargetParamType
+from ..deps.revision_pins import (
+    RevisionPinResolutionError,
+    RevisionPinUpdate,
+    apply_revision_pin_updates,
+    is_full_revision_pin,
+    render_revision_pin_update_plan,
+    resolve_revision_pin_updates,
+)
 from ..install.errors import (
     AuthenticationError,
     DirectDependencyError,
@@ -78,6 +86,116 @@ def _stdin_is_tty() -> bool:
         return sys.stdin is not None and sys.stdin.isatty()
     except (AttributeError, ValueError):
         return False
+
+
+def _resolve_and_maybe_apply_revision_pin_updates(
+    *,
+    all_declared_deps,
+    only_packages: list[str] | None,
+    assume_yes: bool,
+    dry_run: bool,
+    manifest_path: Path,
+) -> list[RevisionPinUpdate]:
+    """Resolve SHA pins and apply their manifest rewrite after consent."""
+    only_set = set(only_packages) if only_packages is not None else None
+    revision_pin_deps = [
+        dep
+        for dep in all_declared_deps
+        if (only_set is None or dep.get_unique_key() in only_set)
+        and is_full_revision_pin(getattr(dep, "reference", None))
+        and not dep.is_local
+        and dep.source != "registry"
+        and not dep.artifactory_prefix
+    ]
+    if not revision_pin_deps:
+        return []
+
+    try:
+        from apm_cli.core.auth import AuthResolver
+        from apm_cli.deps.github_downloader import GitHubPackageDownloader
+
+        downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
+        updates = resolve_revision_pin_updates(
+            revision_pin_deps,
+            downloader,
+            only_packages=only_set,
+        )
+    except RevisionPinResolutionError as e:
+        _rich_error(str(e))
+        sys.exit(1)
+    except Exception as e:
+        _rich_error(f"Failed to resolve revision pins: {e}")
+        sys.exit(1)
+
+    if not updates:
+        return []
+
+    rendered = render_revision_pin_update_plan(updates)
+    if rendered:
+        _rich_echo(rendered)
+        _rich_echo("")
+
+    if dry_run:
+        _rich_info(
+            "Dry run: no revision pin changes applied. Re-run without --dry-run to update.",
+            symbol="info",
+        )
+        return updates
+
+    if not assume_yes:
+        if not _stdin_is_tty():
+            _rich_error(
+                "Cannot prompt for confirmation in non-interactive shell. "
+                "Re-run with --yes to apply, or --dry-run to preview."
+            )
+            sys.exit(1)
+        if not click.confirm("Apply these revision pin updates?", default=False, show_default=True):
+            _rich_info("No changes applied.", symbol="info")
+            sys.exit(0)
+
+    try:
+        apply_revision_pin_updates(manifest_path, updates)
+    except Exception as e:
+        _rich_error(f"Failed to update apm.yml revision pins: {e}")
+        sys.exit(1)
+    # Keep the already-parsed object coherent for tests and callers that
+    # inspect it before the on-disk manifest is reloaded.
+    updates_by_key = {update.dep_key: update for update in updates}
+    for dep_ref in all_declared_deps:
+        update = updates_by_key.get(dep_ref.get_unique_key())
+        if update is not None:
+            dep_ref.reference = update.new_sha
+    return updates
+
+
+def _annotate_lockfile_revision_tags(project_root: Path, updates: list[RevisionPinUpdate]) -> None:
+    """Record resolved annotated tag names for updated SHA pins in the lockfile."""
+    if not updates:
+        return
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+    lockfile_path = get_lockfile_path(project_root)
+    lockfile = LockFile.read(lockfile_path)
+    if lockfile is None:
+        raise RuntimeError("Could not record revision-pin tags: apm.lock.yaml was not written")
+
+    changed = False
+    for update in updates:
+        locked = lockfile.get_dependency(update.dep_key)
+        if locked is None:
+            raise RuntimeError(
+                f"Could not record revision-pin tag for {update.display_name}: missing lockfile entry"
+            )
+        if (locked.resolved_commit or "").lower() != update.new_sha.lower():
+            raise RuntimeError(
+                f"Could not record revision-pin tag for {update.display_name}: "
+                "lockfile SHA does not match updated manifest"
+            )
+        if locked.resolved_tag != update.tag:
+            locked.resolved_tag = update.tag
+            changed = True
+    if changed:
+        lockfile.save(lockfile_path)
 
 
 @click.command(
@@ -312,12 +430,14 @@ def _run_dep_update(
         _rich_success("No APM dependencies declared in apm.yml -- nothing to update.")
         return
 
+    all_declared_deps = apm_package.get_apm_dependencies() + apm_package.get_dev_apm_dependencies()
+
     # Map any positional [PACKAGES] to canonical dependency keys for the
     # engine's only_packages filter; None means "refresh everything".
     try:
         only_packages = resolve_requested_packages(
             packages,
-            apm_package.get_apm_dependencies() + apm_package.get_dev_apm_dependencies(),
+            all_declared_deps,
         )
     except UnknownPackageError as e:
         _rich_error(f"Package '{e.token}' not found in apm.yml")
@@ -326,6 +446,21 @@ def _run_dep_update(
 
     logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=bool(packages))
 
+    revision_pin_updates = _resolve_and_maybe_apply_revision_pin_updates(
+        all_declared_deps=all_declared_deps,
+        only_packages=only_packages,
+        assume_yes=assume_yes,
+        dry_run=dry_run,
+        manifest_path=Path("apm.yml"),
+    )
+    if dry_run and revision_pin_updates:
+        return
+    if revision_pin_updates:
+        from apm_cli.models.apm_package import clear_apm_yml_cache
+
+        clear_apm_yml_cache()
+        apm_package = APMPackage.from_apm_yml(Path("apm.yml"))
+
     plan_state: dict[str, UpdatePlan | bool] = {"plan": None, "proceeded": False}
 
     def _plan_callback(plan: UpdatePlan) -> bool:
@@ -333,6 +468,9 @@ def _run_dep_update(
         plan_state["plan"] = plan
 
         if not plan.has_changes:
+            if revision_pin_updates:
+                plan_state["proceeded"] = True
+                return True
             _rich_success(
                 "All dependencies already at their latest matching refs.",
                 symbol="check",
@@ -350,6 +488,10 @@ def _run_dep_update(
                 symbol="info",
             )
             return False
+
+        if revision_pin_updates:
+            plan_state["proceeded"] = True
+            return True
 
         if assume_yes:
             plan_state["proceeded"] = True
@@ -412,6 +554,12 @@ def _run_dep_update(
         return
 
     if plan_state.get("proceeded"):
+        if revision_pin_updates:
+            try:
+                _annotate_lockfile_revision_tags(Path.cwd(), revision_pin_updates)
+            except Exception as e:
+                _rich_error(f"Failed to record revision-pin tags in apm.lock.yaml: {e}")
+                sys.exit(1)
         installed = getattr(result, "installed_count", 0)
         if installed:
             _rich_success(f"Updated {installed} APM dependencies.")

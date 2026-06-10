@@ -116,6 +116,7 @@ class LockfileBuilder:
             lockfile = self._maybe_merge_partial(lockfile, lockfile_path, _LF)
             self._preserve_existing_mcp_state(lockfile)
             self._preserve_existing_local_state(lockfile)
+            self._preserve_existing_revision_pin_tags(lockfile)
 
             # Only write when the semantic content has actually changed
             # (avoids generated_at churn in version control).
@@ -246,6 +247,23 @@ class LockfileBuilder:
                     "Carrying forward local .apm state pending hash reconciliation: "
                     f"{len(lockfile.local_deployed_files)} file(s)"
                 )
+
+    def _preserve_existing_revision_pin_tags(self, lockfile: LockFile) -> None:
+        """Carry resolved_tag for unchanged SHA-pinned deps across installs."""
+        existing = self.ctx.existing_lockfile
+        if not existing:
+            return
+        for key, dep in lockfile.dependencies.items():
+            if dep.resolved_tag:
+                continue
+            prev = existing.get_dependency(key)
+            if prev is None or not prev.resolved_tag:
+                continue
+            if (
+                dep.resolved_ref == prev.resolved_ref
+                and dep.resolved_commit == prev.resolved_commit
+            ):
+                dep.resolved_tag = prev.resolved_tag
 
     def _write_if_changed(self, lockfile: LockFile, lockfile_path: Path, _LF: type) -> None:
         # Re-read the on-disk lockfile for the semantic comparison.

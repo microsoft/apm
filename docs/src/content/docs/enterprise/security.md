@@ -55,7 +55,7 @@ dependencies:
       - .github/skills/example/skill.md
 ```
 
-The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated.
+The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated. For manifest entries that are themselves pinned to a full SHA, `apm update` resolves the latest annotated semver tag from the authoritative upstream, rewrites the SHA in `apm.yml`, annotates the line with that tag, and records the tag in the lockfile. Branches, caches, and lightweight tags are not accepted for this revision-pin update path.
 
 ### Registry security model
 

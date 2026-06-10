@@ -81,6 +81,36 @@ class TestUpdateDryRun:
             assert "Dry run" in result.output
             assert captured["proceeded"] is False
 
+    def test_dry_run_renders_revision_pin_plan_without_writing_manifest(self, runner, tmp_path):
+        old_sha = "a" * 40
+        new_sha = "b" * 40
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            manifest = Path.cwd() / "apm.yml"
+            manifest.write_text(
+                f"name: test\nversion: 1.0.0\ndependencies:\n  apm:\n    - org/pkg#{old_sha}\n",
+                encoding="utf-8",
+            )
+            original = manifest.read_text(encoding="utf-8")
+
+            from apm_cli.deps.revision_pins import RevisionPinUpdate
+
+            with (
+                patch(
+                    "apm_cli.commands.update.resolve_revision_pin_updates",
+                    return_value=[
+                        RevisionPinUpdate("org/pkg", old_sha, new_sha, "v2.0.0", "org/pkg")
+                    ],
+                ),
+                patch("apm_cli.commands.install._install_apm_dependencies") as mock_install,
+            ):
+                result = runner.invoke(cli, ["update", "--dry-run"])
+
+            assert result.exit_code == 0, result.output
+            assert "Revision pin updates" in result.output
+            assert "v2.0.0" in result.output
+            assert manifest.read_text(encoding="utf-8") == original
+            mock_install.assert_not_called()
+
 
 class TestUpdateAssumeYes:
     def test_yes_skips_prompt_and_proceeds(self, runner, tmp_path):
@@ -103,8 +133,119 @@ class TestUpdateAssumeYes:
             assert result.exit_code == 0, result.output
             assert captured["proceeded"] is True
 
+    def test_yes_updates_revision_pin_manifest_before_install(self, runner, tmp_path):
+        old_sha = "a" * 40
+        new_sha = "b" * 40
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            manifest = Path.cwd() / "apm.yml"
+            manifest.write_text(
+                f"name: test\nversion: 1.0.0\ndependencies:\n  apm:\n    - org/pkg#{old_sha}\n",
+                encoding="utf-8",
+            )
+
+            from apm_cli.deps.revision_pins import RevisionPinUpdate
+            from apm_cli.models.results import InstallResult
+
+            captured = {}
+
+            def fake_install(apm_package, **kwargs):
+                captured["dep_ref"] = apm_package.get_apm_dependencies()[0].reference
+                captured["plan_proceeded"] = kwargs["plan_callback"](_stub_plan_with_changes())
+                return InstallResult(installed_count=1)
+
+            with (
+                patch(
+                    "apm_cli.commands.update.resolve_revision_pin_updates",
+                    return_value=[
+                        RevisionPinUpdate("org/pkg", old_sha, new_sha, "v2.0.0", "org/pkg")
+                    ],
+                ),
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                patch("apm_cli.commands.update._annotate_lockfile_revision_tags"),
+            ):
+                result = runner.invoke(cli, ["update", "--yes"])
+
+            assert result.exit_code == 0, result.output
+            assert f"org/pkg#{new_sha} # v2.0.0" in manifest.read_text(encoding="utf-8")
+            assert captured["dep_ref"] == new_sha
+            assert captured["plan_proceeded"] is True
+
+
+class TestRevisionPinLockfileAnnotation:
+    def test_annotates_lockfile_with_resolved_tag(self, tmp_path) -> None:
+        from apm_cli.commands.update import _annotate_lockfile_revision_tags
+        from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
+        from apm_cli.deps.revision_pins import RevisionPinUpdate
+
+        new_sha = "b" * 40
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="org/pkg",
+                resolved_ref=new_sha,
+                resolved_commit=new_sha,
+            )
+        )
+        lockfile.save(get_lockfile_path(tmp_path))
+
+        _annotate_lockfile_revision_tags(
+            tmp_path,
+            [RevisionPinUpdate("org/pkg", "a" * 40, new_sha, "v2.0.0", "org/pkg")],
+        )
+
+        updated = LockFile.read(get_lockfile_path(tmp_path))
+        assert updated is not None
+        assert updated.get_dependency("org/pkg").resolved_tag == "v2.0.0"
+
+    def test_lockfile_annotation_refuses_sha_mismatch(self, tmp_path) -> None:
+        from apm_cli.commands.update import _annotate_lockfile_revision_tags
+        from apm_cli.deps.lockfile import LockedDependency, LockFile, get_lockfile_path
+        from apm_cli.deps.revision_pins import RevisionPinUpdate
+
+        lockfile = LockFile()
+        lockfile.add_dependency(
+            LockedDependency(
+                repo_url="org/pkg",
+                resolved_ref="c" * 40,
+                resolved_commit="c" * 40,
+            )
+        )
+        lockfile.save(get_lockfile_path(tmp_path))
+
+        with pytest.raises(RuntimeError, match="SHA does not match"):
+            _annotate_lockfile_revision_tags(
+                tmp_path,
+                [RevisionPinUpdate("org/pkg", "a" * 40, "b" * 40, "v2.0.0", "org/pkg")],
+            )
+
 
 class TestUpdateNonTty:
+    def test_revision_pin_non_tty_aborts_without_manifest_write(self, runner, tmp_path):
+        old_sha = "a" * 40
+        new_sha = "b" * 40
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            manifest = Path.cwd() / "apm.yml"
+            manifest.write_text(
+                f"name: test\nversion: 1.0.0\ndependencies:\n  apm:\n    - org/pkg#{old_sha}\n",
+                encoding="utf-8",
+            )
+            original = manifest.read_text(encoding="utf-8")
+
+            from apm_cli.deps.revision_pins import RevisionPinUpdate
+
+            with patch(
+                "apm_cli.commands.update.resolve_revision_pin_updates",
+                return_value=[RevisionPinUpdate("org/pkg", old_sha, new_sha, "v2.0.0", "org/pkg")],
+            ):
+                result = runner.invoke(cli, ["update"])
+
+            assert result.exit_code == 1, result.output
+            assert "non-interactive" in result.output
+            assert manifest.read_text(encoding="utf-8") == original
+
     def test_non_tty_aborts_without_yes_flag(self, runner, tmp_path):
         """No --yes + non-TTY stdin -> exit 1 (CI-safe failure, do not mutate).
 

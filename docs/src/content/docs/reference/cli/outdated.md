@@ -19,6 +19,7 @@ apm outdated [OPTIONS]
 
 - **Plain tag-pinned deps** (e.g. `v1.2.3` or `1.2.3`): semver compare against the latest matching remote tag.
 - **Patterned tag-pinned deps** (e.g. `my-pkg_v1.2.3`, `my-pkg--v1.2.3`, or `my-pkg-v1.2.3`): semver compare against the latest tag matching the package-specific pattern inferred from the locked ref.
+- **Full-SHA revision-pinned deps**: compare the pinned SHA against the commit behind the latest annotated semver tag. Branches and lightweight tags are ignored.
 - **Branch-pinned deps** (e.g. `main`): compare the locked commit SHA against the remote branch tip.
 - **Default-branch deps** (no ref): compare against `main`/`master` tip.
 - **Marketplace deps**: compare the installed ref against the marketplace entry's current `source.ref`.
@@ -54,6 +55,7 @@ Sample output:
   ----------------------------- --------- ------------- ----------- ---------------
   acme/agent-skills             v1.2.0    v1.4.1        outdated    git tags
   acme/prompt-pack              main      9c1ab2f0      outdated    git branch
+  acme/sha-pinned               a1b2c3d4  v2.0.0 (...)  outdated    git annotated tags
   acme/lint-rules               v0.3.0    v0.3.0        up-to-date  git tags
   nadavy/e2e-demo               1.0.1     1.1.1         outdated    registry: corp
   microsoft/apm-review-panel    0.1.1     0.1.2         outdated    registry: corp (lockfile)
