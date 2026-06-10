@@ -92,7 +92,7 @@ Supported targets and where the integrator writes:
 | gemini   | `.gemini/settings.json`               | merged               |
 | codex    | `.codex/hooks.json`                   | merged               |
 | windsurf | `.windsurf/hooks.json`                | merged               |
-| kiro     | `.kiro/hooks/<pkg>-<event>.json`    | one file per hook    |
+| kiro     | `.kiro/hooks/<package-slug>-<hook-file-stem-slug>-<event-slug>-<n>.json` | one file per hook action |
 | opencode | -- not supported --                   | silently skipped     |
 
 Copilot hook files are namespaced with the source package name to avoid

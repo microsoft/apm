@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Kiro IDE is now a first-class install target: APM deploys steering, skills,
-  hooks, and MCP config to the documented `.kiro/` layout. (closes #702)
+  hooks, and MCP config to the documented `.kiro/` layout. (closes #702) (#1741)
 - `apm install --target hermes` and `apm compile -t hermes` add the Hermes
   agent (Nous Research) as a new experimental target (opt in via
   `apm experimental enable hermes`). Skills deploy to `.agents/skills/<name>/SKILL.md`
