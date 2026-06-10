@@ -22,7 +22,8 @@ from ..utils.path_security import PathTraversalError, validate_path_segments
 from ._io import atomic_write
 from .errors import MarketplaceYmlError
 from .yml_schema import (
-    SOURCE_RE,
+    _parse_source_base,
+    _validate_source_value,
     load_marketplace_from_apm_yml,
     load_marketplace_yml,
 )
@@ -129,23 +130,17 @@ def _find_entry_index(packages, name: str) -> int:
     raise MarketplaceYmlError(f"Package '{name}' not found")
 
 
-def _validate_source(source: str) -> None:
-    """Validate that *source* has one of the accepted shapes.
+def _validate_source(source: str, *, source_base: str | None = None) -> None:
+    """Validate that *source* has one of the accepted shapes."""
+    _validate_source_value(source, context="source", source_base=source_base)
 
-    Accepts ``owner/repo``, ``host.tld/owner/repo``, ``https://host.tld/
-    owner/repo[.git]`` (remote forms), or ``./<path>`` (local).
-    """
-    if not SOURCE_RE.match(source):
-        raise MarketplaceYmlError(
-            f"'source' must be one of "
-            f"'<owner>/<repo>', '<host.tld>/<owner>/<repo>', "
-            f"'https://<host.tld>/<owner>/<repo>[.git]', or './<path>', "
-            f"got '{source}'"
-        )
-    try:
-        validate_path_segments(source, context="source", allow_current_dir=True)
-    except PathTraversalError as exc:
-        raise MarketplaceYmlError(str(exc)) from exc
+
+def _default_name_from_source(source: str) -> str:
+    """Derive the package name from the final path segment in a source value."""
+    normalized = source.rstrip("/")
+    if normalized.endswith(".git"):
+        normalized = normalized[: -len(".git")]
+    return normalized.rsplit("/", 1)[-1]
 
 
 def _validate_subdir(subdir: str) -> None:
@@ -177,8 +172,13 @@ def add_plugin_entry(
 
     Returns the resolved package name.
     """
+    # --- load ---
+    data, original_text = _load_rt(yml_path)
+    container = _get_marketplace_container(data)
+    source_base = _parse_source_base(container.get("sourceBase"))
+
     # --- input validation ---
-    _validate_source(source)
+    _validate_source(source, source_base=source_base)
 
     if version is not None and ref is not None:
         raise MarketplaceYmlError("Cannot specify both 'version' and 'ref' -- pick one")
@@ -190,11 +190,8 @@ def add_plugin_entry(
 
     # Derive name from source repo if not provided.
     if name is None:
-        name = source.split("/", 1)[1]
+        name = _default_name_from_source(source)
 
-    # --- load ---
-    data, original_text = _load_rt(yml_path)
-    container = _get_marketplace_container(data)
     packages = container.get("packages")
     if packages is None:
         from ruamel.yaml.comments import CommentedSeq

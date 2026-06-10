@@ -62,7 +62,12 @@ from .output_profiles import (
 from .ref_resolver import RefResolver
 from .semver import SemVer, parse_semver, satisfies_range
 from .tag_pattern import build_tag_regex
-from .yml_schema import MarketplaceYml, PackageEntry, load_marketplace_yml
+from .yml_schema import (
+    MarketplaceYml,
+    PackageEntry,
+    load_marketplace_yml,
+    split_source_base,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +98,7 @@ class ResolvedPackage:
     tags: tuple[str, ...]
     is_prerelease: bool  # True if the resolved ref was a prerelease semver
     host: str | None = None  # non-default git host parsed from apm.yml source
+    source_url: str | None = None  # canonical URL for sourceBase-composed entries
 
 
 @dataclass(frozen=True)
@@ -498,6 +504,31 @@ class MarketplaceBuilder:
 
     # -- single-entry resolution --------------------------------------------
 
+    def _remote_source_coordinates(
+        self,
+        entry: PackageEntry,
+    ) -> tuple[str | None, str, str | None]:
+        """Return ``(host, repo_path, source_url)`` for a remote package entry."""
+        if entry.host:
+            return entry.host, entry.source, None
+        yml = self._load_yml()
+        if yml.source_base:
+            base_host, base_path = split_source_base(yml.source_base)
+            repo_path = f"{base_path}/{entry.source}"
+            return base_host, repo_path, f"{yml.source_base}/{entry.source}"
+        return None, entry.source, None
+
+    def _resolved_output_host(
+        self,
+        *,
+        source_host: str | None,
+        source_url: str | None,
+    ) -> str | None:
+        """Return the host marker mappers should use for the resolved package."""
+        if source_url is not None:
+            return source_host
+        return self._effective_host(source_host)
+
     def _resolve_entry(self, entry: PackageEntry) -> ResolvedPackage:
         """Resolve a single package entry to a concrete tag + SHA."""
         # Local-path packages skip git resolution entirely.
@@ -513,19 +544,35 @@ class MarketplaceBuilder:
                 is_prerelease=False,
             )
         yml = self._load_yml()
-        resolver = self._get_resolver_for_host(entry.host)
-        owner_repo = entry.source
+        source_host, owner_repo, source_url = self._remote_source_coordinates(entry)
+        resolver = self._get_resolver_for_host(source_host)
 
         if entry.ref is not None:
-            return self._resolve_explicit_ref(entry, resolver, owner_repo)
+            return self._resolve_explicit_ref(
+                entry,
+                resolver,
+                owner_repo,
+                source_host=source_host,
+                source_url=source_url,
+            )
         # version range resolution
-        return self._resolve_version_range(entry, resolver, owner_repo, yml)
+        return self._resolve_version_range(
+            entry,
+            resolver,
+            owner_repo,
+            yml,
+            source_host=source_host,
+            source_url=source_url,
+        )
 
     def _resolve_explicit_ref(
         self,
         entry: PackageEntry,
         resolver: RefResolver,
         owner_repo: str,
+        *,
+        source_host: str | None = None,
+        source_url: str | None = None,
     ) -> ResolvedPackage:
         """Resolve an entry with an explicit ``ref:`` field."""
         ref_text = entry.ref
@@ -543,7 +590,8 @@ class MarketplaceBuilder:
                 requested_version=entry.version,
                 tags=entry.tags,
                 is_prerelease=sv.is_prerelease if sv else False,
-                host=self._effective_host(entry.host),
+                host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                source_url=source_url,
             )
 
         refs = resolver.list_remote_refs(owner_repo)
@@ -564,7 +612,8 @@ class MarketplaceBuilder:
                     requested_version=entry.version,
                     tags=entry.tags,
                     is_prerelease=sv.is_prerelease if sv else False,
-                    host=self._effective_host(entry.host),
+                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                    source_url=source_url,
                 )
 
         # Try as full refname
@@ -584,7 +633,8 @@ class MarketplaceBuilder:
                     requested_version=entry.version,
                     tags=entry.tags,
                     is_prerelease=sv.is_prerelease if sv else False,
-                    host=self._effective_host(entry.host),
+                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                    source_url=source_url,
                 )
 
         # Try as branch name
@@ -601,7 +651,8 @@ class MarketplaceBuilder:
                     requested_version=entry.version,
                     tags=entry.tags,
                     is_prerelease=False,
-                    host=self._effective_host(entry.host),
+                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                    source_url=source_url,
                 )
 
         # HEAD special case
@@ -617,6 +668,9 @@ class MarketplaceBuilder:
         resolver: RefResolver,
         owner_repo: str,
         yml: MarketplaceYml,
+        *,
+        source_host: str | None = None,
+        source_url: str | None = None,
     ) -> ResolvedPackage:
         """Resolve an entry using its ``version:`` semver range."""
         version_range = entry.version
@@ -660,7 +714,8 @@ class MarketplaceBuilder:
             requested_version=version_range,
             tags=entry.tags,
             is_prerelease=best_sv.is_prerelease,
-            host=self._effective_host(entry.host),
+            host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+            source_url=source_url,
         )
 
     # -- concurrent resolution ----------------------------------------------

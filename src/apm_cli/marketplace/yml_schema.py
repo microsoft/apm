@@ -32,6 +32,7 @@ Key design rules
 from __future__ import annotations
 
 import re
+import urllib.parse as _urlparse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping  # noqa: UP035
@@ -44,6 +45,7 @@ from .output_profiles import MARKETPLACE_OUTPUTS, known_output_names
 
 __all__ = [
     "LOCAL_SOURCE_RE",
+    "SOURCE_BASE_RE",
     "SOURCE_RE",
     "MarketplaceBuild",
     "MarketplaceClaudeConfig",
@@ -85,7 +87,9 @@ _SEMVER_RE = re.compile(
 # (``git@host:path``) and non-``https`` URL schemes are explicitly rejected
 # to avoid RFC 3986 confused-deputy attacks.
 _HOST_PAT = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-]*"
-_OWNER_REPO_PAT = r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+"
+_SEGMENT_PAT = r"[A-Za-z0-9._-]+"
+_OWNER_REPO_PAT = rf"{_SEGMENT_PAT}/{_SEGMENT_PAT}"
+_RELATIVE_SOURCE_PAT = rf"{_SEGMENT_PAT}(?:/{_SEGMENT_PAT})*"
 
 SOURCE_RE = re.compile(
     r"^(?:"
@@ -96,10 +100,19 @@ SOURCE_RE = re.compile(
     r")$"
 )
 LOCAL_SOURCE_RE = re.compile(r"^\./")
+SOURCE_BASE_RE = re.compile(rf"^https://{_HOST_PAT}/{_RELATIVE_SOURCE_PAT}$")
+_RELATIVE_SOURCE_RE = re.compile(rf"^{_RELATIVE_SOURCE_PAT}$")
 # Matches ``host.tld/owner/repo`` (3 segments, first is FQDN-ish).
 _HOST_PREFIXED_SOURCE_RE = re.compile(rf"^({_HOST_PAT})/({_OWNER_REPO_PAT})$")
 # Matches ``https://host.tld/owner/repo[.git]`` and captures host + owner/repo.
 _HTTPS_URL_SOURCE_RE = re.compile(rf"^https://({_HOST_PAT})/({_OWNER_REPO_PAT})(?:\.git)?$")
+
+
+def split_source_base(source_base: str) -> tuple[str, str]:
+    """Split a validated ``sourceBase`` into ``(host, path_prefix)``."""
+    without_scheme = source_base.removeprefix("https://")
+    host, path_prefix = without_scheme.split("/", 1)
+    return host, path_prefix
 
 
 def split_host_from_source(source: str) -> tuple[str | None, str]:
@@ -216,6 +229,7 @@ _APM_MARKETPLACE_KEYS = frozenset(
         "description",  # optional override of top-level apm.yml description
         "version",  # optional override of top-level apm.yml version
         "owner",
+        "sourceBase",
         "output",
         "outputs",
         "claude",
@@ -388,6 +402,7 @@ class MarketplaceConfig:
     metadata: dict[str, Any] = field(default_factory=dict)
     build: MarketplaceBuild = field(default_factory=MarketplaceBuild)
     versioning: MarketplaceVersioning = field(default_factory=MarketplaceVersioning)
+    source_base: str | None = None
     packages: tuple[PackageEntry, ...] = ()
     output_specs: tuple[MarketplaceOutputSpec, ...] = ()
     warnings: tuple[str, ...] = ()
@@ -433,27 +448,95 @@ def _validate_semver(version: str, *, context: str = "version") -> None:
         )
 
 
-def _validate_source(source: str, *, index: int) -> None:
-    """Validate ``source`` field shape and path safety.
+def _source_error(ctx: str, source: str, *, source_base: str | None) -> MarketplaceYmlError:
+    forms = [
+        "'<owner>/<repo>'",
+        "'<host.tld>/<owner>/<repo>'",
+        "'https://<host.tld>/<owner>/<repo>[.git]'",
+        "'./<path>'",
+    ]
+    if source_base is not None:
+        forms.append("'<relative-path>' when sourceBase is set")
+    return MarketplaceYmlError(f"'{ctx}' must be one of {', '.join(forms)}, got '{source}'")
 
-    Accepts ``owner/repo``, ``host.tld/owner/repo``, ``https://host.tld/
-    owner/repo[.git]``, or ``./<path>``.
-    """
-    ctx = f"packages[{index}].source"
-    if not SOURCE_RE.match(source):
-        raise MarketplaceYmlError(
-            f"'{ctx}' must be one of "
-            f"'<owner>/<repo>', '<host.tld>/<owner>/<repo>', "
-            f"'https://<host.tld>/<owner>/<repo>[.git]', or './<path>', "
-            f"got '{source}'"
+
+def _validate_source_value(
+    source: str,
+    *,
+    context: str,
+    source_base: str | None = None,
+) -> None:
+    """Validate a package ``source`` field shape and path safety."""
+    matches_existing_shape = bool(SOURCE_RE.match(source))
+    if not matches_existing_shape:
+        first_segment = source.split("/", 1)[0]
+        looks_like_unsupported_host_override = "/" in source and bool(
+            re.fullmatch(_HOST_PAT, first_segment)
         )
+        matches_relative_source = bool(_RELATIVE_SOURCE_RE.match(source))
+        if (
+            source_base is None
+            or looks_like_unsupported_host_override
+            or not matches_relative_source
+        ):
+            raise _source_error(context, source, source_base=source_base)
     is_local = bool(LOCAL_SOURCE_RE.match(source))
     try:
         # Local paths legitimately start with ``.`` (current dir) and
         # may have trailing-slash forms like ``./``.  Allow ``.`` here.
-        validate_path_segments(source, context=ctx, allow_current_dir=is_local)
+        validate_path_segments(source, context=context, allow_current_dir=is_local)
     except PathTraversalError as exc:
         raise MarketplaceYmlError(str(exc)) from exc
+
+
+def _validate_source(source: str, *, index: int, source_base: str | None = None) -> None:
+    """Validate ``source`` field shape and path safety."""
+    _validate_source_value(
+        source,
+        context=f"packages[{index}].source",
+        source_base=source_base,
+    )
+
+
+def _parse_source_base(raw: Any) -> str | None:
+    """Parse and validate marketplace-level ``sourceBase``."""
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise MarketplaceYmlError("'sourceBase' must be a non-empty string")
+
+    source_base = raw.strip()
+    if source_base.endswith("/"):
+        source_base = source_base[:-1]
+    if not source_base.startswith("https://"):
+        raise MarketplaceYmlError("'sourceBase' must start with https://")
+
+    parsed = _urlparse.urlparse(source_base)
+    if parsed.username or parsed.password or "@" in parsed.netloc:
+        raise MarketplaceYmlError("'sourceBase' must not include userinfo")
+    if ":" in parsed.netloc:
+        raise MarketplaceYmlError("'sourceBase' must not include a port")
+    if parsed.query:
+        raise MarketplaceYmlError("'sourceBase' must not include a query string")
+    if parsed.fragment:
+        raise MarketplaceYmlError("'sourceBase' must not include a fragment")
+    if not parsed.hostname or not re.fullmatch(_HOST_PAT, parsed.hostname):
+        raise MarketplaceYmlError("'sourceBase' host must be a FQDN")
+    if source_base.endswith(".git"):
+        raise MarketplaceYmlError("'sourceBase' must not end with .git")
+
+    path = parsed.path.lstrip("/")
+    if not path:
+        raise MarketplaceYmlError("'sourceBase' must include at least one path segment")
+    try:
+        validate_path_segments(path, context="sourceBase", reject_empty=True)
+    except PathTraversalError as exc:
+        raise MarketplaceYmlError(str(exc)) from exc
+    if not SOURCE_BASE_RE.match(source_base):
+        raise MarketplaceYmlError(
+            "'sourceBase' path segments may only contain letters, digits, dot, underscore, or hyphen"
+        )
+    return source_base
 
 
 def _validate_tag_pattern(pattern: str, *, context: str) -> None:
@@ -700,7 +783,11 @@ def _parse_outputs(
     return tuple(outputs_list), tuple(specs_list)
 
 
-def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
+def _parse_package_entry(
+    raw: Any,
+    index: int,
+    source_base: str | None = None,
+) -> PackageEntry:
     """Parse and validate a single ``packages`` entry."""
     if not isinstance(raw, dict):
         raise MarketplaceYmlError(f"packages[{index}] must be a mapping")
@@ -710,7 +797,7 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
 
     name = _require_str(raw, "name", context=f"packages[{index}]")
     source = _require_str(raw, "source", context=f"packages[{index}]")
-    _validate_source(source, index=index)
+    _validate_source(source, index=index, source_base=source_base)
     is_local = bool(LOCAL_SOURCE_RE.match(source))
     # Detect host-prefixed source (e.g. ``host.tld/owner/repo``) and split
     # the host off so downstream consumers continue to see ``owner/repo``.
@@ -1119,6 +1206,9 @@ def _build_config(
         except PathTraversalError as exc:
             raise MarketplaceYmlError(str(exc)) from exc
 
+    # -- marketplace source base --
+    source_base = _parse_source_base(marketplace_dict.get("sourceBase"))
+
     # -- build --
     build = _parse_build(marketplace_dict.get("build"))
 
@@ -1176,7 +1266,7 @@ def _build_config(
     entries: list[PackageEntry] = []
     seen_names: dict[str, int] = {}
     for idx, raw_entry in enumerate(raw_packages):
-        entry = _parse_package_entry(raw_entry, idx)
+        entry = _parse_package_entry(raw_entry, idx, source_base=source_base)
         lower_name = entry.name.lower()
         if lower_name in seen_names:
             raise MarketplaceYmlError(
@@ -1208,6 +1298,7 @@ def _build_config(
         codex=codex,
         metadata=metadata,
         build=build,
+        source_base=source_base,
         versioning=versioning,
         packages=tuple(entries),
         output_specs=output_specs,

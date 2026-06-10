@@ -93,13 +93,16 @@ marketplace:
   codex:
     output: .agents/plugins/marketplace.json
 
+  # Optional: package sources can be relative to this git base.
+  sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace
+
   build:
     tagPattern: "v{version}"
 
   packages:
     - name: example-package
       description: Human-readable description consumers see
-      source: acme-org/example-package
+      source: example-package
       version: "^1.0.0"
 
     - name: pinned-package
@@ -116,6 +119,13 @@ The key in `apm.yml` is `packages:`. It becomes `plugins:` in the
 compiled `marketplace.json` -- that rename is the only structural
 transform `apm pack` performs. Strict schema: unknown keys raise an
 error, never silently ignored.
+
+Use `sourceBase` when every package lives under the same enterprise git
+base, such as a GitLab group with nested subgroups. Relative package
+sources compose onto the base. Host-prefixed sources like
+`github.com/acme/tool`, full HTTPS URLs, and local `./` paths remain
+per-entry overrides. If `sourceBase` is absent, existing `owner/repo`
+source behavior is unchanged.
 
 Add and edit packages without leaving the shell:
 

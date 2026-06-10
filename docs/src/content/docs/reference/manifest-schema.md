@@ -754,6 +754,7 @@ Overrides exist for the rare case where the published marketplace identity diffe
 | `description` | `string` | OPTIONAL (override) | inherited | Override of top-level `description`. |
 | `version` | `string` | OPTIONAL (override) | inherited | Override of top-level `version`. Validated as semver. |
 | `owner` | `Owner` | REQUIRED | -- | Marketplace publisher identity. See Section 7.3. |
+| `sourceBase` | `string` | OPTIONAL | unset | HTTPS git base that relative `packages[].source` values compose onto. See Section 7.5. |
 | `output` | `string` | OPTIONAL | `.claude-plugin/marketplace.json` | Output path for the generated marketplace JSON. |
 | `metadata` | `object` | OPTIONAL | `{}` | Free-form metadata forwarded verbatim to `marketplace.json` (e.g. `homepage`, `support`). |
 | `build` | `Build` | OPTIONAL | `tagPattern: "v{version}"` | Build configuration for resolving package refs. See Section 7.4. |
@@ -790,7 +791,7 @@ Each entry MUST be a mapping. Unknown keys are rejected.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | `string` | REQUIRED | Package identifier as it appears in the marketplace. |
-| `source` | `string` | REQUIRED | One of: `<owner>/<repo>` (remote on the default host), `<host.tld>/<owner>/<repo>` (remote on a non-default host such as GitHub Enterprise or self-hosted GitLab -- shorthand), `https://<host.tld>/<owner>/<repo>[.git]` (same, full URL form -- a trailing `.git` is stripped), or `./<path>` (local). Must match the source pattern; path traversal (`..`) is refused, and URL forms with userinfo (`user@host`), ports, query strings, or non-`https` schemes are rejected. |
+| `source` | `string` | REQUIRED | One of: `<owner>/<repo>` (remote on the default host), `<host.tld>/<owner>/<repo>` (remote on a non-default host such as GitHub Enterprise or self-hosted GitLab -- shorthand), `https://<host.tld>/<owner>/<repo>[.git]` (same, full URL form -- a trailing `.git` is stripped), `./<path>` (local), or a relative path when `marketplace.sourceBase` is set. Must match the source pattern; path traversal (`..`) is refused, and URL forms with userinfo (`user@host`), ports, query strings, or non-`https` schemes are rejected. |
 | `subdir` | `string` | OPTIONAL | Subdirectory inside the source repo. Path-traversal-validated. Ignored for local sources. |
 | `version` | `string` | Conditional | Semver range (e.g. `^1.0.0`, `~2.1.0`, `>=3.0`). Stored as a string; resolution happens at pack time. REQUIRED for remote packages unless `ref` is given. |
 | `ref` | `string` | Conditional | Explicit git ref (SHA, tag, or branch). Overrides `version` range when both are present. REQUIRED for remote packages unless `version` is given. |
@@ -808,6 +809,10 @@ Remote packages MUST declare at least one of `version` or `ref`. Local packages 
 
 The first three `source` forms target a remote git host; the second and third name a non-default host (e.g. GitHub Enterprise, self-hosted GitLab) as either a shorthand or a full HTTPS URL with an optional `.git` suffix that is normalized away. Path traversal (`..`) in local paths, userinfo (`user@host`), ports, query strings, and non-`https` URL schemes are rejected at parse time.
 
+When `sourceBase` is set, relative package sources compose onto that base. For example, `sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace` plus `source: review` emits `https://gitlab.corp.example.com/platform/agent-marketplace/review`. Host-prefixed and full URL sources are overrides and ignore `sourceBase`; local `./` sources also ignore it. Without `sourceBase`, existing `owner/repo` behavior is unchanged and single-segment relative sources are rejected.
+
+`sourceBase` must start with `https://`, use a FQDN host, include at least one path segment, and omit userinfo, ports, query strings, fragments, and a trailing `.git`. Each path segment uses letters, digits, `.`, `_`, or `-`; empty, `.` and `..` segments are refused.
+
 Non-default hosts authenticate via the standard APM token chain -- see the [authentication guide](../getting-started/authentication/) for the per-host-class lookup order. A token resolved for the default host is never forwarded to a non-default host.
 
 ### 7.6. Complete Marketplace Block
@@ -819,6 +824,9 @@ marketplace:
     name: contoso
     url:  https://github.com/contoso
 
+  # Optional: packages can name repos relative to this git base.
+  sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace
+
   output: .claude-plugin/marketplace.json
 
   metadata:
@@ -829,7 +837,7 @@ marketplace:
 
   packages:
     - name: code-review
-      source: contoso/code-review
+      source: code-review                    # resolves under sourceBase
       version: "^1.0.0"
       description: AI code-review skills
       tags: [review, quality]
