@@ -149,11 +149,12 @@ do not want install's side effects.
 <a id="copilot-deduplication"></a>
 When `.github/instructions/` is already populated with `.instructions.md` files
 (deployed by `apm install --target copilot`), `apm compile --target copilot`
-automatically omits the instructions section from `AGENTS.md` to avoid
-duplicate context in Copilot's context window. `AGENTS.md` is still generated
-when it carries a constitution or dependency `@import` paths. If
+omits `AGENTS.md` entirely when the only content it would carry is the
+instructions section -- Copilot already reads `.github/instructions/` directly,
+so an instructions-only `AGENTS.md` would be redundant. `AGENTS.md` is still
+written when it carries non-instruction content such as a constitution. If
 `.github/instructions/` is later cleared, re-running `apm compile` restores
-the instructions section to `AGENTS.md`.
+`AGENTS.md` with the full instructions section.
 
 This deduplication is **target-aware**: it only activates when the sole
 AGENTS.md consumer is Copilot. When compiling for targets that do not read

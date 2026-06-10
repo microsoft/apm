@@ -739,15 +739,23 @@ class TestCleanupOrphanedFiles:
         assert not f.exists()
         assert any("Removed" in m for m in msgs)
 
-    def test_hand_authored_file_skipped_with_warning(self, tmp_path: Path) -> None:
-        """Hand-authored AGENTS.md (no APM marker) is NOT deleted; skipped message emitted."""
+    def test_hand_authored_file_skipped_silently(self, tmp_path: Path) -> None:
+        """Hand-authored AGENTS.md (no APM marker) is NOT deleted; no user-facing warning.
+
+        The defense-in-depth skip is logged at DEBUG level only (not surfaced as a
+        user warning to avoid the double-prefix artifact and noise on an unreachable path).
+        """
         compiler = _make_compiler_in_tmp(tmp_path)
         f: Path = tmp_path / "sub3" / "AGENTS.md"
         f.parent.mkdir()
         f.write_text(_HAND_AUTHORED_CONTENT)
         msgs: list[str] = compiler._cleanup_orphaned_files([f], dry_run=False)
         assert f.exists(), "Hand-authored file must not be deleted"
-        assert any("hand-authored" in m.lower() or "Skipped" in m for m in msgs)
+        # No user-facing warning for the skipped hand-authored file (it's debug-only)
+        assert not any("hand-authored" in m.lower() or "Skipped" in m for m in msgs), (
+            "Hand-authored skip must NOT appear as a user-facing warning (demoted to debug).\n"
+            f"Messages: {msgs}"
+        )
 
     def test_unlink_failure_captured_in_messages(self, tmp_path: Path) -> None:
         """OSError during unlink is caught and reported in messages (not raised)."""
