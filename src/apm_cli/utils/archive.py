@@ -1,4 +1,9 @@
-"""Download and safely extract marketplace archive packages."""
+"""Download and safely extract archive packages (zip / tar.gz).
+
+Generic archive helper, decoupled from the marketplace layer: any
+URL-sourced package installer can reuse it without importing marketplace
+internals. Keeps the zip-slip / path-traversal / decompression-bomb guards
+here so they apply to every caller (see #692 forward-compat constraints)."""
 
 from __future__ import annotations
 

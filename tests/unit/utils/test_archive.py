@@ -1,4 +1,4 @@
-"""Safety tests for marketplace archive extraction helpers."""
+"""Safety tests for archive extraction helpers."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from apm_cli.marketplace.archive import ArchiveError, _extract_tar_gz, _extract_zip
+from apm_cli.utils.archive import ArchiveError, _extract_tar_gz, _extract_zip
 
 
 def _zip_bytes(entries: dict[str, bytes]) -> bytes:
