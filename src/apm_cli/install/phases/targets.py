@@ -140,26 +140,55 @@ def _check_openclaw_flag_gate(
     ctx: InstallContext,
 ) -> None:
     """Emit an enable-hint when the user asks for openclaw but the flag is OFF."""
+    _check_experimental_target_hint(
+        explicit, targets, ctx, target_name="openclaw", flag_name="openclaw"
+    )
+
+
+def _check_hermes_flag_gate(
+    explicit: str | list[str] | None,
+    targets: list,
+    ctx: InstallContext,
+) -> None:
+    """Emit an enable-hint when the user asks for hermes but the flag is OFF."""
+    _check_experimental_target_hint(
+        explicit, targets, ctx, target_name="hermes", flag_name="hermes"
+    )
+
+
+def _check_experimental_target_hint(
+    explicit: str | list[str] | None,
+    targets: list,
+    ctx: InstallContext,
+    *,
+    target_name: str,
+    flag_name: str,
+) -> None:
+    """Emit an enable-hint when *target_name* is requested but its flag is OFF.
+
+    Shared by the simple experimental targets whose only gate is the
+    experimental flag (no extra environment requirement).
+    """
     user_asked = False
     if explicit:
         if isinstance(explicit, list):
-            user_asked = "openclaw" in explicit
+            user_asked = target_name in explicit
         else:
-            user_asked = explicit == "openclaw"
+            user_asked = explicit == target_name
     if not user_asked:
         return
 
-    resolved = any(t.name == "openclaw" for t in targets)
+    resolved = any(t.name == target_name for t in targets)
     if resolved:
         return
 
     from apm_cli.core.experimental import is_enabled
 
-    if not is_enabled("openclaw"):
+    if not is_enabled(flag_name):
         if ctx.logger:
             ctx.logger.progress(
-                "The 'openclaw' target requires an experimental flag. "
-                "Run: apm experimental enable openclaw",
+                f"The '{target_name}' target requires an experimental flag. "
+                f"Run: apm experimental enable {flag_name}",
                 symbol="info",
             )
 
@@ -451,6 +480,7 @@ def run(ctx: InstallContext) -> None:
     _gate_cowork_target(ctx, _targets, _explicit, _is_user)
     _gate_copilot_app_target(ctx, _targets, _explicit)
     _check_openclaw_flag_gate(_explicit, _targets, ctx)
+    _check_hermes_flag_gate(_explicit, _targets, ctx)
 
     # Resolve v2 targets for project scope, or set up user-scope dirs.
     _targets = _resolve_targets_by_scope(ctx, _targets, _explicit, _is_user)

@@ -382,3 +382,82 @@ class TestDefaultSkillRouting:
         profiles = [KNOWN_TARGETS["copilot"]]
         apply_legacy_skill_paths(profiles)
         assert KNOWN_TARGETS["copilot"].primitives["skills"].deploy_root == original_root
+
+
+class TestHermesTarget:
+    """Registry + scope + flag-gating invariants for the hermes target."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.root = Path(self.temp_dir)
+
+    def teardown_method(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_hermes_in_known_targets(self):
+        assert "hermes" in KNOWN_TARGETS
+
+    def test_hermes_profile_shape(self):
+        profile = KNOWN_TARGETS["hermes"]
+        assert profile.name == "hermes"
+        assert profile.root_dir == ".agents"
+        assert profile.user_supported is True
+        assert profile.user_root_dir == ".hermes"
+        assert profile.detect_by_dir is False
+        assert profile.requires_flag == "hermes"
+        assert profile.compile_family == "agents"
+        assert "skills" in profile.primitives
+        assert profile.primitives["skills"].format_id == "skill_standard"
+
+    def test_hermes_requires_flag_gate(self, monkeypatch):
+        import apm_cli.integration.targets as tg
+
+        # Flag OFF -> explicit hermes is filtered out of active targets.
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: False)
+        off = active_targets(self.root, explicit_target="hermes")
+        assert all(p.name != "hermes" for p in off)
+
+        # Flag ON -> explicit hermes resolves.
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: True)
+        on = active_targets(self.root, explicit_target="hermes")
+        assert any(p.name == "hermes" for p in on)
+
+    def test_hermes_excluded_from_all(self, monkeypatch):
+        import apm_cli.integration.targets as tg
+
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: True)
+        names = {p.name for p in active_targets(self.root, explicit_target="all")}
+        assert "hermes" not in names
+
+    def test_hermes_user_scope_root(self, monkeypatch):
+        import apm_cli.integration.targets as tg
+
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: True)
+        profile = KNOWN_TARGETS["hermes"].for_scope(user_scope=True)
+        assert profile is not None
+        assert profile.root_dir == ".hermes"
+
+    def test_hermes_user_scope_honors_hermes_home(self, monkeypatch, tmp_path):
+        import apm_cli.integration.targets as tg
+
+        monkeypatch.setattr(tg, "_is_flag_enabled", lambda name: True)
+        custom = tmp_path / "hq"
+        monkeypatch.setenv("HERMES_HOME", str(custom / ".myhermes"))
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        profile = KNOWN_TARGETS["hermes"].for_scope(user_scope=True)
+        assert profile is not None
+        # Home-relative when HERMES_HOME lives under $HOME.
+        assert profile.root_dir == "hq/.myhermes"
+
+    def test_resolve_hermes_root_default(self, monkeypatch, tmp_path):
+        from apm_cli.integration.targets import resolve_hermes_root
+
+        monkeypatch.delenv("HERMES_HOME", raising=False)
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+        assert resolve_hermes_root() == tmp_path / ".hermes"
+
+    def test_resolve_hermes_root_env_override(self, monkeypatch, tmp_path):
+        from apm_cli.integration.targets import resolve_hermes_root
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "custom"))
+        assert resolve_hermes_root() == tmp_path / "custom"
