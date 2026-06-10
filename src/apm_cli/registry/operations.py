@@ -357,10 +357,19 @@ class MCPServerOperations:
                         for env_var in env_vars:
                             if isinstance(env_var, dict) and "name" in env_var:
                                 var_name = env_var["name"]
-                                all_required_vars[var_name] = {
+                                var_info = {
                                     "description": env_var.get("description", ""),
-                                    "required": env_var.get("required", True),
+                                    "required": env_var.get(
+                                        "required", env_var.get("is_required", True)
+                                    ),
                                 }
+                                default_value = env_var.get("value", "")
+                                if default_value:
+                                    var_info["value"] = default_value
+                                required = var_info["required"] is not False
+                                existing_value = os.getenv(var_name)
+                                if required or existing_value or default_value:
+                                    all_required_vars[var_name] = var_info
 
             except Exception:  # noqa: S112
                 # Skip servers we can't analyze
@@ -394,9 +403,15 @@ class MCPServerOperations:
             for var_name in sorted(required_vars.keys()):
                 var_info = required_vars[var_name]
                 existing_value = os.getenv(var_name)
+                required = var_info.get("required", True) is not False
+                default_value = var_info.get("value", "")
 
                 if existing_value:
                     env_vars[var_name] = existing_value
+                elif not required:
+                    if default_value:
+                        env_vars[var_name] = default_value
+                    continue
                 else:  # noqa: PLR5501
                     # Provide sensible defaults for known variables
                     if var_name == "GITHUB_DYNAMIC_TOOLSETS":
@@ -432,7 +447,8 @@ class MCPServerOperations:
             for var_name in sorted(required_vars.keys()):
                 var_info = required_vars[var_name]
                 description = var_info.get("description", "")
-                required = var_info.get("required", True)
+                required = var_info.get("required", True) is not False
+                default_value = var_info.get("value", "")
 
                 # Check if already set in environment
                 existing_value = os.getenv(var_name)
@@ -440,6 +456,10 @@ class MCPServerOperations:
                 if existing_value:
                     console.print(f"  [+] {var_name}: [dim]using existing value[/dim]")
                     env_vars[var_name] = existing_value
+                elif not required:
+                    if default_value:
+                        env_vars[var_name] = default_value
+                    continue
                 else:
                     # Determine if this looks like a password/secret
                     is_sensitive = any(
@@ -451,10 +471,7 @@ class MCPServerOperations:
                     if description:
                         prompt_text += f" ({description})"
 
-                    if required:
-                        value = Prompt.ask(prompt_text, password=is_sensitive)
-                    else:
-                        value = Prompt.ask(prompt_text, default="", password=is_sensitive)
+                    value = Prompt.ask(prompt_text, password=is_sensitive)
 
                     env_vars[var_name] = value
 
@@ -469,12 +486,18 @@ class MCPServerOperations:
             for var_name in sorted(required_vars.keys()):
                 var_info = required_vars[var_name]
                 description = var_info.get("description", "")
+                required = var_info.get("required", True) is not False
+                default_value = var_info.get("value", "")
 
                 existing_value = os.getenv(var_name)
 
                 if existing_value:
                     click.echo(f"  [+] {var_name}: using existing value")
                     env_vars[var_name] = existing_value
+                elif not required:
+                    if default_value:
+                        env_vars[var_name] = default_value
+                    continue
                 else:
                     prompt_text = f"  {var_name}"
                     if description:

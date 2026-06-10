@@ -548,7 +548,7 @@ Values in `headers` and `env` may contain three placeholder syntaxes. APM resolv
 - **Copilot CLI** has native `${VAR}` interpolation in `~/.copilot/mcp-config.json`; APM normalizes `${env:VAR}` and legacy `<VAR>` to `${VAR}`.
 - **Codex, Gemini, and Cursor** have no runtime interpolation, so APM resolves `${VAR}`, `${env:VAR}`, and the legacy `<VAR>` at install time using `os.environ` (or an interactive prompt when missing). Resolved values are not re-scanned, so a value containing literal `${...}` text is preserved.
 - **Recommended:** Use `${VAR}` or `${env:VAR}` in all new manifests - they work on every target that supports remote MCP servers. `<VAR>` is legacy; in VS Code it would silently render as literal text in the generated config.
-- **Registry-backed servers** - APM auto-generates input prompts from registry metadata for `${input:...}`.
+- **Registry-backed servers** - APM auto-generates input prompts from registry metadata only for required variables. Optional variables are omitted when no value is available, and existing user-edited optional values in runtime config are preserved on reinstall.
 - **Self-defined servers** - APM detects `${input:...}` patterns in `apm.yml` and generates matching input definitions automatically.
 
 GitHub Actions templates (`${{ ... }}`) are intentionally left untouched.
