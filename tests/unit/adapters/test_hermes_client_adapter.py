@@ -14,6 +14,8 @@ Hermes reads MCP servers from a YAML ``mcp_servers:`` block in
 
 from __future__ import annotations
 
+import os
+import stat
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -194,6 +196,85 @@ class TestHermesUpdateConfig(unittest.TestCase):
                 adapter.update_config(payload)
             data = load_yaml(home / ".hermes" / "config.yaml")
             self.assertEqual(list(data["mcp_servers"].keys()), ["demo"])
+
+
+class TestHermesConfigSecurity(unittest.TestCase):
+    """Credential-bearing config.yaml is written 0o600 and never clobbered."""
+
+    @unittest.skipUnless(hasattr(os, "fchmod"), "POSIX mode bits required")
+    def test_new_config_written_owner_only(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            with patch.object(Path, "home", staticmethod(lambda h=home: h)):
+                adapter = HermesClientAdapter()
+                self.assertTrue(adapter.update_config({"demo": {"command": "npx"}}))
+            cfg_path = home / ".hermes" / "config.yaml"
+            mode = stat.S_IMODE(cfg_path.stat().st_mode)
+            self.assertEqual(mode, 0o600, f"expected 0o600, got {oct(mode)}")
+
+    @unittest.skipUnless(hasattr(os, "fchmod"), "POSIX mode bits required")
+    def test_existing_loose_config_tightened_to_owner_only(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            cfg_path = home / ".hermes" / "config.yaml"
+            cfg_path.parent.mkdir(parents=True)
+            dump_yaml({"model": {"provider": "zai"}}, cfg_path)
+            os.chmod(cfg_path, 0o644)  # simulate a world-readable pre-existing file
+            with patch.object(Path, "home", staticmethod(lambda h=home: h)):
+                adapter = HermesClientAdapter()
+                self.assertTrue(adapter.update_config({"demo": {"command": "npx"}}))
+            mode = stat.S_IMODE(cfg_path.stat().st_mode)
+            self.assertEqual(mode, 0o600, f"expected tightened 0o600, got {oct(mode)}")
+
+    def test_malformed_config_is_not_overwritten(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            cfg_path = home / ".hermes" / "config.yaml"
+            cfg_path.parent.mkdir(parents=True)
+            # Unparseable YAML carrying a "credential" we must not discard.
+            original = "model: {provider: zai\nSECRET_TOKEN: keep-me\n"
+            cfg_path.write_text(original, encoding="utf-8")
+            with patch.object(Path, "home", staticmethod(lambda h=home: h)):
+                adapter = HermesClientAdapter()
+                ok = adapter.update_config({"demo": {"command": "npx"}})
+            self.assertFalse(ok, "must refuse to overwrite a malformed config")
+            # File is left byte-for-byte untouched.
+            self.assertEqual(cfg_path.read_text(encoding="utf-8"), original)
+
+    def test_non_mapping_config_is_not_overwritten(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            cfg_path = home / ".hermes" / "config.yaml"
+            cfg_path.parent.mkdir(parents=True)
+            original = "- just\n- a\n- list\n"  # valid YAML, but not a mapping
+            cfg_path.write_text(original, encoding="utf-8")
+            with patch.object(Path, "home", staticmethod(lambda h=home: h)):
+                adapter = HermesClientAdapter()
+                ok = adapter.update_config({"demo": {"command": "npx"}})
+            self.assertFalse(ok)
+            self.assertEqual(cfg_path.read_text(encoding="utf-8"), original)
+
+    def test_empty_config_file_is_writable(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            cfg_path = home / ".hermes" / "config.yaml"
+            cfg_path.parent.mkdir(parents=True)
+            cfg_path.write_text("", encoding="utf-8")  # empty -> treated as {}
+            with patch.object(Path, "home", staticmethod(lambda h=home: h)):
+                adapter = HermesClientAdapter()
+                self.assertTrue(adapter.update_config({"demo": {"command": "npx"}}))
+            data = load_yaml(cfg_path)
+            self.assertIn("demo", data["mcp_servers"])
 
 
 if __name__ == "__main__":

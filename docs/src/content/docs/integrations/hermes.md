@@ -2,7 +2,7 @@
 title: "Hermes Agent (Experimental)"
 description: "Deploy APM skills, AGENTS.md instructions, and MCP servers to the Hermes autonomous agent."
 sidebar:
-  order: 6
+  order: 8
 ---
 
 :::caution[Frontier preview]
@@ -12,7 +12,7 @@ This integration is experimental and off by default. You must enable the `hermes
 apm experimental enable hermes
 ```
 
-Until the flag is enabled, the `hermes` target stays inert: it is hidden from active target detection, excluded from `--target all`, and explicit `--target hermes` installs exit cleanly with an enable hint instead of deploying anything.
+Until the flag is enabled, the `hermes` target stays inert: it is hidden from active target detection, excluded from `apm compile --all`, and explicit `--target hermes` installs exit cleanly with an enable hint instead of deploying anything.
 :::
 
 ## What it does

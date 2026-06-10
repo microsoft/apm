@@ -305,3 +305,123 @@ class TestHermesConstants:
         from apm_cli.core.target_detection import should_compile_agents_md
 
         assert should_compile_agents_md("hermes") is True
+
+
+# ===========================================================================
+# compile -t hermes  -- real CLI invocation emits AGENTS.md
+# ===========================================================================
+
+
+class TestHermesCompileE2E:
+    """`apm compile -t hermes` routes through the agents family and writes AGENTS.md."""
+
+    def test_compile_hermes_emits_agents_md(
+        self, fake_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import apm_cli.config as _conf
+
+        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"hermes": True}})
+
+        project = tmp_path / "project"
+        instructions = project / ".apm" / "instructions"
+        instructions.mkdir(parents=True)
+        (project / "apm.yml").write_text(
+            "name: hermes-compile-e2e\nversion: 0.1.0\n", encoding="ascii"
+        )
+        (instructions / "demo.instructions.md").write_text(
+            "---\napplyTo: '**'\n---\n\nAlways write tests first.\n", encoding="ascii"
+        )
+        monkeypatch.chdir(project)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["compile", "--target", "hermes"],
+            env={**_BASE_ENV},
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0, (
+            f"Expected exit 0 from compile -t hermes, got {result.exit_code}.\n"
+            f"Output:\n{result.output}"
+        )
+        agents_md = project / "AGENTS.md"
+        assert agents_md.is_file(), (
+            f"compile -t hermes did not emit AGENTS.md at {agents_md}.\nOutput:\n{result.output}"
+        )
+        assert "Always write tests first." in agents_md.read_text(encoding="utf-8")
+
+
+# ===========================================================================
+# _hermes_runtime_opted_in -- double gate (flag AND presence)
+# ===========================================================================
+
+
+class TestHermesMCPOptIn:
+    """MCP writes to ~/.hermes/ require BOTH the flag AND Hermes presence."""
+
+    def test_flag_off_skips_regardless_of_presence(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import apm_cli.integration.mcp_integrator_install as mod
+
+        present_home = tmp_path / ".hermes"
+        present_home.mkdir()
+        monkeypatch.setattr("apm_cli.core.experimental.is_enabled", lambda _flag: False)
+        monkeypatch.setattr("apm_cli.integration.targets.resolve_hermes_root", lambda: present_home)
+        assert mod._hermes_runtime_opted_in() is False
+
+    def test_flag_on_no_presence_skips_mcp_write(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import apm_cli.integration.mcp_integrator_install as mod
+
+        absent_home = tmp_path / "does-not-exist" / ".hermes"
+        monkeypatch.setattr("apm_cli.core.experimental.is_enabled", lambda _flag: True)
+        monkeypatch.setattr("apm_cli.integration.targets.resolve_hermes_root", lambda: absent_home)
+        monkeypatch.setattr(mod, "find_runtime_binary", lambda _name: None)
+        assert mod._hermes_runtime_opted_in() is False
+
+    def test_flag_on_with_home_dir_opts_in(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import apm_cli.integration.mcp_integrator_install as mod
+
+        present_home = tmp_path / ".hermes"
+        present_home.mkdir()
+        monkeypatch.setattr("apm_cli.core.experimental.is_enabled", lambda _flag: True)
+        monkeypatch.setattr("apm_cli.integration.targets.resolve_hermes_root", lambda: present_home)
+        monkeypatch.setattr(mod, "find_runtime_binary", lambda _name: None)
+        assert mod._hermes_runtime_opted_in() is True
+
+    def test_flag_on_with_binary_only_opts_in(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import apm_cli.integration.mcp_integrator_install as mod
+
+        absent_home = tmp_path / "does-not-exist" / ".hermes"
+        monkeypatch.setattr("apm_cli.core.experimental.is_enabled", lambda _flag: True)
+        monkeypatch.setattr("apm_cli.integration.targets.resolve_hermes_root", lambda: absent_home)
+        monkeypatch.setattr(mod, "find_runtime_binary", lambda _name: "/usr/bin/hermes")
+        assert mod._hermes_runtime_opted_in() is True
+
+
+# ===========================================================================
+# _CROSS_TARGET_MAPS -- lockfile enrichment
+# ===========================================================================
+
+
+class TestHermesCrossTargetMap:
+    """_CROSS_TARGET_MAPS contains a hermes entry remapping github skills."""
+
+    def test_cross_target_map_present(self) -> None:
+        from apm_cli.bundle.lockfile_enrichment import _CROSS_TARGET_MAPS
+
+        assert "hermes" in _CROSS_TARGET_MAPS
+
+    def test_cross_target_map_remaps_github_skills(self) -> None:
+        from apm_cli.bundle.lockfile_enrichment import _CROSS_TARGET_MAPS
+
+        mapping = _CROSS_TARGET_MAPS["hermes"]
+        assert ".github/skills/" in mapping
+        assert mapping[".github/skills/"] == ".agents/skills/"

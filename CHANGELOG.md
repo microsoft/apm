@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `apm experimental enable hermes`). Skills deploy to `.agents/skills/<name>/SKILL.md`
   (project) or `~/.hermes/skills/<name>/SKILL.md` (`--global`), `compile`
   emits `AGENTS.md`, and MCP servers are written to the `mcp_servers:` block
-  of `~/.hermes/config.yaml`. `HERMES_HOME` overrides the Hermes home
-  directory. See the [Hermes integration guide](https://microsoft.github.io/apm/integrations/hermes/).
+  of `~/.hermes/config.yaml` (written atomically with `0o600` perms, preserving
+  unrelated config keys and refusing to overwrite a malformed file). `HERMES_HOME`
+  overrides the Hermes home directory. See the [Hermes integration guide](https://microsoft.github.io/apm/integrations/hermes/).
 
 ## [0.19.0] - 2026-06-09
 
