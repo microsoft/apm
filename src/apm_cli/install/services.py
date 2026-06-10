@@ -182,85 +182,29 @@ def _log_bin_status(
     log_fn,
 ) -> None:
     """Emit integration-tree lines for bin/ deployment or skip reasons."""
-    if skill_result.bin_deployed > 0:
-        log_fn(
-            f"  |-- {skill_result.bin_deployed} executable(s) deployed to "
-            f"Claude Code's PATH -> {suffix} (invoked without confirmation)"
-        )
-        log_fn("  |-- run /reload-plugins or restart Claude Code to activate")
-    elif skill_result.bin_skipped_reason == "project_scope":
-        log_fn(
-            "  |-- plugin ships executables; re-run with -g (global) to deploy them to Claude Code"
-        )
-    elif skill_result.bin_skipped_reason == "no_claude_target":
-        log_fn(
-            "  |-- plugin ships executables; no active Claude Code skills target to receive them"
-        )
-    elif skill_result.bin_skipped_reason == "not_approved":
-        _pkg_label = package_name or getattr(package_info, "name", "unknown")
-        log_fn(
-            f"  |-- bin/ executables skipped (not approved in allowExecutables). "
-            f"Run 'apm approve {_pkg_label}' to approve."
-        )
+    from apm_cli.install.exec_gate import log_bin_status
+
+    log_bin_status(skill_result, suffix, package_name, package_info, log_fn)
 
 
 def _check_executable_approval(
     package_name: str,
     package_info: Any,
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
+    *,
+    ctx: InstallContext | None = None,
 ) -> tuple[bool, bool]:
-    """Return ``(hooks_approved, bin_approved)`` for a package.
+    """Delegate to ``exec_gate.check_executable_approval``."""
+    from apm_cli.install.exec_gate import check_executable_approval
 
-    Local project content (``_local``) is always trusted.  Dependency
-    packages are checked against the ``allowExecutables`` block.  When
-    no ``allowExecutables`` block exists (``None``), all executables are
-    considered approved (opt-in enforcement).
-    """
-    is_local = package_name == "_local"
-    if is_local or allow_executables is None:
-        return True, True
-
-    from apm_cli.security.executables import (
-        EXEC_TYPE_BIN,
-        EXEC_TYPE_HOOKS,
-        is_package_approved,
-    )
-
-    pkg_key = _resolve_package_key(package_info, package_name)
-    hooks_ok = is_package_approved(allow_executables, pkg_key, EXEC_TYPE_HOOKS)
-    bin_ok = is_package_approved(allow_executables, pkg_key, EXEC_TYPE_BIN)
-    return hooks_ok, bin_ok
+    return check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
 
 
 def _resolve_package_key(package_info: Any, package_name: str) -> str:
-    """Build the ``allowExecutables`` lookup key for a package.
+    """Delegate to ``exec_gate.resolve_package_key``."""
+    from apm_cli.install.exec_gate import resolve_package_key
 
-    Tries ``dependency_ref`` first (canonical dependency string), then
-    falls back to ``name#version`` from the package's own metadata.
-    """
-    from apm_cli.security.executables import build_approval_key
-
-    # Prefer the dependency reference's canonical string (includes version/ref)
-    dep_ref = getattr(package_info, "dependency_ref", None)
-    if dep_ref is not None:
-        canonical = getattr(dep_ref, "canonical_string", None)
-        if callable(canonical):
-            cs = canonical()
-            if cs:
-                return cs
-        # Fall back to str(dep_ref)
-        s = str(dep_ref)
-        if s:
-            return s
-
-    # Fall back to package metadata
-    pkg = getattr(package_info, "package", None)
-    if pkg is not None:
-        name = getattr(pkg, "name", package_name) or package_name
-        version = getattr(pkg, "version", "") or ""
-        return build_approval_key(name, version)
-
-    return package_name
+    return resolve_package_key(package_info, package_name)
 
 
 def integrate_package_primitives(
@@ -343,7 +287,7 @@ def integrate_package_primitives(
 
     # Executable approval gate (npm v12-style default-deny).
     _hooks_approved, _bin_approved = _check_executable_approval(
-        package_name, package_info, allow_executables
+        package_name, package_info, allow_executables, ctx=ctx
     )
 
     # --- Amendment 6: cowork non-skill primitive warning (once per run) ---

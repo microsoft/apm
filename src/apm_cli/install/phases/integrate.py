@@ -460,6 +460,49 @@ def _check_cowork_caps(ctx: InstallContext) -> None:
                 ctx.diagnostics.warn(msg, package="cowork")
 
 
+def _run_executable_approval_prompt(ctx: InstallContext) -> None:
+    """Prompt for approval of packages whose executables were blocked.
+
+    After the integration loop, any package that had hooks or bin/
+    blocked is collected in ``ctx.blocked_executables``.  This function
+    runs the interactive approval flow (or hard-errors in CI) and
+    persists approved entries to ``apm.yml`` so the next install
+    deploys them.
+    """
+    if not ctx.blocked_executables:
+        return
+
+    from apm_cli.security.executables import (
+        prompt_executable_approval,
+        write_allow_executables,
+    )
+
+    allow_exec = None
+    if ctx.apm_package is not None:
+        allow_exec = getattr(ctx.apm_package, "allow_executables", None)
+
+    updated = prompt_executable_approval(
+        ctx.blocked_executables,
+        allow_executables=allow_exec,
+    )
+
+    # Persist approvals to apm.yml if user approved anything new.
+    if updated and updated != (allow_exec or {}):
+        manifest_path = ctx.source_root or ctx.project_root
+        apm_yml = manifest_path / "apm.yml"
+        if apm_yml.is_file():
+            write_allow_executables(apm_yml, updated)
+            # Update the in-memory model so subsequent code sees the change.
+            if ctx.apm_package is not None:
+                ctx.apm_package.allow_executables = updated
+            if ctx.logger:
+                ctx.logger.info(
+                    "[i] Updated allowExecutables in apm.yml. "
+                    "Run 'apm install' again to deploy approved executables.",
+                    symbol="info",
+                )
+
+
 # ======================================================================
 # Public phase entry point
 # ======================================================================
@@ -628,3 +671,11 @@ def run(ctx: InstallContext) -> None:
     # a cowork target with a resolved_deploy_root is active.
     # ------------------------------------------------------------------
     _check_cowork_caps(ctx)
+
+    # ------------------------------------------------------------------
+    # Executable approval prompt: if any packages had their hooks or
+    # bin/ blocked, prompt the user to approve them (interactive) or
+    # hard-error (CI).  Approved packages are persisted to apm.yml so
+    # the next ``apm install`` deploys them automatically.
+    # ------------------------------------------------------------------
+    _run_executable_approval_prompt(ctx)
