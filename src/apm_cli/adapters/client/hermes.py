@@ -54,6 +54,9 @@ class HermesClientAdapter(CopilotClientAdapter):
 
         Drops Copilot-CLI-only fields (``type: "local"``, default
         ``tools: ["*"]``, empty ``id``) and stamps an explicit ``enabled``.
+        Required transport fields (``url`` for remote, ``command`` for stdio)
+        are only emitted when truthy so a malformed entry never serializes as
+        ``url: null`` / ``command: null`` into Hermes' config.
         """
         if not isinstance(copilot_entry, dict):
             return copilot_entry
@@ -64,12 +67,15 @@ class HermesClientAdapter(CopilotClientAdapter):
 
         out: dict = {}
         if is_remote:
-            out["url"] = url
+            if url:
+                out["url"] = url
             headers = copilot_entry.get("headers")
             if headers:
                 out["headers"] = headers
         else:
-            out["command"] = copilot_entry.get("command")
+            command = copilot_entry.get("command")
+            if command:
+                out["command"] = command
             args = copilot_entry.get("args")
             if args:
                 out["args"] = list(args)

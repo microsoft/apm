@@ -868,18 +868,21 @@ def _is_flag_enabled(flag_name: str) -> bool:
 def resolve_hermes_root() -> Path:
     """Resolve the Hermes home directory.
 
-    Honors ``$HERMES_HOME`` (default ``~/.hermes``).  Returns an expanded
-    ``Path``; the directory is not required to exist.  Used both by the
-    user-scope skills deploy path and by ``HermesClientAdapter`` to locate
-    ``config.yaml`` for MCP writes.
+    Honors ``$HERMES_HOME`` (default ``~/.hermes``).  Returns an expanded,
+    normalized ``Path`` (``..`` segments collapsed via ``resolve``) so traversal
+    in ``$HERMES_HOME`` cannot create unintended intermediate directories during
+    ``mkdir(parents=True)``; the directory is not required to exist.  Mirrors the
+    normalization in ``TargetProfile.for_scope``.  Used both by the user-scope
+    skills deploy path and by ``HermesClientAdapter`` to locate ``config.yaml``
+    for MCP writes.
     """
     import os
     from pathlib import Path
 
     env = os.environ.get("HERMES_HOME", "").strip()
     if env:
-        return Path(env).expanduser()
-    return Path.home() / ".hermes"
+        return Path(env).expanduser().resolve(strict=False)
+    return (Path.home() / ".hermes").resolve(strict=False)
 
 
 def _flag_gated(profile: TargetProfile) -> bool:

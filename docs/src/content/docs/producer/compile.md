@@ -97,7 +97,7 @@ Experimental targets (`hermes`, `openclaw`, `copilot-cowork`,
 `apm experimental enable <flag>`, but are excluded from `--all`.
 `apm compile -t hermes` emits `AGENTS.md` (the `hermes` target shares
 the `agents` compile family). See
-[Hermes Agent](../../integrations/hermes/).
+[Hermes Agent](../integrations/hermes/).
 
 ## Detection cascade
 

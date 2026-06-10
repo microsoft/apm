@@ -83,6 +83,20 @@ class TestToHermesFormat(unittest.TestCase):
         self.assertNotIn("tools", result)
         self.assertNotIn("id", result)
 
+    def test_remote_type_without_url_omits_null(self):
+        # type signals remote but url is missing: must NOT emit `url: null`.
+        copilot = {"type": "http"}
+        result = HermesClientAdapter._to_hermes_format(copilot)
+        self.assertNotIn("url", result)
+        self.assertTrue(result["enabled"])
+
+    def test_stdio_without_command_omits_null(self):
+        # malformed stdio entry: must NOT emit `command: null`.
+        copilot = {"args": ["x"]}
+        result = HermesClientAdapter._to_hermes_format(copilot)
+        self.assertNotIn("command", result)
+        self.assertTrue(result["enabled"])
+
     def test_http_basic(self):
         copilot = {"url": "https://example.com/mcp"}
         result = HermesClientAdapter._to_hermes_format(copilot)
