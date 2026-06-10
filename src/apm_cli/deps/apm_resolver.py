@@ -12,7 +12,6 @@ from typing import Optional, Protocol
 
 from ..models.apm_package import APMPackage, DependencyReference
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
-from ..utils.paths import portable_relpath
 from .dependency_graph import (
     CircularRef,
     DependencyGraph,
@@ -356,7 +355,7 @@ class APMDependencyResolver:
         parent_source = ensure_path_within(parent_pkg.source_path, repo_root)
         local_path = Path(local_str.replace("\\", "/"))
         resolved = ensure_path_within(parent_source / local_path, repo_root)
-        virtual_path = portable_relpath(resolved, repo_root)
+        virtual_path = resolved.relative_to(repo_root).as_posix()
         if virtual_path in ("", "."):
             return self._inherit_remote_parent_fields(
                 parent_dep,

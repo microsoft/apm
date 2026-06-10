@@ -1,7 +1,7 @@
 """Comprehensive tests for APM dependency resolver."""
 
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
@@ -665,6 +665,8 @@ version: 1.0.0
             self.assertIsNotNone(shared)
             self.assertEqual(shared.dependency_ref.repo_url, "microsoft/mono")
             self.assertEqual(shared.dependency_ref.virtual_path, "packages/shared")
+            self.assertFalse(Path(shared.dependency_ref.virtual_path).is_absolute())
+            self.assertFalse(PureWindowsPath(shared.dependency_ref.virtual_path).is_absolute())
             self.assertEqual(shared.dependency_ref.reference, "feature")
             self.assertFalse(shared.dependency_ref.is_local)
             self.assertEqual(resolver._rejected_remote_local_keys, set())
