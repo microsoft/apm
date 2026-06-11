@@ -829,11 +829,10 @@ def _run_compilation(
     "--clean",
     is_flag=True,
     help=(
-        "Remove orphaned AGENTS.md files no longer generated. For --target claude, "
-        "also removes a stale APM-generated CLAUDE.md when deduplication suppresses "
-        "CLAUDE.md generation (i.e. instructions are already in .claude/rules/ and "
-        "nothing else, such as a constitution, would keep a CLAUDE.md). "
-        "Hand-authored files are never deleted."
+        "Remove orphaned AGENTS.md files no longer generated; for --target claude,"
+        " also removes a stale APM-generated CLAUDE.md (hand-authored files are"
+        " never deleted). Use with --dry-run to preview what would be removed."
+        " See the compile reference for details."
     ),
 )
 @click.option(
@@ -925,9 +924,10 @@ def compile(  # noqa: PLR0913 -- Click handler
     * --local-only: Ignore dependencies, compile only local .apm/ primitives
     * --clean: Remove orphaned AGENTS.md files no longer generated; for
       --target claude, also removes a stale APM-generated CLAUDE.md when
-      deduplication suppresses CLAUDE.md generation (i.e. instructions are already
-      in .claude/rules/ and nothing else, such as a constitution, would keep a
-      CLAUDE.md). Hand-authored files are never deleted.
+      deduplication suppresses CLAUDE.md generation entirely (instructions
+      already in .claude/rules/ with no constitution or other keep-alive).
+      Hand-authored files are never deleted. Combine with --dry-run to
+      preview removals before they happen.
     """
     logger = CommandLogger("compile", verbose=verbose, dry_run=dry_run)
 
