@@ -108,7 +108,13 @@ def test_run_targets_phase_normalizes_vscode_alias(
 
 
 def test_cli_parse_claude_copilot_installs_both_targets(tmp_path: Path) -> None:
-    """The exact CLI parse result for --target claude,copilot keeps copilot."""
+    """Regression trap for #1746: --target claude,copilot resolves both targets.
+
+    parse_target_field intentionally returns the runtime alias spelling for
+    multi-token input ("copilot" -> "vscode"); the targets phase must then
+    normalize that alias back to the canonical "copilot" profile instead of
+    silently dropping it.
+    """
     from apm_cli.core.target_detection import parse_target_field
     from apm_cli.install.phases.targets import run
 
@@ -119,7 +125,9 @@ def test_cli_parse_claude_copilot_installs_both_targets(tmp_path: Path) -> None:
     ctx = _make_ctx(project, target_override=parsed)
     run(ctx)
 
+    # Multi-token parsing yields the runtime alias, not the canonical name.
     assert parsed == ["claude", "vscode"]
+    # The phase normalizes the alias so the copilot profile is preserved.
     assert _target_names(ctx) == ["claude", "copilot"]
     assert (project / ".claude").is_dir()
     assert (project / ".github").is_dir()
