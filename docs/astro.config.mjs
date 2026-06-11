@@ -36,7 +36,6 @@ export default defineConfig({
 		'/introduction/anatomy-of-an-apm-package': '/apm/concepts/package-anatomy',
 		// Legacy getting-started -> persona ramps
 		'/getting-started/quick-start': '/apm/quickstart',
-		'/getting-started/installation': '/apm/quickstart',
 		'/getting-started/authentication': '/apm/consumer/authentication',
 		'/getting-started/migration': '/apm/troubleshooting/migration',
 		// Legacy guides -> consumer/producer ramps
@@ -154,6 +153,7 @@ export default defineConfig({
 					label: 'Start here',
 					items: [
 						{ label: 'Quickstart', slug: 'quickstart' },
+						{ label: 'Installation', slug: 'getting-started/installation' },
 						{ label: 'Your first package', slug: 'getting-started/first-package' },
 					],
 				},
