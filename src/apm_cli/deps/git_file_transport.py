@@ -22,6 +22,7 @@ Design constraints
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import subprocess
@@ -44,6 +45,10 @@ class GitFileTransportError(RuntimeError):
     """Transport-level git failure during path-scoped file fetch."""
 
 
+class GitFileTransportSecurityError(ValueError):
+    """Security validation failure before invoking git transport."""
+
+
 def _debug(message: str) -> None:
     """Print debug message if APM_DEBUG environment variable is set."""
     if os.environ.get("APM_DEBUG"):
@@ -53,7 +58,7 @@ def _debug(message: str) -> None:
 def _redact_git_stderr(stderr: str) -> str:
     """Redact auth-bearing HTTPS URL credentials from git stderr."""
     cleaned = stderr.strip()
-    return re.sub(r"(https://)[^/@\s]+@", r"\1***@", cleaned)
+    return re.sub(r"(https?://)[^/@\s]+@", r"\1***@", cleaned)
 
 
 class GitSparseFileTransport:
@@ -69,15 +74,20 @@ class GitSparseFileTransport:
         timeout: int = _GIT_TIMEOUT,
     ) -> None:
         """Create a reusable sparse checkout for one repository and ref."""
+        if ref.startswith("-"):
+            raise GitFileTransportSecurityError("Invalid git ref: refs must not start with '-'")
         self._dep_ref = dep_ref
         self._ref = ref
         self._build_repo_url_fn = build_repo_url_fn
         self._git_env = {**git_env, "GIT_TERMINAL_PROMPT": "0"}
         self._timeout = timeout
         self._temp_dir = tempfile.TemporaryDirectory(prefix="apm_gitfetch_")
+        with contextlib.suppress(OSError):
+            Path(self._temp_dir.name).chmod(0o700)
         self._work_dir = Path(self._temp_dir.name) / "work"
         self._auth_url: str | None = None
         self._sparse_paths: set[str] = set()
+        self._requested_paths: set[str] = set()
         self._initialized = False
         self._lock = threading.Lock()
         self._state = threading.Condition()
@@ -105,25 +115,25 @@ class GitSparseFileTransport:
 
     def fetch_file(self, file_path: str) -> bytes:
         """Fetch one file from the transport's repository/ref."""
+        validate_path_segments(file_path, context="path")
         with self._state:
             if self._closed:
                 raise GitFileTransportError("git file transport is closed")
+            self._requested_paths.add(file_path)
             self._active_fetches += 1
         try:
             with self._lock:
-                validate_path_segments(file_path, context="path")
                 self._ensure_checkout(file_path)
-
                 target = self._work_dir / file_path
                 ensure_path_within(target, self._work_dir)
-
                 if not target.exists():
                     raise RuntimeError(
                         f"File '{file_path}' not found after git sparse checkout of "
-                        f"{self._dep_ref.host}/{self._dep_ref.repo_url}@{self._ref}"
+                        f"{self._dep_ref.host}/{self._dep_ref.repo_url}@{self._ref}. "
+                        "Verify the path exists at that ref."
                     )
 
-                return target.read_bytes()
+            return target.read_bytes()
         finally:
             with self._state:
                 self._active_fetches -= 1
@@ -141,7 +151,9 @@ class GitSparseFileTransport:
             self._run(["git", "init"])
             self._run(["git", "remote", "add", "origin", self._auth_url])
             self._run(["git", "sparse-checkout", "init", "--no-cone"])
-            self._set_sparse_paths(file_path)
+            with self._state:
+                requested_paths = tuple(self._requested_paths)
+            self._set_sparse_paths(*requested_paths)
             _debug(
                 "git sparse fetch: "
                 f"host={self._dep_ref.host} repo={self._dep_ref.repo_url} "
@@ -156,21 +168,24 @@ class GitSparseFileTransport:
             self._set_sparse_paths(file_path)
             self._run(["git", "checkout", "FETCH_HEAD"])
 
-    def _set_sparse_paths(self, file_path: str) -> None:
+    def _set_sparse_paths(self, *file_paths: str) -> None:
         """Apply the accumulated file-level sparse paths."""
-        self._sparse_paths.add(file_path)
+        self._sparse_paths.update(file_paths)
         self._run(["git", "sparse-checkout", "set", "--no-cone", *sorted(self._sparse_paths)])
 
     def _run(self, cmd: list[str]) -> None:
         """Run one git command and raise a sanitized error on failure."""
-        result = subprocess.run(
-            cmd,
-            cwd=str(self._work_dir),
-            env=self._git_env,
-            capture_output=True,
-            text=True,
-            timeout=self._timeout,
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=str(self._work_dir),
+                env=self._git_env,
+                capture_output=True,
+                text=True,
+                timeout=self._timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise GitFileTransportError(f"git file fetch timed out: {' '.join(cmd[:3])}") from exc
         if result.returncode != 0:
             safe_stderr = _redact_git_stderr(result.stderr)
             raise GitFileTransportError(

@@ -34,8 +34,8 @@ from ..utils.github_host import (
 from ..utils.path_security import PathTraversalError
 from .git_file_transport import (
     GitFileTransportError,
+    GitFileTransportSecurityError,
     GitSparseFileTransport,
-    fetch_file_via_git_sparse,
 )
 from .host_backends import backend_for
 
@@ -79,7 +79,7 @@ class DownloadDelegate:
     preserves existing test ``patch.object`` points on the orchestrator.
     """
 
-    def __init__(self, host):
+    def __init__(self, host, git_file_transport_factory=None):
         """Initialize with a reference to the owning downloader.
 
         Args:
@@ -91,6 +91,7 @@ class DownloadDelegate:
             tuple[str, str, str, int | None], GitSparseFileTransport
         ] = {}
         self._git_file_transports_lock = threading.Lock()
+        self._git_file_transport_factory = git_file_transport_factory
         self._git_file_transport_finalizer = weakref.finalize(
             self,
             _close_git_file_transports,
@@ -665,24 +666,13 @@ class DownloadDelegate:
         ref: str,
     ) -> bytes:
         """Fetch a GitLab path: file via a reusable sparse checkout."""
-        # Preserve existing patch points: tests and older extensions can still
-        # monkeypatch the module-level function and exercise the fallback path.
-        if fetch_file_via_git_sparse.__module__ != "apm_cli.deps.git_file_transport":
-            git_env = {**os.environ, **(self._host.git_env or {})}
-            return fetch_file_via_git_sparse(
-                dep_ref,
-                file_path,
-                ref,
-                build_repo_url_fn=self.build_repo_url,
-                git_env=git_env,
-            )
-
         key = self._gitlab_file_transport_key(dep_ref, ref)
         with self._git_file_transports_lock:
             transport = self._git_file_transports.get(key)
             if transport is None:
                 git_env = {**os.environ, **(self._host.git_env or {})}
-                transport = GitSparseFileTransport(
+                transport_factory = self._git_file_transport_factory or GitSparseFileTransport
+                transport = transport_factory(
                     dep_ref,
                     ref,
                     build_repo_url_fn=self.build_repo_url,
@@ -733,14 +723,14 @@ class DownloadDelegate:
             if verbose_callback:
                 verbose_callback(f"Downloaded file via git: {host}/{dep_ref.repo_url}/{file_path}")
             return content
-        except PathTraversalError:
+        except (PathTraversalError, GitFileTransportSecurityError):
             # A traversal / symlink-escape attempt must hard-fail. It must
             # NOT be silently retried over the REST transport -- letting a
             # rejected path fall through would hand an attacker a second
             # transport to probe. Propagate the security failure unchanged.
             raise
-        except Exception:
-            fallback_target = f"{host}/{dep_ref.repo_url}/{file_path}"
+        except (GitFileTransportError, RuntimeError, OSError):
+            fallback_target = f"{host}/{dep_ref.repo_url}"
             _debug(
                 f"git transport unavailable for {fallback_target}; falling back to GitLab REST API"
             )

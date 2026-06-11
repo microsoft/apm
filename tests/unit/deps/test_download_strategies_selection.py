@@ -1082,8 +1082,8 @@ class TestDownloadGitlabFile:
                 return_value={},
             ),
             patch(
-                "apm_cli.deps.download_strategies.fetch_file_via_git_sparse",
-                side_effect=git_error,
+                "apm_cli.deps.download_strategies.GitSparseFileTransport",
+                return_value=MagicMock(fetch_file=MagicMock(side_effect=git_error)),
             ),
             patch("builtins.print") as debug_print,
         ):
@@ -1105,8 +1105,10 @@ class TestDownloadGitlabFile:
 
         with (
             patch(
-                "apm_cli.deps.download_strategies.fetch_file_via_git_sparse",
-                side_effect=PathTraversalError("path escapes work tree"),
+                "apm_cli.deps.download_strategies.GitSparseFileTransport",
+                return_value=MagicMock(
+                    fetch_file=MagicMock(side_effect=PathTraversalError("path escapes work tree"))
+                ),
             ),
             patch.object(host, "_resilient_get") as mock_api,
             pytest.raises(PathTraversalError),

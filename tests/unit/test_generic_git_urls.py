@@ -1327,6 +1327,14 @@ class TestEmbeddedSubpathInGitUrl:
         with pytest.raises(ValueError, match=r"path:"):
             DependencyReference.parse("git@github.com:org/repo/prompts/review.prompt.md.git")
 
+    def test_error_message_wraps_input_in_backticks(self) -> None:
+        """Error context should avoid Python repr quoting for user input."""
+        with pytest.raises(ValueError) as exc_info:
+            DependencyReference.parse("git@github.com:org/repo/prompts/review.prompt.md.git")
+
+        message = str(exc_info.value)
+        assert "Got: `git@github.com:org/repo/prompts/review.prompt.md.git`" in message
+
     def test_scp_agents_subpath_raises(self) -> None:
         """Primitive 'agents' embedded in SCP URL also raises."""
         with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):

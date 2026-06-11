@@ -1231,8 +1231,10 @@ class TestDownloadGitlabFile:
                 return_value={},
             ),
             patch(
-                "apm_cli.deps.download_strategies.fetch_file_via_git_sparse",
-                side_effect=RuntimeError("git transport unavailable"),
+                "apm_cli.deps.download_strategies.GitSparseFileTransport",
+                return_value=MagicMock(
+                    fetch_file=MagicMock(side_effect=RuntimeError("git transport unavailable"))
+                ),
             ),
         ):
             d.download_gitlab_file(self._dep(), "apm.yml", verbose_callback=callback)

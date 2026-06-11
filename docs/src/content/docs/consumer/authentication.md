@@ -51,7 +51,7 @@ APM fetches `path:`-specified files from GitLab dependencies via git
 sparse/partial checkout (the same transport used for the clone), so your
 existing SSH keys and git credential helpers work without any extra token.
 This is the default for all GitLab sources, including self-hosted instances
-where the REST API is restricted or returns 410.
+where the REST API is restricted or returns 410. If `git clone` already works for the repo, `apm install` needs no extra token.
 
 If you need to fall back to the GitLab REST API (for environments where git
 transport is not available), set `GITLAB_APM_PAT`:

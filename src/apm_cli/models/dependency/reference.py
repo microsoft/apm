@@ -793,11 +793,11 @@ class DependencyReference:
             if idx >= 2 and seg in DependencyReference._APM_PRIMITIVE_DIRS:
                 raise ValueError(
                     "A subpath cannot be embedded in a git URL. "
+                    f"Got: `{raw}`. "
                     "Use the `path:` key instead: "
                     "`git: <repo-url>` + `path: <primitive>/<name>` "
                     "(or the shorthand `org/repo/<primitive>/<name>`). "
-                    "See https://microsoft.github.io/apm/consumer/manage-dependencies/ "
-                    f"Got: {raw!r}"
+                    "See https://microsoft.github.io/apm/consumer/manage-dependencies/"
                 )
 
     @classmethod

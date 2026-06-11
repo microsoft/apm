@@ -113,9 +113,9 @@ apm pack                                 # marketplace.json also resolves agains
 ## GitLab (SaaS or self-managed)
 
 APM fetches `path:`-specified files from GitLab dependencies via git sparse/partial
-checkout (the same transport as the clone). This is git-transport-first: SSH keys and
-git credential helpers work without any extra token, and self-hosted GitLab instances
-where the API returns 410 (disabled) no longer fail.
+checkout (the same transport as the clone). Git transport is tried first, so SSH
+keys and git credential helpers work without any extra token, and self-hosted
+GitLab instances where the API returns 410 (disabled) no longer fail.
 
 If git transport is unavailable, `GITLAB_APM_PAT` is the fallback:
 

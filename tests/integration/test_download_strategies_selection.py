@@ -537,8 +537,10 @@ class TestDownloadGitlabFile:
         callback = MagicMock()
 
         with patch(
-            "apm_cli.deps.download_strategies.fetch_file_via_git_sparse",
-            side_effect=RuntimeError("git transport unavailable"),
+            "apm_cli.deps.download_strategies.GitSparseFileTransport",
+            return_value=MagicMock(
+                fetch_file=MagicMock(side_effect=RuntimeError("git transport unavailable"))
+            ),
         ):
             result = delegate.download_gitlab_file(dep, "README.md", verbose_callback=callback)
 
