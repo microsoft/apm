@@ -1,18 +1,22 @@
 """Bundle unpacker  -- extracts and verifies APM bundles."""
 
 import shutil
-import sys
-import tarfile
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 from ..deps.lockfile import LEGACY_LOCKFILE_NAME, LOCKFILE_NAME, LockFile
-from ..utils.path_security import PathTraversalError, validate_path_segments
+from ..utils.archive import (
+    MAX_ZIP_ENTRIES,
+    MAX_ZIP_UNCOMPRESSED,
+    ArchiveError,
+    _extract_tar_gz_file,
+    safe_extract_zip,
+)
 
-_MAX_ZIP_ENTRIES = 10_000
-_MAX_ZIP_UNCOMPRESSED = 512 * 1024 * 1024  # 512 MB
+_MAX_ZIP_ENTRIES = MAX_ZIP_ENTRIES
+_MAX_ZIP_UNCOMPRESSED = MAX_ZIP_UNCOMPRESSED
 
 
 @dataclass
@@ -66,38 +70,13 @@ def unpack_bundle(
         cleanup_temp = True
         try:
             with zipfile.ZipFile(bundle_path, "r") as zf:
-                members = zf.infolist()
-                # ZIP bomb guard: reject suspiciously large or deep archives
-                if len(members) > _MAX_ZIP_ENTRIES:
-                    raise ValueError(
-                        f"ZIP archive has {len(members)} entries (limit {_MAX_ZIP_ENTRIES})"
-                    )
-                total_size = sum(m.file_size for m in members)
-                if total_size > _MAX_ZIP_UNCOMPRESSED:
-                    raise ValueError(
-                        f"ZIP archive uncompressed size"
-                        f" {total_size // (1024 * 1024)} MB exceeds"
-                        f" limit of {_MAX_ZIP_UNCOMPRESSED // (1024 * 1024)} MB"
-                    )
-                # Security: prevent path traversal and symlink entries
-                for member in members:
-                    name = member.filename
-                    if (
-                        name.startswith("/")
-                        or PureWindowsPath(name).drive
-                        or PureWindowsPath(name).is_absolute()
-                    ):
-                        raise ValueError(f"Refusing to extract path-traversal entry: {name}")
-                    try:
-                        validate_path_segments(name, context="zip member")
-                    except PathTraversalError:
-                        raise ValueError(
-                            f"Refusing to extract path-traversal entry: {name}"
-                        ) from None
-                    # Detect Unix symlinks stored in zip external_attr
-                    if (member.external_attr >> 16) & 0o170000 == 0o120000:
-                        raise ValueError(f"Refusing to extract symlink: {name}")
-                zf.extractall(temp_dir)  # noqa: S202
+                safe_extract_zip(
+                    zf,
+                    temp_dir,
+                    max_entries=_MAX_ZIP_ENTRIES,
+                    max_uncompressed=_MAX_ZIP_UNCOMPRESSED,
+                    error_type=ValueError,
+                )
         except Exception:
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise
@@ -115,29 +94,13 @@ def unpack_bundle(
         temp_dir = Path(tempfile.mkdtemp(prefix="apm-unpack-", dir=get_apm_temp_dir()))
         cleanup_temp = True
         try:
-            with tarfile.open(bundle_path, "r:gz") as tar:
-                # Security: prevent path traversal and special entries
-                for member in tar.getmembers():
-                    name = member.name
-                    if (
-                        name.startswith("/")
-                        or PureWindowsPath(name).drive
-                        or PureWindowsPath(name).is_absolute()
-                    ):
-                        raise ValueError(f"Refusing to extract path-traversal entry: {name}")
-                    try:
-                        validate_path_segments(name, context="tar member")
-                    except PathTraversalError:
-                        raise ValueError(
-                            f"Refusing to extract path-traversal entry: {name}"
-                        ) from None
-                    if member.issym() or member.islnk():
-                        raise ValueError(f"Refusing to extract symlink/hardlink: {name}")
-                # filter="data" was added in Python 3.12; use it when available
-                if sys.version_info >= (3, 12):
-                    tar.extractall(temp_dir, filter="data")
-                else:
-                    tar.extractall(temp_dir)  # noqa: S202
+            _extract_tar_gz_file(bundle_path, str(temp_dir))
+        except ArchiveError as exc:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            msg = str(exc)
+            if "path" in msg or "Symlinks" in msg or "links" in msg:
+                raise ValueError(f"Refusing to extract path-traversal entry: {msg}") from exc
+            raise ValueError(msg) from exc
         except Exception:
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise

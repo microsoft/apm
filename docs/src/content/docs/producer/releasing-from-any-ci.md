@@ -85,10 +85,17 @@ you need to customise any step.
 > **Reference deployment.** [`DevExpGbb/zava-agent-config`](https://github.com/DevExpGbb/zava-agent-config)
 > runs this exact pipeline. The
 > [v6.1.2 release](https://github.com/DevExpGbb/zava-agent-config/releases/tag/v6.1.2)
-> attaches 7 per-plugin tarballs + their `.sha256` companions +
+> attaches 7 per-plugin bundles + their `.sha256` companions +
 > `marketplace-6.1.2.json` (15 assets total) via the workflow in
 > [`.github/workflows/release.yml`](https://github.com/DevExpGbb/zava-agent-config/blob/main/.github/workflows/release.yml).
 > APM `0.16.0` and apm-action `v1.9.1` or newer required.
+
+:::caution[Migrating release workflows from `.tar.gz`?]
+The examples below assume the new `.zip` default from `apm pack --archive`.
+If your release job still uploads or hashes `build/*.tar.gz`, either update
+those globs to `.zip` or add `--archive-format tar.gz` to preserve the previous
+artifact format.
+:::
 
 ```yaml
       - uses: actions/setup-python@v5

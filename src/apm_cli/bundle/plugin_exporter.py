@@ -11,8 +11,6 @@ import hashlib
 import json
 import re
 import shutil
-import tarfile
-import zipfile
 from pathlib import Path, PurePosixPath
 
 import yaml
@@ -24,6 +22,12 @@ from ..deps.lockfile import (
     migrate_lockfile_if_needed,
 )
 from ..models.apm_package import APMPackage, DependencyReference
+from ..utils.archive import (
+    projected_archive_path,
+    validate_archive_format,
+    write_tar_archive,
+    write_zip_archive,
+)
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from .packer import PackResult
@@ -548,7 +552,12 @@ def export_plugin_bundle(
     bundle_dir = output_dir / f"{safe_name}-{safe_version}"
     ensure_path_within(bundle_dir, output_dir)
     if dry_run:
-        return PackResult(bundle_path=bundle_dir, files=output_files)
+        bundle_path = (
+            projected_archive_path(output_dir, bundle_dir.name, archive_format)
+            if archive
+            else bundle_dir
+        )
+        return PackResult(bundle_path=bundle_path, files=output_files)
 
     # 10. Security scan (warn-only, never blocks)
     from ..security.gate import WARN_POLICY, SecurityGate
@@ -648,28 +657,12 @@ def export_plugin_bundle(
 
     # 15. Archive if requested
     if archive:
-        if archive_format not in ("zip", "tar.gz"):
-            raise ValueError(
-                f"Unknown archive_format: {archive_format!r}. Must be 'zip' or 'tar.gz'."
-            )
+        validate_archive_format(archive_format)
+        archive_path = projected_archive_path(output_dir, bundle_dir.name, archive_format)
         if archive_format == "tar.gz":
-            archive_path = output_dir / f"{bundle_dir.name}.tar.gz"
-            ensure_path_within(archive_path, output_dir)
-            with tarfile.open(archive_path, "w:gz") as tf:
-                for fp in sorted(bundle_dir.rglob("*")):
-                    if fp.is_symlink() or not fp.is_file():
-                        continue
-                    tf.add(fp, arcname=f"{bundle_dir.name}/{fp.relative_to(bundle_dir).as_posix()}")
+            write_tar_archive(bundle_dir, archive_path)
         else:
-            archive_path = output_dir / f"{bundle_dir.name}.zip"
-            ensure_path_within(archive_path, output_dir)
-            with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                for fp in sorted(bundle_dir.rglob("*")):
-                    if fp.is_symlink() or not fp.is_file():
-                        continue  # reject symlinks injected after write
-                    zf.write(
-                        fp, arcname=f"{bundle_dir.name}/{fp.relative_to(bundle_dir).as_posix()}"
-                    )
+            write_zip_archive(bundle_dir, archive_path)
         shutil.rmtree(bundle_dir)
         result.bundle_path = archive_path
 

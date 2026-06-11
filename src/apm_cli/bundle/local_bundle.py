@@ -27,24 +27,29 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-import sys
-import tarfile
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import Any
 
 import yaml
 
+from ..utils.archive import (
+    MAX_ZIP_ENTRIES,
+    MAX_ZIP_UNCOMPRESSED,
+    ArchiveError,
+    _extract_tar_gz_file,
+    safe_extract_zip,
+)
 from ..utils.path_security import (
     PathTraversalError,
     ensure_path_within,
     validate_path_segments,
 )
 
-_MAX_ZIP_ENTRIES = 10_000
-_MAX_ZIP_UNCOMPRESSED = 512 * 1024 * 1024  # 512 MB
+_MAX_ZIP_ENTRIES = MAX_ZIP_ENTRIES
+_MAX_ZIP_UNCOMPRESSED = MAX_ZIP_UNCOMPRESSED
 
 
 @dataclass(frozen=True)
@@ -152,32 +157,14 @@ def _looks_like_legacy_apm_bundle(path: Path) -> bool:
         return False
     tmp = Path(tempfile.mkdtemp(prefix="apm-legacy-probe-"))
     try:
-        with tarfile.open(path, "r:gz") as tar:
-            for member in tar.getmembers():
-                if member.issym() or member.islnk():
-                    return False
-                name = member.name
-                if (
-                    name.startswith("/")
-                    or PureWindowsPath(name).drive
-                    or PureWindowsPath(name).is_absolute()
-                ):
-                    return False
-                try:
-                    validate_path_segments(name, context="tar member")
-                except PathTraversalError:
-                    return False
-            if sys.version_info >= (3, 12):
-                tar.extractall(tmp, filter="data")
-            else:
-                tar.extractall(tmp)  # noqa: S202 -- validated above
+        _extract_tar_gz_file(path, str(tmp))
         # Locate the inner directory (apm pack uses arcname=<bundle-name>)
         root = tmp
         children = [p for p in tmp.iterdir() if p.is_dir()]
         if len(children) == 1:
             root = children[0]
         return (root / "apm.lock.yaml").is_file() and not (root / "plugin.json").is_file()
-    except (tarfile.TarError, OSError):
+    except (ArchiveError, OSError):
         return False
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -204,44 +191,27 @@ def _find_extracted_root(extract_dir: Path) -> Path | None:
 def _extract_zip_bundle(path: Path) -> LocalBundleInfo | None:
     """Extract a ``.zip`` bundle to a temp dir and return :class:`LocalBundleInfo`.
 
-    Applies the same security checks as the tar.gz branch: rejects absolute
-    paths, path-traversal segments, and Unix symlink entries detected via
-    ``external_attr``.  Returns ``None`` on any validation failure or I/O
-    error so the caller can fall through to a generic error message.
+    Applies the same security checks as the tar.gz branch and enforces the ZIP
+    size quota while streaming each entry. Returns ``None`` only when the file
+    is not a readable ZIP bundle or no ``plugin.json`` root is found; security
+    violations raise ``ValueError`` with a targeted reason.
     """
     temp_dir = Path(tempfile.mkdtemp(prefix="apm-local-bundle-"))
     try:
         with zipfile.ZipFile(path, "r") as zf:
-            members = zf.infolist()
-            # ZIP bomb guard: reject suspiciously large or deep archives
-            if len(members) > _MAX_ZIP_ENTRIES:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                return None
-            if sum(m.file_size for m in members) > _MAX_ZIP_UNCOMPRESSED:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                return None
-            for member in members:
-                name = member.filename
-                if (
-                    name.startswith("/")
-                    or PureWindowsPath(name).drive
-                    or PureWindowsPath(name).is_absolute()
-                ):
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-                    return None
-                try:
-                    validate_path_segments(name, context="zip member")
-                except PathTraversalError:
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-                    return None
-                # Detect Unix symlinks stored in zip external_attr
-                if (member.external_attr >> 16) & 0o170000 == 0o120000:
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-                    return None
-            zf.extractall(temp_dir)  # noqa: S202 -- validated above
+            safe_extract_zip(
+                zf,
+                temp_dir,
+                max_entries=_MAX_ZIP_ENTRIES,
+                max_uncompressed=_MAX_ZIP_UNCOMPRESSED,
+                error_type=ValueError,
+            )
     except (zipfile.BadZipFile, OSError):
         shutil.rmtree(temp_dir, ignore_errors=True)
         return None
+    except ValueError:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
     bundle_root = _find_extracted_root(temp_dir)
     if bundle_root is None:
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -277,39 +247,8 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
     if path.is_file() and _looks_like_tarball(path):
         temp_dir = Path(tempfile.mkdtemp(prefix="apm-local-bundle-"))
         try:
-            with tarfile.open(path, "r:gz") as tar:
-                # Reject member symlinks/hardlinks and absolute / parent paths
-                # for safety (analogous to the pack-side filter).  Using
-                # ``validate_path_segments`` normalises backslashes and
-                # percent-decoding, and ``PureWindowsPath`` catches drive-letter
-                # absolute forms (e.g. ``C:/foo``) that ``startswith('/')`` misses.
-                for member in tar.getmembers():
-                    if member.issym() or member.islnk():
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        return None
-                    name = member.name
-                    if (
-                        name.startswith("/")
-                        or PureWindowsPath(name).drive
-                        or PureWindowsPath(name).is_absolute()
-                    ):
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        return None
-                    try:
-                        validate_path_segments(name, context="tar member")
-                    except PathTraversalError:
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        return None
-                # tarfile.extractall(filter="data") requires Python 3.12+.
-                # The repo declares requires-python = ">=3.10", so on 3.10/3.11
-                # we extract without the filter.  The pre-extraction validation
-                # above is the primary gate (rejects symlinks, absolute paths,
-                # and any '..' segment), not filter="data".
-                if sys.version_info >= (3, 12):
-                    tar.extractall(temp_dir, filter="data")
-                else:
-                    tar.extractall(temp_dir)  # noqa: S202 -- validated above
-        except (tarfile.TarError, OSError):
+            _extract_tar_gz_file(path, str(temp_dir))
+        except (ArchiveError, OSError):
             shutil.rmtree(temp_dir, ignore_errors=True)
             return None
         bundle_root = _find_extracted_root(temp_dir)

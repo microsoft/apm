@@ -1251,7 +1251,10 @@ def install(  # noqa: PLR0913
             from ..bundle.local_bundle import detect_local_bundle as _detect_lb
             from ..install.local_bundle_handler import install_local_bundle as _install_lb
 
-            _bundle_info = _detect_lb(_probe)
+            try:
+                _bundle_info = _detect_lb(_probe)
+            except ValueError as exc:
+                raise click.UsageError(f"Bundle security check failed: {exc}") from exc
             if _bundle_info is not None:
                 _install_lb(
                     bundle_info=_bundle_info,

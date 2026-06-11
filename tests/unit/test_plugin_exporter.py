@@ -694,6 +694,30 @@ class TestExportPluginBundle:
         assert len(result.files) > 0
         assert "plugin.json" in result.files
 
+    def test_archive_dry_run_reports_projected_zip_path(self, tmp_path):
+        project = _setup_plugin_project(tmp_path, agents=["a.agent.md"])
+        out = tmp_path / "build"
+
+        result = export_plugin_bundle(project, out, archive=True, dry_run=True)
+
+        assert result.bundle_path == out / "test-pkg-1.0.0.zip"
+        assert not out.exists()
+
+    def test_archive_dry_run_reports_projected_tar_gz_path(self, tmp_path):
+        project = _setup_plugin_project(tmp_path, agents=["a.agent.md"])
+        out = tmp_path / "build"
+
+        result = export_plugin_bundle(
+            project,
+            out,
+            archive=True,
+            archive_format="tar.gz",
+            dry_run=True,
+        )
+
+        assert result.bundle_path == out / "test-pkg-1.0.0.tar.gz"
+        assert not out.exists()
+
     def test_archive(self, tmp_path):
         project = _setup_plugin_project(tmp_path, agents=["a.agent.md"])
         out = tmp_path / "build"

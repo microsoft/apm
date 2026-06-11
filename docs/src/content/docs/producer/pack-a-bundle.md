@@ -47,6 +47,11 @@ Add `--archive` to get a single archive (`.zip` by default; use `--archive-forma
 for legacy CI pipelines) instead of a directory; use `-o` to change the output location
 (default `./build`).
 
+:::tip[Windows-native handoff]
+ZIP archives are natively extractable on Windows -- no WSL, tar, or additional
+tooling required. That is why `.zip` is the default archive format.
+:::
+
 ```bash
 apm pack --archive -o ./dist
 # -> ./dist/my-pkg-<version>.zip

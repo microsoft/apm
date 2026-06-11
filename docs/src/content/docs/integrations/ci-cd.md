@@ -204,6 +204,12 @@ Use `apm pack` in CI to build a distributable bundle once, then consume it in do
 
 The APM bundle layout below assumes the upstream job ran `apm-action@v1` with `pack: true` (or `apm pack --format apm --archive`). Plugin-format output cannot be restored this way because it does not carry the install-time directory tree.
 
+:::caution[Migrating from the previous `.tar.gz` default?]
+`apm pack --archive` now writes `.zip`. If a downstream job still expects
+`build/*.tar.gz`, add `--archive-format tar.gz` to the pack step instead of
+switching the restore step to `unzip`.
+:::
+
 ```yaml
 - uses: actions/download-artifact@v4
   with:

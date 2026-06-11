@@ -29,8 +29,8 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | Flag | Default | Description |
 |---|---|---|
 | `--format plugin\|apm` | `plugin` | Bundle format. `plugin` emits a Claude Code plugin directory with `plugin.json` and plugin-native subdirs (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`). `apm` emits the legacy APM bundle layout, kept for tooling that still consumes it (e.g. `microsoft/apm-action@v1` restore mode). |
-| `--archive` | off | Produce a `.zip` archive instead of a directory (use `--archive-format tar.gz` for legacy CI pipelines). Bundle only. |
-| `--archive-format zip\|tar.gz` | `zip` | Archive format when `--archive` is set. `zip` is natively extractable on Windows and matches the format expected by Claude Code and plugin hosts. `tar.gz` preserves the previous default for pipelines that depend on it. |
+| `--archive` | off | Produce a `.zip` archive instead of a directory (previous default: `.tar.gz`; use `--archive-format tar.gz` for legacy CI pipelines). Bundle only. |
+| `--archive-format zip\|tar.gz` | `zip` | Archive format when `--archive` is set. `zip` is natively extractable on Windows and matches the format expected by Claude Code and plugin hosts. `tar.gz` is typically smaller for text-heavy bundles and preserves the previous default for pipelines that depend on it. |
 | `-o`, `--output PATH` | `./build` | Bundle output directory. Does not affect the `marketplace.json` path. |
 | `--force` | off | Allow overwriting on collision. In `plugin` bundle format, last writer wins instead of first; for generated `plugin.json` manifests, overwrites an existing file instead of preserving it. |
 | `--dry-run` | off | Print what would be packed without writing anything. |
@@ -44,6 +44,12 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--check-versions` | off | Release gate: verify per-package versions agree with the configured `marketplace.versioning.strategy` (`lockstep`, `tag_pattern`, or `per_package`). Exits `3` on misalignment. Composes with `--check-clean` and `--dry-run`. |
 | `--check-clean` | off | Release gate: regenerate every configured marketplace output to a temp path and diff against the on-disk file. Exits `4` if the working tree is dirty (out-of-date `marketplace.json`). The gate itself never writes to disk. |
 | `--target`, `-t VALUE` | auto-detect | **Deprecated.** Recorded as informational `pack.target` metadata only; ignored by `apm install`. Will be removed in a future release. |
+
+:::caution[Migrating automation from `.tar.gz`?]
+`apm pack --archive` now produces `.zip`. If your CI release, checksum, or
+upload step still matches `build/*.tar.gz`, add `--archive-format tar.gz` or
+update the downstream glob to `.zip`.
+:::
 
 ## Examples
 

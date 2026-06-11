@@ -18,7 +18,7 @@ Five steps, in order. Each links to the page that owns it:
 | 1 | [Author primitives](./author-primitives/) | Skills, prompts, instructions, agents, hooks, commands, MCP under `.apm/`        |
 | 2 | [Compile your package](./compile/)        | `apm compile` writes deterministic per-target output you can git-diff            |
 | 3 | [Preview and validate](./preview-and-validate/) | `apm preview` and `apm view` confirm what consumers will receive                 |
-| 4 | [Pack a bundle](./pack-a-bundle/)         | `apm pack` produces a bundle you can ship offline or to a marketplace         |
+| 4 | [Pack a bundle](./pack-a-bundle/)         | `apm pack` produces a `.zip` you can ship offline or to a marketplace        |
 | 5 | [Publish to a marketplace](./publish-to-a-marketplace/) | Others install your package with `apm install <owner>/<repo>`                  |
 
 You don't need a marketplace to start. Step 4 is enough for internal teams; the marketplace step is for public discovery.

@@ -29,7 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   offline, or hosted catalogs without publishing a GitHub repo (closes
   #676). (#1739)
 - Enterprise bootstrap mirror mode (`APM_RELEASE_METADATA_URL`, `APM_RELEASE_BASE_URL`, `APM_INSTALLER_BASE_URL`, `APM_PYPI_INDEX_URL`, `APM_NO_DIRECT_FALLBACK`) routes `install.sh`, `install.ps1`, and `apm self-update` through internal mirrors with fail-closed public fallback; closes #1680. (#1733)
-
 - `apm pack --archive-format [zip|tar.gz]` escape hatch (default `zip`) lets
   CI pipelines that depended on the previous `.tar.gz` default opt back in without
   changing the project default. Passing `--archive-format` without `--archive` is
@@ -37,12 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `apm pack --archive` now produces `.zip` by default instead of `.tar.gz`. ZIP is
-  natively extractable on Windows without WSL or a tar binary, and matches the format
-  produced by `apm publish` and expected by Claude Code and plugin hosts.
-  ZIP archives are typically 30-130% larger than `.tar.gz` for text-heavy skill
-  bundles due to per-file compression; use `--archive-format tar.gz` if archive size
-  is a priority. (#1720)
+- **BREAKING:** `apm pack --archive` now produces `.zip` by default instead of `.tar.gz`, matching the format produced by `apm publish` and expected by Claude Code and plugin hosts while staying natively extractable on Windows without WSL or a tar binary. Note: ZIP archives are typically 30-130% larger than `.tar.gz` for text-heavy skill bundles due to per-file compression; use `--archive-format tar.gz` if archive size is a priority. (#1720)
 
 ### Fixed
 

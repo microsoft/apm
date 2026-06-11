@@ -266,6 +266,32 @@ class TestPackBundle:
         # Nothing written to disk
         assert not out.exists()
 
+    def test_pack_archive_dry_run_reports_projected_zip_path(self, tmp_path):
+        deployed = [".github/agents/a.md"]
+        project = _setup_project(tmp_path, deployed, target="vscode")
+        out = tmp_path / "build"
+
+        result = pack_bundle(project, out, archive=True, dry_run=True)
+
+        assert result.bundle_path == out / "test-pkg-1.0.0.zip"
+        assert not out.exists()
+
+    def test_pack_archive_dry_run_reports_projected_tar_gz_path(self, tmp_path):
+        deployed = [".github/agents/a.md"]
+        project = _setup_project(tmp_path, deployed, target="vscode")
+        out = tmp_path / "build"
+
+        result = pack_bundle(
+            project,
+            out,
+            archive=True,
+            archive_format="tar.gz",
+            dry_run=True,
+        )
+
+        assert result.bundle_path == out / "test-pkg-1.0.0.tar.gz"
+        assert not out.exists()
+
     def test_pack_no_lockfile_errors(self, tmp_path):
         project = tmp_path / "project"
         project.mkdir()

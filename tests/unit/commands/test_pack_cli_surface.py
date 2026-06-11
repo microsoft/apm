@@ -227,6 +227,21 @@ class TestRenderBundleResult:
         _render_bundle_result(logger, result, "apm", None, False)
         assert any("apm install" in i for i in logger.infos)
 
+    def test_live_zip_archive_emits_migration_tip_when_requested(self) -> None:
+        logger = _RecordingLogger()
+        result = _pack_result(files=["file.md"], bundle_path="build/my-bundle.zip")
+        _render_bundle_result(logger, result, "plugin", None, False, show_zip_migration_notice=True)
+        assert any("--archive now produces .zip" in i for i in logger.infos)
+        assert any("--archive-format tar.gz" in i for i in logger.infos)
+
+    def test_live_zip_archive_suppresses_migration_tip_when_not_requested(self) -> None:
+        logger = _RecordingLogger()
+        result = _pack_result(files=["file.md"], bundle_path="build/my-bundle.zip")
+        _render_bundle_result(
+            logger, result, "plugin", None, False, show_zip_migration_notice=False
+        )
+        assert not any("--archive now produces .zip" in i for i in logger.infos)
+
     def test_live_no_bundle_path_skips_share_line(self) -> None:
         """When bundle_path is falsy, the share line is suppressed."""
         logger = _RecordingLogger()
@@ -458,6 +473,14 @@ class TestPackCmdFlags:
         assert result.exit_code == 0
         for flag in ["--archive", "--format", "--dry-run", "--force", "--verbose", "--offline"]:
             assert flag in result.output
+
+    def test_archive_help_includes_migration_and_size_cues(self) -> None:
+        result = CliRunner().invoke(pack_cmd, ["--help"])
+        assert result.exit_code == 0
+        assert "previous default" in result.output
+        assert "--archive-format" in result.output
+        assert "tar.gz" in result.output
+        assert "smaller" in result.output
 
     def test_offline_flag_accepted(self, tmp_path: Path, monkeypatch) -> None:
         (tmp_path / "apm.yml").write_text(_APM_SIMPLE, encoding="utf-8")
