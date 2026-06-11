@@ -178,16 +178,14 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
                 # URL so Claude Code can clone from a non-default host (e.g.
                 # GHE) -- the ``github`` shorthand only resolves to github.com.
                 source_obj: dict[str, Any] = OrderedDict()
+                remote_url = _remote_source_url(pkg)
                 if pkg.subdir:
                     source_obj["source"] = "git-subdir"
-                    if pkg.host:
-                        source_obj["url"] = f"https://{pkg.host}/{pkg.source_repo}"
-                    else:
-                        source_obj["url"] = pkg.source_repo
+                    source_obj["url"] = remote_url or pkg.source_repo
                     source_obj["path"] = pkg.subdir
-                elif pkg.host:
+                elif remote_url:
                     source_obj["source"] = "url"
-                    source_obj["url"] = f"https://{pkg.host}/{pkg.source_repo}"
+                    source_obj["url"] = remote_url
                 else:
                     source_obj["source"] = "github"
                     source_obj["repo"] = pkg.source_repo
@@ -267,6 +265,15 @@ MARKETPLACE_OUTPUT_MAPPERS: dict[str, MarketplaceOutputMapper] = {
 }
 
 
+def _remote_source_url(pkg: ResolvedPackage) -> str | None:
+    """Return the canonical URL for remote packages that cannot use github shorthand."""
+    if pkg.source_url:
+        return pkg.source_url
+    if pkg.host:
+        return f"https://{pkg.host}/{pkg.source_repo}"
+    return None
+
+
 def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
     if entry.is_local:
         return OrderedDict(
@@ -278,10 +285,7 @@ def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
     if pkg.subdir:
         source_obj: dict[str, Any] = OrderedDict()
         source_obj["source"] = "git-subdir"
-        if pkg.host:
-            source_obj["url"] = f"https://{pkg.host}/{pkg.source_repo}"
-        else:
-            source_obj["url"] = pkg.source_repo
+        source_obj["url"] = _remote_source_url(pkg) or pkg.source_repo
         source_obj["path"] = pkg.subdir
         if pkg.ref:
             source_obj["ref"] = pkg.ref
@@ -291,10 +295,7 @@ def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
 
     source_obj = OrderedDict()
     source_obj["source"] = "url"
-    if pkg.host:
-        source_obj["url"] = f"https://{pkg.host}/{pkg.source_repo}"
-    else:
-        source_obj["url"] = pkg.source_repo
+    source_obj["url"] = _remote_source_url(pkg) or pkg.source_repo
     if pkg.ref:
         source_obj["ref"] = pkg.ref
     if pkg.sha:

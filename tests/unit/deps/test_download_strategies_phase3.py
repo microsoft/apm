@@ -68,6 +68,19 @@ def _make_host(
         api_base="https://api.github.com",
     )
     auth.build_error_context.return_value = "Set GITHUB_APM_PAT."
+
+    def _is_generic_dep(dep_ref) -> bool:
+        dep_host = getattr(dep_ref, "host", None)
+        if not dep_host:
+            return False
+        return dep_host != "github.com" and not str(dep_host).endswith(".ghe.com")
+
+    host._resolve_dep_token.side_effect = lambda dep_ref=None: (
+        None if _is_generic_dep(dep_ref) else github_token
+    )
+    host._resolve_dep_auth_ctx.side_effect = lambda dep_ref=None: (
+        None if _is_generic_dep(dep_ref) else ctx
+    )
     host.auth_resolver = auth
     return host
 
@@ -1212,12 +1225,23 @@ class TestDownloadGitlabFile:
         host._resilient_get.return_value = resp
         callback = MagicMock()
 
-        with patch(
-            "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
-            return_value={},
+        with (
+            patch(
+                "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
+                return_value={},
+            ),
+            patch(
+                "apm_cli.deps.download_strategies.GitSparseFileTransport",
+                return_value=MagicMock(
+                    fetch_file=MagicMock(side_effect=RuntimeError("git transport unavailable"))
+                ),
+            ),
         ):
             d.download_gitlab_file(self._dep(), "apm.yml", verbose_callback=callback)
-        callback.assert_called_once()
+        # The mocked git failure drives the REST fallback path without spawning
+        # subprocess/network work. Verbose output stays transport-agnostic.
+        assert callback.called
+        assert any("Downloaded file:" in str(c.args[0]) for c in callback.call_args_list)
 
 
 # ---------------------------------------------------------------------------

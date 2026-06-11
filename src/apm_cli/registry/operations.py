@@ -267,7 +267,7 @@ class MCPServerOperations:
         Returns:
             Dictionary mapping runtime variable names to their values
         """
-        all_required_vars = {}  # var_name -> {description, required, etc.}
+        collected_runtime_vars = {}  # var_name -> {description, required, etc.}
 
         # Use cached server info if available, otherwise fetch on-demand
         if server_info_cache is None:
@@ -290,7 +290,7 @@ class MCPServerOperations:
                                 variables = arg.get("variables", {})
                                 for var_name, var_info in variables.items():
                                     if isinstance(var_info, dict):
-                                        all_required_vars[var_name] = {
+                                        collected_runtime_vars[var_name] = {
                                             "description": var_info.get("description", ""),
                                             "required": var_info.get("is_required", True),
                                         }
@@ -299,9 +299,9 @@ class MCPServerOperations:
                 # Skip servers we can't analyze
                 continue
 
-        # Prompt user for each runtime variable
-        if all_required_vars:
-            return self._prompt_for_environment_variables(all_required_vars)
+        # Prompt user for collected runtime variables.
+        if collected_runtime_vars:
+            return self._prompt_for_environment_variables(collected_runtime_vars)
 
         return {}
 
@@ -320,7 +320,7 @@ class MCPServerOperations:
             Dictionary mapping environment variable names to their values
         """
         shared_env_vars = {}
-        all_required_vars = {}  # var_name -> {description, required, etc.}
+        collected_env_vars = {}  # var_name -> {description, required, optional value, etc.}
 
         # Use cached server info if available, otherwise fetch on-demand
         if server_info_cache is None:
@@ -340,8 +340,8 @@ class MCPServerOperations:
                         for arg in docker_args:
                             if isinstance(arg, str) and arg.startswith("${") and arg.endswith("}"):
                                 var_name = arg[2:-1]  # Remove ${ and }
-                                if var_name not in all_required_vars:
-                                    all_required_vars[var_name] = {
+                                if var_name not in collected_env_vars:
+                                    collected_env_vars[var_name] = {
                                         "description": f"Environment variable for {server_info.get('name', server_ref)}",
                                         "required": True,
                                     }
@@ -357,18 +357,33 @@ class MCPServerOperations:
                         for env_var in env_vars:
                             if isinstance(env_var, dict) and "name" in env_var:
                                 var_name = env_var["name"]
-                                all_required_vars[var_name] = {
+                                var_info = {
                                     "description": env_var.get("description", ""),
-                                    "required": env_var.get("required", True),
+                                    "required": env_var.get(
+                                        "required", env_var.get("is_required", True)
+                                    ),
                                 }
+                                default_value = env_var.get("value", "")
+                                if default_value:
+                                    var_info["value"] = default_value
+                                required = var_info["required"] is not False
+                                existing_value = os.getenv(var_name)
+                                if required or existing_value or default_value:
+                                    collected_env_vars[var_name] = var_info
+                                else:
+                                    logger.debug(
+                                        "Skipping optional MCP env var %s for %s: no value/default; omitted from runtime config",
+                                        var_name,
+                                        server_ref,
+                                    )
 
             except Exception:  # noqa: S112
                 # Skip servers we can't analyze
                 continue
 
-        # Prompt user for each environment variable
-        if all_required_vars:
-            shared_env_vars = self._prompt_for_environment_variables(all_required_vars)
+        # Prompt user for collected environment variables.
+        if collected_env_vars:
+            shared_env_vars = self._prompt_for_environment_variables(collected_env_vars)
 
         return shared_env_vars
 
@@ -394,9 +409,15 @@ class MCPServerOperations:
             for var_name in sorted(required_vars.keys()):
                 var_info = required_vars[var_name]
                 existing_value = os.getenv(var_name)
+                required = var_info.get("required", True) is not False
+                default_value = var_info.get("value", "")
 
                 if existing_value:
                     env_vars[var_name] = existing_value
+                elif not required:
+                    if default_value:
+                        env_vars[var_name] = default_value
+                    continue
                 else:  # noqa: PLR5501
                     # Provide sensible defaults for known variables
                     if var_name == "GITHUB_DYNAMIC_TOOLSETS":
@@ -432,7 +453,8 @@ class MCPServerOperations:
             for var_name in sorted(required_vars.keys()):
                 var_info = required_vars[var_name]
                 description = var_info.get("description", "")
-                required = var_info.get("required", True)
+                required = var_info.get("required", True) is not False
+                default_value = var_info.get("value", "")
 
                 # Check if already set in environment
                 existing_value = os.getenv(var_name)
@@ -440,6 +462,10 @@ class MCPServerOperations:
                 if existing_value:
                     console.print(f"  [+] {var_name}: [dim]using existing value[/dim]")
                     env_vars[var_name] = existing_value
+                elif not required:
+                    if default_value:
+                        env_vars[var_name] = default_value
+                    continue
                 else:
                     # Determine if this looks like a password/secret
                     is_sensitive = any(
@@ -451,10 +477,7 @@ class MCPServerOperations:
                     if description:
                         prompt_text += f" ({description})"
 
-                    if required:
-                        value = Prompt.ask(prompt_text, password=is_sensitive)
-                    else:
-                        value = Prompt.ask(prompt_text, default="", password=is_sensitive)
+                    value = Prompt.ask(prompt_text, password=is_sensitive)
 
                     env_vars[var_name] = value
 
@@ -469,12 +492,18 @@ class MCPServerOperations:
             for var_name in sorted(required_vars.keys()):
                 var_info = required_vars[var_name]
                 description = var_info.get("description", "")
+                required = var_info.get("required", True) is not False
+                default_value = var_info.get("value", "")
 
                 existing_value = os.getenv(var_name)
 
                 if existing_value:
                     click.echo(f"  [+] {var_name}: using existing value")
                     env_vars[var_name] = existing_value
+                elif not required:
+                    if default_value:
+                        env_vars[var_name] = default_value
+                    continue
                 else:
                     prompt_text = f"  {var_name}"
                     if description:

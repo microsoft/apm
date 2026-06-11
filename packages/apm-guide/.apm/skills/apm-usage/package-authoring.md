@@ -370,6 +370,29 @@ target is present. Authoring rules:
 - Governance: a `bin_deploy` policy rule can deny deployment per package.
   See the [policy schema](../../../../../docs/src/content/docs/reference/policy-schema.md#bin_deploy).
 
+## Marketplace source bases
+
+Marketplace publishers can declare `marketplace.sourceBase` when package
+repositories share an enterprise git base path:
+
+```yaml
+marketplace:
+  sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace
+  packages:
+    - name: review
+      source: review
+      ref: v1.0.0
+    - name: pinned
+      source: team/pinned
+      ref: main
+```
+
+Relative `packages[].source` values compose onto the base, including
+`owner/repo` shapes like `team/pinned`. Host-prefixed sources, full HTTPS
+URLs, and local `./` paths remain per-entry overrides. Without `sourceBase`,
+existing `owner/repo` source behavior is unchanged. The manifest schema
+Section 7.5 is canonical for the full validation and override rules.
+
 ## Step-by-step: create and publish
 
 ```bash

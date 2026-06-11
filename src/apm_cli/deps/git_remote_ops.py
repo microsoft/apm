@@ -30,6 +30,7 @@ def parse_ls_remote_output(output: str) -> list[RemoteRef]:
         Unsorted list of RemoteRef.
     """
     tags: dict[str, str] = {}  # tag name -> commit sha
+    annotated_tags: set[str] = set()
     branches: list[RemoteRef] = []
 
     for line in output.splitlines():
@@ -44,11 +45,26 @@ def parse_ls_remote_output(output: str) -> list[RemoteRef]:
         if refname.startswith("refs/tags/"):
             tag_name = refname[len("refs/tags/") :]
             if tag_name.endswith("^{}"):
-                # Dereferenced commit -- overwrite with the real commit SHA
+                # Dereferenced commit -- overwrite with the real commit SHA.
+                #
+                # SECURITY INVARIANT (load-bearing, do not weaken): only
+                # ANNOTATED tags emit this peeled ``^{}`` line, so the
+                # presence of a peeled ref is our sole signal for
+                # ``annotated=True``. The revision-pin resolver
+                # (find_latest_annotated_tag) accepts ONLY annotated tags and
+                # rejects branches and lightweight tags fail-closed, so a
+                # branch or lightweight tag named like a release can never
+                # masquerade as a SHA-pin update target. A transport that
+                # suppressed peeled refs would misclassify a genuine annotated
+                # tag as lightweight -- the resolver then raises rather than
+                # downgrading the pin, which is the safe direction. Any future
+                # edit here that marks a non-peeled ref as annotated would
+                # break this anti-spoofing fence.
                 tag_name = tag_name[:-3]
                 tags[tag_name] = sha
+                annotated_tags.add(tag_name)
             else:
-                # Only store if we haven't seen the deref line yet
+                # Only store if we haven't seen the deref line yet.
                 tags.setdefault(tag_name, sha)
 
         elif refname.startswith("refs/heads/"):
@@ -62,7 +78,12 @@ def parse_ls_remote_output(output: str) -> list[RemoteRef]:
             )
 
     tag_refs = [
-        RemoteRef(name=name, ref_type=GitReferenceType.TAG, commit_sha=sha)
+        RemoteRef(
+            name=name,
+            ref_type=GitReferenceType.TAG,
+            commit_sha=sha,
+            annotated=name in annotated_tags,
+        )
         for name, sha in tags.items()
     ]
     return tag_refs + branches

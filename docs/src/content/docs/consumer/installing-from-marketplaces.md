@@ -65,36 +65,53 @@ reproducible across machines and CI.
 
 ## Local and self-hosted marketplaces
 
-`apm marketplace add` accepts more than GitHub-hosted repos. The same
-register / browse / install / update workflow works against:
+`apm marketplace add` can register marketplaces from git repositories,
+local files, or hosted `marketplace.json` catalogs. The same register /
+browse / install / update workflow works against:
 
 - **Local filesystem paths** -- `apm marketplace add /srv/marketplaces/agent-forge`
-  (or a relative path, or `~/code/marketplace`). Useful for
-  privacy-sensitive packages, offline workflows, and air-gapped
-  environments. Local marketplaces with relative plugin sources
-  install by copying from disk via `LocalDependencySource`.
+  (or a relative path, `~/code/marketplace`, or a direct
+  `marketplace.json` file). Useful for privacy-sensitive packages,
+  offline workflows, and air-gapped environments. Local marketplaces
+  with relative plugin sources install by copying from disk via
+  `LocalDependencySource`.
 - **`file://` URIs** -- `apm marketplace add file:///srv/marketplaces/agent-forge.git`.
   Behaves the same as a local path.
+- **Git HTTPS URLs with `#ref`** --
+  `apm marketplace add https://gitlab.com/acme/agent-forge.git#v1.0.0`.
+  APM strips the fragment into the stored ref. If you omit `#ref`
+  (or `--ref`), APM warns because the default branch can move.
+- **Hosted `marketplace.json` URLs** --
+  `apm marketplace add https://catalog.example.com/marketplace.json --name catalog`.
+  APM fetches the JSON directly over HTTPS, caches ETag/Last-Modified
+  metadata, and records the source URL plus content digest in the
+  lockfile when packages are installed from it.
 - **Generic git URLs** -- any host APM does not classify as
   GitHub or GitLab family flows through subprocess `git` and
   `GitCache`. Includes Azure DevOps (auth via `ADO_APM_PAT`),
   Gitea, Bitbucket Server, and self-hosted git servers.
 - **SSH URLs** -- `git@gitea.example.com:org/repo.git`. The host
-  is extracted, classified, and routed through the matching
-  fetcher.
+  is extracted, classified, and routed through the matching fetcher.
+
+:::note[Hosted JSON is public HTTPS]
+Hosted `marketplace.json` URLs are public HTTPS sources: APM does not
+send custom auth headers. Use git-backed marketplaces for private
+catalogs.
+:::
 
 For generic-git marketplaces, `marketplace.json` is fetched via a
 sparse-cone clone (only the manifest path is downloaded); APM does
-not forward `GITHUB_APM_PAT` or `GITLAB_APM_TOKEN` to non-GitHub /
-non-GitLab hosts. Authentication falls through to the host's
-`*_APM_PAT` (e.g. `ADO_APM_PAT`) or your local
-`git credential-manager`. See
+not forward `GITHUB_APM_PAT` or `GITLAB_APM_PAT` to non-GitHub /
+non-GitLab hosts. Authentication falls through to the host's matching
+`*_APM_PAT` variable (such as `ADO_APM_PAT`) or local git credential
+helper when one is configured. See
 [Authentication](../authentication/).
 
 **Lockfile note.** Installs from a local marketplace record a
 local-path source in `apm.lock.yaml`. Lockfiles produced this way
-are machine-specific -- do not commit them into a shared repo. See
-[lockfile reference](../../reference/lockfile-spec/).
+are machine-specific -- do not commit them into a shared repo. Remote
+`marketplace.json` installs record `source_url` and `source_digest`
+provenance. See [lockfile reference](../../reference/lockfile-spec/).
 
 ## Where next
 

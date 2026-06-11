@@ -26,6 +26,7 @@ from .base import (
     _extract_legacy_angle_vars,
     _has_env_placeholder,
     _stringify_env_literal,
+    registry_field_is_required,
 )
 from .base import (
     _translate_env_placeholder as _translate_env_placeholder,
@@ -698,6 +699,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             return translated
 
         if self._supports_runtime_env_substitution:
+            env_overrides = env_overrides or {}
             resolved = {}
             placeholder_keys = []
             for env_var in env_vars:
@@ -706,12 +708,18 @@ class CopilotClientAdapter(MCPClientAdapter):
                 name = env_var.get("name", "")
                 if not name:
                     continue
+                required = registry_field_is_required(env_var)
+                override_value = env_overrides.get(name)
+                has_override = bool(
+                    override_value.strip() if isinstance(override_value, str) else override_value
+                )
                 if name in default_github_env:
                     # Non-secret literal default -- preserve as-is.
                     resolved[name] = default_github_env[name]
-                else:
+                elif required or has_override:
                     # Emit a runtime-substitution placeholder; APM never reads
-                    # or stores the value.
+                    # or stores the value. Optional variables are included only
+                    # when install-time collection observed a value.
                     resolved[name] = self._format_runtime_env_placeholder(name)
                     placeholder_keys.append(name)
             # Record for the post-install summary line and the

@@ -75,6 +75,12 @@ For every harness APM detects in your environment, `apm install`
 writes a runtime-specific MCP config file. The schemas differ; the
 `apm.yml` source of truth does not.
 
+Registry-declared environment variables honor the registry's
+`required` flag. Servers with optional auth install without token
+prompts until you choose to configure one. See the
+[manifest schema reference](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
+for the full required-vs-optional runtime config rule.
+
 | Harness | File | Scope | Format |
 |---|---|---|---|
 | GitHub Copilot CLI | `~/.copilot/mcp-config.json` | global | JSON `mcpServers` |

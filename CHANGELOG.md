@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm install --target kiro` deploys Kiro IDE steering, skills, hooks,
   and MCP config to the documented `.kiro/` layout. (by @TibRib; closes #702) (#1741)
+- APM now catches accidental subpath embeds in git URLs (for example, `org/repo/skills/name.git`) and points at the supported `path:` key form. (#1740)
+- SHA-pinned dependencies now stay current automatically: `apm update` resolves the newest annotated release tag, rewrites the pin, and `apm outdated` reports drift. (#1738)
 - `apm install --target hermes` and `apm compile -t hermes` add the Hermes
   agent (Nous Research) as a new experimental target (opt in via
   `apm experimental enable hermes`). Skills deploy to `.agents/skills/<name>/SKILL.md`
@@ -19,6 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of `~/.hermes/config.yaml` (written atomically with `0o600` perms, preserving
   unrelated config keys and refusing to overwrite a malformed file). `HERMES_HOME`
   overrides the Hermes home directory. See the [Hermes integration guide](https://microsoft.github.io/apm/integrations/hermes/).
+- Enterprise marketplace authors can stop repeating shared git base paths by
+  setting `sourceBase` (one line replaces repeated URLs), while host-prefixed,
+  full-URL, and local entries remain per-entry overrides. (#1736)
+- `apm marketplace add` now accepts git URLs with `#ref`, local file paths,
+  and hosted `marketplace.json` URLs -- so teams can consume private,
+  offline, or hosted catalogs without publishing a GitHub repo (closes
+  #676). (#1739)
+- Enterprise bootstrap mirror mode (`APM_RELEASE_METADATA_URL`, `APM_RELEASE_BASE_URL`, `APM_INSTALLER_BASE_URL`, `APM_PYPI_INDEX_URL`, `APM_NO_DIRECT_FALLBACK`) routes `install.sh`, `install.ps1`, and `apm self-update` through internal mirrors with fail-closed public fallback; closes #1680. (#1733)
+
+### Fixed
+
+- `apm install` now resolves relative `path:` deps declared by remote monorepo packages when they stay inside the same remote repo, while still rejecting absolute, escaping, or cross-repo paths; closes #1571. (#1732)
+- Optional-auth MCP registry servers now install without token prompts when values are unset; `apm install` also omits empty runtime config entries and preserves user-edited optional values on reinstall; refs #20. (#1734)
+- Dependencies with the same path on different git hosts no longer collide in `apm.lock.yaml`; `apm install` keeps GitHub/GitLab PATs off generic-host file downloads, routes bespoke GitLab hosts through `type: gitlab`, and surfaces non-404 download failures with host and endpoint context. Reading private files from a generic non-default host now requires a whole-repo git dependency or explicit backend signal; see the dependency and lockfile docs (closes #773). (#1735)
+- GitLab `path:` files now just work on self-hosted instances where the REST API is disabled or restricted -- APM fetches via git transport automatically. `GITLAB_APM_PAT` / `GITLAB_TOKEN` remain available as a thin REST API fallback; closes #1014. (#1740)
 
 ## [0.19.0] - 2026-06-09
 

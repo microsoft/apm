@@ -393,6 +393,11 @@ Local path dependency (development only):
 - path: ./packages/my-shared-skills
 ```
 
+When the declaring package came from a remote repo, `path:` remains scoped to
+that same repo only. The resolved path must stay inside the parent's cloned repo
+root; APM expands it to the same remote host/repo/ref. Absolute paths, paths
+that escape the repo root, and cross-repo local paths are rejected.
+
 Monorepo sibling reference (`git: parent`):
 
 ```yaml
@@ -544,7 +549,7 @@ Values in `headers` and `env` may contain three placeholder syntaxes. APM resolv
 - **Copilot CLI and Kiro** have native `${VAR}` interpolation in their MCP config files; APM normalizes `${env:VAR}` and legacy `<VAR>` to `${VAR}`.
 - **Codex, Gemini, and Cursor** have no runtime interpolation, so APM resolves `${VAR}`, `${env:VAR}`, and the legacy `<VAR>` at install time using `os.environ` (or an interactive prompt when missing). Resolved values are not re-scanned, so a value containing literal `${...}` text is preserved.
 - **Recommended:** Use `${VAR}` or `${env:VAR}` in all new manifests - they work on every target that supports remote MCP servers. `<VAR>` is legacy; in VS Code it would silently render as literal text in the generated config.
-- **Registry-backed servers** - APM auto-generates input prompts from registry metadata for `${input:...}`.
+- **Registry-backed servers** - APM auto-generates input prompts from registry metadata only for required variables. Optional variables do not generate prompts or runtime config entries when no value is available. If a user has already edited an optional value in runtime config, reinstall preserves that value rather than overwriting it.
 - **Self-defined servers** - APM detects `${input:...}` patterns in `apm.yml` and generates matching input definitions automatically.
 
 GitHub Actions templates (`${{ ... }}`) are intentionally left untouched.
@@ -755,6 +760,7 @@ Overrides exist for the rare case where the published marketplace identity diffe
 | `description` | `string` | OPTIONAL (override) | inherited | Override of top-level `description`. |
 | `version` | `string` | OPTIONAL (override) | inherited | Override of top-level `version`. Validated as semver. |
 | `owner` | `Owner` | REQUIRED | -- | Marketplace publisher identity. See Section 7.3. |
+| `sourceBase` | `string` | OPTIONAL | unset | HTTPS git base that relative `packages[].source` values compose onto. See Section 7.5. |
 | `output` | `string` | OPTIONAL | `.claude-plugin/marketplace.json` | Output path for the generated marketplace JSON. |
 | `metadata` | `object` | OPTIONAL | `{}` | Free-form metadata forwarded verbatim to `marketplace.json` (e.g. `homepage`, `support`). |
 | `build` | `Build` | OPTIONAL | `tagPattern: "v{version}"` | Build configuration for resolving package refs. See Section 7.4. |
@@ -791,7 +797,7 @@ Each entry MUST be a mapping. Unknown keys are rejected.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | `string` | REQUIRED | Package identifier as it appears in the marketplace. |
-| `source` | `string` | REQUIRED | One of: `<owner>/<repo>` (remote on the default host), `<host.tld>/<owner>/<repo>` (remote on a non-default host such as GitHub Enterprise or self-hosted GitLab -- shorthand), `https://<host.tld>/<owner>/<repo>[.git]` (same, full URL form -- a trailing `.git` is stripped), or `./<path>` (local). Must match the source pattern; path traversal (`..`) is refused, and URL forms with userinfo (`user@host`), ports, query strings, or non-`https` schemes are rejected. |
+| `source` | `string` | REQUIRED | One of: `<owner>/<repo>` (remote on the default host), `<host.tld>/<owner>/<repo>` (remote on a non-default host such as GitHub Enterprise or self-hosted GitLab -- shorthand), `https://<host.tld>/<owner>/<repo>[.git]` (same, full URL form -- a trailing `.git` is stripped), `./<path>` (local), or a relative path when `marketplace.sourceBase` is set. Must match the source pattern; path traversal (`..`) is refused, and URL forms with userinfo (`user@host`), ports, query strings, or non-`https` schemes are rejected. |
 | `subdir` | `string` | OPTIONAL | Subdirectory inside the source repo. Path-traversal-validated. Ignored for local sources. |
 | `version` | `string` | Conditional | Semver range (e.g. `^1.0.0`, `~2.1.0`, `>=3.0`). Stored as a string; resolution happens at pack time. REQUIRED for remote packages unless `ref` is given. |
 | `ref` | `string` | Conditional | Explicit git ref (SHA, tag, or branch). Overrides `version` range when both are present. REQUIRED for remote packages unless `version` is given. |
@@ -809,6 +815,12 @@ Remote packages MUST declare at least one of `version` or `ref`. Local packages 
 
 The first three `source` forms target a remote git host; the second and third name a non-default host (e.g. GitHub Enterprise, self-hosted GitLab) as either a shorthand or a full HTTPS URL with an optional `.git` suffix that is normalized away. Path traversal (`..`) in local paths, userinfo (`user@host`), ports, query strings, and non-`https` URL schemes are rejected at parse time.
 
+When `sourceBase` is set, relative package sources compose onto that base. For example, `sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace` plus `source: review` emits `https://gitlab.corp.example.com/platform/agent-marketplace/review`. This includes two-segment `owner/repo` values and deeper relative paths; only host-prefixed sources, full HTTPS URLs, and local `./` sources are overrides that ignore `sourceBase`. Without `sourceBase`, existing `owner/repo` behavior is unchanged and single-segment relative sources are rejected.
+
+A relative `source` may use arbitrary path depth. A value whose leading segments form a host-prefixed shape (`<host.tld>/<owner>/<repo>`) or a full `https://` URL is always treated as a per-entry override and ignores `sourceBase`. A value that looks like it is trying to name a host (a dotted, FQDN-like first segment) but does **not** form a valid override shape is rejected at parse time rather than silently composed onto the base -- this avoids a confused-deputy footgun. To target a different host, use an explicit host-prefixed override or a full `https://` URL instead of a relative source.
+
+`sourceBase` must start with `https://`, use a FQDN host, include at least one path segment, and omit userinfo, ports, query strings, fragments, and a trailing `.git`. Each path segment uses letters, digits, `.`, `_`, or `-`; empty, `.` and `..` segments are refused.
+
 Non-default hosts authenticate via the standard APM token chain -- see the [authentication guide](../getting-started/authentication/) for the per-host-class lookup order. A token resolved for the default host is never forwarded to a non-default host.
 
 ### 7.6. Complete Marketplace Block
@@ -820,6 +832,9 @@ marketplace:
     name: contoso
     url:  https://github.com/contoso
 
+  # Optional: packages can name repos relative to this git base.
+  sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace
+
   output: .claude-plugin/marketplace.json
 
   metadata:
@@ -830,13 +845,13 @@ marketplace:
 
   packages:
     - name: code-review
-      source: contoso/code-review
+      source: code-review                    # resolves under sourceBase
       version: "^1.0.0"
       description: AI code-review skills
       tags: [review, quality]
 
     - name: pinned-helper
-      source: contoso/pinned-helper
+      source: contoso/pinned-helper          # also resolves under sourceBase
       ref: main                              # explicit ref overrides version
       tag_pattern: "pinned-helper-v{version}"
 
@@ -958,3 +973,4 @@ marketplace:
 | 0.1 | 2026-03-06 | Initial Working Draft. |
 | 0.2 | 2026-05-10 | Added Section 7 (Marketplace authoring block). Documented `scripts.start` as the default `apm run` entry point. Cross-links updated to reference CLI paths. ASCII-only enforcement. |
 | 0.3 | 2026-05-20 | Added Section 4.3 (`dependencies.lsp`). LSP servers as a third dependency kind. Updated document structure, devDependencies known keys, and Appendix A. |
+| 0.4 | 2026-06-11 | Added `marketplace.sourceBase` and Section 7.5 source composition semantics. |
