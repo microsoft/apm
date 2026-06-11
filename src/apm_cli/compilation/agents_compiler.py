@@ -9,7 +9,7 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable  # noqa: UP035
+from typing import Any, Callable, NamedTuple  # noqa: UP035
 
 from ..core.target_detection import (
     CompileTargetType,
@@ -235,6 +235,24 @@ class CompilationResult:
     errors: list[str]
     stats: dict[str, Any]
     has_critical_security: bool = False
+
+
+class StaleClaudeDetection(NamedTuple):
+    """Result of _detect_stale_claude_md: describes a candidate stale CLAUDE.md.
+
+    Attributes:
+        path       -- absolute Path to the candidate CLAUDE.md
+        rel        -- portable relative path string (for user-facing messages)
+        exists     -- True if the file is present on disk
+        has_marker -- True if the file contains CLAUDE_HEADER (APM-generated)
+        read_error -- non-None error string if the file exists but could not be read
+    """
+
+    path: Path
+    rel: str
+    exists: bool
+    has_marker: bool
+    read_error: str | None
 
 
 class AgentsCompiler:
@@ -616,10 +634,10 @@ class AgentsCompiler:
 
     def _detect_stale_claude_md(
         self,
-    ) -> tuple[Path, str, bool, bool, str | None]:
+    ) -> StaleClaudeDetection:
         """Detect whether a stale APM-generated CLAUDE.md exists at the project root.
 
-        Returns a 5-tuple:
+        Returns a StaleClaudeDetection with fields:
             path      -- absolute Path to the candidate CLAUDE.md
             rel       -- portable relative path string (for user-facing messages)
             exists    -- True if the file is present on disk
@@ -632,12 +650,14 @@ class AgentsCompiler:
         root_claude_md = self.base_dir / "CLAUDE.md"
         rel = portable_relpath(root_claude_md, self.base_dir)
         if not root_claude_md.exists():
-            return root_claude_md, rel, False, False, None
+            return StaleClaudeDetection(root_claude_md, rel, False, False, None)
         try:
             content = root_claude_md.read_text(encoding="utf-8")
         except OSError as exc:
-            return root_claude_md, rel, True, False, f"Could not read {rel}: {exc!s}"
-        return root_claude_md, rel, True, CLAUDE_HEADER in content, None
+            return StaleClaudeDetection(
+                root_claude_md, rel, True, False, f"Could not read {rel}: {exc!s}"
+            )
+        return StaleClaudeDetection(root_claude_md, rel, True, CLAUDE_HEADER in content, None)
 
     def _compile_claude_md(
         self, config: CompilationConfig, primitives: PrimitiveCollection
@@ -765,13 +785,13 @@ class AgentsCompiler:
             # Only show the preview when no CLAUDE.md would be written -- a project
             # WITH a constitution emits a CLAUDE.md and should NOT show a removal preview.
             if would_emit_no_claude_md and config.clean_orphaned:
-                _path, rel, exists, has_marker, read_error = self._detect_stale_claude_md()
-                if exists:
-                    if read_error is not None:
-                        all_warnings.append(read_error)
-                    elif has_marker:
+                det = self._detect_stale_claude_md()
+                if det.exists:
+                    if det.read_error is not None:
+                        all_warnings.append(det.read_error)
+                    elif det.has_marker:
                         removal_preview = (
-                            f"  [dry-run] would remove stale {rel} -- instructions now"
+                            f"  [dry-run] would remove stale {det.rel} -- instructions now"
                             " live in .claude/rules/"
                         )
                         preview_lines.append(removal_preview)
@@ -780,9 +800,28 @@ class AgentsCompiler:
                         # success and never prints result.content -- issue #1729 fix).
                         self._log(
                             "progress",
-                            f"[dry-run] would remove stale {rel} -- instructions now"
+                            f"[dry-run] would remove stale {det.rel} -- instructions now"
                             " live in .claude/rules/",
                             symbol="info",
+                        )
+                    else:
+                        # Hand-authored CLAUDE.md (no APM marker): the live --clean run
+                        # would skip deletion and warn.  Surface the same intent in
+                        # dry-run so users are not surprised by the live outcome.
+                        hand_authored_preview = (
+                            f"  [dry-run] would skip removal of {det.rel}:"
+                            " hand-authored file will not be deleted."
+                            " Delete or rename it manually if duplicate context"
+                            " is unwanted."
+                        )
+                        preview_lines.append(hand_authored_preview)
+                        all_warnings.append(
+                            f"[dry-run] Skipped removal of {det.rel}: hand-authored file"
+                            " will not be deleted. To remove the duplicate context,"
+                            " delete or rename the file manually, or prepend the line"
+                            f" '{CLAUDE_HEADER}' to the top of the file to mark it as"
+                            " APM-managed, then re-run 'apm compile --clean' to have it"
+                            " removed automatically."
                         )
 
             return CompilationResult(
@@ -848,28 +887,28 @@ class AgentsCompiler:
             # Remove a stale APM-generated CLAUDE.md when --clean is set.
             # A hand-authored file (no CLAUDE_HEADER marker) is never deleted;
             # a warning is emitted instead to match the Copilot-root convention.
-            # Note: the dry_run guard here is unreachable (dry-run returns above),
-            # but omitting it keeps the intent explicit for readers.
-            root_claude_md, rel, exists, has_marker, read_error = self._detect_stale_claude_md()
-            if exists:
-                if read_error is not None:
-                    all_warnings.append(read_error)
-                elif has_marker:
+            # Dry-run mode returns earlier in this method, so this live block is
+            # only reached when NOT in dry-run; no config.dry_run guard is needed.
+            det = self._detect_stale_claude_md()
+            if det.exists:
+                if det.read_error is not None:
+                    all_warnings.append(det.read_error)
+                elif det.has_marker:
                     if config.clean_orphaned:
                         try:
-                            root_claude_md.unlink()  # safe: APM-generated marker confirmed above
+                            det.path.unlink()  # safe: APM-generated marker confirmed above
                             # success() uses its own default symbol; no symbol= kwarg
                             # needed (unlike the progress() calls elsewhere here).
                             self._log(
                                 "success",
-                                f"Removed stale {rel} -- instructions now live in .claude/rules/",
+                                f"Removed stale {det.rel} -- instructions now live in .claude/rules/",
                             )
                         except OSError as exc:
-                            all_warnings.append(f"Could not remove {rel}: {exc!s}")
+                            all_warnings.append(f"Could not remove {det.rel}: {exc!s}")
                     # plain apm compile (no --clean): leave the file, stay non-destructive
                 elif config.clean_orphaned:
                     all_warnings.append(
-                        f"Skipped removal of {rel}: hand-authored file will not be"
+                        f"Skipped removal of {det.rel}: hand-authored file will not be"
                         " deleted. To remove the duplicate context, delete or rename"
                         f" the file manually, or prepend the line '{CLAUDE_HEADER}'"
                         " to the top of the file to mark it as APM-managed, then"

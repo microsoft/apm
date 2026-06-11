@@ -26,7 +26,29 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.compilation.constitution import clear_constitution_cache
+
 CLI = [sys.executable, "-m", "apm_cli.cli"]
+
+
+# ---------------------------------------------------------------------------
+# Module-level cache isolation
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_constitution_cache():
+    """Clear the module-level constitution cache before and after every test.
+
+    The cache is global; without this fixture a test that populates it can
+    leak state into later tests and cause unexpected CLAUDE.md emission or
+    suppressed stale-removal paths (mirrors the unit-test isolation in
+    test_stale_claude_md_cleanup_1729.py).
+    """
+    clear_constitution_cache()
+    yield
+    clear_constitution_cache()
+
 
 APM_YML = """name: test-dedup
 version: 1.0.0

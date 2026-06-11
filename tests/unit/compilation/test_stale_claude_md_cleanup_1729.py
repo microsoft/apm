@@ -535,3 +535,77 @@ class TestConstitutionCaseNoRemovalPreview:
             "must NOT show a stale-removal preview. "
             f"Got content:\n{result.content}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Dry-run hand-authored CLAUDE.md: preview that deletion would be skipped
+# ---------------------------------------------------------------------------
+
+
+class TestDryRunHandAuthoredPreview:
+    """apm compile --clean --dry-run with a hand-authored CLAUDE.md must surface
+    a preview/warning that the file would NOT be deleted (issue #1729 follow-up,
+    comment I: dry-run was previously silent for the hand-authored case)."""
+
+    def test_dry_run_clean_hand_authored_leaves_file(self, tmp_path):
+        """--clean --dry-run must NEVER delete a hand-authored CLAUDE.md."""
+        _make_project(tmp_path, populate_rules=True)
+        _hand_authored_claude_md(tmp_path)
+        original_content = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=True,
+            dry_run=True,
+        )
+        primitives = _make_primitives(tmp_path)
+        result = compiler._compile_claude_md(config, primitives)
+
+        assert result.success, f"Expected success, got errors: {result.errors}"
+        assert (tmp_path / "CLAUDE.md").exists(), (
+            "--clean --dry-run must NEVER delete the hand-authored CLAUDE.md"
+        )
+        assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == original_content, (
+            "Hand-authored CLAUDE.md content must be unchanged after --clean --dry-run"
+        )
+
+    def test_dry_run_clean_hand_authored_emits_warning(self, tmp_path):
+        """--clean --dry-run must emit a warning that the hand-authored file
+        would NOT be deleted, so users are not surprised by the live outcome."""
+        _make_project(tmp_path, populate_rules=True)
+        _hand_authored_claude_md(tmp_path)
+
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=True,
+            dry_run=True,
+        )
+        primitives = _make_primitives(tmp_path)
+        result = compiler._compile_claude_md(config, primitives)
+
+        assert any("hand-authored" in w for w in result.warnings), (
+            "Dry-run --clean with a hand-authored CLAUDE.md must emit a 'hand-authored'"
+            f" warning; got: {result.warnings}"
+        )
+
+    def test_dry_run_clean_hand_authored_preview_in_content(self, tmp_path):
+        """The dry-run content must include the skip-preview line mentioning
+        'hand-authored' so users see it when result.content is printed."""
+        _make_project(tmp_path, populate_rules=True)
+        _hand_authored_claude_md(tmp_path)
+
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=True,
+            dry_run=True,
+        )
+        primitives = _make_primitives(tmp_path)
+        result = compiler._compile_claude_md(config, primitives)
+
+        assert "hand-authored" in result.content, (
+            "Dry-run --clean preview content must mention 'hand-authored' for a"
+            f" hand-authored CLAUDE.md; got content:\n{result.content}"
+        )
