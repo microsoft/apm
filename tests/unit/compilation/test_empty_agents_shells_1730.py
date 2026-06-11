@@ -17,6 +17,7 @@ distributed_compiler.py or agents_compiler.py causes them to fail.
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -41,7 +42,7 @@ def _make_instruction(
     file_path: Path | None = None,
 ) -> Instruction:
     if file_path is None:
-        file_path = Path(f"/tmp/{name}.instructions.md")
+        file_path = Path(tempfile.gettempdir()) / f"{name}.instructions.md"
     return Instruction(
         name=name,
         file_path=file_path,
@@ -344,11 +345,21 @@ class TestCleanRemovesEmptyShells:
         stale_shell = tmp_path / "AGENTS.md"
         stale_shell.write_text(_apm_generated_marker_content(), encoding="utf-8")
 
+        # Write the source instruction on disk so the fixture is hermetic against
+        # future filesystem-based validation tightening.
+        apm_instr_dir = tmp_path / ".apm" / "instructions"
+        apm_instr_dir.mkdir(parents=True)
+        apm_instr_file = apm_instr_dir / "global.instructions.md"
+        apm_instr_file.write_text(
+            "---\ndescription: Global\n---\nGlobal guidance.\n",
+            encoding="utf-8",
+        )
+
         instruction = _make_instruction(
             name="global",
             content="Global guidance.",
             apply_to=None,
-            file_path=tmp_path / ".apm" / "instructions" / "global.instructions.md",
+            file_path=apm_instr_file,
         )
         primitives = _make_primitives(instruction)
         return tmp_path, primitives, stale_shell
@@ -633,11 +644,21 @@ class TestFormatterGuardFullySuppressed:
             encoding="utf-8",
         )
 
+        # Write the source instruction on disk so the test is hermetic against
+        # future filesystem-based validation tightening.
+        apm_instr_dir = tmp_path / ".apm" / "instructions"
+        apm_instr_dir.mkdir(parents=True)
+        apm_instr_file = apm_instr_dir / "global.instructions.md"
+        apm_instr_file.write_text(
+            "---\ndescription: Global\n---\nGlobal guidance.\n",
+            encoding="utf-8",
+        )
+
         instruction = _make_instruction(
             name="global",
             content="Global guidance.",
             apply_to=None,
-            file_path=tmp_path / ".apm" / "instructions" / "global.instructions.md",
+            file_path=apm_instr_file,
         )
         primitives = _make_primitives(instruction)
 

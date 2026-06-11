@@ -763,6 +763,21 @@ class DistributedAgentsCompiler:
 
         return warnings
 
+    @staticmethod
+    def _file_has_apm_marker(path: Path) -> bool:
+        """Return True if *path* contains the APM-generated marker within its first 4096 bytes.
+
+        Reads only a bounded prefix of the file to avoid loading large AGENTS.md
+        files entirely into memory.  Returns False on any OSError (the caller
+        should skip the file).
+        """
+        try:
+            with path.open("rb") as fh:
+                prefix = fh.read(4096).decode("utf-8", errors="replace")
+            return AGENTS_MD_GENERATED_MARKER in prefix
+        except OSError:
+            return False
+
     def _find_orphaned_agents_files(
         self,
         generated_paths: builtins.list[Path],
@@ -817,12 +832,9 @@ class DistributedAgentsCompiler:
 
                 # Marker gate: only touch APM-generated files.  Hand-authored
                 # AGENTS.md files (no marker) are never candidates for cleanup.
-                try:
-                    file_content = agents_file.read_text(encoding="utf-8")
-                except OSError:
-                    continue
-                if AGENTS_MD_GENERATED_MARKER not in file_content:
-                    continue  # Hand-authored -- skip silently
+                # Read only a bounded prefix to limit I/O on large files.
+                if not self._file_has_apm_marker(agents_file):
+                    continue  # Hand-authored or unreadable -- skip silently
 
                 orphaned_files.append(agents_file)
 
@@ -909,16 +921,12 @@ class DistributedAgentsCompiler:
                 rel_path = portable_relpath(file_path, self.base_dir)
                 try:
                     # Defense-in-depth: re-check the marker before deleting.
-                    try:
-                        existing_content = file_path.read_text(encoding="utf-8")
-                    except OSError:
-                        cleanup_messages.append(f"  x Failed to read {rel_path} -- skipping")
-                        continue
-                    if AGENTS_MD_GENERATED_MARKER not in existing_content:
-                        # Defense-in-depth: _find_orphaned_agents_files already
-                        # marker-gates, so this branch is unreachable in normal
-                        # operation.  Emit at debug level only to avoid a stray
-                        # user-facing warning (and the double-prefix it would get).
+                    # Read only a bounded prefix (same helper as _find_orphaned_agents_files).
+                    if not self._file_has_apm_marker(file_path):
+                        # _find_orphaned_agents_files already marker-gates, so
+                        # this branch is unreachable in normal operation.  Emit
+                        # at debug level only to avoid a stray user-facing
+                        # warning (and the double-prefix it would get).
                         _logger.debug("Skipped %s: hand-authored file -- not removing", rel_path)
                         continue
                     file_path.unlink()
