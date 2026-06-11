@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm pack` now fills local-path marketplace package `description` and `version` from each package's own `apm.yml` when the root `marketplace.packages[]` entry omits them, so monorepo marketplaces no longer show empty browse columns -- matching the existing remote-source fallback. (closes #1725)
+- `apm pack` now fills local-path marketplace package `description` and `version` from each package's own `apm.yml` when the root `marketplace.packages[]` entry omits them, so monorepo marketplaces no longer show empty browse columns -- matching the existing remote-source fallback. (closes #1725) (#1755)
 - `apm install --target` with a comma-separated list containing `copilot` (or the `vscode`/`agents` aliases) no longer silently drops the Copilot target. (by @Addono, closes #1746, #1749)
 - `apm install` now resolves relative `path:` deps declared by remote monorepo packages when they stay inside the same remote repo, while still rejecting absolute, escaping, or cross-repo paths; closes #1571. (#1732)
 - Optional-auth MCP registry servers now install without token prompts when values are unset; `apm install` also omits empty runtime config entries and preserves user-edited optional values on reinstall; refs #20. (#1734)
