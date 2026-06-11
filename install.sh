@@ -97,7 +97,15 @@ is_truthy() {
 }
 
 is_public_github_url() {
-    [ "${GITHUB_URL%/}" = "https://github.com" ]
+    [ "${GITHUB_URL:-https://github.com}" = "https://github.com" ] || [ "${GITHUB_URL%/}" = "https://github.com" ]
+}
+
+fail_closed_error() {
+    # $1 is a literal env var name from this script, not user input.
+    printf '%b\n' "${RED}Error: APM_NO_DIRECT_FALLBACK is set, but $1 is not configured.${NC}"
+    shift
+    printf '%s\n' "$*"
+    exit 1
 }
 
 join_url_path() {
@@ -190,9 +198,7 @@ try_pip_installation() {
         PIP_INSTALL_OK=0
         $PIP_CMD install --user --index-url "$APM_PYPI_INDEX_URL" apm-cli || PIP_INSTALL_OK=$?
     elif is_truthy "$APM_NO_DIRECT_FALLBACK"; then
-        echo -e "${RED}Error: APM_NO_DIRECT_FALLBACK is set, but APM_PYPI_INDEX_URL is not configured.${NC}"
-        echo "Set APM_PYPI_INDEX_URL to your internal PyPI proxy before using pip fallback."
-        return 1
+        fail_closed_error APM_PYPI_INDEX_URL "Set APM_PYPI_INDEX_URL to your internal PyPI proxy before using pip fallback."
     else
         PIP_INSTALL_OK=0
         $PIP_CMD install --user apm-cli || PIP_INSTALL_OK=$?
@@ -297,9 +303,7 @@ fi
 if [ -n "$VERSION" ]; then
     TAG_NAME="$VERSION"
     if is_truthy "$APM_NO_DIRECT_FALLBACK" && [ -z "$APM_RELEASE_BASE_URL" ] && is_public_github_url; then
-        echo -e "${RED}Error: APM_NO_DIRECT_FALLBACK is set, but APM_RELEASE_BASE_URL is not configured.${NC}"
-        echo "Set APM_RELEASE_BASE_URL to a mirror containing $TAG_NAME/$DOWNLOAD_BINARY."
-        exit 1
+        fail_closed_error APM_RELEASE_BASE_URL "Set APM_RELEASE_BASE_URL to a mirror containing $TAG_NAME/$DOWNLOAD_BINARY."
     fi
     DOWNLOAD_URL=$(release_asset_url "$TAG_NAME" "$DOWNLOAD_BINARY")
     echo -e "${GREEN}Version: $TAG_NAME${NC}"
@@ -311,9 +315,7 @@ if [ -z "$TAG_NAME" ]; then
 echo -e "${YELLOW}Fetching latest release information...${NC}"
 
 if is_truthy "$APM_NO_DIRECT_FALLBACK" && [ -z "$APM_RELEASE_METADATA_URL" ] && is_public_github_url; then
-    echo -e "${RED}Error: APM_NO_DIRECT_FALLBACK is set, but APM_RELEASE_METADATA_URL is not configured.${NC}"
-    echo "Set APM_RELEASE_METADATA_URL to mirrored latest.json, or set VERSION to a pinned release."
-    exit 1
+    fail_closed_error APM_RELEASE_METADATA_URL "Set APM_RELEASE_METADATA_URL to mirrored latest.json, or set VERSION to a pinned release."
 fi
 
 LATEST_RELEASE_URL=$(release_metadata_url)
@@ -397,9 +399,7 @@ fi
 # Use grep -o to extract just the matching portion (handles single-line JSON)
 TAG_NAME=$(echo "$LATEST_RELEASE" | grep -o '"tag_name": *"[^"]*"' | awk -F'"' '{print $4}')
 if is_truthy "$APM_NO_DIRECT_FALLBACK" && [ -z "$APM_RELEASE_BASE_URL" ] && is_public_github_url; then
-    echo -e "${RED}Error: APM_NO_DIRECT_FALLBACK is set, but APM_RELEASE_BASE_URL is not configured.${NC}"
-    echo "Set APM_RELEASE_BASE_URL to a mirror containing $TAG_NAME/$DOWNLOAD_BINARY."
-    exit 1
+    fail_closed_error APM_RELEASE_BASE_URL "Set APM_RELEASE_BASE_URL to a mirror containing $TAG_NAME/$DOWNLOAD_BINARY."
 fi
 DOWNLOAD_URL=$(release_asset_url "$TAG_NAME" "$DOWNLOAD_BINARY")
 

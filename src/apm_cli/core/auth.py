@@ -203,8 +203,11 @@ class AuthResolver:
         self,
         token_manager: GitHubTokenManager | None = None,
         logger: object | None = None,
+        *,
+        allow_external_fallback: bool = True,
     ):
         self._token_manager = token_manager or GitHubTokenManager()
+        self._allow_external_fallback = allow_external_fallback
         self._cache: dict[AuthCacheKey, AuthContext] = {}
         self._lock = threading.Lock()
         # F2/F3 #852: optional logger lets the install command route the
@@ -227,6 +230,11 @@ class AuthResolver:
         construction. Idempotent. Used by the install command, which builds
         the logger before it knows it needs an AuthResolver elsewhere."""
         self._logger = logger
+
+    def clear_cache(self) -> None:
+        """Clear resolved auth contexts when a caller needs fresh env state."""
+        with self._lock:
+            self._cache.clear()
 
     # -- host classification ------------------------------------------------
 
@@ -940,6 +948,9 @@ class AuthResolver:
         if token:
             source = self._identify_env_source(purpose)
             return token, source, "basic"
+
+        if not self._allow_external_fallback:
+            return None, "none", "basic"
 
         # 3. gh CLI active account (eligibility gated inside the call;
         #    unsupported hosts return None instantly without a subprocess)
