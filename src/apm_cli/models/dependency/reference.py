@@ -57,12 +57,19 @@ def build_dependency_unique_key(
     local_path: str | None = None,
     is_virtual: bool = False,
     virtual_path: str | None = None,
+    registry_prefix: str | None = None,
 ) -> str:
     """Return the lockfile/dedup key for a dependency identity.
 
     github.com remains the implicit default so existing lockfiles keep bare
     ``owner/repo`` keys. Non-default hosts include the host segment to avoid
     collisions between the same ``owner/repo`` on different servers.
+
+    Registry-proxy deps (``registry_prefix`` set, e.g. an Artifactory mirror)
+    keep the bare logical key: the proxy host is a transport detail, not the
+    package identity, and the manifest side always declares the upstream
+    ``owner/repo`` shorthand. Host-qualifying them would break the manifest /
+    lockfile key correspondence used by re-install and orphan detection.
     """
     if source == "local" and local_path:
         return local_path
@@ -70,6 +77,9 @@ def build_dependency_unique_key(
     key = repo_url
     if is_virtual and virtual_path:
         key = f"{key}/{virtual_path}"
+
+    if registry_prefix:
+        return key
 
     host_value = (host or "").strip()
     normalized_host = host_value.lower()
@@ -334,10 +344,11 @@ class DependencyReference:
         return build_dependency_unique_key(
             self.repo_url,
             host=self.host,
-            source=self.source,
+            source="local" if self.is_local else self.source,
             local_path=self.local_path,
             is_virtual=self.is_virtual,
             virtual_path=self.virtual_path,
+            registry_prefix=self.artifactory_prefix,
         )
 
     def to_canonical(self) -> str:
@@ -434,11 +445,16 @@ class DependencyReference:
 
         For identity-based matching that includes non-default hosts, use get_identity().
         For the transport-aware apm.yml entry, use to_apm_yml_entry().
+        For the lockfile dedup key (host-qualified for non-default hosts), use get_unique_key().
 
         Returns:
             str: Host-blind canonical string (e.g., "owner/repo")
         """
-        return self.get_unique_key()
+        if self.is_local and self.local_path:
+            return self.local_path
+        if self.is_virtual and self.virtual_path:
+            return f"{self.repo_url}/{self.virtual_path}"
+        return self.repo_url
 
     def get_install_path(self, apm_modules_dir: Path) -> Path:
         """Get the canonical filesystem path where this package should be installed.

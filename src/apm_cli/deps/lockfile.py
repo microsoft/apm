@@ -89,7 +89,22 @@ class LockedDependency:
             local_path=self.local_path,
             is_virtual=self.is_virtual,
             virtual_path=self.virtual_path,
+            registry_prefix=self.registry_prefix,
         )
+
+    def get_canonical_dependency_string(self) -> str:
+        """Host-blind canonical key for filesystem / orphan-detection matching.
+
+        Mirrors :meth:`DependencyReference.get_canonical_dependency_string`:
+        returns the bare ``repo_url`` (+ ``virtual_path``), never host-qualified,
+        so it matches the host-blind ``apm_modules/`` layout. Use
+        :meth:`get_unique_key` for the host-qualified lockfile dedup key.
+        """
+        if self.source == "local" and self.local_path:
+            return self.local_path
+        if self.is_virtual and self.virtual_path:
+            return f"{self.repo_url}/{self.virtual_path}"
+        return self.repo_url
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for YAML output."""

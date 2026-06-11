@@ -20,12 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-<<<<<<< HEAD
 - `apm install` now resolves relative `path:` deps declared by remote monorepo packages when they stay inside the same remote repo, while still rejecting absolute, escaping, or cross-repo paths; closes #1571. (#1732)
 - `apm install` now keeps same-path dependencies from different git hosts distinct in `apm.lock.yaml`, aligns generic-host file-download auth with clone auth, and surfaces non-404 download failures with host and endpoint context. Reading private files from a generic non-default host now requires an explicit clone/type signal; see the dependency and lockfile docs (closes #773). (#1735)
-=======
-- `apm install` now keeps same-path dependencies from different git hosts distinct in `apm.lock.yaml`, aligns generic-host file-download auth with clone auth, and surfaces non-404 download failures with host and endpoint context (closes #773). (#1735)
->>>>>>> 4181bde3 (Normalize non-default host lock keys)
 
 ## [0.19.0] - 2026-06-09
 
