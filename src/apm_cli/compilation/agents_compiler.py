@@ -749,8 +749,8 @@ class AgentsCompiler:
                         existing_content = None
                     if existing_content is not None and CLAUDE_HEADER in existing_content:
                         removal_preview = (
-                            f"  (would remove stale {rel} -- instructions now live"
-                            " in .claude/rules/)"
+                            f"  [dry-run] would remove stale {rel} -- instructions now"
+                            " live in .claude/rules/"
                         )
                         preview_lines.append(removal_preview)
                         # Emit the preview through the logger so it reaches the terminal
@@ -758,8 +758,8 @@ class AgentsCompiler:
                         # success and never prints result.content -- issue #1729 fix).
                         self._log(
                             "progress",
-                            f"(would remove stale {rel} -- instructions now live"
-                            " in .claude/rules/)",
+                            f"[dry-run] would remove stale {rel} -- instructions now"
+                            " live in .claude/rules/",
                             symbol="info",
                         )
 
@@ -841,6 +841,8 @@ class AgentsCompiler:
                         if config.clean_orphaned:
                             try:
                                 root_claude_md.unlink()  # safe: APM-generated marker confirmed above
+                                # success() uses its own default symbol; no symbol= kwarg
+                                # needed (unlike the progress() calls elsewhere here).
                                 self._log(
                                     "success",
                                     f"Removed stale {rel} -- instructions now live in"
@@ -854,7 +856,9 @@ class AgentsCompiler:
                             f"Skipped removal of {rel}: hand-authored file will not be"
                             " deleted. To remove the duplicate context, delete or rename"
                             f" the file manually, or prepend the line '{CLAUDE_HEADER}'"
-                            " to let APM manage it. Then re-run 'apm compile'."
+                            " to the top of the file to mark it as APM-managed, then"
+                            " re-run 'apm compile --clean' to have it removed"
+                            " automatically."
                         )
         elif distributed_compiler is None and files_written > 0 and not config.dry_run:
             # Single-file strategy bypasses the distributed display formatter
