@@ -42,6 +42,7 @@ _VSCODE_TARGET_ALIASES = ("copilot", "agents")
 _KNOWN_TARGETS = (  # noqa: RUF005
     "vscode",
     "claude",
+    "codebuddy",  # TNV downstream: Tencent CodeBuddy (claude family, .codebuddy/ deploy)
     "cursor",
     "opencode",
     "codex",

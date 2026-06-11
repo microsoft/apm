@@ -517,6 +517,27 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         compile_family="claude",
         hooks_config_display=".claude/settings.json",
     ),
+    # CodeBuddy (Tencent) -- Claude-Code-compatible AI coding IDE. Reads
+    # CLAUDE.md at project root and uses .claude/-style settings.json for
+    # hooks. Reuses claude_* primitive formatters but deploys to .codebuddy/
+    # so multi-IDE projects (.claude/ + .codebuddy/) don't collide.
+    # Ref: https://copilot.tencent.com/codebuddy
+    "codebuddy": TargetProfile(
+        name="codebuddy",
+        root_dir=".codebuddy",
+        primitives={
+            "instructions": PrimitiveMapping("rules", ".md", "claude_rules"),
+            "agents": PrimitiveMapping("agents", ".md", "claude_agent"),
+            "commands": PrimitiveMapping("commands", ".md", "claude_command"),
+            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "hooks": PrimitiveMapping("hooks", ".json", "claude_hooks"),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported=True,
+        compile_family="claude",
+        hooks_config_display=".codebuddy/settings.json",
+    ),
     # Cursor -- at user scope, ~/.cursor/ supports skills, agents, hooks,
     # and MCP.  Rules/instructions are managed via Cursor Settings UI only
     # (not file-based), so "instructions" is excluded from user scope.
