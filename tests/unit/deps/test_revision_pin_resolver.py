@@ -108,8 +108,7 @@ def test_apply_revision_pin_updates_keeps_old_pin_when_replace_fails(tmp_path: P
             )
 
     assert manifest.read_text(encoding="utf-8") == original
-    stale_tmp = manifest.with_name(f".{manifest.name}.apm-update-pins.tmp")
-    assert not stale_tmp.exists()
+    assert not list(manifest.parent.glob(f".{manifest.name}.*.apm-update-pins.tmp"))
 
 
 def test_apply_revision_pin_updates_uses_project_sibling_temp_file(tmp_path: Path) -> None:
@@ -131,7 +130,11 @@ def test_apply_revision_pin_updates_uses_project_sibling_temp_file(tmp_path: Pat
             [RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0", "org/pkg")],
         )
 
-    assert seen_tmp_paths == [str(manifest.with_name(f".{manifest.name}.apm-update-pins.tmp"))]
+    assert len(seen_tmp_paths) == 1
+    seen_tmp = Path(seen_tmp_paths[0])
+    assert seen_tmp.parent == manifest.parent
+    assert seen_tmp.name.startswith(f".{manifest.name}.")
+    assert seen_tmp.name.endswith(".apm-update-pins.tmp")
 
 
 def test_apply_revision_pin_updates_rewrites_uppercase_sha(tmp_path: Path) -> None:
@@ -194,3 +197,30 @@ def test_resolve_revision_pin_updates_uses_tags_only_fetch() -> None:
     )
 
     assert updates == [RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0", "org/pkg")]
+
+
+def test_apply_revision_pin_updates_uses_unique_temp_names(tmp_path: Path) -> None:
+    manifest = tmp_path / "apm.yml"
+    manifest.write_text(
+        f"name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - org/pkg#{OLD_SHA}\n",
+        encoding="utf-8",
+    )
+    seen_tmp_paths: list[str] = []
+    real_replace = os.replace
+
+    def capture_replace(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+        seen_tmp_paths.append(str(src))
+        real_replace(src, dst)
+
+    with patch("apm_cli.utils.yaml_io.os.replace", side_effect=capture_replace):
+        apply_revision_pin_updates(
+            manifest,
+            [RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0", "org/pkg")],
+        )
+        apply_revision_pin_updates(
+            manifest,
+            [RevisionPinUpdate("org/pkg", NEW_SHA, OLD_SHA, "v1.0.0", "org/pkg")],
+        )
+
+    assert len(seen_tmp_paths) == 2
+    assert seen_tmp_paths[0] != seen_tmp_paths[1]

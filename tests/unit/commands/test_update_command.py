@@ -84,8 +84,8 @@ class TestUpdateDryRun:
     def test_dry_run_renders_revision_pin_and_standard_plans_without_writing_manifest(
         self, runner, tmp_path
     ):
-        old_sha = "a" * 40
-        new_sha = "b" * 40
+        old_sha = "abcdef1234567890abcdef1234567890abcdef12"
+        new_sha = "1234567890abcdef1234567890abcdef12345678"
         with runner.isolated_filesystem(temp_dir=tmp_path):
             manifest = Path.cwd() / "apm.yml"
             manifest.write_text(
@@ -120,7 +120,8 @@ class TestUpdateDryRun:
             assert result.exit_code == 0, result.output
             assert "Revision pin updates" in result.output
             assert "Update plan" in result.output
-            assert "(v2.0.0)" in result.output
+            assert "abcdef12 -> 12345678 (v2.0.0)" in result.output
+            assert "abcdef1 -> 1234567" not in result.output
             assert "# v2.0.0" not in result.output
             assert captured["proceeded"] is False
             assert manifest.read_text(encoding="utf-8") == original
@@ -186,6 +187,41 @@ class TestUpdateAssumeYes:
             assert f"org/pkg#{new_sha} # v2.0.0" in manifest.read_text(encoding="utf-8")
             assert captured["dep_ref"] == new_sha
             assert captured["plan_proceeded"] is True
+
+    def test_yes_reports_revision_pin_only_update_count(self, runner, tmp_path):
+        old_sha = "a" * 40
+        new_sha = "b" * 40
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            manifest = Path.cwd() / "apm.yml"
+            manifest.write_text(
+                f"name: test\nversion: 1.0.0\ndependencies:\n  apm:\n    - org/pkg#{old_sha}\n",
+                encoding="utf-8",
+            )
+
+            from apm_cli.deps.revision_pins import RevisionPinUpdate
+            from apm_cli.models.results import InstallResult
+
+            def fake_install(_apm, **kwargs):
+                assert kwargs["plan_callback"](UpdatePlan(entries=())) is True
+                return InstallResult(installed_count=0)
+
+            with (
+                patch(
+                    "apm_cli.commands.update.resolve_revision_pin_updates",
+                    return_value=[
+                        RevisionPinUpdate("org/pkg", old_sha, new_sha, "v2.0.0", "org/pkg")
+                    ],
+                ),
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                patch("apm_cli.commands.update._annotate_lockfile_revision_tags"),
+            ):
+                result = runner.invoke(cli, ["update", "--yes"])
+
+            assert result.exit_code == 0, result.output
+            assert "Updated 1 revision pin in apm.yml." in result.output
 
     def test_revision_pin_decline_keeps_manifest_unchanged(self, runner, tmp_path):
         old_sha = "a" * 40

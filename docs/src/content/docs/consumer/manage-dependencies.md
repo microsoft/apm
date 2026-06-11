@@ -191,7 +191,7 @@ updates the SHA to that tag's commit, and leaves the tag as a YAML comment:
 ```yaml
 dependencies:
   apm:
-    - acme/playbooks#b1c2d3e4f5a6b7c8d9e0f1234567890abcdef123456 # v2.0.0
+    - acme/playbooks#b1c2d3e4f5a6b7c8d9e0f1234567890abcdef123 # v2.0.0
 ```
 
 `apm update --dry-run` previews the SHA/tag rewrite without changing the

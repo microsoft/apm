@@ -13,6 +13,7 @@ Public API::
 """
 
 import os
+import secrets
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -70,16 +71,25 @@ def write_yaml_text_atomic(
     file remains untouched.
     """
     target = Path(path)
-    tmp_path = target.with_name(f".{target.name}{tmp_suffix}")
+    tmp_path: Path | None = None
     try:
-        with suppress(FileNotFoundError):
-            tmp_path.unlink()
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-        fd = os.open(tmp_path, flags, 0o600)
+        for _attempt in range(10):
+            candidate = target.with_name(f".{target.name}.{secrets.token_hex(8)}{tmp_suffix}")
+            try:
+                fd = os.open(candidate, flags, 0o600)
+            except FileExistsError:
+                continue
+            tmp_path = candidate
+            break
+        else:
+            raise FileExistsError(f"Could not create a unique temp file for {target}")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(content)
         os.replace(tmp_path, target)
+        tmp_path = None
     except Exception:
-        with suppress(OSError):
-            tmp_path.unlink()
+        if tmp_path is not None:
+            with suppress(OSError):
+                tmp_path.unlink()
         raise

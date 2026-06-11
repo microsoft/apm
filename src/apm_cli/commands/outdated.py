@@ -16,6 +16,7 @@ import click
 from ..deps.outdated_row import OutdatedRow
 from ..deps.revision_pins import (
     RevisionPinResolutionError,
+    abbreviate_sha,
     dependency_ref_from_locked,
     find_latest_annotated_tag,
     is_full_revision_pin,
@@ -223,16 +224,16 @@ def _check_revision_pin_ref(
     except RevisionPinResolutionError:
         return OutdatedRow(
             package=package_name,
-            current=current_ref[:8],
+            current=abbreviate_sha(current_ref),
             latest="-",
             status="unknown",
             source="git annotated tags",
         )
-    latest_display = f"{latest.tag} ({latest.commit_sha[:8]})"
+    latest_display = f"{latest.tag} ({abbreviate_sha(latest.commit_sha)})"
     status = "up-to-date" if latest.commit_sha.lower() == current_ref.lower() else "outdated"
     return OutdatedRow(
         package=package_name,
-        current=current_ref[:8],
+        current=abbreviate_sha(current_ref),
         latest=latest_display,
         status=status,
         source="git annotated tags",

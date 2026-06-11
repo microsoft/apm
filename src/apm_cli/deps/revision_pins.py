@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency
 
 _SHA_RE = re.compile(r"^[a-fA-F0-9]{40}$")
+_SHA_DISPLAY_LEN = 8
 
 
 class RevisionPinResolutionError(RuntimeError):
@@ -24,11 +25,7 @@ class RevisionPinResolutionError(RuntimeError):
 
 
 class RemoteRefDownloader(Protocol):
-    """Downloader surface needed for authoritative remote-ref checks."""
-
-    def list_remote_refs(self, dep_ref: DependencyReference) -> Iterable[RemoteRef]:
-        """List refs from the dependency's authoritative upstream."""
-        ...
+    """Downloader surface needed for authoritative remote tag checks."""
 
     def list_remote_tag_refs(self, dep_ref: DependencyReference) -> Iterable[RemoteRef]:
         """List tag refs from the dependency's authoritative upstream."""
@@ -57,6 +54,11 @@ class RevisionPinUpdate:
 def is_full_revision_pin(ref: str | None) -> bool:
     """Return True when *ref* is a full 40-character commit SHA."""
     return bool(ref and _SHA_RE.match(ref.strip()))
+
+
+def abbreviate_sha(sha: str | None) -> str:
+    """Return the user-facing short SHA used by update/outdated."""
+    return (sha or "")[:_SHA_DISPLAY_LEN]
 
 
 def _package_name(dep_ref: DependencyReference) -> str:
@@ -169,7 +171,9 @@ def render_revision_pin_update_plan(updates: Iterable[RevisionPinUpdate]) -> str
     lines = [f"{STATUS_SYMBOLS['info']} Revision pin updates for apm.yml", ""]
     for update in ordered:
         lines.append(f"  {STATUS_SYMBOLS['update']} {update.display_name}")
-        lines.append(f"      ref: {update.old_sha[:7]} -> {update.new_sha[:7]} ({update.tag})")
+        lines.append(
+            f"      ref: {abbreviate_sha(update.old_sha)} -> {abbreviate_sha(update.new_sha)} ({update.tag})"
+        )
         lines.append("")
     lines.append(f"  {len(ordered)} revision pin {'update' if len(ordered) == 1 else 'updates'}")
     return "\n".join(lines).rstrip()

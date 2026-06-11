@@ -50,6 +50,7 @@ swiss-army-knife escape hatch for the rest of the install surface.
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -64,7 +65,6 @@ from ..deps.revision_pins import (
     RevisionPinResolutionError,
     RevisionPinUpdate,
     apply_revision_pin_updates,
-    is_full_revision_pin,
     render_revision_pin_update_plan,
     resolve_revision_pin_updates,
 )
@@ -80,6 +80,15 @@ from ._helpers import UnknownPackageError, _find_apm_yml, resolve_requested_pack
 
 if TYPE_CHECKING:
     from ..models.dependency.reference import DependencyReference
+
+
+@dataclass
+class _UpdateRunState:
+    """Mutable state shared with the install plan callback."""
+
+    plan: UpdatePlan | None = None
+    proceeded: bool = False
+    revision_pins_applied: bool = False
 
 
 def _stdin_is_tty() -> bool:
@@ -104,22 +113,13 @@ def _resolve_and_maybe_apply_revision_pin_updates(
     *,
     all_declared_deps: list[DependencyReference],
     only_packages: list[str] | None,
+    logger: InstallLogger,
     downloader: RemoteRefDownloader | None = None,
     max_workers: int = 4,
 ) -> list[RevisionPinUpdate]:
     """Resolve SHA pins and stage their in-memory references for the plan."""
     only_set = set(only_packages) if only_packages is not None else None
-    revision_pin_deps = [
-        dep
-        for dep in all_declared_deps
-        if (only_set is None or dep.get_unique_key() in only_set)
-        and is_full_revision_pin(getattr(dep, "reference", None))
-        and not dep.is_local
-        and dep.source != "registry"
-        and not dep.artifactory_prefix
-    ]
-    if not revision_pin_deps:
-        return []
+    logger.verbose_detail("Resolving revision pins against authoritative upstream...")
 
     try:
         # Authoritative round-trip (intentional, do NOT short-circuit): this
@@ -129,7 +129,7 @@ def _resolve_and_maybe_apply_revision_pin_updates(
         # before downloading. Threading the SHA resolved here into install
         # would collapse the authoritative-upstream fence.
         updates = resolve_revision_pin_updates(
-            revision_pin_deps,
+            all_declared_deps,
             downloader or _build_revision_pin_downloader(),
             only_packages=only_set,
             max_workers=max_workers,
@@ -430,18 +430,15 @@ def _run_dep_update(
     revision_pin_updates = _resolve_and_maybe_apply_revision_pin_updates(
         all_declared_deps=all_declared_deps,
         only_packages=only_packages,
+        logger=logger,
         max_workers=parallel_downloads if parallel_downloads > 0 else 1,
     )
 
-    plan_state: dict[str, UpdatePlan | bool | None] = {
-        "plan": None,
-        "proceeded": False,
-        "revision_pins_applied": False,
-    }
+    plan_state = _UpdateRunState()
 
     def _apply_revision_pin_manifest_updates() -> None:
         """Persist staged revision-pin updates exactly once after consent."""
-        if not revision_pin_updates or plan_state.get("revision_pins_applied"):
+        if not revision_pin_updates or plan_state.revision_pins_applied:
             return
         try:
             apply_revision_pin_updates(Path("apm.yml"), revision_pin_updates)
@@ -451,13 +448,13 @@ def _run_dep_update(
         from apm_cli.models.apm_package import clear_apm_yml_cache
 
         clear_apm_yml_cache()
-        plan_state["revision_pins_applied"] = True
+        plan_state.revision_pins_applied = True
 
     def _confirm_plan_application() -> bool:
         """Run the single update consent gate."""
         if assume_yes:
             _apply_revision_pin_manifest_updates()
-            plan_state["proceeded"] = True
+            plan_state.proceeded = True
             return True
 
         if not _stdin_is_tty():
@@ -468,7 +465,7 @@ def _run_dep_update(
             sys.exit(1)
 
         proceed = click.confirm("Apply these changes?", default=False, show_default=True)
-        plan_state["proceeded"] = proceed
+        plan_state.proceeded = proceed
         if not proceed:
             _rich_info("No changes applied.", symbol="info")
             return False
@@ -477,7 +474,7 @@ def _run_dep_update(
 
     def _plan_callback(plan: UpdatePlan) -> bool:
         """Render plan, prompt, and decide whether to proceed."""
-        plan_state["plan"] = plan
+        plan_state.plan = plan
 
         revision_plan = render_revision_pin_update_plan(revision_pin_updates)
         if revision_plan:
@@ -544,11 +541,11 @@ def _run_dep_update(
             _rich_info("Run with --verbose for detailed diagnostics.")
         sys.exit(1)
 
-    plan = plan_state.get("plan")
+    plan = plan_state.plan
     if plan is None or not isinstance(plan, UpdatePlan):
         return
 
-    if plan_state.get("proceeded"):
+    if plan_state.proceeded:
         if revision_pin_updates:
             try:
                 _annotate_lockfile_revision_tags(Path.cwd(), revision_pin_updates)
@@ -558,6 +555,10 @@ def _run_dep_update(
         installed = getattr(result, "installed_count", 0)
         if installed:
             _rich_success(f"Updated {installed} APM dependencies.")
+        elif revision_pin_updates:
+            count = len(revision_pin_updates)
+            noun = "pin" if count == 1 else "pins"
+            _rich_success(f"Updated {count} revision {noun} in apm.yml.")
         else:
             _rich_success("Update applied.")
 
