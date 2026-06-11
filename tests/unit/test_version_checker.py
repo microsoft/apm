@@ -236,6 +236,45 @@ class TestGitHubVersionFetchAuth(unittest.TestCase):
         self.assertIn("Authorization", headers)
         self.assertTrue(headers["Authorization"].startswith("token "))
 
+    @patch("apm_cli.utils.version_checker._get_github_token", return_value="mirror_secret")
+    @patch("requests.get")
+    def test_token_header_scoped_to_public_release_metadata_request(self, mock_get, mock_token):
+        """Token headers are only attached to non-mirrored release metadata requests."""
+        from urllib.parse import urlparse
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"tag_name": "v0.8.0"}
+        mock_get.return_value = mock_response
+
+        mirrored_env = {
+            "APM_RELEASE_METADATA_URL": "https://mirror.corp.example/apm/latest.json",
+            "GITHUB_TOKEN": "mirror_secret",
+        }
+        with patch.dict("os.environ", mirrored_env, clear=True):
+            get_latest_version_from_github()
+
+        mirrored_url = mock_get.call_args[0][0]
+        mirrored_headers = mock_get.call_args[1].get("headers", {})
+        mirrored_parsed = urlparse(mirrored_url)
+        self.assertEqual(mirrored_parsed.scheme, "https")
+        self.assertEqual(mirrored_parsed.hostname, "mirror.corp.example")
+        self.assertEqual(mirrored_parsed.path, "/apm/latest.json")
+        self.assertNotIn("Authorization", mirrored_headers)
+
+        mock_get.reset_mock()
+        default_env = {"GITHUB_TOKEN": "mirror_secret"}
+        with patch.dict("os.environ", default_env, clear=True):
+            get_latest_version_from_github()
+
+        default_url = mock_get.call_args[0][0]
+        default_headers = mock_get.call_args[1].get("headers", {})
+        default_parsed = urlparse(default_url)
+        self.assertEqual(default_parsed.scheme, "https")
+        self.assertEqual(default_parsed.hostname, "api.github.com")
+        self.assertEqual(default_parsed.path, "/repos/microsoft/apm/releases/latest")
+        self.assertEqual(default_headers.get("Authorization"), "token mirror_secret")
+
     @patch("apm_cli.utils.version_checker._get_github_token", return_value="my_secret_token")
     @patch("requests.get")
     def test_token_value_not_in_exception_text(self, mock_get, mock_token):
@@ -434,6 +473,58 @@ class TestAirGappedEnvVars(unittest.TestCase):
         result = get_latest_version_from_github()
         mock_get.assert_not_called()
         self.assertEqual(result, "1.2.3")
+
+    @patch("requests.get")
+    def test_release_metadata_url_overrides_github_api_url(self, mock_get):
+        """APM_RELEASE_METADATA_URL targets mirror metadata instead of GitHub's API."""
+        from urllib.parse import urlparse
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"tag_name": "v2.0.0"}
+        mock_get.return_value = mock_response
+
+        import os as _os
+
+        env = {
+            k: v
+            for k, v in _os.environ.items()
+            if k not in ("VERSION", "GITHUB_URL", "APM_REPO", "APM_RELEASE_METADATA_URL")
+        }
+        env["APM_RELEASE_METADATA_URL"] = "https://mirror.corp.example/apm/latest.json"
+        with patch.dict("os.environ", env, clear=True):
+            result = get_latest_version_from_github()
+
+        self.assertEqual(result, "2.0.0")
+        call_url = mock_get.call_args[0][0]
+        parsed = urlparse(call_url)
+        self.assertEqual(parsed.scheme, "https")
+        self.assertEqual(parsed.hostname, "mirror.corp.example")
+        self.assertEqual(parsed.path, "/apm/latest.json")
+
+    @patch("requests.get")
+    def test_no_direct_fallback_without_mirror_skips_public_request(self, mock_get):
+        """APM_NO_DIRECT_FALLBACK avoids public metadata requests when no mirror is set."""
+        import os as _os
+
+        env = {
+            k: v
+            for k, v in _os.environ.items()
+            if k
+            not in (
+                "VERSION",
+                "GITHUB_URL",
+                "APM_REPO",
+                "APM_RELEASE_METADATA_URL",
+                "APM_NO_DIRECT_FALLBACK",
+            )
+        }
+        env["APM_NO_DIRECT_FALLBACK"] = "1"
+        with patch.dict("os.environ", env, clear=True):
+            result = get_latest_version_from_github()
+
+        self.assertIsNone(result)
+        mock_get.assert_not_called()
 
     @patch("requests.get")
     @patch.dict("os.environ", {"VERSION": "1.5.0"}, clear=False)

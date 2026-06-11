@@ -267,6 +267,7 @@ class TestResolveForDep:
         dep.host = host
         dep.repo_url = repo_url
         dep.port = port
+        dep.host_type = None
         return dep
 
     def test_resolve_for_dep_uses_host(self) -> None:
@@ -298,6 +299,15 @@ class TestResolveForDep:
             dep = self._make_dep_ref("git.corp.com", None, port=7990)
             ctx = resolver.resolve_for_dep(dep)
             assert ctx.host_info.port == 7990
+
+    def test_resolve_for_dep_threads_host_type(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+            dep = self._make_dep_ref("code.acme.com", "group/repo")
+            dep.host_type = "gitlab"
+            ctx = resolver.resolve_for_dep(dep)
+            assert ctx.host_info.kind == "gitlab"
+            assert ctx.host_info.api_base == "https://code.acme.com/api/v4"
 
 
 # ---------------------------------------------------------------------------

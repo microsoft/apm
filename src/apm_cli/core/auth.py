@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 
 # Patterns that indicate a secret value follows.  Covers:
 #   token=VALUE, Authorization: Bearer VALUE, Authorization: Basic VALUE,
-#   URL credentials (https://user:pass@host), and bare bearer strings.
+#   URL credentials (https://user:pass@host), and bare PAT-like strings.
 _SECRET_RE = re.compile(
     r"(?:"
     r"(?:token|password|secret|authorization|bearer)"  # keyword prefix
@@ -66,6 +66,8 @@ _SECRET_RE = re.compile(
     r"[\w.~!*\'();:@&=+$,/?#\[\]\-]{4,}"  # value (>= 4 chars)
     r"|"
     r"://[^:@/\s]+:[^:@/\s]+@"  # URL user:pass@
+    r"|"
+    r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[psour]_[A-Za-z0-9_]{20,})\b"  # bare PAT
     r")",
     re.IGNORECASE,
 )
@@ -181,6 +183,15 @@ class BearerFallbackOutcome(NamedTuple):
     bearer_attempted: bool
 
 
+class AuthCacheKey(NamedTuple):
+    """Stable cache key for AuthResolver lookups."""
+
+    host: str | None
+    port: int | None
+    host_type: str  # Empty string represents an absent or canonical host_type.
+    org: str
+
+
 class AuthResolver:
     """Single source of truth for auth resolution.
 
@@ -194,7 +205,7 @@ class AuthResolver:
         logger: object | None = None,
     ):
         self._token_manager = token_manager or GitHubTokenManager()
-        self._cache: dict[tuple, AuthContext] = {}
+        self._cache: dict[AuthCacheKey, AuthContext] = {}
         self._lock = threading.Lock()
         # F2/F3 #852: optional logger lets the install command route the
         # verbose auth-source line through CommandLogger and the deferred
@@ -220,7 +231,11 @@ class AuthResolver:
     # -- host classification ------------------------------------------------
 
     @staticmethod
-    def classify_host(host: str, port: int | None = None) -> HostInfo:
+    def classify_host(
+        host: str,
+        port: int | None = None,
+        host_type: str | None = None,
+    ) -> HostInfo:
         """Return a ``HostInfo`` describing *host*.
 
         ``port`` is carried through onto the returned ``HostInfo`` so that
@@ -228,8 +243,11 @@ class AuthResolver:
         can discriminate between the same hostname on different ports.
         Host-kind classification itself is transport-agnostic -- the port
         never influences whether a host is GitHub/GHES/ADO/generic.
+        ``host_type`` is an explicit manifest hint for hosts whose names do
+        not reveal the backing service.
         """
         h = host.lower()
+        host_type_value = (host_type or "").strip().lower()
 
         if h == "github.com":
             return HostInfo(
@@ -258,6 +276,20 @@ class AuthResolver:
                 port=port,
             )
 
+        if host_type_value == "gitlab":
+            api_base = "https://gitlab.com/api/v4" if h == "gitlab.com" else f"https://{h}/api/v4"
+            return HostInfo(
+                host=host,
+                kind="gitlab",
+                has_public_repos=True,
+                api_base=api_base,
+                port=port,
+            )
+        if host_type_value:
+            raise ValueError(
+                f"Unsupported dependency host type: {host_type_value}. Supported values: gitlab"
+            )
+
         # GHES: GITHUB_HOST is set to a non-github.com, non-ghe.com FQDN
         ghes_host = os.environ.get("GITHUB_HOST", "").lower()
         if (
@@ -275,12 +307,9 @@ class AuthResolver:
                     port=port,
                 )
 
-        # GitLab (SaaS + env-configured self-managed) — after GHES per spec (no silent GHES → GitLab)
+        # GitLab (SaaS + env-configured self-managed) -- after GHES per spec (no silent GHES -> GitLab)
         if is_gitlab_hostname(host):
-            if h == "gitlab.com":
-                api_base = "https://gitlab.com/api/v4"
-            else:
-                api_base = f"https://{host}/api/v4"
+            api_base = "https://gitlab.com/api/v4" if h == "gitlab.com" else f"https://{h}/api/v4"
             return HostInfo(
                 host=host,
                 kind="gitlab",
@@ -353,12 +382,21 @@ class AuthResolver:
 
     # -- core resolution ----------------------------------------------------
 
+    @staticmethod
+    def _cache_host_type(host: str, host_type: str | None) -> str:
+        """Return the cache-discriminating host_type value for a host."""
+        value = (host_type or "").strip().lower()
+        if value == "gitlab" and is_gitlab_hostname(host):
+            return ""
+        return value
+
     def resolve(
         self,
         host: str,
         org: str | None = None,
         *,
         port: int | None = None,
+        host_type: str | None = None,
     ) -> AuthContext:
         """Resolve auth for *(host, port, org)*.  Cached & thread-safe.
 
@@ -368,9 +406,10 @@ class AuthResolver:
         ``AuthContext``. Also flows into ``git credential fill`` so git's
         helpers can return port-specific credentials.
         """
-        key = (
+        key = AuthCacheKey(
             host.lower() if host else host,
             port,
+            self._cache_host_type(host, host_type),
             org.lower() if org else "",
         )
         with self._lock:
@@ -384,7 +423,7 @@ class AuthResolver:
             # all subsequent callers for the same key become O(1) cache hits.
             # Bounded by APM_GIT_CREDENTIAL_TIMEOUT (default 60s). No deadlock
             # risk: single lock, never nested.
-            host_info = self.classify_host(host, port=port)
+            host_info = self.classify_host(host, port=port, host_type=host_type)
             token, source, scheme = self._resolve_token(host_info, org)
             token_type = self.detect_token_type(token) if token else "unknown"
             git_env = self._build_git_env(token, scheme=scheme, host_kind=host_info.kind)
@@ -412,7 +451,12 @@ class AuthResolver:
             parts = dep_ref.repo_url.split("/")
             if parts:
                 org = parts[0]
-        return self.resolve(host, org, port=dep_ref.port)
+        return self.resolve(
+            host,
+            org,
+            port=dep_ref.port,
+            host_type=dep_ref.host_type,
+        )
 
     # -- fallback strategy --------------------------------------------------
 

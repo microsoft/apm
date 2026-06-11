@@ -48,9 +48,13 @@ package is resolved relative to THAT package's own directory (npm/pip/cargo
 parity). Sibling layouts that resolve outside the consuming project root
 (e.g. `../sibling-pkg` from a local dep at the project edge) are
 supported -- the consuming developer authored the manifest chain and
-already trusts the layout. The actual security boundary is upstream:
-**remote-cloned packages cannot declare `local_path` deps at all**, since
-they have no business reaching into the consumer's filesystem.
+already trusts the layout.
+
+Remote-cloned packages may declare a relative `path:` only when it resolves
+inside the same authenticated remote repo root. APM expands that path to the
+parent's remote host/repo/ref and fetches the sibling from the same origin.
+Absolute paths, paths that escape the repo root, and cross-repo local paths
+are rejected.
 
 ### Custom git ports
 
@@ -134,6 +138,7 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `path` | OPTIONAL | Subdirectory or file within the repo (virtual package). |
 | `ref` | OPTIONAL | Branch, tag, or commit SHA. |
 | `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
+| `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. Generic hosts do not receive APM-managed PATs on HTTP file reads. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys) for keying rules. |
 
 ```yaml
 - git: https://gitlab.com/acme/repo.git
@@ -146,6 +151,9 @@ instead so `@` remains reserved for git usernames and version syntax.
 
 - git: ssh://git@bitbucket.example.com:7999/project/repo.git   # custom SSH port
   ref: v1.0
+
+- git: https://code.acme.com/platform/standards.git               # bespoke GitLab
+  type: gitlab
 ```
 
 ### Local (`path`)
@@ -454,3 +462,7 @@ enterprise security guide for the threat model.
 `apm.lock.yaml` records the exact commit SHA for every dependency, regardless
 of the ref format in apm.yml. Running `apm install` without `--update` always
 uses the locked SHA, ensuring reproducible installs across machines.
+
+Lockfile keys keep `github.com` implicit for migration stability while
+non-default hosts add the lowercased host segment. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys)
+for the full keying rules.
