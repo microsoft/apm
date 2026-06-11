@@ -62,7 +62,12 @@ from .output_profiles import (
 from .ref_resolver import RefResolver
 from .semver import SemVer, parse_semver, satisfies_range
 from .tag_pattern import build_tag_regex
-from .yml_schema import MarketplaceYml, PackageEntry, load_marketplace_yml
+from .yml_schema import (
+    MarketplaceYml,
+    PackageEntry,
+    load_marketplace_yml,
+    split_source_base,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +98,21 @@ class ResolvedPackage:
     tags: tuple[str, ...]
     is_prerelease: bool  # True if the resolved ref was a prerelease semver
     host: str | None = None  # non-default git host parsed from apm.yml source
+    source_url: str | None = None  # canonical URL for sourceBase-composed entries
+
+
+@dataclass(frozen=True)
+class _SourceBaseCoords:
+    """Parsed sourceBase coordinates cached for one marketplace build."""
+
+    host: str
+    path_prefix: str
+    source_base: str
+
+    @property
+    def org_hint(self) -> str:
+        """Return the leading path segment used for per-org auth lookup."""
+        return self.path_prefix.split("/", 1)[0]
 
 
 @dataclass(frozen=True)
@@ -310,11 +330,13 @@ class MarketplaceBuilder:
         self._host: str = default_host() or "github.com"
         self._host_info: HostInfo | None = None
         self._auth_resolved: bool = False
-        # Per-host RefResolver cache, keyed by host override on PackageEntry.
+        # Per-host RefResolver cache, keyed by host and optional org hint.
         # Pre-warmed on the main thread before workers spawn; lock guards
         # against future refactors that allow worker-side cache misses.
-        self._host_resolvers: dict[str, RefResolver] = {}
+        self._host_resolvers: dict[tuple[str, str | None], RefResolver] = {}
         self._host_resolvers_lock = threading.Lock()
+        self._source_base_parts: _SourceBaseCoords | None = None
+        self._source_base_parts_loaded = False
 
     @classmethod
     def from_config(
@@ -357,6 +379,21 @@ class MarketplaceBuilder:
                 self._yml = load_marketplace_yml(self._yml_path)
         return self._yml
 
+    def _get_source_base_parts(self) -> _SourceBaseCoords | None:
+        """Return cached sourceBase coordinates for this builder."""
+        if not self._source_base_parts_loaded:
+            yml = self._load_yml()
+            source_base = getattr(yml, "source_base", None)
+            if isinstance(source_base, str) and source_base:
+                base_host, base_path = split_source_base(source_base)
+                self._source_base_parts = _SourceBaseCoords(
+                    host=base_host,
+                    path_prefix=base_path,
+                    source_base=source_base,
+                )
+            self._source_base_parts_loaded = True
+        return self._source_base_parts
+
     def _get_resolver(self) -> RefResolver:
         if self._resolver is None:
             self._ensure_auth()
@@ -382,39 +419,40 @@ class MarketplaceBuilder:
             return None
         return host
 
-    def _get_resolver_for_host(self, host: str | None) -> RefResolver:
-        """Return a RefResolver bound to *host* (default when ``None``).
+    def _get_resolver_for_host(self, host: str | None, *, org: str | None = None) -> RefResolver:
+        """Return a RefResolver bound to *host* and optional auth org hint.
 
-        Non-default hosts go through ``AuthResolver.resolve(host)`` so that
-        ``GITHUB_APM_PAT``, ``GITHUB_APM_PAT_{ORG}``, ``GITHUB_TOKEN`` and
-        ``GH_TOKEN`` are consulted before falling back to ambient git
-        credentials (SSH key / credential helper).  Per-host resolvers are
-        cached for the lifetime of the build so each unique host pays the
-        auth-resolution cost only once.
+        Non-default hosts and sourceBase-derived org hints go through
+        ``AuthResolver.resolve(host, org=org)`` so per-org variables are
+        honored before ambient git credentials.  Existing default-host calls
+        without an org hint keep the legacy resolver path.
         """
-        if host is None or host == self._host:
+        if org is None and (host is None or host == self._host):
             return self._get_resolver()
+        resolved_host = host or self._host
+        key = (resolved_host, org)
         with self._host_resolvers_lock:
-            cached = self._host_resolvers.get(host)
+            cached = self._host_resolvers.get(key)
             if cached is not None:
                 return cached
-            token = self._resolve_token_for_host(host)
+            token = self._resolve_token_for_host(resolved_host, org=org)
             logger.debug(
-                "Creating per-host RefResolver for %s (token=%s)",
-                host,
+                "Creating per-host RefResolver for %s (org=%s, token=%s)",
+                resolved_host,
+                org or "none",
                 "set" if token else "unset",
             )
             resolver = RefResolver(
                 timeout_seconds=self._options.timeout_seconds,
                 offline=self._options.offline,
-                host=host,
+                host=resolved_host,
                 token=token,
             )
-            self._host_resolvers[host] = resolver
+            self._host_resolvers[key] = resolver
             return resolver
 
-    def _resolve_token_for_host(self, host: str) -> str | None:
-        """Resolve an auth token for a non-default *host* via ``AuthResolver``.
+    def _resolve_token_for_host(self, host: str, *, org: str | None = None) -> str | None:
+        """Resolve an auth token for *host* via ``AuthResolver``.
 
         Returns ``None`` -- letting ``git`` fall back to ambient credentials
         -- when offline, when no token is configured for the host, or when
@@ -429,7 +467,7 @@ class MarketplaceBuilder:
             if resolver is None:
                 resolver = AuthResolver()
                 self._auth_resolver = resolver
-            ctx = resolver.resolve(host)  # type: ignore[union-attr]
+            ctx = resolver.resolve(host) if org is None else resolver.resolve(host, org=org)
             if ctx.token:
                 logger.debug("Resolved token for host %s (source=%s)", host, ctx.source)
                 return ctx.token
@@ -498,6 +536,37 @@ class MarketplaceBuilder:
 
     # -- single-entry resolution --------------------------------------------
 
+    def _remote_source_coordinates(
+        self,
+        entry: PackageEntry,
+    ) -> tuple[str | None, str, str | None, str | None]:
+        """Return ``(host, repo_path, source_url, org_hint)`` for a remote entry."""
+        if entry.host:
+            return entry.host, entry.source, None, None
+        source_base_parts = self._get_source_base_parts()
+        if source_base_parts is not None:
+            repo_path = f"{source_base_parts.path_prefix}/{entry.source}"
+            source_url = f"{source_base_parts.source_base}/{entry.source}"
+            logger.debug(
+                "Composed marketplace source %r onto sourceBase %r as %r",
+                entry.source,
+                source_base_parts.source_base,
+                repo_path,
+            )
+            return source_base_parts.host, repo_path, source_url, source_base_parts.org_hint
+        return None, entry.source, None, None
+
+    def _resolved_output_host(
+        self,
+        *,
+        source_host: str | None,
+        source_url: str | None,
+    ) -> str | None:
+        """Return the host marker mappers should use for the resolved package."""
+        if source_url is not None:
+            return source_host
+        return self._effective_host(source_host)
+
     def _resolve_entry(self, entry: PackageEntry) -> ResolvedPackage:
         """Resolve a single package entry to a concrete tag + SHA."""
         # Local-path packages skip git resolution entirely.
@@ -513,19 +582,38 @@ class MarketplaceBuilder:
                 is_prerelease=False,
             )
         yml = self._load_yml()
-        resolver = self._get_resolver_for_host(entry.host)
-        owner_repo = entry.source
+        source_host, owner_repo, source_url, source_org = self._remote_source_coordinates(entry)
+        if source_org is None:
+            resolver = self._get_resolver_for_host(source_host)
+        else:
+            resolver = self._get_resolver_for_host(source_host, org=source_org)
 
         if entry.ref is not None:
-            return self._resolve_explicit_ref(entry, resolver, owner_repo)
+            return self._resolve_explicit_ref(
+                entry,
+                resolver,
+                owner_repo,
+                source_host=source_host,
+                source_url=source_url,
+            )
         # version range resolution
-        return self._resolve_version_range(entry, resolver, owner_repo, yml)
+        return self._resolve_version_range(
+            entry,
+            resolver,
+            owner_repo,
+            yml,
+            source_host=source_host,
+            source_url=source_url,
+        )
 
     def _resolve_explicit_ref(
         self,
         entry: PackageEntry,
         resolver: RefResolver,
         owner_repo: str,
+        *,
+        source_host: str | None = None,
+        source_url: str | None = None,
     ) -> ResolvedPackage:
         """Resolve an entry with an explicit ``ref:`` field."""
         ref_text = entry.ref
@@ -543,7 +631,8 @@ class MarketplaceBuilder:
                 requested_version=entry.version,
                 tags=entry.tags,
                 is_prerelease=sv.is_prerelease if sv else False,
-                host=self._effective_host(entry.host),
+                host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                source_url=source_url,
             )
 
         refs = resolver.list_remote_refs(owner_repo)
@@ -564,7 +653,8 @@ class MarketplaceBuilder:
                     requested_version=entry.version,
                     tags=entry.tags,
                     is_prerelease=sv.is_prerelease if sv else False,
-                    host=self._effective_host(entry.host),
+                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                    source_url=source_url,
                 )
 
         # Try as full refname
@@ -584,7 +674,8 @@ class MarketplaceBuilder:
                     requested_version=entry.version,
                     tags=entry.tags,
                     is_prerelease=sv.is_prerelease if sv else False,
-                    host=self._effective_host(entry.host),
+                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                    source_url=source_url,
                 )
 
         # Try as branch name
@@ -601,7 +692,8 @@ class MarketplaceBuilder:
                     requested_version=entry.version,
                     tags=entry.tags,
                     is_prerelease=False,
-                    host=self._effective_host(entry.host),
+                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                    source_url=source_url,
                 )
 
         # HEAD special case
@@ -617,6 +709,9 @@ class MarketplaceBuilder:
         resolver: RefResolver,
         owner_repo: str,
         yml: MarketplaceYml,
+        *,
+        source_host: str | None = None,
+        source_url: str | None = None,
     ) -> ResolvedPackage:
         """Resolve an entry using its ``version:`` semver range."""
         version_range = entry.version
@@ -660,7 +755,8 @@ class MarketplaceBuilder:
             requested_version=version_range,
             tags=entry.tags,
             is_prerelease=best_sv.is_prerelease,
-            host=self._effective_host(entry.host),
+            host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+            source_url=source_url,
         )
 
     # -- concurrent resolution ----------------------------------------------
@@ -690,9 +786,12 @@ class MarketplaceBuilder:
         # spawning workers -- avoids a race on _ensure_auth() and
         # matches the pattern used in _prefetch_metadata().
         self._get_resolver()
-        # Pre-warm any per-host resolvers needed by entries that override the
-        # default host via the ``host.tld/owner/repo`` source form.  Done on
-        # the main thread so workers never race to create the same resolver.
+        # Pre-warm per-host resolvers on the main thread so workers never race
+        # to create the same resolver. Include the sourceBase host because
+        # base-relative entries derive their host during composition.
+        source_base_parts = self._get_source_base_parts()
+        if source_base_parts is not None:
+            self._get_resolver_for_host(source_base_parts.host, org=source_base_parts.org_hint)
         for entry in entries:
             if entry.host:
                 self._get_resolver_for_host(entry.host)

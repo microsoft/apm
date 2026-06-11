@@ -122,6 +122,12 @@ The `github-mcp-server` is a special case: APM injects an
 the Copilot CLI config. See
 [Token injection](../../consumer/install-mcp-servers/#token-injection-github-mcp-server).
 
+When a registry server marks an env/input variable optional, APM does
+not generate a prompt or runtime config entry unless a value is already
+available. See the
+[manifest schema reference](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
+for the canonical required-vs-optional rule.
+
 ## Direct vs transitive: the trust boundary
 
 A self-defined MCP server (`registry: false`) declared by your package
