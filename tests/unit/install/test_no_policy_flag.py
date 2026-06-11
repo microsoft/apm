@@ -117,6 +117,13 @@ class TestHelpTextShowsNoPolicy:
         assert result.exit_code == 0
         assert "--no-policy" not in result.output
 
+    def test_install_help_lists_kiro_runtime_and_global_scope(self):
+        result = self.runner.invoke(cli, ["install", "--help"])
+        assert result.exit_code == 0
+        normalized = " ".join(result.output.split())
+        assert "windsurf, kiro, intellij" in normalized
+        assert "Gemini CLI, Kiro, JetBrains Copilot" in normalized
+
     def test_help_text_is_plain_ascii(self):
         """Help text must be plain ASCII per cli.instructions.md."""
         result = self.runner.invoke(cli, ["install", "--help"])

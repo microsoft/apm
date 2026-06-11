@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_success
 from .copilot import CopilotClientAdapter
 
@@ -72,8 +73,11 @@ class KiroClientAdapter(CopilotClientAdapter):
         current_config[self.mcp_servers_key].update(config_updates)
 
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(current_config, f, indent=2)
+        atomic_write_text(
+            config_path,
+            json.dumps(current_config, indent=2),
+            new_file_mode=0o600,
+        )
         os.chmod(config_path, 0o600)
         return True
 

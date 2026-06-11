@@ -20,6 +20,7 @@ from apm_cli.integration.hook_integrator import (
     _emit_hook_event_diagnostics,
     _filter_hook_files_for_target,
 )
+from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
@@ -170,7 +171,7 @@ def _write_kiro_hook_docs(
                     files_skipped += 1
                     continue
 
-                target_path.write_text(rendered, encoding="utf-8")
+                atomic_write_text(target_path, rendered, new_file_mode=0o600)
                 os.chmod(target_path, 0o600)
                 files_integrated += 1
                 target_paths.append(target_path)

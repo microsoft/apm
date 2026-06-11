@@ -223,6 +223,10 @@ class TestShouldCompileAgentsMd:
         """AGENTS.md compiled for gemini target (GEMINI.md imports it)."""
         assert should_compile_agents_md("gemini") is True
 
+    def test_kiro_target(self):
+        """AGENTS.md compiled for kiro as a cross-harness fallback."""
+        assert should_compile_agents_md("kiro") is True
+
 
 class TestShouldCompileClaudeMd:
     """Tests for should_compile_claude_md function."""
