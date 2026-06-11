@@ -24,11 +24,15 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import logging as _logging_module
+
+    from ..integration.targets import TargetProfile
+    from ..primitives.models import Instruction
 
 # Root filename by compile_family.  Targets whose compile_family is not in
 # this map do not produce a root file (e.g. family=None for agent-skills).
@@ -40,7 +44,33 @@ _ROOT_FILENAME: dict[str, str] = {
 }
 
 
-def _resolve_deploy_root(profile: object) -> Path:
+@dataclass(frozen=True)
+class UserRootCompileResult:
+    """Result for one user-scope root context compilation target."""
+
+    target: str
+    path: Path | None
+    status: str
+
+    def __getitem__(self, key: str) -> object:
+        """Provide dict-style access for existing result consumers."""
+        if key == "target":
+            return self.target
+        if key == "path":
+            return self.path
+        if key == "status":
+            return self.status
+        raise KeyError(key)
+
+    def get(self, key: str, default: object = None) -> object:
+        """Provide dict-style optional access for existing result consumers."""
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+
+def _resolve_deploy_root(profile: TargetProfile) -> Path:
     """Return the absolute deploy root for a user-scoped TargetProfile.
 
     After for_scope(user_scope=True):
@@ -72,7 +102,7 @@ def _finalize_build_id(content: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _generate_content(instructions: list[object]) -> str:
+def _generate_content(instructions: list[Instruction]) -> str:
     """Generate the root context file content from a list of global instructions.
 
     Embeds the APM-generated marker and a deterministic Build ID so that
@@ -98,12 +128,12 @@ def _generate_content(instructions: list[object]) -> str:
 
 
 def compile_user_root_contexts(
-    targets: Iterable[object],
+    targets: Iterable[TargetProfile],
     source_root: Path,
     *,
     dry_run: bool = False,
     logger: _logging_module.Logger | None = None,
-) -> list[dict[str, object]]:
+) -> list[UserRootCompileResult]:
     """Compile user-scope root context files from global (apply_to-less) instructions.
 
     Iterates over *targets*, skipping any that:
@@ -123,8 +153,8 @@ def compile_user_root_contexts(
         logger: Optional logger.  Falls back to ``logging.getLogger(__name__)``.
 
     Returns:
-        A list of dicts, one per target that was evaluated, each containing:
-        ``{"target": <name str>, "path": <Path|None>, "status": <str>}``.
+        A list of UserRootCompileResult entries, one per target that was
+        evaluated.  Each entry contains ``target``, ``path``, and ``status``.
 
         Status values:
         * ``"written"``              -- file was created or updated
@@ -139,7 +169,7 @@ def compile_user_root_contexts(
 
     log = logger or logging.getLogger(__name__)
 
-    results: list[dict[str, object]] = []
+    results: list[UserRootCompileResult] = []
 
     apm_modules = source_root / "apm_modules"
     if not apm_modules.is_dir():
@@ -178,9 +208,7 @@ def compile_user_root_contexts(
                 apm_modules,
                 scoped.name,
             )
-            results.append(
-                {"target": scoped.name, "path": None, "status": "skipped-no-instructions"}
-            )
+            results.append(UserRootCompileResult(scoped.name, None, "skipped-no-instructions"))
             continue
 
         deploy_root = _resolve_deploy_root(scoped)
@@ -195,9 +223,7 @@ def compile_user_root_contexts(
                 existing = output_path.read_text(encoding="utf-8")
             except OSError as exc:
                 log.warning("user_root_context: cannot read %s: %s", output_path, exc)
-                results.append(
-                    {"target": scoped.name, "path": output_path, "status": f"error:{exc}"}
-                )
+                results.append(UserRootCompileResult(scoped.name, output_path, f"error:{exc}"))
                 continue
 
             if _COPILOT_ROOT_GENERATED_MARKER not in existing:
@@ -206,27 +232,27 @@ def compile_user_root_contexts(
                     output_path,
                 )
                 results.append(
-                    {"target": scoped.name, "path": output_path, "status": "skipped-hand-authored"}
+                    UserRootCompileResult(scoped.name, output_path, "skipped-hand-authored")
                 )
                 continue
 
             if existing == content:
                 log.debug("user_root_context: %s is unchanged", output_path)
-                results.append({"target": scoped.name, "path": output_path, "status": "unchanged"})
+                results.append(UserRootCompileResult(scoped.name, output_path, "unchanged"))
                 continue
 
         if dry_run:
             log.debug("user_root_context: [dry-run] would write %s", output_path)
-            results.append({"target": scoped.name, "path": output_path, "status": "would-write"})
+            results.append(UserRootCompileResult(scoped.name, output_path, "would-write"))
             continue
 
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(content, encoding="utf-8")
             log.debug("user_root_context: wrote %s", output_path)
-            results.append({"target": scoped.name, "path": output_path, "status": "written"})
+            results.append(UserRootCompileResult(scoped.name, output_path, "written"))
         except OSError as exc:
             log.warning("user_root_context: failed to write %s: %s", output_path, exc)
-            results.append({"target": scoped.name, "path": output_path, "status": f"error:{exc}"})
+            results.append(UserRootCompileResult(scoped.name, output_path, f"error:{exc}"))
 
     return results

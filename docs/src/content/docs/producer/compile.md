@@ -220,10 +220,10 @@ you can omit `start_marker` and `end_marker` if you use those verbatim.
 
 ## Global compilation (-g)
 
-By default, `apm compile` reads instructions from your workspace and
-writes root context files to `.github/`, `.claude/`, etc. For distributing
-instructions to all AI tools on your user's machine (not scoped to a project),
-use the `--global` or `-g` flag:
+Install a package once globally and every AI tool on your machine can pick up
+its instructions without per-project setup. By default, `apm compile` reads
+instructions from your workspace and writes root context files to `.github/`,
+`.claude/`, etc. For user-scope instructions, use the `--global` or `-g` flag:
 
 ```bash
 apm compile --global

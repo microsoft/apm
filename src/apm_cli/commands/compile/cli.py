@@ -352,7 +352,10 @@ def _handle_global_flag(dry_run: bool) -> int:
     )
 
     if not results:
-        _rich_info("No user-scope targets produced output (no global instructions found).")
+        _rich_info(
+            "No user-scope targets produced output -- run 'apm install -g <package>' "
+            "to add global instructions."
+        )
         return 0
 
     has_error = False
@@ -931,7 +934,8 @@ def _run_compilation(
     default=False,
     help=(
         "Compile user-scope root context files (~/.claude/CLAUDE.md, etc.) "
-        "from ~/.apm/apm_modules. Cannot be combined with --watch or --root."
+        "from ~/.apm/apm_modules. Cannot be combined with --watch or --root; "
+        "use with --dry-run to preview changes."
     ),
 )
 @click.pass_context
@@ -994,14 +998,10 @@ def compile(  # noqa: PLR0913 -- Click handler
     # --global: compile user-scope root context files from ~/.apm/apm_modules.
     # Must be checked before --watch / --root guards so we return early.
     if global_:
-        from ...utils.console import _rich_error
-
         if watch:
-            _rich_error("--global cannot be combined with --watch")
-            sys.exit(2)
+            raise click.UsageError("--global is not valid with --watch")
         if root:
-            _rich_error("--global cannot be combined with --root")
-            sys.exit(2)
+            raise click.UsageError("--global is not valid with --root")
         rc = _handle_global_flag(dry_run=dry_run)
         if rc != 0:
             sys.exit(rc)

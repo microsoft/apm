@@ -358,36 +358,30 @@ class TestCompileGlobalCommand:
     """Tests for compile command with --global flag."""
 
     def test_global_with_watch_rejected(self):
-        """--global and --watch together -> error message and sys.exit(2)."""
+        """--global and --watch together -> Click usage error."""
         from apm_cli.commands.compile.cli import compile as compile_cmd
 
         runner = CliRunner()
 
-        with patch("apm_cli.utils.console._rich_error") as mock_error:
-            # Invoke with both --global and --watch
-            result = runner.invoke(compile_cmd, ["--global", "--watch"])
+        result = runner.invoke(compile_cmd, ["--global", "--watch"])
 
-            # Should reject the combination with non-zero exit code
-            mock_error.assert_called()
-            call_str = str(mock_error.call_args)
-            assert "global" in call_str.lower() and "watch" in call_str.lower()
-            assert result.exit_code == 2
+        assert result.exit_code == 2
+        assert "global" in result.output.lower()
+        assert "watch" in result.output.lower()
+        assert "Usage:" in result.output
 
     def test_global_with_root_rejected(self):
-        """--global and --root together -> error message and sys.exit(2)."""
+        """--global and --root together -> Click usage error."""
         from apm_cli.commands.compile.cli import compile as compile_cmd
 
         runner = CliRunner()
 
-        with patch("apm_cli.utils.console._rich_error") as mock_error:
-            # Invoke with both --global and --root
-            result = runner.invoke(compile_cmd, ["--global", "--root", "/nonexistent"])
+        result = runner.invoke(compile_cmd, ["--global", "--root", "/nonexistent"])
 
-            # Should reject the combination with non-zero exit code
-            mock_error.assert_called()
-            call_str = str(mock_error.call_args)
-            assert "global" in call_str.lower() and "root" in call_str.lower()
-            assert result.exit_code == 2
+        assert result.exit_code == 2
+        assert "global" in result.output.lower()
+        assert "root" in result.output.lower()
+        assert "Usage:" in result.output
 
     def test_global_success_no_exit(self, tmp_path):
         """--global with successful _handle_global_flag -> returns normally."""
