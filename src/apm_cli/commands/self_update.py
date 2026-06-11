@@ -116,7 +116,7 @@ def _get_installer_run_command(script_path: str) -> list[str]:
     name="self-update",
     help=(
         "Update the APM CLI binary itself to the latest version.\n\n"
-        "Environment variables for enterprise bootstrap mirrors:\n"
+        "Set these to route updates through an internal mirror (optional):\n"
         "  APM_RELEASE_METADATA_URL  Mirror latest.json release metadata.\n"
         "  APM_RELEASE_BASE_URL      Mirror release assets at {base}/{tag}/{asset}.\n"
         "  APM_INSTALLER_BASE_URL    Mirror install.sh/install.ps1 for self-update.\n"

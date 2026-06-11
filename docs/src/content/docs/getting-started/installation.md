@@ -102,7 +102,7 @@ jobs:
 
 ### Enterprise bootstrap mirror mode
 
-APM ships native enterprise mirror support: five env vars route bootstrap traffic through internal hosts, with fail-closed mode ensuring no public fallback.
+Mirror mode routes bootstrap traffic through internal hosts. Four URL variables point install and self-update at your mirror; `APM_NO_DIRECT_FALLBACK=1` fails closed so no request reaches a public host:
 
 ```bash
 export APM_INSTALLER_BASE_URL="https://artifactory.mycorp.example/generic/apm-install"

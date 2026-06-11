@@ -9,7 +9,7 @@ APM_RELEASE_METADATA_URL = "APM_RELEASE_METADATA_URL"
 APM_INSTALLER_BASE_URL = "APM_INSTALLER_BASE_URL"
 APM_PYPI_INDEX_URL = "APM_PYPI_INDEX_URL"
 APM_NO_DIRECT_FALLBACK = "APM_NO_DIRECT_FALLBACK"
-VERSION_ENV_VAR = "VERSION"
+_VERSION_ENV_VAR = "VERSION"
 
 _PUBLIC_GITHUB_URL = "https://github.com"
 _TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -80,7 +80,7 @@ def release_metadata_public_lookup_blocked(github_url: str | None = None) -> boo
         no_direct_fallback_enabled()
         and is_public_github_url(github_url)
         and get_release_metadata_url() is None
-        and not os.environ.get(VERSION_ENV_VAR, "").strip()
+        and not os.environ.get(_VERSION_ENV_VAR, "").strip()
     )
 
 

@@ -231,6 +231,11 @@ class AuthResolver:
         the logger before it knows it needs an AuthResolver elsewhere."""
         self._logger = logger
 
+    def clear_cache(self) -> None:
+        """Clear resolved auth contexts when a caller needs fresh env state."""
+        with self._lock:
+            self._cache.clear()
+
     # -- host classification ------------------------------------------------
 
     @staticmethod

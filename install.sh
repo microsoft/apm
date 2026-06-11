@@ -101,10 +101,9 @@ is_public_github_url() {
 }
 
 fail_closed_error() {
-    _mirror_var="$1"
+    printf '%b\n' "${RED}Error: APM_NO_DIRECT_FALLBACK is set, but $1 is not configured.${NC}"
     shift
-    echo -e "${RED}Error: APM_NO_DIRECT_FALLBACK is set, but $_mirror_var is not configured.${NC}"
-    echo "$*"
+    printf '%s\n' "$*"
     exit 1
 }
 

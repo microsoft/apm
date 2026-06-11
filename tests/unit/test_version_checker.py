@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 from apm_cli.utils.version_checker import (
     _get_github_token,
+    _reset_version_check_auth_resolver_for_tests,
     check_for_updates,
     get_latest_version_from_github,
     is_newer_version,
@@ -170,6 +171,14 @@ class TestGitHubVersionFetch(unittest.TestCase):
 class TestGitHubTokenResolution(unittest.TestCase):
     """Test GitHub token resolution helper."""
 
+    def setUp(self):
+        """Reset the version-check resolver cache between env-sensitive tests."""
+        _reset_version_check_auth_resolver_for_tests()
+
+    def tearDown(self):
+        """Drop any patched resolver before the next test runs."""
+        _reset_version_check_auth_resolver_for_tests()
+
     @patch.dict("os.environ", {}, clear=True)
     def test_no_token_when_env_empty(self):
         """Returns None when no token env vars are set."""
@@ -226,6 +235,22 @@ class TestGitHubTokenResolution(unittest.TestCase):
 
         self.assertEqual(_get_github_token(), "resolver_token")
         mock_resolver.resolve.assert_called_once()
+
+    @patch.dict("os.environ", {"GITHUB_TOKEN": "resolver_token"}, clear=True)
+    @patch("apm_cli.utils.version_checker.AuthResolver")
+    def test_version_check_token_resolution_reuses_resolver(self, mock_resolver_cls):
+        """Version checks reuse one AuthResolver without stale cache reads."""
+        mock_context = Mock(token="resolver_token")
+        mock_resolver = Mock()
+        mock_resolver.resolve.return_value = mock_context
+        mock_resolver_cls.return_value = mock_resolver
+
+        self.assertEqual(_get_github_token(), "resolver_token")
+        self.assertEqual(_get_github_token(), "resolver_token")
+
+        mock_resolver_cls.assert_called_once_with(allow_external_fallback=False)
+        mock_resolver.clear_cache.assert_called_once()
+        self.assertEqual(mock_resolver.resolve.call_count, 2)
 
 
 class TestGitHubVersionFetchAuth(unittest.TestCase):

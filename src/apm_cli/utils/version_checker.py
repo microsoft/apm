@@ -15,6 +15,7 @@ from ..core.auth import AuthResolver
 _DEFAULT_REPO = "microsoft/apm"
 _PUBLIC_GITHUB_URL = "https://github.com"
 _PUBLIC_API_BASE = "https://api.github.com"
+_VERSION_CHECK_AUTH_RESOLVER: AuthResolver | None = None
 
 
 def _get_air_gap_github_url() -> str:
@@ -50,6 +51,22 @@ def _build_releases_api_url(
     return f"{github_url}/api/v3/repos/{repo}/releases/latest"
 
 
+def _get_version_check_auth_resolver() -> AuthResolver:
+    """Return the reusable resolver for non-blocking version checks."""
+    global _VERSION_CHECK_AUTH_RESOLVER
+    if _VERSION_CHECK_AUTH_RESOLVER is None:
+        _VERSION_CHECK_AUTH_RESOLVER = AuthResolver(allow_external_fallback=False)
+    else:
+        _VERSION_CHECK_AUTH_RESOLVER.clear_cache()
+    return _VERSION_CHECK_AUTH_RESOLVER
+
+
+def _reset_version_check_auth_resolver_for_tests() -> None:
+    """Reset the cached version-check resolver for isolated unit tests."""
+    global _VERSION_CHECK_AUTH_RESOLVER
+    _VERSION_CHECK_AUTH_RESOLVER = None
+
+
 def _get_github_token(github_url: str | None = None, repo: str | None = None) -> str | None:
     """Return a GitHub token through AuthResolver, or None.
 
@@ -61,7 +78,7 @@ def _get_github_token(github_url: str | None = None, repo: str | None = None) ->
     host = parsed.hostname or "github.com"
     effective_repo = repo or _get_air_gap_repo()
     org = effective_repo.split("/", 1)[0] if "/" in effective_repo else None
-    context = AuthResolver(allow_external_fallback=False).resolve(host, org=org)
+    context = _get_version_check_auth_resolver().resolve(host, org=org)
     return context.token
 
 
