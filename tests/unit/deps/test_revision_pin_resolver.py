@@ -199,6 +199,32 @@ def test_resolve_revision_pin_updates_uses_tags_only_fetch() -> None:
     assert updates == [RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0", "org/pkg")]
 
 
+def test_resolve_revision_pin_updates_rejects_invalid_remote_sha() -> None:
+    class InvalidShaDownloader:
+        def list_remote_tag_refs(self, _dep_ref: DependencyReference) -> list[RemoteRef]:
+            return [RemoteRef("v2.0.0", GitReferenceType.TAG, "not-a-sha", annotated=True)]
+
+    with pytest.raises(RevisionPinResolutionError, match="invalid SHA"):
+        resolve_revision_pin_updates(
+            [DependencyReference(repo_url="org/pkg", reference=OLD_SHA)],
+            InvalidShaDownloader(),
+        )
+
+
+def test_apply_revision_pin_updates_rejects_control_chars_in_tag(tmp_path: Path) -> None:
+    manifest = tmp_path / "apm.yml"
+    original = f"name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - org/pkg#{OLD_SHA}\n"
+    manifest.write_text(original, encoding="utf-8")
+
+    with pytest.raises(RevisionPinResolutionError, match="control character"):
+        apply_revision_pin_updates(
+            manifest,
+            [RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0\nmalicious: true", "org/pkg")],
+        )
+
+    assert manifest.read_text(encoding="utf-8") == original
+
+
 def test_apply_revision_pin_updates_uses_unique_temp_names(tmp_path: Path) -> None:
     manifest = tmp_path / "apm.yml"
     manifest.write_text(

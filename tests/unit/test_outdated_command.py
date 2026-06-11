@@ -323,16 +323,16 @@ class TestOutdatedCommand:
             deps = {
                 "org/commit-pkg": _locked_dep(
                     "org/commit-pkg",
-                    resolved_ref="abc1234567890def1234567890abc1234567890de",
+                    resolved_ref="a" * 40,
                 ),
             }
             mock_lf_cls.read.return_value = _make_lockfile(deps)
 
             mock_downloader = MagicMock()
             mock_dl_cls.return_value = mock_downloader
-            # A branch is not an acceptable replacement for a revision pin.
-            mock_downloader.list_remote_refs.return_value = [
-                _remote_branch("v9.9.9", sha="f" * 40),
+            # Lightweight tags are not acceptable replacements for revision pins.
+            mock_downloader.list_remote_tag_refs.return_value = [
+                RemoteRef("v9.9.9", GitReferenceType.TAG, "f" * 40, annotated=False),
             ]
 
             result = self.runner.invoke(cli, ["outdated"])
@@ -340,6 +340,7 @@ class TestOutdatedCommand:
             assert result.exit_code == 0
             assert "unknown" in result.output.lower()
             assert "org/commit-pkg" in result.output
+            mock_downloader.list_remote_refs.assert_not_called()
 
     @patch(_PATCH_AUTH)
     @patch(_PATCH_DOWNLOADER)
@@ -374,14 +375,14 @@ class TestOutdatedCommand:
 
             mock_downloader = MagicMock()
             mock_dl_cls.return_value = mock_downloader
-            mock_downloader.list_remote_refs.return_value = [
+            mock_downloader.list_remote_tag_refs.return_value = [
                 RemoteRef("v2.0.0", GitReferenceType.TAG, latest_sha, annotated=True),
-                _remote_branch("v9.9.9", sha="f" * 40),
             ]
 
             result = self.runner.invoke(cli, ["outdated"])
 
             assert result.exit_code == 0, result.output
+            mock_downloader.list_remote_refs.assert_not_called()
             assert "org/commit-pkg" in result.output
             assert "v2.0.0" in result.output
             assert current_sha[:8] in result.output

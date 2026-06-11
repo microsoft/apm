@@ -118,8 +118,10 @@ class TestUpdateDryRun:
                 result = runner.invoke(cli, ["update", "--dry-run"])
 
             assert result.exit_code == 0, result.output
+            assert "Checking upstream for revision-pin freshness" in result.output
             assert "Revision pin updates" in result.output
             assert "Update plan" in result.output
+            assert "Total: 1 revision pin rewrite + 1 dependency change." in result.output
             assert "abcdef12 -> 12345678 (v2.0.0)" in result.output
             assert "abcdef1 -> 1234567" not in result.output
             assert "# v2.0.0" not in result.output
@@ -187,6 +189,7 @@ class TestUpdateAssumeYes:
             assert f"org/pkg#{new_sha} # v2.0.0" in manifest.read_text(encoding="utf-8")
             assert captured["dep_ref"] == new_sha
             assert captured["plan_proceeded"] is True
+            assert "Updated 1 APM dependency and 1 revision pin in apm.yml." in result.output
 
     def test_yes_reports_revision_pin_only_update_count(self, runner, tmp_path):
         old_sha = "a" * 40

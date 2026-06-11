@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `apm update` and `apm outdated` now keep full-SHA revision-pinned dependencies current by resolving the latest annotated semver tag SHA and annotating updated manifest pins with the tag. (#1738)
+- SHA-pinned dependencies now stay current automatically: `apm update` resolves the newest annotated release tag, rewrites the pin, and `apm outdated` reports drift. (#1738)
 - `apm install --target hermes` and `apm compile -t hermes` add the Hermes
   agent (Nous Research) as a new experimental target (opt in via
   `apm experimental enable hermes`). Skills deploy to `.agents/skills/<name>/SKILL.md`

@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
+from git.exc import GitCommandError
 
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger
@@ -119,7 +120,10 @@ def _resolve_and_maybe_apply_revision_pin_updates(
 ) -> list[RevisionPinUpdate]:
     """Resolve SHA pins and stage their in-memory references for the plan."""
     only_set = set(only_packages) if only_packages is not None else None
-    logger.verbose_detail("Resolving revision pins against authoritative upstream...")
+    if logger.dry_run:
+        logger.progress("Checking upstream for revision-pin freshness...", symbol="running")
+    else:
+        logger.verbose_detail("Resolving revision pins against authoritative upstream...")
 
     try:
         # Authoritative round-trip (intentional, do NOT short-circuit): this
@@ -137,14 +141,19 @@ def _resolve_and_maybe_apply_revision_pin_updates(
     except RevisionPinResolutionError as e:
         _rich_error(str(e))
         sys.exit(1)
-    except Exception as e:
+    except (GitCommandError, OSError) as e:
         _rich_error(f"Failed to resolve revision pins: {e}")
+        if not logger.verbose:
+            logger.info("Run with --verbose for detailed diagnostics.")
         sys.exit(1)
 
     updates_by_key = {update.dep_key: update for update in updates}
     for dep_ref in all_declared_deps:
         update = updates_by_key.get(dep_ref.get_unique_key())
         if update is not None:
+            # Mutation contract: the install pipeline builds its plan from these
+            # DependencyReference objects, while apm.yml is rewritten only after
+            # the consent gate and the manifest cache is cleared below.
             dep_ref.reference = update.new_sha
     return updates
 
@@ -493,6 +502,14 @@ def _run_dep_update(
             )
             return False
 
+        if revision_pin_updates and plan.has_changes:
+            pin_count = len(revision_pin_updates)
+            dep_count = len(plan.entries)
+            pin_noun = "pin rewrite" if pin_count == 1 else "pin rewrites"
+            dep_noun = "dependency change" if dep_count == 1 else "dependency changes"
+            logger.info(f"Total: {pin_count} revision {pin_noun} + {dep_count} {dep_noun}.")
+            _rich_echo("")
+
         if dry_run:
             _rich_info(
                 "Dry run: no changes applied. Re-run without --dry-run to update.",
@@ -553,7 +570,14 @@ def _run_dep_update(
                 _rich_error(f"Failed to record revision-pin tags in apm.lock.yaml: {e}")
                 sys.exit(1)
         installed = getattr(result, "installed_count", 0)
-        if installed:
+        if installed and revision_pin_updates:
+            count = len(revision_pin_updates)
+            dep_noun = "dependency" if installed == 1 else "dependencies"
+            pin_noun = "pin" if count == 1 else "pins"
+            _rich_success(
+                f"Updated {installed} APM {dep_noun} and {count} revision {pin_noun} in apm.yml."
+            )
+        elif installed:
             _rich_success(f"Updated {installed} APM dependencies.")
         elif revision_pin_updates:
             count = len(revision_pin_updates)

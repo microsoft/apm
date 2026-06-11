@@ -227,7 +227,7 @@ def _check_revision_pin_ref(
             current=abbreviate_sha(current_ref),
             latest="-",
             status="unknown",
-            source="git annotated tags",
+            source="git tags",
         )
     latest_display = f"{latest.tag} ({abbreviate_sha(latest.commit_sha)})"
     status = "up-to-date" if latest.commit_sha.lower() == current_ref.lower() else "outdated"
@@ -236,7 +236,7 @@ def _check_revision_pin_ref(
         current=abbreviate_sha(current_ref),
         latest=latest_display,
         status=status,
-        source="git annotated tags",
+        source="git tags",
     )
 
 
@@ -274,9 +274,12 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
             package=package_name, current=current_ref or "(none)", latest="-", status="unknown"
         )
 
-    # Fetch remote refs
+    # Fetch only the ref families this comparison needs.
     try:
-        remote_refs = downloader.list_remote_refs(dep_ref)
+        if is_full_revision_pin(current_ref):
+            remote_refs = downloader.list_remote_tag_refs(dep_ref)
+        else:
+            remote_refs = downloader.list_remote_refs(dep_ref)
     except Exception:
         return OutdatedRow(
             package=package_name, current=current_ref or "(none)", latest="-", status="unknown"

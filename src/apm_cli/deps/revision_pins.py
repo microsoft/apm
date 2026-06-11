@@ -112,8 +112,7 @@ def find_latest_annotated_tag(
             "APM will not replace a SHA pin with a branch or lightweight tag."
         )
 
-    candidates.sort(key=lambda item: item[0])
-    _, tag, sha = candidates[-1]
+    _, tag, sha = max(candidates, key=lambda item: item[0])
     return AnnotatedTagCandidate(tag=tag, commit_sha=sha)
 
 
@@ -144,6 +143,10 @@ def resolve_revision_pin_updates(
         remote_refs = downloader.list_remote_tag_refs(dep_ref)
         latest = find_latest_annotated_tag(remote_refs, package_name=_package_name(dep_ref))
         latest_sha = latest.commit_sha.strip().lower()
+        if not is_full_revision_pin(latest_sha):
+            raise RevisionPinResolutionError(
+                f"Remote returned an invalid SHA for {dep_key}: expected 40-character hex."
+            )
         if latest_sha == old_sha:
             return None
         return RevisionPinUpdate(
@@ -168,14 +171,17 @@ def render_revision_pin_update_plan(updates: Iterable[RevisionPinUpdate]) -> str
     ordered = list(updates)
     if not ordered:
         return ""
-    lines = [f"{STATUS_SYMBOLS['info']} Revision pin updates for apm.yml", ""]
+    info_symbol = STATUS_SYMBOLS.get("info", "[i]")
+    update_symbol = STATUS_SYMBOLS.get("update", "[~]")
+    lines = [f"{info_symbol} Revision pin updates for apm.yml", ""]
     for update in ordered:
-        lines.append(f"  {STATUS_SYMBOLS['update']} {update.display_name}")
+        lines.append(f"  {update_symbol} {update.display_name}")
         lines.append(
             f"      ref: {abbreviate_sha(update.old_sha)} -> {abbreviate_sha(update.new_sha)} ({update.tag})"
         )
         lines.append("")
-    lines.append(f"  {len(ordered)} revision pin {'update' if len(ordered) == 1 else 'updates'}")
+    count = len(ordered)
+    lines.append(f"  {count} revision pin {'update' if count == 1 else 'updates'}")
     return "\n".join(lines).rstrip()
 
 
@@ -236,6 +242,11 @@ def _replace_one_revision_pin_line(
     if suffix and not suffix.startswith("#"):
         raise RevisionPinResolutionError(
             f"Unexpected trailing content after SHA pin for {update.display_name}. "
+            "No manifest changes were written."
+        )
+    if re.search(r"[\x00-\x1f\x7f]", update.tag):
+        raise RevisionPinResolutionError(
+            f"Unexpected control character in tag for {update.display_name}. "
             "No manifest changes were written."
         )
     lines[idx] = f"{prefix}{update.new_sha} # {update.tag}{newline}"

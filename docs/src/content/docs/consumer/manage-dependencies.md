@@ -184,9 +184,10 @@ SHAs. The lockfile pins the resolved commit either way, so two clones
 running `apm install` get the same bytes -- but a branch ref will resolve
 to a new SHA on the next `apm update`.
 
-When a dependency is pinned to a full 40-character SHA, `apm update`
-checks the authoritative upstream for the latest annotated semver tag,
-updates the SHA to that tag's commit, and leaves the tag as a YAML comment:
+For SHA-pinned deps, think of `apm update` as Dependabot-style review
+for AI packages: the manifest stays pinned to a commit, while the comment
+shows the release tag. See [`apm update`](../../reference/cli/update/) for
+the full rewrite rules.
 
 ```yaml
 dependencies:
