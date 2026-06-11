@@ -112,6 +112,7 @@ class GitSparseFileTransport:
                 self._state.wait()
         with self._lock:
             self._temp_dir.cleanup()
+            self._auth_url = None
 
     def fetch_file(self, file_path: str) -> bytes:
         """Fetch one file from the transport's repository/ref."""
@@ -130,10 +131,14 @@ class GitSparseFileTransport:
                     raise RuntimeError(
                         f"File '{file_path}' not found after git sparse checkout of "
                         f"{self._dep_ref.host}/{self._dep_ref.repo_url}@{self._ref}. "
-                        "Verify the path exists at that ref."
+                        "Verify the path exists at that ref "
+                        f"(try `git ls-tree -r --name-only {self._ref} -- {file_path}`)."
                     )
 
-            return target.read_bytes()
+                # The lock serializes sparse-checkout expansion and the
+                # containment/read pair so another checkout cannot race the
+                # target between ensure_path_within() and read_bytes().
+                return target.read_bytes()
         finally:
             with self._state:
                 self._active_fetches -= 1
@@ -171,7 +176,7 @@ class GitSparseFileTransport:
     def _set_sparse_paths(self, *file_paths: str) -> None:
         """Apply the accumulated file-level sparse paths."""
         self._sparse_paths.update(file_paths)
-        self._run(["git", "sparse-checkout", "set", "--no-cone", *sorted(self._sparse_paths)])
+        self._run(["git", "sparse-checkout", "set", "--no-cone", "--", *sorted(self._sparse_paths)])
 
     def _run(self, cmd: list[str]) -> None:
         """Run one git command and raise a sanitized error on failure."""

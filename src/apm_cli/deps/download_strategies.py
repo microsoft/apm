@@ -53,10 +53,13 @@ def _debug(message: str) -> None:
 
 def _close_git_file_transports(transports: dict[object, object]) -> None:
     """Close cached git file transports owned by a DownloadDelegate."""
-    for transport in transports.values():
+    for transport in list(transports.values()):
         close = getattr(transport, "close", None)
         if close is not None:
-            close()
+            try:
+                close()
+            except Exception as exc:
+                _debug(f"git file transport cleanup failed: {exc}")
     transports.clear()
 
 
@@ -721,7 +724,9 @@ class DownloadDelegate:
         try:
             content = self._download_gitlab_file_via_git(dep_ref, file_path, ref)
             if verbose_callback:
-                verbose_callback(f"Downloaded file via git: {host}/{dep_ref.repo_url}/{file_path}")
+                verbose_callback(
+                    f"Fetched file via git transport: {host}/{dep_ref.repo_url}/{file_path}"
+                )
             return content
         except (PathTraversalError, GitFileTransportSecurityError):
             # A traversal / symlink-escape attempt must hard-fail. It must
@@ -729,10 +734,11 @@ class DownloadDelegate:
             # rejected path fall through would hand an attacker a second
             # transport to probe. Propagate the security failure unchanged.
             raise
-        except (GitFileTransportError, RuntimeError, OSError):
+        except (GitFileTransportError, RuntimeError, OSError) as exc:
             fallback_target = f"{host}/{dep_ref.repo_url}"
             _debug(
-                f"git transport unavailable for {fallback_target}; falling back to GitLab REST API"
+                f"git transport unavailable for {fallback_target}; "
+                f"falling back to GitLab REST API ({type(exc).__name__})"
             )
             if verbose_callback:
                 verbose_callback(
@@ -768,7 +774,7 @@ class DownloadDelegate:
             response.raise_for_status()
             if verbose_callback:
                 verbose_callback(
-                    f"Downloaded file via GitLab REST API: {host}/{dep_ref.repo_url}/{file_path}"
+                    f"Fetched file via GitLab REST API: {host}/{dep_ref.repo_url}/{file_path}"
                 )
             return response.content
         except requests.exceptions.HTTPError as e:
@@ -784,7 +790,7 @@ class DownloadDelegate:
                     response.raise_for_status()
                     if verbose_callback:
                         verbose_callback(
-                            f"Downloaded file via GitLab REST API: "
+                            f"Fetched file via GitLab REST API: "
                             f"{host}/{dep_ref.repo_url}/{file_path}"
                         )
                     return response.content

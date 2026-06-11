@@ -115,20 +115,15 @@ apm pack                                 # marketplace.json also resolves agains
 APM fetches `path:`-specified files from GitLab dependencies via git sparse/partial
 checkout (the same transport as the clone). Git transport is tried first, so SSH
 keys and git credential helpers work without any extra token, and self-hosted
-GitLab instances where the API returns 410 (disabled) no longer fail.
+GitLab instances where the API returns 410 (disabled) no longer fail. Explicit
+`git:` / SSH URLs carry the host in the dependency; set `GITLAB_HOST` (or
+`APM_GITLAB_HOSTS`) only when bare-host or shorthand forms should classify as
+GitLab.
 
 If git transport is unavailable, `GITLAB_APM_PAT` is the fallback:
 
 ```bash
 export GITLAB_APM_PAT=glpat_your_token
-apm install
-```
-
-For self-hosted GitLab, also set `GITLAB_HOST` so APM classifies the host:
-
-```bash
-export GITLAB_HOST=gitlab.corp.example.com
-export GITLAB_APM_PAT=glpat_your_token   # fallback only; git transport is tried first
 apm install
 ```
 

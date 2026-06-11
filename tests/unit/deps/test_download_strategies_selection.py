@@ -1117,6 +1117,17 @@ class TestDownloadGitlabFile:
 
         mock_api.assert_not_called()
 
+    def test_ref_injection_from_git_transport_does_not_fallback(self) -> None:
+        """Git refs that look like options must hard-fail without REST fallback."""
+        host = _make_host()
+        self._setup_host_info(host)
+        d = DownloadDelegate(host)
+
+        with patch.object(host, "_resilient_get") as mock_api, pytest.raises(ValueError):
+            d.download_gitlab_file(self._dep(), "agents/spec.agent.md", ref="--upload-pack=x")
+
+        mock_api.assert_not_called()
+
     def test_same_repo_ref_reuses_git_file_transport(self) -> None:
         """Two GitLab path: files from one repo/ref share one sparse checkout."""
         host = _make_host()
