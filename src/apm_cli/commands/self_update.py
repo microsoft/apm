@@ -79,7 +79,7 @@ def _get_manual_update_command() -> str:
             try:
                 installer_url = _get_update_installer_url()
             except RuntimeError:
-                return "Set APM_INSTALLER_BASE_URL and re-run 'apm self-update'."
+                return "Set APM_INSTALLER_BASE_URL to your mirror base URL, then re-run 'apm self-update'."
         return f"powershell -ExecutionPolicy Bypass -c 'irm \"{installer_url}\" | iex'"
 
     if get_installer_base_url() is not None:
@@ -88,7 +88,9 @@ def _get_manual_update_command() -> str:
         try:
             installer_url = _get_update_installer_url()
         except RuntimeError:
-            return "Set APM_INSTALLER_BASE_URL and re-run 'apm self-update'."
+            return (
+                "Set APM_INSTALLER_BASE_URL to your mirror base URL, then re-run 'apm self-update'."
+            )
     return f'curl -sSL "{installer_url}" | sh'
 
 

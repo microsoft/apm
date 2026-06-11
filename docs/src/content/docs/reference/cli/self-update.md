@@ -35,7 +35,7 @@ Some package-manager distributions (for example, Homebrew) disable self-update a
 
 ## Enterprise bootstrap mirrors
 
-`apm self-update` uses the same mirror contract as the installer scripts. These variables are additive to the older `GITHUB_URL` / `APM_REPO` / `VERSION` flow:
+`apm self-update` uses the same mirror contract as the installer scripts. The canonical bootstrap mirror table lives in [installation](../../../getting-started/installation/#enterprise-bootstrap-mirror-mode); this command-specific table shows the same knobs alongside legacy update settings:
 
 | Variable | Default | Effect |
 |----------|---------|--------|

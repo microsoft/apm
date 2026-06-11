@@ -69,7 +69,7 @@ irm https://aka.ms/apm-windows | iex
 
 ## Enterprise bootstrap mirrors
 
-Set `APM_INSTALLER_BASE_URL`, `APM_RELEASE_METADATA_URL`, `APM_RELEASE_BASE_URL`, `APM_PYPI_INDEX_URL`, and `APM_NO_DIRECT_FALLBACK=1` to install and update APM through an internal mirror while failing closed on public fallback. The canonical variable table, GHES scoping note, and no-egress smoke recipe live in [installation.md](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md#enterprise-bootstrap-mirror-mode).
+Set `APM_INSTALLER_BASE_URL`, `APM_RELEASE_METADATA_URL`, `APM_RELEASE_BASE_URL`, `APM_PYPI_INDEX_URL`, and `APM_NO_DIRECT_FALLBACK=1` to install and update APM through an internal mirror while failing closed on public fallback. For verification, run the installer and `apm self-update --check` behind an egress proxy or wrappers that deny public GitHub, `aka.ms`, PyPI, Homebrew, and Scoop; only your mirror host should appear. The canonical variable table, GHES scoping note, and full no-egress smoke recipe live in [installation.md](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md#enterprise-bootstrap-mirror-mode).
 
 ```bash
 export APM_INSTALLER_BASE_URL="https://artifactory.mycorp.example/generic/apm-install"

@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and hosted `marketplace.json` URLs -- so teams can consume private,
   offline, or hosted catalogs without publishing a GitHub repo (closes
   #676). (#1739)
-- Enterprise bootstrap mirror mode lets `install.sh`, `install.ps1`, and `apm self-update` use `APM_RELEASE_METADATA_URL`, `APM_RELEASE_BASE_URL`, `APM_INSTALLER_BASE_URL`, `APM_PYPI_INDEX_URL`, and `APM_NO_DIRECT_FALLBACK` for internal release, installer, and PyPI mirrors with fail-closed public fallback, and closes #1680. (#1733)
+- Enterprise bootstrap mirror mode adds `APM_RELEASE_METADATA_URL`, `APM_RELEASE_BASE_URL`, `APM_INSTALLER_BASE_URL`, `APM_PYPI_INDEX_URL`, and `APM_NO_DIRECT_FALLBACK` so `install.sh`, `install.ps1`, and `apm self-update` can use internal mirrors with fail-closed public fallback; closes #1680. (#1733)
 
 ### Fixed
 
