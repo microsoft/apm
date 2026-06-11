@@ -5,7 +5,7 @@ import re
 import sys
 from pathlib import Path
 
-from apm_cli.bootstrap_mirror import (
+from ..bootstrap_mirror import (
     get_release_metadata_url,
     release_metadata_public_lookup_blocked,
 )
