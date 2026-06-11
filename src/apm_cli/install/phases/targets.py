@@ -68,7 +68,7 @@ def _as_yaml_targets(value: str | list[str] | None) -> list[str] | None:
 
 
 def _normalize_runtime_target_aliases(tokens: Iterable[str]) -> list[str]:
-    """Map runtime target aliases to canonical target names and dedupe them."""
+    """Map runtime aliases to canonical target names in first-seen order."""
     from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
 
     normalized: list[str] = []
@@ -375,6 +375,7 @@ def _resolve_targets_by_scope(
             parts = [t.strip() for t in raw_override.split(",") if t.strip()]
         else:
             parts = list(raw_override)
+        # Multi-token CLI parsing returns runtime aliases; convert them before filtering.
         parts = _normalize_runtime_target_aliases(parts)
         parts = [p for p in parts if p in _CANONICAL]
         if len(parts) == 1:
