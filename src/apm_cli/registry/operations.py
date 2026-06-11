@@ -372,7 +372,7 @@ class MCPServerOperations:
                                     collected_env_vars[var_name] = var_info
                                 else:
                                     logger.debug(
-                                        "Skipping optional MCP env var %s for %s: no value/default available",
+                                        "Skipping optional MCP env var %s for %s: no value/default; omitted from runtime config",
                                         var_name,
                                         server_ref,
                                     )

@@ -4,7 +4,7 @@ import os
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from ...utils.console import _rich_error, _rich_warning
 
@@ -29,7 +29,7 @@ _ENV_PLACEHOLDER_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>|" + _ENV_VAR_RE.pattern)
 _LEGACY_ANGLE_VAR_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>")
 
 
-def registry_field_is_required(field):
+def registry_field_is_required(field: dict[str, Any]) -> bool:
     """Return True unless registry metadata explicitly marks a field optional."""
     return field.get("required", field.get("is_required", True)) is not False
 
@@ -808,9 +808,9 @@ class MCPClientAdapter(ABC):
         if empty_value_vars and skip_prompting:
             var_names = [ev.get("name") for ev in empty_value_vars]
             _rich_warning(
-                f"Warning: The following required environment variables have no default "
-                f"value and cannot be prompted in non-interactive mode: {var_names}. "
-                "Set them in your environment and rerun apm install."
+                f"Required environment variables have no default value and cannot be "
+                f"prompted in non-interactive mode: {var_names}. Set them in your "
+                "environment and rerun `apm install`."
             )
 
         for env_var in env_vars:
@@ -867,9 +867,9 @@ class MCPClientAdapter(ABC):
                 resolved[name] = default_value
             elif required:
                 _rich_warning(
-                    f"Warning: Required environment variable '{name}' could not be resolved. "
+                    f"Required environment variable '{name}' could not be resolved. "
                     f"The MCP server may not function correctly. Set {name} in your "
-                    "environment and rerun apm install."
+                    "environment and rerun `apm install`."
                 )
                 resolved[name] = ""
 

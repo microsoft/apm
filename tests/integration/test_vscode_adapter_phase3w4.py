@@ -291,6 +291,64 @@ class TestConfigureMcpServer:
         assert "CONTEXT7_API_KEY" not in server.get("env", {})
         assert config.get("inputs", []) == []
 
+    def test_optional_env_vars_preserved_on_reinstall(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CONTEXT7_API_KEY", raising=False)
+        vscode_dir = tmp_path / ".vscode"
+        vscode_dir.mkdir()
+        mcp_json = vscode_dir / "mcp.json"
+        mcp_json.write_text(
+            json.dumps(
+                {
+                    "servers": {
+                        "context7": {
+                            "type": "stdio",
+                            "command": "npx",
+                            "args": ["-y", "@upstash/context7-mcp"],
+                            "env": {"CONTEXT7_API_KEY": "${env:CONTEXT7_API_KEY}"},
+                        }
+                    },
+                    "inputs": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        server_info = _context7_optional_env_server_info()
+        logger = MagicMock()
+
+        with (
+            patch("apm_cli.integration.mcp_integrator._get_console", return_value=None),
+            patch(
+                "apm_cli.registry.operations.MCPServerOperations.validate_servers_exist",
+                return_value=(["context7"], []),
+            ),
+            patch(
+                "apm_cli.registry.operations.MCPServerOperations.check_servers_needing_installation",
+                return_value=["context7"],
+            ),
+            patch(
+                "apm_cli.registry.operations.MCPServerOperations.batch_fetch_server_info",
+                return_value={"context7": server_info},
+            ),
+            patch(
+                "apm_cli.core.conflict_detector.MCPConflictDetector.check_server_exists",
+                return_value=False,
+            ),
+        ):
+            configured = run_mcp_install(
+                ["context7"],
+                runtime="vscode",
+                explicit_target="vscode",
+                project_root=tmp_path,
+                logger=logger,
+            )
+
+        config = json.loads(mcp_json.read_text(encoding="utf-8"))
+        server = config["servers"]["context7"]
+
+        assert configured == 1
+        assert server["env"] == {"CONTEXT7_API_KEY": "${env:CONTEXT7_API_KEY}"}
+        assert config.get("inputs", []) == []
+
     def test_adds_input_variables_without_duplicates(self, tmp_path):
         vscode_dir = tmp_path / ".vscode"
         vscode_dir.mkdir()

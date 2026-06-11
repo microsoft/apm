@@ -327,7 +327,7 @@ dependencies:
         #   ${input:<id>}         -> VS Code prompts user at runtime
         #   <VAR>                 -> deprecated; auto-translated, emits a warning
         # Registry-declared optional env/input fields are omitted when unset;
-        # see manifest-schema for reinstall preservation semantics.
+        # see manifest-schema section 4.2.4 for reinstall preservation semantics.
         Authorization: "Bearer ${MY_TOKEN}"
       tools: ["repos", "issues"]
 

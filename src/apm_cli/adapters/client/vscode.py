@@ -469,8 +469,8 @@ class VSCodeClientAdapter(MCPClientAdapter):
             return None
         return existing_mapping.get(name)
 
+    @staticmethod
     def _value_for_declared_vscode_env(
-        self,
         env_var,
         *,
         env_overrides=None,
@@ -489,13 +489,15 @@ class VSCodeClientAdapter(MCPClientAdapter):
         if registry_field_is_required(env_var):
             return input_ref
 
-        existing_value = self._existing_mapping_value(existing_server_config, "env", name)
-        if self._has_value(existing_value):
+        existing_value = VSCodeClientAdapter._existing_mapping_value(
+            existing_server_config, "env", name
+        )
+        if VSCodeClientAdapter._has_value(existing_value):
             return existing_value
 
         env_overrides = env_overrides or {}
         override_value = env_overrides.get(name)
-        if self._has_value(override_value):
+        if VSCodeClientAdapter._has_value(override_value):
             return f"${{env:{name}}}"
 
         return None
