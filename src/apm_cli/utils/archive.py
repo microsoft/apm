@@ -23,10 +23,33 @@ from apm_cli.utils.path_security import (
 )
 
 _MAX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+_COPY_CHUNK_BYTES = 1024 * 1024
 
 
 class ArchiveError(Exception):
     """Raised when an archive cannot be downloaded or extracted safely."""
+
+
+def _copy_member_within_limit(src: object, dst: object, running_total: int) -> int:
+    """Stream *src* into *dst*, enforcing the cumulative uncompressed cap.
+
+    Counts the ACTUAL bytes read from the (decompressed) member stream and
+    aborts mid-stream once the running total exceeds the cap, rather than
+    trusting the archive's header-declared member sizes. A crafted archive
+    that under-declares its sizes therefore cannot slip past the
+    decompression-bomb guard, and a single huge member is never buffered
+    whole in memory.
+    """
+    total = running_total
+    while True:
+        chunk = src.read(_COPY_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _MAX_UNCOMPRESSED_BYTES:
+            raise ArchiveError(f"Archive exceeds size limit of {_MAX_UNCOMPRESSED_BYTES} bytes")
+        dst.write(chunk)
+    return total
 
 
 def _check_archive_member(member_path: str) -> None:
@@ -97,18 +120,13 @@ def _extract_tar_gz(data: bytes, dest_dir: str) -> list[str]:
                 if not member.isreg():
                     continue
                 _check_archive_member(member.name)
-                total_size += member.size
-                if total_size > _MAX_UNCOMPRESSED_BYTES:
-                    raise ArchiveError(
-                        f"Archive exceeds size limit of {_MAX_UNCOMPRESSED_BYTES} bytes"
-                    )
                 destination = _safe_destination(dest_dir, member.name)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 src = archive.extractfile(member)
                 if src is None:
                     continue
                 with src, open(destination, "wb") as dst:
-                    dst.write(src.read())
+                    total_size = _copy_member_within_limit(src, dst, total_size)
                 extracted.append(member.name)
     except tarfile.TarError as exc:
         raise ArchiveError(f"Failed to read tar.gz archive: {exc}") from exc
@@ -125,15 +143,10 @@ def _extract_zip(data: bytes, dest_dir: str) -> list[str]:
                 if info.filename.endswith("/"):
                     continue
                 _check_archive_member(info.filename)
-                total_size += info.file_size
-                if total_size > _MAX_UNCOMPRESSED_BYTES:
-                    raise ArchiveError(
-                        f"Archive exceeds size limit of {_MAX_UNCOMPRESSED_BYTES} bytes"
-                    )
                 destination = _safe_destination(dest_dir, info.filename)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 with archive.open(info) as src, open(destination, "wb") as dst:
-                    dst.write(src.read())
+                    total_size = _copy_member_within_limit(src, dst, total_size)
                 extracted.append(info.filename)
     except zipfile.BadZipFile as exc:
         raise ArchiveError(f"Failed to read zip archive: {exc}") from exc

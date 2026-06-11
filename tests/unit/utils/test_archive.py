@@ -85,6 +85,26 @@ def test_extract_tar_gz_rejects_symlink(tmp_path: Path) -> None:
         _extract_tar_gz(buf.getvalue(), str(tmp_path / "out"))
 
 
+def test_extract_zip_rejects_decompression_bomb(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(archive_mod, "_MAX_UNCOMPRESSED_BYTES", 1024)
+    archive = _zip_bytes({"plugin/big.bin": b"x" * 4096})
+
+    with pytest.raises(ArchiveError, match=r"exceeds size limit"):
+        _extract_zip(archive, str(tmp_path / "out"))
+
+
+def test_extract_tar_gz_rejects_decompression_bomb(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(archive_mod, "_MAX_UNCOMPRESSED_BYTES", 1024)
+    archive = _tar_gz_bytes({"plugin/big.bin": b"x" * 4096})
+
+    with pytest.raises(ArchiveError, match=r"exceeds size limit"):
+        _extract_tar_gz(archive, str(tmp_path / "out"))
+
+
 def test_extract_zip_writes_safe_members(tmp_path: Path) -> None:
     archive = _zip_bytes({"plugin/SKILL.md": b"content"})
     out = tmp_path / "out"
