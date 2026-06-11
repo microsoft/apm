@@ -106,7 +106,7 @@ class TestCleanRemovesApmGeneratedStaleCLAUDEMD:
         )
 
     def test_clean_log_mentions_removal(self, tmp_path):
-        """A success-level log about the removal must be emitted."""
+        """A success-level log about the removal must be emitted (green/bold)."""
         _make_project(tmp_path, populate_rules=True)
         _apm_generated_claude_md(tmp_path)
 
@@ -115,6 +115,9 @@ class TestCleanRemovesApmGeneratedStaleCLAUDEMD:
         class _CapturingLogger:
             def progress(self, msg, **kw):
                 logged.append(("progress", msg))
+
+            def success(self, msg, **kw):
+                logged.append(("success", msg))
 
             def warning(self, msg, **kw):
                 logged.append(("warning", msg))
@@ -132,9 +135,11 @@ class TestCleanRemovesApmGeneratedStaleCLAUDEMD:
         primitives = _make_primitives(tmp_path)
         compiler._compile_claude_md(config, primitives)
 
-        messages = [m for _, m in logged]
-        assert any("Removed stale" in m and "CLAUDE.md" in m for m in messages), (
-            f"Expected a 'Removed stale CLAUDE.md' log line, got: {messages}"
+        # Must be logged at "success" level (green) -- a destructive file deletion
+        # must render visibly distinct from an info/progress no-op (issue #1729 fix).
+        success_messages = [m for level, m in logged if level == "success"]
+        assert any("Removed stale" in m and "CLAUDE.md" in m for m in success_messages), (
+            f"Expected a 'Removed stale CLAUDE.md' log line at 'success' level, got: {logged}"
         )
 
 
@@ -419,4 +424,96 @@ class TestDryRunCleanBehavior:
         assert "would remove stale CLAUDE.md" not in result.content, (
             "Dry-run without --clean must not mention stale-removal; "
             f"got content:\n{result.content}"
+        )
+
+    def test_dry_run_clean_preview_emitted_via_logger(self, tmp_path):
+        """The stale-removal preview must be emitted through self._log (progress)
+        so it reaches the terminal on the distributed dry-run path.
+
+        This is the regression test for issue #1729: cli.py does `pass` on
+        dry-run success and never prints result.content, so the preview MUST
+        arrive via the logger rather than relying solely on result.content.
+        Without the fix this test would fail because no logger call is made.
+        """
+        _make_project(tmp_path, populate_rules=True)
+        _apm_generated_claude_md(tmp_path)
+
+        logged: list[tuple[str, str]] = []
+
+        class _CapturingLogger:
+            def progress(self, msg, **kw):
+                logged.append(("progress", msg))
+
+            def success(self, msg, **kw):
+                logged.append(("success", msg))
+
+            def warning(self, msg, **kw):
+                logged.append(("warning", msg))
+
+            def verbose_detail(self, msg, **kw):
+                pass
+
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._logger = _CapturingLogger()
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=True,
+            dry_run=True,
+        )
+        primitives = _make_primitives(tmp_path)
+        compiler._compile_claude_md(config, primitives)
+
+        messages = [m for _, m in logged]
+        assert any("would remove stale" in m and "CLAUDE.md" in m for m in messages), (
+            "Dry-run --clean must emit the stale-removal preview through the logger "
+            "(not just in result.content) so it reaches the terminal via the distributed "
+            "cli.py dry-run path. "
+            f"Logger calls captured: {logged}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# would_emit_no_claude_md guard: constitution case must NOT show removal preview
+# ---------------------------------------------------------------------------
+
+
+class TestConstitutionCaseNoRemovalPreview:
+    """A project with a constitution emits a CLAUDE.md even when .claude/rules/
+    is populated (the constitution block keeps the file alive). In that case
+    would_emit_no_claude_md is False and no removal preview must appear."""
+
+    def test_dry_run_clean_with_constitution_does_not_preview_removal(self, tmp_path):
+        """Dry-run + --clean + .claude/rules/ populated + constitution present
+        -> NO removal preview (CLAUDE.md would still be written for the constitution)."""
+        from apm_cli.compilation.constitution import clear_constitution_cache
+
+        _make_project(tmp_path, populate_rules=True)
+        _apm_generated_claude_md(tmp_path)
+
+        # Place a constitution at the canonical path so the formatter emits a CLAUDE.md.
+        # The path is .specify/memory/constitution.md relative to base_dir.
+        constitution_dir = tmp_path / ".specify" / "memory"
+        constitution_dir.mkdir(parents=True)
+        (constitution_dir / "constitution.md").write_text(
+            "# Constitution\nBe helpful.\n", encoding="utf-8"
+        )
+        # Clear the module-level constitution cache so this test sees the new file.
+        clear_constitution_cache()
+
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=True,
+            dry_run=True,
+        )
+        primitives = _make_primitives(tmp_path)
+        result = compiler._compile_claude_md(config, primitives)
+
+        # With a constitution the content_map is non-empty (root CLAUDE.md is kept
+        # for the constitution block), so would_emit_no_claude_md is False and the
+        # removal preview block must NOT run.
+        assert "would remove stale" not in result.content, (
+            "When a constitution keeps CLAUDE.md alive, the dry-run --clean path "
+            "must NOT show a stale-removal preview. "
+            f"Got content:\n{result.content}"
         )

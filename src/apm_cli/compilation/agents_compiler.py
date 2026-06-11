@@ -708,6 +708,12 @@ class AgentsCompiler:
         all_warnings = self.warnings + claude_result.warnings
         all_errors = self.errors + claude_result.errors
 
+        # would_emit_no_claude_md is True when the formatter produced no CLAUDE.md
+        # files because skip_instructions fired (all content already in .claude/rules/).
+        # Used symmetrically in the dry-run preview block and the live-removal block so
+        # both paths share a single, precise emptiness signal.
+        would_emit_no_claude_md = len(claude_result.content_map) == 0 and skip_instructions
+
         # Handle dry-run mode
         if config.dry_run:
             # Generate preview summary
@@ -731,17 +737,30 @@ class AgentsCompiler:
             # Preview stale CLAUDE.md removal so --dry-run --clean is self-explanatory.
             # Read the file here (safe in dry-run: we never mutate it) to check for
             # the APM marker, mirroring the Copilot root-instructions convention.
-            if skip_instructions and config.clean_orphaned:
+            # Only show the preview when no CLAUDE.md would be written -- a project
+            # WITH a constitution emits a CLAUDE.md and should NOT show a removal preview.
+            if would_emit_no_claude_md and config.clean_orphaned:
                 root_claude_md = self.base_dir / "CLAUDE.md"
+                rel = portable_relpath(root_claude_md, self.base_dir)
                 if root_claude_md.exists():
                     try:
                         existing_content = root_claude_md.read_text(encoding="utf-8")
                     except OSError:
                         existing_content = None
                     if existing_content is not None and CLAUDE_HEADER in existing_content:
-                        preview_lines.append(
-                            "  (would remove stale CLAUDE.md -- instructions now live"
+                        removal_preview = (
+                            f"  (would remove stale {rel} -- instructions now live"
                             " in .claude/rules/)"
+                        )
+                        preview_lines.append(removal_preview)
+                        # Emit the preview through the logger so it reaches the terminal
+                        # on the distributed dry-run path (cli.py does `pass` on dry-run
+                        # success and never prints result.content -- issue #1729 fix).
+                        self._log(
+                            "progress",
+                            f"(would remove stale {rel} -- instructions now live"
+                            " in .claude/rules/)",
+                            symbol="info",
                         )
 
             return CompilationResult(
@@ -797,7 +816,7 @@ class AgentsCompiler:
         stats = claude_result.stats.copy()
         stats["claude_files_written"] = files_written
 
-        if files_written == 0 and skip_instructions:
+        if would_emit_no_claude_md:
             self._log(
                 "progress",
                 "CLAUDE.md not generated -- Claude Code reads .claude/rules/ directly,"
@@ -807,8 +826,10 @@ class AgentsCompiler:
             # Remove a stale APM-generated CLAUDE.md when --clean is set.
             # A hand-authored file (no CLAUDE_HEADER marker) is never deleted;
             # a warning is emitted instead to match the Copilot-root convention.
+            # Note: the dry_run guard here is unreachable (dry-run returns above),
+            # but omitting it keeps the intent explicit for readers.
             root_claude_md = self.base_dir / "CLAUDE.md"
-            if root_claude_md.exists() and not config.dry_run:
+            if root_claude_md.exists():
                 rel = portable_relpath(root_claude_md, self.base_dir)
                 try:
                     existing_content = root_claude_md.read_text(encoding="utf-8")
@@ -819,12 +840,11 @@ class AgentsCompiler:
                     if CLAUDE_HEADER in existing_content:
                         if config.clean_orphaned:
                             try:
-                                root_claude_md.unlink()
+                                root_claude_md.unlink()  # safe: APM-generated marker confirmed above
                                 self._log(
-                                    "progress",
+                                    "success",
                                     f"Removed stale {rel} -- instructions now live in"
                                     " .claude/rules/",
-                                    symbol="success",
                                 )
                             except OSError as exc:
                                 all_warnings.append(f"Could not remove {rel}: {exc!s}")

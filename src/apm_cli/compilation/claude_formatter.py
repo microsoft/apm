@@ -274,13 +274,14 @@ class ClaudeFormatter:
             placement (ClaudePlacement): Placement result with instructions.
             primitives (PrimitiveCollection): Full primitive collection.
             skip_instructions (bool): If True, omit the Project Standards section.
-            source_attribution (bool): If True, include cosmetic opt-in comments
-                (APM Version, footer). Defaults to False to reduce token overhead.
-                CLAUDE_HEADER and Build ID are always emitted regardless of this
-                flag: CLAUDE_HEADER is a functional marker used by
-                ``apm compile --clean`` to distinguish APM-generated files from
-                hand-authored ones (stale-file removal, issue #1729); Build ID
-                is always present for drift normalization.
+            source_attribution (bool): Controls the opt-in cosmetic annotations
+                only: when True, the APM Version comment and the footer are
+                included; when False (default) they are omitted to reduce token
+                overhead. CLAUDE_HEADER and Build ID are always emitted
+                regardless of this flag: CLAUDE_HEADER is a functional marker
+                used by ``apm compile --clean`` to distinguish APM-generated
+                files from hand-authored ones (stale-file removal, issue #1729);
+                Build ID is always present for drift normalization.
 
         Returns:
             str: Generated CLAUDE.md content.
