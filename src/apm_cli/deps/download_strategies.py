@@ -29,6 +29,7 @@ from ..utils.github_host import (
     default_host,
     is_github_hostname,
 )
+from ..utils.path_security import PathTraversalError
 from .git_file_transport import fetch_file_via_git_sparse
 from .host_backends import backend_for
 
@@ -665,8 +666,19 @@ class DownloadDelegate:
             if verbose_callback:
                 verbose_callback(f"Downloaded file via git: {host}/{dep_ref.repo_url}/{file_path}")
             return content
+        except PathTraversalError:
+            # A traversal / symlink-escape attempt must hard-fail. It must
+            # NOT be silently retried over the REST transport -- letting a
+            # rejected path fall through would hand an attacker a second
+            # transport to probe. Propagate the security failure unchanged.
+            raise
         except Exception as git_err:
             _debug(f"git transport failed for {host}/{dep_ref.repo_url}/{file_path}: {git_err}")
+            if verbose_callback:
+                verbose_callback(
+                    f"[i] git transport unavailable for {host}/{dep_ref.repo_url}/{file_path}; "
+                    f"falling back to GitLab REST API ({git_err})"
+                )
 
         # -- Fallback: GitLab REST v4 API (requires GITLAB_APM_PAT / GITLAB_TOKEN) --
         org = project_path.split("/")[0]
@@ -695,7 +707,10 @@ class DownloadDelegate:
             response = self._host._resilient_get(api_url, headers=headers, timeout=30)
             response.raise_for_status()
             if verbose_callback:
-                verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
+                verbose_callback(
+                    f"[i] Downloaded file via GitLab REST API: "
+                    f"{host}/{dep_ref.repo_url}/{file_path}"
+                )
             return response.content
         except requests.exceptions.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
@@ -709,7 +724,10 @@ class DownloadDelegate:
                     response = self._host._resilient_get(fallback_url, headers=headers, timeout=30)
                     response.raise_for_status()
                     if verbose_callback:
-                        verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
+                        verbose_callback(
+                            f"[i] Downloaded file via GitLab REST API: "
+                            f"{host}/{dep_ref.repo_url}/{file_path}"
+                        )
                     return response.content
                 except requests.exceptions.HTTPError as fallback_err:
                     raise RuntimeError(

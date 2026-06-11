@@ -490,7 +490,12 @@ class TestDownloadGitlabFilePhase3W5:
         result = delegate.download_gitlab_file(dep, "README.md", verbose_callback=callback)
 
         assert result == b"ok"
-        callback.assert_called_once_with("Downloaded file: gitlab.example.com/group/repo/README.md")
+        # Git transport is unmocked and fails, so a fallback-transition note
+        # fires before the REST-API success note. The success note attributes
+        # the GitLab REST API as the transport that answered (410 triage).
+        callback.assert_any_call(
+            "[i] Downloaded file via GitLab REST API: gitlab.example.com/group/repo/README.md"
+        )
 
     def test_non_default_ref_404_raises_specific_error(self) -> None:
         host = make_host(resolved_token=None, api_base="https://gitlab.example.com/api/v4")
@@ -513,7 +518,9 @@ class TestDownloadGitlabFilePhase3W5:
         )
 
         assert result == b"ok"
-        callback.assert_called_once_with("Downloaded file: gitlab.example.com/group/repo/README.md")
+        callback.assert_any_call(
+            "[i] Downloaded file via GitLab REST API: gitlab.example.com/group/repo/README.md"
+        )
 
     def test_fallback_ref_404_reports_both_refs(self) -> None:
         host = make_host(resolved_token=None, api_base="https://gitlab.example.com/api/v4")

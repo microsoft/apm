@@ -415,3 +415,34 @@ class TestGitlabGitTransportIntegration:
                 mock_api.side_effect = RuntimeError("401 Unauthorized")
                 with pytest.raises(RuntimeError):
                     downloader._download_github_file(dep_ref, "agents/spec.agent.md", "main")
+
+    def test_path_traversal_in_git_not_swallowed_into_rest_fallback(self) -> None:
+        """Security: a PathTraversalError from git transport must hard-fail.
+
+        Regression trap for the supply-chain follow-up on #1740: a path
+        validation / symlink-escape rejection raised by the git transport
+        must propagate to the caller, NOT be caught and silently retried
+        over the GitLab REST API. A traversal attempt must not gain a
+        second transport to probe, so `_resilient_get` is never reached.
+        """
+        from apm_cli.deps.github_downloader import GitHubPackageDownloader
+
+        dep_ref = _make_gitlab_dep("gitlab.com")
+
+        with (
+            patch.dict(os.environ, {"GITLAB_APM_PAT": "glpat-should-not-be-used"}, clear=True),
+            _CRED_FILL_PATCH,
+        ):
+            downloader = GitHubPackageDownloader()
+            with (
+                patch(
+                    "apm_cli.deps.download_strategies.fetch_file_via_git_sparse",
+                    side_effect=PathTraversalError("path '../../etc/passwd' escapes work tree"),
+                ),
+                patch.object(downloader, "_resilient_get") as mock_api,
+            ):
+                with pytest.raises(PathTraversalError):
+                    downloader._download_github_file(dep_ref, "../../etc/passwd", "main")
+
+        # The REST fallback must never be reached for a traversal rejection.
+        mock_api.assert_not_called()

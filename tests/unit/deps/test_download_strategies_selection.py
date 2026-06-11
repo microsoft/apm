@@ -1074,7 +1074,12 @@ class TestDownloadGitlabFile:
             return_value={},
         ):
             d.download_gitlab_file(self._dep(), "apm.yml", verbose_callback=callback)
-        callback.assert_called_once()
+        # Git transport is unmocked here and fails, so the callback fires for
+        # the fallback-transition note AND the REST-API success note. At least
+        # one call must attribute the REST API as the transport that answered
+        # (transport-attribution for 410 triage).
+        assert callback.called
+        assert any("REST API" in str(c.args[0]) for c in callback.call_args_list)
 
 
 # ---------------------------------------------------------------------------
