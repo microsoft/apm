@@ -1876,6 +1876,25 @@ class TestFetchLocalMetadata:
 
         assert result is None
 
+    def test_apm_yml_symlink_escape_returns_none(self, tmp_path: Path) -> None:
+        """A symlinked package apm.yml that escapes the root is skipped."""
+        outside = tmp_path.parent / "outside-apm.yml"
+        outside.write_text(
+            "name: local-tool\ndescription: Outside description\n",
+            encoding="utf-8",
+        )
+        pkg_dir = tmp_path / "packages" / "local-tool"
+        pkg_dir.mkdir(parents=True)
+        try:
+            (pkg_dir / "apm.yml").symlink_to(outside)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+
+        builder = self._make_builder(tmp_path)
+        result = builder._fetch_local_metadata(self._make_pkg())
+
+        assert result is None
+
     def test_malformed_yaml_returns_none(self, tmp_path: Path) -> None:
         """Bad YAML -> None, no exception propagates."""
         pkg_dir = tmp_path / "packages" / "local-tool"

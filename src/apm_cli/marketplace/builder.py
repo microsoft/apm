@@ -860,7 +860,8 @@ class MarketplaceBuilder:
             file_path = package_root / "apm.yml"
             if not file_path.is_file():
                 return None
-            with file_path.open("rb") as handle:
+            metadata_path = ensure_path_within(file_path, project_root)
+            with metadata_path.open("rb") as handle:
                 raw = handle.read(_LOCAL_METADATA_MAX_BYTES + 1)
             if len(raw) > _LOCAL_METADATA_MAX_BYTES:
                 logger.debug(
