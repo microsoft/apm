@@ -12,7 +12,9 @@ import json
 import os
 import random
 import sys
+import threading
 import time
+import weakref
 from pathlib import Path
 from urllib.parse import quote
 
@@ -30,7 +32,11 @@ from ..utils.github_host import (
     is_github_hostname,
 )
 from ..utils.path_security import PathTraversalError
-from .git_file_transport import fetch_file_via_git_sparse
+from .git_file_transport import (
+    GitFileTransportError,
+    GitSparseFileTransport,
+    fetch_file_via_git_sparse,
+)
 from .host_backends import backend_for
 
 # ---------------------------------------------------------------------------
@@ -43,6 +49,15 @@ def _debug(message: str) -> None:
     """Print debug message if APM_DEBUG environment variable is set."""
     if os.environ.get("APM_DEBUG"):
         print(f"[DEBUG] {message}", file=sys.stderr)
+
+
+def _close_git_file_transports(transports: dict[object, object]) -> None:
+    """Close cached git file transports owned by a DownloadDelegate."""
+    for transport in transports.values():
+        close = getattr(transport, "close", None)
+        if close is not None:
+            close()
+    transports.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +87,15 @@ class DownloadDelegate:
                 this delegate.
         """
         self._host = host
+        self._git_file_transports: dict[
+            tuple[str, str, str, int | None], GitSparseFileTransport
+        ] = {}
+        self._git_file_transports_lock = threading.Lock()
+        self._git_file_transport_finalizer = weakref.finalize(
+            self,
+            _close_git_file_transports,
+            self._git_file_transports,
+        )
 
     # ------------------------------------------------------------------
     # HTTP resilient GET
@@ -621,6 +645,56 @@ class DownloadDelegate:
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Network error downloading {file_path}: {e}") from e
 
+    def _gitlab_file_transport_key(
+        self, dep_ref: DependencyReference, ref: str
+    ) -> tuple[str, str, str, int | None]:
+        """Return the cache key for one GitLab git-file checkout."""
+        return (dep_ref.host or default_host(), dep_ref.repo_url, ref, dep_ref.port)
+
+    def _discard_gitlab_file_transport(self, key: tuple[str, str, str, int | None]) -> None:
+        """Close and remove a failed cached git-file checkout."""
+        with self._git_file_transports_lock:
+            transport = self._git_file_transports.pop(key, None)
+        if transport is not None:
+            transport.close()
+
+    def _download_gitlab_file_via_git(
+        self,
+        dep_ref: DependencyReference,
+        file_path: str,
+        ref: str,
+    ) -> bytes:
+        """Fetch a GitLab path: file via a reusable sparse checkout."""
+        # Preserve existing patch points: tests and older extensions can still
+        # monkeypatch the module-level function and exercise the fallback path.
+        if fetch_file_via_git_sparse.__module__ != "apm_cli.deps.git_file_transport":
+            git_env = {**os.environ, **(self._host.git_env or {})}
+            return fetch_file_via_git_sparse(
+                dep_ref,
+                file_path,
+                ref,
+                build_repo_url_fn=self.build_repo_url,
+                git_env=git_env,
+            )
+
+        key = self._gitlab_file_transport_key(dep_ref, ref)
+        with self._git_file_transports_lock:
+            transport = self._git_file_transports.get(key)
+            if transport is None:
+                git_env = {**os.environ, **(self._host.git_env or {})}
+                transport = GitSparseFileTransport(
+                    dep_ref,
+                    ref,
+                    build_repo_url_fn=self.build_repo_url,
+                    git_env=git_env,
+                )
+                self._git_file_transports[key] = transport
+        try:
+            return transport.fetch_file(file_path)
+        except GitFileTransportError:
+            self._discard_gitlab_file_transport(key)
+            raise
+
     # ------------------------------------------------------------------
     # GitLab file download
     # ------------------------------------------------------------------
@@ -635,7 +709,7 @@ class DownloadDelegate:
         """Download a GitLab file: git-transport-first, REST API as fallback.
 
         Primary path (the 410-killer): extracts the file via git sparse/
-        partial checkout (blob:none + cone sparse-checkout) so SSH keys and
+        partial checkout (blob:none + file-level sparse paths) so SSH keys and
         system git credentials are sufficient -- no REST API token needed.
 
         Fallback (thin GITLAB_PAT path): if the git transport fails (e.g.
@@ -655,14 +729,7 @@ class DownloadDelegate:
 
         # -- Primary: git sparse/partial checkout (works even when API is 410) --
         try:
-            git_env = {**os.environ, **(self._host.git_env or {})}
-            content = fetch_file_via_git_sparse(
-                dep_ref,
-                file_path,
-                ref,
-                build_repo_url_fn=self._host._build_repo_url,
-                git_env=git_env,
-            )
+            content = self._download_gitlab_file_via_git(dep_ref, file_path, ref)
             if verbose_callback:
                 verbose_callback(f"Downloaded file via git: {host}/{dep_ref.repo_url}/{file_path}")
             return content
@@ -679,7 +746,7 @@ class DownloadDelegate:
             )
             if verbose_callback:
                 verbose_callback(
-                    f"[i] git transport unavailable for {fallback_target}; "
+                    f"git transport unavailable for {fallback_target}; "
                     "falling back to GitLab REST API"
                 )
 
@@ -711,8 +778,7 @@ class DownloadDelegate:
             response.raise_for_status()
             if verbose_callback:
                 verbose_callback(
-                    f"[i] Downloaded file via GitLab REST API: "
-                    f"{host}/{dep_ref.repo_url}/{file_path}"
+                    f"Downloaded file via GitLab REST API: {host}/{dep_ref.repo_url}/{file_path}"
                 )
             return response.content
         except requests.exceptions.HTTPError as e:
@@ -728,7 +794,7 @@ class DownloadDelegate:
                     response.raise_for_status()
                     if verbose_callback:
                         verbose_callback(
-                            f"[i] Downloaded file via GitLab REST API: "
+                            f"Downloaded file via GitLab REST API: "
                             f"{host}/{dep_ref.repo_url}/{file_path}"
                         )
                     return response.content

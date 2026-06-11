@@ -580,12 +580,12 @@ class TestFQDNVirtualPaths:
 
     def test_https_url_with_path_rejected(self):
         """HTTPS git URLs can't embed virtual paths -- use dict format with path: instead."""
-        with pytest.raises(ValueError, match=r"\[x\] A subpath cannot be embedded in a git URL"):
+        with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
             DependencyReference.parse("https://gitlab.com/acme/repo/prompts/file.prompt.md")
 
     def test_ssh_url_with_path_rejected(self):
         """SSH git URLs can't embed virtual paths -- use dict format with path: instead."""
-        with pytest.raises(ValueError, match=r"\[x\] A subpath cannot be embedded in a git URL"):
+        with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
             DependencyReference.parse("git@gitlab.com:acme/repo/prompts/code-review.prompt.md")
 
 
@@ -1309,17 +1309,17 @@ class TestEmbeddedSubpathInGitUrl:
 
     def test_scp_url_with_skills_subpath_raises_friendly_error(self) -> None:
         """git@github.com:org/repo/skills/hello-world.git must raise before git runs."""
-        with pytest.raises(ValueError, match=r"\[x\] A subpath cannot be embedded in a git URL"):
+        with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
             DependencyReference.parse("git@github.com:org/repo/skills/hello-world.git")
 
     def test_ssh_protocol_url_with_skills_subpath_raises_friendly_error(self) -> None:
         """ssh://git@github.com/org/repo/skills/hello-world.git must raise."""
-        with pytest.raises(ValueError, match=r"\[x\] A subpath cannot be embedded in a git URL"):
+        with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
             DependencyReference.parse("ssh://git@github.com/org/repo/skills/hello-world.git")
 
     def test_https_url_with_skills_subpath_raises_friendly_error(self) -> None:
         """https://github.com/org/repo/skills/hello-world.git must raise."""
-        with pytest.raises(ValueError, match=r"\[x\] A subpath cannot be embedded in a git URL"):
+        with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
             DependencyReference.parse("https://github.com/org/repo/skills/hello-world.git")
 
     def test_error_message_mentions_path_key(self) -> None:
@@ -1329,12 +1329,12 @@ class TestEmbeddedSubpathInGitUrl:
 
     def test_scp_agents_subpath_raises(self) -> None:
         """Primitive 'agents' embedded in SCP URL also raises."""
-        with pytest.raises(ValueError, match=r"\[x\] A subpath cannot be embedded in a git URL"):
+        with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
             DependencyReference.parse("git@github.com:org/repo/agents/coder.git")
 
     def test_parse_from_dict_scp_raises_friendly_error(self) -> None:
         """parse_from_dict with git: key containing embedded subpath raises."""
-        with pytest.raises(ValueError, match=r"\[x\] A subpath cannot be embedded in a git URL"):
+        with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
             DependencyReference.parse_from_dict(
                 {"git": "git@github.com:org/repo/skills/hello-world.git"}
             )

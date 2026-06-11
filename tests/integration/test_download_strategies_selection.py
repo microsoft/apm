@@ -547,7 +547,7 @@ class TestDownloadGitlabFile:
         # subprocess/network work. The success note attributes the GitLab REST
         # API as the transport that answered (410 triage).
         callback.assert_any_call(
-            "[i] Downloaded file via GitLab REST API: gitlab.example.com/group/repo/README.md"
+            "Downloaded file via GitLab REST API: gitlab.example.com/group/repo/README.md"
         )
 
     def test_non_default_ref_404_raises_specific_error(self) -> None:
@@ -572,7 +572,7 @@ class TestDownloadGitlabFile:
 
         assert result == b"ok"
         callback.assert_any_call(
-            "[i] Downloaded file via GitLab REST API: gitlab.example.com/group/repo/README.md"
+            "Downloaded file via GitLab REST API: gitlab.example.com/group/repo/README.md"
         )
 
     def test_fallback_ref_404_reports_both_refs(self) -> None:

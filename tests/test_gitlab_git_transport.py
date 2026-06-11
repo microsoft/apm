@@ -45,6 +45,16 @@ def _mock_subprocess_success() -> Mock:
     return m
 
 
+class _FakeTemporaryDirectory:
+    """Test double for tempfile.TemporaryDirectory with a fixed path."""
+
+    def __init__(self, path: Path) -> None:
+        self.name = str(path)
+
+    def cleanup(self) -> None:
+        """Leave test-created files in place for assertions."""
+
+
 # ---------------------------------------------------------------------------
 # Unit tests for fetch_file_via_git_sparse
 # ---------------------------------------------------------------------------
@@ -101,8 +111,8 @@ class TestFetchFileViaGitSparse:
         mock_run.return_value = _mock_subprocess_success()
 
         with patch(
-            "apm_cli.deps.git_file_transport.tempfile.mkdtemp",
-            return_value=str(work_parent),
+            "apm_cli.deps.git_file_transport.tempfile.TemporaryDirectory",
+            return_value=_FakeTemporaryDirectory(work_parent),
         ):
             result = fetch_file_via_git_sparse(
                 _make_gitlab_dep(),
@@ -135,8 +145,8 @@ class TestFetchFileViaGitSparse:
 
         with (
             patch(
-                "apm_cli.deps.git_file_transport.tempfile.mkdtemp",
-                return_value=str(work_parent),
+                "apm_cli.deps.git_file_transport.tempfile.TemporaryDirectory",
+                return_value=_FakeTemporaryDirectory(work_parent),
             ),
             patch("requests.get") as mock_requests_get,
         ):
@@ -178,8 +188,8 @@ class TestFetchFileViaGitSparse:
 
         with (
             patch(
-                "apm_cli.deps.git_file_transport.tempfile.mkdtemp",
-                return_value=str(work_parent),
+                "apm_cli.deps.git_file_transport.tempfile.TemporaryDirectory",
+                return_value=_FakeTemporaryDirectory(work_parent),
             ),
             pytest.raises(PathTraversalError),
         ):
@@ -207,8 +217,8 @@ class TestFetchFileViaGitSparse:
         mock_run.return_value = _mock_subprocess_success()
 
         with patch(
-            "apm_cli.deps.git_file_transport.tempfile.mkdtemp",
-            return_value=str(work_parent),
+            "apm_cli.deps.git_file_transport.tempfile.TemporaryDirectory",
+            return_value=_FakeTemporaryDirectory(work_parent),
         ):
             result = fetch_file_via_git_sparse(
                 _make_gitlab_dep(),
@@ -220,11 +230,11 @@ class TestFetchFileViaGitSparse:
 
         assert result == b"root agent"
         all_cmds = [c[0][0] for c in mock_run.call_args_list]
-        # No sparse-checkout init call for root files.
-        sparse_inits = [c for c in all_cmds if "sparse-checkout" in c and "init" in c]
-        assert not sparse_inits, (
-            f"Expected no sparse-checkout init for root file, got: {sparse_inits}"
-        )
+        # Root files are now included as exact file-level sparse patterns,
+        # avoiding a whole-tree checkout while still using blob:none.
+        sparse_sets = [c for c in all_cmds if "sparse-checkout" in c and "set" in c]
+        assert sparse_sets
+        assert any("root.agent.md" in cmd for cmd in sparse_sets)
 
     @patch("apm_cli.deps.git_file_transport.subprocess.run")
     def test_git_failure_raises_runtime_error(self, mock_run: Mock, tmp_path: Path) -> None:
@@ -240,8 +250,8 @@ class TestFetchFileViaGitSparse:
 
         with (
             patch(
-                "apm_cli.deps.git_file_transport.tempfile.mkdtemp",
-                return_value=str(work_parent),
+                "apm_cli.deps.git_file_transport.tempfile.TemporaryDirectory",
+                return_value=_FakeTemporaryDirectory(work_parent),
             ),
             pytest.raises(RuntimeError, match="git file fetch failed"),
         ):
@@ -252,6 +262,73 @@ class TestFetchFileViaGitSparse:
                 build_repo_url_fn=lambda *a, **kw: "https://gitlab.example.com/g/r.git",
                 git_env={},
             )
+
+    @patch("apm_cli.deps.git_file_transport.subprocess.run")
+    def test_git_env_disables_terminal_prompts(self, mock_run: Mock, tmp_path: Path) -> None:
+        """Git subprocesses must disable interactive credential prompts."""
+        from apm_cli.deps.git_file_transport import fetch_file_via_git_sparse
+
+        work_parent = tmp_path / "fetch_prompt"
+        work_parent.mkdir()
+        work_dir = work_parent / "work"
+        work_dir.mkdir()
+        (work_dir / "agents").mkdir()
+        (work_dir / "agents" / "spec.agent.md").write_bytes(b"# Agent")
+        mock_run.return_value = _mock_subprocess_success()
+
+        with patch(
+            "apm_cli.deps.git_file_transport.tempfile.TemporaryDirectory",
+            return_value=_FakeTemporaryDirectory(work_parent),
+        ):
+            fetch_file_via_git_sparse(
+                _make_gitlab_dep(),
+                "agents/spec.agent.md",
+                "main",
+                build_repo_url_fn=lambda *a, **kw: "https://gitlab.example.com/g/r.git",
+                git_env={"CUSTOM_ENV": "1"},
+            )
+
+        for call in mock_run.call_args_list:
+            env = call.kwargs["env"]
+            assert env["GIT_TERMINAL_PROMPT"] == "0"
+            assert env["CUSTOM_ENV"] == "1"
+
+    @patch("apm_cli.deps.git_file_transport.subprocess.run")
+    def test_git_failure_redacts_token_bearing_stderr(self, mock_run: Mock, tmp_path: Path) -> None:
+        """RuntimeError must not expose auth-embedded git URLs from stderr."""
+        from apm_cli.deps.git_file_transport import fetch_file_via_git_sparse
+
+        mock_run.return_value = Mock(
+            returncode=128,
+            stderr=(
+                "fatal: Authentication failed for "
+                "https://oauth2:secret-token@gitlab.example.com/group/repo.git"
+            ),
+            stdout="",
+        )
+        work_parent = tmp_path / "fetch_redact"
+        work_parent.mkdir()
+
+        with (
+            patch(
+                "apm_cli.deps.git_file_transport.tempfile.TemporaryDirectory",
+                return_value=_FakeTemporaryDirectory(work_parent),
+            ),
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            fetch_file_via_git_sparse(
+                _make_gitlab_dep("gitlab.example.com"),
+                "agents/spec.agent.md",
+                "main",
+                build_repo_url_fn=lambda *a, **kw: (
+                    "https://oauth2:secret-token@gitlab.example.com/group/repo.git"
+                ),
+                git_env={},
+            )
+
+        message = str(exc_info.value)
+        assert "secret-token" not in message
+        assert "https://***@gitlab.example.com" in message
 
     @patch("apm_cli.deps.git_file_transport.subprocess.run")
     def test_file_missing_after_checkout_raises_runtime_error(
@@ -270,8 +347,8 @@ class TestFetchFileViaGitSparse:
 
         with (
             patch(
-                "apm_cli.deps.git_file_transport.tempfile.mkdtemp",
-                return_value=str(work_parent),
+                "apm_cli.deps.git_file_transport.tempfile.TemporaryDirectory",
+                return_value=_FakeTemporaryDirectory(work_parent),
             ),
             pytest.raises(RuntimeError, match="not found after git sparse checkout"),
         ):

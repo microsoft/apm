@@ -267,7 +267,7 @@ class DependencyReference:
     # Known APM primitive directory names. Used to detect a subpath accidentally
     # embedded inside an explicit git URL form (SCP/ssh://https://), which git
     # would later reject with a cryptic "not a valid repository name" error.
-    _APM_PRIMITIVE_DIRS: frozenset = frozenset(
+    _APM_PRIMITIVE_DIRS: frozenset[str] = frozenset(
         {
             "skills",
             "agents",
@@ -792,10 +792,11 @@ class DependencyReference:
         for idx, seg in enumerate(segments[:-1]):
             if idx >= 2 and seg in DependencyReference._APM_PRIMITIVE_DIRS:
                 raise ValueError(
-                    "[x] A subpath cannot be embedded in a git URL. "
+                    "A subpath cannot be embedded in a git URL. "
                     "Use the `path:` key instead: "
                     "`git: <repo-url>` + `path: <primitive>/<name>` "
                     "(or the shorthand `org/repo/<primitive>/<name>`). "
+                    "See https://microsoft.github.io/apm/consumer/manage-dependencies/ "
                     f"Got: {raw!r}"
                 )
 

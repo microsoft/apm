@@ -135,8 +135,6 @@ apm install
 `GITLAB_TOKEN` is accepted as a lower-precedence fallback. `git credential fill` is
 also tried (same as for GitHub) so credential-manager users need no env var at all.
 
-
-
 ## GHE Cloud data residency (*.ghe.com)
 
 ```bash

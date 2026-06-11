@@ -59,10 +59,10 @@ are rejected.
 **GitLab `path:` fetch transport:** for GitLab-sourced deps (SaaS or self-hosted),
 `path:` files are fetched via git sparse/partial checkout (blob:none + sparse paths)
 rather than the REST API. This is the primary path and works with SSH keys and git
-credential helpers without any extra token. It also fixes self-hosted GitLab where
-the REST API returns 410 (API disabled). If git transport fails, the REST API is tried
-as a fallback using `GITLAB_APM_PAT`. Path containment (`ensure_path_within`) is
-enforced on the materialized file to reject symlink/traversal escapes.
+credential helpers without any extra token. It keeps self-hosted GitLab installs
+working when the REST API returns 410 (API disabled). Path containment
+(`ensure_path_within`) is enforced on the materialized file to reject symlink or
+traversal escapes. For fallback token setup, see `authentication.md`.
 
 ### Custom git ports
 
