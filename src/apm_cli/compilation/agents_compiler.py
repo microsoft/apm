@@ -653,7 +653,10 @@ class AgentsCompiler:
         if not root_claude_md.exists():
             return StaleClaudeDetection(root_claude_md, rel, False, False, None)
         try:
-            content = root_claude_md.read_text(encoding="utf-8")
+            with root_claude_md.open("rb") as fh:
+                content = fh.read(4096).decode(
+                    "utf-8"
+                )  # strict; raises UnicodeDecodeError on invalid bytes
         except (OSError, UnicodeDecodeError) as exc:
             return StaleClaudeDetection(
                 root_claude_md, rel, True, False, f"Could not read {rel}: {exc!s}"
@@ -795,18 +798,17 @@ class AgentsCompiler:
                         # result.content -- issue #1729 fix).
                         self._log("warning", det.read_error)
                     elif det.has_marker:
-                        removal_preview = (
-                            f"  [dry-run] would remove stale {det.rel} -- instructions now"
+                        removal_msg = (
+                            f"[dry-run] would remove stale {det.rel} -- instructions now"
                             " live in .claude/rules/"
                         )
-                        preview_lines.append(removal_preview)
+                        preview_lines.append(f"  {removal_msg}")
                         # Emit the preview through the logger so it reaches the terminal
                         # on the distributed dry-run path (cli.py does `pass` on dry-run
                         # success and never prints result.content -- issue #1729 fix).
                         self._log(
                             "progress",
-                            f"[dry-run] would remove stale {det.rel} -- instructions now"
-                            " live in .claude/rules/",
+                            removal_msg,
                             symbol="info",
                         )
                     else:
