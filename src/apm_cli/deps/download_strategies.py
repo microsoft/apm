@@ -740,12 +740,6 @@ class DownloadDelegate:
                 f"git transport unavailable for {fallback_target}; "
                 f"falling back to GitLab REST API ({type(exc).__name__})"
             )
-            if verbose_callback:
-                verbose_callback(
-                    f"git transport unavailable for {fallback_target}; "
-                    "falling back to GitLab REST API"
-                )
-
         # -- Fallback: GitLab REST v4 API (requires GITLAB_APM_PAT / GITLAB_TOKEN) --
         org = project_path.split("/")[0]
         file_ctx = self._host.auth_resolver.resolve(
@@ -773,9 +767,7 @@ class DownloadDelegate:
             response = self._host._resilient_get(api_url, headers=headers, timeout=30)
             response.raise_for_status()
             if verbose_callback:
-                verbose_callback(
-                    f"Fetched file via GitLab REST API: {host}/{dep_ref.repo_url}/{file_path}"
-                )
+                verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
             return response.content
         except requests.exceptions.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
@@ -789,10 +781,7 @@ class DownloadDelegate:
                     response = self._host._resilient_get(fallback_url, headers=headers, timeout=30)
                     response.raise_for_status()
                     if verbose_callback:
-                        verbose_callback(
-                            f"Fetched file via GitLab REST API: "
-                            f"{host}/{dep_ref.repo_url}/{file_path}"
-                        )
+                        verbose_callback(f"Downloaded file: {host}/{dep_ref.repo_url}/{file_path}")
                     return response.content
                 except requests.exceptions.HTTPError as fallback_err:
                     raise RuntimeError(

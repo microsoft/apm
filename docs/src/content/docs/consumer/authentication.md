@@ -47,6 +47,8 @@ For the org-private case, see [Private and org packages](../private-and-org-pack
 
 ## GitLab (SaaS or self-managed)
 
+**If `git clone` works, `apm install` works** -- no token is needed for GitLab `path:` files.
+
 APM fetches `path:`-specified files from GitLab dependencies via git
 sparse/partial checkout (the same transport used for the clone), so your
 existing SSH keys and git credential helpers work without any extra token.

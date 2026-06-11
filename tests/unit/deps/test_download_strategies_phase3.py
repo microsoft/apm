@@ -1239,10 +1239,9 @@ class TestDownloadGitlabFile:
         ):
             d.download_gitlab_file(self._dep(), "apm.yml", verbose_callback=callback)
         # The mocked git failure drives the REST fallback path without spawning
-        # subprocess/network work. At least one call must attribute the REST API
-        # as the transport that answered (transport-attribution for 410 triage).
+        # subprocess/network work. Verbose output stays transport-agnostic.
         assert callback.called
-        assert any("REST API" in str(c.args[0]) for c in callback.call_args_list)
+        assert any("Downloaded file:" in str(c.args[0]) for c in callback.call_args_list)
 
 
 # ---------------------------------------------------------------------------

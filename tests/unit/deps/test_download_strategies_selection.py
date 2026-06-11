@@ -1093,7 +1093,7 @@ class TestDownloadGitlabFile:
         callback_messages = " ".join(str(c.args[0]) for c in callback.call_args_list)
         debug_messages = " ".join(str(c.args[0]) for c in debug_print.call_args_list)
         assert callback.called
-        assert "REST API" in callback_messages
+        assert "Downloaded file:" in callback_messages
         assert "oauth2:secret" not in callback_messages
         assert "oauth2:secret" not in debug_messages
 

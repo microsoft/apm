@@ -79,7 +79,7 @@ class GitSparseFileTransport:
         self._dep_ref = dep_ref
         self._ref = ref
         self._build_repo_url_fn = build_repo_url_fn
-        self._git_env = {**git_env, "GIT_TERMINAL_PROMPT": "0"}
+        self._git_env = {**git_env, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
         self._timeout = timeout
         self._temp_dir = tempfile.TemporaryDirectory(prefix="apm_gitfetch_")
         with contextlib.suppress(OSError):

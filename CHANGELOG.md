@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm install` now resolves relative `path:` deps declared by remote monorepo packages when they stay inside the same remote repo, while still rejecting absolute, escaping, or cross-repo paths; closes #1571. (#1732)
 - Dependencies with the same path on different git hosts no longer collide in `apm.lock.yaml`; `apm install` keeps GitHub/GitLab PATs off generic-host file downloads, routes bespoke GitLab hosts through `type: gitlab`, and surfaces non-404 download failures with host and endpoint context. Reading private files from a generic non-default host now requires a whole-repo git dependency or explicit backend signal; see the dependency and lockfile docs (closes #773). (#1735)
-- Self-hosted GitLab `path:` installs no longer fail when the REST API is disabled -- APM now fetches via git transport automatically. `GITLAB_APM_PAT` / `GITLAB_TOKEN` remain available as a thin REST API fallback; closes #1014. (#1740)
+- GitLab `path:` files now just work on self-hosted instances where the REST API is disabled or restricted -- APM fetches via git transport automatically. `GITLAB_APM_PAT` / `GITLAB_TOKEN` remain available as a thin REST API fallback; closes #1014. (#1740)
 
 ## [0.19.0] - 2026-06-09
 

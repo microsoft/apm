@@ -56,13 +56,10 @@ parent's remote host/repo/ref and fetches the sibling from the same origin.
 Absolute paths, paths that escape the repo root, and cross-repo local paths
 are rejected.
 
-**GitLab `path:` fetch transport:** for GitLab-sourced deps (SaaS or self-hosted),
-`path:` files are fetched via git sparse/partial checkout (blob:none + sparse paths)
-rather than the REST API. This is the primary path and works with SSH keys and git
-credential helpers without any extra token. It keeps self-hosted GitLab installs
-working when the REST API returns 410 (API disabled). Path containment
-(`ensure_path_within`) is enforced on the materialized file to reject symlink or
-traversal escapes. For fallback token setup, see `authentication.md`.
+**GitLab `path:` fetch transport:** GitLab `path:` files are fetched over git
+transport, not the REST API, so self-hosted instances with the API disabled
+still install. Path containment is enforced on the materialized file to reject
+symlink or traversal escapes. For fallback token setup, see `authentication.md`.
 
 ### Custom git ports
 

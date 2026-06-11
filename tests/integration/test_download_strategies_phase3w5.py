@@ -499,9 +499,7 @@ class TestDownloadGitlabFilePhase3W5:
         # The mocked git failure drives the REST fallback path without spawning
         # subprocess/network work. The success note attributes the GitLab REST
         # API as the transport that answered (410 triage).
-        callback.assert_any_call(
-            "Fetched file via GitLab REST API: gitlab.example.com/group/repo/README.md"
-        )
+        callback.assert_any_call("Downloaded file: gitlab.example.com/group/repo/README.md")
 
     def test_non_default_ref_404_raises_specific_error(self) -> None:
         host = make_host(resolved_token=None, api_base="https://gitlab.example.com/api/v4")
@@ -524,9 +522,7 @@ class TestDownloadGitlabFilePhase3W5:
         )
 
         assert result == b"ok"
-        callback.assert_any_call(
-            "Fetched file via GitLab REST API: gitlab.example.com/group/repo/README.md"
-        )
+        callback.assert_any_call("Downloaded file: gitlab.example.com/group/repo/README.md")
 
     def test_fallback_ref_404_reports_both_refs(self) -> None:
         host = make_host(resolved_token=None, api_base="https://gitlab.example.com/api/v4")
