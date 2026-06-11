@@ -1151,7 +1151,7 @@ class TestMCPServerOperationsCollectEnvVars:
         result = ops.collect_environment_variables(["srv"], server_info_cache=cache)
         assert result.get("MY_TOKEN") == "secret-value"
 
-    def test_e2e_mode_detected(self, monkeypatch, _no_cache_env):
+    def test_e2e_mode_omits_optional_env_without_value(self, monkeypatch, _no_cache_env):
         from apm_cli.registry.operations import MCPServerOperations
 
         monkeypatch.setenv("APM_E2E_TESTS", "1")
@@ -1174,7 +1174,7 @@ class TestMCPServerOperationsCollectEnvVars:
             }
         }
         result = ops.collect_environment_variables(["srv"], server_info_cache=cache)
-        assert result.get("GITHUB_DYNAMIC_TOOLSETS") == "1"
+        assert "GITHUB_DYNAMIC_TOOLSETS" not in result
 
 
 class TestMCPServerOperationsCollectRuntimeVars:
@@ -1761,7 +1761,7 @@ class TestResolveMarketplacePlugin:
             [{"name": "my-plugin", "source": "./plugins/my-plugin", "description": "A plugin"}]
         )
 
-        with patch("requests.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             result = resolve_marketplace_plugin("my-plugin", "test-market")
 
@@ -1780,7 +1780,7 @@ class TestResolveMarketplacePlugin:
             ]
         )
 
-        with patch("requests.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             result = resolve_marketplace_plugin("ext-plugin", "test-market")
 
@@ -1794,7 +1794,7 @@ class TestResolveMarketplacePlugin:
             [{"name": "existing-plugin", "source": "./plugins/existing"}]
         )
 
-        with patch("requests.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             with pytest.raises(PluginNotFoundError):
                 resolve_marketplace_plugin("nonexistent-plugin", "test-market")
@@ -1816,7 +1816,7 @@ class TestResolveMarketplacePlugin:
             ]
         )
 
-        with patch("requests.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             result = resolve_marketplace_plugin("versioned", "test-market", version_spec="v2.5.0")
 
@@ -1845,7 +1845,7 @@ class TestResolveMarketplacePlugin:
             ]
         )
         warnings_emitted: list[str] = []
-        with patch("requests.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             result = resolve_marketplace_plugin(
                 "versioned",
@@ -1862,7 +1862,7 @@ class TestResolveMarketplacePlugin:
             [{"name": "iter-plugin", "source": "./plugins/iter-plugin"}]
         )
 
-        with patch("requests.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             canonical, plugin = resolve_marketplace_plugin("iter-plugin", "test-market")
 

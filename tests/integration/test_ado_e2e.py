@@ -156,7 +156,7 @@ class TestADOCompile:
     ADO_TEST_REPO = "dev.azure.com/dmeppiel-org/market-js-app/_git/compliance-rules"
 
     def test_compile_generates_agents_md(self, tmp_path):
-        """Compile should generate AGENTS.md from ADO dependencies."""
+        """Compile should keep ADO Copilot instructions outside AGENTS.md."""
         project_dir = tmp_path / "test-project"
         project_dir.mkdir()
 
@@ -182,9 +182,15 @@ class TestADOCompile:
         # Should not show orphan warnings
         assert "orphan" not in result.stdout.lower() or "0 orphan" in result.stdout.lower()
 
-        # AGENTS.md should be generated
+        # Copilot compile suppresses empty AGENTS.md shells when installed
+        # instructions already live under .github/instructions/.
         agents_md = project_dir / "AGENTS.md"
-        assert agents_md.exists(), "AGENTS.md not generated"
+        github_instructions = project_dir / ".github" / "instructions"
+        assert not agents_md.exists(), (
+            "AGENTS.md should not be generated for Copilot-only instructions"
+        )
+        assert github_instructions.is_dir(), ".github/instructions not generated"
+        assert list(github_instructions.glob("*.md")), "No Copilot instruction files generated"
 
 
 class TestADOVirtualPackage:
