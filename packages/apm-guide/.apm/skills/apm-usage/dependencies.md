@@ -48,9 +48,13 @@ package is resolved relative to THAT package's own directory (npm/pip/cargo
 parity). Sibling layouts that resolve outside the consuming project root
 (e.g. `../sibling-pkg` from a local dep at the project edge) are
 supported -- the consuming developer authored the manifest chain and
-already trusts the layout. The actual security boundary is upstream:
-**remote-cloned packages cannot declare `local_path` deps at all**, since
-they have no business reaching into the consumer's filesystem.
+already trusts the layout.
+
+Remote-cloned packages may declare a relative `path:` only when it resolves
+inside the same authenticated remote repo root. APM expands that path to the
+parent's remote host/repo/ref and fetches the sibling from the same origin.
+Absolute paths, paths that escape the repo root, and cross-repo local paths
+are rejected.
 
 ### Custom git ports
 
