@@ -98,6 +98,20 @@ use `apm install` or `apm deps update` when you want shared
 | `--dry-run` | Show placement decisions without writing files. |
 | `-v, --verbose` | Show source attribution and optimizer analysis. |
 
+### Global compilation
+
+| Flag | Description |
+|------|-------------|
+| `-g, --global` | Compile user-scope root context files from `~/.apm/apm_modules`. Reads globally installed packages and writes one root context file per active target (e.g. `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`). Not valid with `--watch` or `--root`. Exits non-zero if `~/.apm/apm_modules` does not exist. |
+
+`apm install --global` automatically runs this step after installing packages.
+Use `apm compile --global` to re-run it manually after adding or removing global packages.
+Hand-authored files (files that do not carry the APM-generated marker) are never overwritten.
+
+```bash
+apm compile -g
+```
+
 ## Examples
 
 Compile for whatever the project is set up for:

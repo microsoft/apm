@@ -19,6 +19,23 @@ if TYPE_CHECKING:
     from apm_cli.models.results import InstallResult
 
 
+def _compile_user_root_contexts_after_install(ctx: InstallContext) -> None:
+    """Invoke compile_user_root_contexts after a user-scope install."""
+    from apm_cli.compilation import compile_user_root_contexts
+    from apm_cli.core.scope import InstallScope, get_apm_dir
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    source_root = get_apm_dir(InstallScope.USER)
+    targets = list(KNOWN_TARGETS.values())
+    # Pass logger=None so compile_user_root_contexts uses the stdlib logger;
+    # ctx.logger is an InstallLogger which does not expose the stdlib debug/info API.
+    results = compile_user_root_contexts(targets, source_root, dry_run=False, logger=None)
+    written = [r for r in results if r.get("status") == "written"]
+    if written and ctx.logger:
+        target_names = ", ".join(str(r["target"]) for r in written)
+        ctx.logger.verbose_detail(f"Compiled user-scope root contexts: {target_names}")
+
+
 def run(ctx: InstallContext) -> InstallResult:
     """Emit verbose stats, fallback success, unpinned warning, and return final result."""
     from apm_cli.commands import install as _install_mod
@@ -82,6 +99,13 @@ def run(ctx: InstallContext) -> InstallResult:
             ctx.diagnostics.warn(
                 f"{ctx.unpinned_count} {noun} unpinned -- add #tag or #sha to prevent drift"
             )
+
+    # User-scope post-install: compile root context files if we just installed
+    # a package that brought global instructions.
+    from apm_cli.core.scope import InstallScope
+
+    if ctx.scope is InstallScope.USER:
+        _compile_user_root_contexts_after_install(ctx)
 
     return InstallResult(
         ctx.installed_count,

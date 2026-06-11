@@ -239,6 +239,39 @@ you can omit `start_marker` and `end_marker` if you use those verbatim.
 - Content outside the markers is preserved verbatim across every compile
   run; only the block between the markers is replaced.
 
+## Global compilation (-g)
+
+Install a package once globally and every AI tool on your machine can pick up
+its instructions without per-project setup. By default, `apm compile` reads
+instructions from your workspace and writes root context files to `.github/`,
+`.claude/`, etc. For user-scope instructions, use the `--global` or `-g` flag:
+
+```bash
+apm compile --global
+apm compile -g --dry-run
+```
+
+This reads **global instructions** from `~/.apm/apm_modules/` (instructions
+without an `apply_to:` field) and writes user-scope root context files:
+
+- `~/.claude/CLAUDE.md` (or `$CLAUDE_CONFIG_DIR/CLAUDE.md`)
+- `~/.codex/AGENTS.md`, `~/.copilot/AGENTS.md`, `~/.cursor/AGENTS.md`, etc.
+- `~/.gemini/GEMINI.md`
+
+### Overwrite protection
+
+When a root file exists but contains no APM marker, it is treated as
+hand-authored and never overwritten. Use `--dry-run` to preview what would
+be written without modifying files.
+
+### Constraints
+
+- `--global` cannot be combined with `--watch` or `--root`.
+- Skills-only packages (no global instructions) do not write root files.
+- To integrate global compile into your install flow, use
+  `apm install -g` (see [Install packages](../consumer/install-packages/)), which
+  automatically runs compile after installing global packages.
+
 ## Pitfalls
 
 - **Confusing compile's scope.** Compile only handles **instructions**
