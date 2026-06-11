@@ -188,6 +188,22 @@ class TestInstallerUrlAirGap:
         assert parsed.hostname == "mirror.corp.example"
         assert parsed.path == "/apm-install/install.ps1"
 
+    def test_manual_command_no_direct_fallback_without_base_gives_action_not_pseudo_url(
+        self,
+    ) -> None:
+        """Fail-closed manual guidance should tell users to set the mirror base."""
+        env = self._clean_env()
+        env["APM_NO_DIRECT_FALLBACK"] = "1"
+        with patch.dict("os.environ", env, clear=True):
+            with patch(
+                "apm_cli.commands.self_update._is_windows_platform",
+                return_value=False,
+            ):
+                command = update_module._get_manual_update_command()
+
+        assert command == "Set APM_INSTALLER_BASE_URL and re-run 'apm self-update'."
+        assert "APM_INSTALLER_BASE_URL/" not in command
+
     def test_manual_command_no_direct_fallback_unix_uses_env_reference(self) -> None:
         """Fail-closed manual Unix guidance should reference the mirror env var."""
         env = self._clean_env()
@@ -199,7 +215,7 @@ class TestInstallerUrlAirGap:
             ):
                 command = update_module._get_manual_update_command()
 
-        assert command == 'curl -sSL "$APM_INSTALLER_BASE_URL/install.sh" | sh'
+        assert command == "Set APM_INSTALLER_BASE_URL and re-run 'apm self-update'."
 
     def test_manual_command_no_direct_fallback_windows_uses_env_reference(self) -> None:
         """Fail-closed manual Windows guidance should reference the mirror env var."""
@@ -212,10 +228,7 @@ class TestInstallerUrlAirGap:
             ):
                 command = update_module._get_manual_update_command()
 
-        assert command == (
-            "powershell -ExecutionPolicy Bypass -c "
-            "'irm \"$env:APM_INSTALLER_BASE_URL/install.ps1\" | iex'"
-        )
+        assert command == "Set APM_INSTALLER_BASE_URL and re-run 'apm self-update'."
 
     def test_manual_command_mirror_base_does_not_print_credentials(self) -> None:
         """Manual guidance should not echo credentials embedded in mirror URLs."""
@@ -259,6 +272,20 @@ class TestEnterpriseBootstrapSelfUpdate:
             "APM_TEMP_DIR",
         }
         return {k: v for k, v in os.environ.items() if k not in mirrored_vars}
+
+    def test_self_update_help_lists_enterprise_mirror_env_vars(self) -> None:
+        """Users can discover enterprise mirror env vars from self-update help."""
+        result = self.runner.invoke(cli, ["self-update", "--help"])
+
+        assert result.exit_code == 0
+        for name in (
+            "APM_RELEASE_BASE_URL",
+            "APM_RELEASE_METADATA_URL",
+            "APM_INSTALLER_BASE_URL",
+            "APM_PYPI_INDEX_URL",
+            "APM_NO_DIRECT_FALLBACK",
+        ):
+            assert name in result.output
 
     def test_no_direct_fallback_blocks_public_metadata_lookup(self) -> None:
         """APM_NO_DIRECT_FALLBACK refuses public latest-release lookup without a mirror."""

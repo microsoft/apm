@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of `~/.hermes/config.yaml` (written atomically with `0o600` perms, preserving
   unrelated config keys and refusing to overwrite a malformed file). `HERMES_HOME`
   overrides the Hermes home directory. See the [Hermes integration guide](https://microsoft.github.io/apm/integrations/hermes/).
-- Enterprise bootstrap mirror mode lets `install.sh`, `install.ps1`, and `apm self-update` use internal release, installer, and PyPI mirrors with fail-closed public fallback, and closes #1680. (#1733)
+- Enterprise bootstrap mirror mode lets `install.sh`, `install.ps1`, and `apm self-update` use `APM_RELEASE_METADATA_URL`, `APM_RELEASE_BASE_URL`, `APM_INSTALLER_BASE_URL`, `APM_PYPI_INDEX_URL`, and `APM_NO_DIRECT_FALLBACK` for internal release, installer, and PyPI mirrors with fail-closed public fallback, and closes #1680. (#1733)
 
 ## [0.19.0] - 2026-06-09
 

@@ -102,7 +102,7 @@ jobs:
 
 ### Enterprise bootstrap mirror mode
 
-Mirror mode lets locked-down workstations install and update APM without direct public egress:
+APM ships native enterprise mirror support: five env vars route bootstrap traffic through internal hosts, with fail-closed mode ensuring no public fallback.
 
 ```bash
 export APM_INSTALLER_BASE_URL="https://artifactory.mycorp.example/generic/apm-install"
@@ -144,7 +144,7 @@ apm-releases/
 
 #### What fail-closed does and does not cover
 
-Fail-closed scoping keys off the public `github.com` default. The guard only blocks egress when the resolved host would be public GitHub (`github.com` / `api.github.com`), `aka.ms`, or public PyPI. It does **not** suppress egress to a custom `GITHUB_URL`: if you set a GHES host (for example `GITHUB_URL=https://github.corp.com`) together with `APM_NO_DIRECT_FALLBACK=1` and no release mirror, the installer still reaches that GHES host. This is intentional coexistence with GHES, but "no direct fallback" should not be read as "zero egress" -- it means "no fallback to public hosts". For true zero-egress, set the `APM_RELEASE_METADATA_URL` / `APM_RELEASE_BASE_URL` / `APM_INSTALLER_BASE_URL` / `APM_PYPI_INDEX_URL` mirrors so every request resolves to your internal hosts. The GitHub token is attached only when the request targets the canonical GitHub / configured GHES host; it is never sent to a mirror host.
+Fail-closed scoping keys off the public `github.com` default. The guard only blocks egress when the resolved host would be public GitHub (`github.com` / `api.github.com`), `aka.ms`, or public PyPI. It does **not** suppress egress to a custom `GITHUB_URL`: if you set a GHES host (for example `GITHUB_URL=https://github.corp.com`) together with `APM_NO_DIRECT_FALLBACK=1` and no release mirror, the installer still reaches that GHES host. This is intentional coexistence with GHES, but "no direct fallback" should not be read as "zero egress" -- it means "no fallback to public hosts". For true zero-egress, set the `APM_RELEASE_METADATA_URL` / `APM_RELEASE_BASE_URL` / `APM_INSTALLER_BASE_URL` / `APM_PYPI_INDEX_URL` mirrors so every request resolves to your internal hosts. When `APM_RELEASE_METADATA_URL` is unset, GHES metadata requests intentionally use the resolved GitHub token for that host; mirror metadata requests never receive it. The GitHub token is attached only when the request targets the canonical GitHub / configured GHES host, never a mirror host.
 
 Homebrew and Scoop mirror support is docs-only in this v0: mirror the tap or bucket with your package manager's normal enterprise controls, but the APM env vars above do not rewrite Homebrew or Scoop internals.
 
@@ -187,13 +187,17 @@ chmod +x .apm-mirror-smoke/bin/curl .apm-mirror-smoke/bin/pip .apm-mirror-smoke/
 python3 -m http.server 8765 --directory .apm-mirror-smoke/mirror > .apm-mirror-smoke/server.log 2>&1 &
 server_pid=$!
 trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+set +e
 PATH="$PWD/.apm-mirror-smoke/bin:$PATH" \
   APM_INSTALLER_BASE_URL="http://127.0.0.1:8765/apm-install" \
   APM_RELEASE_METADATA_URL="http://127.0.0.1:8765/apm-releases/latest.json" \
   APM_RELEASE_BASE_URL="http://127.0.0.1:8765/apm-releases" \
   APM_PYPI_INDEX_URL="http://127.0.0.1:8765/pypi/simple" \
   APM_NO_DIRECT_FALLBACK=1 \
-  sh .apm-mirror-smoke/mirror/apm-install/install.sh || test $? -eq 1
+  sh .apm-mirror-smoke/mirror/apm-install/install.sh
+status=$?
+set -e
+test "$status" -ne 0
 ```
 
 For `apm self-update`, run `apm self-update --check` with the same env vars and verify your proxy, firewall, or CI egress logs show only the mirror host. Use a disposable runner for a full `apm self-update` because it executes the mirrored installer.

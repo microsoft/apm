@@ -4,11 +4,13 @@ import os
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 from ..bootstrap_mirror import (
     get_release_metadata_url,
     release_metadata_public_lookup_blocked,
 )
+from ..core.auth import AuthResolver
 
 _DEFAULT_REPO = "microsoft/apm"
 _PUBLIC_GITHUB_URL = "https://github.com"
@@ -31,7 +33,9 @@ def _get_air_gap_version() -> str | None:
     return v if v else None
 
 
-def _build_releases_api_url(github_url: str, repo: str) -> str:
+def _build_releases_api_url(
+    github_url: str, repo: str, release_metadata_url: str | None = None
+) -> str:
     """Build the release metadata URL for the given host and repository.
 
     ``APM_RELEASE_METADATA_URL`` wins when configured so enterprise mirrors can
@@ -39,7 +43,6 @@ def _build_releases_api_url(github_url: str, repo: str) -> str:
     public GitHub, targets api.github.com directly. For GitHub Enterprise Server
     (any other GITHUB_URL value), uses the /api/v3 prefix on the configured host.
     """
-    release_metadata_url = get_release_metadata_url()
     if release_metadata_url is not None:
         return release_metadata_url
     if github_url == _PUBLIC_GITHUB_URL:
@@ -47,20 +50,19 @@ def _build_releases_api_url(github_url: str, repo: str) -> str:
     return f"{github_url}/api/v3/repos/{repo}/releases/latest"
 
 
-def _get_github_token() -> str | None:
-    """Return a GitHub token following canonical precedence, or None.
+def _get_github_token(github_url: str | None = None, repo: str | None = None) -> str | None:
+    """Return a GitHub token through AuthResolver, or None.
 
-    Precedence mirrors TOKEN_PRECEDENCE["modules"] in core/token_manager.py:
-      GITHUB_APM_PAT -> GITHUB_TOKEN -> GH_TOKEN
-
-    The token value is never logged or included in any output.
+    Version checks only need environment-scoped tokens. Disabling external
+    fallback avoids invoking gh or git credential helpers from the non-blocking
+    startup update check while keeping the token precedence centralized.
     """
-    return (
-        os.environ.get("GITHUB_APM_PAT")
-        or os.environ.get("GITHUB_TOKEN")
-        or os.environ.get("GH_TOKEN")
-        or None
-    )
+    parsed = urlparse(github_url or _get_air_gap_github_url())
+    host = parsed.hostname or "github.com"
+    effective_repo = repo or _get_air_gap_repo()
+    org = effective_repo.split("/", 1)[0] if "/" in effective_repo else None
+    context = AuthResolver(allow_external_fallback=False).resolve(host, org=org)
+    return context.token
 
 
 def get_latest_version_from_github(repo: str | None = None, timeout: int = 2) -> str | None:
@@ -110,14 +112,13 @@ def get_latest_version_from_github(repo: str | None = None, timeout: int = 2) ->
     try:
         effective_repo = _get_air_gap_repo() if repo is None else repo
         github_url = _get_air_gap_github_url()
+        release_metadata_url = get_release_metadata_url()
         if release_metadata_public_lookup_blocked(github_url):
             return None
-        url = _build_releases_api_url(github_url, effective_repo)
-        token = _get_github_token()
+        url = _build_releases_api_url(github_url, effective_repo, release_metadata_url)
+        token = _get_github_token(github_url, effective_repo)
         headers = (
-            {"Authorization": f"token {token}"}
-            if token and get_release_metadata_url() is None
-            else {}
+            {"Authorization": f"token {token}"} if token and release_metadata_url is None else {}
         )
         response = requests.get(url, headers=headers, timeout=timeout)
 
