@@ -504,10 +504,7 @@ class AgentsCompiler:
         compilation_results = distributed_compiler.get_compilation_results_for_display(
             config.dry_run
         )
-        _all_suppressed = (
-            bool(distributed_result.suppressed_empty_paths) and not distributed_result.content_map
-        )
-        if compilation_results and not _all_suppressed:
+        if compilation_results and not distributed_result.all_suppressed:
             if config.debug or config.trace:
                 # Verbose mode with mathematical analysis
                 output = distributed_compiler.output_formatter.format_verbose(compilation_results)
@@ -547,17 +544,18 @@ class AgentsCompiler:
                 # Partial suppression: at least one AGENTS.md was written
                 self._log(
                     "progress",
-                    f"Some AGENTS.md placements not generated ({suppressed_count} {noun})"
-                    " -- Copilot reads `.github/instructions/` directly,"
-                    " no further action needed",
+                    f"Skipped {suppressed_count} empty AGENTS.md {noun} -- "
+                    ".github/instructions/ already covers Copilot; "
+                    "pass --no-dedup to write them",
                     symbol="info",
                 )
             else:
                 # Full suppression: no AGENTS.md written at all
                 self._log(
                     "progress",
-                    f"AGENTS.md not generated ({suppressed_count} {noun}) -- Copilot reads"
-                    " `.github/instructions/` directly, no further action needed",
+                    f"AGENTS.md not generated ({suppressed_count} {noun}) -- "
+                    ".github/instructions/ already covers Copilot; "
+                    "pass --no-dedup to write AGENTS.md",
                     symbol="info",
                 )
 

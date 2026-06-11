@@ -8,6 +8,7 @@ for nested agent context files.
 import builtins
 import logging
 from collections import defaultdict
+from collections.abc import MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -83,6 +84,11 @@ class CompilationResult:
     # (skip_instructions=True, no constitution).  Exposed for callers that
     # need to emit a user-visible INFO message or perform --clean removal.
     suppressed_empty_paths: builtins.list[Path] = field(default_factory=list)
+
+    @property
+    def all_suppressed(self) -> bool:
+        """Return True when every planned AGENTS.md placement was suppressed."""
+        return bool(self.suppressed_empty_paths) and not self.content_map
 
 
 class DistributedAgentsCompiler:
@@ -285,10 +291,7 @@ class DistributedAgentsCompiler:
             # Optional: Get referenced contexts for reporting (doesn't copy)
             try:
                 # Collect all files from placements for context reference scanning.
-                # PlacementResult has no `agents` attribute (see the dataclass), so
-                # the old `for agent in placement.agents` loop was always dead code
-                # (AttributeError swallowed by `except Exception`); removed in the
-                # #1730 cleanup.
+                # PlacementResult has no `agents` attr; the old loop was dead code.
                 all_files_to_scan = []
                 for placement in placements:
                     for instruction in placement.instructions:
@@ -681,7 +684,7 @@ class DistributedAgentsCompiler:
         placement: PlacementResult,
         *,
         with_constitution: bool = True,
-        constitution_cache: builtins.dict[Path, bool] | None = None,
+        constitution_cache: MutableMapping[Path, bool] | None = None,
     ) -> bool:
         """Return True when a placement would produce a content-free AGENTS.md shell.
 
@@ -706,7 +709,7 @@ class DistributedAgentsCompiler:
             with_constitution: Whether the caller will inject a constitution at
                 write time (mirrors ``CompilationConfig.with_constitution``).
                 Defaults to True for back-compat.
-            constitution_cache: Optional ``dict[Path, bool]`` keyed by placement
+            constitution_cache: Optional mutable mapping keyed by placement
                 directory, used to memoize constitution-existence checks across
                 placements within a single ``compile_distributed()`` call so the
                 same directory is not read from disk repeatedly. When omitted,
@@ -946,7 +949,7 @@ class DistributedAgentsCompiler:
                     display = rel_path if rel_path is not None else str(file_path)
                     cleanup_messages.append(f"  x Failed to remove {display}: {e!s}")
             if removed_count == 0:
-                cleanup_messages.append("  0 files removed (all skipped)")
+                cleanup_messages.append("  [i] 0 files removed (all skipped)")
 
         return cleanup_messages
 

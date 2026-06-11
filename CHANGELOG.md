@@ -36,23 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional-auth MCP registry servers now install without token prompts when values are unset; `apm install` also omits empty runtime config entries and preserves user-edited optional values on reinstall; refs #20. (#1734)
 - Dependencies with the same path on different git hosts no longer collide in `apm.lock.yaml`; `apm install` keeps GitHub/GitLab PATs off generic-host file downloads, routes bespoke GitLab hosts through `type: gitlab`, and surfaces non-404 download failures with host and endpoint context. Reading private files from a generic non-default host now requires a whole-repo git dependency or explicit backend signal; see the dependency and lockfile docs (closes #773). (#1735)
 - GitLab `path:` files now just work on self-hosted instances where the REST API is disabled or restricted -- APM fetches via git transport automatically. `GITLAB_APM_PAT` / `GITLAB_TOKEN` remain available as a thin REST API fallback; closes #1014. (#1740)
-- `apm compile --target copilot` no longer writes empty AGENTS.md shell files
-  (header + footer only, no instruction body) when `.github/instructions/`
-  already holds the deployed instructions. Previously, the instruction-dedup
-  logic introduced in #1550 correctly omitted instruction bodies but still
-  created content-free files for the root placement and every distributed
-  subdir placement (e.g. `docs/AGENTS.md`, `src/AGENTS.md`). Placements whose
-  only content would have been the now-elided instruction block are now
-  suppressed entirely; an INFO-style message ("AGENTS.md not generated --
-  Copilot reads `.github/instructions/` directly, no further action needed")
-  is emitted instead, mirroring the analogous CLAUDE.md behaviour. Placements
-  that carry non-instruction content (constitution, context links) are still
-  written. Suppression fires only when `can_dedup_agents_md_instructions`
-  returns True (Copilot-only target), so Codex / OpenCode / Windsurf / Gemini
-  multi-target builds are unaffected. `apm compile --clean` now also removes
-  pre-existing APM-generated AGENTS.md files that would be empty shells under
-  the current configuration; hand-authored AGENTS.md files (no APM marker) are
-  never deleted. (closes #1730, related: #1138, #1550)
+- `apm compile --target copilot` no longer writes empty `AGENTS.md`
+  shell files when `.github/instructions/` already holds deployed
+  instructions; `--clean` also removes stale APM-generated shells while
+  preserving hand-authored files. Use `--no-dedup` / `--force-instructions`
+  to write full `AGENTS.md` files anyway. (by @tillig; closes #1730, related:
+  #1138, #1550) (#1742)
 
 ## [0.19.0] - 2026-06-09
 
