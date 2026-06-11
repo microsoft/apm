@@ -91,6 +91,8 @@ _SEMVER_RE = re.compile(
 # (``git@host:path``) and non-``https`` URL schemes are explicitly rejected
 # to avoid RFC 3986 confused-deputy attacks.
 _HOST_PAT = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-]*"
+# SECURITY: segment regexes are shape filters only. Traversal defense lives in
+# validate_path_segments(), which rejects empty, '.', and '..' path segments.
 _SEGMENT_PAT = r"[A-Za-z0-9._-]+"
 _OWNER_REPO_PAT = rf"{_SEGMENT_PAT}/{_SEGMENT_PAT}"
 _RELATIVE_SOURCE_PAT = rf"{_SEGMENT_PAT}(?:/{_SEGMENT_PAT})*"
@@ -113,7 +115,7 @@ _HTTPS_URL_SOURCE_RE = re.compile(rf"^https://({_HOST_PAT})/({_OWNER_REPO_PAT})(
 
 
 def split_source_base(source_base: str) -> tuple[str, str]:
-    """Split a validated ``sourceBase`` into ``(host, path_prefix)``."""
+    """Split a ``parse_source_base``-validated value into host and path."""
     without_scheme = source_base.removeprefix("https://")
     host, path_prefix = without_scheme.split("/", 1)
     return host, path_prefix
@@ -483,11 +485,13 @@ def validate_source_value(
             re.fullmatch(_HOST_PAT, first_segment)
         )
         matches_relative_source = bool(_RELATIVE_SOURCE_RE.match(source))
-        if (
-            source_base is None
-            or looks_like_unsupported_host_override
-            or not matches_relative_source
-        ):
+        if looks_like_unsupported_host_override:
+            raise MarketplaceYmlError(
+                f"'{context}' looks like a host-prefixed source but does not match "
+                f"'<host.tld>/<owner>/<repo>'. Use a full HTTPS URL override "
+                f"('https://...') or remove the host to compose onto sourceBase."
+            )
+        if source_base is None or not matches_relative_source:
             raise _source_error(context, source, source_base=source_base)
     is_local = bool(LOCAL_SOURCE_RE.match(source))
     try:

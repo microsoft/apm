@@ -125,27 +125,35 @@ such as a GitLab group with nested subgroups. Any relative source composes
 onto the base, including two-segment values like `acme-org/pinned-package`.
 Host-prefixed sources like `github.com/acme/tool`, full HTTPS URLs, and
 local `./` paths remain per-entry overrides. If `sourceBase` is absent,
-existing `owner/repo` source behavior is unchanged.
+existing `owner/repo` source behavior is unchanged. See the
+[manifest schema](../reference/manifest-schema/#75-marketplacepackages)
+for the full validation and override rules.
 
 Before:
 
 ```yaml
-packages:
-  - name: review
-    source: https://gitlab.corp.example.com/platform/agent-marketplace/review
-  - name: pinned
-    source: https://gitlab.corp.example.com/platform/agent-marketplace/acme-org/pinned-package
+marketplace:
+  packages:
+    - name: review
+      source: https://gitlab.corp.example.com/platform/agent-marketplace/review
+      ref: v1.0.0
+    - name: pinned
+      source: https://gitlab.corp.example.com/platform/agent-marketplace/acme-org/pinned-package
+      ref: main
 ```
 
 After:
 
 ```yaml
-sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace
-packages:
-  - name: review
-    source: review
-  - name: pinned
-    source: acme-org/pinned-package
+marketplace:
+  sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace
+  packages:
+    - name: review
+      source: review
+      ref: v1.0.0
+    - name: pinned
+      source: acme-org/pinned-package
+      ref: main
 ```
 
 Add and edit packages without leaving the shell:

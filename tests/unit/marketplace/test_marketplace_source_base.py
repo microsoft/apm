@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import pytest
@@ -34,6 +35,17 @@ class _MockRefResolver:
 
     def close(self) -> None:
         pass
+
+
+class _RecordingAuthResolver:
+    """Record AuthResolver calls while returning a token-bearing context."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str | None]] = []
+
+    def resolve(self, host: str, org: str | None = None):
+        self.calls.append((host, org))
+        return SimpleNamespace(token="token", source="test-auth")
 
 
 def _write(path: Path, content: str) -> Path:
@@ -156,13 +168,27 @@ class TestSourceBaseSchema:
         # sourceBase set, rather than being silently composed onto the base:
         # that disambiguation avoids a confused-deputy footgun
         # (manifest-schema.md Section 7.5).
-        with pytest.raises(MarketplaceYmlError, match="must be one of"):
+        with pytest.raises(MarketplaceYmlError, match="host-prefixed source"):
             _load_config(
                 tmp_path,
                 "https://gitlab.example.com/platform/marketplaces",
                 f"""
                 - name: tool
                   source: {source}
+                  ref: {_SHA}
+                """,
+            )
+
+    def test_rejects_host_looking_relative_source_with_actionable_message(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(MarketplaceYmlError, match="looks like a host-prefixed source"):
+            _load_config(
+                tmp_path,
+                "https://gitlab.example.com/platform/marketplaces",
+                f"""
+                - name: tool
+                  source: gitlab.example.com/team/tool/extra
                   ref: {_SHA}
                 """,
             )
@@ -249,7 +275,9 @@ class TestSourceBaseBuildComposition:
                 RemoteRef(name="refs/tags/v2.0.0", sha="d" * 40),
             ]
         }
-        builder._get_resolver_for_host = lambda _host: _MockRefResolver(refs)  # type: ignore[assignment]
+        builder._get_resolver_for_host = (  # type: ignore[assignment]
+            lambda _host, **_kwargs: _MockRefResolver(refs)
+        )
 
         resolved = builder._resolve_entry(config.packages[0])
         assert resolved.source_repo == composed_repo
@@ -322,6 +350,29 @@ class TestSourceBaseBuildComposition:
         parsed = urlparse(resolved.source_url or "")
         assert parsed.hostname == "gitlab.example.com"
         assert parsed.path == "/platform/marketplaces/team.tools/repo"
+
+    def test_source_base_resolution_uses_base_org_for_auth_context(self, tmp_path: Path) -> None:
+        config = _load_config(
+            tmp_path,
+            "https://github.com/contoso/marketplaces",
+            f"""
+            - name: tool
+              source: tool
+              ref: {_SHA}
+            """,
+        )
+        auth = _RecordingAuthResolver()
+        builder = MarketplaceBuilder.from_config(
+            config,
+            tmp_path,
+            BuildOptions(offline=False),
+            auth_resolver=auth,
+        )
+
+        resolved = builder._resolve_entry(config.packages[0])
+
+        assert resolved.source_repo == "contoso/marketplaces/tool"
+        assert auth.calls == [("github.com", "contoso")]
 
 
 class TestSourceBaseEditor:
