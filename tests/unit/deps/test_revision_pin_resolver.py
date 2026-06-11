@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -168,6 +169,10 @@ def test_apply_revision_pin_updates_rejects_non_manifest_path(tmp_path: Path) ->
         )
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows does not honor POSIX file modes; st_mode & 0o777 is not 0o600",
+)
 def test_apply_revision_pin_updates_writes_restrictive_permissions(tmp_path: Path) -> None:
     manifest = tmp_path / "apm.yml"
     manifest.write_text(
