@@ -52,7 +52,7 @@ def test_download_and_extract_archive_rejects_non_https_before_request(
         called = True
         raise AssertionError("network should not be called for non-HTTPS archives")
 
-    monkeypatch.setattr(archive_mod.requests, "get", fake_get)
+    monkeypatch.setattr(archive_mod, "_archive_get", fake_get)
 
     with pytest.raises(ArchiveError, match="Only HTTPS URLs"):
         download_and_extract_archive("http://example.test/plugin.zip", str(tmp_path / "out"))
@@ -82,7 +82,7 @@ def test_download_and_extract_archive_rejects_redirect_to_http(
     def fake_get(_url: str, **_kwargs: object) -> Response:
         return Response()
 
-    monkeypatch.setattr(archive_mod.requests, "get", fake_get)
+    monkeypatch.setattr(archive_mod, "_archive_get", fake_get)
 
     with pytest.raises(ArchiveError, match="Redirect to non-HTTPS URL rejected"):
         download_and_extract_archive("https://example.test/download", str(tmp_path / "out"))
@@ -112,7 +112,7 @@ def test_download_and_extract_archive_stages_raw_file_outside_destination(
     def fake_get(_url: str, **_kwargs: object) -> Response:
         return Response()
 
-    monkeypatch.setattr(archive_mod.requests, "get", fake_get)
+    monkeypatch.setattr(archive_mod, "_archive_get", fake_get)
 
     extracted = download_and_extract_archive("https://example.test/download", str(out))
 
@@ -151,7 +151,7 @@ def test_download_and_extract_archive_uses_redirect_url_for_format(
         seen_kwargs.append(kwargs)
         return Response()
 
-    monkeypatch.setattr(archive_mod.requests, "get", fake_get)
+    monkeypatch.setattr(archive_mod, "_archive_get", fake_get)
 
     out = tmp_path / "out"
     extracted = download_and_extract_archive("https://example.test/download", str(out))

@@ -10,10 +10,12 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import shutil
 import tarfile
 import uuid
 import zipfile
 from pathlib import Path
+from typing import IO
 from urllib.parse import urlparse
 
 import requests
@@ -28,13 +30,15 @@ _MAX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 _MAX_ARCHIVE_DOWNLOAD_BYTES = _MAX_UNCOMPRESSED_BYTES
 _COPY_CHUNK_BYTES = 1024 * 1024
 _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
+_ARCHIVE_SESSION = requests.Session()
+_ARCHIVE_SESSION.max_redirects = 5
 
 
 class ArchiveError(Exception):
     """Raised when an archive cannot be downloaded or extracted safely."""
 
 
-def _copy_member_within_limit(src: object, dst: object, running_total: int) -> int:
+def _copy_member_within_limit(src: IO[bytes], dst: IO[bytes], running_total: int) -> int:
     """Stream *src* into *dst*, enforcing the cumulative uncompressed cap.
 
     Counts the ACTUAL bytes read from the (decompressed) member stream and
@@ -208,7 +212,17 @@ def _stream_download_to_file(response: object, output_path: Path, url: str) -> N
         raise ArchiveError(f"Archive download from {url!r} returned an empty body")
 
 
-def download_and_extract_archive(url: str, dest_dir: str) -> list[str]:
+def _archive_get(url: str, **kwargs: object):
+    """Issue archive HTTP GET through a cookie-cleared session."""
+    _ARCHIVE_SESSION.cookies.clear()
+    response = _ARCHIVE_SESSION.get(url, **kwargs)
+    _ARCHIVE_SESSION.cookies.clear()
+    return response
+
+
+def download_and_extract_archive(
+    url: str, dest_dir: str, *, headers: dict[str, str] | None = None
+) -> list[str]:
     """Download an HTTPS archive URL and extract it safely into *dest_dir*."""
     if urlparse(url).scheme.lower() != "https":
         raise ArchiveError(f"Only HTTPS URLs are supported for archive download: {url!r}")
@@ -220,7 +234,10 @@ def download_and_extract_archive(url: str, dest_dir: str) -> list[str]:
     download_path = staging_root / "archive-download"
     response = None
     try:
-        response = requests.get(url, headers={"User-Agent": "apm-cli"}, timeout=60, stream=True)
+        request_headers = {"User-Agent": "apm-cli"}
+        if headers:
+            request_headers.update(headers)
+        response = _archive_get(url, headers=request_headers, timeout=60, stream=True)
         response.raise_for_status()
 
         final_url = getattr(response, "url", url)
@@ -241,7 +258,4 @@ def download_and_extract_archive(url: str, dest_dir: str) -> list[str]:
             close = getattr(response, "close", None)
             if callable(close):
                 close()
-        with contextlib.suppress(OSError):
-            download_path.unlink()
-        with contextlib.suppress(OSError):
-            staging_root.rmdir()
+        shutil.rmtree(staging_root, ignore_errors=True)

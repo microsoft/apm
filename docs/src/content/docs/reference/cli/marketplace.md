@@ -116,9 +116,9 @@ host -- generic HTTPS, SSH, Azure DevOps, self-hosted -- the
 marketplace is fetched via subprocess `git` through `GitCache`,
 and authentication falls through to the host's local git credential
 helper and matching `*_APM_PAT` variables such as `ADO_APM_PAT`.
-Hosted `marketplace.json` URLs are public HTTPS only in this phase;
-private URL auth is tracked separately. When packages are installed
-from a hosted JSON URL, the lockfile records the source URL and
+Hosted `marketplace.json` URLs are public HTTPS only: APM sends no auth
+headers. Use a git-backed marketplace for private catalogs. When packages
+are installed from a hosted JSON URL, the lockfile records the source URL and
 fetched content digest. See
 [`getting-started/authentication`](../../../getting-started/authentication/).
 

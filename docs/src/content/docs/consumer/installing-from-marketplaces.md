@@ -96,7 +96,7 @@ browse / install / update workflow works against:
 :::note[Hosted JSON is public HTTPS]
 Hosted `marketplace.json` URLs are public HTTPS sources: APM does not
 send custom auth headers. Use git-backed marketplaces for private
-catalogs until private URL auth is added.
+catalogs.
 :::
 
 For generic-git marketplaces, `marketplace.json` is fetched via a

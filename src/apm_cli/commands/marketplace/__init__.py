@@ -512,16 +512,26 @@ Examples:
 @marketplace.command(help="Register a marketplace", epilog=_ADD_EPILOG)
 @click.argument("source", metavar="SOURCE", required=True)
 @click.option("--name", "-n", default=None, help="Display name (defaults to repo name)")
-@click.option("--ref", "-r", default=None, help="Branch, tag, or commit to use (default: main)")
+@click.option(
+    "--ref",
+    "-r",
+    default=None,
+    help="Git ref (branch, tag, or commit). Default: main. Applies to git-backed sources only.",
+)
 @click.option("--branch", "-b", default=None, help="Deprecated alias for --ref", hidden=True)
-@click.option("--host", default=None, help="Git host FQDN (default: github.com)")
+@click.option(
+    "--host",
+    default=None,
+    help="Git host FQDN for OWNER/REPO shorthand (default: github.com)",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def add(source, name, ref, branch, host, verbose):
     """Register a marketplace.
 
     SOURCE accepts: OWNER/REPO shorthand, HOST/OWNER/REPO shorthand, a full
-    HTTPS URL (GitHub, GitLab, Azure DevOps, Gitea, Bitbucket Server, or
-    any self-hosted git server), an SSH URL (``git@host:org/repo.git``),
+    HTTPS git URL with optional ``#ref`` (GitHub, GitLab, Azure DevOps,
+    Gitea, Bitbucket Server, or any self-hosted git server), a hosted
+    ``marketplace.json`` URL, an SSH URL (``git@host:org/repo.git``),
     a local filesystem path, or a ``file://`` URI.
     """
     logger = CommandLogger("marketplace-add", verbose=verbose)

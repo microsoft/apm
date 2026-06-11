@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class FetchResult:
-    """Result of fetching a direct remote marketplace.json URL."""
+    """Cache-layer DTO for a direct remote marketplace.json fetch."""
 
     data: dict
     digest: str
@@ -59,6 +59,7 @@ _MAX_MARKETPLACE_JSON_BYTES = 10 * 1024 * 1024
 _HTTP_CHUNK_BYTES = 1024 * 1024
 _CACHE_DIR_NAME = os.path.join("cache", "marketplace")
 _HTTP_SESSION = requests.Session()
+_HTTP_SESSION.max_redirects = 5
 
 # Candidate locations for marketplace.json in a repository (priority order)
 _MARKETPLACE_PATHS = [
