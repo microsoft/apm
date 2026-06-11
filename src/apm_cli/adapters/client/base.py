@@ -29,7 +29,7 @@ _ENV_PLACEHOLDER_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>|" + _ENV_VAR_RE.pattern)
 _LEGACY_ANGLE_VAR_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>")
 
 
-def _registry_field_is_required(field):
+def registry_field_is_required(field):
     """Return True unless registry metadata explicitly marks a field optional."""
     return field.get("required", field.get("is_required", True)) is not False
 
@@ -486,7 +486,7 @@ class MCPClientAdapter(ABC):
             name = env_var.get("name", "")
             if not name:
                 continue
-            required = _registry_field_is_required(env_var)
+            required = registry_field_is_required(env_var)
 
             value = env_overrides.get(name) or os.getenv(name)
             if not value and required and not skip_prompting:
@@ -803,13 +803,14 @@ class MCPClientAdapter(ABC):
 
         # First pass: identify variables with empty values to warn the user.
         empty_value_vars = [
-            ev for ev in env_vars if _registry_field_is_required(ev) and not ev.get("value")
+            ev for ev in env_vars if registry_field_is_required(ev) and not ev.get("value")
         ]
         if empty_value_vars and skip_prompting:
             var_names = [ev.get("name") for ev in empty_value_vars]
             _rich_warning(
                 f"Warning: The following required environment variables have no default "
-                f"value and cannot be prompted in non-interactive mode: {var_names}"
+                f"value and cannot be prompted in non-interactive mode: {var_names}. "
+                "Set them in your environment and rerun apm install."
             )
 
         for env_var in env_vars:
@@ -844,7 +845,7 @@ class MCPClientAdapter(ABC):
 
             # Priority 4: interactive prompt
             default_value = env_var.get("value", "")
-            required = _registry_field_is_required(env_var)
+            required = registry_field_is_required(env_var)
 
             if not skip_prompting and required:
                 from rich.prompt import Prompt
@@ -867,7 +868,8 @@ class MCPClientAdapter(ABC):
             elif required:
                 _rich_warning(
                     f"Warning: Required environment variable '{name}' could not be resolved. "
-                    f"The MCP server may not function correctly."
+                    f"The MCP server may not function correctly. Set {name} in your "
+                    "environment and rerun apm install."
                 )
                 resolved[name] = ""
 

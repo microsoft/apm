@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
+from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -21,6 +22,29 @@ from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 
 def _make_adapter(tmp_path: Path) -> VSCodeClientAdapter:
     return VSCodeClientAdapter(project_root=tmp_path)
+
+
+def _context7_optional_env_server_info() -> dict:
+    """Return registry metadata with an unset optional token env var."""
+    return {
+        "name": "context7",
+        "packages": [
+            {
+                "runtime_hint": "npx",
+                "name": "@upstash/context7-mcp",
+                "registry_name": "npm",
+                "runtime_arguments": [],
+                "package_arguments": [],
+                "environment_variables": [
+                    {
+                        "name": "CONTEXT7_API_KEY",
+                        "description": "Optional Context7 authorization token",
+                        "required": False,
+                    }
+                ],
+            }
+        ],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +255,41 @@ class TestConfigureMcpServer:
                 server_info_cache={"empty-server": server_info},
                 logger=logger,
             )
+
+    def test_optional_env_vars_omitted_from_vscode_config_on_install(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CONTEXT7_API_KEY", raising=False)
+        server_info = _context7_optional_env_server_info()
+        logger = MagicMock()
+
+        with (
+            patch("apm_cli.integration.mcp_integrator._get_console", return_value=None),
+            patch(
+                "apm_cli.registry.operations.MCPServerOperations.validate_servers_exist",
+                return_value=(["context7"], []),
+            ),
+            patch(
+                "apm_cli.registry.operations.MCPServerOperations.check_servers_needing_installation",
+                return_value=["context7"],
+            ),
+            patch(
+                "apm_cli.registry.operations.MCPServerOperations.batch_fetch_server_info",
+                return_value={"context7": server_info},
+            ),
+        ):
+            configured = run_mcp_install(
+                ["context7"],
+                runtime="vscode",
+                explicit_target="vscode",
+                project_root=tmp_path,
+                logger=logger,
+            )
+
+        config = json.loads((tmp_path / ".vscode" / "mcp.json").read_text(encoding="utf-8"))
+        server = config["servers"]["context7"]
+
+        assert configured == 1
+        assert "CONTEXT7_API_KEY" not in server.get("env", {})
+        assert config.get("inputs", []) == []
 
     def test_adds_input_variables_without_duplicates(self, tmp_path):
         vscode_dir = tmp_path / ".vscode"

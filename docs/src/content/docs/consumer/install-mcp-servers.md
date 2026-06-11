@@ -76,11 +76,10 @@ writes a runtime-specific MCP config file. The schemas differ; the
 `apm.yml` source of truth does not.
 
 Registry-declared environment variables honor the registry's
-`required` flag. Required variables may be collected at install time or
-materialized as runtime prompts/placeholders. Optional variables are not
-prompted and are not added to generated config when no value is
-available; if a user already edited an optional value in the runtime
-config, reinstall preserves it.
+`required` flag. Servers with optional auth install without token
+prompts until you choose to configure one. See the
+[manifest schema reference](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
+for the full required-vs-optional runtime config rule.
 
 | Harness | File | Scope | Format |
 |---|---|---|---|

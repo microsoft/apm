@@ -12,7 +12,7 @@ from pathlib import Path
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
-from .base import _ENV_VAR_RE, _INPUT_VAR_RE, MCPClientAdapter, _registry_field_is_required
+from .base import _ENV_VAR_RE, _INPUT_VAR_RE, MCPClientAdapter, registry_field_is_required
 
 # Legacy ``<VAR>`` placeholder (Copilot CLI / Codex only). VS Code does not
 # resolve angle-bracket placeholders, so emitting them produces literal
@@ -481,10 +481,12 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
         Required variables keep the existing promptString behavior. Optional
         variables are omitted unless a value was collected for this install or
-        the user already has an edited value in the existing config.
+        the user already has an edited value in the existing config. Collected
+        optional values are emitted as ``${env:NAME}``, which VS Code resolves
+        from the VS Code process environment when the server starts.
         """
         name = env_var["name"]
-        if _registry_field_is_required(env_var):
+        if registry_field_is_required(env_var):
             return input_ref
 
         existing_value = self._existing_mapping_value(existing_server_config, "env", name)

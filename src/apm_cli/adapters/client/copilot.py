@@ -25,8 +25,8 @@ from .base import (
     MCPClientAdapter,
     _extract_legacy_angle_vars,
     _has_env_placeholder,
-    _registry_field_is_required,
     _stringify_env_literal,
+    registry_field_is_required,
 )
 from .base import (
     _translate_env_placeholder as _translate_env_placeholder,
@@ -708,7 +708,7 @@ class CopilotClientAdapter(MCPClientAdapter):
                 name = env_var.get("name", "")
                 if not name:
                     continue
-                required = _registry_field_is_required(env_var)
+                required = registry_field_is_required(env_var)
                 override_value = env_overrides.get(name)
                 has_override = bool(
                     override_value.strip() if isinstance(override_value, str) else override_value

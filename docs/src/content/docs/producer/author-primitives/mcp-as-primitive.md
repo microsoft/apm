@@ -123,9 +123,10 @@ the Copilot CLI config. See
 [Token injection](../../consumer/install-mcp-servers/#token-injection-github-mcp-server).
 
 When a registry server marks an env/input variable optional, APM does
-not force a prompt and does not create a generated runtime config entry
-unless a value is already available. User-edited optional entries in a
-runtime config are preserved on reinstall.
+not generate a prompt or runtime config entry unless a value is already
+available. See the
+[manifest schema reference](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
+for the canonical required-vs-optional rule.
 
 ## Direct vs transitive: the trust boundary
 
