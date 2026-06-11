@@ -669,6 +669,39 @@ class TestUpdateApmYmlParseError:
             assert result.exit_code == 1
 
 
+class TestRevisionPinResolutionErrors:
+    """Revision-pin resolution failures exit before install side effects."""
+
+    def test_revision_pin_resolution_error_exits_1(self, runner, tmp_path) -> None:
+        from apm_cli.deps.revision_pins import RevisionPinResolutionError
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            with _patch(
+                "apm_cli.commands.update.resolve_revision_pin_updates",
+                side_effect=RevisionPinResolutionError("No annotated tag found"),
+            ):
+                result = runner.invoke(cli, ["update"])
+
+        assert result.exit_code == 1
+        assert "No annotated tag found" in result.output
+
+    def test_revision_pin_git_error_exits_1_with_verbose_hint(self, runner, tmp_path) -> None:
+        from git.exc import GitCommandError
+
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+            with _patch(
+                "apm_cli.commands.update.resolve_revision_pin_updates",
+                side_effect=GitCommandError("ls-remote", 128, stderr="network down"),
+            ):
+                result = runner.invoke(cli, ["update"])
+
+        assert result.exit_code == 1
+        assert "Failed to resolve revision pins" in result.output
+        assert "Run with --verbose" in result.output
+
+
 class TestUpdatePlanCallbackPaths:
     """Lines 282->286, 304-308: plan render and interactive confirm."""
 
@@ -874,8 +907,8 @@ class TestUpdatePlanStatePaths:
             # Without plan_callback being invoked, no "Updated" or "applied" lines
             assert "updated" not in result.output.lower() or "refreshes" in result.output.lower()
 
-    def test_proceeded_zero_installed_shows_applied(self, runner, tmp_path) -> None:
-        """Line 350: proceeded=True but installed_count=0 → 'Update applied.'"""
+    def test_proceeded_zero_installed_reports_no_dependency_changes(self, runner, tmp_path) -> None:
+        """Line 350: proceeded=True but installed_count=0 reports the no-op outcome."""
         with runner.isolated_filesystem(temp_dir=tmp_path):
             _make_apm_yml(Path.cwd())
 
@@ -896,7 +929,7 @@ class TestUpdatePlanStatePaths:
             ):
                 result = runner.invoke(cli, ["update"])
             assert result.exit_code == 0, result.output
-            assert "update applied" in result.output.lower()
+            assert "no dependency changes were applied" in result.output.lower()
 
 
 # -----------------------------------------------------------------------------

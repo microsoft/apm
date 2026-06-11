@@ -111,7 +111,7 @@ def _build_revision_pin_downloader() -> RemoteRefDownloader:
     return GitHubPackageDownloader(auth_resolver=AuthResolver())
 
 
-def _resolve_and_maybe_apply_revision_pin_updates(
+def _resolve_and_stage_revision_pin_updates(
     *,
     all_declared_deps: list[DependencyReference],
     only_packages: list[str] | None,
@@ -119,12 +119,15 @@ def _resolve_and_maybe_apply_revision_pin_updates(
     downloader: RemoteRefDownloader | None = None,
     max_workers: int = 4,
 ) -> list[RevisionPinUpdate]:
-    """Resolve SHA pins and stage their in-memory references for the plan."""
+    """Resolve SHA pins and stage their in-memory references for the plan.
+
+    The passed dependency references belong to a staged APMPackage copy, not to
+    the object parsed from disk. Mutating them lets the install pipeline resolve
+    against the new SHAs after the user's consent decision while dry-run and
+    decline paths leave the original manifest model untouched.
+    """
     only_set = set(only_packages) if only_packages is not None else None
-    if logger.dry_run:
-        logger.progress("Checking upstream for revision-pin freshness...", symbol="running")
-    else:
-        logger.verbose_detail("Resolving revision pins against authoritative upstream...")
+    logger.progress("Checking upstream for revision-pin freshness...", symbol="running")
 
     try:
         # Authoritative round-trip (intentional, do NOT short-circuit): this
@@ -140,10 +143,10 @@ def _resolve_and_maybe_apply_revision_pin_updates(
             max_workers=max_workers,
         )
     except RevisionPinResolutionError as e:
-        _rich_error(str(e))
+        logger.error(str(e))
         sys.exit(1)
     except (GitCommandError, OSError) as e:
-        _rich_error(f"Failed to resolve revision pins: {e}")
+        logger.error(f"Failed to resolve revision pins: {e}")
         if not logger.verbose:
             logger.info("Run with --verbose for detailed diagnostics.")
         sys.exit(1)
@@ -440,7 +443,7 @@ def _run_dep_update(
 
     logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=bool(packages))
 
-    revision_pin_updates = _resolve_and_maybe_apply_revision_pin_updates(
+    revision_pin_updates = _resolve_and_stage_revision_pin_updates(
         all_declared_deps=all_declared_deps,
         only_packages=only_packages,
         logger=logger,
@@ -588,7 +591,7 @@ def _run_dep_update(
             noun = "pin" if count == 1 else "pins"
             _rich_success(f"Updated {count} revision {noun} in apm.yml.")
         else:
-            _rich_success("Update applied.")
+            _rich_success("No dependency changes were applied.")
 
 
 __all__ = ["update"]
