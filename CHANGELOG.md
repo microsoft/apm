@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source.
 
+### Fixed
+
+- `apm pack` now fills local-path marketplace package `description` and `version` from each package's own `apm.yml` when the root `marketplace.packages[]` entry omits them, so monorepo marketplaces no longer show empty browse columns. (closes #1725) -- by @imbabamba (#1581)
+
 ## [0.16.1] - 2026-06-01
 
 ### Added

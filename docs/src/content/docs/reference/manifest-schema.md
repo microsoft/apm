@@ -671,11 +671,11 @@ Each entry MUST be a mapping. Unknown keys are rejected.
 | `name` | `string` | REQUIRED | Package identifier as it appears in the marketplace. |
 | `source` | `string` | REQUIRED | One of: `<owner>/<repo>` (remote on the default host), `<host.tld>/<owner>/<repo>` (remote on a non-default host such as GitHub Enterprise or self-hosted GitLab -- shorthand), `https://<host.tld>/<owner>/<repo>[.git]` (same, full URL form -- a trailing `.git` is stripped), or `./<path>` (local). Must match the source pattern; path traversal (`..`) is refused, and URL forms with userinfo (`user@host`), ports, query strings, or non-`https` schemes are rejected. |
 | `subdir` | `string` | OPTIONAL | Subdirectory inside the source repo. Path-traversal-validated. Ignored for local sources. |
-| `version` | `string` | Conditional | Semver range (e.g. `^1.0.0`, `~2.1.0`, `>=3.0`). Stored as a string; resolution happens at pack time. REQUIRED for remote packages unless `ref` is given. |
+| `version` | `string` | Conditional | Semver range (e.g. `^1.0.0`, `~2.1.0`, `>=3.0`). Stored as a string; resolution happens at pack time. REQUIRED for remote packages unless `ref` is given. Falls back to the package's own `apm.yml` when omitted (see note below). |
 | `ref` | `string` | Conditional | Explicit git ref (SHA, tag, or branch). Overrides `version` range when both are present. REQUIRED for remote packages unless `version` is given. |
 | `tag_pattern` | `string` | OPTIONAL | Per-package override of `build.tagPattern`. Same placeholder rule. |
 | `include_prerelease` | `bool` | `false` | Whether semver pre-release tags are eligible for resolution. |
-| `description` | `string` | OPTIONAL | Pass-through to `marketplace.json`. |
+| `description` | `string` | OPTIONAL | Pass-through to `marketplace.json`; falls back to the package's own `apm.yml` when omitted (see note below). |
 | `homepage` | `string` | OPTIONAL | Pass-through to `marketplace.json`. |
 | `tags` | `list<string>` | OPTIONAL | Pass-through to `marketplace.json`. Limited to 50 tags, 100 chars each. |
 | `keywords` | `list<string>` | OPTIONAL | Alias merged into `tags` (deduplicated). |
@@ -685,7 +685,7 @@ Each entry MUST be a mapping. Unknown keys are rejected.
 
 Remote packages MUST declare at least one of `version` or `ref`. Local packages (sources beginning with `./`) skip git resolution and have no version requirement.
 
-When `description` or `version` is omitted from a `packages[]` entry, `apm pack` reads the matching field from the referenced package's own `apm.yml` and uses it in the generated `marketplace.json`. Remote packages are fetched over HTTPS (skipped under `--offline`); local packages are read from disk under the project root. A curator-side value still wins when both are set.
+When `description` or `version` is omitted from a `packages[]` entry, `apm pack` reads the matching field from the referenced package's own `apm.yml` and uses it in the generated `marketplace.json`. Remote packages are fetched over HTTPS (skipped under `--offline`); local packages are read from disk under the project root. A value set on the `packages[]` entry still wins when both are present.
 
 The first three `source` forms target a remote git host; the second and third name a non-default host (e.g. GitHub Enterprise, self-hosted GitLab) as either a shorthand or a full HTTPS URL with an optional `.git` suffix that is normalized away. Path traversal (`..`) in local paths, userinfo (`user@host`), ports, query strings, and non-`https` URL schemes are rejected at parse time.
 

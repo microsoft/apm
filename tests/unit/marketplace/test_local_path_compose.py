@@ -516,6 +516,45 @@ def test_compose_local_curator_description_wins_over_package(
     assert doc["plugins"][0]["description"] == "Curator-side blurb."
 
 
+def test_compose_local_curator_version_wins_over_package(tmp_path: Path) -> None:
+    """Curator-side ``version`` still overrides the package manifest --
+    same precedence as the existing remote path.
+    """
+    _write(
+        tmp_path / "apm.yml",
+        """\
+        name: my-project
+        description: M.
+        version: 1.0.0
+        marketplace:
+          owner:
+            name: ACME
+          packages:
+            - name: local-tool
+              source: ./packages/local-tool
+              version: 2.0.0
+        """,
+    )
+    package_dir = tmp_path / "packages" / "local-tool"
+    package_dir.mkdir(parents=True)
+    _write(
+        package_dir / "apm.yml",
+        """\
+        name: local-tool
+        version: 0.3.0
+        description: Package-side blurb.
+        """,
+    )
+
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = next(p for p in config.packages if p.is_local)
+    resolved = builder._resolve_entry(local_entry)
+    doc = builder.compose_marketplace_json([resolved])
+
+    assert doc["plugins"][0]["version"] == "2.0.0"
+
+
 def test_compose_local_missing_package_apm_yml_omits_description(
     tmp_path: Path,
 ) -> None:
