@@ -2387,24 +2387,50 @@ class TestGiteaRawUrlDownload:
         raw_headers = mock_get.call_args_list[0][1].get("headers", {})
         assert "Authorization" not in raw_headers
 
-    def test_generic_download_uses_resolve_dep_token_boundary(self):
+    def test_generic_download_uses_resolve_dep_auth_context_boundary(self):
         dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
         raw_ok = _make_resp(200, b"data")
 
         with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
             downloader = GitHubPackageDownloader()
             with (
-                patch.object(downloader, "_resolve_dep_token", return_value=None) as mock_resolve,
+                patch.object(
+                    downloader, "_resolve_dep_auth_ctx", return_value=None
+                ) as mock_resolve,
+                patch.object(
+                    downloader,
+                    "_resolve_dep_token",
+                    side_effect=AssertionError("download performed duplicate token resolution"),
+                ),
                 patch.object(
                     downloader.auth_resolver,
                     "resolve",
-                    side_effect=AssertionError("generic download bypassed _resolve_dep_token"),
+                    side_effect=AssertionError("generic download bypassed _resolve_dep_auth_ctx"),
                 ),
                 patch.object(downloader, "_resilient_get", return_value=raw_ok),
             ):
                 assert downloader.download_raw_file(dep_ref, "README.md", "main") == b"data"
 
         mock_resolve.assert_called_once_with(dep_ref)
+
+    def test_generic_host_403_without_credentials_explains_opt_in_paths(self):
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            downloader = GitHubPackageDownloader()
+            with patch.object(
+                downloader,
+                "_resilient_get",
+                side_effect=[_make_resp(404), _make_resp(403)],
+            ):
+                with pytest.raises(RuntimeError) as exc_info:
+                    downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        msg = str(exc_info.value)
+        assert "No APM-managed token was sent" in msg
+        assert "type: gitlab" in msg
+        assert "GITHUB_HOST" in msg
+        assert "Re-run with --verbose" in msg
 
     def test_falls_back_to_api_v1_when_raw_returns_404(self):
         """When the raw URL returns 404, the API v1 path is tried next."""
@@ -2435,9 +2461,12 @@ class TestGiteaRawUrlDownload:
             with pytest.raises(RuntimeError) as exc_info:
                 self.downloader.download_raw_file(dep_ref, "README.md", "main")
 
-        components = _error_url_components(str(exc_info.value))
-        assert ("https", "gitea.myorg.com", "/owner/repo/raw/main/README.md") in components
-        assert "network error" in str(exc_info.value).lower()
+        msg = str(exc_info.value)
+        assert (
+            "Network error downloading README.md from gitea.myorg.com via raw URL endpoint" in msg
+        )
+        assert "boom" in msg
+        assert "Re-run with --verbose" in msg
 
     def test_raw_url_500_surfaces_with_endpoint_context(self):
         dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
@@ -2446,18 +2475,19 @@ class TestGiteaRawUrlDownload:
             with pytest.raises(RuntimeError) as exc_info:
                 self.downloader.download_raw_file(dep_ref, "README.md", "main")
 
-        components = _error_url_components(str(exc_info.value))
-        assert ("https", "gitea.myorg.com", "/owner/repo/raw/main/README.md") in components
-        assert "HTTP 500" in str(exc_info.value)
+        msg = str(exc_info.value)
+        assert "Failed to download README.md from gitea.myorg.com" in msg
+        assert "HTTP 500" in msg
+        assert "raw URL endpoint" in msg
+        assert "Re-run with --verbose" in msg
 
 
 class TestGiteaGogsApiVersionNegotiation:
     """API version negotiation: raw URL -> v1 -> v3 for Gitea/Gogs generic hosts.
 
-    The implementation intentionally stops at v3.  GitLab uses a completely
-    different API shape (/api/v4/projects/:id/repository/files/...) that is
-    not compatible with the GitHub Contents-style endpoint negotiated here;
-    GitLab support is limited to git-clone operations only.
+    The generic-host implementation intentionally stops at v3. Explicit
+    ``type: gitlab`` dependencies use GitLab's separate
+    /api/v4/projects/:id/repository/files/... path instead of this negotiation.
     """
 
     def setup_method(self):

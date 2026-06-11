@@ -181,6 +181,15 @@ class BearerFallbackOutcome(NamedTuple):
     bearer_attempted: bool
 
 
+class AuthCacheKey(NamedTuple):
+    """Stable cache key for AuthResolver lookups."""
+
+    host: str | None
+    port: int | None
+    host_type: str
+    org: str
+
+
 class AuthResolver:
     """Single source of truth for auth resolution.
 
@@ -194,7 +203,7 @@ class AuthResolver:
         logger: object | None = None,
     ):
         self._token_manager = token_manager or GitHubTokenManager()
-        self._cache: dict[tuple, AuthContext] = {}
+        self._cache: dict[AuthCacheKey, AuthContext] = {}
         self._lock = threading.Lock()
         # F2/F3 #852: optional logger lets the install command route the
         # verbose auth-source line through CommandLogger and the deferred
@@ -266,9 +275,7 @@ class AuthResolver:
             )
 
         if host_type_value == "gitlab":
-            api_base = (
-                "https://gitlab.com/api/v4" if h == "gitlab.com" else f"https://{host}/api/v4"
-            )
+            api_base = "https://gitlab.com/api/v4" if h == "gitlab.com" else f"https://{h}/api/v4"
             return HostInfo(
                 host=host,
                 kind="gitlab",
@@ -277,7 +284,9 @@ class AuthResolver:
                 port=port,
             )
         if host_type_value:
-            raise ValueError(f"Unsupported dependency host type: {host_type}")
+            raise ValueError(
+                f"Unsupported dependency host type: {host_type}. Supported values: gitlab"
+            )
 
         # GHES: GITHUB_HOST is set to a non-github.com, non-ghe.com FQDN
         ghes_host = os.environ.get("GITHUB_HOST", "").lower()
@@ -296,12 +305,9 @@ class AuthResolver:
                     port=port,
                 )
 
-        # GitLab (SaaS + env-configured self-managed) — after GHES per spec (no silent GHES → GitLab)
+        # GitLab (SaaS + env-configured self-managed) -- after GHES per spec (no silent GHES -> GitLab)
         if is_gitlab_hostname(host):
-            if h == "gitlab.com":
-                api_base = "https://gitlab.com/api/v4"
-            else:
-                api_base = f"https://{host}/api/v4"
+            api_base = "https://gitlab.com/api/v4" if h == "gitlab.com" else f"https://{h}/api/v4"
             return HostInfo(
                 host=host,
                 kind="gitlab",
@@ -374,6 +380,14 @@ class AuthResolver:
 
     # -- core resolution ----------------------------------------------------
 
+    @staticmethod
+    def _cache_host_type(host: str, host_type: str | None) -> str:
+        """Return the cache-discriminating host_type value for a host."""
+        value = (host_type or "").strip().lower()
+        if value == "gitlab" and is_gitlab_hostname(host):
+            return ""
+        return value
+
     def resolve(
         self,
         host: str,
@@ -390,10 +404,10 @@ class AuthResolver:
         ``AuthContext``. Also flows into ``git credential fill`` so git's
         helpers can return port-specific credentials.
         """
-        key = (
+        key = AuthCacheKey(
             host.lower() if host else host,
             port,
-            (host_type or "").strip().lower(),
+            self._cache_host_type(host, host_type),
             org.lower() if org else "",
         )
         with self._lock:
@@ -439,7 +453,7 @@ class AuthResolver:
             host,
             org,
             port=dep_ref.port,
-            host_type=getattr(dep_ref, "host_type", None),
+            host_type=dep_ref.host_type,
         )
 
     # -- fallback strategy --------------------------------------------------

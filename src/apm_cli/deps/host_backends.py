@@ -563,7 +563,7 @@ def backend_for(
                 info = auth_resolver.classify_host(
                     host,
                     port=port,
-                    host_type=getattr(dep_ref, "host_type", None),
+                    host_type=dep_ref.host_type,
                 )
                 if not isinstance(info, HostInfo):
                     info = HostInfo(
@@ -580,7 +580,7 @@ def backend_for(
     info = auth_resolver.classify_host(
         host,
         port=port,
-        host_type=getattr(dep_ref, "host_type", None) if dep_ref is not None else None,
+        host_type=dep_ref.host_type if dep_ref is not None else None,
     )
     cls: type | None = None
     if isinstance(info, HostInfo):

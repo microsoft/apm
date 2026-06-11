@@ -159,7 +159,8 @@ use `local_path` directly. Virtual dependencies append `virtual_path` to the
 base repo key. Entries for non-default hosts prefix the key with the lowercased
 host (`host/owner/repo`), so `github.com/team/skills` and
 `gitea.myorg.com/team/skills` can coexist without overwriting each other, and
-host casing cannot create duplicate keys.
+host casing cannot create duplicate keys. Registry-proxy entries keep the bare
+logical key because the proxy host is transport, not package identity.
 
 ## Self entry
 

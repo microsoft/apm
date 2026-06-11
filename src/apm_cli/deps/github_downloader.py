@@ -413,7 +413,7 @@ class GitHubPackageDownloader:
             self.auth_resolver.classify_host(
                 dep_host,
                 port=dep_ref.port,
-                host_type=getattr(dep_ref, "host_type", None),
+                host_type=dep_ref.host_type,
             ).kind
             != "gitlab"
         )
@@ -803,7 +803,7 @@ class GitHubPackageDownloader:
             self.auth_resolver.classify_host(
                 host,
                 port=dep_ref.port,
-                host_type=getattr(dep_ref, "host_type", None),
+                host_type=dep_ref.host_type,
             ).kind
             == "gitlab"
         ):

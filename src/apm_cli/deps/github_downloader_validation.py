@@ -337,7 +337,7 @@ def _build_validation_attempts(
         downloader.auth_resolver.classify_host(
             dep_ref.host,
             port=dep_ref.port,
-            host_type=getattr(dep_ref, "host_type", None),
+            host_type=dep_ref.host_type,
         )
         if getattr(dep_ref, "host", None)
         else None

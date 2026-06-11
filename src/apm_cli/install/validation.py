@@ -290,8 +290,8 @@ def _validate_ado_git_package(
     is_gitlab = (
         auth_resolver.classify_host(
             dep_ref.host,
-            port=getattr(dep_ref, "port", None),
-            host_type=getattr(dep_ref, "host_type", None),
+            port=dep_ref.port,
+            host_type=dep_ref.host_type,
         ).kind
         == "gitlab"
     )

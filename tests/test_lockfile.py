@@ -3,7 +3,7 @@
 from pathlib import Path  # noqa: F401
 from unittest.mock import Mock
 
-import pytest  # noqa: F401
+import pytest
 import yaml
 
 from apm_cli.deps.lockfile import (
@@ -136,6 +136,12 @@ class TestLockedDependency:
         restored = LockedDependency.from_dict(data)
         assert restored.host_type == "gitlab"
         assert restored.to_dependency_ref().host_type == "gitlab"
+
+    def test_rejects_unknown_host_type_from_lockfile(self):
+        with pytest.raises(ValueError, match="Supported values: gitlab"):
+            LockedDependency.from_dict(
+                {"repo_url": "team/repo", "host": "code.acme.com", "host_type": "gitea"}
+            )
 
     def test_host_type_from_dependency_ref(self):
         dep_ref = DependencyReference(

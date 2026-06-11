@@ -118,13 +118,21 @@ paths that escape the repo root, and cross-repo local paths are rejected.
 This is for same-repo monorepo siblings, not general workspace semantics.
 
 Use `type: gitlab` only on `git` object entries for self-managed GitLab
-instances whose hostname does not make the platform obvious. It routes REST
-file reads and token lookup through the GitLab path (`GITLAB_APM_PAT`,
-`GITLAB_TOKEN`, then host credentials) without relying on hostname heuristics.
-Reading a private file from a generic non-default host now requires that
-explicit clone/type signal: without it APM treats the host as public for the
-file-read path, so private siblings on an unrecognized host need the `git`
-object form (or `type:`) to resolve their credentials.
+instances whose hostname does not make the platform obvious:
+
+```yaml
+- git: https://code.acme.com/platform/standards.git
+  type: gitlab
+```
+
+That routes REST file reads and token lookup through the GitLab path without
+relying on hostname heuristics. For the token precedence chain, see
+[Authentication](../../getting-started/authentication/).
+
+Generic non-default hosts do not receive APM-managed GitHub or GitLab PATs on
+the HTTP file-read path. If a private host fails with 401/403, use the
+supported backend signal (`type: gitlab` for GitLab-compatible hosts,
+`GITHUB_HOST` for GHES) or a clone-backed dependency path.
 
 For private repos and non-GitHub hosts, see
 [Private and org packages](../private-and-org-packages/).

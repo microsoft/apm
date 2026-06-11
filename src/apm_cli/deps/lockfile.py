@@ -22,6 +22,22 @@ from ..models.dependency.reference import (
 logger = logging.getLogger(__name__)
 
 _SELF_KEY = "."
+_ALLOWED_HOST_TYPES = {"gitlab"}
+
+
+def _normalize_lockfile_host_type(raw: Any) -> str | None:
+    """Validate and normalize the optional lockfile host_type field."""
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("lockfile host_type must be a non-empty string")
+    value = raw.strip().lower()
+    if value not in _ALLOWED_HOST_TYPES:
+        raise ValueError(
+            f"Unsupported lockfile host_type: {raw}. Supported values: "
+            f"{', '.join(sorted(_ALLOWED_HOST_TYPES))}"
+        )
+    return value
 
 
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
@@ -204,6 +220,8 @@ class LockedDependency:
             if _p_int is not None and 1 <= _p_int <= 65535:
                 port = _p_int
 
+        host_type = _normalize_lockfile_host_type(data.get("host_type"))
+
         # Recognised keys this build knows about. Anything else is captured
         # as ``_unknown_fields`` so a re-emit preserves forward-introduced
         # fields rather than silently dropping them. ``deployed_skills`` is
@@ -246,7 +264,7 @@ class LockedDependency:
         return cls(
             repo_url=data["repo_url"],
             host=data.get("host"),
-            host_type=data.get("host_type"),
+            host_type=host_type,
             port=port,
             registry_prefix=data.get("registry_prefix"),
             resolved_commit=data.get("resolved_commit"),

@@ -635,7 +635,7 @@ class DownloadDelegate:
         host_info = self._host.auth_resolver.classify_host(
             host,
             port=dep_ref.port,
-            host_type=getattr(dep_ref, "host_type", None),
+            host_type=dep_ref.host_type,
         )
         project_path = dep_ref.repo_url
         if not project_path:
@@ -646,7 +646,7 @@ class DownloadDelegate:
             host,
             org,
             port=dep_ref.port,
-            host_type=getattr(dep_ref, "host_type", None),
+            host_type=dep_ref.host_type,
         )
         token = file_ctx.token
         headers = AuthResolver.gitlab_rest_headers(token)
@@ -742,11 +742,11 @@ class DownloadDelegate:
         # Parse owner/repo from repo_url
         owner, repo = dep_ref.repo_url.split("/", 1)
 
-        # Resolve tokens through the same per-dependency boundary used by
+        # Resolve auth once through the same per-dependency boundary used by
         # clone URLs. Generic hosts intentionally return None here so APM
         # does not attach managed PATs to ad-hoc HTTP requests.
-        token = self._host._resolve_dep_token(dep_ref)
         file_ctx = self._host._resolve_dep_auth_ctx(dep_ref)
+        token = file_ctx.token if file_ctx else None
 
         # --- CDN fast-path for github.com without a token ---
         # raw.githubusercontent.com is served from GitHub's CDN and is not
@@ -816,7 +816,7 @@ class DownloadDelegate:
 
         # Try to download with the specified ref
         try:
-            if verbose_callback:
+            if verbose_callback and host.lower() != "github.com":
                 verbose_callback(f"Trying Contents API on {host}: {api_url}")
             response = self._host._resilient_get(api_url, headers=headers, timeout=30)
             response.raise_for_status()
@@ -977,13 +977,22 @@ class DownloadDelegate:
                     f"(file: {file_path}, ref: {ref}). "
                 )
                 if not token:
-                    error_msg += self._host.auth_resolver.build_error_context(
-                        host,
-                        "download",
-                        org=owner,
-                        port=dep_ref.port if dep_ref else None,
-                        dep_url=dep_ref.repo_url if dep_ref else None,
-                    )
+                    if is_github_host:
+                        error_msg += self._host.auth_resolver.build_error_context(
+                            host,
+                            "download",
+                            org=owner,
+                            port=dep_ref.port if dep_ref else None,
+                            dep_url=dep_ref.repo_url if dep_ref else None,
+                        )
+                    else:
+                        error_msg += (
+                            "No APM-managed token was sent for generic host file download. "
+                            "Use object-form type: gitlab for GitLab-compatible hosts, "
+                            f"set GITHUB_HOST={host} for GitHub Enterprise Server, "
+                            "or use a clone-backed dependency path. "
+                            "Re-run with --verbose to see attempted endpoint URLs."
+                        )
                 elif is_github_host and not host.lower().endswith(".ghe.com"):
                     error_msg += (
                         "Both authenticated and unauthenticated access "
@@ -1003,7 +1012,8 @@ class DownloadDelegate:
                         f"GITHUB_HOST={host} when this host is your GitHub "
                         "Enterprise Server."
                     )
-                error_msg += f" Endpoint: {api_url}."
+                if is_github_host:
+                    error_msg += " Re-run with --verbose to see attempted endpoint URLs."
                 raise RuntimeError(error_msg)  # noqa: B904
             else:
                 raise RuntimeError(
@@ -1180,7 +1190,10 @@ class DownloadDelegate:
         endpoint: str,
     ) -> str:
         """Build a host- and endpoint-specific HTTP download error."""
-        return f"Failed to download {file_path} from {host}: HTTP {status} at {url} ({endpoint})."
+        return (
+            f"Failed to download {file_path} from {host}: HTTP {status} "
+            f"from {endpoint} endpoint. Re-run with --verbose to see attempted URL."
+        )
 
     @staticmethod
     def _build_download_network_error(
@@ -1191,9 +1204,10 @@ class DownloadDelegate:
         error: BaseException,
     ) -> str:
         """Build a host- and endpoint-specific network download error."""
+        detail = str(error).strip().splitlines()[0] if str(error).strip() else type(error).__name__
         return (
-            f"Network error downloading {file_path} from {host}: "
-            f"{type(error).__name__} at {url} ({endpoint})."
+            f"Network error downloading {file_path} from {host} via {endpoint} endpoint: "
+            f"{detail}. Re-run with --verbose to see attempted URL."
         )
 
     @staticmethod

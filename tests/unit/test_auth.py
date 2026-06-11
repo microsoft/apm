@@ -82,6 +82,22 @@ class TestClassifyHost:
             assert hi.kind == "gitlab"
             assert hi.api_base == "https://git.corp.example.com/api/v4"
 
+    def test_host_type_gitlab_reclassifies_bespoke_host(self):
+        hi = AuthResolver.classify_host("Code.Acme.COM", host_type="gitlab")
+        assert hi.kind == "gitlab"
+        assert hi.api_base == "https://code.acme.com/api/v4"
+
+    def test_unsupported_host_type_lists_supported_values(self):
+        with pytest.raises(ValueError, match="Supported values: gitlab"):
+            AuthResolver.classify_host("code.acme.com", host_type="gitea")
+
+    def test_gitlab_host_type_hint_reuses_gitlab_cache_entry(self):
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+            ctx_a = resolver.resolve("gitlab.com")
+            ctx_b = resolver.resolve("gitlab.com", host_type="gitlab")
+        assert ctx_a is ctx_b
+
     def test_gitlab_self_managed_apm_gitlab_hosts_env(self):
         with patch.dict(
             os.environ,

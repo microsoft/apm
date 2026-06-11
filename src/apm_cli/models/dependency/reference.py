@@ -958,7 +958,9 @@ class DependencyReference:
             raise ValueError("'type' field must be a non-empty string")
         value = raw.strip().lower()
         if value != "gitlab":
-            raise ValueError("'type' field currently supports only 'gitlab'")
+            raise ValueError(
+                "'type' field currently supports only 'gitlab'. Supported values: gitlab"
+            )
         return value
 
     @classmethod

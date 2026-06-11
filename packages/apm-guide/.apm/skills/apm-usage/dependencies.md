@@ -138,7 +138,7 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `path` | OPTIONAL | Subdirectory or file within the repo (virtual package). |
 | `ref` | OPTIONAL | Branch, tag, or commit SHA. |
 | `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
-| `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. |
+| `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. Generic hosts do not receive APM-managed PATs on HTTP file reads. |
 
 ```yaml
 - git: https://gitlab.com/acme/repo.git
