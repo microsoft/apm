@@ -14,9 +14,30 @@ Acceptance criteria:
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
 from apm_cli.compilation.claude_formatter import CLAUDE_HEADER
+from apm_cli.compilation.constitution import clear_constitution_cache
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
+
+# ---------------------------------------------------------------------------
+# Module-level cache isolation
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_constitution_cache():
+    """Clear the module-level constitution cache before and after every test.
+
+    The cache is global; without this fixture a test that places a constitution
+    file on disk can leak state into later tests and cause unexpected
+    CLAUDE.md emission or suppressed removal previews.
+    """
+    clear_constitution_cache()
+    yield
+    clear_constitution_cache()
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -485,8 +506,6 @@ class TestConstitutionCaseNoRemovalPreview:
     def test_dry_run_clean_with_constitution_does_not_preview_removal(self, tmp_path):
         """Dry-run + --clean + .claude/rules/ populated + constitution present
         -> NO removal preview (CLAUDE.md would still be written for the constitution)."""
-        from apm_cli.compilation.constitution import clear_constitution_cache
-
         _make_project(tmp_path, populate_rules=True)
         _apm_generated_claude_md(tmp_path)
 
@@ -497,8 +516,7 @@ class TestConstitutionCaseNoRemovalPreview:
         (constitution_dir / "constitution.md").write_text(
             "# Constitution\nBe helpful.\n", encoding="utf-8"
         )
-        # Clear the module-level constitution cache so this test sees the new file.
-        clear_constitution_cache()
+        # Cache is reset before every test by the _reset_constitution_cache autouse fixture.
 
         compiler = AgentsCompiler(str(tmp_path))
         config = CompilationConfig(
