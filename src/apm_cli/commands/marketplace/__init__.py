@@ -573,7 +573,12 @@ def add(source, name, ref, branch, host, verbose):
         # --host is being ignored rather than silently overriding.
         is_direct_url = _is_remote_marketplace_json_url(url)
 
-        if host is not None and kind == "local":
+        if host is not None and is_direct_url:
+            logger.warning(
+                "--host is ignored when SOURCE is a hosted marketplace.json URL.",
+                symbol="warning",
+            )
+        elif host is not None and kind == "local":
             logger.warning(
                 "--host is ignored when SOURCE is a local filesystem path.",
                 symbol="warning",
@@ -626,7 +631,6 @@ def add(source, name, ref, branch, host, verbose):
         provisional_label = name or (
             _default_alias_from_remote_url(url) if is_direct_url else _default_alias_from_url(url)
         )
-        logger.start(f"Registering marketplace '{provisional_label}'...", symbol="gear")
         if _should_warn_unpinned_git_url(
             source_arg, kind, is_direct_url, fragment_ref, explicit_ref
         ):
@@ -635,6 +639,7 @@ def add(source, name, ref, branch, host, verbose):
                 f"{source_arg}#v1.0.0) or --ref to avoid mutable branch updates.",
                 symbol="warning",
             )
+        logger.start(f"Registering marketplace '{provisional_label}'...", symbol="gear")
 
         # Probe for marketplace.json location. The probe source's name is a
         # placeholder -- _auto_detect_path only consults url/ref/path/kind.
@@ -693,7 +698,9 @@ def add(source, name, ref, branch, host, verbose):
         )
 
         logger.verbose_detail(f"    Source: {fetch_source.display_source}")
-        logger.verbose_detail(f"    Kind: {fetch_source.kind}")
+        logger.verbose_detail(
+            f"    Source type: {_display_source_kind(fetch_source.kind, is_direct_url)}"
+        )
         if not is_direct_url:
             logger.verbose_detail(f"    Ref: {effective_ref}")
         logger.verbose_detail(f"    Detected path: {detected_path}")
@@ -773,14 +780,34 @@ def _local_source_points_to_file(source: MarketplaceSource) -> bool:
         return False
 
 
+def _display_source_kind(kind: str, is_direct_url: bool) -> str:
+    """Return a human-readable source kind for verbose CLI output."""
+    if is_direct_url:
+        return "hosted marketplace.json URL"
+    labels = {
+        "github": "GitHub repository",
+        "gitlab": "GitLab repository",
+        "git": "generic git repository",
+        "local": "local filesystem path",
+    }
+    return labels.get(kind, kind)
+
+
 def _default_alias_from_remote_url(url: str) -> str:
     """Derive a stable default alias for a direct remote marketplace.json URL."""
     try:
         parsed = urlsplit(url)
     except ValueError:
         return "marketplace"
-    host = (parsed.hostname or "marketplace").lower()
-    return host.split(":", 1)[0]
+    host = (parsed.hostname or "marketplace").lower().split(":", 1)[0]
+    path_segments = [seg for seg in (parsed.path or "").split("/") if seg]
+    parent = ""
+    if len(path_segments) >= 2 and path_segments[-1].lower() == "marketplace.json":
+        parent = path_segments[-2]
+    if parent:
+        alias = f"{host}-{parent}"
+        return re.sub(r"[^a-zA-Z0-9._-]", "_", alias).strip("._-") or host
+    return host
 
 
 def _default_alias_from_url(url: str) -> str:

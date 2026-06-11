@@ -56,7 +56,9 @@ class FetchResult:
 
 _CACHE_TTL_SECONDS = 3600  # 1 hour
 _MAX_MARKETPLACE_JSON_BYTES = 10 * 1024 * 1024
+_HTTP_CHUNK_BYTES = 1024 * 1024
 _CACHE_DIR_NAME = os.path.join("cache", "marketplace")
+_HTTP_SESSION = requests.Session()
 
 # Candidate locations for marketplace.json in a repository (priority order)
 _MARKETPLACE_PATHS = [
@@ -217,6 +219,25 @@ def _read_stale_meta(name: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 
+def _http_get(url: str, **kwargs):
+    """Issue HTTP GET through a shared session for connection reuse."""
+    return _HTTP_SESSION.get(url, **kwargs)
+
+
+def _read_bounded_response_bytes(resp, url: str, max_bytes: int) -> bytes:
+    """Read response body from streaming chunks, enforcing *max_bytes*."""
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in resp.iter_content(chunk_size=_HTTP_CHUNK_BYTES):
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > max_bytes:
+            raise MarketplaceFetchError(url, f"marketplace.json exceeds {max_bytes} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def _fetch_url_direct(
     url: str,
     *,
@@ -238,40 +259,42 @@ def _fetch_url_direct(
     if last_modified:
         headers["If-Modified-Since"] = last_modified
 
+    resp = None
     try:
-        resp = requests.get(url, headers=headers, timeout=30)
+        resp = _http_get(url, headers=headers, timeout=30, stream=True)
     except requests.exceptions.RequestException as exc:
         raise MarketplaceFetchError(url, str(exc)) from exc
 
-    final_url = getattr(resp, "url", url)
-    if isinstance(final_url, str) and urlsplit(final_url).scheme.lower() != "https":
-        raise MarketplaceFetchError(url, "redirect to non-HTTPS URL rejected")
-
-    if resp.status_code == 304:
-        return None
-    if resp.status_code == 404:
-        raise MarketplaceFetchError(url, "404 Not Found")
-
     try:
-        resp.raise_for_status()
-    except requests.exceptions.RequestException as exc:
-        raise MarketplaceFetchError(url, str(exc)) from exc
+        final_url = getattr(resp, "url", url)
+        if isinstance(final_url, str) and urlsplit(final_url).scheme.lower() != "https":
+            raise MarketplaceFetchError(url, "redirect to non-HTTPS URL rejected")
 
-    content_length = resp.headers.get("Content-Length", "")
-    if content_length:
-        with contextlib.suppress(ValueError):
-            if int(content_length) > _MAX_MARKETPLACE_JSON_BYTES:
-                raise MarketplaceFetchError(
-                    url,
-                    f"marketplace.json exceeds {_MAX_MARKETPLACE_JSON_BYTES} bytes",
-                )
+        if resp.status_code == 304:
+            return None
+        if resp.status_code == 404:
+            raise MarketplaceFetchError(url, "404 Not Found")
 
-    raw = resp.content
-    if len(raw) > _MAX_MARKETPLACE_JSON_BYTES:
-        raise MarketplaceFetchError(
-            url,
-            f"marketplace.json exceeds {_MAX_MARKETPLACE_JSON_BYTES} bytes",
-        )
+        try:
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            raise MarketplaceFetchError(url, str(exc)) from exc
+
+        content_length = resp.headers.get("Content-Length", "")
+        if content_length:
+            with contextlib.suppress(ValueError):
+                if int(content_length) > _MAX_MARKETPLACE_JSON_BYTES:
+                    raise MarketplaceFetchError(
+                        url,
+                        f"marketplace.json exceeds {_MAX_MARKETPLACE_JSON_BYTES} bytes",
+                    )
+
+        raw = _read_bounded_response_bytes(resp, url, _MAX_MARKETPLACE_JSON_BYTES)
+    finally:
+        if resp is not None:
+            close = getattr(resp, "close", None)
+            if callable(close):
+                close()
 
     digest = "sha256:" + hashlib.sha256(raw).hexdigest()
     if expected_digest and digest != expected_digest:
@@ -406,7 +429,7 @@ def _fetch_via_api(
     url = url_builder(source, file_path, host_info)
 
     def _do_fetch(token, _git_env):
-        resp = requests.get(url, headers=header_builder(token), timeout=30)
+        resp = _http_get(url, headers=header_builder(token), timeout=30)
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
@@ -590,7 +613,12 @@ def _fetch_local(
 
 
 def _fetch_local_file(source: MarketplaceSource, manifest_file: Path) -> dict | None:
-    """Read a local marketplace.json file with parent-directory containment."""
+    """Read an explicit local marketplace.json file.
+
+    The parent directory is the containment boundary by design: unlike a
+    directory source, a direct file source is a single user-selected file, so
+    there is no broader marketplace root to enforce.
+    """
     from ..utils.path_security import PathTraversalError, ensure_path_within
 
     try:
@@ -741,7 +769,7 @@ def fetch_raw(
 
     def _do_fetch(token, _git_env):
         headers = _github_headers(token)
-        resp = requests.get(url, headers=headers, timeout=30)
+        resp = _http_get(url, headers=headers, timeout=30)
         if resp.status_code == 404:
             return None
         resp.raise_for_status()

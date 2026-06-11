@@ -104,9 +104,9 @@ apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
 | Flag | Description |
 |---|---|
 | `--name`, `-n` | Display name. Defaults to the repo name. |
-| `--ref`, `-r` | Git ref (branch, tag, or SHA). Default: `main`. For HTTPS git URLs, a `#ref` fragment is equivalent and is stored as the ref. |
+| `--ref`, `-r` | Git ref (branch, tag, or SHA). Default: `main`. Applies only to git-backed sources. For HTTPS git URLs, a `#ref` fragment is equivalent and is stored as the ref. |
 | `--branch`, `-b` | Deprecated alias for `--ref`. |
-| `--host` | Git host FQDN. Default: `github.com`. Ignored when `SOURCE` is a URL or local path. |
+| `--host` | Git host FQDN for `OWNER/REPO` shorthand. Default: `github.com`. Ignored with a warning when `SOURCE` is a URL, hosted `marketplace.json`, or local path. |
 | `--verbose`, `-v` | Show detailed output. |
 
 **Trust boundary.** APM forwards its authentication tokens
@@ -115,10 +115,11 @@ host is classified as GitHub or GitLab family. For any other git
 host -- generic HTTPS, SSH, Azure DevOps, self-hosted -- the
 marketplace is fetched via subprocess `git` through `GitCache`,
 and authentication falls through to the host's local git credential
-helper. Hosted `marketplace.json` URLs are public HTTPS only in this
-phase; private URL auth is tracked separately. When packages are
-installed from a hosted JSON URL, the lockfile records the source URL
-and fetched content digest. See
+helper and matching `*_APM_PAT` variables such as `ADO_APM_PAT`.
+Hosted `marketplace.json` URLs are public HTTPS only in this phase;
+private URL auth is tracked separately. When packages are installed
+from a hosted JSON URL, the lockfile records the source URL and
+fetched content digest. See
 [`getting-started/authentication`](../../../getting-started/authentication/).
 
 **Azure DevOps.** ADO-hosted marketplaces fetch `marketplace.json`

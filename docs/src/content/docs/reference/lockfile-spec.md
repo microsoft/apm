@@ -141,6 +141,8 @@ Each item in `dependencies` describes one resolved package.
 | `is_dev` | bool | no | `true` when the dep was declared under `devDependencies`. |
 | `discovered_via` | string | no | Marketplace name that surfaced this package (provenance). |
 | `marketplace_plugin_name` | string | no | Plugin name as listed in that marketplace. |
+| `source_url` | string | no | Canonical marketplace source URL when the package came from a hosted `marketplace.json` catalog. |
+| `source_digest` | string | no | `sha256:<hex>` digest of the hosted `marketplace.json` bytes used for resolution. |
 | `is_insecure` | bool | no | `true` when the source URL was `http://`. |
 | `allow_insecure` | bool | no | `true` when the manifest explicitly opted in to the insecure source. |
 | `constraint` | string | git-source semver only | The original semver range from `apm.yml` (`^1.2.0`, `~1.4`). Present when `ref:` was a range; used by drift detection so a manifest range vs. a locked tag (`v1.5.3`) is not a false positive, and by lockfile replay to pin the resolved tag deterministically across installs. |

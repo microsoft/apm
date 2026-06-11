@@ -190,6 +190,15 @@ class TestMarketplaceAdd:
         assert result.exit_code == 0
         assert "Alias source: manifest.name" in result.output
 
+    def test_remote_url_default_alias_includes_nearest_path_segment(self):
+        """Hosted JSON aliases should not collapse every path on a host to the same name."""
+        from apm_cli.commands.marketplace import _default_alias_from_remote_url
+
+        assert (
+            _default_alias_from_remote_url("https://catalog.example.com/teams/sec/marketplace.json")
+            == "catalog.example.com-sec"
+        )
+
     @patch("apm_cli.marketplace.client.fetch_marketplace")
     @patch("apm_cli.marketplace.client._auto_detect_path")
     def test_successful_add(self, mock_detect, mock_fetch, runner):
@@ -329,24 +338,34 @@ class TestMarketplaceAdd:
         """Remote marketplace.json URLs are direct JSON sources, not git repositories."""
         from apm_cli.commands.marketplace import marketplace
 
+        raw = b'{"name":"catalog","plugins":[{"name":"tool","repository":"acme/tool"}]}'
+
         class Response:
             status_code = 200
             url = "https://catalog.example.com/marketplace.json"
-            content = b'{"name":"catalog","plugins":[{"name":"tool","repository":"acme/tool"}]}'
 
             def __init__(self):
                 self.headers = {"ETag": "abc"}
 
+            def iter_content(self, chunk_size):
+                yield raw[:chunk_size]
+                yield raw[chunk_size:]
+
             def raise_for_status(self):
+                return None
+
+            def close(self):
                 return None
 
         requests_seen: list[str] = []
 
-        def fake_get(url, headers=None, timeout=None):
-            requests_seen.append(url)
-            return Response()
+        class Session:
+            def get(self, url, headers=None, timeout=None, stream=False):
+                assert stream is True
+                requests_seen.append(url)
+                return Response()
 
-        monkeypatch.setattr("apm_cli.marketplace.client.requests.get", fake_get)
+        monkeypatch.setattr("apm_cli.marketplace.client._HTTP_SESSION", Session())
 
         result = runner.invoke(
             marketplace,
@@ -371,6 +390,52 @@ class TestMarketplaceAdd:
         )
         assert registered.path == ""
         assert registered.kind == "url"
+
+    @patch("apm_cli.marketplace.registry.add_marketplace")
+    def test_add_remote_marketplace_json_url_warns_host_flag_is_ignored(
+        self, mock_add, runner, monkeypatch
+    ):
+        """--host is a shorthand-only flag; hosted marketplace.json URLs carry their own host."""
+        from apm_cli.commands.marketplace import marketplace
+
+        raw = b'{"name":"catalog","plugins":[]}'
+
+        class Response:
+            status_code = 200
+            url = "https://catalog.example.com/marketplace.json"
+
+            def __init__(self):
+                self.headers: dict[str, str] = {}
+
+            def iter_content(self, chunk_size):
+                yield raw
+
+            def raise_for_status(self):
+                return None
+
+            def close(self):
+                return None
+
+        class Session:
+            def get(self, url, headers=None, timeout=None, stream=False):
+                assert stream is True
+                return Response()
+
+        monkeypatch.setattr("apm_cli.marketplace.client._HTTP_SESSION", Session())
+
+        result = runner.invoke(
+            marketplace,
+            [
+                "add",
+                "https://catalog.example.com/marketplace.json",
+                "--host",
+                "catalog.example.com",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "--host is ignored when SOURCE is a hosted marketplace.json URL" in result.output
+        assert mock_add.call_args[0][0].name == "catalog"
 
     @patch("apm_cli.marketplace.client.fetch_marketplace")
     @patch("apm_cli.marketplace.client._auto_detect_path")

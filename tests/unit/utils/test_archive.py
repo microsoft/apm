@@ -42,19 +42,53 @@ def test_detect_archive_format_rejects_uncompressed_tar() -> None:
         _detect_archive_format("application/x-tar", "https://example.test/archive.tar")
 
 
+def test_download_and_extract_archive_rejects_non_https_before_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called = False
+
+    def fake_get(_url: str, **_kwargs: object) -> object:
+        nonlocal called
+        called = True
+        raise AssertionError("network should not be called for non-HTTPS archives")
+
+    monkeypatch.setattr(archive_mod.requests, "get", fake_get)
+
+    with pytest.raises(ArchiveError, match="Only HTTPS URLs"):
+        download_and_extract_archive("http://example.test/plugin.zip", str(tmp_path / "out"))
+
+    assert called is False
+
+
 def test_download_and_extract_archive_uses_redirect_url_for_format(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    archive = _zip_bytes({"plugin/SKILL.md": b"content"})
+    seen_kwargs: list[dict[str, object]] = []
+
     class Response:
         def __init__(self) -> None:
             self.headers = {"Content-Type": ""}
-            self.content = _zip_bytes({"plugin/SKILL.md": b"content"})
             self.url = "https://cdn.example.test/plugin.zip"
+
+        @property
+        def content(self) -> bytes:
+            raise AssertionError(
+                "download_and_extract_archive must stream, not read response.content"
+            )
 
         def raise_for_status(self) -> None:
             return None
 
-    def fake_get(_url: str, **_kwargs: object) -> Response:
+        def iter_content(self, chunk_size: int):
+            for idx in range(0, len(archive), chunk_size):
+                yield archive[idx : idx + chunk_size]
+
+        def close(self) -> None:
+            return None
+
+    def fake_get(_url: str, **kwargs: object) -> Response:
+        seen_kwargs.append(kwargs)
         return Response()
 
     monkeypatch.setattr(archive_mod.requests, "get", fake_get)
@@ -62,6 +96,7 @@ def test_download_and_extract_archive_uses_redirect_url_for_format(
     out = tmp_path / "out"
     extracted = download_and_extract_archive("https://example.test/download", str(out))
 
+    assert seen_kwargs == [{"headers": {"User-Agent": "apm-cli"}, "timeout": 60, "stream": True}]
     assert extracted == ["plugin/SKILL.md"]
     assert (out / "plugin" / "SKILL.md").read_text() == "content"
 

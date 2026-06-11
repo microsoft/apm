@@ -118,7 +118,7 @@ Credentials resolve via `APM_REGISTRY_TOKEN_{NAME}` env var (or `apm config set 
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm marketplace add SOURCE` | Register a marketplace. `SOURCE` accepts `OWNER/REPO`, `HOST/OWNER/REPO`, nested `HOST/group/sub/.../REPO`, HTTPS git URL with optional `#ref`, hosted `marketplace.json` URL, SSH URL (`git@host:org/repo.git`), local directory or file path, or `file://` URI. | `-n NAME`, `-r REF`, `--host HOST` |
+| `apm marketplace add SOURCE` | Register a marketplace. `SOURCE` accepts `OWNER/REPO`, `HOST/OWNER/REPO`, nested `HOST/group/sub/.../REPO`, HTTPS git URL with optional `#ref`, hosted `marketplace.json` URL, SSH URL (`git@host:org/repo.git`), local directory or file path, or `file://` URI. `--ref` applies only to git-backed sources; `--host` applies only to shorthand sources. | `-n NAME`, `-r REF`, `--host HOST` |
 | `apm marketplace list` | List registered marketplaces | -- |
 | `apm marketplace browse NAME` | Browse marketplace plugins | -- |
 | `apm marketplace update [NAME]` | Update marketplace index | -- |

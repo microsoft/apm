@@ -348,7 +348,7 @@ class TestInstallGitLabMarketplaceFullPipelineFromHttp:
     @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
     @patch("apm_cli.commands.install._rich_success")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    @patch("apm_cli.marketplace.client.requests.get")
+    @patch("apm_cli.marketplace.client._http_get")
     @patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None)
     def test_gitlab_marketplace_in_repo_plugin_resolves_to_git_path(
         self,
@@ -375,6 +375,7 @@ class TestInstallGitLabMarketplaceFullPipelineFromHttp:
         cache_root = tmp_path / "apm_home"
         cache_root.mkdir()
         monkeypatch.setattr("apm_cli.config.CONFIG_DIR", str(cache_root))
+        monkeypatch.setattr("apm_cli.config.CONFIG_FILE", str(cache_root / "config.json"))
 
         source = MarketplaceSource(
             name="apm-reg",

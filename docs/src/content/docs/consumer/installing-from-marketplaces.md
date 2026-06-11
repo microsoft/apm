@@ -65,9 +65,9 @@ reproducible across machines and CI.
 
 ## Local and self-hosted marketplaces
 
-`apm marketplace add` accepts the same source shapes as Anthropic's
-marketplace command. The same register / browse / install / update
-workflow works against:
+`apm marketplace add` can register marketplaces from git repositories,
+local files, or hosted `marketplace.json` catalogs. The same register /
+browse / install / update workflow works against:
 
 - **Local filesystem paths** -- `apm marketplace add /srv/marketplaces/agent-forge`
   (or a relative path, `~/code/marketplace`, or a direct
@@ -93,9 +93,9 @@ workflow works against:
 - **SSH URLs** -- `git@gitea.example.com:org/repo.git`. The host
   is extracted, classified, and routed through the matching fetcher.
 
-Phase 1 of source parity is public plus local only: direct hosted
-`marketplace.json` URLs use HTTPS without custom auth headers. Private
-URL auth is tracked separately.
+Hosted `marketplace.json` URLs are public HTTPS sources: APM does not
+send custom auth headers. Use git-backed marketplaces for private
+catalogs until private URL auth is added.
 
 For generic-git marketplaces, `marketplace.json` is fetched via a
 sparse-cone clone (only the manifest path is downloaded); APM does
