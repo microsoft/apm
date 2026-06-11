@@ -49,6 +49,7 @@ swiss-army-knife escape hatch for the rest of the install surface.
 
 from __future__ import annotations
 
+import copy
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -151,9 +152,6 @@ def _resolve_and_maybe_apply_revision_pin_updates(
     for dep_ref in all_declared_deps:
         update = updates_by_key.get(dep_ref.get_unique_key())
         if update is not None:
-            # Mutation contract: the install pipeline builds its plan from these
-            # DependencyReference objects, while apm.yml is rewritten only after
-            # the consent gate and the manifest cache is cleared below.
             dep_ref.reference = update.new_sha
     return updates
 
@@ -420,7 +418,13 @@ def _run_dep_update(
         _rich_success("No APM dependencies declared in apm.yml -- nothing to update.")
         return
 
-    all_declared_deps = apm_package.get_apm_dependencies() + apm_package.get_dev_apm_dependencies()
+    # Stage revision-pin rewrites on an owned package copy. The install
+    # pipeline must resolve against the new SHAs, but declined/dry-run paths
+    # should not mutate the APMPackage instance parsed from the on-disk manifest.
+    staged_apm_package = copy.deepcopy(apm_package)
+    all_declared_deps = (
+        staged_apm_package.get_apm_dependencies() + staged_apm_package.get_dev_apm_dependencies()
+    )
 
     # Map any positional [PACKAGES] to canonical dependency keys for the
     # engine's only_packages filter; None means "refresh everything".
@@ -521,7 +525,7 @@ def _run_dep_update(
 
     try:
         result = _install_apm_dependencies(
-            apm_package,
+            staged_apm_package,
             update_refs=True,
             verbose=verbose,
             scope=scope,
