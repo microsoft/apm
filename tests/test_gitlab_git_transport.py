@@ -169,7 +169,10 @@ class TestFetchFileViaGitSparse:
 
         # Create a symlink inside the work dir pointing outside.
         (work_dir / "agents").mkdir()
-        (work_dir / "agents" / "evil.agent.md").symlink_to(outside)
+        try:
+            (work_dir / "agents" / "evil.agent.md").symlink_to(outside)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"symlink creation not supported on this platform: {exc}")
 
         mock_run.return_value = _mock_subprocess_success()
 

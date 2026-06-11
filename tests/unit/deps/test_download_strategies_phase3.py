@@ -1225,15 +1225,20 @@ class TestDownloadGitlabFile:
         host._resilient_get.return_value = resp
         callback = MagicMock()
 
-        with patch(
-            "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
-            return_value={},
+        with (
+            patch(
+                "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
+                return_value={},
+            ),
+            patch(
+                "apm_cli.deps.download_strategies.fetch_file_via_git_sparse",
+                side_effect=RuntimeError("git transport unavailable"),
+            ),
         ):
             d.download_gitlab_file(self._dep(), "apm.yml", verbose_callback=callback)
-        # Git transport is unmocked here and fails, so the callback fires for
-        # the fallback-transition note AND the REST-API success note. At least
-        # one call must attribute the REST API as the transport that answered
-        # (transport-attribution for 410 triage).
+        # The mocked git failure drives the REST fallback path without spawning
+        # subprocess/network work. At least one call must attribute the REST API
+        # as the transport that answered (transport-attribution for 410 triage).
         assert callback.called
         assert any("REST API" in str(c.args[0]) for c in callback.call_args_list)
 

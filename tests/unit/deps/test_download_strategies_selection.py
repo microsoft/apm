@@ -1061,25 +1061,38 @@ class TestDownloadGitlabFile:
             with pytest.raises(RuntimeError, match="Network error"):
                 d.download_gitlab_file(self._dep(), "apm.yml")
 
-    def test_verbose_callback_called_on_success(self) -> None:
+    def test_verbose_callback_called_on_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         host = _make_host()
         self._setup_host_info(host)
         d = DownloadDelegate(host)
         resp = _fake_response(200, b"data")
         host._resilient_get.return_value = resp
         callback = MagicMock()
+        git_error = RuntimeError(
+            "fatal: could not read from https://oauth2:secret@gitlab.example.com/group/repo.git"
+        )
+        monkeypatch.setenv("APM_DEBUG", "1")
 
-        with patch(
-            "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
-            return_value={},
+        with (
+            patch(
+                "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
+                return_value={},
+            ),
+            patch(
+                "apm_cli.deps.download_strategies.fetch_file_via_git_sparse",
+                side_effect=git_error,
+            ),
+            patch("builtins.print") as debug_print,
         ):
             d.download_gitlab_file(self._dep(), "apm.yml", verbose_callback=callback)
-        # Git transport is unmocked here and fails, so the callback fires for
-        # the fallback-transition note AND the REST-API success note. At least
-        # one call must attribute the REST API as the transport that answered
-        # (transport-attribution for 410 triage).
+        # The mocked git failure drives the REST fallback path without spawning
+        # subprocess/network work, and raw git stderr must not leak secrets.
+        callback_messages = " ".join(str(c.args[0]) for c in callback.call_args_list)
+        debug_messages = " ".join(str(c.args[0]) for c in debug_print.call_args_list)
         assert callback.called
-        assert any("REST API" in str(c.args[0]) for c in callback.call_args_list)
+        assert "REST API" in callback_messages
+        assert "oauth2:secret" not in callback_messages
+        assert "oauth2:secret" not in debug_messages
 
 
 # ---------------------------------------------------------------------------

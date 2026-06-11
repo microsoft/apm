@@ -672,12 +672,15 @@ class DownloadDelegate:
             # rejected path fall through would hand an attacker a second
             # transport to probe. Propagate the security failure unchanged.
             raise
-        except Exception as git_err:
-            _debug(f"git transport failed for {host}/{dep_ref.repo_url}/{file_path}: {git_err}")
+        except Exception:
+            fallback_target = f"{host}/{dep_ref.repo_url}/{file_path}"
+            _debug(
+                f"git transport unavailable for {fallback_target}; falling back to GitLab REST API"
+            )
             if verbose_callback:
                 verbose_callback(
-                    f"[i] git transport unavailable for {host}/{dep_ref.repo_url}/{file_path}; "
-                    f"falling back to GitLab REST API ({git_err})"
+                    f"[i] git transport unavailable for {fallback_target}; "
+                    "falling back to GitLab REST API"
                 )
 
         # -- Fallback: GitLab REST v4 API (requires GITLAB_APM_PAT / GITLAB_TOKEN) --
