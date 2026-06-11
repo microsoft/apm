@@ -1361,6 +1361,19 @@ class TestEmbeddedSubpathInGitUrl:
         assert dep.host == "gitlab.com"
         assert dep.repo_url == "group/subgroup/repo"
 
+    def test_gitlab_subgroup_named_after_primitive_no_false_positive(self) -> None:
+        """git@gitlab.com:group/skills/repo.git: `skills` is a subgroup, `repo` the repository.
+
+        Regression trap for the #1014 DevX follow-up: a GitLab subgroup
+        literally named after an APM primitive (here `skills` at index 1)
+        must NOT trip the embedded-subpath guard. The embedded-subpath shape
+        is `org/repo` + `<primitive>/<name>`, so a primitive segment only
+        counts when preceded by a complete org/repo prefix (index >= 2).
+        """
+        dep = DependencyReference.parse("git@gitlab.com:group/skills/repo.git")
+        assert dep.host == "gitlab.com"
+        assert dep.repo_url == "group/skills/repo"
+
     def test_plain_scp_url_no_false_positive(self) -> None:
         """git@github.com:org/repo.git (plain, no subpath) must parse fine."""
         dep = DependencyReference.parse("git@github.com:org/repo.git")

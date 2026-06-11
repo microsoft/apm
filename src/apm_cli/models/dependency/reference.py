@@ -742,6 +742,18 @@ class DependencyReference:
         GitLab subgroups and Azure DevOps org/project paths do not use APM
         primitive names (skills, agents, prompts, ...) as segment labels, so
         the check produces no false positives for those legitimate forms.
+
+        Scoping (issue #1014 follow-up): the embedded-subpath shape is
+        ``org/repo`` followed by ``<primitive>/<name>``, so a primitive
+        segment is only treated as an embedded subpath when it is preceded
+        by a complete ``org/repo`` prefix (segment index >= 2). This avoids
+        a false positive for a GitLab subgroup literally named after a
+        primitive, e.g. ``git@gitlab.com:group/skills/repo.git`` (here
+        ``skills`` is a subgroup at index 1 and ``repo`` is the real
+        repository). A residual ambiguity remains for deep subgroups that
+        embed a primitive name at index >= 2 (e.g.
+        ``group/sub/skills/repo``); that shape is genuinely undecidable
+        without probing the host, so it is still treated as malformed.
         """
         raw = url.strip()
 
@@ -762,10 +774,23 @@ class DependencyReference:
         if len(segments) < 3:
             return  # too few segments to contain an interior primitive name
 
-        # If any non-last segment is a known APM primitive directory, the URL
-        # encodes a subpath that should be the `path:` key instead.
-        for seg in segments[:-1]:
-            if seg in DependencyReference._APM_PRIMITIVE_DIRS:
+        # Azure DevOps repo URLs carry the repository under a `_git` segment
+        # and legitimately encode a virtual path after it (e.g.
+        # dev.azure.com/org/proj/_git/repo/instructions/x). That is the
+        # supported ADO shorthand, not an embedded subpath, so skip the guard
+        # for any URL containing the ADO-specific `_git` marker (no GitHub or
+        # GitLab repo path uses `_git`, so real detection is unaffected).
+        if "_git" in segments:
+            return
+
+        # An embedded subpath is `org/repo` + `<primitive>/<name>`, so the
+        # primitive directory must be preceded by a complete org/repo prefix
+        # (index >= 2). Restricting to index >= 2 keeps the real malformed-URL
+        # detection (org/repo/skills/<name>) while not false-positiving on a
+        # subgroup literally named after a primitive at index 1
+        # (group/skills/repo, where `repo` is the actual repository).
+        for idx, seg in enumerate(segments[:-1]):
+            if idx >= 2 and seg in DependencyReference._APM_PRIMITIVE_DIRS:
                 raise ValueError(
                     "[x] A subpath cannot be embedded in a git URL. "
                     "Use the `path:` key instead: "
