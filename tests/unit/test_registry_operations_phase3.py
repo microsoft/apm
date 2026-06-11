@@ -540,15 +540,27 @@ class TestPromptForEnvironmentVariables:
             )
         assert "MY_API_KEY" in result
 
-    def test_e2e_mode_other_var_defaults_to_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_e2e_mode_optional_var_omitted_unless_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Board #20: a declared-but-optional var with no value must NOT be
+        # written into the resolved env; one carrying a declared default still is.
         monkeypatch.setenv("APM_E2E_TESTS", "1")
         monkeypatch.delenv("RANDOM_CONFIG_VAR", raising=False)
+        monkeypatch.delenv("OPTIONAL_WITH_DEFAULT", raising=False)
         ops = _make_ops()
         result = ops._prompt_for_environment_variables(
-            {"RANDOM_CONFIG_VAR": {"description": "misc", "required": False}}
+            {
+                "RANDOM_CONFIG_VAR": {"description": "misc", "required": False},
+                "OPTIONAL_WITH_DEFAULT": {
+                    "description": "misc",
+                    "required": False,
+                    "value": "preset",
+                },
+            }
         )
-        assert "RANDOM_CONFIG_VAR" in result
-        assert result["RANDOM_CONFIG_VAR"] == ""
+        assert "RANDOM_CONFIG_VAR" not in result
+        assert result["OPTIONAL_WITH_DEFAULT"] == "preset"
 
     def test_rich_prompt_used_in_interactive_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("APM_E2E_TESTS", raising=False)
@@ -626,8 +638,11 @@ class TestPromptForEnvironmentVariables:
         monkeypatch.delenv("CI", raising=False)
         monkeypatch.setenv("GITHUB_ACTIONS", "true")
         ops = _make_ops()
+        # A required var is auto-defaulted (not prompted) in CI mode, proving CI
+        # detection. An optional var would be skipped in BOTH modes (board #20
+        # optional-omit) and so cannot distinguish CI from interactive.
         result = ops._prompt_for_environment_variables(
-            {"SOME_VAR": {"description": "d", "required": False}}
+            {"SOME_VAR": {"description": "d", "required": True}}
         )
         assert "SOME_VAR" in result
 
@@ -640,6 +655,6 @@ class TestPromptForEnvironmentVariables:
         monkeypatch.setenv("BUILDKITE", "true")
         ops = _make_ops()
         result = ops._prompt_for_environment_variables(
-            {"ANOTHER_VAR": {"description": "d", "required": False}}
+            {"ANOTHER_VAR": {"description": "d", "required": True}}
         )
         assert "ANOTHER_VAR" in result
