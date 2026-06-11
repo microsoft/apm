@@ -236,6 +236,45 @@ class TestGitHubVersionFetchAuth(unittest.TestCase):
         self.assertIn("Authorization", headers)
         self.assertTrue(headers["Authorization"].startswith("token "))
 
+    @patch("apm_cli.utils.version_checker._get_github_token", return_value="mirror_secret")
+    @patch("requests.get")
+    def test_token_header_scoped_to_public_release_metadata_request(self, mock_get, mock_token):
+        """Token headers are only attached to non-mirrored release metadata requests."""
+        from urllib.parse import urlparse
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"tag_name": "v0.8.0"}
+        mock_get.return_value = mock_response
+
+        mirrored_env = {
+            "APM_RELEASE_METADATA_URL": "https://mirror.corp.example/apm/latest.json",
+            "GITHUB_TOKEN": "mirror_secret",
+        }
+        with patch.dict("os.environ", mirrored_env, clear=True):
+            get_latest_version_from_github()
+
+        mirrored_url = mock_get.call_args[0][0]
+        mirrored_headers = mock_get.call_args[1].get("headers", {})
+        mirrored_parsed = urlparse(mirrored_url)
+        self.assertEqual(mirrored_parsed.scheme, "https")
+        self.assertEqual(mirrored_parsed.hostname, "mirror.corp.example")
+        self.assertEqual(mirrored_parsed.path, "/apm/latest.json")
+        self.assertNotIn("Authorization", mirrored_headers)
+
+        mock_get.reset_mock()
+        default_env = {"GITHUB_TOKEN": "mirror_secret"}
+        with patch.dict("os.environ", default_env, clear=True):
+            get_latest_version_from_github()
+
+        default_url = mock_get.call_args[0][0]
+        default_headers = mock_get.call_args[1].get("headers", {})
+        default_parsed = urlparse(default_url)
+        self.assertEqual(default_parsed.scheme, "https")
+        self.assertEqual(default_parsed.hostname, "api.github.com")
+        self.assertEqual(default_parsed.path, "/repos/microsoft/apm/releases/latest")
+        self.assertEqual(default_headers.get("Authorization"), "token mirror_secret")
+
     @patch("apm_cli.utils.version_checker._get_github_token", return_value="my_secret_token")
     @patch("requests.get")
     def test_token_value_not_in_exception_text(self, mock_get, mock_token):

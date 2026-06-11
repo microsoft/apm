@@ -81,8 +81,9 @@ def get_latest_version_from_github(repo: str | None = None, timeout: int = 2) ->
         ``microsoft/apm``).
 
     Also sends an Authorization header when a GitHub token is present in the
-    environment (GITHUB_APM_PAT > GITHUB_TOKEN > GH_TOKEN), falling back to
-    anonymous when none is set.  The token value is never logged or echoed.
+    environment (GITHUB_APM_PAT > GITHUB_TOKEN > GH_TOKEN) and no metadata
+    mirror is configured, falling back to anonymous when none is set.  The token
+    value is never logged or echoed.
 
     Args:
         repo: Repository override in ``owner/repo`` form.  When *None* (the
@@ -113,7 +114,11 @@ def get_latest_version_from_github(repo: str | None = None, timeout: int = 2) ->
             return None
         url = _build_releases_api_url(github_url, effective_repo)
         token = _get_github_token()
-        headers = {"Authorization": f"token {token}"} if token else {}
+        headers = (
+            {"Authorization": f"token {token}"}
+            if token and get_release_metadata_url() is None
+            else {}
+        )
         response = requests.get(url, headers=headers, timeout=timeout)
 
         if response.status_code != 200:
