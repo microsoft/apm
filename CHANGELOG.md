@@ -17,10 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of `~/.hermes/config.yaml` (written atomically with `0o600` perms, preserving
   unrelated config keys and refusing to overwrite a malformed file). `HERMES_HOME`
   overrides the Hermes home directory. See the [Hermes integration guide](https://microsoft.github.io/apm/integrations/hermes/).
+- `apm marketplace add` now accepts git URLs with `#ref`, local file paths,
+  and hosted `marketplace.json` URLs -- so teams can consume private,
+  offline, or hosted catalogs without publishing a GitHub repo (closes
+  #676). (#1739)
+- Enterprise bootstrap mirror mode (`APM_RELEASE_METADATA_URL`, `APM_RELEASE_BASE_URL`, `APM_INSTALLER_BASE_URL`, `APM_PYPI_INDEX_URL`, `APM_NO_DIRECT_FALLBACK`) routes `install.sh`, `install.ps1`, and `apm self-update` through internal mirrors with fail-closed public fallback; closes #1680. (#1733)
 
 ### Fixed
 
 - `apm install` now resolves relative `path:` deps declared by remote monorepo packages when they stay inside the same remote repo, while still rejecting absolute, escaping, or cross-repo paths; closes #1571. (#1732)
+- Dependencies with the same path on different git hosts no longer collide in `apm.lock.yaml`; `apm install` keeps GitHub/GitLab PATs off generic-host file downloads, routes bespoke GitLab hosts through `type: gitlab`, and surfaces non-404 download failures with host and endpoint context. Reading private files from a generic non-default host now requires a whole-repo git dependency or explicit backend signal; see the dependency and lockfile docs (closes #773). (#1735)
 
 ## [0.19.0] - 2026-06-09
 

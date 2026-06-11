@@ -194,6 +194,8 @@ class LockfileBuilder:
                     lockfile.dependencies[dep_key].marketplace_plugin_name = prov.get(
                         "marketplace_plugin_name"
                     )
+                    lockfile.dependencies[dep_key].source_url = prov.get("source_url")
+                    lockfile.dependencies[dep_key].source_digest = prov.get("source_digest")
 
     def _merge_existing(self, lockfile: LockFile) -> None:
         if self.ctx.existing_lockfile and not self.ctx.update_refs:

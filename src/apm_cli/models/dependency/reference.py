@@ -49,6 +49,71 @@ _NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
 _REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
 
 
+def build_dependency_unique_key(
+    repo_url: str,
+    *,
+    host: str | None = None,
+    source: str | None = None,
+    local_path: str | None = None,
+    is_virtual: bool = False,
+    virtual_path: str | None = None,
+    registry_prefix: str | None = None,
+) -> str:
+    """Return the lockfile/dedup key for a dependency identity.
+
+    github.com remains the implicit default so existing lockfiles keep bare
+    ``owner/repo`` keys. Non-default hosts include the host segment to avoid
+    collisions between the same ``owner/repo`` on different servers.
+
+    Registry-proxy deps (``registry_prefix`` set, e.g. an Artifactory mirror)
+    keep the bare logical key: the proxy host is a transport detail, not the
+    package identity, and the manifest side always declares the upstream
+    ``owner/repo`` shorthand. Host-qualifying them would break the manifest /
+    lockfile key correspondence used by re-install and orphan detection.
+    """
+    if source == "local" and local_path:
+        return local_path
+
+    key = repo_url
+    if is_virtual and virtual_path:
+        key = f"{key}/{virtual_path}"
+
+    if registry_prefix:
+        return key
+
+    host_value = (host or "").strip()
+    normalized_host = host_value.lower()
+    if normalized_host and normalized_host != "github.com":
+        return f"{normalized_host}/{key}"
+    return key
+
+
+def build_canonical_dependency_string(
+    repo_url: str,
+    *,
+    is_local: bool = False,
+    local_path: str | None = None,
+    is_virtual: bool = False,
+    virtual_path: str | None = None,
+) -> str:
+    """Return the host-blind canonical string for filesystem / orphan matching.
+
+    Host-blind by construction: it never prefixes the host, so it matches the
+    host-blind ``apm_modules/`` layout. Use :func:`build_dependency_unique_key`
+    for the host-qualified lockfile dedup key.
+
+    Callers pass their own ``is_local`` signal -- ``DependencyReference``
+    derives it from its ``is_local`` property while ``LockedDependency`` derives
+    it from ``source == "local"`` -- so single-sourcing the body shape does not
+    collapse the two identity models' distinct local-detection semantics.
+    """
+    if is_local and local_path:
+        return local_path
+    if is_virtual and virtual_path:
+        return f"{repo_url}/{virtual_path}"
+    return repo_url
+
+
 def _path_segment_pattern(is_ado_host: bool) -> str:
     """Return the allowed-character regex for a single repo path segment."""
     return _ADO_PATH_SEGMENT_RE if is_ado_host else _NON_ADO_PATH_SEGMENT_RE
@@ -79,6 +144,7 @@ class DependencyReference:
 
     repo_url: str  # e.g., "user/repo" for GitHub or "org/project/repo" for Azure DevOps
     host: str | None = None  # Optional host (github.com, dev.azure.com, or enterprise host)
+    host_type: str | None = None  # Explicit host kind override (currently: "gitlab")
     port: int | None = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
     explicit_scheme: str | None = (
         None  # User-stated transport: "ssh", "https", "http", or None for shorthand
@@ -301,11 +367,15 @@ class DependencyReference:
         Returns:
             str: Unique key for this dependency
         """
-        if self.is_local and self.local_path:
-            return self.local_path
-        if self.is_virtual and self.virtual_path:
-            return f"{self.repo_url}/{self.virtual_path}"
-        return self.repo_url
+        return build_dependency_unique_key(
+            self.repo_url,
+            host=self.host,
+            source="local" if self.is_local else self.source,
+            local_path=self.local_path,
+            is_virtual=self.is_virtual,
+            virtual_path=self.virtual_path,
+            registry_prefix=self.artifactory_prefix,
+        )
 
     def to_canonical(self) -> str:
         """Return the canonical scheme-free identity string for this dependency.
@@ -401,11 +471,18 @@ class DependencyReference:
 
         For identity-based matching that includes non-default hosts, use get_identity().
         For the transport-aware apm.yml entry, use to_apm_yml_entry().
+        For the lockfile dedup key (host-qualified for non-default hosts), use get_unique_key().
 
         Returns:
             str: Host-blind canonical string (e.g., "owner/repo")
         """
-        return self.get_unique_key()
+        return build_canonical_dependency_string(
+            self.repo_url,
+            is_local=self.is_local,
+            local_path=self.local_path,
+            is_virtual=self.is_virtual,
+            virtual_path=self.virtual_path,
+        )
 
     def get_install_path(self, apm_modules_dir: Path) -> Path:
         """Get the canonical filesystem path where this package should be installed.
@@ -747,9 +824,12 @@ class DependencyReference:
         git_url = entry["git"]
         if not isinstance(git_url, str) or not git_url.strip():
             raise ValueError("'git' field must be a non-empty string")
+        host_type = cls._parse_host_type(entry.get("type"))
 
         # Monorepo parent inheritance (literal ``git: parent`` only; resolver expands)
         if git_url == "parent":
+            if host_type is not None:
+                raise ValueError("'type' is only supported for remote git dependencies")
             path_raw = entry.get("path")
             if path_raw is None:
                 raise ValueError(
@@ -807,6 +887,7 @@ class DependencyReference:
 
         # Parse the git URL using the standard parser
         dep = cls.parse(git_url)
+        dep.host_type = host_type
         dep.allow_insecure = allow_insecure
         # Object-form ``- git:`` is an explicit Git resolver pin, even when
         # a top-level ``registries.default`` is set. Mark source so the
@@ -858,6 +939,27 @@ class DependencyReference:
             dep.skill_subset = sorted(validated)
 
         return dep
+
+    @staticmethod
+    def _parse_host_type(raw: object) -> str | None:
+        """Parse the optional object-form ``type`` host-kind hint.
+
+        Currently only ``gitlab`` is accepted; any other value fails closed with
+        a ``ValueError``. This is a deliberate gate, not an oversight: future
+        host kinds (e.g. ``gitea``, ``bitbucket``) would extend the accepted set
+        here and thread a matching branch through ``AuthResolver.classify_host``
+        and ``host_backends.backend_for``. Until those backends exist, rejecting
+        unknown hints keeps classification explicit rather than silently
+        mis-routing a bespoke host to the GitHub path.
+        """
+        if raw is None:
+            return None
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError("'type' field must be a non-empty string")
+        value = raw.strip().lower()
+        if value != "gitlab":
+            raise ValueError(f"'type' field only supports 'gitlab'; got {raw!r}")
+        return value
 
     @classmethod
     def virtual_suffix_is_installable_shape(cls, virtual_path: str) -> bool:

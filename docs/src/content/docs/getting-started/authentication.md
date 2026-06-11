@@ -259,12 +259,21 @@ When authentication fails, APM prints a targeted diagnostic instead of a generic
 
 APM must classify a host as GitLab to use **GitLab REST v4** (for example `marketplace.json` fetches and install-time single-file reads). Configuration mirrors GHES-style host overrides:
 
-| Variable | Purpose |
-|----------|---------|
-| `GITLAB_HOST` | One self-managed GitLab FQDN (e.g. `git.company.com`) |
-| `APM_GITLAB_HOSTS` | Several self-managed GitLab FQDNs, comma-separated |
+| Signal | Purpose |
+|--------|---------|
+| `GITLAB_HOST` | Environment variable for one self-managed GitLab FQDN (e.g. `git.company.com`) |
+| `APM_GITLAB_HOSTS` | Environment variable for several self-managed GitLab FQDNs, comma-separated |
+| `type: gitlab` | Manifest object-form hint for one bespoke GitLab host |
 
-`gitlab.com` is detected automatically. For GitLab-class hosts, resolved credentials follow **`GITLAB_APM_PAT` → `GITLAB_TOKEN`** and then **`git credential fill`** (see [GitLab-class hosts](#gitlab-class-hosts-gitlabcom-gitlab_host-apm_gitlab_hosts) under [Token lookup](#token-lookup)). GitHub PAT env vars are not used on GitLab. Use a GitLab personal or project access token with API read access where your policy requires it.
+`gitlab.com` is detected automatically. For a single dependency on a bespoke
+hostname, use object form instead of a hostname convention:
+
+```yaml
+- git: https://code.acme.com/platform/standards.git
+  type: gitlab
+```
+
+For GitLab-class hosts, resolved credentials follow **`GITLAB_APM_PAT` → `GITLAB_TOKEN`** and then **`git credential fill`** (see [GitLab-class hosts](#gitlab-class-hosts-gitlabcom-gitlab_host-apm_gitlab_hosts) under [Token lookup](#token-lookup)). GitHub PAT env vars are not used on GitLab. Use a GitLab personal or project access token with API read access where your policy requires it.
 
 ### REST headers (GitLab vs GitHub)
 
