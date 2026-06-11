@@ -119,6 +119,18 @@ def _resolve_and_maybe_apply_revision_pin_updates(
         from apm_cli.deps.github_downloader import GitHubPackageDownloader
 
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
+        # Authoritative round-trip (intentional, do NOT short-circuit): this
+        # ls-remote-per-pinned-dep resolves the latest annotated-tag SHA only
+        # to build the plan and rewrite apm.yml. The subsequent install
+        # pipeline (_install_apm_dependencies) independently re-resolves the
+        # freshly-written pin against upstream before downloading. The panel
+        # flagged this as a redundant round-trip, but threading the SHA
+        # resolved here into the install pipeline would make the install trust
+        # a SHA computed earlier in the same process instead of re-verifying
+        # it against the authoritative remote -- collapsing the
+        # authoritative-upstream fence. The duplicate fetch is a binding
+        # security requirement, not an oversight; the extra ls-remote is cheap
+        # relative to the integrity guarantee it preserves.
         updates = resolve_revision_pin_updates(
             revision_pin_deps,
             downloader,

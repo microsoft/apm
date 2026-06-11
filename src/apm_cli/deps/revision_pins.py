@@ -81,6 +81,12 @@ def find_latest_annotated_tag(
     for ref in remote_refs:
         if ref.ref_type != GitReferenceType.TAG:
             continue
+        # Fail-closed security fence: reject branches and lightweight tags.
+        # ``annotated`` is set true only when ls-remote emitted a peeled
+        # ``^{}`` ref (see git_remote_ops.parse_ls_remote_output), which only
+        # annotated tags produce. Skipping non-annotated refs here is what
+        # stops a branch named like a release from being chosen as the
+        # revision-pin update target.
         if not getattr(ref, "annotated", False):
             continue
         for pattern in patterns:
