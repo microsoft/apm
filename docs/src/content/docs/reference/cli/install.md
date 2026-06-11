@@ -199,7 +199,7 @@ apm install owner/skill-bundle --skill '*'   # reset to all skills
 
 - **`--force` is dual-purpose.** It overwrites locally-authored files on collision **and** disables the critical-finding block from the built-in security scan. It does **not** suppress general install errors -- any error reported in the diagnostic summary still exits `1` (matches `npm` / `pip` / `cargo`). It does **not** refresh remote refs -- for routine ref updates, run [`apm update`](../update/). To remediate findings, prefer `apm audit --strip`. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/).
 - **Claude target prompt rewrite.** When deploying to `.claude/commands/`, prompt files with an `input:` front-matter key are rewritten to Claude's `arguments:` shape and `${input:name}` placeholders become `$name`. Argument names must match `^[A-Za-z][\w-]{0,63}$`; rejected names are dropped with a warning.
-- **MCP env-var passthrough.** Copilot CLI and Kiro translate `${env:VAR}` and `<VAR>` to `${VAR}` in their MCP configs. JetBrains Copilot preserves env references as `${env:VAR}` in `github-copilot/intellij/mcp.json`. Plaintext secrets are never written to disk for these runtime-resolved targets; legacy targets resolve placeholders at install time.
+- **MCP env-var passthrough.** Copilot CLI and Kiro translate `${env:VAR}` and `<VAR>` to `${VAR}` in their MCP configs. Kiro writes `.kiro/settings/mcp.json` and `~/.kiro/settings/mcp.json` with `0o600` permissions. JetBrains Copilot preserves env references as `${env:VAR}` in `github-copilot/intellij/mcp.json`. Plaintext secrets are never written to disk for these runtime-resolved targets; legacy targets resolve placeholders at install time.
 
 ### Install from a private registry (experimental)
 

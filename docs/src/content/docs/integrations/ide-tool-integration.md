@@ -60,7 +60,7 @@ Each primitive type maps to a target-specific slot:
 .apm/prompts/        ->   per target: prompt files / commands
 .apm/agents/         ->   per target: agent definitions (or skill conversion)
 .apm/skills/         ->   per target: skills directory (Claude, Codex, OpenCode, .agents)
-.apm/hooks/          ->   per target: lifecycle hooks / tool hooks
+.apm/hooks/          ->   per target: lifecycle hooks / tool hooks (see [Targets matrix](../reference/targets-matrix/))
 mcp: in apm.yml      ->   per target: .mcp.json / settings.json / equivalent
 ```
 

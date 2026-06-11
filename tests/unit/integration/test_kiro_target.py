@@ -8,11 +8,22 @@ from pathlib import Path
 
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
+from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
-from apm_cli.models.apm_package import APMPackage, GitReferenceType, PackageInfo, ResolvedReference
+from apm_cli.models.apm_package import (
+    APMPackage,
+    GitReferenceType,
+    PackageInfo,
+    PackageType,
+    ResolvedReference,
+)
 
 
-def _make_package_info(package_dir: Path, name: str = "test-pkg") -> PackageInfo:
+def _make_package_info(
+    package_dir: Path,
+    name: str = "test-pkg",
+    package_type: PackageType | None = None,
+) -> PackageInfo:
     package = APMPackage(
         name=name,
         version="1.0.0",
@@ -30,6 +41,7 @@ def _make_package_info(package_dir: Path, name: str = "test-pkg") -> PackageInfo
         install_path=package_dir,
         resolved_reference=resolved_ref,
         installed_at=datetime.now().isoformat(),
+        package_type=package_type,
     )
 
 
@@ -114,6 +126,28 @@ def test_kiro_steering_defaults_unscoped_instructions_to_always(tmp_path: Path) 
     target = tmp_path / ".kiro" / "steering" / "global.md"
     assert target.read_text(encoding="utf-8") == (
         "---\ninclusion: always\n---\n\n# Global\n\nUse this everywhere.\n"
+    )
+
+
+def test_kiro_skills_deploy_skill_md_to_kiro_skills_dir(tmp_path: Path) -> None:
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "skill-pkg"
+    package_dir.mkdir()
+    (package_dir / "SKILL.md").write_text(
+        "---\nname: skill-pkg\ndescription: Demo skill\n---\n\n# Demo\n",
+        encoding="utf-8",
+    )
+
+    result = SkillIntegrator().integrate_package_skill(
+        _make_package_info(package_dir, "skill-pkg", PackageType.CLAUDE_SKILL),
+        tmp_path,
+        targets=[KNOWN_TARGETS["kiro"]],
+    )
+
+    target = tmp_path / ".kiro" / "skills" / "skill-pkg" / "SKILL.md"
+    assert result.skill_created is True
+    assert target.read_text(encoding="utf-8") == (
+        "---\nname: skill-pkg\ndescription: Demo skill\n---\n\n# Demo\n"
     )
 
 

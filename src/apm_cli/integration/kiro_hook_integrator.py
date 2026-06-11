@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from apm_cli.integration.hook_integrator import (
     _HOOK_EVENT_MAP,
@@ -21,6 +22,9 @@ from apm_cli.integration.hook_integrator import (
 )
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
+
+if TYPE_CHECKING:
+    from apm_cli.integration.hook_integrator import HookIntegrator
 
 _KIRO_EVENT_MAP = _HOOK_EVENT_MAP["kiro"]
 
@@ -97,7 +101,7 @@ def _kiro_hook_document(
 
 
 def _write_kiro_hook_docs(
-    integrator,
+    integrator: HookIntegrator,
     hook_file: Path,
     rewritten: dict,
     hooks_dir: Path,
@@ -179,7 +183,12 @@ def _write_kiro_hook_docs(
 
 
 def _display_payload(
-    integrator, target_filename: str, hook_file: Path, event_name: str, then: dict, rendered: str
+    integrator: HookIntegrator,
+    target_filename: str,
+    hook_file: Path,
+    event_name: str,
+    then: dict,
+    rendered: str,
 ) -> dict:
     """Build install-log metadata for one generated Kiro hook file."""
     summary = (
@@ -197,7 +206,7 @@ def _display_payload(
 
 
 def _copy_scripts(
-    integrator,
+    integrator: HookIntegrator,
     scripts,
     project_root: Path,
     managed_files,
@@ -230,7 +239,7 @@ def _copy_scripts(
 
 
 def integrate_kiro_hooks(
-    integrator,
+    integrator: HookIntegrator,
     package_info,
     project_root: Path,
     *,

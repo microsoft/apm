@@ -351,6 +351,14 @@ class TestGetTargetDescription:
         assert "AGENTS.md" in desc
         assert ".opencode/" in desc
 
+    def test_kiro_description_includes_mcp_config_path(self):
+        """Description for kiro target names its MCP config path."""
+        desc = get_target_description("kiro")
+        assert ".kiro/steering/" in desc
+        assert ".kiro/skills/" in desc
+        assert ".kiro/hooks/" in desc
+        assert ".kiro/settings/mcp.json" in desc
+
 
 class TestDetectTargetCursor:
     """Tests for auto-detection and explicit cursor target."""

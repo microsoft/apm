@@ -349,7 +349,7 @@ def get_target_description(target: UserTargetType) -> str:
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .windsurf/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
-        "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/",
+        "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
         "hermes": "AGENTS.md + .agents/skills/ (project) or ~/.hermes/skills/ + config.yaml MCP (--global) -- experimental",

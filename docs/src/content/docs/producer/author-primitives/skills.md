@@ -111,7 +111,7 @@ in `references/`; keep `SKILL.md` to the always-relevant flow.
 Five harnesses converge on the cross-tool `.agents/skills/`
 directory. Claude keeps its harness-native path because Claude Code's
 default scan is `.claude/skills/`; Windsurf and Kiro currently use
-`.windsurf/skills/` and `.kiro/skills/` for the same reason, though Cascade also
+`.windsurf/skills/` and `.kiro/skills/` for the same reason. Windsurf's Cascade also
 [discovers `.agents/skills/`](https://docs.windsurf.com/windsurf/cascade/skills#skill-scopes)
 natively for cross-agent compatibility (convergence tracked in
 [#1520](https://github.com/microsoft/apm/issues/1520)). The whole
