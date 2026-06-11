@@ -546,7 +546,7 @@ class AgentsCompiler:
                     "progress",
                     f"Skipped {suppressed_count} empty AGENTS.md {noun} -- "
                     ".github/instructions/ already covers Copilot; "
-                    "pass --no-dedup to write them",
+                    "pass --no-dedup to write all AGENTS.md files",
                     symbol="info",
                 )
             else:
