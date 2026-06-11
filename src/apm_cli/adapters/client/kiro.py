@@ -78,6 +78,7 @@ class KiroClientAdapter(CopilotClientAdapter):
             json.dumps(current_config, indent=2),
             new_file_mode=0o600,
         )
+        # Keep existing config files private after updates too.
         os.chmod(config_path, 0o600)
         return True
 

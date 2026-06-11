@@ -62,6 +62,18 @@ def test_kiro_is_discoverable_in_target_help() -> None:
     assert compile_result.exit_code == 0
     assert expected_all_targets in install_help
     assert expected_all_targets in compile_help
+    assert "ClaudeCode" in install_help
+    assert "Windsurf" in install_help
+
+
+def test_kiro_runtime_discovered_in_user_scope_without_project_dir(tmp_path: Path) -> None:
+    from apm_cli.integration.mcp_integrator_install import _discover_installed_runtimes
+
+    assert not (tmp_path / ".kiro").exists()
+
+    runtimes = _discover_installed_runtimes(tmp_path, user_scope=True)
+
+    assert "kiro" in runtimes
 
 
 def test_kiro_target_profile_matches_ratified_layout() -> None:

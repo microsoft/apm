@@ -172,6 +172,7 @@ def _write_kiro_hook_docs(
                     continue
 
                 atomic_write_text(target_path, rendered, new_file_mode=0o600)
+                # Keep existing hook files private after updates too.
                 os.chmod(target_path, 0o600)
                 files_integrated += 1
                 target_paths.append(target_path)

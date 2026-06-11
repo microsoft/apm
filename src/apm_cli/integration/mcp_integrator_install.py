@@ -469,7 +469,7 @@ def _resolve_target_runtimes(
             logger.warning(msg)
         if not target_runtimes:
             logger.warning(
-                "No runtimes support user-scope MCP installation (supported: copilot, codex, gemini)"
+                "No runtimes support user-scope MCP installation (supported: copilot, claude, codex, gemini, kiro, windsurf, intellij)"
             )
             return None
 

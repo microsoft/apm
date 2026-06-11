@@ -888,7 +888,7 @@ def _handle_mcp_install(
 @click.option(
     "--runtime",
     help=(
-        "Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude, windsurf, kiro, intellij)"
+        "Target specific runtime only (copilot, claude, codex, cursor, gemini, kiro, opencode, windsurf, vscode, intellij)"
     ),
 )
 @click.option("--exclude", help="Exclude specific runtime from installation")
@@ -961,7 +961,7 @@ def _handle_mcp_install(
     "global_",
     is_flag=True,
     default=False,
-    help="Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Codex CLI, Gemini CLI, Kiro, JetBrains Copilot).",
+    help="Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Kiro, Windsurf, JetBrains Copilot).",
 )
 @click.option(
     "--ssh",
