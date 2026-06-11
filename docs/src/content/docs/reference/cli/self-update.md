@@ -35,7 +35,7 @@ Some package-manager distributions (for example, Homebrew) disable self-update a
 
 ## Enterprise bootstrap mirrors
 
-`apm self-update` uses the same mirror contract as the installer scripts. The canonical bootstrap mirror table lives in [installation](../../../getting-started/installation/#enterprise-bootstrap-mirror-mode); this command-specific table shows the same knobs alongside legacy update settings:
+`apm self-update` uses the same mirror contract as the installer scripts. See the [installation bootstrap mirror section](../../../getting-started/installation/#enterprise-bootstrap-mirror-mode) for the canonical setup; this command-specific table shows the same knobs alongside legacy update settings:
 
 | Variable | Default | Effect |
 |----------|---------|--------|

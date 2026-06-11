@@ -198,6 +198,7 @@ PATH="$PWD/.apm-mirror-smoke/bin:$PATH" \
 status=$?
 set -e
 test "$status" -ne 0
+# Success: installer failed closed with an actionable error, as expected.
 ```
 
 For `apm self-update`, run `apm self-update --check` with the same env vars and verify your proxy, firewall, or CI egress logs show only the mirror host. Use a disposable runner for a full `apm self-update` because it executes the mirrored installer.

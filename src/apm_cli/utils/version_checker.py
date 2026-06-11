@@ -3,6 +3,7 @@
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -16,6 +17,7 @@ _DEFAULT_REPO = "microsoft/apm"
 _PUBLIC_GITHUB_URL = "https://github.com"
 _PUBLIC_API_BASE = "https://api.github.com"
 _VERSION_CHECK_AUTH_RESOLVER: AuthResolver | None = None
+_VERSION_CHECK_AUTH_RESOLVER_LOCK = threading.RLock()
 
 
 def _get_air_gap_github_url() -> str:
@@ -54,17 +56,17 @@ def _build_releases_api_url(
 def _get_version_check_auth_resolver() -> AuthResolver:
     """Return the reusable resolver for non-blocking version checks."""
     global _VERSION_CHECK_AUTH_RESOLVER
-    if _VERSION_CHECK_AUTH_RESOLVER is None:
-        _VERSION_CHECK_AUTH_RESOLVER = AuthResolver(allow_external_fallback=False)
-    else:
-        _VERSION_CHECK_AUTH_RESOLVER.clear_cache()
-    return _VERSION_CHECK_AUTH_RESOLVER
+    with _VERSION_CHECK_AUTH_RESOLVER_LOCK:
+        if _VERSION_CHECK_AUTH_RESOLVER is None:
+            _VERSION_CHECK_AUTH_RESOLVER = AuthResolver(allow_external_fallback=False)
+        return _VERSION_CHECK_AUTH_RESOLVER
 
 
 def _reset_version_check_auth_resolver_for_tests() -> None:
     """Reset the cached version-check resolver for isolated unit tests."""
     global _VERSION_CHECK_AUTH_RESOLVER
-    _VERSION_CHECK_AUTH_RESOLVER = None
+    with _VERSION_CHECK_AUTH_RESOLVER_LOCK:
+        _VERSION_CHECK_AUTH_RESOLVER = None
 
 
 def _get_github_token(github_url: str | None = None, repo: str | None = None) -> str | None:
@@ -78,7 +80,12 @@ def _get_github_token(github_url: str | None = None, repo: str | None = None) ->
     host = parsed.hostname or "github.com"
     effective_repo = repo or _get_air_gap_repo()
     org = effective_repo.split("/", 1)[0] if "/" in effective_repo else None
-    context = _get_version_check_auth_resolver().resolve(host, org=org)
+    with _VERSION_CHECK_AUTH_RESOLVER_LOCK:
+        resolver = _get_version_check_auth_resolver()
+        # Version checks run in env-sensitive startup/test paths; reuse the
+        # resolver object but refresh contexts so token env changes are visible.
+        resolver.clear_cache()
+        context = resolver.resolve(host, org=org)
     return context.token
 
 

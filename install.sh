@@ -101,6 +101,7 @@ is_public_github_url() {
 }
 
 fail_closed_error() {
+    # $1 is a literal env var name from this script, not user input.
     printf '%b\n' "${RED}Error: APM_NO_DIRECT_FALLBACK is set, but $1 is not configured.${NC}"
     shift
     printf '%s\n' "$*"

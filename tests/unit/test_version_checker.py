@@ -249,7 +249,7 @@ class TestGitHubTokenResolution(unittest.TestCase):
         self.assertEqual(_get_github_token(), "resolver_token")
 
         mock_resolver_cls.assert_called_once_with(allow_external_fallback=False)
-        mock_resolver.clear_cache.assert_called_once()
+        self.assertEqual(mock_resolver.clear_cache.call_count, 2)
         self.assertEqual(mock_resolver.resolve.call_count, 2)
 
 

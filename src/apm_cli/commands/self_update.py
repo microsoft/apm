@@ -79,7 +79,7 @@ def _get_manual_update_command() -> str:
             try:
                 installer_url = _get_update_installer_url()
             except RuntimeError:
-                return "Set APM_INSTALLER_BASE_URL to your mirror base URL, then re-run 'apm self-update'."
+                return "Set APM_INSTALLER_BASE_URL=<mirror> and re-run: apm self-update"
         return f"powershell -ExecutionPolicy Bypass -c 'irm \"{installer_url}\" | iex'"
 
     if get_installer_base_url() is not None:
@@ -88,9 +88,7 @@ def _get_manual_update_command() -> str:
         try:
             installer_url = _get_update_installer_url()
         except RuntimeError:
-            return (
-                "Set APM_INSTALLER_BASE_URL to your mirror base URL, then re-run 'apm self-update'."
-            )
+            return "Set APM_INSTALLER_BASE_URL=<mirror> and re-run: apm self-update"
     return f'curl -sSL "{installer_url}" | sh'
 
 
@@ -119,11 +117,11 @@ def _get_installer_run_command(script_path: str) -> list[str]:
     help=(
         "Update the APM CLI binary itself to the latest version.\n\n"
         "Set these to route updates through an internal mirror (optional):\n"
-        "  APM_RELEASE_METADATA_URL  Mirror latest.json release metadata.\n"
-        "  APM_RELEASE_BASE_URL      Mirror release assets at {base}/{tag}/{asset}.\n"
-        "  APM_INSTALLER_BASE_URL    Mirror install.sh/install.ps1 for self-update.\n"
-        "  APM_PYPI_INDEX_URL        PyPI mirror for installer pip fallback.\n"
-        "  APM_NO_DIRECT_FALLBACK    Set to 1 to fail closed on public fallback.\n"
+        "  APM_RELEASE_METADATA_URL  latest.json mirror URL.\n"
+        "  APM_RELEASE_BASE_URL      release asset mirror base URL.\n"
+        "  APM_INSTALLER_BASE_URL    install.sh/install.ps1 mirror base URL.\n"
+        "  APM_PYPI_INDEX_URL        PyPI mirror for installer fallback.\n"
+        "  APM_NO_DIRECT_FALLBACK    1 means fail closed on public fallback.\n"
     ),
 )
 @click.option("--check", is_flag=True, help="Only check for updates without installing")
