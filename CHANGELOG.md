@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-06-11
+
 ### Added
 
 - `apm install --target kiro` deploys Kiro IDE steering, skills, hooks,
@@ -20,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   emits `AGENTS.md`, and MCP servers are written to the `mcp_servers:` block
   of `~/.hermes/config.yaml` (written atomically with `0o600` perms, preserving
   unrelated config keys and refusing to overwrite a malformed file). `HERMES_HOME`
-  overrides the Hermes home directory. See the [Hermes integration guide](https://microsoft.github.io/apm/integrations/hermes/).
+  overrides the Hermes home directory. See the [Hermes integration guide](https://microsoft.github.io/apm/integrations/hermes/). (#1726)
 - Enterprise marketplace authors can stop repeating shared git base paths by
   setting `sourceBase` (one line replaces repeated URLs), while host-prefixed,
   full-URL, and local entries remain per-entry overrides. (#1736)
