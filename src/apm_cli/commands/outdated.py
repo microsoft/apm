@@ -223,7 +223,7 @@ def _check_revision_pin_ref(
     except RevisionPinResolutionError:
         return OutdatedRow(
             package=package_name,
-            current=current_ref,
+            current=current_ref[:8],
             latest="-",
             status="unknown",
             source="git annotated tags",
@@ -232,7 +232,7 @@ def _check_revision_pin_ref(
     status = "up-to-date" if latest.commit_sha.lower() == current_ref.lower() else "outdated"
     return OutdatedRow(
         package=package_name,
-        current=current_ref,
+        current=current_ref[:8],
         latest=latest_display,
         status=status,
         source="git annotated tags",

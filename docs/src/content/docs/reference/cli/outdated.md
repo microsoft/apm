@@ -55,7 +55,7 @@ Sample output:
   ----------------------------- --------- ------------- ----------- ---------------
   acme/agent-skills             v1.2.0    v1.4.1        outdated    git tags
   acme/prompt-pack              main      9c1ab2f0      outdated    git branch
-  acme/sha-pinned               a1b2c3d4  v2.0.0 (...)  outdated    git annotated tags
+  acme/sha-pinned               a1b2c3d4  v2.0.0 (9e8d7c6b)  outdated    git annotated tags
   acme/lint-rules               v0.3.0    v0.3.0        up-to-date  git tags
   nadavy/e2e-demo               1.0.1     1.1.1         outdated    registry: corp
   microsoft/apm-review-panel    0.1.1     0.1.2         outdated    registry: corp (lockfile)
@@ -69,6 +69,8 @@ Check user-scope deps installed under `~/.apm/`:
 ```bash
 apm outdated --global
 ```
+
+Full-SHA pins use the annotated-tag update rules described in the [security model](../../enterprise/security/).
 
 Show available tags for outdated packages:
 

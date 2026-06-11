@@ -120,7 +120,8 @@ class TestUpdateDryRun:
             assert result.exit_code == 0, result.output
             assert "Revision pin updates" in result.output
             assert "Update plan" in result.output
-            assert "v2.0.0" in result.output
+            assert "(v2.0.0)" in result.output
+            assert "# v2.0.0" not in result.output
             assert captured["proceeded"] is False
             assert manifest.read_text(encoding="utf-8") == original
 
@@ -186,7 +187,7 @@ class TestUpdateAssumeYes:
             assert captured["dep_ref"] == new_sha
             assert captured["plan_proceeded"] is True
 
-    def test_revision_pin_updates_do_not_auto_confirm_main_plan(self, runner, tmp_path):
+    def test_revision_pin_decline_keeps_manifest_unchanged(self, runner, tmp_path):
         old_sha = "a" * 40
         new_sha = "b" * 40
         with runner.isolated_filesystem(temp_dir=tmp_path):
@@ -195,6 +196,7 @@ class TestUpdateAssumeYes:
                 f"name: test\nversion: 1.0.0\ndependencies:\n  apm:\n    - org/pkg#{old_sha}\n",
                 encoding="utf-8",
             )
+            original = manifest.read_text(encoding="utf-8")
 
             from apm_cli.deps.revision_pins import RevisionPinUpdate
             from apm_cli.models.results import InstallResult
@@ -219,17 +221,17 @@ class TestUpdateAssumeYes:
                 ),
                 patch("apm_cli.commands.update._annotate_lockfile_revision_tags") as annotate,
                 patch("apm_cli.commands.update._stdin_is_tty", return_value=True),
-                patch(
-                    "apm_cli.commands.update.click.confirm", side_effect=[True, False]
-                ) as confirm,
+                patch("apm_cli.commands.update.click.confirm", return_value=False) as confirm,
             ):
                 result = runner.invoke(cli, ["update"])
 
             assert result.exit_code == 0, result.output
-            assert f"org/pkg#{new_sha} # v2.0.0" in manifest.read_text(encoding="utf-8")
+            assert manifest.read_text(encoding="utf-8") == original
             assert captured["dep_ref"] == new_sha
             assert captured["plan_proceeded"] is False
-            assert confirm.call_count == 2
+            confirm.assert_called_once_with(
+                "Apply these changes?", default=False, show_default=True
+            )
             annotate.assert_not_called()
             assert "no changes" in result.output.lower()
 
@@ -295,10 +297,23 @@ class TestUpdateNonTty:
             original = manifest.read_text(encoding="utf-8")
 
             from apm_cli.deps.revision_pins import RevisionPinUpdate
+            from apm_cli.models.results import InstallResult
 
-            with patch(
-                "apm_cli.commands.update.resolve_revision_pin_updates",
-                return_value=[RevisionPinUpdate("org/pkg", old_sha, new_sha, "v2.0.0", "org/pkg")],
+            def fake_install(_apm, **kwargs):
+                kwargs["plan_callback"](_stub_plan_with_changes())
+                return InstallResult()
+
+            with (
+                patch(
+                    "apm_cli.commands.update.resolve_revision_pin_updates",
+                    return_value=[
+                        RevisionPinUpdate("org/pkg", old_sha, new_sha, "v2.0.0", "org/pkg")
+                    ],
+                ),
+                patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
             ):
                 result = runner.invoke(cli, ["update"])
 

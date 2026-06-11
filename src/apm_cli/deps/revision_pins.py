@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -22,11 +23,15 @@ class RevisionPinResolutionError(RuntimeError):
     """Raised when a SHA pin cannot be safely mapped to an annotated tag."""
 
 
-class _RemoteRefDownloader(Protocol):
+class RemoteRefDownloader(Protocol):
     """Downloader surface needed for authoritative remote-ref checks."""
 
     def list_remote_refs(self, dep_ref: DependencyReference) -> Iterable[RemoteRef]:
         """List refs from the dependency's authoritative upstream."""
+        ...
+
+    def list_remote_tag_refs(self, dep_ref: DependencyReference) -> Iterable[RemoteRef]:
+        """List tag refs from the dependency's authoritative upstream."""
         ...
 
 
@@ -87,7 +92,7 @@ def find_latest_annotated_tag(
         # annotated tags produce. Skipping non-annotated refs here is what
         # stops a branch named like a release from being chosen as the
         # revision-pin update target.
-        if not getattr(ref, "annotated", False):
+        if not ref.annotated:
             continue
         for pattern in patterns:
             expanded = pattern.replace("{name}", package_name)
@@ -112,36 +117,48 @@ def find_latest_annotated_tag(
 
 def resolve_revision_pin_updates(
     dependencies: Iterable[DependencyReference],
-    downloader: _RemoteRefDownloader,
+    downloader: RemoteRefDownloader,
     *,
     only_packages: set[str] | None = None,
+    max_workers: int = 4,
 ) -> list[RevisionPinUpdate]:
     """Resolve direct SHA-pinned dependencies to latest annotated tag SHAs."""
-    updates: list[RevisionPinUpdate] = []
+    eligible: list[DependencyReference] = []
     for dep_ref in dependencies:
         dep_key = dep_ref.get_unique_key()
         if only_packages is not None and dep_key not in only_packages:
             continue
         if dep_ref.is_local or dep_ref.source == "registry" or dep_ref.artifactory_prefix:
             continue
-        old_sha = (dep_ref.reference or "").strip()
-        if not is_full_revision_pin(old_sha):
-            continue
+        if is_full_revision_pin(getattr(dep_ref, "reference", None)):
+            eligible.append(dep_ref)
 
-        remote_refs = downloader.list_remote_refs(dep_ref)
+    if not eligible:
+        return []
+
+    def _resolve_one(dep_ref: DependencyReference) -> RevisionPinUpdate | None:
+        dep_key = dep_ref.get_unique_key()
+        old_sha = (dep_ref.reference or "").strip().lower()
+        remote_refs = downloader.list_remote_tag_refs(dep_ref)
         latest = find_latest_annotated_tag(remote_refs, package_name=_package_name(dep_ref))
-        if latest.commit_sha.lower() == old_sha.lower():
-            continue
-        updates.append(
-            RevisionPinUpdate(
-                dep_key=dep_key,
-                old_sha=old_sha,
-                new_sha=latest.commit_sha.lower(),
-                tag=latest.tag,
-                display_name=dep_key,
-            )
+        latest_sha = latest.commit_sha.strip().lower()
+        if latest_sha == old_sha:
+            return None
+        return RevisionPinUpdate(
+            dep_key=dep_key,
+            old_sha=old_sha,
+            new_sha=latest_sha,
+            tag=latest.tag,
+            display_name=dep_key,
         )
-    return updates
+
+    worker_count = max(1, min(max_workers, len(eligible)))
+    if worker_count == 1:
+        resolved = [_resolve_one(dep_ref) for dep_ref in eligible]
+    else:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            resolved = list(executor.map(_resolve_one, eligible))
+    return [update for update in resolved if update is not None]
 
 
 def render_revision_pin_update_plan(updates: Iterable[RevisionPinUpdate]) -> str:
@@ -149,10 +166,10 @@ def render_revision_pin_update_plan(updates: Iterable[RevisionPinUpdate]) -> str
     ordered = list(updates)
     if not ordered:
         return ""
-    lines = ["[i] Revision pin updates for apm.yml", ""]
+    lines = [f"{STATUS_SYMBOLS['info']} Revision pin updates for apm.yml", ""]
     for update in ordered:
         lines.append(f"  {STATUS_SYMBOLS['update']} {update.display_name}")
-        lines.append(f"      ref: {update.old_sha[:7]} -> {update.new_sha[:7]} (# {update.tag})")
+        lines.append(f"      ref: {update.old_sha[:7]} -> {update.new_sha[:7]} ({update.tag})")
         lines.append("")
     lines.append(f"  {len(ordered)} revision pin {'update' if len(ordered) == 1 else 'updates'}")
     return "\n".join(lines).rstrip()
@@ -160,6 +177,11 @@ def render_revision_pin_update_plan(updates: Iterable[RevisionPinUpdate]) -> str
 
 def apply_revision_pin_updates(manifest_path: Path, updates: Iterable[RevisionPinUpdate]) -> None:
     """Rewrite SHA pins in *manifest_path* and annotate each with its tag."""
+    manifest_path = Path(manifest_path)
+    if manifest_path.name not in {"apm.yml", "apm.yaml"}:
+        raise RevisionPinResolutionError(
+            "Revision-pin updates can only rewrite an apm.yml manifest."
+        )
     original = manifest_path.read_text(encoding="utf-8")
     lines = original.splitlines(keepends=True)
     for update in updates:
@@ -184,7 +206,7 @@ def _replace_one_revision_pin_line(
     for idx, line in enumerate(lines):
         if line.lstrip().startswith("#"):
             continue
-        if update.old_sha in line:
+        if update.old_sha.lower() in line.lower():
             matches.append(idx)
     if len(matches) > 1:
         scoped_matches = [
@@ -204,7 +226,7 @@ def _replace_one_revision_pin_line(
     line = lines[idx]
     newline = "\n" if line.endswith("\n") else ""
     body = line[:-1] if newline else line
-    old_idx = body.index(update.old_sha)
+    old_idx = body.lower().index(update.old_sha.lower())
     prefix = body[:old_idx]
     suffix = body[old_idx + len(update.old_sha) :].strip()
     if suffix and not suffix.startswith("#"):
@@ -217,5 +239,9 @@ def _replace_one_revision_pin_line(
 
 
 def dependency_ref_from_locked(locked: LockedDependency) -> DependencyReference:
-    """Rebuild a DependencyReference suitable for authoritative upstream checks."""
+    """Rebuild a DependencyReference suitable for authoritative upstream checks.
+
+    This named seam keeps ``apm outdated`` coupled to the revision-pin
+    resolver contract instead of reaching through the lockfile type directly.
+    """
     return locked.to_dependency_ref()

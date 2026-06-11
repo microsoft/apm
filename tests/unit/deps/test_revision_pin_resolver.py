@@ -14,7 +14,9 @@ from apm_cli.deps.revision_pins import (
     RevisionPinUpdate,
     apply_revision_pin_updates,
     find_latest_annotated_tag,
+    resolve_revision_pin_updates,
 )
+from apm_cli.models.dependency.reference import DependencyReference
 from apm_cli.models.dependency.types import GitReferenceType, RemoteRef
 
 OLD_SHA = "a" * 40
@@ -130,3 +132,65 @@ def test_apply_revision_pin_updates_uses_project_sibling_temp_file(tmp_path: Pat
         )
 
     assert seen_tmp_paths == [str(manifest.with_name(f".{manifest.name}.apm-update-pins.tmp"))]
+
+
+def test_apply_revision_pin_updates_rewrites_uppercase_sha(tmp_path: Path) -> None:
+    manifest = tmp_path / "apm.yml"
+    manifest.write_text(
+        f"name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - org/pkg#{OLD_SHA.upper()}\n",
+        encoding="utf-8",
+    )
+
+    apply_revision_pin_updates(
+        manifest,
+        [RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0", "org/pkg")],
+    )
+
+    assert manifest.read_text(encoding="utf-8").splitlines()[-1] == (
+        f"    - org/pkg#{NEW_SHA} # v2.0.0"
+    )
+
+
+def test_apply_revision_pin_updates_rejects_non_manifest_path(tmp_path: Path) -> None:
+    not_manifest = tmp_path / "other.yml"
+    not_manifest.write_text(
+        f"name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - org/pkg#{OLD_SHA}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RevisionPinResolutionError, match=r"apm\.yml manifest"):
+        apply_revision_pin_updates(
+            not_manifest,
+            [RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0", "org/pkg")],
+        )
+
+
+def test_apply_revision_pin_updates_writes_restrictive_permissions(tmp_path: Path) -> None:
+    manifest = tmp_path / "apm.yml"
+    manifest.write_text(
+        f"name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - org/pkg#{OLD_SHA}\n",
+        encoding="utf-8",
+    )
+
+    apply_revision_pin_updates(
+        manifest,
+        [RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0", "org/pkg")],
+    )
+
+    assert manifest.stat().st_mode & 0o777 == 0o600
+
+
+def test_resolve_revision_pin_updates_uses_tags_only_fetch() -> None:
+    class TagsOnlyDownloader:
+        def list_remote_refs(self, _dep_ref: DependencyReference) -> list[RemoteRef]:
+            raise AssertionError("revision-pin resolver should not fetch branch heads")
+
+        def list_remote_tag_refs(self, _dep_ref: DependencyReference) -> list[RemoteRef]:
+            return [RemoteRef("v2.0.0", GitReferenceType.TAG, NEW_SHA, annotated=True)]
+
+    updates = resolve_revision_pin_updates(
+        [DependencyReference(repo_url="org/pkg", reference=OLD_SHA)],
+        TagsOnlyDownloader(),
+    )
+
+    assert updates == [RevisionPinUpdate("org/pkg", OLD_SHA, NEW_SHA, "v2.0.0", "org/pkg")]

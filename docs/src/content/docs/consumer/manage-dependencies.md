@@ -164,7 +164,7 @@ dependencies:
   apm:
     - microsoft/apm-sample-package#v1.0.0       # tag
     - acme/playbooks#main                       # branch (moves)
-    - acme/playbooks#a1b2c3d4e5f6...            # SHA (immutable)
+    - acme/playbooks#a1b2c3d4e5f6a7b8c9d0e1f234567890abcdef12  # SHA (immutable)
 ```
 
 For registry-sourced deps or when `policy.dependencies.require_pinned_constraint: true` is on, the ref slot also accepts semver constraints:
@@ -191,7 +191,7 @@ updates the SHA to that tag's commit, and leaves the tag as a YAML comment:
 ```yaml
 dependencies:
   apm:
-    - acme/playbooks#b1c2d3e4f5... # v2.0.0
+    - acme/playbooks#b1c2d3e4f5a6b7c8d9e0f1234567890abcdef123456 # v2.0.0
 ```
 
 `apm update --dry-run` previews the SHA/tag rewrite without changing the

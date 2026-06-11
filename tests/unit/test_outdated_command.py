@@ -384,6 +384,8 @@ class TestOutdatedCommand:
             assert result.exit_code == 0, result.output
             assert "org/commit-pkg" in result.output
             assert "v2.0.0" in result.output
+            assert current_sha[:8] in result.output
+            assert current_sha not in result.output
             assert latest_sha[:8] in result.output
             assert "outdated" in result.output.lower()
 

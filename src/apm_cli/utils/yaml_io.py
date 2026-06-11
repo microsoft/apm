@@ -72,7 +72,12 @@ def write_yaml_text_atomic(
     target = Path(path)
     tmp_path = target.with_name(f".{target.name}{tmp_suffix}")
     try:
-        tmp_path.write_text(content, encoding="utf-8")
+        with suppress(FileNotFoundError):
+            tmp_path.unlink()
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        fd = os.open(tmp_path, flags, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
         os.replace(tmp_path, target)
     except Exception:
         with suppress(OSError):

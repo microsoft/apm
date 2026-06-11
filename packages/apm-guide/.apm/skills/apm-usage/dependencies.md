@@ -252,8 +252,8 @@ active. Registry-routed deps add `source: registry`, `version`,
 `resolved_url`, and `resolved_hash` (sha256 of the archive bytes) to
 their lockfile entry, and the lockfile is promoted to
 `lockfile_version: "2"` when any dep is registry-sourced OR carries
-git-source semver resolution fields (`constraint` / `resolved_tag` /
-`resolved_at`).
+git-source semver resolution fields (`constraint` / `resolved_at`) or a
+revision-pin tag annotation (`resolved_tag`).
 
 The `acme/foo@registry-name#version` shorthand is **not supported** (deferred
 to v2) -- the `@` collides with npm/cargo/pip version syntax, with
