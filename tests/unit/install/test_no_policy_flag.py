@@ -121,7 +121,7 @@ class TestHelpTextShowsNoPolicy:
         result = self.runner.invoke(cli, ["install", "--help"])
         assert result.exit_code == 0
         normalized = " ".join(result.output.split())
-        assert "gemini, kiro, opencode" in normalized
+        assert "gemini, intellij, kiro" in normalized
         assert "Claude Code, Codex CLI, Gemini CLI, Kiro, Windsurf" in normalized
 
     def test_help_text_is_plain_ascii(self):
