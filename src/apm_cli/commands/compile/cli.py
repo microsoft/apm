@@ -829,10 +829,8 @@ def _run_compilation(
     "--clean",
     is_flag=True,
     help=(
-        "Remove orphaned AGENTS.md files no longer generated; for --target claude,"
-        " also removes a stale APM-generated CLAUDE.md (hand-authored files are"
-        " never deleted). Use with --dry-run to preview what would be removed."
-        " See the compile reference for details."
+        "Remove orphaned output files (AGENTS.md, CLAUDE.md) no longer generated. "
+        "Hand-authored files are never deleted; use --dry-run to preview removals."
     ),
 )
 @click.option(

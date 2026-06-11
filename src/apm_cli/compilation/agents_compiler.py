@@ -21,6 +21,7 @@ from ..core.target_detection import (
 )
 from ..primitives.discovery import discover_primitives
 from ..primitives.models import PrimitiveCollection
+from ..utils.path_security import PathTraversalError, ensure_path_within
 from ..utils.paths import portable_relpath
 from ..version import get_version
 from .claude_formatter import CLAUDE_HEADER, ClaudeFormatter
@@ -271,6 +272,27 @@ class StaleClaudeDetection(NamedTuple):
     exists: bool
     has_marker: bool
     read_error: str | None
+
+    @property
+    def is_apm_managed(self) -> bool:
+        """Return True when the file is readable and carries APM's marker."""
+        return self.exists and self.has_marker and self.read_error is None
+
+
+def _hand_authored_claude_skip_message(
+    rel: str, *, dry_run: bool = False, preview: bool = False
+) -> str:
+    """Build consistent skip guidance for hand-authored CLAUDE.md files."""
+    if preview:
+        prefix = "[dry-run] would skip removal"
+    elif dry_run:
+        prefix = "[dry-run] Skipped removal"
+    else:
+        prefix = "Skipped removal"
+    return (
+        f"{prefix} of {rel}: hand-authored file will not be deleted."
+        " Delete or rename it manually if duplicate context is unwanted."
+    )
 
 
 class AgentsCompiler:
@@ -671,6 +693,7 @@ class AgentsCompiler:
             return StaleClaudeDetection(root_claude_md, rel, False, False, None)
         try:
             with root_claude_md.open("rb") as fh:
+                # CLAUDE_HEADER is emitted on the first line; 4 KiB is ample.
                 content = fh.read(4096).decode(
                     "utf-8"
                 )  # strict; raises UnicodeDecodeError on invalid bytes
@@ -814,7 +837,7 @@ class AgentsCompiler:
                         # (cli.py does `pass` on dry-run success and never prints
                         # result.content -- issue #1729 fix).
                         self._log("warning", det.read_error)
-                    elif det.has_marker:
+                    elif det.is_apm_managed:
                         removal_msg = (
                             f"[dry-run] would remove stale {det.rel} -- instructions now"
                             " live in .claude/rules/"
@@ -830,24 +853,19 @@ class AgentsCompiler:
                         )
                     else:
                         # Hand-authored CLAUDE.md (no APM marker): the live --clean run
-                        # would skip deletion and warn.  Surface the same intent in
+                        # would skip deletion and warn. Surface the same intent in
                         # dry-run so users are not surprised by the live outcome.
-                        hand_authored_preview = (
-                            f"  [dry-run] would skip removal of {det.rel}:"
-                            " hand-authored file will not be deleted."
-                            " Delete or rename it manually if duplicate context"
-                            " is unwanted."
+                        hand_authored_preview = _hand_authored_claude_skip_message(
+                            det.rel, preview=True
                         )
-                        preview_lines.append(hand_authored_preview)
-                        hand_authored_warning = (
-                            f"[dry-run] Skipped removal of {det.rel}: "
-                            + _hand_authored_skip_message(det.rel)
+                        preview_lines.append(f"  {hand_authored_preview}")
+                        all_warnings.append(
+                            _hand_authored_claude_skip_message(det.rel, dry_run=True)
                         )
-                        all_warnings.append(hand_authored_warning)
                         # Emit via logger so it surfaces on the distributed dry-run path
                         # (cli.py does `pass` on dry-run success and never prints
                         # result.content -- issue #1729 fix).
-                        self._log("progress", hand_authored_preview.strip(), symbol="info")
+                        self._log("progress", hand_authored_preview, symbol="info")
 
             return CompilationResult(
                 success=len(all_errors) == 0,
@@ -922,18 +940,10 @@ class AgentsCompiler:
                     if det.read_error is not None:
                         all_warnings.append(det.read_error)
                         self._log("warning", det.read_error)
-                    elif det.has_marker:
+                    elif det.is_apm_managed:
                         try:
-                            # Defense-in-depth: confirm the path is still within the
-                            # project root before mutating the filesystem -- matches
-                            # the containment guard used for .claude/rules/ above.
-                            from ..utils.path_security import (
-                                PathTraversalError,
-                                ensure_path_within,
-                            )
-
                             ensure_path_within(det.path, self.base_dir)
-                            det.path.unlink()  # safe: APM-generated marker confirmed above
+                            det.path.unlink()  # safe: containment + APM marker confirmed above
                             # success() uses its own default symbol; no symbol= kwarg
                             # needed (unlike the progress() calls elsewhere here).
                             self._log(
@@ -941,15 +951,13 @@ class AgentsCompiler:
                                 f"Removed stale {det.rel} -- instructions now live in .claude/rules/",
                             )
                         except (OSError, PathTraversalError) as exc:
-                            msg = f"Could not remove {det.rel}: {exc!s}"
-                            all_warnings.append(msg)
-                            self._log("warning", msg)
+                            warning = f"Could not remove {det.rel}: {exc!s}"
+                            all_warnings.append(warning)
+                            self._log("warning", warning)
                     else:
-                        msg = f"Skipped removal of {det.rel}: " + _hand_authored_skip_message(
-                            det.rel
-                        )
-                        all_warnings.append(msg)
-                        self._log("warning", msg)
+                        warning = _hand_authored_claude_skip_message(det.rel)
+                        all_warnings.append(warning)
+                        self._log("warning", warning)
         elif distributed_compiler is None and files_written > 0 and not config.dry_run:
             # Single-file strategy bypasses the distributed display formatter
             # (which has no analysis to render). Emit a minimal progress line

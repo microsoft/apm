@@ -14,12 +14,15 @@ Acceptance criteria:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
 from apm_cli.compilation.claude_formatter import CLAUDE_HEADER
 from apm_cli.compilation.constitution import clear_constitution_cache
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
+from apm_cli.utils.path_security import PathTraversalError
 
 # ---------------------------------------------------------------------------
 # Module-level cache isolation
@@ -168,6 +171,59 @@ class TestCleanRemovesApmGeneratedStaleCLAUDEMD:
             f"Expected a 'Removed stale CLAUDE.md' log line at 'success' level, got: {logger.logged}"
         )
 
+    def test_clean_checks_containment_before_unlink(self, tmp_path, monkeypatch):
+        """Stale CLAUDE.md deletion must pass through the path containment guard."""
+        _make_project(tmp_path, populate_rules=True)
+        _apm_generated_claude_md(tmp_path)
+        guard_calls = []
+
+        def fake_ensure_path_within(path: Path, base_dir: Path) -> Path:
+            guard_calls.append((path, base_dir))
+            return path
+
+        monkeypatch.setattr(
+            "apm_cli.compilation.agents_compiler.ensure_path_within",
+            fake_ensure_path_within,
+        )
+
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=True,
+            dry_run=False,
+        )
+        primitives = _make_primitives(tmp_path)
+        compiler._compile_claude_md(config, primitives)
+
+        assert guard_calls == [(tmp_path / "CLAUDE.md", tmp_path)]
+        assert not (tmp_path / "CLAUDE.md").exists()
+
+    def test_clean_keeps_file_when_containment_guard_rejects(self, tmp_path, monkeypatch):
+        """Containment failure must fail closed and warn instead of unlinking."""
+        _make_project(tmp_path, populate_rules=True)
+        _apm_generated_claude_md(tmp_path)
+
+        def reject_path(path: Path, base_dir: Path) -> Path:
+            raise PathTraversalError("outside base")
+
+        monkeypatch.setattr("apm_cli.compilation.agents_compiler.ensure_path_within", reject_path)
+        logger = _CapturingLogger()
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._logger = logger
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=True,
+            dry_run=False,
+        )
+        primitives = _make_primitives(tmp_path)
+        result = compiler._compile_claude_md(config, primitives)
+
+        assert (tmp_path / "CLAUDE.md").exists()
+        assert any("Could not remove CLAUDE.md" in w for w in result.warnings)
+        assert any(
+            "Could not remove CLAUDE.md" in m for level, m in logger.logged if level == "warning"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Hand-authored file protection
@@ -215,6 +271,54 @@ class TestHandAuthoredCLAUDEMDIsNeverRemoved:
 
         assert any("hand-authored" in w for w in result.warnings), (
             f"Expected a 'hand-authored' warning, got: {result.warnings}"
+        )
+
+    def test_clean_hand_authored_warning_emitted_via_logger(self, tmp_path):
+        """Live --clean hand-authored skips must reach the terminal logger."""
+        _make_project(tmp_path, populate_rules=True)
+        _hand_authored_claude_md(tmp_path)
+
+        logger = _CapturingLogger()
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._logger = logger
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=True,
+            dry_run=False,
+        )
+        primitives = _make_primitives(tmp_path)
+        compiler._compile_claude_md(config, primitives)
+
+        warning_messages = [m for level, m in logger.logged if level == "warning"]
+        assert any("hand-authored" in m and "CLAUDE.md" in m for m in warning_messages), (
+            "Live --clean with a hand-authored CLAUDE.md must emit the skip warning "
+            f"through the logger; got: {logger.logged}"
+        )
+
+    def test_clean_unlink_error_warning_emitted_via_logger(self, tmp_path, monkeypatch):
+        """Live --clean unlink failures must be visible through the logger."""
+        _make_project(tmp_path, populate_rules=True)
+        _apm_generated_claude_md(tmp_path)
+
+        def fail_unlink(self: Path) -> None:
+            raise OSError("busy")
+
+        monkeypatch.setattr(Path, "unlink", fail_unlink)
+        logger = _CapturingLogger()
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._logger = logger
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=True,
+            dry_run=False,
+        )
+        primitives = _make_primitives(tmp_path)
+        result = compiler._compile_claude_md(config, primitives)
+
+        assert (tmp_path / "CLAUDE.md").exists()
+        assert any("Could not remove CLAUDE.md" in w for w in result.warnings)
+        assert any(
+            "Could not remove CLAUDE.md" in m for level, m in logger.logged if level == "warning"
         )
 
 
