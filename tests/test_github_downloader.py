@@ -2428,6 +2428,7 @@ class TestGiteaRawUrlDownload:
 
         msg = str(exc_info.value)
         assert "No APM-managed token was sent" in msg
+        assert "whole-repo git dependency" in msg
         assert "type: gitlab" in msg
         assert "GITHUB_HOST" in msg
         assert "Re-run with --verbose" in msg
@@ -2466,7 +2467,7 @@ class TestGiteaRawUrlDownload:
             "Network error downloading README.md from gitea.myorg.com via raw URL endpoint" in msg
         )
         assert "boom" in msg
-        assert "Re-run with --verbose" in msg
+        assert "Re-run with --verbose to see attempted URLs" in msg
 
     def test_raw_url_500_surfaces_with_endpoint_context(self):
         dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
@@ -2479,7 +2480,7 @@ class TestGiteaRawUrlDownload:
         assert "Failed to download README.md from gitea.myorg.com" in msg
         assert "HTTP 500" in msg
         assert "raw URL endpoint" in msg
-        assert "Re-run with --verbose" in msg
+        assert "Re-run with --verbose to see attempted URLs" in msg
 
 
 class TestGiteaGogsApiVersionNegotiation:

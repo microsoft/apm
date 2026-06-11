@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 
 # Patterns that indicate a secret value follows.  Covers:
 #   token=VALUE, Authorization: Bearer VALUE, Authorization: Basic VALUE,
-#   URL credentials (https://user:pass@host), and bare bearer strings.
+#   URL credentials (https://user:pass@host), and bare PAT-like strings.
 _SECRET_RE = re.compile(
     r"(?:"
     r"(?:token|password|secret|authorization|bearer)"  # keyword prefix
@@ -66,6 +66,8 @@ _SECRET_RE = re.compile(
     r"[\w.~!*\'();:@&=+$,/?#\[\]\-]{4,}"  # value (>= 4 chars)
     r"|"
     r"://[^:@/\s]+:[^:@/\s]+@"  # URL user:pass@
+    r"|"
+    r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[psou]_[A-Za-z0-9_]{20,})\b"  # bare PAT
     r")",
     re.IGNORECASE,
 )
@@ -186,7 +188,7 @@ class AuthCacheKey(NamedTuple):
 
     host: str | None
     port: int | None
-    host_type: str
+    host_type: str  # Empty string represents an absent or canonical host_type.
     org: str
 
 

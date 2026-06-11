@@ -523,10 +523,8 @@ _BACKEND_BY_KIND: dict[str, type] = {
 
 
 def _host_type_for_backend_dispatch(dep_ref: DependencyReference | None) -> str | None:
-    """Return a first-class host_type from typed dependency refs."""
-    if type(dep_ref).__name__ == "DependencyReference":
-        return dep_ref.host_type
-    return None
+    """Return a structural host_type from dependency-like refs."""
+    return getattr(dep_ref, "host_type", None)
 
 
 def backend_for(

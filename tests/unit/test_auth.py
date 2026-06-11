@@ -1627,3 +1627,11 @@ class TestCredentialFallbackOrderRegressionTrap:
         assert sentinel not in full_log, (
             "Secret embedded in exception message must be redacted by SecretRedactionFilter"
         )
+
+    def test_bare_pat_like_token_is_redacted(self):
+        from apm_cli.core.auth import _redact_secrets
+
+        sentinel = "github_pat_" + "A" * 24
+        redacted = _redact_secrets(f"git stderr leaked {sentinel} without a label")
+        assert sentinel not in redacted
+        assert "[REDACTED]" in redacted

@@ -783,7 +783,7 @@ class DownloadDelegate:
                 response = self._host._resilient_get(raw_url, headers=raw_headers, timeout=30)
             except (requests.RequestException, OSError) as raw_err:
                 raise RuntimeError(
-                    self._build_download_network_error(host, file_path, raw_url, "raw URL", raw_err)
+                    self._build_download_network_error(host, file_path, "raw URL", raw_err)
                 ) from raw_err
             if response.status_code == 200:
                 if verbose_callback:
@@ -792,7 +792,7 @@ class DownloadDelegate:
             if response.status_code != 404:
                 raise RuntimeError(
                     self._build_download_http_error(
-                        host, file_path, raw_url, response.status_code, "raw URL"
+                        host, file_path, response.status_code, "raw URL"
                     )
                 )
 
@@ -847,14 +847,12 @@ class DownloadDelegate:
                         if status != 404:
                             raise RuntimeError(  # noqa: B904
                                 self._build_download_http_error(
-                                    host, file_path, candidate_url, status, "Contents API"
+                                    host, file_path, status, "Contents API"
                                 )
                             )
                     except requests.exceptions.RequestException as ce:
                         raise RuntimeError(  # noqa: B904
-                            self._build_download_network_error(
-                                host, file_path, candidate_url, "Contents API", ce
-                            )
+                            self._build_download_network_error(host, file_path, "Contents API", ce)
                         )
 
                 # Try fallback branches if the specified ref fails
@@ -899,14 +897,12 @@ class DownloadDelegate:
                         if status != 404:
                             raise RuntimeError(  # noqa: B904
                                 self._build_download_http_error(
-                                    host, file_path, fallback_url, status, "Contents API"
+                                    host, file_path, status, "Contents API"
                                 )
                             )
                     except requests.exceptions.RequestException as fe:
                         raise RuntimeError(  # noqa: B904
-                            self._build_download_network_error(
-                                host, file_path, fallback_url, "Contents API", fe
-                            )
+                            self._build_download_network_error(host, file_path, "Contents API", fe)
                         )
 
                 raise RuntimeError(  # noqa: B904
@@ -988,10 +984,10 @@ class DownloadDelegate:
                     else:
                         error_msg += (
                             "No APM-managed token was sent for generic host file download. "
-                            "Use object-form type: gitlab for GitLab-compatible hosts, "
-                            f"set GITHUB_HOST={host} for GitHub Enterprise Server, "
-                            "or use a clone-backed dependency path. "
-                            "Re-run with --verbose to see attempted endpoint URLs."
+                            "Use a whole-repo git dependency for full clone auth support. "
+                            "For platform-specific HTTP file reads, use object-form type: gitlab "
+                            f"for GitLab-compatible hosts or set GITHUB_HOST={host} for GitHub "
+                            "Enterprise Server. Re-run with --verbose to see attempted URLs."
                         )
                 elif is_github_host and not host.lower().endswith(".ghe.com"):
                     error_msg += (
@@ -1013,17 +1009,15 @@ class DownloadDelegate:
                         "Enterprise Server."
                     )
                 if is_github_host:
-                    error_msg += " Re-run with --verbose to see attempted endpoint URLs."
+                    error_msg += " Re-run with --verbose to see attempted URLs."
                 raise RuntimeError(error_msg)  # noqa: B904
             else:
                 raise RuntimeError(
-                    self._build_download_http_error(
-                        host, file_path, api_url, status, "Contents API"
-                    )
+                    self._build_download_http_error(host, file_path, status, "Contents API")
                 ) from e
         except requests.exceptions.RequestException as e:
             raise RuntimeError(
-                self._build_download_network_error(host, file_path, api_url, "Contents API", e)
+                self._build_download_network_error(host, file_path, "Contents API", e)
             ) from e
 
     # ------------------------------------------------------------------
@@ -1185,21 +1179,19 @@ class DownloadDelegate:
     def _build_download_http_error(
         host: str,
         file_path: str,
-        url: str,
         status: int | str,
         endpoint: str,
     ) -> str:
         """Build a host- and endpoint-specific HTTP download error."""
         return (
             f"Failed to download {file_path} from {host}: HTTP {status} "
-            f"from {endpoint} endpoint. Re-run with --verbose to see attempted URL."
+            f"from {endpoint} endpoint. Re-run with --verbose to see attempted URLs."
         )
 
     @staticmethod
     def _build_download_network_error(
         host: str,
         file_path: str,
-        url: str,
         endpoint: str,
         error: BaseException,
     ) -> str:
@@ -1207,7 +1199,7 @@ class DownloadDelegate:
         detail = str(error).strip().splitlines()[0] if str(error).strip() else type(error).__name__
         return (
             f"Network error downloading {file_path} from {host} via {endpoint} endpoint: "
-            f"{detail}. Re-run with --verbose to see attempted URL."
+            f"{detail}. Re-run with --verbose to see attempted URLs."
         )
 
     @staticmethod
