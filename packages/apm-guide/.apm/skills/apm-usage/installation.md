@@ -91,7 +91,9 @@ apm self-update --check
 
 For dependency installs after bootstrap, keep using `PROXY_REGISTRY_URL` and `PROXY_REGISTRY_ONLY=1`. Homebrew and Scoop mirroring is package-manager documentation only in v0; these env vars do not rewrite Homebrew or Scoop internals.
 
-No-egress smoke test: run the installer on a disposable runner with a curl wrapper or egress proxy that denies `github.com`, `api.github.com`, `aka.ms`, `pypi.org`, `pythonhosted.org`, Homebrew, and Scoop upstreams. With all mirror env vars set, the only allowed outbound host should be your mirror. Run `apm self-update --check` under the same env vars and confirm proxy logs show only the mirror host.
+Fail-closed scoping keys off the public `github.com` default: it blocks fallback to public hosts, not all egress. A custom `GITHUB_URL` (GHES host) plus `APM_NO_DIRECT_FALLBACK=1` and no release mirror still reaches that GHES host. Set the four mirror URLs for zero public egress. The GitHub token is attached only to the canonical GitHub / configured GHES host, never to a mirror host (symmetric across `install.sh` and `install.ps1`).
+
+No-egress smoke test: run the installer on a disposable runner with `curl` and `pip` wrappers (or an egress proxy) that deny `github.com`, `api.github.com`, `aka.ms`, `pypi.org`, `pythonhosted.org`, Homebrew, and Scoop upstreams. Wrapping `pip` keeps the proof honest about the PyPI fallback path. With all mirror env vars set, the only allowed outbound host should be your mirror. Run `apm self-update --check` under the same env vars and confirm proxy logs show only the mirror host.
 
 ## Troubleshooting
 

@@ -63,6 +63,8 @@ apm self-update
 
 With `APM_NO_DIRECT_FALLBACK=1`, missing or unreachable mirror settings are hard failures with a non-zero exit. APM does not fall back to public GitHub, `aka.ms`, or PyPI in that mode.
 
+Fail-closed scoping keys off the public `github.com` default: it blocks fallback to public hosts, not all egress. A custom `GITHUB_URL` (a GHES host) combined with `APM_NO_DIRECT_FALLBACK=1` and no release mirror still egresses to that GHES host -- this is intentional GHES coexistence. For zero public egress set the `APM_RELEASE_METADATA_URL` / `APM_RELEASE_BASE_URL` / `APM_INSTALLER_BASE_URL` / `APM_PYPI_INDEX_URL` mirrors. The GitHub token is sent only to the canonical GitHub / configured GHES host, never to a mirror host.
+
 ## Options
 
 | Flag | Description |

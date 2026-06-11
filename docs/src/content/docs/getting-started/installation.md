@@ -142,11 +142,15 @@ apm-releases/
 
 `APM_NO_DIRECT_FALLBACK=1` makes missing mirror settings and unreachable mirrors hard failures. It does not replace package-install proxying; keep using `PROXY_REGISTRY_URL` and `PROXY_REGISTRY_ONLY=1` for `apm install` dependencies.
 
+#### What fail-closed does and does not cover
+
+Fail-closed scoping keys off the public `github.com` default. The guard only blocks egress when the resolved host would be public GitHub (`github.com` / `api.github.com`), `aka.ms`, or public PyPI. It does **not** suppress egress to a custom `GITHUB_URL`: if you set a GHES host (for example `GITHUB_URL=https://github.corp.com`) together with `APM_NO_DIRECT_FALLBACK=1` and no release mirror, the installer still reaches that GHES host. This is intentional coexistence with GHES, but "no direct fallback" should not be read as "zero egress" -- it means "no fallback to public hosts". For true zero-egress, set the `APM_RELEASE_METADATA_URL` / `APM_RELEASE_BASE_URL` / `APM_INSTALLER_BASE_URL` / `APM_PYPI_INDEX_URL` mirrors so every request resolves to your internal hosts. The GitHub token is attached only when the request targets the canonical GitHub / configured GHES host; it is never sent to a mirror host.
+
 Homebrew and Scoop mirror support is docs-only in this v0: mirror the tap or bucket with your package manager's normal enterprise controls, but the APM env vars above do not rewrite Homebrew or Scoop internals.
 
 ### No-egress smoke test
 
-Run this on a disposable Linux or macOS runner. It starts a local mirror, wraps `curl` with a deny-list for public hosts, and expects the installer to fail only after downloading the fake archive. Any request to GitHub, `aka.ms`, PyPI, Homebrew, or Scoop fails the smoke test immediately.
+Run this on a disposable Linux or macOS runner. It starts a local mirror, wraps both `curl` and `pip` with deny-lists for public hosts, and expects the installer to fail only after downloading the fake archive. Any request to GitHub, `aka.ms`, PyPI, Homebrew, or Scoop fails the smoke test immediately. The `pip` wrapper makes the PyPI egress path explicit: pip fallback is gated by `APM_NO_DIRECT_FALLBACK` + `APM_PYPI_INDEX_URL`, so the wrapper proves pip cannot reach public PyPI even if the binary path falls back to it.
 
 ```bash
 set -eu
@@ -167,7 +171,19 @@ case " $* " in
 esac
 exec /usr/bin/curl "$@"
 SH
-chmod +x .apm-mirror-smoke/bin/curl
+cat > .apm-mirror-smoke/bin/pip <<'SH'
+#!/bin/sh
+# Deny public PyPI; allow only the configured mirror index.
+case " $* " in
+  *pypi.org*|*pythonhosted.org*)
+    echo "public pip egress blocked: $*" >&2
+    exit 70
+    ;;
+esac
+exec /usr/bin/pip "$@"
+SH
+cp .apm-mirror-smoke/bin/pip .apm-mirror-smoke/bin/pip3
+chmod +x .apm-mirror-smoke/bin/curl .apm-mirror-smoke/bin/pip .apm-mirror-smoke/bin/pip3
 python3 -m http.server 8765 --directory .apm-mirror-smoke/mirror > .apm-mirror-smoke/server.log 2>&1 &
 server_pid=$!
 trap 'kill "$server_pid" 2>/dev/null || true' EXIT
