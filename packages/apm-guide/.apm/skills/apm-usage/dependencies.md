@@ -265,8 +265,8 @@ active. Registry-routed deps add `source: registry`, `version`,
 `resolved_url`, and `resolved_hash` (sha256 of the archive bytes) to
 their lockfile entry, and the lockfile is promoted to
 `lockfile_version: "2"` when any dep is registry-sourced OR carries
-git-source semver resolution fields (`constraint` / `resolved_tag` /
-`resolved_at`).
+git-source semver resolution fields (`constraint` / `resolved_at`) or a
+revision-pin tag annotation (`resolved_tag`).
 
 The `acme/foo@registry-name#version` shorthand is **not supported** (deferred
 to v2) -- the `@` collides with npm/cargo/pip version syntax, with
@@ -331,6 +331,8 @@ dependencies:
         #                            Codex: passed through unchanged.
         #   ${input:<id>}         -> VS Code prompts user at runtime
         #   <VAR>                 -> deprecated; auto-translated, emits a warning
+        # Registry-declared optional env/input fields are omitted when unset;
+        # see manifest-schema section 4.2.4 for reinstall preservation semantics.
         Authorization: "Bearer ${MY_TOKEN}"
       tools: ["repos", "issues"]
 
@@ -402,7 +404,7 @@ server map or a `{ "lspServers": { ... } }` envelope.
 | Tag | `owner/repo#v1.0.0` | Production -- immutable reference |
 | Semver range | `owner/repo#^1.2.0` | Track patch/minor updates within a range; APM lists remote tags and pins the highest match in the lockfile |
 | Branch | `owner/repo#main` | Development -- tracks latest |
-| Commit SHA | `owner/repo#abc123d` | Maximum reproducibility |
+| Commit SHA | `owner/repo#abc123d` | Maximum reproducibility; `apm update` can move full 40-character SHA pins to the latest annotated semver tag SHA and annotate the line with `# <tag>` |
 | No ref | `owner/repo` | Resolves default branch at install time |
 | Marketplace ref | `plugin@marketplace#ref` | Override marketplace source ref |
 

@@ -35,13 +35,13 @@ Some package-manager distributions (for example, Homebrew) disable self-update a
 
 ## Enterprise bootstrap mirrors
 
-`apm self-update` uses the same mirror contract as the installer scripts. These variables are additive to the older `GITHUB_URL` / `APM_REPO` / `VERSION` flow:
+`apm self-update` uses the same mirror contract as the installer scripts. See the [installation bootstrap mirror section](../../../getting-started/installation/#enterprise-bootstrap-mirror-mode) for the canonical setup; this command-specific table shows the same knobs alongside legacy update settings:
 
 | Variable | Default | Effect |
 |----------|---------|--------|
 | `APM_RELEASE_METADATA_URL` | _(unset)_ | Exact URL for mirrored release metadata, usually a static `latest.json` with at least `{"tag_name":"vX.Y.Z"}`. Overrides GitHub release metadata lookup. |
 | `APM_INSTALLER_BASE_URL` | _(unset)_ | Base URL containing `install.sh` and `install.ps1`. `apm self-update` downloads the platform script from this base. |
-| `APM_RELEASE_BASE_URL` | _(unset)_ | Base URL containing release assets at `{base}/{tag}/{asset}`. The downloaded installer subprocess inherits this value. |
+| `APM_RELEASE_BASE_URL` | _(unset)_ | Base URL containing release assets at `{base}/{tag}/{asset}`. Used when self-update runs the installer to fetch binary archives. |
 | `APM_PYPI_INDEX_URL` | _(unset)_ | PyPI-compatible index used by installer pip fallback. |
 | `APM_NO_DIRECT_FALLBACK` | _(unset)_ | Set to `1` to fail closed instead of using public GitHub, `aka.ms`, or PyPI fallback. |
 | `GITHUB_URL` | `https://github.com` | Legacy GitHub/GHES base URL. Still supported when mirror env vars are not set. |
@@ -61,9 +61,7 @@ apm self-update --check
 apm self-update
 ```
 
-With `APM_NO_DIRECT_FALLBACK=1`, missing or unreachable mirror settings are hard failures with a non-zero exit. APM does not fall back to public GitHub, `aka.ms`, or PyPI in that mode.
-
-Fail-closed scoping keys off the public `github.com` default: it blocks fallback to public hosts, not all egress. A custom `GITHUB_URL` (a GHES host) combined with `APM_NO_DIRECT_FALLBACK=1` and no release mirror still egresses to that GHES host -- this is intentional GHES coexistence. For zero public egress set the `APM_RELEASE_METADATA_URL` / `APM_RELEASE_BASE_URL` / `APM_INSTALLER_BASE_URL` / `APM_PYPI_INDEX_URL` mirrors. The GitHub token is sent only to the canonical GitHub / configured GHES host, never to a mirror host.
+With `APM_NO_DIRECT_FALLBACK=1`, missing or unreachable mirror settings are hard failures with a non-zero exit. For the full fail-closed scope, GHES token boundary, and no-egress smoke recipe, see [Enterprise bootstrap mirror mode](../../../getting-started/installation/#enterprise-bootstrap-mirror-mode).
 
 ## Options
 

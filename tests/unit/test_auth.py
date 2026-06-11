@@ -228,13 +228,36 @@ class TestResolve:
             assert ctx.source == "GITHUB_APM_PAT"
 
     def test_no_token_returns_none(self):
-        """No tokens at all → token is None."""
+        """No tokens at all -> token is None."""
         with patch.dict(os.environ, {}, clear=True):
             with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
                 resolver = AuthResolver()
                 ctx = resolver.resolve("github.com")
                 assert ctx.token is None
                 assert ctx.source == "none"
+
+    def test_allow_external_fallback_false_skips_gh_cli_and_git_credentials(self):
+        """Disabled external fallback never probes gh CLI or git credentials."""
+        with patch.dict(os.environ, {}, clear=True):
+            with (
+                patch.object(
+                    GitHubTokenManager,
+                    "resolve_credential_from_gh_cli",
+                    side_effect=AssertionError("gh cli should not be probed"),
+                ) as mock_gh_cli,
+                patch.object(
+                    GitHubTokenManager,
+                    "resolve_credential_from_git",
+                    side_effect=AssertionError("git credentials should not be probed"),
+                ) as mock_git,
+            ):
+                resolver = AuthResolver(allow_external_fallback=False)
+                ctx = resolver.resolve("github.com", org="microsoft")
+
+        assert ctx.token is None
+        assert ctx.source == "none"
+        mock_gh_cli.assert_not_called()
+        mock_git.assert_not_called()
 
     def test_caching(self):
         """Second call returns cached result."""

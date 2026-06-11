@@ -691,6 +691,10 @@ class GitHubPackageDownloader:
         """
         return self._refs.list_remote_refs(dep_ref)
 
+    def list_remote_tag_refs(self, dep_ref: DependencyReference) -> list[RemoteRef]:
+        """Enumerate remote tags only without cloning."""
+        return self._refs.list_remote_tag_refs(dep_ref)
+
     def resolve_git_reference(
         self, repo_ref: Union[str, "DependencyReference"]
     ) -> ResolvedReference:

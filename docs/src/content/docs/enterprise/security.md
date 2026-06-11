@@ -48,14 +48,14 @@ lockfile_version: "1"
 dependencies:
   - repo_url: owner/repo
     host: github.com
-    resolved_commit: a1b2c3d4e5f6...
+    resolved_commit: a1b2c3d4e5f6a7b8c9d0e1f234567890abcdef12
     resolved_ref: main
     depth: 1
     deployed_files:
       - .github/skills/example/skill.md
 ```
 
-The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated.
+The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated. For manifest entries that are themselves pinned to a full SHA, `apm update` resolves only annotated semver tags from the authoritative upstream; branches and lightweight tags are not accepted for this revision-pin update path. See [`apm update`](../reference/cli/update/) for the rewrite mechanics.
 
 ### Registry security model
 
@@ -189,7 +189,7 @@ APM computes a SHA-256 hash of each downloaded package's file tree and stores it
 # apm.lock.yaml
 dependencies:
   - repo_url: https://github.com/acme-corp/security-baseline
-    resolved_commit: a1b2c3d4e5f6...
+    resolved_commit: a1b2c3d4e5f6a7b8c9d0e1f234567890abcdef12
     content_hash: "sha256:9f86d081884c7d659a2feaa0c55ad015..."
 ```
 

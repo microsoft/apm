@@ -71,7 +71,7 @@ def _get_update_installer_suffix() -> str:
 
 
 def _get_manual_update_command() -> str:
-    """Return the manual update command for the current platform."""
+    """Return the manual update action for the current platform."""
     if _is_windows_platform():
         if get_installer_base_url() is not None:
             installer_url = "$env:APM_INSTALLER_BASE_URL/install.ps1"
@@ -79,7 +79,7 @@ def _get_manual_update_command() -> str:
             try:
                 installer_url = _get_update_installer_url()
             except RuntimeError:
-                installer_url = "$env:APM_INSTALLER_BASE_URL/install.ps1"
+                return "Set APM_INSTALLER_BASE_URL=<mirror> and re-run: apm self-update"
         return f"powershell -ExecutionPolicy Bypass -c 'irm \"{installer_url}\" | iex'"
 
     if get_installer_base_url() is not None:
@@ -88,7 +88,7 @@ def _get_manual_update_command() -> str:
         try:
             installer_url = _get_update_installer_url()
         except RuntimeError:
-            installer_url = "$APM_INSTALLER_BASE_URL/install.sh"
+            return "Set APM_INSTALLER_BASE_URL=<mirror> and re-run: apm self-update"
     return f'curl -sSL "{installer_url}" | sh'
 
 
@@ -112,7 +112,18 @@ def _get_installer_run_command(script_path: str) -> list[str]:
     return [shell_path, script_path]
 
 
-@click.command(name="self-update", help="Update the APM CLI binary itself to the latest version")
+@click.command(
+    name="self-update",
+    help=(
+        "Update the APM CLI binary itself to the latest version.\n\n"
+        "Set these to route updates through an internal mirror (optional):\n"
+        "  APM_RELEASE_METADATA_URL  latest.json mirror URL.\n"
+        "  APM_RELEASE_BASE_URL      release asset mirror base URL.\n"
+        "  APM_INSTALLER_BASE_URL    install.sh/install.ps1 mirror base URL.\n"
+        "  APM_PYPI_INDEX_URL        PyPI mirror for installer fallback.\n"
+        "  APM_NO_DIRECT_FALLBACK    1 means fail closed on public fallback.\n"
+    ),
+)
 @click.option("--check", is_flag=True, help="Only check for updates without installing")
 def self_update(check):
     """Update APM CLI to the latest version (like npm update -g npm).
@@ -174,7 +185,7 @@ def self_update(check):
                 )
             else:
                 logger.error("Unable to fetch latest version from remote")
-                logger.progress("Please check your internet connection or try again later")
+                logger.info("Check your internet connection or try again later.")
             sys.exit(1)
 
         from ..utils.version_checker import is_newer_version
@@ -259,12 +270,12 @@ def self_update(check):
 
         except ImportError:
             logger.error("'requests' library not available")
-            logger.progress("Please update manually using:")
+            logger.info("Update manually using:")
             click.echo(f"  {_get_manual_update_command()}")
             sys.exit(1)
         except Exception as e:
             logger.error(f"Update failed: {e}")
-            logger.progress("Please update manually using:")
+            logger.info("Update manually using:")
             click.echo(f"  {_get_manual_update_command()}")
             sys.exit(1)
 

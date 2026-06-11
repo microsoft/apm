@@ -96,10 +96,12 @@ class TestParseLsRemoteOutput:
     def test_deref_handling(self):
         """^{} lines should override tag-object SHAs with the commit SHA."""
         refs = GitHubPackageDownloader._parse_ls_remote_output(SAMPLE_LS_REMOTE_WITH_DEREF)
-        tag_map = {r.name: r.commit_sha for r in refs if r.ref_type == GitReferenceType.TAG}
+        tag_map = {r.name: r for r in refs if r.ref_type == GitReferenceType.TAG}
         # The ^{} commit SHA should be used, not the tag object SHA
-        assert tag_map["v1.0.0"] == "com1111111111111111111111111111111111111"
-        assert tag_map["v2.0.0"] == "com2222222222222222222222222222222222222"
+        assert tag_map["v1.0.0"].commit_sha == "com1111111111111111111111111111111111111"
+        assert tag_map["v2.0.0"].commit_sha == "com2222222222222222222222222222222222222"
+        assert tag_map["v1.0.0"].annotated is True
+        assert tag_map["v2.0.0"].annotated is True
         # No ^{} entry should appear as a separate ref
         assert "v1.0.0^{}" not in tag_map
         assert "v2.0.0^{}" not in tag_map

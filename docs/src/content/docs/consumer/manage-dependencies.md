@@ -198,7 +198,7 @@ dependencies:
   apm:
     - microsoft/apm-sample-package#v1.0.0       # tag
     - acme/playbooks#main                       # branch (moves)
-    - acme/playbooks#a1b2c3d4e5f6...            # SHA (immutable)
+    - acme/playbooks#a1b2c3d4e5f6a7b8c9d0e1f234567890abcdef12  # SHA (immutable)
 ```
 
 For registry-sourced deps or when `policy.dependencies.require_pinned_constraint: true` is on, the ref slot also accepts semver constraints:
@@ -217,6 +217,21 @@ Branches move; tags and SHAs do not. For reproducibility, prefer tags or
 SHAs. The lockfile pins the resolved commit either way, so two clones
 running `apm install` get the same bytes -- but a branch ref will resolve
 to a new SHA on the next `apm update`.
+
+For SHA-pinned deps, think of `apm update` as Dependabot-style review
+for AI packages: the manifest stays pinned to a commit, while the comment
+shows the release tag. See [`apm update`](../../reference/cli/update/) for
+the full rewrite rules.
+
+```yaml
+dependencies:
+  apm:
+    - acme/playbooks#b1c2d3e4f5a6b7c8d9e0f1234567890abcdef123 # v2.0.0
+```
+
+`apm update --dry-run` previews the SHA/tag rewrite without changing the
+manifest. Branches and lightweight tags are not accepted as revision-pin
+update targets.
 
 ### Marketplace ref override
 
