@@ -294,7 +294,7 @@ def test_verbose_summary_both_clauses(tmp_path: Path) -> None:
     summary = [d for d in diagnostics if "stripped from" in d.message]
     assert len(summary) == 1
     assert "stripped from 2 local source(s)" in summary[0].message
-    assert "1 entry(ies) used curator-supplied overrides" in summary[0].message
+    assert "1 curator-supplied field override kept over package metadata" in summary[0].message
 
 
 # ---------------------------------------------------------------------------

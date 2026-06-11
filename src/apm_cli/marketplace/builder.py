@@ -71,6 +71,8 @@ from .yml_schema import (
 
 logger = logging.getLogger(__name__)
 
+_LOCAL_METADATA_MAX_BYTES = 64 * 1024
+
 __all__ = [
     "BuildDiagnostic",
     "BuildOptions",
@@ -204,7 +206,7 @@ class BuildReport:
         return any(output.dry_run for output in self.outputs)
 
     def to_json_dict(self) -> dict[str, Any]:
-        """Serialize build report as the §4 JSON contract.
+        """Serialize build report as the Section 4 JSON contract.
 
         Shape: {ok, dry_run, warnings[], errors[],
                 marketplace: {outputs: [{format, path, added, updated,
@@ -248,7 +250,7 @@ class BuildReport:
         warnings: list[str] | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Produce the §4 JSON shape for a pre-build failure.
+        """Produce the Section 4 JSON shape for a pre-build failure.
 
         Used when the build cannot even start (e.g., config parse error,
         unknown format filter).
@@ -851,13 +853,23 @@ class MarketplaceBuilder:
         if not pkg.subdir:
             return None
         try:
-            package_root = ensure_path_within(self._project_root / pkg.subdir, self._project_root)
-            if package_root == self._project_root.resolve():
+            project_root = ensure_path_within(self._project_root, self._project_root)
+            package_root = ensure_path_within(project_root / pkg.subdir, project_root)
+            if package_root == project_root:
                 return None
             file_path = package_root / "apm.yml"
             if not file_path.is_file():
                 return None
-            data = yaml.safe_load(file_path.read_text(encoding="utf-8"))
+            with file_path.open("rb") as handle:
+                raw = handle.read(_LOCAL_METADATA_MAX_BYTES + 1)
+            if len(raw) > _LOCAL_METADATA_MAX_BYTES:
+                logger.debug(
+                    "Skipping local metadata for %s: apm.yml exceeds %d bytes",
+                    pkg.name,
+                    _LOCAL_METADATA_MAX_BYTES,
+                )
+                return None
+            data = yaml.safe_load(raw.decode("utf-8"))
             if not isinstance(data, dict):
                 return None
             result: dict[str, str] = {}

@@ -97,7 +97,7 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
                     entry_value=entry.description,
                     meta_value=meta.get("description"),
                     pkg_name=pkg.name,
-                    source_label="package",
+                    source_label="package apm.yml",
                 ):
                     override_count += 1
                 if _apply_field_with_precedence(
@@ -107,7 +107,7 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
                     entry_value=entry.version,
                     meta_value=meta.get("version"),
                     pkg_name=pkg.name,
-                    source_label="package",
+                    source_label="package apm.yml",
                 ):
                     override_count += 1
             else:
@@ -206,7 +206,10 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
         if plugin_root and strip_count > 0:
             summary_parts.append(f"stripped from {strip_count} local source(s)")
         if override_count > 0:
-            summary_parts.append(f"{override_count} entry(ies) used curator-supplied overrides")
+            field_label = "field override" if override_count == 1 else "field overrides"
+            summary_parts.append(
+                f"{override_count} curator-supplied {field_label} kept over package metadata"
+            )
         if summary_parts:
             diagnostics.append(
                 BuildDiagnostic(

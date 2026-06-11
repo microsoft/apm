@@ -1845,6 +1845,37 @@ class TestFetchLocalMetadata:
         result = builder._fetch_local_metadata(pkg)
         assert result is None
 
+    def test_project_root_skip_uses_normalized_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Project-root skip compares the same normalized path shape."""
+        (tmp_path / "apm.yml").write_text(
+            "name: root-tool\ndescription: Root description\n",
+            encoding="utf-8",
+        )
+        builder = self._make_builder(tmp_path)
+
+        class ExtendedProjectRoot:
+            def __truediv__(self, other: str) -> Path:
+                return tmp_path / other
+
+            def resolve(self) -> Path:
+                return Path(f"\\\\?\\{tmp_path.resolve()}")
+
+        def fake_ensure_path_within(_path: Any, _base_dir: Any) -> Path:
+            return tmp_path.resolve()
+
+        monkeypatch.setattr(
+            "apm_cli.marketplace.builder.ensure_path_within",
+            fake_ensure_path_within,
+        )
+        builder._project_root = ExtendedProjectRoot()  # type: ignore[assignment]
+
+        pkg = self._make_pkg(subdir="./")
+        result = builder._fetch_local_metadata(pkg)
+
+        assert result is None
+
     def test_malformed_yaml_returns_none(self, tmp_path: Path) -> None:
         """Bad YAML -> None, no exception propagates."""
         pkg_dir = tmp_path / "packages" / "local-tool"
