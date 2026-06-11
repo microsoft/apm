@@ -923,9 +923,11 @@ class DistributedAgentsCompiler:
         else:
             # Actually perform the cleanup
             cleanup_messages.append(f"Cleaning up {len(orphaned_files)} orphaned AGENTS.md files")
+            removed_count = 0
             for file_path in orphaned_files:
-                rel_path = portable_relpath(file_path, self.base_dir)
+                rel_path: str | None = None
                 try:
+                    rel_path = portable_relpath(file_path, self.base_dir)
                     # Defense-in-depth: re-check the marker before deleting.
                     # Read only a bounded prefix (same helper as _find_orphaned_agents_files).
                     if not self._file_has_apm_marker(file_path):
@@ -936,9 +938,15 @@ class DistributedAgentsCompiler:
                         _logger.debug("Skipped %s: hand-authored file -- not removing", rel_path)
                         continue
                     file_path.unlink()
+                    removed_count += 1
                     cleanup_messages.append(f"  + Removed {rel_path}")
                 except Exception as e:
-                    cleanup_messages.append(f"  x Failed to remove {rel_path}: {e!s}")
+                    # rel_path is None if portable_relpath itself raised; fall back to
+                    # the raw path so the error message is always informative.
+                    display = rel_path if rel_path is not None else str(file_path)
+                    cleanup_messages.append(f"  x Failed to remove {display}: {e!s}")
+            if removed_count == 0:
+                cleanup_messages.append("  0 files removed (all skipped)")
 
         return cleanup_messages
 

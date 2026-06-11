@@ -742,6 +742,21 @@ class TestCleanupOrphanedFiles:
             msgs: list[str] = compiler._cleanup_orphaned_files([f], dry_run=False)
         assert any("Failed to remove" in m for m in msgs)
 
+    def test_all_hand_authored_reports_zero_removed(self, tmp_path: Path) -> None:
+        """When every file in the list fails the marker re-check, reports '0 files removed'."""
+        compiler = _make_compiler_in_tmp(tmp_path)
+        f: Path = tmp_path / "hand" / "AGENTS.md"
+        f.parent.mkdir()
+        f.write_text("# hand-authored, no marker")
+        msgs: list[str] = compiler._cleanup_orphaned_files([f], dry_run=False)
+        assert f.exists(), "Hand-authored file must not be deleted"
+        assert any("0 files removed" in m for m in msgs), (
+            f"Must report '0 files removed' when all files are skipped.\nMessages: {msgs}"
+        )
+        assert not any("Removed" in m for m in msgs), (
+            f"Must not report any individual removals when nothing was removed.\nMessages: {msgs}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # _compile_distributed_stats

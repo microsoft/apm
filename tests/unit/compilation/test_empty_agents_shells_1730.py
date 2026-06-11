@@ -17,7 +17,6 @@ distributed_compiler.py or agents_compiler.py causes them to fail.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -40,9 +39,15 @@ def _make_instruction(
     content: str = "Follow these rules.",
     apply_to: str | None = None,
     file_path: Path | None = None,
+    tmp_path: Path | None = None,
 ) -> Instruction:
     if file_path is None:
-        file_path = Path(tempfile.gettempdir()) / f"{name}.instructions.md"
+        # Derive a tmp_path-scoped path so each test invocation gets a unique,
+        # isolated location -- no shared temp-dir collisions across xdist workers
+        # and no stale files between runs.
+        if tmp_path is None:
+            raise ValueError("Either file_path or tmp_path must be provided to _make_instruction")
+        file_path = tmp_path / f"{name}.instructions.md"
     return Instruction(
         name=name,
         file_path=file_path,
@@ -586,7 +591,7 @@ class TestIsPlacementEmptyShell:
         The presence of instructions in the model does not prevent suppression:
         skip_instructions=True means those instructions will be omitted from output.
         """
-        inst = _make_instruction("style", content="Use type hints.")
+        inst = _make_instruction("style", content="Use type hints.", tmp_path=tmp_path)
         placement = self._make_placement(tmp_path / "AGENTS.md", instructions=[inst])
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(
