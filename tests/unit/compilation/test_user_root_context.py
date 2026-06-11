@@ -591,6 +591,47 @@ class TestErrorOnWrite:
 
 
 # ---------------------------------------------------------------------------
+# test_symlink_escape
+# ---------------------------------------------------------------------------
+
+
+class TestSymlinkEscape:
+    """Symlinked output files that escape deploy root are rejected."""
+
+    def test_output_symlink_escape_returns_error(self, tmp_path):
+        """Root context symlink pointing outside deploy root is not followed."""
+        from apm_cli.compilation.user_root_context import compile_user_root_contexts
+
+        source_root = tmp_path / "source"
+        source_root.mkdir()
+        apm_modules = source_root / "apm_modules"
+        apm_modules.mkdir()
+
+        deploy_root = tmp_path / ".claude"
+        deploy_root.mkdir()
+        outside = tmp_path / "outside.md"
+        outside.write_text("outside content", encoding="utf-8")
+        (deploy_root / "CLAUDE.md").symlink_to(outside)
+
+        target = _make_target("claude", "claude", deploy_root=deploy_root)
+        instr = _make_instruction("global", apply_to=None, content="Use type hints")
+        primitives = MagicMock()
+        primitives.instructions = [instr]
+
+        with patch(
+            "apm_cli.primitives.discovery.discover_primitives",
+            return_value=primitives,
+        ):
+            result = compile_user_root_contexts([target], source_root)
+
+        assert len(result) == 1
+        assert result[0]["target"] == "claude"
+        assert result[0]["status"].startswith("error:")
+        assert "outside" in result[0]["status"]
+        assert outside.read_text(encoding="utf-8") == "outside content"
+
+
+# ---------------------------------------------------------------------------
 # test_logger_usage
 # ---------------------------------------------------------------------------
 

@@ -165,6 +165,7 @@ def compile_user_root_contexts(
         * ``"error:<msg>"``          -- OS error during read or write
     """
     from ..primitives.discovery import discover_primitives
+    from ..utils.path_security import PathTraversalError, ensure_path_within
     from .agents_compiler import _COPILOT_ROOT_GENERATED_MARKER
 
     log = logger or logging.getLogger(__name__)
@@ -213,7 +214,14 @@ def compile_user_root_contexts(
 
         deploy_root = _resolve_deploy_root(scoped)
         root_filename = _ROOT_FILENAME[family]
-        output_path = deploy_root / root_filename
+        try:
+            output_path = ensure_path_within(deploy_root / root_filename, deploy_root)
+        except PathTraversalError as exc:
+            log.warning("user_root_context: unsafe output path for %s: %s", scoped.name, exc)
+            results.append(
+                UserRootCompileResult(scoped.name, deploy_root / root_filename, f"error:{exc}")
+            )
+            continue
 
         content = _generate_content(global_instructions)
 
