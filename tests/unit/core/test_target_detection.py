@@ -81,6 +81,16 @@ class TestDetectTarget:
         assert target == "all"
         assert reason == "explicit --target flag"
 
+    def test_explicit_target_kiro_wins(self, tmp_path):
+        """Explicit --target kiro always wins."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target="kiro",
+        )
+
+        assert target == "kiro"
+        assert reason == "explicit --target flag"
+
     def test_config_target_copilot(self, tmp_path):
         """Config target copilot maps to vscode."""
         target, reason = detect_target(
@@ -165,6 +175,19 @@ class TestDetectTarget:
         assert target == "all"
         assert ".github/" in reason and ".claude/" in reason
 
+    def test_auto_detect_kiro_only(self, tmp_path):
+        """Auto-detect kiro when only .kiro/ exists."""
+        (tmp_path / ".kiro").mkdir()
+
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target=None,
+        )
+
+        assert target == "kiro"
+        assert "detected .kiro/ folder" in reason
+
     def test_auto_detect_neither_folder(self, tmp_path):
         """Auto-detect minimal when neither folder exists."""
         target, reason = detect_target(
@@ -199,6 +222,10 @@ class TestShouldCompileAgentsMd:
     def test_gemini_target(self):
         """AGENTS.md compiled for gemini target (GEMINI.md imports it)."""
         assert should_compile_agents_md("gemini") is True
+
+    def test_kiro_target(self):
+        """AGENTS.md compiled for kiro as a cross-harness fallback."""
+        assert should_compile_agents_md("kiro") is True
 
 
 class TestShouldCompileClaudeMd:
@@ -327,6 +354,14 @@ class TestGetTargetDescription:
         desc = get_target_description("opencode")
         assert "AGENTS.md" in desc
         assert ".opencode/" in desc
+
+    def test_kiro_description_includes_mcp_config_path(self):
+        """Description for kiro target names its MCP config path."""
+        desc = get_target_description("kiro")
+        assert ".kiro/steering/" in desc
+        assert ".kiro/skills/" in desc
+        assert ".kiro/hooks/" in desc
+        assert ".kiro/settings/mcp.json" in desc
 
 
 class TestDetectTargetCursor:

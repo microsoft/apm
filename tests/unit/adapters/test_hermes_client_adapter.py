@@ -122,15 +122,18 @@ class TestHermesConfigPath(unittest.TestCase):
 
     def test_default_config_path(self):
         adapter = HermesClientAdapter()
-        with patch.object(Path, "home", staticmethod(lambda: Path("/fake/home"))):
+        fake_home = Path("/fake/home")
+        with patch.object(Path, "home", staticmethod(lambda: fake_home)):
             path = Path(adapter.get_config_path())
-        self.assertEqual(path, Path("/fake/home/.hermes/config.yaml"))
+        expected = (fake_home / ".hermes" / "config.yaml").resolve(strict=False)
+        self.assertEqual(path, expected)
 
     def test_hermes_home_override(self):
         adapter = HermesClientAdapter()
         with patch.dict("os.environ", {"HERMES_HOME": "/custom/hermes"}):
             path = Path(adapter.get_config_path())
-        self.assertEqual(path, Path("/custom/hermes/config.yaml"))
+        expected = Path("/custom/hermes").expanduser().resolve(strict=False) / "config.yaml"
+        self.assertEqual(path, expected)
 
 
 class TestHermesUpdateConfig(unittest.TestCase):

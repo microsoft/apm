@@ -110,6 +110,26 @@ apm install myorg/internal-package       # resolves to github.company.com
 apm pack                                 # marketplace.json also resolves against github.company.com
 ```
 
+## GitLab (SaaS or self-managed)
+
+APM fetches `path:`-specified files from GitLab dependencies via git sparse/partial
+checkout (the same transport as the clone). Git transport is tried first, so SSH
+keys and git credential helpers work without any extra token, and self-hosted
+GitLab instances where the API returns 410 (disabled) no longer fail. Explicit
+`git:` / SSH URLs carry the host in the dependency; set `GITLAB_HOST` (or
+`APM_GITLAB_HOSTS`) only when bare-host or shorthand forms should classify as
+GitLab.
+
+If git transport is unavailable, `GITLAB_APM_PAT` is the fallback:
+
+```bash
+export GITLAB_APM_PAT=glpat_your_token
+apm install
+```
+
+`GITLAB_TOKEN` is accepted as a lower-precedence fallback. `git credential fill` is
+also tried (same as for GitHub) so credential-manager users need no env var at all.
+
 ## GHE Cloud data residency (*.ghe.com)
 
 ```bash

@@ -1225,12 +1225,23 @@ class TestDownloadGitlabFile:
         host._resilient_get.return_value = resp
         callback = MagicMock()
 
-        with patch(
-            "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
-            return_value={},
+        with (
+            patch(
+                "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
+                return_value={},
+            ),
+            patch(
+                "apm_cli.deps.download_strategies.GitSparseFileTransport",
+                return_value=MagicMock(
+                    fetch_file=MagicMock(side_effect=RuntimeError("git transport unavailable"))
+                ),
+            ),
         ):
             d.download_gitlab_file(self._dep(), "apm.yml", verbose_callback=callback)
-        callback.assert_called_once()
+        # The mocked git failure drives the REST fallback path without spawning
+        # subprocess/network work. Verbose output stays transport-agnostic.
+        assert callback.called
+        assert any("Downloaded file:" in str(c.args[0]) for c in callback.call_args_list)
 
 
 # ---------------------------------------------------------------------------

@@ -41,6 +41,7 @@ class InstructionIntegrator(BaseIntegrator):
         "cursor_rules": "_convert_to_cursor_rules",
         "claude_rules": "_convert_to_claude_rules",
         "windsurf_rules": "_convert_to_windsurf_rules",
+        "kiro_steering": "_convert_to_kiro_steering",
     }
 
     def find_instruction_files(self, package_path: Path) -> list[Path]:
@@ -262,6 +263,9 @@ class InstructionIntegrator(BaseIntegrator):
             elif mapping.format_id == "claude_rules":
                 # Do not use a broad legacy glob for Claude rules to avoid
                 # deleting user-authored .md files under .claude/rules/.
+                legacy_pattern = None
+            elif mapping.format_id == "kiro_steering":
+                # Do not delete user-authored steering markdown under .kiro/steering/.
                 legacy_pattern = None
             else:
                 legacy_pattern = "*.instructions.md"
@@ -608,6 +612,54 @@ class InstructionIntegrator(BaseIntegrator):
         content, links_resolved = self._render_instruction(source, target, "windsurf_rules")
         target.write_text(content, encoding="utf-8")
         return links_resolved
+
+    # ------------------------------------------------------------------
+    # Kiro Steering (.md with inclusion frontmatter)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _convert_to_kiro_steering(content: str) -> str:
+        """Convert APM instructions to Kiro steering format.
+
+        Kiro steering files use ``inclusion: always`` for unconditional
+        guidance and ``inclusion: fileMatch`` plus ``fileMatchPattern`` for
+        path-scoped guidance. APM's ``applyTo`` frontmatter is the source of
+        truth for that scoping.
+        """
+        import yaml
+
+        body = content
+        apply_to = ""
+
+        fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
+        if fm_match:
+            body = content[fm_match.end() :]
+            try:
+                fm = yaml.safe_load(fm_match.group(1)) or {}
+            except Exception:
+                fm = {}
+            raw_apply_to = fm.get("applyTo", "")
+            if isinstance(raw_apply_to, list):
+                apply_to = ",".join(str(item) for item in raw_apply_to)
+            else:
+                apply_to = str(raw_apply_to).strip()
+
+        safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
+        globs = parse_apply_to(safe_apply_to)
+
+        parts = ["---"]
+        if globs:
+            parts.append("inclusion: fileMatch")
+            if len(globs) == 1:
+                parts.append(f"fileMatchPattern: {yaml_double_quote(globs[0])}")
+            else:
+                parts.append("fileMatchPattern:")
+                parts.extend(f"  - {yaml_double_quote(g)}" for g in globs)
+        else:
+            parts.append("inclusion: always")
+        parts.append("---")
+
+        return "\n".join(parts) + "\n\n" + body.lstrip("\n")
 
     # ------------------------------------------------------------------
     # Claude Code Rules (.md with paths: frontmatter)

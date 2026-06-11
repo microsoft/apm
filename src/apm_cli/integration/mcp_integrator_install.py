@@ -203,7 +203,7 @@ def _hermes_runtime_opted_in() -> bool:
         return False
 
 
-def _discover_installed_runtimes(project_root_path) -> list[str]:
+def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list[str]:
     """Detect which MCP-capable runtimes are installed on the host.
 
     Each runtime is opt-in via a binary-on-PATH and/or directory-presence
@@ -213,12 +213,13 @@ def _discover_installed_runtimes(project_root_path) -> list[str]:
     """
     from apm_cli.integration.mcp_integrator import _is_vscode_available
 
-    # directory-signal opt-in runtimes: name -> required project dir.
-    _dir_signal = {
+    # Directory-signal opt-in runtimes: name -> required project dir.
+    dir_signal = {
         "cursor": ".cursor",
         "opencode": ".opencode",
         "gemini": ".gemini",
         "windsurf": ".windsurf",
+        "kiro": ".kiro",
     }
     try:
         from apm_cli.factory import ClientFactory
@@ -235,28 +236,41 @@ def _discover_installed_runtimes(project_root_path) -> list[str]:
             "opencode",
             "gemini",
             "windsurf",
+            "kiro",
             "claude",
             "intellij",
             "hermes",
         ]:
             try:
-                if not _runtime_is_present(runtime_name, project_root_path, manager, _dir_signal):
+                if not _runtime_is_present(
+                    runtime_name, project_root_path, manager, dir_signal, user_scope=user_scope
+                ):
                     continue
-                ClientFactory.create_client(runtime_name)
+                ClientFactory.create_client(
+                    runtime_name,
+                    project_root=project_root_path,
+                    user_scope=user_scope,
+                )
                 installed_runtimes.append(runtime_name)
             except (ValueError, ImportError):
                 continue
         return installed_runtimes
     except ImportError:
-        return _discover_installed_runtimes_fallback(project_root_path, _is_vscode_available)
+        return _discover_installed_runtimes_fallback(
+            project_root_path, _is_vscode_available, user_scope=user_scope
+        )
 
 
-def _runtime_is_present(runtime_name, project_root_path, manager, dir_signal) -> bool:
+def _runtime_is_present(
+    runtime_name, project_root_path, manager, dir_signal, *, user_scope: bool
+) -> bool:
     """Return ``True`` when *runtime_name*'s opt-in presence signal fires."""
     from apm_cli.integration.mcp_integrator import _is_vscode_available
 
     if runtime_name == "vscode":
         return _is_vscode_available(project_root=project_root_path)
+    if runtime_name == "kiro" and user_scope:
+        return True
     if runtime_name in dir_signal:
         return (project_root_path / dir_signal[runtime_name]).is_dir()
     if runtime_name == "claude":
@@ -274,7 +288,9 @@ def _runtime_is_present(runtime_name, project_root_path, manager, dir_signal) ->
     return manager.is_runtime_available(runtime_name)
 
 
-def _discover_installed_runtimes_fallback(project_root_path, _is_vscode_available) -> list[str]:
+def _discover_installed_runtimes_fallback(
+    project_root_path, _is_vscode_available, *, user_scope: bool
+) -> list[str]:
     """Binary/directory-only runtime probe used when adapters fail to import."""
     installed_runtimes = [rt for rt in ["copilot", "codex"] if find_runtime_binary(rt) is not None]
     if _is_vscode_available(project_root=project_root_path):
@@ -284,8 +300,9 @@ def _discover_installed_runtimes_fallback(project_root_path, _is_vscode_availabl
         ("opencode", ".opencode"),
         ("gemini", ".gemini"),
         ("windsurf", ".windsurf"),
+        ("kiro", ".kiro"),
     ):
-        if (project_root_path / signal).is_dir():
+        if (name == "kiro" and user_scope) or (project_root_path / signal).is_dir():
             installed_runtimes.append(name)
     # Claude Code: directory-presence OR binary-on-PATH
     if (project_root_path / ".claude").is_dir() or find_runtime_binary("claude") is not None:
@@ -344,7 +361,7 @@ def _resolve_target_runtimes(
                 apm_config = None
 
         # Step 1: Get all installed runtimes on the system
-        installed_runtimes = _discover_installed_runtimes(project_root_path)
+        installed_runtimes = _discover_installed_runtimes(project_root_path, user_scope=user_scope)
 
         # Step 2: Get runtimes referenced in apm.yml scripts
         script_runtimes = MCPIntegrator._detect_runtimes(
@@ -452,7 +469,7 @@ def _resolve_target_runtimes(
             logger.warning(msg)
         if not target_runtimes:
             logger.warning(
-                "No runtimes support user-scope MCP installation (supported: copilot, codex, gemini)"
+                "No runtimes support user-scope MCP installation (supported: Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Kiro, Windsurf, JetBrains Copilot)"
             )
             return None
 

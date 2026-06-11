@@ -252,7 +252,7 @@ Source: `src/apm_cli/models/apm_package.py`,
 
 The `targets:` field in `apm.yml` (or legacy `target:`). Names which harnesses the package
 compiles for (`copilot`, `claude`, `cursor`, `codex`, `gemini`,
-`opencode`, `windsurf`, or `all`). Drives which integrator runs and
+`opencode`, `windsurf`, `kiro`, or `all`). Drives which integrator runs and
 which directories receive output during `apm compile`.
 
 NOT the harness itself. Target is the declaration; the harness is the
