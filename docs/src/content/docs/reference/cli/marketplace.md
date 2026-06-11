@@ -61,11 +61,16 @@ Register a marketplace from a source reference. Accepted forms:
 - `OWNER/REPO` -- GitHub shorthand (`acme/marketplace`).
 - `HOST/OWNER/.../REPO` -- non-GitHub host shorthand
   (`gitlab.com/team/marketplace`).
-- HTTPS URL -- any git host, including Azure DevOps, GitLab,
-  Gitea, Bitbucket Server, or a self-hosted git server.
+- HTTPS git URL -- any git host, including Azure DevOps, GitLab,
+  Gitea, Bitbucket Server, or a self-hosted git server. Add `#ref`
+  to pin the marketplace, for example
+  `https://gitlab.com/acme/marketplace.git#v1.0.0`.
+- Hosted `marketplace.json` URL --
+  `https://catalog.example.com/marketplace.json`.
 - SSH URL -- `git@host:org/repo.git` style.
 - Local filesystem path -- absolute (`/srv/marketplaces/agent-forge`),
-  relative (`./local-mkt`), or home-based (`~/code/marketplace`).
+  relative (`./local-mkt`), home-based (`~/code/marketplace`), or a
+  direct `marketplace.json` file.
 - `file://` URI -- `file:///srv/marketplaces/agent-forge.git`.
 
 ```bash
@@ -79,14 +84,18 @@ apm marketplace add gitlab.com/my-org/awesome-agents --host gitlab.com
 apm marketplace add https://dev.azure.com/contoso/eng/_git/agent-forge \
     --name agent-forge
 
-# Gitea / Bitbucket Server / self-hosted git
-apm marketplace add https://gitea.example.com/org/repo.git --name custom
+# Gitea / Bitbucket Server / self-hosted git, pinned with #ref
+apm marketplace add https://gitea.example.com/org/repo.git#v1.0.0 --name custom
+
+# Hosted marketplace.json URL
+apm marketplace add https://catalog.example.com/marketplace.json --name catalog
 
 # SSH
 apm marketplace add git@gitea.example.com:org/repo.git --name custom
 
-# Local filesystem (bare repo or working directory)
+# Local filesystem (bare repo, working directory, or marketplace.json file)
 apm marketplace add /srv/marketplaces/agent-forge.git --name agent-forge
+apm marketplace add ./vendor/marketplace.json --name vendor
 
 # file:// URI
 apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
@@ -95,19 +104,22 @@ apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
 | Flag | Description |
 |---|---|
 | `--name`, `-n` | Display name. Defaults to the repo name. |
-| `--ref`, `-r` | Git ref (branch, tag, or SHA). Default: `main`. |
+| `--ref`, `-r` | Git ref (branch, tag, or SHA). Default: `main`. Applies only to git-backed sources. For HTTPS git URLs, a `#ref` fragment is equivalent and is stored as the ref. |
 | `--branch`, `-b` | Deprecated alias for `--ref`. |
-| `--host` | Git host FQDN. Default: `github.com`. Ignored when `SOURCE` is a URL or local path. |
+| `--host` | Git host FQDN for `OWNER/REPO` shorthand. Default: `github.com`. Ignored when `SOURCE` already carries a host (URL, hosted `marketplace.json`, or local path); a warning is shown for hosted JSON, local paths, or a conflicting embedded host. |
 | `--verbose`, `-v` | Show detailed output. |
 
 **Trust boundary.** APM forwards its authentication tokens
 (`GITHUB_APM_PAT`, `GITLAB_APM_PAT`) only when the marketplace
-host is classified as GitHub or GitLab family. For any other host
--- generic HTTPS, SSH, Azure DevOps, self-hosted -- the
+host is classified as GitHub or GitLab family. For any other git
+host -- generic HTTPS, SSH, Azure DevOps, self-hosted -- the
 marketplace is fetched via subprocess `git` through `GitCache`,
-and authentication falls through to the host's APM PAT (e.g.
-`ADO_APM_PAT` for Azure DevOps) or your local
-`git credential-manager`. See
+and authentication falls through to the host's local git credential
+helper and matching `*_APM_PAT` variables such as `ADO_APM_PAT`.
+Hosted `marketplace.json` URLs are public HTTPS only: APM sends no auth
+headers. Use a git-backed marketplace for private catalogs. When packages
+are installed from a hosted JSON URL, the lockfile records the source URL and
+fetched content digest. See
 [`getting-started/authentication`](../../../getting-started/authentication/).
 
 **Azure DevOps.** ADO-hosted marketplaces fetch `marketplace.json`

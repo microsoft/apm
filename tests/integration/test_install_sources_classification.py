@@ -626,3 +626,34 @@ class TestLocalInstallSymlinkDerefThroughPipeline:
 
         # The hard-fail must leave no partial staged content behind.
         assert not install_path.exists()
+
+
+class TestGitLabHostTypeInstallRoundTrip:
+    def test_manifest_host_type_selects_gitlab_backend_and_lockfile_entry(self):
+        from urllib.parse import urlparse
+
+        from apm_cli.core.auth import AuthResolver
+        from apm_cli.deps.host_backends import GitLabBackend, backend_for
+        from apm_cli.deps.lockfile import LockedDependency
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep_ref = DependencyReference.parse_from_dict(
+            {"git": "https://code.acme.com/group/sub/repo.git", "type": "gitlab"}
+        )
+
+        host_info = AuthResolver.classify_host(
+            dep_ref.host,
+            port=dep_ref.port,
+            host_type=dep_ref.host_type,
+        )
+        backend = backend_for(dep_ref, AuthResolver())
+        locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None)
+        restored = LockedDependency.from_dict(locked.to_dict()).to_dependency_ref()
+
+        assert host_info.kind == "gitlab"
+        parsed_api_base = urlparse(host_info.api_base)
+        assert parsed_api_base.hostname == "code.acme.com"
+        assert parsed_api_base.path == "/api/v4"
+        assert isinstance(backend, GitLabBackend)
+        assert locked.host_type == "gitlab"
+        assert restored.host_type == "gitlab"

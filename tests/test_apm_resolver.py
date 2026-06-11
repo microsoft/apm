@@ -1,7 +1,7 @@
 """Comprehensive tests for APM dependency resolver."""
 
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
@@ -609,6 +609,146 @@ class TestRemoteParentLocalPathFailClosed(unittest.TestCase):
                 local_dep.get_unique_key(),
                 resolver._rejected_remote_local_keys,
             )
+
+    def test_remote_parent_same_repo_sibling_path_expands_to_remote_virtual_dep(self):
+        with TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir) / "consumer"
+            modules_dir = project_root / "apm_modules"
+            project_root.mkdir()
+            (project_root / "apm.yml").write_text(
+                """
+name: consumer
+version: 1.0.0
+dependencies:
+  apm:
+    - git: microsoft/mono
+      path: packages/frontend
+      ref: feature
+""".lstrip()
+            )
+            callback_refs = []
+
+            def download_callback(dep_ref, apm_modules_dir, parent_chain="", parent_pkg=None):
+                callback_refs.append(dep_ref)
+                install_path = dep_ref.get_install_path(apm_modules_dir)
+                install_path.mkdir(parents=True, exist_ok=True)
+                if dep_ref.virtual_path == "packages/frontend":
+                    (install_path / "apm.yml").write_text(
+                        """
+name: frontend
+version: 1.0.0
+dependencies:
+  apm:
+    - path: ../shared
+""".lstrip()
+                    )
+                elif dep_ref.virtual_path == "packages/shared":
+                    (install_path / "apm.yml").write_text(
+                        """
+name: shared
+version: 1.0.0
+""".lstrip()
+                    )
+                else:
+                    raise AssertionError(f"unexpected virtual path: {dep_ref.virtual_path}")
+                return install_path
+
+            resolver = APMDependencyResolver(
+                apm_modules_dir=modules_dir,
+                download_callback=download_callback,
+                max_parallel=1,
+            )
+
+            graph = resolver.resolve_dependencies(project_root)
+
+            shared = graph.dependency_tree.get_node("microsoft/mono/packages/shared#feature")
+            self.assertIsNotNone(shared)
+            self.assertEqual(shared.dependency_ref.repo_url, "microsoft/mono")
+            self.assertEqual(shared.dependency_ref.virtual_path, "packages/shared")
+            self.assertFalse(Path(shared.dependency_ref.virtual_path).is_absolute())
+            self.assertFalse(PureWindowsPath(shared.dependency_ref.virtual_path).is_absolute())
+            self.assertEqual(shared.dependency_ref.reference, "feature")
+            self.assertFalse(shared.dependency_ref.is_local)
+            self.assertEqual(resolver._rejected_remote_local_keys, set())
+            self.assertTrue(
+                any(
+                    ref.virtual_path == "packages/shared" and not ref.is_local
+                    for ref in callback_refs
+                )
+            )
+
+    def test_remote_parent_path_escape_outside_repo_root_is_rejected(self):
+        self._assert_remote_local_path_rejected(
+            parent_path="packages/frontend",
+            child_path="../../../outside",
+            rejected_key="../../../outside",
+        )
+
+    def test_remote_parent_path_to_different_repo_clone_is_rejected(self):
+        self._assert_remote_local_path_rejected(
+            parent_path=None,
+            child_path="../repo-b/shared",
+            rejected_key="../repo-b/shared",
+        )
+
+    def _assert_remote_local_path_rejected(
+        self, *, parent_path: str | None, child_path: str, rejected_key: str
+    ):
+        with TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir) / "consumer"
+            modules_dir = project_root / "apm_modules"
+            project_root.mkdir()
+            if parent_path is None:
+                dep_block = "    - microsoft/repo-a\n"
+                parent_virtual_path = None
+            else:
+                dep_block = (
+                    f"    - git: microsoft/repo-a\n      path: {parent_path}\n      ref: main\n"
+                )
+                parent_virtual_path = parent_path
+            (project_root / "apm.yml").write_text(
+                f"""
+name: consumer
+version: 1.0.0
+dependencies:
+  apm:
+{dep_block}""".lstrip()
+            )
+            callback_refs = []
+
+            def download_callback(dep_ref, apm_modules_dir, parent_chain="", parent_pkg=None):
+                callback_refs.append(dep_ref)
+                install_path = dep_ref.get_install_path(apm_modules_dir)
+                install_path.mkdir(parents=True, exist_ok=True)
+                (install_path / "apm.yml").write_text(
+                    f"""
+name: parent
+version: 1.0.0
+dependencies:
+  apm:
+    - path: {child_path}
+""".lstrip()
+                )
+                return install_path
+
+            resolver = APMDependencyResolver(
+                apm_modules_dir=modules_dir,
+                download_callback=download_callback,
+                max_parallel=1,
+            )
+
+            graph = resolver.resolve_dependencies(project_root)
+
+            self.assertIn(rejected_key, resolver._rejected_remote_local_keys)
+            self.assertIsNone(graph.dependency_tree.get_node(rejected_key))
+            self.assertFalse(
+                any(
+                    ref is not callback_refs[0] and ref.repo_url == "microsoft/repo-a"
+                    for ref in callback_refs
+                )
+            )
+            if parent_virtual_path is not None:
+                self.assertEqual(callback_refs[0].virtual_path, parent_virtual_path)
 
 
 class TestMarketplaceResolution(unittest.TestCase):

@@ -53,6 +53,7 @@ def _make_dep(
 ) -> MagicMock:
     dep = MagicMock()
     dep.get_unique_key.return_value = key
+    dep.get_canonical_dependency_string.return_value = key
     dep.version = version
     dep.resolved_commit = resolved_commit
     dep.resolved_ref = resolved_ref
@@ -345,6 +346,7 @@ class TestResolveScopeDepsAdditional:
 
         insecure_dep = MagicMock()
         insecure_dep.get_unique_key.return_value = "owner/repo"
+        insecure_dep.get_canonical_dependency_string.return_value = "owner/repo"
         insecure_dep.host = None
         insecure_dep.source = "github"
         insecure_dep.is_insecure = True
