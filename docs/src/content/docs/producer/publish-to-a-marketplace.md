@@ -102,11 +102,11 @@ marketplace:
   packages:
     - name: example-package
       description: Human-readable description consumers see
-      source: example-package
+      source: example-package           # -> .../agent-marketplace/example-package
       version: "^1.0.0"
 
     - name: pinned-package
-      source: acme-org/pinned-package
+      source: acme-org/pinned-package   # -> .../agent-marketplace/acme-org/pinned-package
       ref: 3f2a9b1c
 
     - name: local-tool
@@ -120,12 +120,33 @@ compiled `marketplace.json` -- that rename is the only structural
 transform `apm pack` performs. Strict schema: unknown keys raise an
 error, never silently ignored.
 
-Use `sourceBase` when every package lives under the same enterprise git
-base, such as a GitLab group with nested subgroups. Relative package
-sources compose onto the base. Host-prefixed sources like
-`github.com/acme/tool`, full HTTPS URLs, and local `./` paths remain
-per-entry overrides. If `sourceBase` is absent, existing `owner/repo`
-source behavior is unchanged.
+Use `sourceBase` when packages live under the same enterprise git base,
+such as a GitLab group with nested subgroups. Any relative source composes
+onto the base, including two-segment values like `acme-org/pinned-package`.
+Host-prefixed sources like `github.com/acme/tool`, full HTTPS URLs, and
+local `./` paths remain per-entry overrides. If `sourceBase` is absent,
+existing `owner/repo` source behavior is unchanged.
+
+Before:
+
+```yaml
+packages:
+  - name: review
+    source: https://gitlab.corp.example.com/platform/agent-marketplace/review
+  - name: pinned
+    source: https://gitlab.corp.example.com/platform/agent-marketplace/acme-org/pinned-package
+```
+
+After:
+
+```yaml
+sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace
+packages:
+  - name: review
+    source: review
+  - name: pinned
+    source: acme-org/pinned-package
+```
 
 Add and edit packages without leaving the shell:
 

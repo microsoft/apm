@@ -59,6 +59,10 @@ __all__ = [
     "load_marketplace_from_apm_yml",
     "load_marketplace_from_legacy_yml",
     "load_marketplace_yml",
+    "parse_source_base",
+    "split_host_from_source",
+    "split_source_base",
+    "validate_source_value",
 ]
 
 # ---------------------------------------------------------------------------
@@ -460,7 +464,7 @@ def _source_error(ctx: str, source: str, *, source_base: str | None) -> Marketpl
     return MarketplaceYmlError(f"'{ctx}' must be one of {', '.join(forms)}, got '{source}'")
 
 
-def _validate_source_value(
+def validate_source_value(
     source: str,
     *,
     context: str,
@@ -496,27 +500,26 @@ def _validate_source_value(
 
 def _validate_source(source: str, *, index: int, source_base: str | None = None) -> None:
     """Validate ``source`` field shape and path safety."""
-    _validate_source_value(
+    validate_source_value(
         source,
         context=f"packages[{index}].source",
         source_base=source_base,
     )
 
 
-def _parse_source_base(raw: Any) -> str | None:
+def parse_source_base(raw: Any) -> str | None:
     """Parse and validate marketplace-level ``sourceBase``."""
     if raw is None:
         return None
     if not isinstance(raw, str) or not raw.strip():
         raise MarketplaceYmlError("'sourceBase' must be a non-empty string")
 
-    source_base = raw.strip()
-    if source_base.endswith("/"):
-        source_base = source_base[:-1]
-    if not source_base.startswith("https://"):
+    raw_source_base = raw.strip()
+    if not raw_source_base.startswith("https://"):
         raise MarketplaceYmlError("'sourceBase' must start with https://")
 
-    parsed = _urlparse.urlparse(source_base)
+    parsed = _urlparse.urlparse(raw_source_base)
+    source_base = raw_source_base.rstrip("/")
     if parsed.username or parsed.password or "@" in parsed.netloc:
         raise MarketplaceYmlError("'sourceBase' must not include userinfo")
     if ":" in parsed.netloc:
@@ -531,6 +534,8 @@ def _parse_source_base(raw: Any) -> str | None:
         raise MarketplaceYmlError("'sourceBase' must not end with .git")
 
     path = parsed.path.lstrip("/")
+    if path.endswith("/"):
+        path = path[:-1]
     if not path:
         raise MarketplaceYmlError("'sourceBase' must include at least one path segment")
     try:
@@ -1212,7 +1217,7 @@ def _build_config(
             raise MarketplaceYmlError(str(exc)) from exc
 
     # -- marketplace source base --
-    source_base = _parse_source_base(marketplace_dict.get("sourceBase"))
+    source_base = parse_source_base(marketplace_dict.get("sourceBase"))
 
     # -- build --
     build = _parse_build(marketplace_dict.get("build"))

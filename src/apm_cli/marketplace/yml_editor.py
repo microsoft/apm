@@ -22,10 +22,10 @@ from ..utils.path_security import PathTraversalError, validate_path_segments
 from ._io import atomic_write
 from .errors import MarketplaceYmlError
 from .yml_schema import (
-    _parse_source_base,
-    _validate_source_value,
     load_marketplace_from_apm_yml,
     load_marketplace_yml,
+    parse_source_base,
+    validate_source_value,
 )
 
 __all__ = [
@@ -132,7 +132,7 @@ def _find_entry_index(packages, name: str) -> int:
 
 def _validate_source(source: str, *, source_base: str | None = None) -> None:
     """Validate that *source* has one of the accepted shapes."""
-    _validate_source_value(source, context="source", source_base=source_base)
+    validate_source_value(source, context="source", source_base=source_base)
 
 
 def _default_name_from_source(source: str) -> str:
@@ -175,7 +175,7 @@ def add_plugin_entry(
     # --- load ---
     data, original_text = _load_rt(yml_path)
     container = _get_marketplace_container(data)
-    source_base = _parse_source_base(container.get("sourceBase"))
+    source_base = parse_source_base(container.get("sourceBase"))
 
     # --- input validation ---
     _validate_source(source, source_base=source_base)

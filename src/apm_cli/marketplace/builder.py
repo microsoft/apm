@@ -321,6 +321,8 @@ class MarketplaceBuilder:
         # against future refactors that allow worker-side cache misses.
         self._host_resolvers: dict[str, RefResolver] = {}
         self._host_resolvers_lock = threading.Lock()
+        self._source_base_parts: tuple[str, str, str] | None = None
+        self._source_base_parts_loaded = False
 
     @classmethod
     def from_config(
@@ -362,6 +364,16 @@ class MarketplaceBuilder:
             else:
                 self._yml = load_marketplace_yml(self._yml_path)
         return self._yml
+
+    def _get_source_base_parts(self) -> tuple[str, str, str] | None:
+        """Return cached ``(host, path_prefix, source_base)`` coordinates."""
+        if not self._source_base_parts_loaded:
+            yml = self._load_yml()
+            if yml.source_base:
+                base_host, base_path = split_source_base(yml.source_base)
+                self._source_base_parts = (base_host, base_path, yml.source_base)
+            self._source_base_parts_loaded = True
+        return self._source_base_parts
 
     def _get_resolver(self) -> RefResolver:
         if self._resolver is None:
@@ -511,11 +523,11 @@ class MarketplaceBuilder:
         """Return ``(host, repo_path, source_url)`` for a remote package entry."""
         if entry.host:
             return entry.host, entry.source, None
-        yml = self._load_yml()
-        if yml.source_base:
-            base_host, base_path = split_source_base(yml.source_base)
+        source_base_parts = self._get_source_base_parts()
+        if source_base_parts is not None:
+            base_host, base_path, source_base = source_base_parts
             repo_path = f"{base_path}/{entry.source}"
-            return base_host, repo_path, f"{yml.source_base}/{entry.source}"
+            return base_host, repo_path, f"{source_base}/{entry.source}"
         return None, entry.source, None
 
     def _resolved_output_host(

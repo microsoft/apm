@@ -379,11 +379,16 @@ marketplace:
     - name: review
       source: review
       ref: v1.0.0
+    - name: pinned
+      source: team/pinned
+      ref: main
 ```
 
-Relative `packages[].source` values compose onto the base. Host-prefixed
-sources, full HTTPS URLs, and local `./` paths remain per-entry overrides.
-Without `sourceBase`, existing `owner/repo` source behavior is unchanged.
+Relative `packages[].source` values compose onto the base, including
+`owner/repo` shapes like `team/pinned`. Host-prefixed sources, full HTTPS
+URLs, and local `./` paths remain per-entry overrides. Without `sourceBase`,
+existing `owner/repo` source behavior is unchanged. The manifest schema
+Section 7.5 is canonical for the full validation and override rules.
 
 ## Step-by-step: create and publish
 

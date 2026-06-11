@@ -17,9 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of `~/.hermes/config.yaml` (written atomically with `0o600` perms, preserving
   unrelated config keys and refusing to overwrite a malformed file). `HERMES_HOME`
   overrides the Hermes home directory. See the [Hermes integration guide](https://microsoft.github.io/apm/integrations/hermes/).
-- Marketplace authors can set `sourceBase` so package sources resolve relative
-  to enterprise git base paths, while host-prefixed, full-URL, and local entries
-  remain per-entry overrides. (#1736)
+- Enterprise marketplace authors can stop repeating shared git base paths by
+  setting `sourceBase`, while host-prefixed, full-URL, and local entries remain
+  per-entry overrides. (#1736)
 - `apm marketplace add` now accepts git URLs with `#ref`, local file paths,
   and hosted `marketplace.json` URLs -- so teams can consume private,
   offline, or hosted catalogs without publishing a GitHub repo (closes

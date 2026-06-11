@@ -814,7 +814,7 @@ Remote packages MUST declare at least one of `version` or `ref`. Local packages 
 
 The first three `source` forms target a remote git host; the second and third name a non-default host (e.g. GitHub Enterprise, self-hosted GitLab) as either a shorthand or a full HTTPS URL with an optional `.git` suffix that is normalized away. Path traversal (`..`) in local paths, userinfo (`user@host`), ports, query strings, and non-`https` URL schemes are rejected at parse time.
 
-When `sourceBase` is set, relative package sources compose onto that base. For example, `sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace` plus `source: review` emits `https://gitlab.corp.example.com/platform/agent-marketplace/review`. Host-prefixed and full URL sources are overrides and ignore `sourceBase`; local `./` sources also ignore it. Without `sourceBase`, existing `owner/repo` behavior is unchanged and single-segment relative sources are rejected.
+When `sourceBase` is set, relative package sources compose onto that base. For example, `sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace` plus `source: review` emits `https://gitlab.corp.example.com/platform/agent-marketplace/review`. This includes two-segment `owner/repo` values and deeper relative paths; only host-prefixed sources, full HTTPS URLs, and local `./` sources are overrides that ignore `sourceBase`. Without `sourceBase`, existing `owner/repo` behavior is unchanged and single-segment relative sources are rejected.
 
 A relative `source` may use arbitrary path depth. A value whose leading segments form a host-prefixed shape (`<host.tld>/<owner>/<repo>`) or a full `https://` URL is always treated as a per-entry override and ignores `sourceBase`. A value that looks like it is trying to name a host (a dotted, FQDN-like first segment) but does **not** form a valid override shape is rejected at parse time rather than silently composed onto the base -- this avoids a confused-deputy footgun. To target a different host, use an explicit host-prefixed override or a full `https://` URL instead of a relative source.
 
@@ -850,7 +850,7 @@ marketplace:
       tags: [review, quality]
 
     - name: pinned-helper
-      source: contoso/pinned-helper
+      source: contoso/pinned-helper          # also resolves under sourceBase
       ref: main                              # explicit ref overrides version
       tag_pattern: "pinned-helper-v{version}"
 
@@ -972,3 +972,4 @@ marketplace:
 | 0.1 | 2026-03-06 | Initial Working Draft. |
 | 0.2 | 2026-05-10 | Added Section 7 (Marketplace authoring block). Documented `scripts.start` as the default `apm run` entry point. Cross-links updated to reference CLI paths. ASCII-only enforcement. |
 | 0.3 | 2026-05-20 | Added Section 4.3 (`dependencies.lsp`). LSP servers as a third dependency kind. Updated document structure, devDependencies known keys, and Appendix A. |
+| 0.4 | 2026-06-11 | Added `marketplace.sourceBase` and Section 7.5 source composition semantics. |
