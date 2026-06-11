@@ -67,7 +67,7 @@ _SECRET_RE = re.compile(
     r"|"
     r"://[^:@/\s]+:[^:@/\s]+@"  # URL user:pass@
     r"|"
-    r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[psou]_[A-Za-z0-9_]{20,})\b"  # bare PAT
+    r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[psour]_[A-Za-z0-9_]{20,})\b"  # bare PAT
     r")",
     re.IGNORECASE,
 )
@@ -287,7 +287,7 @@ class AuthResolver:
             )
         if host_type_value:
             raise ValueError(
-                f"Unsupported dependency host type: {host_type}. Supported values: gitlab"
+                f"Unsupported dependency host type: {host_type_value}. Supported values: gitlab"
             )
 
         # GHES: GITHUB_HOST is set to a non-github.com, non-ghe.com FQDN

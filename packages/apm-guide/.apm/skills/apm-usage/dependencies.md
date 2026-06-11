@@ -463,8 +463,6 @@ enterprise security guide for the threat model.
 of the ref format in apm.yml. Running `apm install` without `--update` always
 uses the locked SHA, ensuring reproducible installs across machines.
 
-Lockfile keys keep `github.com` implicit for migration stability: existing
-GitHub entries stay keyed as `owner/repo`. Non-default hosts add the lowercased
-host segment, for example `gitea.myorg.com/owner/repo`, so same-name
-repositories on different hosts no longer collide and host casing cannot create
-duplicate keys.
+Lockfile keys keep `github.com` implicit for migration stability while
+non-default hosts add the lowercased host segment. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys)
+for the full keying rules.
