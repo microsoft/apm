@@ -653,7 +653,7 @@ class AgentsCompiler:
             return StaleClaudeDetection(root_claude_md, rel, False, False, None)
         try:
             content = root_claude_md.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             return StaleClaudeDetection(
                 root_claude_md, rel, True, False, f"Could not read {rel}: {exc!s}"
             )
@@ -905,6 +905,7 @@ class AgentsCompiler:
                 if det.exists:
                     if det.read_error is not None:
                         all_warnings.append(det.read_error)
+                        self._log("warning", det.read_error)
                     elif det.has_marker:
                         try:
                             det.path.unlink()  # safe: APM-generated marker confirmed above

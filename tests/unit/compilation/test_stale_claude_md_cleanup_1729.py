@@ -44,6 +44,25 @@ def _reset_constitution_cache():
 # ---------------------------------------------------------------------------
 
 
+class _CapturingLogger:
+    """Minimal logger stub that records (level, message) pairs for assertions."""
+
+    def __init__(self):
+        self.logged: list[tuple[str, str]] = []
+
+    def progress(self, msg, **kw):
+        self.logged.append(("progress", msg))
+
+    def success(self, msg, **kw):
+        self.logged.append(("success", msg))
+
+    def warning(self, msg, **kw):
+        self.logged.append(("warning", msg))
+
+    def verbose_detail(self, msg, **kw):
+        pass
+
+
 def _make_project(tmp_path, *, populate_rules: bool = True):
     """Create a minimal project with an instruction primitive.
 
@@ -131,23 +150,9 @@ class TestCleanRemovesApmGeneratedStaleCLAUDEMD:
         _make_project(tmp_path, populate_rules=True)
         _apm_generated_claude_md(tmp_path)
 
-        logged: list[tuple[str, str]] = []
-
-        class _CapturingLogger:
-            def progress(self, msg, **kw):
-                logged.append(("progress", msg))
-
-            def success(self, msg, **kw):
-                logged.append(("success", msg))
-
-            def warning(self, msg, **kw):
-                logged.append(("warning", msg))
-
-            def verbose_detail(self, msg, **kw):
-                pass
-
+        logger = _CapturingLogger()
         compiler = AgentsCompiler(str(tmp_path))
-        compiler._logger = _CapturingLogger()
+        compiler._logger = logger
         config = CompilationConfig(
             target="claude",
             clean_orphaned=True,
@@ -158,9 +163,9 @@ class TestCleanRemovesApmGeneratedStaleCLAUDEMD:
 
         # Must be logged at "success" level (green) -- a destructive file deletion
         # must render visibly distinct from an info/progress no-op (issue #1729 fix).
-        success_messages = [m for level, m in logged if level == "success"]
+        success_messages = [m for level, m in logger.logged if level == "success"]
         assert any("Removed stale" in m and "CLAUDE.md" in m for m in success_messages), (
-            f"Expected a 'Removed stale CLAUDE.md' log line at 'success' level, got: {logged}"
+            f"Expected a 'Removed stale CLAUDE.md' log line at 'success' level, got: {logger.logged}"
         )
 
 
@@ -480,23 +485,9 @@ class TestDryRunCleanBehavior:
         _make_project(tmp_path, populate_rules=True)
         _apm_generated_claude_md(tmp_path)
 
-        logged: list[tuple[str, str]] = []
-
-        class _CapturingLogger:
-            def progress(self, msg, **kw):
-                logged.append(("progress", msg))
-
-            def success(self, msg, **kw):
-                logged.append(("success", msg))
-
-            def warning(self, msg, **kw):
-                logged.append(("warning", msg))
-
-            def verbose_detail(self, msg, **kw):
-                pass
-
+        logger = _CapturingLogger()
         compiler = AgentsCompiler(str(tmp_path))
-        compiler._logger = _CapturingLogger()
+        compiler._logger = logger
         config = CompilationConfig(
             target="claude",
             clean_orphaned=True,
@@ -505,12 +496,12 @@ class TestDryRunCleanBehavior:
         primitives = _make_primitives(tmp_path)
         compiler._compile_claude_md(config, primitives)
 
-        messages = [m for _, m in logged]
+        messages = [m for _, m in logger.logged]
         assert any("would remove stale" in m and "CLAUDE.md" in m for m in messages), (
             "Dry-run --clean must emit the stale-removal preview through the logger "
             "(not just in result.content) so it reaches the terminal via the distributed "
             "cli.py dry-run path. "
-            f"Logger calls captured: {logged}"
+            f"Logger calls captured: {logger.logged}"
         )
 
 
@@ -638,23 +629,9 @@ class TestDryRunHandAuthoredPreview:
         _make_project(tmp_path, populate_rules=True)
         _hand_authored_claude_md(tmp_path)
 
-        logged: list[tuple[str, str]] = []
-
-        class _CapturingLogger:
-            def progress(self, msg, **kw):
-                logged.append(("progress", msg))
-
-            def success(self, msg, **kw):
-                logged.append(("success", msg))
-
-            def warning(self, msg, **kw):
-                logged.append(("warning", msg))
-
-            def verbose_detail(self, msg, **kw):
-                pass
-
+        logger = _CapturingLogger()
         compiler = AgentsCompiler(str(tmp_path))
-        compiler._logger = _CapturingLogger()
+        compiler._logger = logger
         config = CompilationConfig(
             target="claude",
             clean_orphaned=True,
@@ -663,12 +640,12 @@ class TestDryRunHandAuthoredPreview:
         primitives = _make_primitives(tmp_path)
         compiler._compile_claude_md(config, primitives)
 
-        messages = [m for _, m in logged]
+        messages = [m for _, m in logger.logged]
         assert any("hand-authored" in m for m in messages), (
             "Dry-run --clean with a hand-authored CLAUDE.md must emit the skip-preview "
             "through the logger (not just in result.content) so it reaches the terminal "
             "via the distributed cli.py dry-run path. "
-            f"Logger calls captured: {logged}"
+            f"Logger calls captured: {logger.logged}"
         )
 
 
@@ -683,52 +660,38 @@ class TestDryRunReadErrorLoggedViaLogger:
     path (issue #1729 comment N)."""
 
     def test_dry_run_clean_read_error_emitted_via_logger(self, tmp_path):
-        """When CLAUDE.md exists but cannot be read, the dry-run --clean path must
-        emit the read-error at warning level through the logger."""
-        import platform
+        """When CLAUDE.md exists but cannot be decoded as UTF-8, the dry-run --clean
+        path must emit the read-error at warning level through the logger.
 
-        if platform.system() == "Windows":
-            pytest.skip("chmod-based permission test not applicable on Windows")
-
+        Uses an invalid-UTF-8 byte sequence to deterministically trigger
+        UnicodeDecodeError (caught by _detect_stale_claude_md) across all
+        environments including containers running as root (where chmod(0o000) is
+        unreliable).  This also exercises the UnicodeDecodeError branch added by
+        comment P.
+        """
         _make_project(tmp_path, populate_rules=True)
-        _apm_generated_claude_md(tmp_path)
         claude_md = tmp_path / "CLAUDE.md"
-        claude_md.chmod(0o000)  # make unreadable
+        # Write bytes that are not valid UTF-8 -- read_text(encoding="utf-8") will
+        # raise UnicodeDecodeError regardless of filesystem permissions or user id.
+        claude_md.write_bytes(b"\xff\xfe invalid utf-8 \x80\x81")
 
-        logged: list[tuple[str, str]] = []
-
-        class _CapturingLogger:
-            def progress(self, msg, **kw):
-                logged.append(("progress", msg))
-
-            def success(self, msg, **kw):
-                logged.append(("success", msg))
-
-            def warning(self, msg, **kw):
-                logged.append(("warning", msg))
-
-            def verbose_detail(self, msg, **kw):
-                pass
-
+        logger = _CapturingLogger()
         compiler = AgentsCompiler(str(tmp_path))
-        compiler._logger = _CapturingLogger()
+        compiler._logger = logger
         config = CompilationConfig(
             target="claude",
             clean_orphaned=True,
             dry_run=True,
         )
         primitives = _make_primitives(tmp_path)
-        try:
-            result = compiler._compile_claude_md(config, primitives)
-        finally:
-            claude_md.chmod(0o644)  # restore so tmp_path cleanup works
+        result = compiler._compile_claude_md(config, primitives)
 
-        warning_messages = [m for level, m in logged if level == "warning"]
+        warning_messages = [m for level, m in logger.logged if level == "warning"]
         assert any("Could not read" in m for m in warning_messages), (
-            "Dry-run --clean with an unreadable CLAUDE.md must emit a 'Could not read' "
+            "Dry-run --clean with an undecodable CLAUDE.md must emit a 'Could not read' "
             "warning through the logger (not just in result.warnings) so it reaches "
             "the terminal via the distributed cli.py dry-run path. "
-            f"Logger calls captured: {logged}"
+            f"Logger calls captured: {logger.logged}"
         )
         assert any("Could not read" in w for w in result.warnings), (
             f"result.warnings must also contain the read-error; got: {result.warnings}"
