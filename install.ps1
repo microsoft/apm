@@ -607,12 +607,14 @@ try {
             }
         }
 
-        if (-not $downloadOk) {
+        # Final auth fallback only for canonical GitHub / GHES hosts. In mirror mode
+        # ($releaseBaseUrl set) the GitHub token must never be sent to the operator
+        # mirror host, so skip auth and fail closed via the mirror error below.
+        if (-not $downloadOk -and -not $releaseBaseUrl) {
             if ($headers.Count -eq 0) { $headers = Get-AuthHeader }
             if ($headers.Count -gt 0) {
                 try {
-                    $authAssetUri = if ($releaseBaseUrl) { $directUrl } else { $asset.browser_download_url }
-                    Invoke-WebRequest -Uri $authAssetUri -Headers $headers -OutFile $zipPath -UseBasicParsing
+                    Invoke-WebRequest -Uri $asset.browser_download_url -Headers $headers -OutFile $zipPath -UseBasicParsing
                     $downloadOk = $true
                     Write-Success "Download successful with authentication"
                 } catch {
@@ -689,8 +691,10 @@ try {
                     Invoke-WebRequest -Uri $sha256Url -OutFile $sha256Path -UseBasicParsing
                     $fetched = $true
                 } catch {
+                    # Mirror checksum URLs ($releaseBaseUrl set) stay unauthenticated:
+                    # never send the GitHub token to the operator mirror host.
                     if ($headers.Count -eq 0) { $headers = Get-AuthHeader }
-                    if ($headers.Count -gt 0) {
+                    if ($headers.Count -gt 0 -and -not $releaseBaseUrl) {
                         Invoke-WebRequest -Uri $sha256Url -Headers $headers -OutFile $sha256Path -UseBasicParsing
                         $fetched = $true
                     } else {

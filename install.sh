@@ -321,7 +321,11 @@ LATEST_RELEASE_URL=$(release_metadata_url)
 # Fetch release info; include Authorization header when a token is already resolved
 # (AUTH_HEADER_VALUE set earlier from GITHUB_APM_PAT > GITHUB_TOKEN > GH_TOKEN precedence).
 # This avoids anonymous rate-limiting behind shared IPs / corporate NAT.
-if [ -n "$AUTH_HEADER_VALUE" ]; then
+# Only attach the token when the request targets the canonical GitHub / configured
+# GHES host. When APM_RELEASE_METADATA_URL routes to an operator mirror, the request
+# stays UNAUTHENTICATED so the GitHub token is never transmitted cross-host (matches
+# install.ps1, which fetches mirror metadata unauthenticated).
+if [ -n "$AUTH_HEADER_VALUE" ] && [ -z "$APM_RELEASE_METADATA_URL" ]; then
     LATEST_RELEASE=$(curl -s -H "Authorization: token $AUTH_HEADER_VALUE" "$LATEST_RELEASE_URL")
 else
     LATEST_RELEASE=$(curl -s "$LATEST_RELEASE_URL")
@@ -336,8 +340,10 @@ if [ -n "$APM_RELEASE_METADATA_URL" ] && { [ $CURL_EXIT_CODE -ne 0 ] || [ -z "$L
 fi
 
 # Check if the response indicates authentication is required (private repo)
-# Only try authentication if curl failed OR we got a "Not Found" message OR response is empty
-if [ $CURL_EXIT_CODE -ne 0 ] || [ -z "$LATEST_RELEASE" ] || echo "$LATEST_RELEASE" | grep -q '"message".*"Not Found"'; then
+# Only try authentication if curl failed OR we got a "Not Found" message OR response is empty.
+# Skip this retry entirely in mirror metadata mode: the GitHub token must not be sent to an
+# operator-configured mirror host (mirror failures already exited above with guidance).
+if [ -z "$APM_RELEASE_METADATA_URL" ] && { [ $CURL_EXIT_CODE -ne 0 ] || [ -z "$LATEST_RELEASE" ] || echo "$LATEST_RELEASE" | grep -q '"message".*"Not Found"'; }; then
     echo -e "${BLUE}Repository appears to be private, trying with authentication...${NC}"
 
     # Check if we have GitHub token for private repo access
@@ -432,8 +438,11 @@ echo -e "${YELLOW}Downloading APM...${NC}"
 if curl -L --fail --silent --show-error "$DOWNLOAD_URL" -o "$TMP_DIR/$DOWNLOAD_BINARY"; then
     echo -e "${GREEN}[+] Download successful${NC}"
 else
-    # If unauthenticated download fails, try with authentication if available
-    if [ -n "$AUTH_HEADER_VALUE" ]; then
+    # If unauthenticated download fails, try with authentication if available.
+    # Never attach the token in mirror mode: APM_RELEASE_BASE_URL points at an
+    # operator-configured host, so a failed mirror download must fail closed below
+    # (matches install.ps1, which leaves mirror asset downloads unauthenticated).
+    if [ -n "$AUTH_HEADER_VALUE" ] && [ -z "$APM_RELEASE_BASE_URL" ]; then
         echo -e "${BLUE}Download failed, retrying with authentication...${NC}"
         
         # For private repositories, use GitHub API with proper headers
