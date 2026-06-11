@@ -14,10 +14,30 @@ from typing import Any
 import yaml
 
 from ..models.apm_package import DependencyReference
+from ..models.dependency.reference import (
+    build_canonical_dependency_string,
+    build_dependency_unique_key,
+)
 
 logger = logging.getLogger(__name__)
 
 _SELF_KEY = "."
+_ALLOWED_HOST_TYPES = {"gitlab"}
+
+
+def _normalize_lockfile_host_type(raw: Any) -> str | None:
+    """Validate and normalize the optional lockfile host_type field."""
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("lockfile host_type must be a non-empty string")
+    value = raw.strip().lower()
+    if value not in _ALLOWED_HOST_TYPES:
+        raise ValueError(
+            f"Unsupported lockfile host_type: {raw}. Supported values: "
+            f"{', '.join(sorted(_ALLOWED_HOST_TYPES))}"
+        )
+    return value
 
 
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
@@ -31,6 +51,7 @@ class LockedDependency:
 
     repo_url: str
     host: str | None = None
+    host_type: str | None = None
     port: int | None = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
     registry_prefix: str | None = None  # Registry path prefix, e.g. "artifactory/github"
     resolved_commit: str | None = None
@@ -52,6 +73,8 @@ class LockedDependency:
     is_dev: bool = False  # True for devDependencies
     discovered_via: str | None = None  # Marketplace name (provenance)
     marketplace_plugin_name: str | None = None  # Plugin name in marketplace
+    source_url: str | None = None  # Canonical marketplace source URL
+    source_digest: str | None = None  # sha256 digest of the marketplace manifest
     is_insecure: bool = False  # True when the locked source was http://
     allow_insecure: bool = False  # True when the manifest explicitly allowed HTTP
     skill_subset: list[str] = field(default_factory=list)  # Sorted skill names for SKILL_BUNDLE
@@ -80,17 +103,39 @@ class LockedDependency:
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
-        if self.source == "local" and self.local_path:
-            return self.local_path
-        if self.is_virtual and self.virtual_path:
-            return f"{self.repo_url}/{self.virtual_path}"
-        return self.repo_url
+        return build_dependency_unique_key(
+            self.repo_url,
+            host=self.host,
+            source=self.source,
+            local_path=self.local_path,
+            is_virtual=self.is_virtual,
+            virtual_path=self.virtual_path,
+            registry_prefix=self.registry_prefix,
+        )
+
+    def get_canonical_dependency_string(self) -> str:
+        """Host-blind canonical key for filesystem / orphan-detection matching.
+
+        Mirrors :meth:`DependencyReference.get_canonical_dependency_string`:
+        returns the bare ``repo_url`` (+ ``virtual_path``), never host-qualified,
+        so it matches the host-blind ``apm_modules/`` layout. Use
+        :meth:`get_unique_key` for the host-qualified lockfile dedup key.
+        """
+        return build_canonical_dependency_string(
+            self.repo_url,
+            is_local=(self.source == "local"),
+            local_path=self.local_path,
+            is_virtual=self.is_virtual,
+            virtual_path=self.virtual_path,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for YAML output."""
         result: dict[str, Any] = {"repo_url": self.repo_url}
         if self.host:
             result["host"] = self.host
+        if self.host_type:
+            result["host_type"] = self.host_type
         if self.port:
             result["port"] = self.port
         if self.registry_prefix:
@@ -127,6 +172,10 @@ class LockedDependency:
             result["discovered_via"] = self.discovered_via
         if self.marketplace_plugin_name:
             result["marketplace_plugin_name"] = self.marketplace_plugin_name
+        if self.source_url:
+            result["source_url"] = self.source_url
+        if self.source_digest:
+            result["source_digest"] = self.source_digest
         if self.is_insecure:
             result["is_insecure"] = True
         if self.allow_insecure:
@@ -177,6 +226,8 @@ class LockedDependency:
             if _p_int is not None and 1 <= _p_int <= 65535:
                 port = _p_int
 
+        host_type = _normalize_lockfile_host_type(data.get("host_type"))
+
         # Recognised keys this build knows about. Anything else is captured
         # as ``_unknown_fields`` so a re-emit preserves forward-introduced
         # fields rather than silently dropping them. ``deployed_skills`` is
@@ -184,6 +235,7 @@ class LockedDependency:
         _known_keys = {
             "repo_url",
             "host",
+            "host_type",
             "port",
             "registry_prefix",
             "resolved_commit",
@@ -202,6 +254,8 @@ class LockedDependency:
             "is_dev",
             "discovered_via",
             "marketplace_plugin_name",
+            "source_url",
+            "source_digest",
             "is_insecure",
             "allow_insecure",
             "skill_subset",
@@ -218,6 +272,7 @@ class LockedDependency:
         return cls(
             repo_url=data["repo_url"],
             host=data.get("host"),
+            host_type=host_type,
             port=port,
             registry_prefix=data.get("registry_prefix"),
             resolved_commit=data.get("resolved_commit"),
@@ -236,6 +291,8 @@ class LockedDependency:
             is_dev=data.get("is_dev", False),
             discovered_via=data.get("discovered_via"),
             marketplace_plugin_name=data.get("marketplace_plugin_name"),
+            source_url=data.get("source_url"),
+            source_digest=data.get("source_digest"),
             is_insecure=data.get("is_insecure", False),
             allow_insecure=data.get("allow_insecure", False),
             skill_subset=list(data.get("skill_subset") or []),
@@ -329,6 +386,7 @@ class LockedDependency:
         return cls(
             repo_url=dep_ref.repo_url,
             host=host,
+            host_type=dep_ref.host_type,
             port=dep_ref.port,
             registry_prefix=registry_prefix,
             resolved_commit=resolved_commit,
@@ -388,6 +446,7 @@ class LockedDependency:
         return DependencyReference(
             repo_url=self.repo_url,
             host=self.host,
+            host_type=self.host_type,
             port=self.port,
             reference=ref,
             virtual_path=self.virtual_path,

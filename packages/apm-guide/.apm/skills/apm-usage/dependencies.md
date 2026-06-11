@@ -138,6 +138,7 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `path` | OPTIONAL | Subdirectory or file within the repo (virtual package). |
 | `ref` | OPTIONAL | Branch, tag, or commit SHA. |
 | `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
+| `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. Generic hosts do not receive APM-managed PATs on HTTP file reads. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys) for keying rules. |
 
 ```yaml
 - git: https://gitlab.com/acme/repo.git
@@ -150,6 +151,9 @@ instead so `@` remains reserved for git usernames and version syntax.
 
 - git: ssh://git@bitbucket.example.com:7999/project/repo.git   # custom SSH port
   ref: v1.0
+
+- git: https://code.acme.com/platform/standards.git               # bespoke GitLab
+  type: gitlab
 ```
 
 ### Local (`path`)
@@ -460,3 +464,7 @@ enterprise security guide for the threat model.
 `apm.lock.yaml` records the exact commit SHA for every dependency, regardless
 of the ref format in apm.yml. Running `apm install` without `--update` always
 uses the locked SHA, ensuring reproducible installs across machines.
+
+Lockfile keys keep `github.com` implicit for migration stability while
+non-default hosts add the lowercased host segment. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys)
+for the full keying rules.

@@ -159,7 +159,8 @@ class TestDefaultPortNormalisationE2E:
 
         loaded = LockFile.read(lock_path)
         assert loaded is not None
-        reloaded_dep = loaded.dependencies.get("team/repo")
+        # Non-default host (#773): lockfile dedup key is host-qualified.
+        reloaded_dep = loaded.dependencies.get("bitbucket.corp.com/team/repo")
         assert reloaded_dep is not None
         assert reloaded_dep.port == 7990
 
@@ -191,6 +192,7 @@ class TestDefaultPortNormalisationE2E:
         assert "port:" not in raw_yaml
 
         loaded = LockFile.read(lock_path)
-        reloaded = loaded.dependencies.get("acme/tools")
+        # Non-default host (#773): lockfile dedup key is host-qualified.
+        reloaded = loaded.dependencies.get("gitlab.com/acme/tools")
         assert reloaded is not None
         assert reloaded.port is None

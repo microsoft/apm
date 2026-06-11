@@ -1389,10 +1389,10 @@ class TestDownloaderCredentialFallback:
             assert downloader._github_token_from_credential_fill is False
             mock_cred.assert_not_called()
 
-    def test_credential_fill_for_non_default_host(self):
-        """Non-default hosts should try credential fill on demand in _download_github_file."""
+    def test_credential_fill_for_configured_enterprise_host(self):
+        """Configured GHES hosts try credential fill on demand in _download_github_file."""
         with (
-            patch.dict(os.environ, {}, clear=True),
+            patch.dict(os.environ, {"GITHUB_HOST": "ghes.company.com"}, clear=True),
             patch(
                 "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
             ) as mock_cred,
@@ -2271,6 +2271,24 @@ def _gitea_json_envelope(file_bytes: bytes) -> bytes:
     ).encode("utf-8")
 
 
+def _error_url_components(text: str) -> list[tuple[str, str, str]]:
+    """Extract (scheme, hostname, path) tuples for any URLs embedded in *text*.
+
+    Download-error messages embed the failed endpoint as a URL. Asserting on
+    parsed components (per tests.instructions.md: never substring-match URLs)
+    rather than scraping with ``startswith``/``rstrip`` keeps the assertion
+    robust to wording or punctuation tweaks in the error string.
+    """
+    out: list[tuple[str, str, str]] = []
+    for token in text.split():
+        cleaned = token.strip("(),.;'\"")
+        if "://" not in cleaned:
+            continue
+        parsed = urlparse(cleaned)
+        out.append((parsed.scheme, parsed.hostname or "", parsed.path))
+    return out
+
+
 class TestGiteaRawUrlDownload:
     """Gitea raw URL path: /{owner}/{repo}/raw/{ref}/{file}."""
 
@@ -2352,13 +2370,8 @@ class TestGiteaRawUrlDownload:
         api_headers = mock_get.call_args_list[0][1].get("headers", {})
         assert api_headers.get("Authorization") == "token ghp_ghe"
 
-    def test_git_credential_helper_token_sent_to_generic_host(self):
-        """Host-scoped credentials (git credential helper) ARE sent to generic hosts.
-
-        The credential helper is host-scoped by construction, so forwarding
-        is safe and necessary for private Gitea/Gogs repos. This is the
-        symmetric case to the security guard test above.
-        """
+    def test_git_credential_helper_token_is_not_sent_by_generic_http_download(self):
+        """Generic HTTP file downloads use the same token boundary as clone URLs."""
         dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
         raw_ok = _make_resp(200, b"data")
 
@@ -2372,9 +2385,55 @@ class TestGiteaRawUrlDownload:
                     downloader.download_raw_file(dep_ref, "README.md", "main")
 
         raw_headers = mock_get.call_args_list[0][1].get("headers", {})
-        assert raw_headers.get("Authorization") == "token gitea-host-scoped-token"
+        assert "Authorization" not in raw_headers
 
-    def test_falls_back_to_api_v1_when_raw_returns_non_200(self):
+    def test_generic_download_uses_resolve_dep_auth_context_boundary(self):
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+        raw_ok = _make_resp(200, b"data")
+
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            downloader = GitHubPackageDownloader()
+            with (
+                patch.object(
+                    downloader, "_resolve_dep_auth_ctx", return_value=None
+                ) as mock_resolve,
+                patch.object(
+                    downloader,
+                    "_resolve_dep_token",
+                    side_effect=AssertionError("download performed duplicate token resolution"),
+                ),
+                patch.object(
+                    downloader.auth_resolver,
+                    "resolve",
+                    side_effect=AssertionError("generic download bypassed _resolve_dep_auth_ctx"),
+                ),
+                patch.object(downloader, "_resilient_get", return_value=raw_ok),
+            ):
+                assert downloader.download_raw_file(dep_ref, "README.md", "main") == b"data"
+
+        mock_resolve.assert_called_once_with(dep_ref)
+
+    def test_generic_host_403_without_credentials_explains_opt_in_paths(self):
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+
+        with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
+            downloader = GitHubPackageDownloader()
+            with patch.object(
+                downloader,
+                "_resilient_get",
+                side_effect=[_make_resp(404), _make_resp(403)],
+            ):
+                with pytest.raises(RuntimeError) as exc_info:
+                    downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        msg = str(exc_info.value)
+        assert "No APM-managed token was sent" in msg
+        assert "whole-repo git dependency" in msg
+        assert "type: gitlab" in msg
+        assert "GITHUB_HOST" in msg
+        assert "Re-run with --verbose" in msg
+
+    def test_falls_back_to_api_v1_when_raw_returns_404(self):
         """When the raw URL returns 404, the API v1 path is tried next."""
         dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
         expected = b"file via API"
@@ -2391,43 +2450,71 @@ class TestGiteaRawUrlDownload:
         assert urls[0] == "https://gitea.myorg.com/owner/repo/raw/main/README.md"
         assert urlparse(urls[1]).path.startswith("/api/v1/")
 
-    def test_raw_url_request_exception_falls_through_to_api(self):
-        """RequestException on the raw URL path must not abort -- API path runs.
-
-        Regression trap for the ``except (RequestException, OSError)``
-        swallow at the raw-URL try block. Previously this only had unit
-        coverage that pinned the swallow itself; this test exercises the
-        downstream "fallthrough must reach the API path" promise.
-        """
+    def test_raw_url_request_exception_surfaces_with_endpoint_context(self):
+        """Only 404 falls through; network errors name the failed endpoint."""
         dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
-        expected = b"recovered via api"
-        api_ok = _make_resp(200, expected)
 
-        side_effects = [
-            requests_lib.exceptions.ConnectionError("boom"),
-            api_ok,
-        ]
-        with patch.object(self.downloader, "_resilient_get", side_effect=side_effects) as mock_get:
-            result = self.downloader.download_raw_file(dep_ref, "README.md", "main")
+        with patch.object(
+            self.downloader,
+            "_resilient_get",
+            side_effect=requests_lib.exceptions.ConnectionError("boom"),
+        ):
+            with pytest.raises(RuntimeError) as exc_info:
+                self.downloader.download_raw_file(dep_ref, "README.md", "main")
 
-        assert result == expected
-        urls = [c[0][0] for c in mock_get.call_args_list]
-        assert urls[0].endswith("/owner/repo/raw/main/README.md")
-        assert urlparse(urls[1]).path.startswith("/api/v1/")
+        msg = str(exc_info.value)
+        assert (
+            "Network error downloading README.md from gitea.myorg.com via raw URL endpoint" in msg
+        )
+        assert "boom" in msg
+        assert "Re-run with --verbose to see attempted URLs" in msg
+
+    def test_raw_url_500_surfaces_with_endpoint_context(self):
+        dep_ref = DependencyReference.parse("gitea.myorg.com/owner/repo")
+
+        with patch.object(self.downloader, "_resilient_get", return_value=_make_resp(500)):
+            with pytest.raises(RuntimeError) as exc_info:
+                self.downloader.download_raw_file(dep_ref, "README.md", "main")
+
+        msg = str(exc_info.value)
+        assert "Failed to download README.md from gitea.myorg.com" in msg
+        assert "HTTP 500" in msg
+        assert "raw URL endpoint" in msg
+        assert "Re-run with --verbose to see attempted URLs" in msg
 
 
 class TestGiteaGogsApiVersionNegotiation:
     """API version negotiation: raw URL -> v1 -> v3 for Gitea/Gogs generic hosts.
 
-    The implementation intentionally stops at v3.  GitLab uses a completely
-    different API shape (/api/v4/projects/:id/repository/files/...) that is
-    not compatible with the GitHub Contents-style endpoint negotiated here;
-    GitLab support is limited to git-clone operations only.
+    The generic-host implementation intentionally stops at v3. Explicit
+    ``type: gitlab`` dependencies use GitLab's separate
+    /api/v4/projects/:id/repository/files/... path instead of this negotiation.
     """
 
     def setup_method(self):
         with patch.dict(os.environ, {}, clear=True), _CRED_FILL_PATCH:
             self.downloader = GitHubPackageDownloader()
+
+    def test_object_form_type_gitlab_routes_bespoke_host_to_gitlab_api(self):
+        dep_ref = DependencyReference.parse_from_dict(
+            {"git": "https://code.acme.com/group/sub/repo.git", "type": "gitlab"}
+        )
+        expected = b"gitlab raw"
+        response = _make_resp(200, expected)
+
+        with patch.dict(os.environ, {"GITLAB_APM_PAT": "glpat-bespoke"}, clear=True):
+            downloader = GitHubPackageDownloader()
+            with patch.object(downloader, "_resilient_get", return_value=response) as mock_get:
+                result = downloader._download_github_file(dep_ref, "SKILL.md", "main")
+
+        assert result == expected
+        request_url = mock_get.call_args[0][0]
+        parsed = urlparse(request_url)
+        assert parsed.hostname == "code.acme.com"
+        assert parsed.path.endswith("/repository/files/SKILL.md/raw")
+        headers = mock_get.call_args[1]["headers"]
+        assert headers.get("PRIVATE-TOKEN") == "glpat-bespoke"
+        assert dep_ref.host_type == "gitlab"
 
     def test_v1_falls_back_to_v3_for_generic_hosts(self):
         """When Gitea raw URL and v1 both return 404, v3 is tried and succeeds."""
@@ -2510,12 +2597,7 @@ class TestGiteaGogsApiVersionNegotiation:
         assert result == expected
 
     def test_fallback_candidate_loop_reraises_non_404(self):
-        """500 on a candidate URL must surface as RuntimeError, not silent skip.
-
-        Pins the symmetry-fix between the primary loop (already re-raised
-        non-404) and the fallback-ref loop (previously swallowed all
-        HTTPErrors via bare ``pass``).
-        """
+        """500 on a candidate URL must surface as RuntimeError, not silent skip."""
         dep_ref = DependencyReference.parse("gitea.example.com/owner/repo")
 
         # raw=404, v1=404 (forces ref-fallback), v1@master=500
