@@ -591,7 +591,7 @@ def add(source, name, ref, branch, host, verbose):
 
         # Trust gate is now scoped to kinds that would forward an APM token
         # via header injection. The subprocess git path (kind == "git")
-        # never forwards GITHUB_APM_PAT / GITLAB_APM_TOKEN -- AuthResolver
+        # never forwards GITHUB_APM_PAT / GITLAB_APM_PAT -- AuthResolver
         # only emits credentials matching the classified host. Local-kind
         # fetches use no credentials at all.
         if kind in ("github", "gitlab"):
@@ -740,13 +740,14 @@ def _split_source_fragment_ref(source: str) -> tuple[str, str]:
 
 
 def _is_remote_marketplace_json_url(url: str) -> bool:
-    """Return True when *url* names a hosted marketplace.json document."""
-    try:
-        parsed = urlsplit(url)
-    except ValueError:
-        return False
-    path = (parsed.path or "").rstrip("/")
-    return parsed.scheme.lower() == "https" and path.endswith("/marketplace.json")
+    """Return True when *url* names a hosted marketplace.json document.
+
+    Delegates to the single shared classifier in ``marketplace.models`` so
+    the CLI and ``MarketplaceSource`` cannot drift on the url-kind decision.
+    """
+    from ...marketplace.models import url_names_remote_manifest
+
+    return url_names_remote_manifest(url)
 
 
 def _should_warn_unpinned_git_url(

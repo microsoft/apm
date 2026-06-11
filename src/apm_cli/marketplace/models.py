@@ -48,6 +48,28 @@ def _extract_host_from_url(url: str) -> str:
     return parsed.hostname or ""
 
 
+def url_names_remote_manifest(url: str) -> bool:
+    """Return True when *url* is a direct hosted ``marketplace.json`` document.
+
+    Single source of truth for the "is this a hosted marketplace.json URL"
+    decision, shared by the marketplace CLI (``_is_remote_marketplace_json_url``)
+    and ``MarketplaceSource.is_remote_manifest_url`` so the two predicates
+    cannot drift (see #692 forward-compat constraint 1: the source-kind
+    discriminator stays a derived, validated string). Matches Anthropic's
+    hosted ``marketplace.json`` shape: HTTPS scheme, a host, and a path that
+    ends in ``/marketplace.json``.
+    """
+    if not url:
+        return False
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        return False
+    return (parsed.path or "").rstrip("/").endswith("/marketplace.json")
+
+
 def _extract_owner_repo_from_url(url: str) -> tuple[str, str]:
     """Best-effort owner/repo extraction. Empty strings if not derivable."""
     if not url or _looks_like_local_path(url):
@@ -155,13 +177,7 @@ class MarketplaceSource:
     @property
     def is_remote_manifest_url(self) -> bool:
         """Return True for direct remote marketplace.json URL sources."""
-        if not self.url or self.path != "":
-            return False
-        try:
-            parsed = urlsplit(self.url)
-        except ValueError:
-            return False
-        return parsed.scheme.lower() == "https" and bool(parsed.hostname)
+        return self.path == "" and url_names_remote_manifest(self.url)
 
     @property
     def kind(self) -> str:
