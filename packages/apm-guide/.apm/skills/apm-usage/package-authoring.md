@@ -116,7 +116,8 @@ my-hooks-pkg/
 APM automatically normalises event names per target (e.g. `postToolUse`
 becomes `PostToolUse` in Claude) and rewrites path variables
 (`${PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`) to
-the correct target-specific form.
+the correct target-specific form. Kiro materializes one JSON document per
+hook action under `.kiro/hooks/`.
 
 ### Hook command paths: project-scope stays repo-relative
 

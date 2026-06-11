@@ -20,8 +20,10 @@ Compile is **recommended for every other target** (`claude`,
 `cursor`, `codex`, `gemini`, `opencode`, `windsurf`, `kiro`) -- those
 harnesses load instructions through the root context file
 (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`) or a harness-specific rules
-folder that compile generates. Without it, your instructions are
-on disk but the harness will not pick them up.
+folder that compile generates. Kiro receives `.kiro/steering/` files;
+its `AGENTS.md` output remains the cross-harness fallback. Without
+compile, your instructions are on disk but the harness will not pick
+them up.
 :::
 
 ```bash
@@ -32,8 +34,9 @@ Concretely, that command rolls your `instructions/*.instructions.md`
 (see [Instructions](./author-primitives/instructions-and-agents/#1-instructions))
 into the native rules surface each target expects:
 
-- `AGENTS.md` -- the cross-harness root context file (Copilot, Codex,
-  OpenCode, Windsurf, and Kiro all read this).
+- `AGENTS.md` -- the cross-harness root context file. Copilot, Codex,
+  OpenCode, and Windsurf read it directly; Kiro primarily uses the
+  `.kiro/steering/` files that compile also emits.
 - `CLAUDE.md` -- Claude Code's root context file.
 - `GEMINI.md` -- Gemini CLI's root context file.
 - per-harness rules trees that mirror each instruction's
@@ -129,7 +132,7 @@ Per target, with the rules shape on disk after compile:
 | `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `GEMINI.md` |
 | `opencode` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `windsurf` | -- | `.windsurf/rules/<name>.md` | Yes -- compiled to Windsurf rules |
-| `kiro` | `AGENTS.md` (folded) | `.kiro/steering/<name>.md` | Yes -- compiled to Kiro steering |
+| `kiro` | `AGENTS.md` (fallback) | `.kiro/steering/<name>.md` | Yes -- compiled to Kiro steering |
 
 ## compile vs install
 

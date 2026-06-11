@@ -119,15 +119,16 @@ For server installation patterns, registry resolution, and trust model, see [MCP
 
 ### Kiro IDE
 
-Kiro reads project configuration from `.kiro/`. APM maps instructions to
-`.kiro/steering/` and converts `applyTo:` scoping into Kiro steering
-frontmatter (`inclusion: fileMatch`); unscoped instructions become
+[Kiro](https://kiro.dev) reads project configuration from `.kiro/`. APM maps
+instructions to `.kiro/steering/` and converts `applyTo:` scoping into Kiro
+steering frontmatter (`inclusion: fileMatch`); unscoped instructions become
 `inclusion: always`. Skills are copied verbatim to `.kiro/skills/`, hooks
-become one JSON file per hook in `.kiro/hooks/`, and MCP servers are written
-to `.kiro/settings/mcp.json` or `~/.kiro/settings/mcp.json` for `--global`.
+become one JSON file per hook action in `.kiro/hooks/`, and MCP servers are
+written to `.kiro/settings/mcp.json` or `~/.kiro/settings/mcp.json` for
+`--global`.
 
 This target covers the documented Kiro IDE layout. Kiro CLI configuration
-differences are tracked separately.
+differences are tracked separately; see [the targets matrix](../reference/targets-matrix/#kiro).
 
 ### JetBrains (IntelliJ IDEA, PyCharm, GoLand, and others)
 

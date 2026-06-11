@@ -171,10 +171,12 @@ def test_kiro_hooks_expand_each_apm_hook_to_individual_json(tmp_path: Path) -> N
     assert pre_data["then"]["command"] == "python .kiro/hooks/hookify/hooks/check.py"
     assert pre_data["description"] == "Validate before tool use"
     assert "hooks" not in pre_data
+    assert pre_tool.stat().st_mode & 0o777 == 0o600
 
     prompt_data = json.loads(prompt_submit.read_text(encoding="utf-8"))
     assert prompt_data["when"] == {"type": "promptSubmit"}
     assert prompt_data["then"]["command"] == "python .kiro/hooks/hookify/hooks/prompt.py"
+    assert prompt_submit.stat().st_mode & 0o777 == 0o600
 
     assert (tmp_path / ".kiro" / "hooks" / "hookify" / "hooks" / "check.py").exists()
     assert (tmp_path / ".kiro" / "hooks" / "hookify" / "hooks" / "prompt.py").exists()

@@ -937,10 +937,11 @@ class MCPIntegrator:
             logger.progress(f"Dependencies for {runtime}: {', '.join(mcp_deps)}")
             return False
         except ValueError as e:
+            from apm_cli.factory import ClientFactory
+
+            supported_runtimes = ", ".join(sorted(ClientFactory.supported_clients()))
             logger.warning(f"Runtime {runtime} not supported: {e}")
-            logger.progress(
-                "Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, claude, windsurf, kiro, intellij, llm"
-            )
+            logger.progress(f"Supported runtimes: {supported_runtimes}")
             return False
         except Exception as e:
             _log.debug("Unexpected error installing for runtime %s", runtime, exc_info=True)

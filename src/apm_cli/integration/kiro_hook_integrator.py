@@ -8,6 +8,7 @@ so the shared integrator stays under the source-length guardrail.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -151,6 +152,7 @@ def _write_kiro_hook_docs(
                 rendered = json.dumps(doc, indent=2) + "\n"
 
                 if target_path.exists() and target_path.read_text(encoding="utf-8") == rendered:
+                    os.chmod(target_path, 0o600)
                     files_adopted += 1
                     target_paths.append(target_path)
                     continue
@@ -165,6 +167,7 @@ def _write_kiro_hook_docs(
                     continue
 
                 target_path.write_text(rendered, encoding="utf-8")
+                os.chmod(target_path, 0o600)
                 files_integrated += 1
                 target_paths.append(target_path)
                 display_payloads.append(

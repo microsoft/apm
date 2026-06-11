@@ -78,17 +78,17 @@ class KiroClientAdapter(CopilotClientAdapter):
         return True
 
     @staticmethod
-    def _header_mapping(remote: dict[str, Any]) -> dict[str, Any]:
-        """Return registry remote headers as a dict."""
+    def _header_mapping(remote: dict[str, Any]) -> dict[str, str]:
+        """Return registry remote headers as string key-value pairs."""
         headers = remote.get("headers", {})
         if isinstance(headers, list):
             return {
-                h["name"]: h["value"]
+                str(h["name"]): str(h["value"])
                 for h in headers
                 if isinstance(h, dict) and "name" in h and "value" in h
             }
         if isinstance(headers, dict):
-            return dict(headers)
+            return {str(name): str(value) for name, value in headers.items()}
         return {}
 
     @staticmethod
@@ -179,12 +179,12 @@ class KiroClientAdapter(CopilotClientAdapter):
 
     def configure_mcp_server(
         self,
-        server_url,
-        server_name=None,
-        enabled=True,
-        env_overrides=None,
-        server_info_cache=None,
-        runtime_vars=None,
+        server_url: str,
+        server_name: str | None = None,
+        enabled: bool = True,
+        env_overrides: dict[str, str] | None = None,
+        server_info_cache: dict[str, Any] | None = None,
+        runtime_vars: dict[str, str] | None = None,
     ) -> bool:
         """Configure an MCP server in Kiro's MCP config."""
         if not server_url:
@@ -198,6 +198,8 @@ class KiroClientAdapter(CopilotClientAdapter):
             )
             return True
 
+        config_key = self._determine_config_key(server_url, server_name)
+
         try:
             server_info = self._fetch_server_info(server_url, server_info_cache)
             if server_info is None:
@@ -206,7 +208,6 @@ class KiroClientAdapter(CopilotClientAdapter):
             self._last_env_placeholder_keys = set()
             self._last_legacy_angle_vars = set()
 
-            config_key = self._determine_config_key(server_url, server_name)
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             if not enabled:
                 server_config["disabled"] = True
@@ -216,5 +217,5 @@ class KiroClientAdapter(CopilotClientAdapter):
             return True
         except Exception as exc:
             logger.debug("Kiro MCP configuration failed: %s", exc)
-            _rich_error("Failed to configure MCP server for Kiro", symbol="error")
+            _rich_error(f"Failed to configure MCP server '{config_key}' for Kiro", symbol="error")
             return False

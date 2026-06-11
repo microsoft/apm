@@ -89,6 +89,46 @@ class TestKiroClientAdapter:
         assert "tools" not in config
         assert "id" not in config
 
+    def test_remote_header_values_are_string_coerced(self) -> None:
+        adapter = KiroClientAdapter()
+        server_info = {
+            "name": "remote-server",
+            "remotes": [
+                {
+                    "transport_type": "http",
+                    "url": "https://mcp.example.com/server",
+                    "headers": [{"name": "X-Retry", "value": 3}],
+                }
+            ],
+        }
+
+        config = adapter._format_server_config(server_info)
+
+        assert config["headers"] == {"X-Retry": "3"}
+
+    def test_remote_unsupported_transport_raises_for_kiro(self) -> None:
+        adapter = KiroClientAdapter()
+        server_info = {
+            "name": "remote-server",
+            "remotes": [
+                {
+                    "transport_type": "websocket",
+                    "url": "https://mcp.example.com/server",
+                }
+            ],
+        }
+
+        try:
+            adapter._format_server_config(server_info)
+        except ValueError as exc:
+            message = str(exc)
+        else:
+            raise AssertionError("Expected ValueError for unsupported Kiro transport")
+
+        assert "Unsupported remote transport" in message
+        assert "websocket" in message
+        assert "Kiro" in message
+
     def test_stdio_env_literals_are_written_as_runtime_placeholders(self) -> None:
         adapter = KiroClientAdapter()
         server_info = {
@@ -121,6 +161,23 @@ class TestKiroClientAdapter:
 
         data = json.loads((tmp_path / ".kiro" / "settings" / "mcp.json").read_text())
         assert data["mcpServers"]["srv"]["command"] == "npx"
+
+    def test_configure_mcp_server_error_names_config_key(self, tmp_path: Path) -> None:
+        (tmp_path / ".kiro").mkdir()
+        adapter = KiroClientAdapter(project_root=tmp_path)
+        adapter.registry_client = MagicMock()
+        adapter.registry_client.find_server_by_reference.return_value = {
+            "name": "broken-server",
+            "remotes": [{"transport_type": "websocket", "url": "https://mcp.example.com"}],
+        }
+
+        with patch("apm_cli.adapters.client.kiro._rich_error") as rich_error:
+            assert adapter.configure_mcp_server("scope/server", server_name="srv") is False
+
+        rich_error.assert_called_once_with(
+            "Failed to configure MCP server 'srv' for Kiro",
+            symbol="error",
+        )
 
     def test_configure_mcp_server_sets_disabled_when_enabled_false(self, tmp_path: Path) -> None:
         (tmp_path / ".kiro").mkdir()
