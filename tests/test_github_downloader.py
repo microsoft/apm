@@ -2271,6 +2271,24 @@ def _gitea_json_envelope(file_bytes: bytes) -> bytes:
     ).encode("utf-8")
 
 
+def _error_url_components(text: str) -> list[tuple[str, str, str]]:
+    """Extract (scheme, hostname, path) tuples for any URLs embedded in *text*.
+
+    Download-error messages embed the failed endpoint as a URL. Asserting on
+    parsed components (per tests.instructions.md: never substring-match URLs)
+    rather than scraping with ``startswith``/``rstrip`` keeps the assertion
+    robust to wording or punctuation tweaks in the error string.
+    """
+    out: list[tuple[str, str, str]] = []
+    for token in text.split():
+        cleaned = token.strip("(),.;'\"")
+        if "://" not in cleaned:
+            continue
+        parsed = urlparse(cleaned)
+        out.append((parsed.scheme, parsed.hostname or "", parsed.path))
+    return out
+
+
 class TestGiteaRawUrlDownload:
     """Gitea raw URL path: /{owner}/{repo}/raw/{ref}/{file}."""
 
@@ -2417,11 +2435,8 @@ class TestGiteaRawUrlDownload:
             with pytest.raises(RuntimeError) as exc_info:
                 self.downloader.download_raw_file(dep_ref, "README.md", "main")
 
-        urls = [tok for tok in str(exc_info.value).split() if tok.startswith("https://")]
-        assert len(urls) == 1
-        parsed = urlparse(urls[0].rstrip("."))
-        assert parsed.hostname == "gitea.myorg.com"
-        assert parsed.path == "/owner/repo/raw/main/README.md"
+        components = _error_url_components(str(exc_info.value))
+        assert ("https", "gitea.myorg.com", "/owner/repo/raw/main/README.md") in components
         assert "network error" in str(exc_info.value).lower()
 
     def test_raw_url_500_surfaces_with_endpoint_context(self):
@@ -2431,11 +2446,8 @@ class TestGiteaRawUrlDownload:
             with pytest.raises(RuntimeError) as exc_info:
                 self.downloader.download_raw_file(dep_ref, "README.md", "main")
 
-        urls = [tok for tok in str(exc_info.value).split() if tok.startswith("https://")]
-        assert len(urls) == 1
-        parsed = urlparse(urls[0].rstrip("."))
-        assert parsed.hostname == "gitea.myorg.com"
-        assert parsed.path == "/owner/repo/raw/main/README.md"
+        components = _error_url_components(str(exc_info.value))
+        assert ("https", "gitea.myorg.com", "/owner/repo/raw/main/README.md") in components
         assert "HTTP 500" in str(exc_info.value)
 
 
