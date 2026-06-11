@@ -479,9 +479,10 @@ if ($pinnedVersion) {
         exit 1
     }
     $latestUri = Get-ReleaseMetadataUri
+    $headers = if ($releaseMetadataUrl) { @{} } else { Get-AuthHeader }
     $metadataError = $null
     try {
-        $release = Invoke-RestMethod -Uri $latestUri
+        $release = Invoke-GitHubJson -Uri $latestUri -Headers $headers
     } catch {
         $metadataError = $_
     }

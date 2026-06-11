@@ -158,3 +158,22 @@ def test_unix_installer_fail_closed_asset_exit_code() -> None:
     combined = result.stdout + result.stderr
     assert "APM_NO_DIRECT_FALLBACK is set" in combined
     assert "APM_RELEASE_BASE_URL is not configured" in combined
+
+
+def test_windows_installer_uses_auth_on_first_ghes_metadata_fetch() -> None:
+    """install.ps1 should not make an unauthenticated GHES metadata request first."""
+    text = _read_repo_file("install.ps1")
+
+    assert "$headers = if ($releaseMetadataUrl) { @{} } else { Get-AuthHeader }" in text
+    assert "$release = Invoke-GitHubJson -Uri $latestUri -Headers $headers" in text
+    assert "$release = Invoke-RestMethod -Uri $latestUri" not in text
+
+
+def test_unix_installer_centralizes_fail_closed_error_style() -> None:
+    """install.sh fail-closed guards should share one actionable error helper."""
+    text = _read_repo_file("install.sh")
+
+    assert "fail_closed_error()" in text
+    assert text.count("fail_closed_error APM_RELEASE_BASE_URL") == 2
+    assert text.count("fail_closed_error APM_RELEASE_METADATA_URL") == 1
+    assert text.count("fail_closed_error APM_PYPI_INDEX_URL") == 1

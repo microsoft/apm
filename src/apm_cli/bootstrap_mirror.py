@@ -2,12 +2,14 @@
 
 import os
 
+from apm_cli.utils.path_security import PathTraversalError, validate_path_segments
+
 APM_RELEASE_BASE_URL = "APM_RELEASE_BASE_URL"
 APM_RELEASE_METADATA_URL = "APM_RELEASE_METADATA_URL"
 APM_INSTALLER_BASE_URL = "APM_INSTALLER_BASE_URL"
 APM_PYPI_INDEX_URL = "APM_PYPI_INDEX_URL"
 APM_NO_DIRECT_FALLBACK = "APM_NO_DIRECT_FALLBACK"
-VERSION = "VERSION"
+VERSION_ENV_VAR = "VERSION"
 
 _PUBLIC_GITHUB_URL = "https://github.com"
 _TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -30,8 +32,18 @@ def no_direct_fallback_enabled() -> bool:
 
 
 def append_url_path(base_url: str, *parts: str) -> str:
-    """Join a base URL and path parts without introducing double slashes."""
-    cleaned = [part.strip("/") for part in parts if part]
+    """Join a base URL and path parts without unsafe dot segments."""
+    cleaned: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        segment = part.strip("/")
+        try:
+            validate_path_segments(segment, context="URL path part")
+        except PathTraversalError as exc:
+            raise ValueError("URL path parts must not contain dot segments") from exc
+        if segment:
+            cleaned.append(segment)
     if not cleaned:
         return base_url.rstrip("/")
     return "/".join([base_url.rstrip("/"), *cleaned])
@@ -68,7 +80,7 @@ def release_metadata_public_lookup_blocked(github_url: str | None = None) -> boo
         no_direct_fallback_enabled()
         and is_public_github_url(github_url)
         and get_release_metadata_url() is None
-        and not os.environ.get(VERSION, "").strip()
+        and not os.environ.get(VERSION_ENV_VAR, "").strip()
     )
 
 
