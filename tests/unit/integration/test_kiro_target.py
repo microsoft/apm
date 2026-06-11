@@ -247,6 +247,44 @@ def test_kiro_hooks_expand_each_apm_hook_to_individual_json(tmp_path: Path) -> N
     assert (tmp_path / ".kiro" / "hooks" / "hookify" / "hooks" / "prompt.py").exists()
 
 
+def test_kiro_hooks_convert_prompt_actions_to_ask_agent(tmp_path: Path) -> None:
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "prompt-hooks"
+    hooks_dir = package_dir / "hooks"
+    hooks_dir.mkdir(parents=True)
+    hook_data = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "hooks": [
+                        {
+                            "type": "askAgent",
+                            "prompt": "Review the submitted prompt for policy drift.",
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+    (hooks_dir / "hooks.json").write_text(json.dumps(hook_data), encoding="utf-8")
+
+    result = HookIntegrator().integrate_hooks_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir, "prompt-hooks"),
+        tmp_path,
+    )
+
+    target = tmp_path / ".kiro" / "hooks" / "prompt-hooks-hooks-promptsubmit-1.json"
+    assert result.files_integrated == 1
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert data["when"] == {"type": "promptSubmit"}
+    assert data["then"] == {
+        "type": "askAgent",
+        "prompt": "Review the submitted prompt for policy drift.",
+    }
+    assert target.stat().st_mode & 0o777 == 0o600
+
+
 def test_kiro_hooks_skip_when_project_has_no_kiro_dir(tmp_path: Path) -> None:
     package_dir = tmp_path / "hookify"
     hooks_dir = package_dir / "hooks"
