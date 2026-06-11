@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -49,7 +50,8 @@ class TestKiroClientAdapter:
         data = json.loads(mcp_json.read_text(encoding="utf-8"))
         assert data["mcpServers"]["srv"]["command"] == "node"
         assert data["mcpServers"]["srv"]["args"] == ["server.js"]
-        assert mcp_json.stat().st_mode & 0o777 == 0o600
+        if sys.platform != "win32":
+            assert mcp_json.stat().st_mode & 0o777 == 0o600
 
     def test_user_scope_writes_without_existing_kiro_dir(self, tmp_path: Path) -> None:
         with patch("pathlib.Path.home", return_value=tmp_path):
@@ -59,7 +61,8 @@ class TestKiroClientAdapter:
         mcp_json = tmp_path / ".kiro" / "settings" / "mcp.json"
         data = json.loads(mcp_json.read_text(encoding="utf-8"))
         assert data["mcpServers"]["srv"]["command"] == "node"
-        assert mcp_json.stat().st_mode & 0o777 == 0o600
+        if sys.platform != "win32":
+            assert mcp_json.stat().st_mode & 0o777 == 0o600
 
     def test_remote_config_uses_kiro_url_headers_and_tool_extensions(self) -> None:
         adapter = KiroClientAdapter()

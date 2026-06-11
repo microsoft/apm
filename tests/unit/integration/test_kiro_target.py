@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -236,12 +237,14 @@ def test_kiro_hooks_expand_each_apm_hook_to_individual_json(tmp_path: Path) -> N
     assert pre_data["then"]["command"] == "python .kiro/hooks/hookify/hooks/check.py"
     assert pre_data["description"] == "Validate before tool use"
     assert "hooks" not in pre_data
-    assert pre_tool.stat().st_mode & 0o777 == 0o600
+    if sys.platform != "win32":
+        assert pre_tool.stat().st_mode & 0o777 == 0o600
 
     prompt_data = json.loads(prompt_submit.read_text(encoding="utf-8"))
     assert prompt_data["when"] == {"type": "promptSubmit"}
     assert prompt_data["then"]["command"] == "python .kiro/hooks/hookify/hooks/prompt.py"
-    assert prompt_submit.stat().st_mode & 0o777 == 0o600
+    if sys.platform != "win32":
+        assert prompt_submit.stat().st_mode & 0o777 == 0o600
 
     assert (tmp_path / ".kiro" / "hooks" / "hookify" / "hooks" / "check.py").exists()
     assert (tmp_path / ".kiro" / "hooks" / "hookify" / "hooks" / "prompt.py").exists()
@@ -282,7 +285,8 @@ def test_kiro_hooks_convert_prompt_actions_to_ask_agent(tmp_path: Path) -> None:
         "type": "askAgent",
         "prompt": "Review the submitted prompt for policy drift.",
     }
-    assert target.stat().st_mode & 0o777 == 0o600
+    if sys.platform != "win32":
+        assert target.stat().st_mode & 0o777 == 0o600
 
 
 def test_kiro_hooks_skip_when_project_has_no_kiro_dir(tmp_path: Path) -> None:

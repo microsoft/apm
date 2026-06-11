@@ -314,6 +314,10 @@ class TestEnterpriseBootstrapSelfUpdate:
                 "APM_RELEASE_METADATA_URL": "https://mirror.corp.example/apm/latest.json",
                 "APM_INSTALLER_BASE_URL": "https://mirror.corp.example/apm/installers",
                 "APM_TEMP_DIR": str(self.scratch),
+                # Disable the CLI-startup update notifier so its cache-gated
+                # metadata fetch (which fires on a cold Windows runner cache but
+                # not on a warm Unix one) does not perturb the request list.
+                "APM_E2E_TESTS": "1",
             }
         )
         requested_urls: list[str] = []
