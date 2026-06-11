@@ -108,7 +108,8 @@ class TestCompileUserRootContextsAfterInstall:
         # Logger should have been called with verbose_detail
         mock_logger.verbose_detail.assert_called_once()
         call_str = str(mock_logger.verbose_detail.call_args)
-        assert "2" in call_str  # Should mention 2 files
+        assert "claude" in call_str
+        assert "vscode" in call_str
 
     def test_no_logging_when_no_files_written(self):
         """When no files written, logger not called."""

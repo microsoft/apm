@@ -108,6 +108,10 @@ use `apm install` or `apm deps update` when you want shared
 Use `apm compile --global` to re-run it manually after adding or removing global packages.
 Hand-authored files (files that do not carry the APM-generated marker) are never overwritten.
 
+```bash
+apm compile -g
+```
+
 ## Examples
 
 Compile for whatever the project is set up for:

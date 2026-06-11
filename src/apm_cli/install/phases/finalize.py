@@ -32,7 +32,8 @@ def _compile_user_root_contexts_after_install(ctx: InstallContext) -> None:
     results = compile_user_root_contexts(targets, source_root, dry_run=False, logger=None)
     written = [r for r in results if r.get("status") == "written"]
     if written and ctx.logger:
-        ctx.logger.verbose_detail(f"Compiled {len(written)} user-scope root context file(s)")
+        target_names = ", ".join(str(r["target"]) for r in written)
+        ctx.logger.verbose_detail(f"Compiled user-scope root contexts: {target_names}")
 
 
 def run(ctx: InstallContext) -> InstallResult:
