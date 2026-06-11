@@ -83,6 +83,9 @@ dependencies:
     # Local: filesystem path (development only)
     - path: ./packages/shared-skills
 
+    # Remote monorepo sibling: inside owner/mono/packages/frontend/apm.yml
+    - path: ../shared
+
     # Marketplace: resolved to a concrete git ref at install time
     - name: sec-check
       marketplace: acme-plugins
@@ -103,6 +106,12 @@ dependencies:
       version: 1.4.0
 
 ```
+
+A `path:` declared inside a remote package is allowed only when the resolved
+path stays inside that same cloned repo. APM expands it to the parent's remote
+host/repo/ref and downloads the sibling from the same origin. Absolute paths,
+paths that escape the repo root, and cross-repo local paths are rejected.
+This is for same-repo monorepo siblings, not general workspace semantics.
 
 For private repos and non-GitHub hosts, see
 [Private and org packages](../private-and-org-packages/).
