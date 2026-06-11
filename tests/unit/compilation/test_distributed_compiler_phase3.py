@@ -758,11 +758,12 @@ class TestCompileDistributedStats:
         prims = _make_primitives()
         stats: dict = compiler._compile_distributed_stats([], prims)
         assert "agents_files_generated" in stats
+        assert "placements_analyzed" in stats
         assert "total_instructions_placed" in stats
         assert "primitives_found" in stats
 
     def test_stats_counts_placements(self, tmp_path: Path) -> None:
-        """agents_files_generated equals number of placements."""
+        """agents_files_generated falls back to len(placements) when content_map is not passed."""
         compiler = _make_compiler_in_tmp(tmp_path)
         compiler.context_optimizer.get_optimization_stats.return_value = None
         inst = _make_instruction(file_path=tmp_path / "i.md")
@@ -774,6 +775,7 @@ class TestCompileDistributedStats:
         prims = _make_primitives()
         stats: dict = compiler._compile_distributed_stats([placement], prims)
         assert stats["agents_files_generated"] == 1
+        assert stats["placements_analyzed"] == 1
         assert stats["total_instructions_placed"] == 1
 
     def test_optimization_stats_merged_when_available(self, tmp_path: Path) -> None:

@@ -415,11 +415,19 @@ class TestHandAuthoredProtection:
             encoding="utf-8",
         )
 
+        apm_instr_dir = tmp_path / ".apm" / "instructions"
+        apm_instr_dir.mkdir(parents=True)
+        apm_instr_file = apm_instr_dir / "global.instructions.md"
+        apm_instr_file.write_text(
+            "---\ndescription: Global\n---\nGlobal guidance.\n",
+            encoding="utf-8",
+        )
+
         instruction = _make_instruction(
             name="global",
             content="Global guidance.",
             apply_to=None,
-            file_path=tmp_path / ".apm" / "instructions" / "global.instructions.md",
+            file_path=apm_instr_file,
         )
         primitives = _make_primitives(instruction)
 
@@ -453,11 +461,19 @@ class TestMultiTargetUnaffected:
             encoding="utf-8",
         )
 
+        apm_instr_dir = tmp_path / ".apm" / "instructions"
+        apm_instr_dir.mkdir(parents=True)
+        apm_instr_file = apm_instr_dir / "style.instructions.md"
+        apm_instr_file.write_text(
+            "---\ndescription: Style\napplyTo: '**/*.py'\n---\nUse type hints.\n",
+            encoding="utf-8",
+        )
+
         instruction = _make_instruction(
             name="style",
             content="Use type hints.",
             apply_to="**/*.py",
-            file_path=tmp_path / ".apm" / "instructions" / "style.instructions.md",
+            file_path=apm_instr_file,
         )
         primitives = _make_primitives(instruction)
         return tmp_path, primitives

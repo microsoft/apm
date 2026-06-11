@@ -280,7 +280,7 @@ class DistributedAgentsCompiler:
                 self.warnings.extend(coverage_validation)
 
             # Compile statistics
-            stats = self._compile_distributed_stats(placements, primitives)
+            stats = self._compile_distributed_stats(placements, primitives, content_map=content_map)
 
             # Optional: Get referenced contexts for reporting (doesn't copy)
             try:
@@ -791,7 +791,13 @@ class DistributedAgentsCompiler:
         marker are ever returned; hand-authored AGENTS.md files are silently skipped.
 
         Args:
-            generated_paths: AGENTS.md files written in the current run.
+            generated_paths: AGENTS.md placement paths considered part of the current
+                run — these are ALL placement paths (written OR suppressed as empty
+                shells), NOT necessarily files that were written to disk.  Paths in
+                this list are excluded from orphan candidates so that previously
+                written files belonging to an active placement are never flagged for
+                cleanup.  Do not pass only the written subset, or stale-but-active
+                placements will be incorrectly treated as orphans.
             suppressed_empty_paths: AGENTS.md paths suppressed this run because
                 they would have been header/footer-only shells (skip_instructions
                 active, no constitution).  Pass an empty list or None when
@@ -937,13 +943,23 @@ class DistributedAgentsCompiler:
         return cleanup_messages
 
     def _compile_distributed_stats(
-        self, placements: builtins.list[PlacementResult], primitives: PrimitiveCollection
+        self,
+        placements: builtins.list[PlacementResult],
+        primitives: PrimitiveCollection,
+        *,
+        content_map: builtins.dict[Path, str] | None = None,
     ) -> builtins.dict[str, float]:
         """Compile statistics about the distributed compilation with optimization metrics.
 
         Args:
-            placements (List[PlacementResult]): Generated placements.
+            placements (List[PlacementResult]): All placements analyzed (written + suppressed).
             primitives (PrimitiveCollection): Full primitive collection.
+            content_map: Mapping of agents_path -> content for placements that will actually
+                be written (i.e. excluding suppressed empty-shell placements).  When provided,
+                ``agents_files_generated`` reflects the number of files that will be written
+                rather than the number of placements analyzed (which overcounts under
+                skip_instructions deduplication).  Defaults to None for back-compat with
+                direct callers that do not pass the content map.
 
         Returns:
             Dict[str, float]: Compilation statistics including optimization metrics.
@@ -951,13 +967,22 @@ class DistributedAgentsCompiler:
         total_instructions = sum(len(p.instructions) for p in placements)
         total_patterns = sum(len(p.coverage_patterns) for p in placements)
 
+        # agents_files_generated: number of files that will actually be written.
+        # When content_map is provided (normal compile_distributed() path), use its
+        # length so suppressed empty-shell placements are not counted.  Fall back to
+        # len(placements) for back-compat with callers that do not pass content_map.
+        files_generated = len(content_map) if content_map is not None else len(placements)
+
         # Get optimization metrics
         placement_map = {Path(p.agents_path.parent): p.instructions for p in placements}
         optimization_stats = self.context_optimizer.get_optimization_stats(placement_map)
 
         # Combine traditional stats with optimization metrics
         stats = {
-            "agents_files_generated": len(placements),
+            "agents_files_generated": files_generated,
+            # Total placements analyzed (includes suppressed empty-shell placements).
+            # Useful for audit/debug: agents_files_generated <= placements_analyzed.
+            "placements_analyzed": len(placements),
             "total_instructions_placed": total_instructions,
             "total_patterns_covered": total_patterns,
             "primitives_found": primitives.count(),

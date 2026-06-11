@@ -546,7 +546,7 @@ class AgentsCompiler:
                 # Partial suppression: at least one AGENTS.md was written
                 self._log(
                     "progress",
-                    f"AGENTS.md subdir placements not generated ({suppressed_count} {noun})"
+                    f"Some AGENTS.md placements not generated ({suppressed_count} {noun})"
                     " -- Copilot reads `.github/instructions/` directly,"
                     " no further action needed",
                     symbol="info",
