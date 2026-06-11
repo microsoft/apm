@@ -9,10 +9,31 @@ import pytest
 from apm_cli.marketplace.builder import BuildOptions, MarketplaceBuilder
 from apm_cli.marketplace.errors import MarketplaceYmlError
 from apm_cli.marketplace.migration import load_marketplace_config
+from apm_cli.marketplace.ref_resolver import RemoteRef
 from apm_cli.marketplace.yml_editor import add_plugin_entry
 from apm_cli.marketplace.yml_schema import MarketplaceConfig
 
 _SHA = "a" * 40
+
+
+class _MockRefResolver:
+    """In-process RefResolver stub keyed by composed ``owner/repo`` path.
+
+    The version-range branch of ``MarketplaceBuilder._resolve_entry`` calls
+    ``list_remote_refs(owner_repo)`` where ``owner_repo`` is the base-composed
+    coordinate (e.g. ``platform/marketplaces/team/tool``). Keying the stub on
+    that composed path proves the base composition reaches the resolver on the
+    ``version:`` branch, not just the explicit-``ref`` branch.
+    """
+
+    def __init__(self, refs_by_remote: dict[str, list[RemoteRef]]) -> None:
+        self._refs = refs_by_remote
+
+    def list_remote_refs(self, owner_repo: str) -> list[RemoteRef]:
+        return self._refs.get(owner_repo, [])
+
+    def close(self) -> None:
+        pass
 
 
 def _write(path: Path, content: str) -> Path:
@@ -202,6 +223,105 @@ class TestSourceBaseBuildComposition:
         assert parsed.scheme == "https"
         assert parsed.hostname == "ghe.example.com"
         assert parsed.path == "/acme/tool"
+
+    def test_composes_relative_source_onto_base_for_version_range_resolution(
+        self, tmp_path: Path
+    ) -> None:
+        # Lock the compose-onto-base behavior for the ``version:`` branch too.
+        # The explicit-``ref`` test exercises one branch of ``_resolve_entry``;
+        # ``_resolve_version_range`` threads the same source_host/source_url and
+        # must select a tag against the composed ``owner/repo`` coordinate.
+        config = _load_config(
+            tmp_path,
+            "https://gitlab.example.com/platform/marketplaces",
+            """
+            - name: tool
+              source: team/tool
+              version: "^1.0.0"
+            """,
+        )
+        builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+        composed_repo = "platform/marketplaces/team/tool"
+        refs = {
+            composed_repo: [
+                RemoteRef(name="refs/tags/v1.0.0", sha="b" * 40),
+                RemoteRef(name="refs/tags/v1.2.0", sha="c" * 40),
+                RemoteRef(name="refs/tags/v2.0.0", sha="d" * 40),
+            ]
+        }
+        builder._get_resolver_for_host = lambda _host: _MockRefResolver(refs)  # type: ignore[assignment]
+
+        resolved = builder._resolve_entry(config.packages[0])
+        assert resolved.source_repo == composed_repo
+        assert resolved.host == "gitlab.example.com"
+        assert resolved.ref == "v1.2.0"
+        assert resolved.sha == "c" * 40
+        parsed = urlparse(resolved.source_url or "")
+        assert parsed.scheme == "https"
+        assert parsed.hostname == "gitlab.example.com"
+        assert parsed.path == "/platform/marketplaces/team/tool"
+
+        doc = builder.compose_marketplace_json([resolved])
+        source = doc["plugins"][0]["source"]
+        assert source["source"] == "url"
+        parsed = urlparse(source["url"])
+        assert parsed.hostname == "gitlab.example.com"
+        assert parsed.path == "/platform/marketplaces/team/tool"
+
+    def test_ado_shaped_source_base_composes_relative_repo(self, tmp_path: Path) -> None:
+        # Forward-compat guard for the #1010 / future-ADO reuse: an Azure DevOps
+        # base (``org/project/_git`` 3-part path, underscore-leading ``_git``
+        # segment) must validate and compose a relative repo onto it. ADO will
+        # REUSE sourceBase rather than add a separate ``host`` field, so the
+        # field shape must not be narrowed to reject this base.
+        config = _load_config(
+            tmp_path,
+            "https://dev.azure.com/contoso/platform/_git",
+            f"""
+            - name: ado-tool
+              source: agent-skills
+              ref: {_SHA}
+            """,
+        )
+        assert config.source_base == "https://dev.azure.com/contoso/platform/_git"
+        assert config.packages[0].source == "agent-skills"
+        assert config.packages[0].host is None
+
+        builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+        resolved = builder._resolve_entry(config.packages[0])
+        assert resolved.source_repo == "contoso/platform/_git/agent-skills"
+        assert resolved.host == "dev.azure.com"
+        parsed = urlparse(resolved.source_url or "")
+        assert parsed.scheme == "https"
+        assert parsed.hostname == "dev.azure.com"
+        assert parsed.path == "/contoso/platform/_git/agent-skills"
+
+    def test_dotted_subgroup_relative_source_composes_onto_base(self, tmp_path: Path) -> None:
+        # A relative source whose owner segment legitimately contains a dot
+        # (e.g. a GitLab subgroup named ``team.tools``) is a valid two-segment
+        # ``owner/repo`` shape and MUST compose onto the base -- it is NOT a
+        # host-looking value the confused-deputy guard rejects. Locks the
+        # accepted behavior so future guard changes cannot silently start
+        # blocking valid dotted subgroup names.
+        config = _load_config(
+            tmp_path,
+            "https://gitlab.example.com/platform/marketplaces",
+            f"""
+            - name: dotted
+              source: team.tools/repo
+              ref: {_SHA}
+            """,
+        )
+        assert config.packages[0].source == "team.tools/repo"
+        assert config.packages[0].host is None
+
+        builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+        resolved = builder._resolve_entry(config.packages[0])
+        assert resolved.source_repo == "platform/marketplaces/team.tools/repo"
+        assert resolved.host == "gitlab.example.com"
+        parsed = urlparse(resolved.source_url or "")
+        assert parsed.hostname == "gitlab.example.com"
+        assert parsed.path == "/platform/marketplaces/team.tools/repo"
 
 
 class TestSourceBaseEditor:
