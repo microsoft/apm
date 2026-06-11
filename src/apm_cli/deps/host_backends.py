@@ -522,6 +522,13 @@ _BACKEND_BY_KIND: dict[str, type] = {
 }
 
 
+def _host_type_for_backend_dispatch(dep_ref: DependencyReference | None) -> str | None:
+    """Return a first-class host_type from typed dependency refs."""
+    if type(dep_ref).__name__ == "DependencyReference":
+        return dep_ref.host_type
+    return None
+
+
 def backend_for(
     dep_ref: DependencyReference | None,
     auth_resolver: AuthResolver,
@@ -547,6 +554,7 @@ def backend_for(
     Returns:
         The :class:`HostBackend` for the resolved host.
     """
+    host_type = _host_type_for_backend_dispatch(dep_ref)
     if dep_ref is not None and dep_ref.host:
         host = dep_ref.host
         port = getattr(dep_ref, "port", None)
@@ -563,7 +571,7 @@ def backend_for(
                 info = auth_resolver.classify_host(
                     host,
                     port=port,
-                    host_type=dep_ref.host_type,
+                    host_type=host_type,
                 )
                 if not isinstance(info, HostInfo):
                     info = HostInfo(
@@ -580,7 +588,7 @@ def backend_for(
     info = auth_resolver.classify_host(
         host,
         port=port,
-        host_type=dep_ref.host_type if dep_ref is not None else None,
+        host_type=host_type,
     )
     cls: type | None = None
     if isinstance(info, HostInfo):
