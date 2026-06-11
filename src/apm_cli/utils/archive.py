@@ -215,7 +215,9 @@ def download_and_extract_archive(url: str, dest_dir: str) -> list[str]:
 
     destination_root = Path(dest_dir)
     destination_root.mkdir(parents=True, exist_ok=True)
-    download_path = destination_root / f".apm-archive-download-{uuid.uuid4().hex}"
+    staging_root = destination_root.parent / f".apm-archive-staging-{uuid.uuid4().hex}"
+    staging_root.mkdir(parents=True, exist_ok=False)
+    download_path = staging_root / "archive-download"
     response = None
     try:
         response = requests.get(url, headers={"User-Agent": "apm-cli"}, timeout=60, stream=True)
@@ -241,3 +243,5 @@ def download_and_extract_archive(url: str, dest_dir: str) -> list[str]:
                 close()
         with contextlib.suppress(OSError):
             download_path.unlink()
+        with contextlib.suppress(OSError):
+            staging_root.rmdir()

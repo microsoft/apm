@@ -17,9 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of `~/.hermes/config.yaml` (written atomically with `0o600` perms, preserving
   unrelated config keys and refusing to overwrite a malformed file). `HERMES_HOME`
   overrides the Hermes home directory. See the [Hermes integration guide](https://microsoft.github.io/apm/integrations/hermes/).
-- `apm marketplace add` can register git URL `#ref`, local file, and hosted
-  `marketplace.json` sources, so teams can use private, offline, or hosted
-  catalogs while APM records hosted JSON provenance in the lockfile (closes
+- `apm marketplace add` now accepts git URLs with `#ref`, local file paths,
+  and hosted `marketplace.json` URLs -- so teams can consume private,
+  offline, or hosted catalogs without publishing a GitHub repo (closes
   #676). (#1739)
 - Enterprise bootstrap mirror mode lets `install.sh`, `install.ps1`, and `apm self-update` use internal release, installer, and PyPI mirrors with fail-closed public fallback, and closes #1680. (#1733)
 

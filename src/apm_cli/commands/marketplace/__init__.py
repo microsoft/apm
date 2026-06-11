@@ -500,6 +500,8 @@ _ADD_EPILOG = """
 Examples:
   apm marketplace add owner/repo
   apm marketplace add github.com/owner/repo
+  apm marketplace add https://github.com/owner/repo#v1.0.0
+  apm marketplace add https://catalog.example.com/marketplace.json --name catalog
   apm marketplace add https://gitlab.com/group/repo
   apm marketplace add https://dev.azure.com/org/proj/_git/repo --name apm-mkt
   apm marketplace add git@gitea.example.com:org/repo.git --name custom
@@ -631,6 +633,7 @@ def add(source, name, ref, branch, host, verbose):
         provisional_label = name or (
             _default_alias_from_remote_url(url) if is_direct_url else _default_alias_from_url(url)
         )
+        logger.start(f"Registering marketplace '{provisional_label}'...", symbol="gear")
         if _should_warn_unpinned_git_url(
             source_arg, kind, is_direct_url, fragment_ref, explicit_ref
         ):
@@ -639,7 +642,6 @@ def add(source, name, ref, branch, host, verbose):
                 f"{source_arg}#v1.0.0) or --ref to avoid mutable branch updates.",
                 symbol="warning",
             )
-        logger.start(f"Registering marketplace '{provisional_label}'...", symbol="gear")
 
         # Probe for marketplace.json location. The probe source's name is a
         # placeholder -- _auto_detect_path only consults url/ref/path/kind.
@@ -703,7 +705,10 @@ def add(source, name, ref, branch, host, verbose):
         )
         if not is_direct_url:
             logger.verbose_detail(f"    Ref: {effective_ref}")
-        logger.verbose_detail(f"    Detected path: {detected_path}")
+        if detected_path:
+            logger.verbose_detail(f"    Detected path: {detected_path}")
+        elif not is_direct_url:
+            logger.verbose_detail("    Detected path: direct local file")
         logger.verbose_detail(f"    Alias source: {alias_source}")
 
         final_source = MarketplaceSource(

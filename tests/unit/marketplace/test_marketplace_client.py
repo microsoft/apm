@@ -278,6 +278,57 @@ class TestFetchMarketplace:
         assert seen_headers[0]["If-None-Match"] == "etag-1"
         assert seen_headers[0]["If-Modified-Since"] == "Mon, 01 Jan 2024 00:00:00 GMT"
 
+    def test_fetch_remote_marketplace_url_rejects_redirect_to_http(self, monkeypatch):
+        source_url = "https://catalog.example.com/marketplace.json"
+
+        class Response:
+            status_code = 200
+            url = "http://catalog.example.com/marketplace.json"
+
+            def __init__(self):
+                self.headers: dict[str, str] = {}
+
+            def raise_for_status(self):
+                return None
+
+            def close(self):
+                return None
+
+        class Session:
+            def get(self, url, headers=None, timeout=None, stream=False):
+                assert stream is True
+                return Response()
+
+        monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
+
+        with pytest.raises(MarketplaceFetchError, match="redirect to non-HTTPS URL rejected"):
+            client_mod._fetch_url_direct(source_url)
+
+    def test_http_get_clears_session_cookies_between_hosts(self, monkeypatch):
+        class Cookies:
+            def __init__(self):
+                self.clear_count = 0
+
+            def clear(self):
+                self.clear_count += 1
+
+        class Session:
+            def __init__(self):
+                self.cookies = Cookies()
+                self.calls: list[str] = []
+
+            def get(self, url, **kwargs):
+                self.calls.append(url)
+                return object()
+
+        session = Session()
+        monkeypatch.setattr(client_mod, "_HTTP_SESSION", session, raising=False)
+
+        assert client_mod._http_get("https://one.example.test") is not None
+        assert client_mod._http_get("https://two.example.test") is not None
+        assert session.calls == ["https://one.example.test", "https://two.example.test"]
+        assert session.cookies.clear_count == 4
+
     def test_fetch_remote_marketplace_url_streams_without_content_length(self, monkeypatch):
         source_url = "https://catalog.example.com/marketplace.json"
         raw = b'{"name":"catalog","plugins":[]}'

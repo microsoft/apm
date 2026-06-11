@@ -60,6 +60,66 @@ def test_download_and_extract_archive_rejects_non_https_before_request(
     assert called is False
 
 
+def test_download_and_extract_archive_rejects_redirect_to_http(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = _zip_bytes({"plugin/SKILL.md": b"content"})
+
+    class Response:
+        def __init__(self) -> None:
+            self.headers = {"Content-Type": ""}
+            self.url = "http://cdn.example.test/plugin.zip"
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_content(self, chunk_size: int):
+            yield archive
+
+        def close(self) -> None:
+            return None
+
+    def fake_get(_url: str, **_kwargs: object) -> Response:
+        return Response()
+
+    monkeypatch.setattr(archive_mod.requests, "get", fake_get)
+
+    with pytest.raises(ArchiveError, match="Redirect to non-HTTPS URL rejected"):
+        download_and_extract_archive("https://example.test/download", str(tmp_path / "out"))
+
+
+def test_download_and_extract_archive_stages_raw_file_outside_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = _zip_bytes({"plugin/SKILL.md": b"content"})
+    out = tmp_path / "out"
+
+    class Response:
+        def __init__(self) -> None:
+            self.headers = {"Content-Type": "application/zip"}
+            self.url = "https://cdn.example.test/plugin.zip"
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_content(self, chunk_size: int):
+            assert not list(out.glob(".apm-archive-download-*"))
+            yield archive
+
+        def close(self) -> None:
+            return None
+
+    def fake_get(_url: str, **_kwargs: object) -> Response:
+        return Response()
+
+    monkeypatch.setattr(archive_mod.requests, "get", fake_get)
+
+    extracted = download_and_extract_archive("https://example.test/download", str(out))
+
+    assert extracted == ["plugin/SKILL.md"]
+    assert not list(out.glob(".apm-archive-*"))
+
+
 def test_download_and_extract_archive_uses_redirect_url_for_format(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

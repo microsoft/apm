@@ -219,9 +219,15 @@ def _read_stale_meta(name: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 
-def _http_get(url: str, **kwargs):
-    """Issue HTTP GET through a shared session for connection reuse."""
-    return _HTTP_SESSION.get(url, **kwargs)
+def _http_get(url: str, **kwargs: object):
+    """Issue HTTP GET through a shared session without persisting cookies."""
+    cookies = getattr(_HTTP_SESSION, "cookies", None)
+    if cookies is not None:
+        cookies.clear()
+    response = _HTTP_SESSION.get(url, **kwargs)
+    if cookies is not None:
+        cookies.clear()
+    return response
 
 
 def _read_bounded_response_bytes(resp, url: str, max_bytes: int) -> bytes:

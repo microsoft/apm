@@ -106,7 +106,7 @@ apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
 | `--name`, `-n` | Display name. Defaults to the repo name. |
 | `--ref`, `-r` | Git ref (branch, tag, or SHA). Default: `main`. Applies only to git-backed sources. For HTTPS git URLs, a `#ref` fragment is equivalent and is stored as the ref. |
 | `--branch`, `-b` | Deprecated alias for `--ref`. |
-| `--host` | Git host FQDN for `OWNER/REPO` shorthand. Default: `github.com`. Ignored with a warning when `SOURCE` is a URL, hosted `marketplace.json`, or local path. |
+| `--host` | Git host FQDN for `OWNER/REPO` shorthand. Default: `github.com`. Ignored when `SOURCE` already carries a host (URL, hosted `marketplace.json`, or local path); a warning is shown for hosted JSON, local paths, or a conflicting embedded host. |
 | `--verbose`, `-v` | Show detailed output. |
 
 **Trust boundary.** APM forwards its authentication tokens

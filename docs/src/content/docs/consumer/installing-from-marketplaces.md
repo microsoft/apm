@@ -88,20 +88,23 @@ browse / install / update workflow works against:
   lockfile when packages are installed from it.
 - **Generic git URLs** -- any host APM does not classify as
   GitHub or GitLab family flows through subprocess `git` and
-  `GitCache`. Includes Azure DevOps, Gitea, Bitbucket Server, and
-  self-hosted git servers.
+  `GitCache`. Includes Azure DevOps (auth via `ADO_APM_PAT`),
+  Gitea, Bitbucket Server, and self-hosted git servers.
 - **SSH URLs** -- `git@gitea.example.com:org/repo.git`. The host
   is extracted, classified, and routed through the matching fetcher.
 
+:::note[Hosted JSON is public HTTPS]
 Hosted `marketplace.json` URLs are public HTTPS sources: APM does not
 send custom auth headers. Use git-backed marketplaces for private
 catalogs until private URL auth is added.
+:::
 
 For generic-git marketplaces, `marketplace.json` is fetched via a
 sparse-cone clone (only the manifest path is downloaded); APM does
 not forward `GITHUB_APM_PAT` or `GITLAB_APM_PAT` to non-GitHub /
-non-GitLab hosts. Authentication falls through to the host's local git
-credential helper when one is configured. See
+non-GitLab hosts. Authentication falls through to the host's matching
+`*_APM_PAT` variable (such as `ADO_APM_PAT`) or local git credential
+helper when one is configured. See
 [Authentication](../authentication/).
 
 **Lockfile note.** Installs from a local marketplace record a
