@@ -195,11 +195,14 @@ class TestCleanRemovesApmGeneratedStaleCLAUDEMD:
         primitives = _make_primitives(tmp_path)
         compiler._compile_claude_md(config, primitives)
 
-        assert guard_calls == [(tmp_path / "CLAUDE.md", tmp_path)]
+        assert guard_calls == [
+            (tmp_path / "CLAUDE.md", tmp_path),
+            (tmp_path / "CLAUDE.md", tmp_path),
+        ]
         assert not (tmp_path / "CLAUDE.md").exists()
 
     def test_clean_keeps_file_when_containment_guard_rejects(self, tmp_path, monkeypatch):
-        """Containment failure must fail closed and warn instead of unlinking."""
+        """Containment failure must fail closed before reading or unlinking."""
         _make_project(tmp_path, populate_rules=True)
         _apm_generated_claude_md(tmp_path)
 
@@ -219,9 +222,9 @@ class TestCleanRemovesApmGeneratedStaleCLAUDEMD:
         result = compiler._compile_claude_md(config, primitives)
 
         assert (tmp_path / "CLAUDE.md").exists()
-        assert any("Could not remove CLAUDE.md" in w for w in result.warnings)
+        assert any("Could not read CLAUDE.md" in w for w in result.warnings)
         assert any(
-            "Could not remove CLAUDE.md" in m for level, m in logger.logged if level == "warning"
+            "Could not read CLAUDE.md" in m for level, m in logger.logged if level == "warning"
         )
 
 

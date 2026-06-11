@@ -670,12 +670,13 @@ class AgentsCompiler:
         if not root_claude_md.exists():
             return StaleClaudeDetection(root_claude_md, rel, False, False, None)
         try:
+            ensure_path_within(root_claude_md, self.base_dir)
             with root_claude_md.open("rb") as fh:
                 # CLAUDE_HEADER is emitted on the first line; 4 KiB is ample.
                 content = fh.read(4096).decode(
                     "utf-8"
                 )  # strict; raises UnicodeDecodeError on invalid bytes
-        except (OSError, UnicodeDecodeError) as exc:
+        except (OSError, PathTraversalError, UnicodeDecodeError) as exc:
             return StaleClaudeDetection(
                 root_claude_md, rel, True, False, f"Could not read {rel}: {exc!s}"
             )
