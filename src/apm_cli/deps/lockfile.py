@@ -14,7 +14,10 @@ from typing import Any
 import yaml
 
 from ..models.apm_package import DependencyReference
-from ..models.dependency.reference import build_dependency_unique_key
+from ..models.dependency.reference import (
+    build_canonical_dependency_string,
+    build_dependency_unique_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,11 +103,13 @@ class LockedDependency:
         so it matches the host-blind ``apm_modules/`` layout. Use
         :meth:`get_unique_key` for the host-qualified lockfile dedup key.
         """
-        if self.source == "local" and self.local_path:
-            return self.local_path
-        if self.is_virtual and self.virtual_path:
-            return f"{self.repo_url}/{self.virtual_path}"
-        return self.repo_url
+        return build_canonical_dependency_string(
+            self.repo_url,
+            is_local=(self.source == "local"),
+            local_path=self.local_path,
+            is_virtual=self.is_virtual,
+            virtual_path=self.virtual_path,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for YAML output."""

@@ -88,6 +88,32 @@ def build_dependency_unique_key(
     return key
 
 
+def build_canonical_dependency_string(
+    repo_url: str,
+    *,
+    is_local: bool = False,
+    local_path: str | None = None,
+    is_virtual: bool = False,
+    virtual_path: str | None = None,
+) -> str:
+    """Return the host-blind canonical string for filesystem / orphan matching.
+
+    Host-blind by construction: it never prefixes the host, so it matches the
+    host-blind ``apm_modules/`` layout. Use :func:`build_dependency_unique_key`
+    for the host-qualified lockfile dedup key.
+
+    Callers pass their own ``is_local`` signal -- ``DependencyReference``
+    derives it from its ``is_local`` property while ``LockedDependency`` derives
+    it from ``source == "local"`` -- so single-sourcing the body shape does not
+    collapse the two identity models' distinct local-detection semantics.
+    """
+    if is_local and local_path:
+        return local_path
+    if is_virtual and virtual_path:
+        return f"{repo_url}/{virtual_path}"
+    return repo_url
+
+
 def _path_segment_pattern(is_ado_host: bool) -> str:
     """Return the allowed-character regex for a single repo path segment."""
     return _ADO_PATH_SEGMENT_RE if is_ado_host else _NON_ADO_PATH_SEGMENT_RE
@@ -450,11 +476,13 @@ class DependencyReference:
         Returns:
             str: Host-blind canonical string (e.g., "owner/repo")
         """
-        if self.is_local and self.local_path:
-            return self.local_path
-        if self.is_virtual and self.virtual_path:
-            return f"{self.repo_url}/{self.virtual_path}"
-        return self.repo_url
+        return build_canonical_dependency_string(
+            self.repo_url,
+            is_local=self.is_local,
+            local_path=self.local_path,
+            is_virtual=self.is_virtual,
+            virtual_path=self.virtual_path,
+        )
 
     def get_install_path(self, apm_modules_dir: Path) -> Path:
         """Get the canonical filesystem path where this package should be installed.
@@ -914,7 +942,16 @@ class DependencyReference:
 
     @staticmethod
     def _parse_host_type(raw: object) -> str | None:
-        """Parse the optional object-form ``type`` host-kind hint."""
+        """Parse the optional object-form ``type`` host-kind hint.
+
+        Currently only ``gitlab`` is accepted; any other value fails closed with
+        a ``ValueError``. This is a deliberate gate, not an oversight: future
+        host kinds (e.g. ``gitea``, ``bitbucket``) would extend the accepted set
+        here and thread a matching branch through ``AuthResolver.classify_host``
+        and ``host_backends.backend_for``. Until those backends exist, rejecting
+        unknown hints keeps classification explicit rather than silently
+        mis-routing a bespoke host to the GitHub path.
+        """
         if raw is None:
             return None
         if not isinstance(raw, str) or not raw.strip():
