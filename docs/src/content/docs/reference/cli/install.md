@@ -50,7 +50,7 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 | `--runtime VALUE` | unset | Legacy alias for `--target` (single value only). Still accepted; prefer `--target`. |
 | `--exclude VALUE` | unset | Skip a single runtime that auto-detect or `targets:` would otherwise enable. |
 | `--only apm\|mcp` | both | Install only APM packages or only MCP servers. |
-| `-g`, `--global` | off | Install to user scope (`~/.apm/`) instead of the current project. MCP servers deploy only to global-capable runtimes (Copilot CLI, Codex CLI, Gemini CLI, Kiro, JetBrains Copilot). |
+| `-g`, `--global` | off | Install to user scope (`~/.apm/`) instead of the current project. MCP servers deploy only to global-capable runtimes, such as Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Kiro, Windsurf, and JetBrains Copilot. |
 | `--legacy-skill-paths` | off | Deploy skills to per-client paths (`.cursor/skills/`, `.github/skills/`, ...) instead of the converged `.agents/skills/`. Env: `APM_LEGACY_SKILL_PATHS=1`. |
 
 ### Policy and trust

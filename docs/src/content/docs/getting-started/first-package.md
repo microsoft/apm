@@ -17,8 +17,8 @@ Otherwise, start here.
 
 - APM installed -- see [Installation](./installation/).
 - A GitHub account and an empty repo for publishing (step 5).
-- A runtime where you can try the result: GitHub Copilot, Claude Code, or
-  Cursor.
+- A runtime where you can try the result: GitHub Copilot, Claude Code, Kiro,
+  or Cursor.
 
 ## 1. Scaffold
 
@@ -211,8 +211,8 @@ priority chain: `--target` flag > `apm.yml` `targets:` > auto-detect from
 filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.github/copilot-instructions.md`,
 `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`). The example layout
 above shows `.github/` because `.github/copilot-instructions.md` exists in the
-project; if you also have `.claude/`, `.cursor/`, `.opencode/`, or `.gemini/`, those
-directories get populated too. With no signal at all, `apm install` exits with
+project; if you also have `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, or
+`.kiro/`, those directories get populated too. With no signal at all, `apm install` exits with
 code 2 and a teaching message instead of silently picking a target -- declare an
 intent explicitly via `--target copilot` (or another harness), or by adding
 `targets: [copilot]` to `apm.yml`. Run `apm targets` to inspect what APM detects

@@ -6,6 +6,9 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from click.testing import CliRunner
+
+from apm_cli.cli import cli
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
@@ -43,6 +46,22 @@ def _make_package_info(
         installed_at=datetime.now().isoformat(),
         package_type=package_type,
     )
+
+
+def test_kiro_is_discoverable_in_target_help() -> None:
+    runner = CliRunner()
+
+    install = runner.invoke(cli, ["install", "--help"])
+    compile_result = runner.invoke(cli, ["compile", "--help"])
+
+    expected_all_targets = "copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro"
+    install_help = "".join(install.output.split())
+    compile_help = "".join(compile_result.output.split())
+
+    assert install.exit_code == 0
+    assert compile_result.exit_code == 0
+    assert expected_all_targets in install_help
+    assert expected_all_targets in compile_help
 
 
 def test_kiro_target_profile_matches_ratified_layout() -> None:
