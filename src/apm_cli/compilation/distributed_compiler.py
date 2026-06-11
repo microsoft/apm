@@ -17,7 +17,7 @@ from ..primitives.models import Instruction, PrimitiveCollection
 from ..utils.paths import portable_relpath, resolve_base_and_source_dirs
 from ..version import get_version
 from .constants import BUILD_ID_PLACEHOLDER
-from .constitution import read_constitution
+from .constitution import find_constitution
 from .context_optimizer import ContextOptimizer
 from .link_resolver import UnifiedLinkResolver
 from .template_builder import (
@@ -727,7 +727,7 @@ class DistributedAgentsCompiler:
         if constitution_cache is not None and directory in constitution_cache:
             has_constitution = constitution_cache[directory]
         else:
-            has_constitution = read_constitution(directory) is not None
+            has_constitution = find_constitution(directory).is_file()
             if constitution_cache is not None:
                 constitution_cache[directory] = has_constitution
 

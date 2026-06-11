@@ -87,7 +87,7 @@ def _apm_generated_marker_content(extra: str = "") -> str:
 
 
 class TestCaseAGlobalInstructions:
-    """Case A: target=copilot, .github/instructions/*.md present -> NO root AGENTS.md."""
+    """Case A: copilot target (internal alias `vscode`), .github/instructions/*.md present -> NO root AGENTS.md."""
 
     @pytest.fixture
     def project_global(self, tmp_path: Path):
@@ -121,7 +121,7 @@ class TestCaseAGlobalInstructions:
         return tmp_path, primitives
 
     def test_case_a_no_root_agents_md_written(self, project_global):
-        """Failing-without-fix: target=copilot + .github/instructions/ -> NO root AGENTS.md."""
+        """Failing-without-fix: copilot target (internal alias `vscode`) + .github/instructions/ -> NO root AGENTS.md."""
         tmp_path, primitives = project_global
         compiler = AgentsCompiler(str(tmp_path))
         config = CompilationConfig(target="vscode", dry_run=False)
@@ -315,6 +315,15 @@ class TestInfoLogMessage:
         class _MockLogger:
             def progress(self, msg, **_kw):
                 logged_messages.append(msg)
+
+            def warning(self, msg, **_kw):  # no-op stub
+                pass
+
+            def error(self, msg, **_kw):  # no-op stub
+                pass
+
+            def success(self, msg, **_kw):  # no-op stub
+                pass
 
         compiler = AgentsCompiler(str(tmp_path))
         config = CompilationConfig(target="vscode", dry_run=False)
@@ -575,42 +584,40 @@ class TestIsPlacementEmptyShell:
             instructions=instructions if instructions is not None else [],
         )
 
+    def _write_constitution(self, base_dir: Path) -> Path:
+        """Create a real constitution file at the canonical path under base_dir."""
+        constitution_path = base_dir / ".specify" / "memory" / "constitution.md"
+        constitution_path.parent.mkdir(parents=True, exist_ok=True)
+        constitution_path.write_text("# Constitution content\n", encoding="utf-8")
+        return constitution_path
+
     def test_empty_shell_no_constitution(self, compiler, tmp_path: Path):
-        """When skip_instructions=True and no constitution exists, placement is an empty shell."""
+        """When skip_instructions=True and no constitution file exists, placement is an empty shell.
+
+        No constitution file is created; find_constitution(dir).is_file() returns False.
+        """
         placement = self._make_placement(tmp_path / "AGENTS.md")
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(
-                "apm_cli.compilation.distributed_compiler.read_constitution",
-                lambda _: None,
-            )
-            assert compiler._is_placement_empty_shell(placement) is True
+        # No constitution file created -> find_constitution(...).is_file() is False
+        assert compiler._is_placement_empty_shell(placement) is True
 
     def test_empty_shell_even_with_instructions_present(self, compiler, tmp_path: Path):
         """When skip_instructions=True, instructions are not written; no constitution -> shell.
 
         The presence of instructions in the model does not prevent suppression:
         skip_instructions=True means those instructions will be omitted from output.
+        No constitution file is created; find_constitution(dir).is_file() returns False.
         """
         inst = _make_instruction("style", content="Use type hints.", tmp_path=tmp_path)
         placement = self._make_placement(tmp_path / "AGENTS.md", instructions=[inst])
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(
-                "apm_cli.compilation.distributed_compiler.read_constitution",
-                lambda _: None,
-            )
-            # instructions present but skip_instructions=True means they won't be written;
-            # no constitution -> still an empty shell
-            assert compiler._is_placement_empty_shell(placement) is True
+        # No constitution file created -> find_constitution(...).is_file() is False;
+        # instructions present but skip_instructions=True means they won't be written
+        assert compiler._is_placement_empty_shell(placement) is True
 
     def test_constitution_present_not_shell(self, compiler, tmp_path: Path):
-        """Constitution exists and with_constitution=True -> NOT an empty shell."""
+        """Constitution file exists on disk + with_constitution=True -> NOT an empty shell."""
         placement = self._make_placement(tmp_path / "AGENTS.md")
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(
-                "apm_cli.compilation.distributed_compiler.read_constitution",
-                lambda _: "# Constitution content",
-            )
-            assert compiler._is_placement_empty_shell(placement) is False
+        self._write_constitution(tmp_path)
+        assert compiler._is_placement_empty_shell(placement) is False
 
     def test_no_constitution_with_constitution_false(self, compiler, tmp_path: Path):
         """with_constitution=False + constitution on disk -> still an empty shell.
@@ -618,26 +625,19 @@ class TestIsPlacementEmptyShell:
         This is the predicate/writer disagreement fix (issue #1730):
         when --no-constitution is passed, the writer skips injection regardless
         of what is on disk, so the predicate must agree and return True.
+        The with_constitution=False short-circuit fires before any filesystem check.
         """
         placement = self._make_placement(tmp_path / "AGENTS.md")
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(
-                "apm_cli.compilation.distributed_compiler.read_constitution",
-                lambda _: "# Constitution content",
-            )
-            # Even though constitution exists, with_constitution=False means writer
-            # will skip it -- placement is still an empty shell.
-            assert compiler._is_placement_empty_shell(placement, with_constitution=False) is True
+        self._write_constitution(tmp_path)
+        # Even though constitution file exists, with_constitution=False means writer
+        # will skip it -- placement is still an empty shell.
+        assert compiler._is_placement_empty_shell(placement, with_constitution=False) is True
 
     def test_constitution_present_with_constitution_true_not_shell(self, compiler, tmp_path: Path):
-        """Constitution present + with_constitution=True -> NOT an empty shell (default)."""
+        """Constitution file present on disk + with_constitution=True -> NOT an empty shell."""
         placement = self._make_placement(tmp_path / "AGENTS.md")
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(
-                "apm_cli.compilation.distributed_compiler.read_constitution",
-                lambda _: "# Constitution",
-            )
-            assert compiler._is_placement_empty_shell(placement, with_constitution=True) is False
+        self._write_constitution(tmp_path)
+        assert compiler._is_placement_empty_shell(placement, with_constitution=True) is False
 
 
 # ---------------------------------------------------------------------------
@@ -691,6 +691,15 @@ class TestFormatterGuardFullySuppressed:
         class _MockLogger:
             def progress(self, msg, **_kw):
                 logged_messages.append(msg)
+
+            def warning(self, msg, **_kw):  # no-op stub
+                pass
+
+            def error(self, msg, **_kw):  # no-op stub
+                pass
+
+            def success(self, msg, **_kw):  # no-op stub
+                pass
 
         mock_formatter = MagicMock()
         mock_formatter.format_default.side_effect = lambda r: (
