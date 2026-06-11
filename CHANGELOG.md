@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm install --target kiro` deploys Kiro IDE steering, skills, hooks,
+  and MCP config to the documented `.kiro/` layout. (by @TibRib; closes #702) (#1741)
+- APM now catches accidental subpath embeds in git URLs (for example, `org/repo/skills/name.git`) and points at the supported `path:` key form. (#1740)
+- SHA-pinned dependencies now stay current automatically: `apm update` resolves the newest annotated release tag, rewrites the pin, and `apm outdated` reports drift. (#1738)
 - `apm install --target hermes` and `apm compile -t hermes` add the Hermes
   agent (Nous Research) as a new experimental target (opt in via
   `apm experimental enable hermes`). Skills deploy to `.agents/skills/<name>/SKILL.md`
@@ -31,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` now resolves relative `path:` deps declared by remote monorepo packages when they stay inside the same remote repo, while still rejecting absolute, escaping, or cross-repo paths; closes #1571. (#1732)
 - Optional-auth MCP registry servers now install without token prompts when values are unset; `apm install` also omits empty runtime config entries and preserves user-edited optional values on reinstall; refs #20. (#1734)
 - Dependencies with the same path on different git hosts no longer collide in `apm.lock.yaml`; `apm install` keeps GitHub/GitLab PATs off generic-host file downloads, routes bespoke GitLab hosts through `type: gitlab`, and surfaces non-404 download failures with host and endpoint context. Reading private files from a generic non-default host now requires a whole-repo git dependency or explicit backend signal; see the dependency and lockfile docs (closes #773). (#1735)
+- GitLab `path:` files now just work on self-hosted instances where the REST API is disabled or restricted -- APM fetches via git transport automatically. `GITLAB_APM_PAT` / `GITLAB_TOKEN` remain available as a thin REST API fallback; closes #1014. (#1740)
 - `apm compile --target copilot` no longer writes empty AGENTS.md shell files
   (header + footer only, no instruction body) when `.github/instructions/`
   already holds the deployed instructions. Previously, the instruction-dedup

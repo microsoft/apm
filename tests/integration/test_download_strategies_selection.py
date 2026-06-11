@@ -536,10 +536,19 @@ class TestDownloadGitlabFile:
         host._resilient_get.return_value = fake_response(200, content=b"ok")
         callback = MagicMock()
 
-        result = delegate.download_gitlab_file(dep, "README.md", verbose_callback=callback)
+        with patch(
+            "apm_cli.deps.download_strategies.GitSparseFileTransport",
+            return_value=MagicMock(
+                fetch_file=MagicMock(side_effect=RuntimeError("git transport unavailable"))
+            ),
+        ):
+            result = delegate.download_gitlab_file(dep, "README.md", verbose_callback=callback)
 
         assert result == b"ok"
-        callback.assert_called_once_with("Downloaded file: gitlab.example.com/group/repo/README.md")
+        # The mocked git failure drives the REST fallback path without spawning
+        # subprocess/network work. The success note attributes the GitLab REST
+        # API as the transport that answered (410 triage).
+        callback.assert_any_call("Downloaded file: gitlab.example.com/group/repo/README.md")
 
     def test_non_default_ref_404_raises_specific_error(self) -> None:
         host = make_host(resolved_token=None, api_base="https://gitlab.example.com/api/v4")
@@ -562,7 +571,7 @@ class TestDownloadGitlabFile:
         )
 
         assert result == b"ok"
-        callback.assert_called_once_with("Downloaded file: gitlab.example.com/group/repo/README.md")
+        callback.assert_any_call("Downloaded file: gitlab.example.com/group/repo/README.md")
 
     def test_fallback_ref_404_reports_both_refs(self) -> None:
         host = make_host(resolved_token=None, api_base="https://gitlab.example.com/api/v4")

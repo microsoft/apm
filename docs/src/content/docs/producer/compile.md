@@ -17,11 +17,13 @@ aggregated `AGENTS.md` / `copilot-instructions.md` it produces are a
 nice-to-have, not a requirement.
 
 Compile is **recommended for every other target** (`claude`,
-`cursor`, `codex`, `gemini`, `opencode`, `windsurf`) -- those
+`cursor`, `codex`, `gemini`, `opencode`, `windsurf`, `kiro`) -- those
 harnesses load instructions through the root context file
 (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`) or a harness-specific rules
-folder that compile generates. Without it, your instructions are
-on disk but the harness will not pick them up.
+folder that compile generates. Kiro receives `.kiro/steering/` files;
+its `AGENTS.md` output remains the cross-harness fallback. Without
+compile, your instructions are on disk but the harness will not pick
+them up.
 :::
 
 ```bash
@@ -32,13 +34,14 @@ Concretely, that command rolls your `instructions/*.instructions.md`
 (see [Instructions](./author-primitives/instructions-and-agents/#1-instructions))
 into the native rules surface each target expects:
 
-- `AGENTS.md` -- the cross-harness root context file (Copilot, Codex,
-  OpenCode, Windsurf all read this).
+- `AGENTS.md` -- the cross-harness root context file. Copilot, Codex,
+  OpenCode, and Windsurf read it directly; Kiro primarily uses the
+  `.kiro/steering/` files that compile also emits.
 - `CLAUDE.md` -- Claude Code's root context file.
 - `GEMINI.md` -- Gemini CLI's root context file.
 - per-harness rules trees that mirror each instruction's
   `applyTo:` glob: `.github/instructions/`, `.claude/rules/`,
-  `.cursor/rules/*.mdc`, `.windsurf/rules/`.
+  `.cursor/rules/*.mdc`, `.windsurf/rules/`, `.kiro/steering/`.
 
 Other primitive types -- prompts, skills, agents, chatmodes, hooks,
 commands -- are NOT compiled by this command. They are deployed by
@@ -87,7 +90,7 @@ apm compile --all                            # every canonical target
 ```
 
 Accepted values: `copilot`, `claude`, `cursor`, `opencode`, `codex`,
-`gemini`, `windsurf`, `agent-skills`, `all`. The `agent-skills` slug
+`gemini`, `windsurf`, `kiro`, `agent-skills`, `all`. The `agent-skills` slug
 is a no-op for compile (skills are deployed by `apm install`); it is
 accepted in target lists for symmetry only. Unknown slugs are
 rejected before any work runs.
@@ -107,7 +110,7 @@ order:
 1. Explicit `--target <slug>` flag.
 2. The `targets:` field in your `apm.yml`.
 3. Auto-detect: any harness root directory (`.github/`, `.claude/`,
-   `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`) that
+   `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `.kiro/`) that
    already exists.
 4. Fallback: `minimal` -- writes a single `AGENTS.md` and skips per-
    harness rules folders.
@@ -129,6 +132,7 @@ Per target, with the rules shape on disk after compile:
 | `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `GEMINI.md` |
 | `opencode` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `windsurf` | -- | `.windsurf/rules/<name>.md` | Yes -- compiled to Windsurf rules |
+| `kiro` | `AGENTS.md` (fallback) | `.kiro/steering/<name>.md` | Yes -- compiled to Kiro steering |
 
 ## compile vs install
 

@@ -75,6 +75,7 @@ Sample output in a project with `CLAUDE.md` and `.cursor/`:
   gemini       inactive   needs GEMINI.md                          .gemini/
   opencode     inactive   needs .opencode/                         .opencode/
   windsurf     inactive   needs .windsurf/                         .windsurf/
+  kiro         inactive   needs .kiro/                             .kiro/
 ```
 
 Machine-readable form:
@@ -98,6 +99,7 @@ match per target is enough to activate it.
 | `gemini` | `.gemini/` directory, or `GEMINI.md` file | `.gemini/` |
 | `opencode` | `.opencode/` directory | `.opencode/` |
 | `windsurf` | `.windsurf/` directory | `.windsurf/` |
+| `kiro` | `.kiro/` directory | `.kiro/` |
 | `agent-skills` | Meta-target; never auto-detected. Opt in via `targets:` in `apm.yml` or `--target agent-skills` on `apm install` / `apm deps update` (compile is a no-op for this target). | `.agents/` |
 
 Notes:

@@ -30,7 +30,7 @@ Scaffolds a new APM project in the current directory.
 
 `apm init` writes an `apm.yml` manifest with sensible defaults for `name`, `author`, and `description`, plus empty dependency and script blocks. It records selected targets in `targets:`; author `.apm/` primitives yourself and run `apm install` or `apm compile` to create target output directories.
 
-Targets are picked in priority order. An explicit `--target copilot,claude` flag wins. Otherwise an interactive checklist runs. Otherwise APM scans the working tree for signal directories (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`) and pre-checks every harness it finds. With `-y` and no flag, all detected harnesses are written into `apm.yml`. See [primitives and targets](/apm/concepts/primitives-and-targets/) for what each target actually receives.
+Targets are picked in priority order. An explicit `--target copilot,claude` flag wins. Otherwise an interactive checklist runs. Otherwise APM scans the working tree for signal directories (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`) and pre-checks every harness it finds. With `-y` and no flag, all detected harnesses are written into `apm.yml`. See [primitives and targets](/apm/concepts/primitives-and-targets/) for what each target actually receives.
 
 **Common surprises**
 
@@ -74,11 +74,11 @@ Order of operations is deterministic and worth memorizing:
 apm compile [--target <list>]
 ```
 
-Transforms the primitives in `.apm/` (and dependencies under `apm_modules/`) into harness-native files: `AGENTS.md` for Codex, `GEMINI.md` for Gemini, populated `.cursor/`, `.opencode/`, `.windsurf/` directories, and so on.
+Transforms the primitives in `.apm/` (and dependencies under `apm_modules/`) into harness-native files: `AGENTS.md` for Codex, `GEMINI.md` for Gemini, populated `.cursor/`, `.opencode/`, `.windsurf/`, `.kiro/` directories, and so on.
 
 Most users never call `apm compile` directly. `apm install` runs it as part of the integrate phase, and `apm run` auto-compiles any `.prompt.md` files referenced by a script just before execution. Reach for `apm compile` when you want to inspect what will be deployed without changing dependencies, when you are iterating on local primitives between installs, or when you only need output for one harness.
 
-The `--target` flag accepts a comma-separated list (`copilot,claude,cursor,opencode,codex,gemini,windsurf,agent-skills`) or `all`. `--dry-run` prints placement decisions without writing files. `--validate` checks primitive frontmatter and structure without producing output. `--watch` re-runs compilation on every change.
+The `--target` flag accepts a comma-separated list (`copilot,claude,cursor,opencode,codex,gemini,windsurf,kiro,agent-skills`) or `all`. `--dry-run` prints placement decisions without writing files. `--validate` checks primitive frontmatter and structure without producing output. `--watch` re-runs compilation on every change.
 
 **Common surprises**
 
