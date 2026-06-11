@@ -64,6 +64,16 @@ def test_fetch_local_working_dir_direct_read(tmp_path: Path) -> None:
     assert result == manifest
 
 
+def test_fetch_local_file_direct_read(tmp_path: Path) -> None:
+    """Anthropic local file shape reads a marketplace.json file directly."""
+    manifest_file = tmp_path / "marketplace.json"
+    manifest = {"name": "acme", "plugins": []}
+    manifest_file.write_text(json.dumps(manifest))
+
+    result = _fetch_local(_local_source("acme", manifest_file), "")
+    assert result == manifest
+
+
 def test_fetch_local_missing_path_raises(tmp_path: Path) -> None:
     """Path that does not exist raises ``MarketplaceFetchError``."""
     with pytest.raises(MarketplaceFetchError, match="does not exist"):

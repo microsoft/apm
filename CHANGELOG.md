@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Marketplace authors can set `sourceBase` so package sources resolve relative
   to enterprise git base paths, while host-prefixed, full-URL, and local entries
   remain per-entry overrides. (#1736)
+- `apm marketplace add` now accepts git URLs with `#ref`, local file paths,
+  and hosted `marketplace.json` URLs -- so teams can consume private,
+  offline, or hosted catalogs without publishing a GitHub repo (closes
+  #676). (#1739)
+- Enterprise bootstrap mirror mode lets `install.sh`, `install.ps1`, and `apm self-update` use internal release, installer, and PyPI mirrors with fail-closed public fallback, and closes #1680. (#1733)
+
+### Fixed
+
+- `apm install` now resolves relative `path:` deps declared by remote monorepo packages when they stay inside the same remote repo, while still rejecting absolute, escaping, or cross-repo paths; closes #1571. (#1732)
 
 ## [0.19.0] - 2026-06-09
 

@@ -195,9 +195,9 @@ def _copy_local_package(dep_ref, install_path, base_dir, *, project_root, logger
         project_root: Project root, threaded through for symmetry with the
             anchoring story but NOT used as a hard containment boundary
             here. The actual untrusted-source boundary lives upstream in
-            :mod:`apm_cli.deps.apm_resolver` (``_try_load_dependency_package``
-            dual-rejects any local_path declared by a remote parent before
-            this function ever runs). Enforcing project-root containment
+            :mod:`apm_cli.deps.apm_resolver` (remote-parent local paths are
+            expanded to same-repo virtual deps or rejected before this
+            function ever runs). Enforcing project-root containment
             *here* would also block legitimate sibling layouts -- e.g.
             ``apm install ../pkg-a`` from a monorepo workspace -- which
             users explicitly opt into. Kept on the signature so callers
@@ -215,10 +215,10 @@ def _copy_local_package(dep_ref, install_path, base_dir, *, project_root, logger
         We deliberately do NOT call ``validate_path_segments`` on
         ``dep_ref.local_path``: that helper rejects ``..`` segments, which
         would break the legitimate ``../sibling`` pattern this PR enables.
-        The untrusted-source boundary is the resolver-level dual-reject
-        of remote-parent local_paths; everything reaching this function
-        comes from a parent the user already trusts (their own manifest,
-        a CLI arg, or another local package they explicitly added).
+        The untrusted-source boundary is the resolver-level expansion or
+        rejection of remote-parent local_paths; everything reaching this
+        function comes from a parent the user already trusts (their own
+        manifest, a CLI arg, or another local package they explicitly added).
     """
     # project_root retained on signature for future strict-mode hook (see
     # docstring); not consumed in the current copy path.
