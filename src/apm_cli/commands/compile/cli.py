@@ -830,8 +830,10 @@ def _run_compilation(
     is_flag=True,
     help=(
         "Remove orphaned AGENTS.md files no longer generated. For --target claude, "
-        "also removes a stale APM-generated CLAUDE.md when .claude/rules/ is already "
-        "populated (hand-authored files are never deleted)."
+        "also removes a stale APM-generated CLAUDE.md when deduplication suppresses "
+        "CLAUDE.md generation (i.e. instructions are already in .claude/rules/ and "
+        "nothing else, such as a constitution, would keep a CLAUDE.md). "
+        "Hand-authored files are never deleted."
     ),
 )
 @click.option(
@@ -923,7 +925,9 @@ def compile(  # noqa: PLR0913 -- Click handler
     * --local-only: Ignore dependencies, compile only local .apm/ primitives
     * --clean: Remove orphaned AGENTS.md files no longer generated; for
       --target claude, also removes a stale APM-generated CLAUDE.md when
-      .claude/rules/ is already populated (hand-authored files are never deleted)
+      deduplication suppresses CLAUDE.md generation (i.e. instructions are already
+      in .claude/rules/ and nothing else, such as a constitution, would keep a
+      CLAUDE.md). Hand-authored files are never deleted.
     """
     logger = CommandLogger("compile", verbose=verbose, dry_run=dry_run)
 

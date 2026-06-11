@@ -279,6 +279,27 @@ class TestPlainCompileIsNonDestructive:
             f"got: {result.warnings}"
         )
 
+    def test_plain_compile_apm_generated_emits_no_stale_warnings(self, tmp_path):
+        """Plain apm compile (no --clean) with an APM-generated CLAUDE.md must
+        emit NO stale-file warnings and must NOT read CLAUDE.md at all
+        (issue #1729 comment M: live block must be a no-op without --clean)."""
+        _make_project(tmp_path, populate_rules=True)
+        _apm_generated_claude_md(tmp_path)
+
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=False,
+            dry_run=False,
+        )
+        primitives = _make_primitives(tmp_path)
+        result = compiler._compile_claude_md(config, primitives)
+
+        assert not any(
+            any(kw in w for kw in ("stale", "Skipped removal", "Could not read", "hand-authored"))
+            for w in result.warnings
+        ), f"Plain compile (no --clean) must emit no stale-file warnings; got: {result.warnings}"
+
 
 # ---------------------------------------------------------------------------
 # Clean-checkout behavior from #1138 unchanged
@@ -608,4 +629,107 @@ class TestDryRunHandAuthoredPreview:
         assert "hand-authored" in result.content, (
             "Dry-run --clean preview content must mention 'hand-authored' for a"
             f" hand-authored CLAUDE.md; got content:\n{result.content}"
+        )
+
+    def test_dry_run_clean_hand_authored_preview_emitted_via_logger(self, tmp_path):
+        """The hand-authored skip preview must also be emitted through self._log
+        so it reaches the terminal on the distributed dry-run path (issue #1729
+        comment N: hand-authored case was previously log-silent)."""
+        _make_project(tmp_path, populate_rules=True)
+        _hand_authored_claude_md(tmp_path)
+
+        logged: list[tuple[str, str]] = []
+
+        class _CapturingLogger:
+            def progress(self, msg, **kw):
+                logged.append(("progress", msg))
+
+            def success(self, msg, **kw):
+                logged.append(("success", msg))
+
+            def warning(self, msg, **kw):
+                logged.append(("warning", msg))
+
+            def verbose_detail(self, msg, **kw):
+                pass
+
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._logger = _CapturingLogger()
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=True,
+            dry_run=True,
+        )
+        primitives = _make_primitives(tmp_path)
+        compiler._compile_claude_md(config, primitives)
+
+        messages = [m for _, m in logged]
+        assert any("hand-authored" in m for m in messages), (
+            "Dry-run --clean with a hand-authored CLAUDE.md must emit the skip-preview "
+            "through the logger (not just in result.content) so it reaches the terminal "
+            "via the distributed cli.py dry-run path. "
+            f"Logger calls captured: {logged}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Dry-run read-error: preview emitted via logger (issue #1729 comment N)
+# ---------------------------------------------------------------------------
+
+
+class TestDryRunReadErrorLoggedViaLogger:
+    """apm compile --clean --dry-run with an unreadable CLAUDE.md must surface
+    the read-error through the logger so users see it on the distributed dry-run
+    path (issue #1729 comment N)."""
+
+    def test_dry_run_clean_read_error_emitted_via_logger(self, tmp_path):
+        """When CLAUDE.md exists but cannot be read, the dry-run --clean path must
+        emit the read-error at warning level through the logger."""
+        import platform
+
+        if platform.system() == "Windows":
+            pytest.skip("chmod-based permission test not applicable on Windows")
+
+        _make_project(tmp_path, populate_rules=True)
+        _apm_generated_claude_md(tmp_path)
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.chmod(0o000)  # make unreadable
+
+        logged: list[tuple[str, str]] = []
+
+        class _CapturingLogger:
+            def progress(self, msg, **kw):
+                logged.append(("progress", msg))
+
+            def success(self, msg, **kw):
+                logged.append(("success", msg))
+
+            def warning(self, msg, **kw):
+                logged.append(("warning", msg))
+
+            def verbose_detail(self, msg, **kw):
+                pass
+
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._logger = _CapturingLogger()
+        config = CompilationConfig(
+            target="claude",
+            clean_orphaned=True,
+            dry_run=True,
+        )
+        primitives = _make_primitives(tmp_path)
+        try:
+            result = compiler._compile_claude_md(config, primitives)
+        finally:
+            claude_md.chmod(0o644)  # restore so tmp_path cleanup works
+
+        warning_messages = [m for level, m in logged if level == "warning"]
+        assert any("Could not read" in m for m in warning_messages), (
+            "Dry-run --clean with an unreadable CLAUDE.md must emit a 'Could not read' "
+            "warning through the logger (not just in result.warnings) so it reaches "
+            "the terminal via the distributed cli.py dry-run path. "
+            f"Logger calls captured: {logged}"
+        )
+        assert any("Could not read" in w for w in result.warnings), (
+            f"result.warnings must also contain the read-error; got: {result.warnings}"
         )

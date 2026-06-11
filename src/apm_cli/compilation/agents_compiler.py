@@ -789,6 +789,10 @@ class AgentsCompiler:
                 if det.exists:
                     if det.read_error is not None:
                         all_warnings.append(det.read_error)
+                        # Emit via logger so it surfaces on the distributed dry-run path
+                        # (cli.py does `pass` on dry-run success and never prints
+                        # result.content -- issue #1729 fix).
+                        self._log("warning", det.read_error)
                     elif det.has_marker:
                         removal_preview = (
                             f"  [dry-run] would remove stale {det.rel} -- instructions now"
@@ -815,7 +819,7 @@ class AgentsCompiler:
                             " is unwanted."
                         )
                         preview_lines.append(hand_authored_preview)
-                        all_warnings.append(
+                        hand_authored_warning = (
                             f"[dry-run] Skipped removal of {det.rel}: hand-authored file"
                             " will not be deleted. To remove the duplicate context,"
                             " delete or rename the file manually, or prepend the line"
@@ -823,6 +827,11 @@ class AgentsCompiler:
                             " APM-managed, then re-run 'apm compile --clean' to have it"
                             " removed automatically."
                         )
+                        all_warnings.append(hand_authored_warning)
+                        # Emit via logger so it surfaces on the distributed dry-run path
+                        # (cli.py does `pass` on dry-run success and never prints
+                        # result.content -- issue #1729 fix).
+                        self._log("progress", hand_authored_preview.strip(), symbol="info")
 
             return CompilationResult(
                 success=len(all_errors) == 0,
@@ -889,12 +898,14 @@ class AgentsCompiler:
             # a warning is emitted instead to match the Copilot-root convention.
             # Dry-run mode returns earlier in this method, so this live block is
             # only reached when NOT in dry-run; no config.dry_run guard is needed.
-            det = self._detect_stale_claude_md()
-            if det.exists:
-                if det.read_error is not None:
-                    all_warnings.append(det.read_error)
-                elif det.has_marker:
-                    if config.clean_orphaned:
+            # Gate on clean_orphaned so plain `apm compile` (no --clean) does NO
+            # extra disk I/O and emits NO stale-file warnings (non-destructive by design).
+            if config.clean_orphaned:
+                det = self._detect_stale_claude_md()
+                if det.exists:
+                    if det.read_error is not None:
+                        all_warnings.append(det.read_error)
+                    elif det.has_marker:
                         try:
                             det.path.unlink()  # safe: APM-generated marker confirmed above
                             # success() uses its own default symbol; no symbol= kwarg
@@ -905,16 +916,15 @@ class AgentsCompiler:
                             )
                         except OSError as exc:
                             all_warnings.append(f"Could not remove {det.rel}: {exc!s}")
-                    # plain apm compile (no --clean): leave the file, stay non-destructive
-                elif config.clean_orphaned:
-                    all_warnings.append(
-                        f"Skipped removal of {det.rel}: hand-authored file will not be"
-                        " deleted. To remove the duplicate context, delete or rename"
-                        f" the file manually, or prepend the line '{CLAUDE_HEADER}'"
-                        " to the top of the file to mark it as APM-managed, then"
-                        " re-run 'apm compile --clean' to have it removed"
-                        " automatically."
-                    )
+                    else:
+                        all_warnings.append(
+                            f"Skipped removal of {det.rel}: hand-authored file will not be"
+                            " deleted. To remove the duplicate context, delete or rename"
+                            f" the file manually, or prepend the line '{CLAUDE_HEADER}'"
+                            " to the top of the file to mark it as APM-managed, then"
+                            " re-run 'apm compile --clean' to have it removed"
+                            " automatically."
+                        )
         elif distributed_compiler is None and files_written > 0 and not config.dry_run:
             # Single-file strategy bypasses the distributed display formatter
             # (which has no analysis to render). Emit a minimal progress line
