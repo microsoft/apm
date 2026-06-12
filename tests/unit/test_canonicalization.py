@@ -32,16 +32,51 @@ class TestToCanonical:
         dep = DependencyReference.parse("microsoft/apm-sample-package#v1.0")
         assert dep.to_canonical() == "microsoft/apm-sample-package#v1.0"
 
-    def test_shorthand_with_alias_shorthand_removed(self):
-        """Shorthand @alias syntax is no longer supported in parsing."""
-        with pytest.raises(ValueError):
+    def test_shorthand_alias_rejected(self):
+        """Shorthand @alias syntax is rejected with a migration error."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
             DependencyReference.parse("microsoft/apm-sample-package@my-alias")
 
-    def test_shorthand_with_ref_and_alias_shorthand_not_parsed(self):
-        """Shorthand #ref@alias — @ is no longer parsed as alias separator."""
-        dep = DependencyReference.parse("microsoft/apm-sample-package#main@my-alias")
-        assert dep.to_canonical() == "microsoft/apm-sample-package#main@my-alias"
-        assert dep.alias is None  # @ is part of the ref, not an alias
+    def test_shorthand_with_ref_and_alias_rejected(self):
+        """Shorthand #ref@alias is rejected with a migration error."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("microsoft/apm-sample-package#main@my-alias")
+
+    def test_shorthand_with_subpath_and_alias_rejected(self):
+        """Subpath + @alias rejected loudly (was the silent-miscoercion bug)."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("stablyai/orca/skills/orchestration@orca-stration")
+
+    def test_shorthand_with_deeper_subpath_and_alias_rejected(self):
+        """Multi-segment subpath + @alias is also rejected."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("owner/repo/skills/foo/deeper@my-alias")
+
+    def test_shorthand_with_subpath_ref_and_alias_rejected(self):
+        """All four parts (subpath + #ref + @alias) trip the same uniform error."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("owner/repo/skills/foo#main@my-alias")
+
+    def test_fqdn_shorthand_with_alias_rejected(self):
+        """FQDN shorthand + @alias is rejected (covers the non-nested-group FQDN path)."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("github.com/owner/repo@my-alias")
+
+    def test_url_encoded_at_in_alias_shorthand_rejected(self):
+        """Percent-encoded ``@`` in shorthand is also rejected."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("owner/repo%40my-alias")
+
+    def test_trailing_at_with_no_alias_rejected(self):
+        """A bare trailing ``@`` is rejected (not silently stripped)."""
+        with pytest.raises(ValueError, match="Shorthand '@alias' is not supported"):
+            DependencyReference.parse("owner/repo@")
+
+    def test_https_with_embedded_credentials_parses(self):
+        """Guard must not fire on HTTPS userinfo (regression: don't over-reject ``@``)."""
+        dep = DependencyReference.parse("https://user@github.com/owner/repo.git")
+        assert dep.repo_url == "owner/repo"
+        assert dep.alias is None
 
     def test_fqdn_github(self):
         """FQDN with default host strips the host."""
@@ -145,15 +180,9 @@ class TestGetIdentity:
         dep = DependencyReference.parse("owner/repo#v1.0")
         assert dep.get_identity() == "owner/repo"
 
-    def test_shorthand_with_alias_shorthand_removed(self):
-        """Shorthand @alias syntax is no longer supported."""
-        with pytest.raises(ValueError):
-            DependencyReference.parse("owner/repo@my-alias")
-
-    def test_shorthand_with_ref_and_alias_shorthand_not_parsed(self):
-        """Shorthand #ref@alias — @ becomes part of the ref, identity still strips ref."""
-        dep = DependencyReference.parse("owner/repo#main@my-alias")
-        assert dep.get_identity() == "owner/repo"
+    # Shorthand @alias rejection is covered in TestToCanonical; parse() raises
+    # before get_identity() runs, so duplicating the cases here would prove
+    # nothing about identity semantics.
 
     def test_fqdn_github(self):
         """Default host is stripped from identity."""

@@ -19,6 +19,7 @@ namespace intercepts both call paths consistently.
 from __future__ import annotations
 
 import builtins
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
     from ..core.scope import InstallScope
     from ..install.context import InstallContext
+    from ..integration.base_integrator import BaseIntegrator
     from ..utils.diagnostics import DiagnosticCollector
 
 
@@ -36,6 +38,23 @@ if TYPE_CHECKING:
 set = builtins.set
 list = builtins.list
 dict = builtins.dict
+
+
+@dataclass(frozen=True)
+class IntegratorBundle:
+    """Groups the six primitive integrators passed to ``integrate_package_primitives``.
+
+    Using a bundle reduces the public argument count of
+    ``integrate_package_primitives`` below the PLR0913 threshold (≤15) while
+    keeping the integrator objects strongly typed and discoverable.
+    """
+
+    prompt: BaseIntegrator
+    agent: BaseIntegrator
+    skill: BaseIntegrator
+    instruction: BaseIntegrator
+    command: BaseIntegrator
+    hook: BaseIntegrator
 
 
 def _deployed_path_entry(
@@ -56,17 +75,39 @@ def _deployed_path_entry(
         If the path is outside the project tree and cannot be
         translated to a ``cowork://`` URI via any available target.
     """
+    if targets:
+        for _t in targets:
+            if _t.resolved_deploy_root is None:
+                continue
+            try:
+                target_path.relative_to(_t.resolved_deploy_root)
+            except ValueError:
+                continue
+            if _t.name == "copilot-app":
+                from apm_cli.integration.copilot_app_db import to_lockfile_uri
+
+                return to_lockfile_uri(target_path.name)
+            from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
+
+            return to_lockfile_path(target_path, _t.resolved_deploy_root)
     try:
         return target_path.relative_to(project_root).as_posix()
     except ValueError:
-        # Path is outside the project tree -- must be a dynamic-root
-        # target.  Find the matching target and translate.
+        # Path is outside the project tree and no dynamic-root target
+        # contained it. Fall through to the legacy cowork translation
+        # which security-validates against deploy_root and raises
+        # PathTraversalError when out of bounds.
         if targets:
             for _t in targets:
-                if _t.resolved_deploy_root is not None:
-                    from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
+                if _t.resolved_deploy_root is None:
+                    continue
+                if _t.name == "copilot-app":
+                    from apm_cli.integration.copilot_app_db import to_lockfile_uri
 
-                    return to_lockfile_path(target_path, _t.resolved_deploy_root)
+                    return to_lockfile_uri(target_path.name)
+                from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
+
+                return to_lockfile_path(target_path, _t.resolved_deploy_root)
         raise RuntimeError(  # noqa: B904
             f"Cannot translate {target_path!r} to a lockfile path: "
             f"path is outside the project tree and no dynamic-root "
@@ -74,17 +115,71 @@ def _deployed_path_entry(
         )
 
 
+def _skill_bundle_file_entries(
+    skill_dir: Path,
+    project_root: Path,
+    targets: Any,
+) -> list[str]:
+    """Return per-file lockfile entries for a deployed skill bundle directory.
+
+    A skill is deployed as a directory (e.g. ``.agents/skills/<s>``). Recording
+    only the directory leaves its contents unhashed, so skill content drift
+    escapes ``content-integrity`` (the ``apm audit --ci --no-drift`` gate).
+    This expands the bundle into per-file entries (``SKILL.md``, ``assets/``,
+    ``scripts/``) so ``compute_deployed_hashes`` hashes them. The directory
+    entry itself is recorded by the caller and intentionally excluded here.
+
+    Mocked or file-shaped ``target_paths`` (used in unit tests) are not real
+    directories on disk and yield an empty list, so callers pass them through
+    unchanged.
+    """
+    try:
+        if not (skill_dir.is_dir() and not skill_dir.is_symlink()):
+            return []
+    except OSError:
+        return []
+    entries: list[str] = []
+    for bundle_file in sorted(skill_dir.rglob("*")):
+        try:
+            if bundle_file.is_file() and not bundle_file.is_symlink():
+                entries.append(_deployed_path_entry(bundle_file, project_root, targets))
+        except OSError:
+            continue
+    return entries
+
+
+def _log_hook_display_payloads(
+    payloads: list,
+    verbose: bool,
+    log_fn: Any,
+    logger: Any,
+) -> None:
+    """Emit per-hook-file action summaries for the hook transparency feature.
+
+    Uses post-path-rewrite data from display_payloads, so the output
+    faithfully reflects what was written to disk and will be executed.
+    """
+    for _payload in payloads:
+        _src = _payload.get("source_hook_file", "hook file")
+        _actions = _payload.get("actions", [])
+        if _actions:
+            for _act in _actions:
+                log_fn(f"  |   {_act.get('event', '?')}: {_act.get('summary', '?')} ({_src})")
+        else:
+            log_fn(f"  |   Hook file integrated: {_src}")
+        if verbose and logger is not None:
+            _out_path = _payload.get("output_path", "")
+            logger.verbose_detail(f"  |   Hook JSON ({_src} -> {_out_path}):")
+            for _jline in _payload.get("rendered_json", "").splitlines():
+                logger.verbose_detail(f"  |     {_jline}")
+
+
 def integrate_package_primitives(
     package_info: Any,
     project_root: Path,
     *,
     targets: Any,
-    prompt_integrator: Any,
-    agent_integrator: Any,
-    skill_integrator: Any,
-    instruction_integrator: Any,
-    command_integrator: Any,
-    hook_integrator: Any,
+    integrators: IntegratorBundle,
     force: bool,
     managed_files: Any,
     diagnostics: DiagnosticCollector,
@@ -94,6 +189,7 @@ def integrate_package_primitives(
     skill_subset: tuple | None = None,
     ctx: InstallContext | None = None,
     scratch_root: Path | None = None,
+    policy: Any = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -112,6 +208,8 @@ def integrate_package_primitives(
     Returns a dict with integration counters and the list of deployed file paths.
     """
     from apm_cli.integration.dispatch import get_dispatch_table
+
+    from ..core.scope import InstallScope
 
     _dispatch = get_dispatch_table()
     result = {
@@ -218,17 +316,17 @@ def integrate_package_primitives(
     _verbose = bool(getattr(ctx, "verbose", False)) if ctx is not None else False
 
     _INTEGRATOR_KWARGS = {
-        "prompts": prompt_integrator,
-        "agents": agent_integrator,
-        "commands": command_integrator,
-        "instructions": instruction_integrator,
-        "hooks": hook_integrator,
-        "skills": skill_integrator,
+        "prompts": integrators.prompt,
+        "agents": integrators.agent,
+        "commands": integrators.command,
+        "instructions": integrators.instruction,
+        "hooks": integrators.hook,
+        "skills": integrators.skill,
     }
 
     # Aggregate per-primitive across targets so we emit ONE line per kind
     # (per the 1/2/3+ collapse rule), not one per target.
-    # Structure: { prim_name: {"files": int, "label": str, "paths": [str]} }
+    # Structure: { prim_name: {"files": int, "adopted": int, "label": str, "paths": [str]} }
     _per_kind: dict[str, dict[str, Any]] = {}
 
     for _prim_name, _entry in _dispatch.items():
@@ -236,26 +334,57 @@ def integrate_package_primitives(
             continue  # skills handled separately
         _integrator = _INTEGRATOR_KWARGS[_prim_name]
         _agg_files = 0
+        _agg_adopted = 0
         _agg_paths: list[str] = []
+        _agg_hook_payloads: list = []
         _label = _prim_name
         for _target in targets:
             _mapping = _target.primitives.get(_prim_name)
             if _mapping is None:
                 continue
+            _call_kwargs: dict[str, Any] = {
+                "force": force,
+                "managed_files": managed_files,
+                "diagnostics": diagnostics,
+                "scope": scope,
+            }
+            # Hook integrator alone needs the scope signal: project-scope
+            # deploys keep ``command`` paths repo-relative (#1394), user-scope
+            # deploys absolutize them (#1310 / #1354).  Sibling integrators
+            # don't accept this kwarg, so include it only for hooks.
+            if _prim_name == "hooks":
+                _call_kwargs["user_scope"] = scope is InstallScope.USER
             _int_result = getattr(_integrator, _entry.integrate_method)(
                 _target,
                 package_info,
                 project_root,
-                force=force,
-                managed_files=managed_files,
-                diagnostics=diagnostics,
+                **_call_kwargs,
             )
             result["links_resolved"] += _int_result.links_resolved
             for tp in _int_result.target_paths:
                 deployed.append(_deployed_path_entry(tp, project_root, targets))
-            if _int_result.files_integrated <= 0:
+            _adopted_attr = getattr(_int_result, "files_adopted", 0)
+            # Coerce defensively: subclasses (e.g. HookIntegrationResult)
+            # always set this, but tests use MagicMock results which
+            # auto-attribute to MagicMock objects whose ``__int__`` is 1.
+            # Treat anything that is not a real int as 0 so we never
+            # invent fake adopt counts.
+            _adopted = _adopted_attr if isinstance(_adopted_attr, int) else 0
+            # Show the per-kind line whenever ANY work happened -- either
+            # a fresh integrate or a silent adopt of pre-existing
+            # byte-identical files. Adopt-only runs (e.g. re-install
+            # after lockfile wipe) used to print nothing here, which made
+            # the install summary look like a no-op even though the
+            # lockfile WAS being repopulated. Surfacing adopt counts
+            # restores operator trust in CI.
+            if _int_result.files_integrated <= 0 and _adopted <= 0:
                 continue
             _agg_files += _int_result.files_integrated
+            _agg_adopted += _adopted
+            # Only count fresh integrations against the package counter
+            # so totals like "3 prompts integrated" stay truthful;
+            # adopted files are surfaced separately in the per-kind
+            # line.
             result[_entry.counter_key] += _int_result.files_integrated
             _effective_root = _mapping.deploy_root or _target.root_dir
             _deploy_dir = (
@@ -263,10 +392,10 @@ def integrate_package_primitives(
                 if _mapping.subdir
                 else f"{_effective_root}/"
             )
-            if _prim_name == "instructions" and _mapping.format_id in (
-                "cursor_rules",
-                "claude_rules",
-            ):
+            if _prim_name == "instructions" and _mapping.output_compare:
+                # Rule-dir formats (cursor/claude/windsurf) are the
+                # output_compare set; derive the label from the same flag so a
+                # new rule format needs no edit here.
                 _label = "rule(s)"
             elif _prim_name == "instructions":
                 _label = "instruction(s)"
@@ -274,15 +403,20 @@ def integrate_package_primitives(
                 if _target.hooks_config_display:
                     _deploy_dir = _target.hooks_config_display
                 _label = "hook(s)"
+                _agg_hook_payloads.extend(
+                    p for p in getattr(_int_result, "display_payloads", []) or []
+                )
             else:
                 _label = _prim_name
             _agg_paths.append(_deploy_dir)
 
-        if _agg_files > 0:
+        if _agg_files > 0 or _agg_adopted > 0:
             _per_kind[_prim_name] = {
                 "files": _agg_files,
+                "adopted": _agg_adopted,
                 "label": _label,
                 "paths": _agg_paths,
+                "hook_payloads": _agg_hook_payloads,
             }
 
     # Emit aggregated per-kind lines in dispatch order so output is stable.
@@ -291,14 +425,49 @@ def integrate_package_primitives(
             continue
         _info = _per_kind[_prim_name]
         _suffix, _expansion = _format_target_collapse(_info["paths"], _verbose)
+        # Build the verb + count phrase. When at least one file was
+        # freshly integrated we lead with "N X integrated"; pure-adopt
+        # runs (no fresh writes) lead with "N X adopted" so the line
+        # still appears and the count is truthful.
+        _files = _info["files"]
+        _adopted = _info["adopted"]
+        if _files > 0:
+            _verb_phrase = f"{_files} {_info['label']} integrated"
+            if _adopted > 0:
+                _verb_phrase = f"{_verb_phrase} ({_adopted} adopted)"
+        else:
+            _verb_phrase = f"{_adopted} {_info['label']} adopted"
         if _expansion:
-            _log_integration(f"  |-- {_info['files']} {_info['label']} integrated:")
+            _log_integration(f"  |-- {_verb_phrase}:")
             for line in _expansion:
                 _log_integration(line)
         else:
-            _log_integration(f"  |-- {_info['files']} {_info['label']} integrated -> {_suffix}")
+            _log_integration(f"  |-- {_verb_phrase} -> {_suffix}")
+        # Emit per-hook-file action summaries for the hooks primitive.
+        # display_payloads reflects post-path-rewrite data (what is
+        # actually written to disk and executed), so this is faithful.
+        if _prim_name == "hooks" and _info["files"] > 0:
+            _hook_verbose = _verbose or (
+                bool(getattr(logger, "verbose", False)) if logger is not None else False
+            )
+            _log_hook_display_payloads(
+                _info.get("hook_payloads", []),
+                _hook_verbose,
+                _log_integration,
+                logger,
+            )
+        # Emit a one-line "next step" hint when copilot-app workflows
+        # were integrated: the row lands enabled=0 and the user has to
+        # flip the toggle in the Copilot App's Workflows tab before the
+        # schedule fires. This is the "failure mode is the product"
+        # surface for project-scope ride-along installs where a
+        # contributor may not have read the integration doc.
+        if any(p.startswith("copilot-app/") for p in _info["paths"]) and _info["files"] > 0:
+            _log_integration(
+                "  |-- workflows arrive disabled; enable from the Copilot App's Workflows tab"
+            )
 
-    skill_result = skill_integrator.integrate_package_skill(
+    skill_result = integrators.skill.integrate_package_skill(
         package_info,
         project_root,
         diagnostics=diagnostics,
@@ -306,6 +475,8 @@ def integrate_package_primitives(
         force=force,
         targets=targets,
         skill_subset=skill_subset,
+        scope=scope,
+        policy=policy,
     )
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:
@@ -338,8 +509,29 @@ def integrate_package_primitives(
             _log_integration(
                 f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_suffix}"
             )
+    if skill_result.bin_deployed > 0:
+        _log_integration(
+            f"  |-- {skill_result.bin_deployed} executable(s) deployed to "
+            f"Claude Code's PATH -> {_skill_suffix} (invoked without confirmation)"
+        )
+        _log_integration("  |-- run /reload-plugins or restart Claude Code to activate")
+    elif skill_result.bin_skipped_reason == "project_scope":
+        _log_integration(
+            "  |-- plugin ships executables; re-run with -g (global) to deploy them to Claude Code"
+        )
+    elif skill_result.bin_skipped_reason == "no_claude_target":
+        _log_integration(
+            "  |-- plugin ships executables; no active Claude Code skills target to receive them"
+        )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
+        # #1716: also record the bundle's contained files so per-file
+        # content hashes cover SKILL.md / assets / scripts. The directory
+        # entry above is retained (cleanup's directory-rejection gate and
+        # the manifest dir-exclusion contract depend on it); the file
+        # entries give ``content-integrity`` its per-file coverage so skill
+        # drift is caught under ``apm audit --ci --no-drift``.
+        deployed.extend(_skill_bundle_file_entries(tp, project_root, targets))
 
     # A3: warm-cache visibility. If nothing was integrated for any kind AND
     # no skill was created, emit one annotation so the user knows the dep
@@ -347,6 +539,7 @@ def integrate_package_primitives(
     _total_integrated = sum(_info["files"] for _info in _per_kind.values())
     _total_integrated += int(skill_result.skill_created)
     _total_integrated += int(skill_result.sub_skills_promoted)
+    _total_integrated += int(skill_result.bin_deployed)
     if _total_integrated == 0:
         _log_integration("  |-- (files unchanged)")
 
@@ -368,6 +561,7 @@ def integrate_local_content(
     diagnostics: DiagnosticCollector,
     logger: InstallLogger | None = None,
     scope: InstallScope | None = None,
+    source_root: Path | None = None,
     ctx: InstallContext | None = None,
 ) -> dict:
     """Integrate primitives from the project's own .apm/ directory.
@@ -380,20 +574,33 @@ def integrate_local_content(
     intentionally ignored (it describes the project itself, not a
     deployable skill).
 
+    Args:
+        project_root: Deploy root -- where ``.claude/``, ``.codex/``,
+            etc. are written.  Also used to compute relative paths for
+            tracking deployed files.
+        source_root: Where to discover the synthetic local package's
+            ``.apm/`` content.  Defaults to ``project_root`` when not
+            provided.  When ``apm install --root`` is in play,
+            ``source_root`` stays at ``$PWD`` while ``project_root``
+            points to the override.
+
     Returns a dict with integration counters and deployed file paths,
     same shape as ``integrate_package_primitives()``.
     """
     from ..models.apm_package import APMPackage, PackageInfo, PackageType
 
+    if source_root is None:
+        source_root = project_root
+
     local_pkg = APMPackage(
         name="_local",
         version="0.0.0",
-        package_path=project_root,
+        package_path=source_root,
         source="local",
     )
     local_info = PackageInfo(
         package=local_pkg,
-        install_path=project_root,
+        install_path=source_root,
         package_type=PackageType.APM_PACKAGE,
     )
 
@@ -401,12 +608,14 @@ def integrate_local_content(
         local_info,
         project_root,
         targets=targets,
-        prompt_integrator=prompt_integrator,
-        agent_integrator=agent_integrator,
-        skill_integrator=skill_integrator,
-        instruction_integrator=instruction_integrator,
-        command_integrator=command_integrator,
-        hook_integrator=hook_integrator,
+        integrators=IntegratorBundle(
+            prompt=prompt_integrator,
+            agent=agent_integrator,
+            skill=skill_integrator,
+            instruction=instruction_integrator,
+            command=command_integrator,
+            hook=hook_integrator,
+        ),
         force=force,
         managed_files=managed_files,
         diagnostics=diagnostics,

@@ -58,6 +58,31 @@ my-package/
         resource2.md
 ```
 
+## Install-time discovery rules
+
+`apm pack` (export) is liberal: it collects primitives from both
+`.apm/<type>/` and root convention directories (`agents/`, `skills/`,
+`instructions/`, etc.). `apm install` (integration) is per-primitive
+and stricter. Authors who rely on root convention directories for
+instructions or prompts will produce bundles that pack but install
+silently incomplete.
+
+Per-primitive scan paths for `apm install`:
+
+| Primitive | Scanned path | Root alternative? |
+|-----------|-------------|------------------|
+| instruction | `.apm/instructions/` | No |
+| command (prompt) | `.apm/prompts/` | No |
+| hook | `.apm/hooks/` | Yes: `hooks/` |
+| agent | `.apm/agents/`, `.apm/chatmodes/` | Yes: `*.agent.md` and `*.chatmode.md` at root |
+| skill | `.apm/skills/<name>/` | Yes: `skills/<name>/` (SKILL_BUNDLE or MARKETPLACE_PLUGIN) |
+
+**Recommendation for marketplace publishers:** use `.apm/<type>/` for
+every primitive. This is the only layout that is symmetric between
+`apm pack` and `apm install`. Authoring `instructions/` at the plugin
+root will pack cleanly but instructions will be silently dropped when
+consumers run `apm install`.
+
 ## Hook files
 
 Packages can ship hooks (pre/post tool-use scripts) by placing JSON
@@ -73,6 +98,7 @@ hooks:
 | `*-codex-hooks.json` | Codex CLI only |
 | `*-gemini-hooks.json` | Gemini CLI only |
 | `*-windsurf-hooks.json` | Windsurf only |
+| `*-kiro-hooks.json` | Kiro only |
 | Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets |
 
 Example directory tree for a multi-target hook package:
@@ -84,12 +110,33 @@ my-hooks-pkg/
     copilot-hooks.json      # Copilot only
     cursor-hooks.json       # Cursor only
     claude-hooks.json       # Claude Code only
+    kiro-hooks.json         # Kiro only
 ```
 
 APM automatically normalises event names per target (e.g. `postToolUse`
 becomes `PostToolUse` in Claude) and rewrites path variables
 (`${PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`) to
-the correct target-specific form.
+the correct target-specific form. Kiro materializes one JSON document per
+hook action under `.kiro/hooks/`.
+
+### Hook command paths: project-scope stays repo-relative
+
+`apm install` (project-scope, no `-g`) keeps hook `command` paths
+**repo-relative** in checked-in configs (`<repo>/.claude/settings.json`,
+`<repo>/.codex/hooks.json`, the `<repo>/.claude/apm-hooks.json`
+sidecar, and equivalents for Cursor / Gemini / Windsurf / Kiro) so clones,
+contributors, and CI runners do not see the installer's machine-local
+absolute prefix. `apm install -g` (user-scope, e.g.
+`~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
+references to absolute paths because the user-scope config is read
+without a fixed cwd. If a referenced hook script is missing at install
+time the installer emits a warning either way; user-scope additionally
+rewrites the unexpanded variable to an absolute source path so the hook
+fails loudly at runtime, while project-scope leaves the variable in
+place to avoid baking the installer's prefix into committed config. To
+clean up an older repo whose committed configs still carry absolutized
+paths, re-run `apm install` -- the installer rewrites them back to
+repo-relative.
 
 ## Manifest fields: `targets:` validation contract
 
@@ -105,11 +152,11 @@ Both `apm.yml`'s `targets:`/`target:` and the `--target` CLI flag share the same
 | Form | Behaviour |
 |------|-----------|
 | `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
-| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `all` |
+| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `all` |
 | `target: claude,copilot` | CSV-string sugar; parses identically to the list form (the shared validator splits on `,`) |
 | `targets:` and `target:` both set | **Parse error** -- pick one |
 | `targets: []` (empty list) | **Parse error** -- remove the line if you meant auto-detect |
-| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`) |
+| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`) |
 | `target: bogus` (unknown token) | **Parse error** -- fix the typo |
 | `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |
 
@@ -130,6 +177,14 @@ applyTo: "**/*.py"
 tags: [security, validation]
 ---
 ```
+
+`applyTo` accepts a single glob (`"**/*.py"`) or a comma-separated list
+(`"**/src/**,**/api/**"`). A YAML sequence (`applyTo: ['**/*.py']`) is also
+accepted; when multiple sequence elements are given, the first is used.
+Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
+and are NOT separators -- only top-level commas split the list. On Copilot
+the value is preserved verbatim; on Claude/Cursor/Windsurf/Kiro comma-lists are
+expanded to a YAML array under `paths:` / `globs:` / `fileMatchPattern:`.
 
 ### 2. Chatmode (`*.chatmode.md`)
 
@@ -180,6 +235,44 @@ When installed as a Claude Code slash command, APM maps `input:` to
 Claude's `arguments:` frontmatter and converts `${input:name}` to `$name`
 placeholders. An `argument-hint` is auto-generated unless one is already set.
 
+#### Optional workflow frontmatter (GitHub Copilot App, experimental)
+
+When the `copilot_app` experimental flag is enabled and the package is
+installed with `apm install --target copilot-app` (project scope) or
+`apm install --target copilot-app --global` (user scope), prompts that
+carry workflow frontmatter -- any flat top-level key of `interval`,
+`schedule_hour`, `schedule_day` -- are deployed as rows in the desktop
+App's SQLite store at `~/.copilot/data.db`. ``mode``, ``model``, and
+``reasoning_effort`` are optional fields on a workflow but do NOT mark
+a plain prompt as a workflow (they overload with plain VSCode / Copilot
+slash-command prompts); declare ``interval: manual`` to opt a no-schedule
+prompt into the App.
+
+```yaml
+---
+name: "Daily Digest"
+interval: daily           # manual | hourly | daily | weekly
+schedule_hour: 9          # 0-23 (UTC); ignored for manual / hourly
+schedule_day: 1           # 0-6 (weekly only)
+mode: interactive         # interactive | plan
+model: claude-opus-4.7    # optional
+reasoning_effort: high    # optional
+---
+```
+
+Rows are always inserted with `enabled = 0`; the user opts in from the
+App. A `.prompt.md` belongs to exactly ONE surface: workflow-frontmatter
+prompts go ONLY to the App DB, plain prompts go ONLY to file-based
+slash-command targets (`copilot`, `claude`, `cursor`, ...). Pointing a
+plain prompt at `--target copilot-app` is a hard error with an
+actionable diagnostic. `interval` is optional and defaults to `manual`
+when any other execution-shape key is present, so a parameterised
+prompt with no schedule still works as a manually-fired App workflow.
+The App also defines an `autopilot` mode, but APM intentionally does
+not accept it via this target -- a third-party package could otherwise
+auto-run the moment the user enables the row. Users who want autopilot
+can still set it themselves per-row from the App UI after install.
+
 ### 5. Agent (`*.agent.md`)
 
 Agent persona and behavior definition.
@@ -195,6 +288,49 @@ instructions: |
 ---
 ```
 
+#### OpenCode target: frontmatter constraints
+
+OpenCode (`target: opencode`, deploys to `.opencode/agents/`) parses
+agent frontmatter through a strict Zod schema and refuses to load
+the agent on any mismatch. APM installs OpenCode agents verbatim
+and emits an install-time warning when it detects either of these
+known incompatibilities -- the file is still copied so you can fix
+it in place, but OpenCode will fail to start until you do.
+
+- `tools:` must be a **mapping of tool-name to boolean**, not a list
+  or comma-separated string:
+
+  ```yaml
+  # OK
+  tools:
+    Read: true
+    Grep: true
+    Edit: false
+
+  # Rejected by OpenCode (Claude/Copilot-style):
+  # tools: [Read, Grep]
+  # tools: "Read, Grep"
+  ```
+
+- `color:` must be either a **hex value** (`#abc` or `#aabbcc`) or
+  one of the OpenCode theme tokens: `primary`, `secondary`, `accent`,
+  `success`, `warning`, `error`, `info`. Free-form names such as
+  `cyan` or `magenta` are rejected:
+
+  ```yaml
+  # OK
+  color: "#aabbcc"
+  color: accent
+
+  # Rejected by OpenCode:
+  # color: cyan
+  ```
+
+If you target multiple agent runtimes from one source file, keep the
+frontmatter to the intersection of their schemas (or maintain
+target-specific copies) until APM ships a per-target frontmatter
+transformer (tracked as Phase 2 of #581 -- contributions welcome).
+
 ### 6. Skill (folder-based, `SKILL.md`)
 
 Reusable capability with supporting resources.
@@ -209,6 +345,53 @@ my-skill/
 ### 7. Marketplace Plugin (`plugin.json`)
 
 Packaged distribution format created with `apm pack --format plugin`.
+
+When `apm.yml` declares `target: claude` or `target: copilot` (or the plural `targets:` equivalent), `apm pack` also generates an ecosystem-specific `plugin.json` automatically -- authors no longer need to maintain this file manually. The manifest is synthesised from `apm.yml` identity fields (`name`, `version`, `description`, `author`, `license`). See the apm pack reference (reference/cli/pack/#plugin-manifests) for output paths, credential stripping, and per-ecosystem differences, or run `apm pack --help`.
+
+#### Shipping `bin/` executables (Claude Code only)
+
+A marketplace plugin may ship a root `bin/` directory of executable
+scripts. On `apm install`, APM deploys them under the Claude Code skills
+directory as a skills-directory plugin (a folder containing
+`.claude-plugin/plugin.json`), which puts `bin/` on Claude Code's Bash
+tool PATH so the agent can invoke them as bare commands.
+
+This is a **Claude-Code-specific** contract -- no other harness has an
+equivalent, so `bin/` deploys only when an active Claude Code skills
+target is present. Authoring rules:
+
+- Place executables in a top-level `bin/` directory; APM marks them
+  `0o755` on POSIX.
+- Deploy is **user-scope only**. A project-scope install (`apm install`
+  without `-g`) skips `bin/` and prints a hint to re-run with `-g`.
+- Deployed executables land on Claude Code's PATH and are invoked
+  **without per-call confirmation** -- treat them as trusted code and
+  keep them minimal.
+- Governance: a `bin_deploy` policy rule can deny deployment per package.
+  See the [policy schema](../../../../../docs/src/content/docs/reference/policy-schema.md#bin_deploy).
+
+## Marketplace source bases
+
+Marketplace publishers can declare `marketplace.sourceBase` when package
+repositories share an enterprise git base path:
+
+```yaml
+marketplace:
+  sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace
+  packages:
+    - name: review
+      source: review
+      ref: v1.0.0
+    - name: pinned
+      source: team/pinned
+      ref: main
+```
+
+Relative `packages[].source` values compose onto the base, including
+`owner/repo` shapes like `team/pinned`. Host-prefixed sources, full HTTPS
+URLs, and local `./` paths remain per-entry overrides. Without `sourceBase`,
+existing `owner/repo` source behavior is unchanged. The manifest schema
+Section 7.5 is canonical for the full validation and override rules.
 
 ## Step-by-step: create and publish
 
@@ -237,6 +420,64 @@ git tag v1.0.0 && git push --tags
 # 6. Consumers install via
 apm install org/my-package#v1.0.0
 ```
+
+## Publishing to a registry (experimental)
+
+REST-based APM registries are an alternative distribution channel to Git
+(and a separate surface from marketplaces). Use `apm publish` to push a
+package version to a registry that implements the [Registry HTTP API](../../../../../docs/src/content/docs/reference/registry-http-api.md).
+
+```bash
+# 1. Enable the feature
+apm experimental enable registries
+
+# 2. Declare the target registry in apm.yml
+cat >> apm.yml <<'EOF'
+registries:
+  corp-main:
+    url: https://registry.example.com/apm/corp-main
+EOF
+
+# 3. Set a publish token (per-registry env var)
+export APM_REGISTRY_TOKEN_CORP_MAIN=eyJ...
+
+# 4. Preview then publish
+apm publish --registry corp-main --dry-run -v
+apm publish --registry corp-main
+```
+
+`apm publish` auto-packs a **flat registry archive** in the project root
+(`{name}-{version}.tar.gz`) containing `apm.yml` and `.apm/` at the
+tarball root. This layout differs from the plugin bundle that
+`apm pack` produces (`{name}-{version}/plugin.json`). Auto-pack skips
+macOS `._*` / `.DS_Store` sidecars.
+
+Auto-pack requires:
+- `apm.yml` with `name:` and `version:` (and `source:` when the registry
+  identity differs from the package name)
+- A `.apm/` directory with at least one primitive
+
+Skill-only or custom layouts: build the tarball yourself and pass
+`--tarball`:
+
+```bash
+tar czf my-skill-0.0.1.tar.gz apm.yml SKILL.md
+apm publish --tarball my-skill-0.0.1.tar.gz --registry corp-main
+```
+
+Upload contract: `PUT /v1/packages/{owner}/{repo}/versions/{version}`.
+Re-publishing an existing version returns `409 Conflict` (registry
+versions are immutable) -- bump `version:` in `apm.yml` to publish again.
+
+**Supported registries:** any backend that implements the
+[Registry HTTP API](../../../../../docs/src/content/docs/reference/registry-http-api.md)
+(JFrog Artifactory, custom services). GitHub / Git remotes are NOT
+registries -- they remain the default Git resolver. APM marketplaces
+(`apm pack` + `.claude-plugin/marketplace.json`) are a separate surface.
+
+See `commands.md` for the `apm publish` command reference,
+`authentication.md` for registry token resolution, and `governance.md`
+for the `registry_source` policy field.
 
 ## Marketplace authoring
 
@@ -268,6 +509,8 @@ marketplace:
   owner:
     name: acme-org
     url: https://github.com/acme-org
+  versioning:                  # optional; used by `apm pack --check-versions`
+    strategy: lockstep         # lockstep | tag_pattern | per_package
   build:                       # APM-only, stripped at compile time
     tagPattern: "v{version}"
   metadata:                    # pass-through, copied verbatim
@@ -286,6 +529,13 @@ marketplace:
       description: Plugin shipped alongside this repo
       source: ./plugins/local-tool       # local path (no remote fetch)
       version: 0.1.0
+
+    - name: enterprise-plugin
+      description: Hosted on GitHub Enterprise
+      source: ghe.corp.example.com/platform/agents   # host.tld/owner/repo
+      version: "^0.3.0"
+      # Equivalent full URL form (trailing .git is stripped):
+      # source: https://ghe.corp.example.com/platform/agents.git
 ```
 
 Schema rules:
@@ -295,7 +545,51 @@ Schema rules:
 - `ref` takes precedence over `version`.
 - `source: ./...` marks a local-path entry: skips git resolution,
   emits the path verbatim into `marketplace.json`.
+- `source` accepts three remote forms: `owner/repo` (default host),
+  `host.tld/owner/repo` (non-default host shorthand), or
+  `https://host.tld/owner/repo[.git]` (full URL).  Non-default hosts
+  resolve auth via the standard APM token chain
+  (`docs/getting-started/authentication.md`); the default-host token is
+  never forwarded.
+- `versioning.strategy` is optional. When present, it is consumed by
+  the `apm pack --check-versions` release gate to enforce alignment
+  between each local package's `version:` field and the marketplace
+  version: `lockstep` (all packages match `marketplace.version`),
+  `tag_pattern` (each package renders a unique tag via `tagPattern`),
+  or `per_package` (each package versions independently, gate only
+  checks that `version:` is present). Omit entirely to skip the gate.
 - Unknown keys raise a schema error -- do not invent fields.
+
+### Cross-repo plugin sources on enterprise marketplaces
+
+When a marketplace published on a `*.ghe.com` host references a plugin
+in a different repo via the YAML mapping form of `source:` -- with
+nested `type:` and `repo:` keys (rather than the simple `source: owner/repo`
+string) -- the `repo:` field **must be host-qualified**. A bare
+`owner/repo` value is refused at install time because it cannot be
+disambiguated from a public-github.com dependency-confusion attempt
+(see CHANGELOG entry for #1326). Two valid forms:
+
+```yaml
+plugins:
+  - name: shared-tool
+    source:
+      type: github
+      # Enterprise dep (most common): host-qualify to the marketplace host
+      repo: corp.ghe.com/platform-team/shared-tool
+      path: plugins/shared
+
+  - name: opensource-helper
+    source:
+      type: github
+      # Declared cross-host dep: host-qualify to github.com explicitly
+      repo: github.com/opensource-org/helper
+      path: plugins/helper
+```
+
+In-marketplace plugins (`source: ./...` or `source: owner/marketplace-repo`
+when it matches the marketplace project) are unaffected -- the resolver
+backfills the host automatically.
 
 ### Build semantics
 
@@ -317,7 +611,7 @@ only a `marketplace:` block present, bundle flags (`--archive`, `-o`, `--format`
 `--target`, `--force`) are silent no-ops.
 
 Marketplace-relevant flags on `apm pack`: `--dry-run`, `--offline`,
-`--include-prerelease`, `--marketplace-output PATH`, `-v`.
+`--include-prerelease`, `--marketplace-path FORMAT=PATH`, `-v`.
 
 Exit codes: `0` success, `1` build error, `2` schema error.
 

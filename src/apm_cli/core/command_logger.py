@@ -6,7 +6,6 @@ from apm_cli.utils.console — no new output primitives.
 """
 
 from dataclasses import dataclass
-from typing import Optional  # noqa: F401
 
 from apm_cli.utils.console import (
     _rich_echo,
@@ -218,9 +217,11 @@ class InstallLogger(CommandLogger):
         noun = "package" if count == 1 else "packages"
         _rich_info(f"Validating {count} {noun}...", symbol="gear")
 
-    def validation_pass(self, canonical: str, already_present: bool):
+    def validation_pass(self, canonical: str, already_present: bool, updated: bool = False):
         """Log a package that passed validation."""
-        if already_present:
+        if updated:
+            _rich_echo(f"{canonical} (updated ref in apm.yml)", color="dim", symbol="check")
+        elif already_present:
             _rich_echo(f"{canonical} (already in apm.yml)", color="dim", symbol="check")
         else:
             _rich_success(canonical, symbol="check")
@@ -378,6 +379,81 @@ class InstallLogger(CommandLogger):
         if not self.verbose:
             return
         _rich_echo(f"    Package type: {type_label}", color="dim")
+
+    # --- Performance diagnostics (perf #1433) ---
+
+    def subdir_download_start(
+        self,
+        dep_name: str,
+        cache_state: str,
+        sha_short: str = "",
+        sparse_paths: list[str] | None = None,
+    ):
+        """Log the start of a subdirectory dep download (verbose only).
+
+        Names the dep, the bare-cache state (e.g. ``cold`` / ``warm`` /
+        ``persistent`` / ``shared-bare``), the resolved SHA (short),
+        and the sparse paths being requested. Surfaces enough state to
+        diagnose a perf regression from one log line.
+        """
+        if not self.verbose:
+            return
+        sha_part = f" @{sha_short}" if sha_short else ""
+        paths_part = f" sparse={','.join(sparse_paths)}" if sparse_paths else " sparse=<none>"
+        _rich_echo(
+            f"    [i] perf: subdir {dep_name}{sha_part} cache={cache_state}{paths_part}",
+            color="dim",
+        )
+
+    def bare_clone_strategy(self, strategy: str, elapsed_ms: int):
+        """Log the bare-clone strategy and wall time (verbose only).
+
+        ``strategy`` is the human-readable command shape, e.g.
+        ``--depth=1 --branch main`` or ``init+fetch --depth=1 <sha>``.
+        ``elapsed_ms`` lets readers spot a network-bound regression
+        without re-running with a profiler.
+        """
+        if not self.verbose:
+            return
+        _rich_echo(
+            f"    [i] perf: bare clone strategy={strategy} took={elapsed_ms}ms",
+            color="dim",
+        )
+
+    def materialize_result(self, sparse_applied: bool, consumer_size_bytes: int):
+        """Log materialization outcome and consumer dir size (verbose only).
+
+        ``sparse_applied`` tells the reader whether sparse-cone fired
+        on this consumer dir (sparse_paths were passed and accepted by
+        git). ``consumer_size_bytes`` is the on-disk size of the
+        working tree handed off to the integrator; a regression here
+        is the leading indicator that sparse-cone silently fell back.
+        """
+        if not self.verbose:
+            return
+        size_mb = consumer_size_bytes / (1024 * 1024)
+        applied = "yes" if sparse_applied else "no"
+        _rich_echo(
+            f"    [i] perf: materialize sparse={applied} size={size_mb:.2f} MB",
+            color="dim",
+        )
+
+    def tier_summary(self, stats: dict[str, int]):
+        """Log the tiered ref resolver hit counts (verbose only).
+
+        Emitted at the end of the resolve phase so the reader can see
+        how many ref->SHA lookups hit each tier (L0 per-run cache,
+        L1 commits API, L2 bare rev-parse, L3 legacy clone) without
+        wiring a debugger. A run dominated by L3 is the canonical
+        signal that ref-resolution is paying full clone cost.
+        """
+        if not self.verbose or not stats:
+            return
+        non_zero = {k: v for k, v in stats.items() if v}
+        if not non_zero:
+            return
+        parts = " ".join(f"{k}={v}" for k, v in non_zero.items())
+        _rich_echo(f"    [i] perf: ref-resolver tiers: {parts}", color="dim")
 
     # --- Cleanup phase (stale and orphan file removal) ---
 
@@ -608,7 +684,6 @@ class InstallLogger(CommandLogger):
                 hint).  When provided, a dim secondary line with
                 remediation guidance is rendered under the inline error.
         """
-        from apm_cli.utils.diagnostics import CATEGORY_POLICY  # noqa: F401
 
         # F9 dedupe: some callers pass reason with a "{dep_ref}: " prefix
         # (the detail strings produced by policy_checks.py do this).
@@ -683,6 +758,7 @@ class InstallLogger(CommandLogger):
         self,
         apm_count: int,
         mcp_count: int,
+        lsp_count: int = 0,
         errors: int = 0,
         stale_cleaned: int = 0,
         elapsed_seconds: float | None = None,
@@ -692,6 +768,7 @@ class InstallLogger(CommandLogger):
         Args:
             apm_count: Number of APM dependencies installed.
             mcp_count: Number of MCP servers installed.
+            lsp_count: Number of LSP servers installed.
             errors: Number of errors collected during install.
             stale_cleaned: Total stale + orphan files removed during
                 this install. Reported as a parenthetical so existing
@@ -708,6 +785,9 @@ class InstallLogger(CommandLogger):
         if mcp_count > 0:
             noun = "server" if mcp_count == 1 else "servers"
             parts.append(f"{mcp_count} MCP {noun}")
+        if lsp_count > 0:
+            noun = "server" if lsp_count == 1 else "servers"
+            parts.append(f"{lsp_count} LSP {noun}")
 
         cleanup_suffix = ""
         if stale_cleaned > 0:
@@ -734,6 +814,11 @@ class InstallLogger(CommandLogger):
             _rich_error(
                 f"Installation failed with {errors} error(s){timing_suffix}.",
                 symbol="error",
+            )
+        else:
+            _rich_info(
+                f"No changes -- install state already up to date{timing_suffix}.",
+                symbol="info",
             )
 
     def install_interrupted(self, elapsed_seconds: float):

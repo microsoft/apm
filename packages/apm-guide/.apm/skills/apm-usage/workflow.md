@@ -44,7 +44,7 @@ compilation:                               # optional
   output:      <string>                    # custom output path
   chatmode:    <string>                    # chatmode to prepend
   resolve_links: <bool>                    # resolve markdown links (default true)
-  source_attribution: <bool>              # include source comments
+  source_attribution: <bool>              # include source comments (default: false; opt-in)
 ```
 
 ### Type behavior

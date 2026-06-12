@@ -8,9 +8,9 @@ import click
 
 from ....core.command_logger import CommandLogger
 from ....marketplace.errors import MarketplaceYmlError
+from ..._helpers import _is_interactive
 from . import (
     _ensure_yml_exists,
-    _is_interactive,
     package,
 )
 

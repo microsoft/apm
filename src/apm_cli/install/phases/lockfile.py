@@ -15,6 +15,7 @@ Exposes:
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -66,12 +67,18 @@ class LockfileBuilder:
 
     def build_and_save(self) -> None:
         """Assemble lockfile from ctx state and write it (no-op when nothing was installed)."""
-        if not self.ctx.installed_packages:
+        if not self.ctx.installed_packages and not self.ctx.lockfile_only:
             # Even with nothing newly installed, a pre-existing
             # lockfile may need its cache pin markers refreshed --
             # e.g. user upgraded APM and their cache pre-dates the
             # marker contract. Sync best-effort against the on-disk
             # lockfile.
+            #
+            # In lockfile_only mode (``apm lock``) we deliberately fall
+            # through even with zero dependencies: the command's core
+            # promise is to always materialise an ``apm.lock.yaml`` (an
+            # empty one for a depless project), mirroring
+            # ``cargo generate-lockfile``.
             self._sync_cache_pin_markers_from_disk()
             return
         try:
@@ -107,6 +114,9 @@ class LockfileBuilder:
             # merge new entries into the existing lockfile instead of
             # overwriting it -- otherwise the uninstalled packages disappear.
             lockfile = self._maybe_merge_partial(lockfile, lockfile_path, _LF)
+            self._preserve_existing_mcp_state(lockfile)
+            self._preserve_existing_local_state(lockfile)
+            self._preserve_existing_revision_pin_tags(lockfile)
 
             # Only write when the semantic content has actually changed
             # (avoids generated_at churn in version control).
@@ -124,16 +134,34 @@ class LockfileBuilder:
     # -- private helpers (verbatim from original inline block) ----------
 
     def _attach_deployed_files(self, lockfile: LockFile) -> None:
-        for dep_key, dep_files in self.ctx.package_deployed_files.items():
-            if dep_key in lockfile.dependencies:
-                lockfile.dependencies[dep_key].deployed_files = dep_files
-                # Hash the files as they exist on disk AFTER stale
-                # cleanup so the recorded hashes match what is now
-                # deployed (provenance for the next install's stale
-                # cleanup).
-                lockfile.dependencies[dep_key].deployed_file_hashes = compute_deployed_hashes(
-                    dep_files, self.ctx.project_root
-                )
+        """Attach per-dependency deployed-file manifests, unioning targets.
+
+        Reconciliation is **target-scoped**, mirroring the symmetry that
+        on-disk stale cleanup already has (``phases/cleanup.py``). Entries a
+        prior install recorded for OTHER targets are preserved rather than
+        clobbered, so a multi-target deploy keeps every target's files in the
+        committed lockfile and they stay covered by the audit gates (issue
+        #1716). See :mod:`apm_cli.install.manifest_reconcile`.
+        """
+        from apm_cli.install.manifest_reconcile import union_preserving
+
+        existing = self.ctx.existing_lockfile
+        for dep_key, locked_dep in lockfile.dependencies.items():
+            current = list(self.ctx.package_deployed_files.get(dep_key, []))
+            current_hashes = compute_deployed_hashes(current, self.ctx.project_root)
+            prev = existing.get_dependency(dep_key) if existing is not None else None
+            prior_files = prev.deployed_files if prev is not None else []
+            prior_hashes = prev.deployed_file_hashes if prev is not None else {}
+            files, hashes = union_preserving(
+                current, current_hashes, prior_files, prior_hashes, self.ctx.targets
+            )
+            if not files:
+                # Nothing this install governs and nothing to carry forward;
+                # leave deployed_files untouched so the whole-dep
+                # _merge_existing path can preserve it intact.
+                continue
+            locked_dep.deployed_files = files
+            locked_dep.deployed_file_hashes = hashes
 
     def _attach_package_types(self, lockfile: LockFile) -> None:
         for dep_key, pkg_type in self.ctx.package_types.items():
@@ -167,6 +195,8 @@ class LockfileBuilder:
                     lockfile.dependencies[dep_key].marketplace_plugin_name = prov.get(
                         "marketplace_plugin_name"
                     )
+                    lockfile.dependencies[dep_key].source_url = prov.get("source_url")
+                    lockfile.dependencies[dep_key].source_digest = prov.get("source_digest")
 
     def _merge_existing(self, lockfile: LockFile) -> None:
         if self.ctx.existing_lockfile and not self.ctx.update_refs:
@@ -188,6 +218,54 @@ class LockfileBuilder:
                     existing.add_dependency(dep)
                 lockfile = existing
         return lockfile
+
+    def _preserve_existing_mcp_state(self, lockfile: LockFile) -> None:
+        """Keep MCP fields until MCPIntegrator reconciles them later in install."""
+        if self.ctx.existing_lockfile:
+            # MCPIntegrator.update_lockfile runs after this phase and reconciles
+            # these carried-forward fields against the current manifest.
+            lockfile.mcp_servers = list(self.ctx.existing_lockfile.mcp_servers)
+            lockfile.mcp_configs = copy.deepcopy(self.ctx.existing_lockfile.mcp_configs)
+            if self.ctx.logger:
+                self.ctx.logger.verbose_detail(
+                    "MCP state unchanged -- carrying forward "
+                    f"{len(lockfile.mcp_servers)} server(s), "
+                    f"{len(lockfile.mcp_configs)} config(s)"
+                )
+
+    def _preserve_existing_local_state(self, lockfile: LockFile) -> None:
+        """Keep local fields until post_deps_local reconciles content hashes."""
+        if self.ctx.existing_lockfile:
+            lockfile.local_deployed_files = list(self.ctx.existing_lockfile.local_deployed_files)
+            lockfile.local_deployed_file_hashes = copy.deepcopy(
+                self.ctx.existing_lockfile.local_deployed_file_hashes
+            )
+            if "." in self.ctx.existing_lockfile.dependencies:
+                lockfile.dependencies["."] = copy.deepcopy(
+                    self.ctx.existing_lockfile.dependencies["."]
+                )
+            if self.ctx.logger:
+                self.ctx.logger.verbose_detail(
+                    "Carrying forward local .apm state pending hash reconciliation: "
+                    f"{len(lockfile.local_deployed_files)} file(s)"
+                )
+
+    def _preserve_existing_revision_pin_tags(self, lockfile: LockFile) -> None:
+        """Carry resolved_tag for unchanged SHA-pinned deps across installs."""
+        existing = self.ctx.existing_lockfile
+        if not existing:
+            return
+        for key, dep in lockfile.dependencies.items():
+            if dep.resolved_tag:
+                continue
+            prev = existing.get_dependency(key)
+            if prev is None or not prev.resolved_tag:
+                continue
+            if (
+                dep.resolved_ref == prev.resolved_ref
+                and dep.resolved_commit == prev.resolved_commit
+            ):
+                dep.resolved_tag = prev.resolved_tag
 
     def _write_if_changed(self, lockfile: LockFile, lockfile_path: Path, _LF: type) -> None:
         # Re-read the on-disk lockfile for the semantic comparison.

@@ -33,7 +33,7 @@ jobs:
 
 ### Private Dependencies
 
-For private repositories, pass a token via the workflow `env:` block. See the [Authentication guide](../../getting-started/authentication/) for all supported tokens and priority rules.
+For private repositories, pass a token via the workflow `env:` block. See the [Authentication guide](../../consumer/authentication/) for all supported tokens and priority rules.
 
 ```yaml
       - name: Install APM packages
@@ -68,15 +68,34 @@ This step is not needed if your team only uses GitHub Copilot and Claude, which 
         run: apm audit --ci
 ```
 
-This single command runs the seven baseline lockfile checks PLUS integration
+This single command runs the eight baseline lockfile checks PLUS integration
 drift detection (default-on) AND replays
 the install pipeline into a scratch tree to detect missed `apm install`
 runs, hand-edited deployed files, and orphaned files. See the
-[Drift Detection guide](../../guides/drift-detection/) for details and
+[Drift Detection guide](../../enterprise/drift-detection/) for details and
 opt-out (`--no-drift`).
 
+For tamper detection -- catching deployed files modified after the last
+install -- use the audit-only pattern instead. `apm install` overwrites
+managed files before audit runs, which erases any tampered bytes before
+`content-integrity` can see them. Pass `setup-only: true` to the action so
+it only provides the CLI, then audit with `--no-drift`:
+
+```yaml
+      - uses: microsoft/apm-action@v1
+        with:
+          setup-only: true
+      - name: Audit (audit-only, tamper detection)
+        run: apm audit --ci --no-drift
+```
+
+`content-integrity` verifies the SHA-256 hash of every deployed file
+against `deployed_file_hashes` in `apm.lock.yaml` without replaying the
+install. See [Audit-only CI pattern](../../enterprise/enforce-in-ci/#audit-only-ci-pattern)
+for the full recipe and when to use each approach.
+
 :::tip[We dogfood this]
-APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml) as a reference implementation for installing APM and running `apm audit --ci`. Use it as a practical example when wiring these checks into your own workflow.
+APM's own repo uses the `APM Self-Check` job in [`microsoft/apm`'s `ci.yml`](https://github.com/microsoft/apm/blob/main/.github/workflows/ci.yml) as a reference implementation of the audit-only CI pattern: `setup-only: true` keeps deployed files untouched so `content-integrity` can detect tampered bytes, and `--no-drift` skips the replay that requires a warm cache. Use it as a practical example when wiring the audit-only check into your own workflow.
 :::
 
 ## Azure Pipelines
@@ -133,7 +152,7 @@ jobs:
         # Do not set ADO_APM_PAT -- APM picks up the az session.
 ```
 
-See [Authentication: AAD bearer tokens](../../getting-started/authentication/#authenticating-with-microsoft-entra-id-aad-bearer-tokens) for resolution precedence and verbose output.
+See [Azure DevOps AAD bearer tokens](../../enterprise/security/#azure-devops-aad-bearer-tokens) for resolution precedence and verbose output.
 
 ## General CI
 
@@ -148,7 +167,7 @@ apm install
 
 ## Governance with `apm audit`
 
-`apm audit --ci` verifies lockfile consistency in CI (7 baseline checks plus integration drift detection, no configuration). Add `--policy org` to enforce organizational rules (17 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
+`apm audit --ci` verifies lockfile consistency in CI (8 baseline checks plus integration drift detection, no configuration). Add `--policy org` to enforce organizational rules (17 additional checks). For full setup including SARIF integration and GitHub Code Scanning, see the [Enforce in CI guide](../../enterprise/enforce-in-ci/).
 
 For content scanning and hidden Unicode detection, `apm install` automatically blocks critical findings. Run `apm audit` for on-demand reporting. See [Governance](../../enterprise/governance-guide/) for the full governance model.
 
@@ -158,7 +177,7 @@ Use `apm pack` in CI to build a distributable bundle once, then consume it in do
 
 ### Pack in CI (build once)
 
-`apm-action@v1` with `pack: true` emits an APM-format bundle (`--format apm --archive`) so downstream jobs can restore it via `tar xzf` or the action's restore mode.
+`apm-action@v1` with `pack: true` emits an APM-format bundle (`--format apm --archive`) so downstream jobs can restore it via `unzip` or the action's restore mode.
 
 ```yaml
 - uses: microsoft/apm-action@v1
@@ -167,7 +186,7 @@ Use `apm pack` in CI to build a distributable bundle once, then consume it in do
 - uses: actions/upload-artifact@v4
   with:
     name: agent-config
-    path: build/*.tar.gz
+    path: build/*.zip
 ```
 
 ### Pack as standalone plugin
@@ -185,11 +204,17 @@ Use `apm pack` in CI to build a distributable bundle once, then consume it in do
 
 The APM bundle layout below assumes the upstream job ran `apm-action@v1` with `pack: true` (or `apm pack --format apm --archive`). Plugin-format output cannot be restored this way because it does not carry the install-time directory tree.
 
+:::caution[Migrating from the previous `.tar.gz` default?]
+`apm pack --archive` now writes `.zip`. If a downstream job still expects
+`build/*.tar.gz`, add `--archive-format tar.gz` to the pack step instead of
+switching the restore step to `unzip`.
+:::
+
 ```yaml
 - uses: actions/download-artifact@v4
   with:
     name: agent-config
-- run: tar xzf build/*.tar.gz -C ./
+- run: unzip -o build/*.zip -d ./
 ```
 
 Or use the apm-action restore mode to unpack a bundle directly:
@@ -197,14 +222,14 @@ Or use the apm-action restore mode to unpack a bundle directly:
 ```yaml
 - uses: microsoft/apm-action@v1
   with:
-    bundle: ./agent-config.tar.gz
+    bundle: ./agent-config.zip
 ```
 
-See the [Pack & Distribute guide](../../guides/pack-distribute/) for the full workflow.
+See the [Pack a bundle guide](../../producer/pack-a-bundle/) for the full workflow.
 
 ## Best Practices
 
-- **Pin APM version** in CI to avoid unexpected changes: `pip install apm-cli==0.7.7`
+- **Pin APM version** in CI to avoid unexpected changes: `pip install apm-cli==0.16.0`
 - **Commit `apm.lock.yaml`** so CI resolves the same dependency versions as local development
 - **Commit `.github/`, `.claude/`, `.cursor/`, `.opencode/`, and `.gemini/` deployed files** so contributors and cloud-based Copilot get agent context without running `apm install`
 - **If using `apm compile`** (for Codex, Gemini instructions), run it in CI and fail the build if the output differs from what's committed

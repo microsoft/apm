@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Any
 
 import frontmatter
 
@@ -455,6 +455,7 @@ class CommandIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        scope=None,
     ) -> IntegrationResult:
         """Integrate prompt files as commands for a single *target*.
 
@@ -505,11 +506,29 @@ class CommandIntegrator(BaseIntegrator):
         commands_dir = target_root / mapping.subdir
         files_integrated = 0
         files_skipped = 0
+        files_adopted = 0
         target_paths: list[Path] = []
         total_links_resolved = 0
         any_dropped_keys = False
 
         for prompt_file in prompt_files:
+            # Skip workflow-shape prompts: they belong to the Copilot
+            # App workflows table, not a slash-command directory.  This
+            # is the central fix for Option B's slash-command leak:
+            # a single .prompt.md file with execution metadata used to
+            # ship to .claude/commands/, .cursor/commands/, .gemini/
+            # commands/, .copilot/prompts/ AND the App DB.  Only the
+            # last destination was correct.
+            try:
+                from apm_cli.integration.prompt_integrator import _is_workflow_shape
+
+                _meta = frontmatter.load(str(prompt_file)).metadata
+            except Exception:
+                _meta = {}
+            if _is_workflow_shape(_meta):
+                files_skipped += 1
+                continue
+
             filename = prompt_file.name
             if filename.endswith(".prompt.md"):
                 base_name = filename[: -len(".prompt.md")]
@@ -549,14 +568,14 @@ class CommandIntegrator(BaseIntegrator):
 
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.check_collision(
-                target_path,
-                rel_path,
-                managed_files,
-                force,
-                diagnostics=diagnostics,
-            ):
-                files_skipped += 1
+            skip, adopted = self._check_adopt_or_skip(
+                target_path, prompt_file, rel_path, managed_files, force, diagnostics, target_paths
+            )
+            if skip:
+                if adopted:
+                    files_adopted += 1
+                else:
+                    files_skipped += 1
                 continue
 
             if mapping.format_id == "gemini_command":
@@ -619,6 +638,7 @@ class CommandIntegrator(BaseIntegrator):
             files_skipped=files_skipped,
             target_paths=target_paths,
             links_resolved=total_links_resolved,
+            files_adopted=files_adopted,
         )
 
     def sync_for_target(
@@ -714,7 +734,12 @@ class CommandIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["claude"], ...) instead.
-    def sync_integration(self, apm_package, project_root: Path, managed_files: set = None) -> dict:  # noqa: RUF013
+    def sync_integration(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
+        self,
+        apm_package,
+        project_root: Path,
+        managed_files: set = None,  # noqa: RUF013
+    ) -> dict:
         """Remove APM-managed command files from .claude/commands/."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
@@ -758,7 +783,7 @@ class CommandIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["opencode"], ...) instead.
-    def sync_integration_opencode(
+    def sync_integration_opencode(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
         self,
         apm_package,
         project_root: Path,

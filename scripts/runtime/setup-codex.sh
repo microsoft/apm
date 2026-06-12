@@ -27,6 +27,8 @@ CODEX_REPO="openai/codex"
 # Users can override with: apm runtime setup codex --version <version> (e.g. 'latest')
 CODEX_VERSION="rust-v0.118.0"
 VANILLA_MODE=false
+# Last Codex minor version that works with GitHub Models without wire_api=chat (#605)
+LAST_COMPAT_VERSION_MINOR=115
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -127,6 +129,7 @@ setup_codex() {
         fi
         
         log_info "Using Codex release: $latest_tag"
+        CODEX_VERSION="$latest_tag"
         download_url="https://github.com/$CODEX_REPO/releases/download/$latest_tag/codex-$codex_platform.tar.gz"
     else
         download_url="https://github.com/$CODEX_REPO/releases/download/$CODEX_VERSION/codex-$codex_platform.tar.gz"
@@ -211,6 +214,19 @@ EOF
         
         log_success "Codex configuration created at $codex_config"
         log_info "Using Codex $CODEX_VERSION."
+
+        # Version compatibility check
+        codex_minor=$(echo "$CODEX_VERSION" | sed -n 's/^rust-v0\.\([0-9]*\).*/\1/p')
+        if [ -n "$codex_minor" ] && [ "$codex_minor" -gt "$LAST_COMPAT_VERSION_MINOR" ] 2>/dev/null; then
+            echo ""
+            log_warning "codex >= v0.116 requires wire_api=chat configuration for GitHub Models compatibility."
+            log_warning "The generated config uses wire_api=responses, which returns 404 with GitHub Models."
+            log_warning "To fix, update wire_api in $codex_config:"
+            log_warning "  wire_api = \"chat\""
+            log_warning "Or install an older compatible version: apm runtime setup codex --version rust-v0.115.0"
+            echo ""
+        fi
+
         log_info "Override with: apm runtime setup codex --version <version> (e.g. 'latest')"
         log_info "APM configured Codex with GitHub Models as default provider"
         log_info "Use 'apm install' to configure MCP servers for your projects"

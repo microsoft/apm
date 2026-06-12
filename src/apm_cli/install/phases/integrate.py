@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import builtins
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Any
 
+from apm_cli.install.phases._redownload import _should_skip_redownload
+from apm_cli.install.phases._skip_logic import _compute_skip_download
 from apm_cli.install.phases.heal import run_heal_chain
 from apm_cli.install.services import integrate_local_content
 from apm_cli.install.sources import make_dependency_source
@@ -52,18 +54,26 @@ def _resolve_download_strategy(
     update_refs = ctx.update_refs
     diagnostics = ctx.diagnostics
     logger = ctx.logger
+    dep_key = dep_ref.get_unique_key()
 
     # npm-like behavior: Branches always fetch latest, only tags/commits use cache
     # Resolve git reference to determine type
     resolved_ref = None
-    if dep_ref.get_unique_key() not in ctx.pre_downloaded_keys:
+    # Registry-sourced deps don't have a git reference to resolve — calling
+    # ``resolve_git_reference`` on them would issue ``git ls-remote`` against
+    # the dep's notional host (default github.com), which can trigger an SSH
+    # key-acceptance prompt or a wasted network call. Skip the git probe
+    # entirely for non-git sources.
+    _source = getattr(dep_ref, "source", None)
+    is_git_source = not isinstance(_source, str) or _source in (None, "git")
+    if is_git_source and dep_key not in ctx.pre_downloaded_keys:
         # Resolve when there is an explicit ref, OR when update_refs
         # is True AND we have a non-cached lockfile entry to compare
         # against (otherwise resolution is wasted work -- the package
         # will be downloaded regardless).
         _has_lockfile_sha = False
         if update_refs and existing_lockfile:
-            _lck = existing_lockfile.get_dependency(dep_ref.get_unique_key())
+            _lck = existing_lockfile.get_dependency(dep_key)
             _has_lockfile_sha = bool(
                 _lck and _lck.resolved_commit and _lck.resolved_commit != "cached"
             )
@@ -79,16 +89,22 @@ def _resolve_download_strategy(
         GitReferenceType.COMMIT,
     ]
     # Skip download if: already fetched by resolver callback, or cached tag/commit
-    already_resolved = dep_ref.get_unique_key() in ctx.callback_downloaded
+    already_resolved = dep_key in ctx.callback_downloaded
     # Detect if manifest ref changed vs what the lockfile recorded.
     # detect_ref_change() handles all transitions including None->ref.
-    _dep_locked_chk = (
-        existing_lockfile.get_dependency(dep_ref.get_unique_key()) if existing_lockfile else None
-    )
+    _dep_locked_chk = existing_lockfile.get_dependency(dep_key) if existing_lockfile else None
     ref_changed = detect_ref_change(dep_ref, _dep_locked_chk, update_refs=update_refs)
+    # When the manifest ref drifted from the lockfile, the content hash
+    # will legitimately change after re-download.  Mark the dep so the
+    # supply-chain check in sources.py doesn't treat it as an attack.
+    if ref_changed:
+        # resolve.py's BFS callback may have already added this;
+        # set semantics make double-add safe.
+        ctx.expected_hash_change_deps.add(dep_key)
     # Phase 5 (#171): Also skip when lockfile SHA matches local HEAD
     # -- but not when the manifest ref has changed (user wants different version).
     lockfile_match = False
+    content_hash_already_verified = dep_key in ctx.content_hash_verified_deps
     # Track whether lockfile_match was satisfied via content-hash fallback only
     # (no git HEAD verification possible -- typical for virtual packages, where
     # install_path is a carved-out subdirectory rather than a git repo).
@@ -96,7 +112,7 @@ def _resolve_download_strategy(
     # branch-ref drift bug for upgrading users.
     lockfile_match_via_content_hash_only = False
     if install_path.exists() and existing_lockfile:
-        locked_dep = existing_lockfile.get_dependency(dep_ref.get_unique_key())
+        locked_dep = existing_lockfile.get_dependency(dep_key)
         if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
             if update_refs:
                 # Update mode: compare resolved remote SHA with lockfile SHA.
@@ -115,12 +131,13 @@ def _resolve_download_strategy(
                         # Git check failed (e.g. .git removed, or virtual
                         # package install_path is not a git repo). Fall back
                         # to content-hash verification (#763).
-                        if locked_dep.content_hash and install_path.is_dir():
-                            from apm_cli.utils.content_hash import verify_package_hash
-
-                            if verify_package_hash(install_path, locked_dep.content_hash):
-                                lockfile_match = True
-                                lockfile_match_via_content_hash_only = True
+                        if content_hash_already_verified or _should_skip_redownload(
+                            locked_dep, install_path
+                        ):
+                            lockfile_match = True
+                            lockfile_match_via_content_hash_only = True
+                            content_hash_already_verified = True
+                            ctx.content_hash_verified_deps.add(dep_key)
             elif not ref_changed:
                 # Normal mode: compare local HEAD with lockfile SHA.
                 try:
@@ -133,12 +150,45 @@ def _resolve_download_strategy(
                     # Git check failed (e.g. .git removed, or virtual package
                     # install_path is not a git repo). Fall back to
                     # content-hash verification (#763).
-                    if locked_dep.content_hash and install_path.is_dir():
-                        from apm_cli.utils.content_hash import verify_package_hash
-
-                        if verify_package_hash(install_path, locked_dep.content_hash):
-                            lockfile_match = True
-                            lockfile_match_via_content_hash_only = True
+                    if content_hash_already_verified or _should_skip_redownload(
+                        locked_dep, install_path
+                    ):
+                        lockfile_match = True
+                        lockfile_match_via_content_hash_only = True
+                        content_hash_already_verified = True
+                        ctx.content_hash_verified_deps.add(dep_key)
+        elif (
+            locked_dep
+            and getattr(locked_dep, "source", None) == "registry"
+            and not ref_changed
+            and not update_refs
+        ):
+            # Registry deps have no resolved_commit; use content_hash as the
+            # skip-download signal (mirrors the git content-hash fallback above).
+            if content_hash_already_verified or _should_skip_redownload(locked_dep, install_path):
+                lockfile_match = True
+                content_hash_already_verified = True
+                ctx.content_hash_verified_deps.add(dep_key)
+        elif locked_dep and locked_dep.content_hash and not ref_changed and not update_refs:
+            # Unpinned git/virtual deps (#1548): the lockfile recorded a
+            # content_hash but no resolved_commit (e.g. ADO partial-clone
+            # fallback could not pin a SHA, or a virtual-file dep was carved
+            # out without a commit anchor).  Without this branch the second
+            # install would re-download every time, and a non-deterministic
+            # fresh hash trips the supply-chain mismatch check at
+            # sources.py with a false-positive attack alert.
+            #
+            # Cache-skip parity with the resolved_commit branches: when the
+            # on-disk content still hashes to the lockfile-recorded value,
+            # the package is intact -- skip re-download. This branch has no
+            # commit anchor; the content hash is the only trust signal, so any
+            # divergence must fall through to the fresh-download path and its
+            # supply-chain mismatch check.
+            if content_hash_already_verified or _should_skip_redownload(locked_dep, install_path):
+                lockfile_match = True
+                lockfile_match_via_content_hash_only = True
+                content_hash_already_verified = True
+                ctx.content_hash_verified_deps.add(dep_key)
 
     # Self-heal pipeline (PR #1158).
     #
@@ -164,14 +214,49 @@ def _resolve_download_strategy(
         ref_changed=ref_changed,
     )
 
-    skip_download = install_path.exists() and (
-        (is_cacheable and not update_refs)
-        or (already_resolved and not update_refs)
-        or lockfile_match
+    # Issue #551: skip re-download when the BFS callback already fetched this
+    # dep during resolution AND the remote SHA still matches what was captured.
+    # This eliminates redundant network I/O in --update mode when apm_modules/
+    # is empty but the lockfile SHA is stale: the callback downloads the latest
+    # content (recording its SHA), and the sequential loop would otherwise
+    # re-download identical bytes because lockfile_match=False (stale SHA).
+    _callback_sha = ctx.callback_downloaded.get(dep_key)
+    _already_resolved_sha_match = (
+        already_resolved
+        and update_refs
+        and bool(resolved_ref)
+        and bool(_callback_sha)
+        and getattr(resolved_ref, "resolved_commit", None) not in (None, "cached")
+        and _callback_sha == resolved_ref.resolved_commit
     )
 
-    # Verify content integrity when lockfile has a hash
-    if skip_download and _dep_locked_chk and _dep_locked_chk.content_hash:
+    if _already_resolved_sha_match and logger:
+        logger.verbose_detail(f"  {dep_key}: callback SHA matches remote -- skipping re-download")
+
+    skip_download = _already_resolved_sha_match or _compute_skip_download(
+        install_path_exists=install_path.exists(),
+        is_cacheable=is_cacheable,
+        update_refs=update_refs,
+        already_resolved=already_resolved,
+        lockfile_match=lockfile_match,
+    )
+
+    # Verify content integrity when lockfile has a hash.
+    # NOTE: when _already_resolved_sha_match is True, the callback has already
+    # written the correct content for the current remote SHA -- but the lockfile
+    # content_hash still refers to the *previous* content. If the remote content
+    # changed (which is the typical stale-lockfile scenario), verify_package_hash
+    # will mismatch, safe_rmtree fires, and skip_download resets to False, causing
+    # a re-download. This is the correct safety behaviour but means the
+    # optimisation is a no-op for update scenarios where content_hash is present
+    # and stale. A follow-up can target this by propagating the callback-downloaded
+    # content_hash into the verified set before this guard runs.
+    if (
+        skip_download
+        and _dep_locked_chk
+        and _dep_locked_chk.content_hash
+        and not content_hash_already_verified
+    ):
         from apm_cli.utils.content_hash import verify_package_hash
 
         if not verify_package_hash(install_path, _dep_locked_chk.content_hash):
@@ -261,6 +346,7 @@ def _integrate_root_project(
             diagnostics=diagnostics,
             logger=logger,
             scope=ctx.scope,
+            source_root=ctx.source_root,
             ctx=ctx,
         )
 
@@ -284,7 +370,7 @@ def _integrate_root_project(
             logger.verbose_detail(f"Deployed {_local_total} local primitive(s) from .apm/")
 
         return {
-            "installed": 1,
+            "installed": int(_local_total > 0),
             "prompts": _root_result["prompts"],
             "agents": _root_result["agents"],
             "skills": _root_result.get("skills", 0),

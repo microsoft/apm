@@ -593,24 +593,194 @@ class TestGetDependencyDeclarationOrder(unittest.TestCase):
         """Transitive deps from lockfile are appended but not duplicated."""
         apm_yml = Path(self.tmp) / "apm.yml"
         apm_yml.write_text("name: test\n")
+        # Write a real lockfile so discovery's single LockFile.read() call
+        # picks up the transitive entry. apm_modules dir doesn't need to
+        # actually exist for get_installed_paths to return the entries.
+        (Path(self.tmp) / "apm.lock.yaml").write_text(
+            "version: 1\n"
+            "dependencies:\n"
+            "  - repo_url: owner/direct-dep\n"
+            "    resolved_ref: HEAD\n"
+            "    resolved_commit: 0\n"
+            "    version: 0.0.0\n"
+            "    depth: 0\n"
+            "    source: registry\n"
+            "  - repo_url: owner/transitive-dep\n"
+            "    resolved_ref: HEAD\n"
+            "    resolved_commit: 0\n"
+            "    version: 0.0.0\n"
+            "    depth: 1\n"
+            "    source: registry\n"
+        )
         mock_dep = MagicMock()
         mock_dep.alias = None
         mock_dep.is_virtual = False
         mock_dep.repo_url = "owner/direct-dep"
         mock_package = MagicMock()
         mock_package.get_apm_dependencies.return_value = [mock_dep]
-        with (
-            patch(
-                "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
-                return_value=mock_package,
-            ),
-            patch(
-                "apm_cli.primitives.discovery.LockFile.installed_paths_for_project",
-                return_value=["owner/direct-dep", "owner/transitive-dep"],
-            ),
+        with patch(
+            "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
+            return_value=mock_package,
         ):
             result = get_dependency_declaration_order(self.tmp)
         self.assertEqual(result, ["owner/direct-dep", "owner/transitive-dep"])
+
+
+class TestLocalBundleStagedSlugs(unittest.TestCase):
+    """Regression tests for issue #1363.
+
+    Local-bundle install stages instructions under
+    ``apm_modules/<slug>/.apm/instructions/`` and records the deployed paths
+    in the lockfile's top-level ``local_deployed_files`` field. The install
+    intentionally does NOT mutate ``apm.yml`` (services.py:489-490), so
+    ``scan_dependency_primitives`` previously could not see the staged
+    primitives, and ``apm compile`` produced no output for compile-only
+    targets (opencode, codex, gemini).
+
+    The fix derives bundle slugs from ``local_deployed_files`` entries that
+    match ``apm_modules/<slug>/.apm/...`` and feeds them into the discovery
+    scan list, so compile picks them up while the apm.yml contract stays
+    untouched. Provenance is anchored to the lockfile record, not to a blind
+    walk of ``apm_modules/`` -- a stray directory under ``apm_modules/``
+    without a lockfile record must NOT be discovered.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_local_bundle_lockfile(self, deployed_files: list[str]) -> None:
+        """Write an apm.lock.yaml with ``local_deployed_files`` populated.
+
+        Mirrors what ``install_local_bundle`` writes in
+        ``local_bundle_handler.py:194-199``.
+        """
+        import yaml
+
+        data: dict = {
+            "lockfile_version": "1",
+            "generated_at": "2025-01-01T00:00:00+00:00",
+        }
+        if deployed_files:
+            data["local_deployed_files"] = sorted(deployed_files)
+        (Path(self.tmp) / "apm.lock.yaml").write_text(
+            yaml.dump(data, default_flow_style=False), encoding="utf-8"
+        )
+
+    def test_staged_bundle_slug_appended_when_apm_yml_empty(self):
+        """A local bundle staged under apm_modules/<slug>/.apm/ appears in
+        the declaration order even with no apm.yml dependency entry.
+        """
+        apm_yml = Path(self.tmp) / "apm.yml"
+        apm_yml.write_text("name: test\nversion: 1.0.0\n")
+        self._write_local_bundle_lockfile(
+            [
+                "apm_modules/my-bundle/.apm/instructions/style.md",
+                "apm_modules/my-bundle/.apm/instructions/style.instructions.md",
+            ]
+        )
+        result = get_dependency_declaration_order(self.tmp)
+        self.assertIn("my-bundle", result)
+
+    def test_no_lockfile_record_no_slug(self):
+        """A stray apm_modules/<slug>/.apm/ directory with NO lockfile
+        record must NOT be surfaced. This defends the security invariant
+        that discovery is gated by lockfile provenance, not by raw
+        on-disk presence (otherwise a hostile actor or stale debris
+        could inject content into compile output).
+        """
+        apm_yml = Path(self.tmp) / "apm.yml"
+        apm_yml.write_text("name: test\nversion: 1.0.0\n")
+        # No lockfile written at all.
+        # Even if we physically stage files on disk, discovery must not
+        # surface them without a lockfile record.
+        staged = Path(self.tmp) / "apm_modules" / "phantom" / ".apm" / "instructions"
+        staged.mkdir(parents=True)
+        (staged / "evil.instructions.md").write_text(INSTRUCTION_CONTENT)
+        result = get_dependency_declaration_order(self.tmp)
+        self.assertNotIn("phantom", result)
+
+    def test_declared_dep_wins_over_local_bundle_with_same_slug(self):
+        """When both a declared dep and a local-bundle slug share a name,
+        the declared dep appears first (priority). The local-bundle slug
+        is deduplicated against the existing entry.
+        """
+        apm_yml = Path(self.tmp) / "apm.yml"
+        apm_yml.write_text("name: test\n")
+        mock_dep = MagicMock()
+        mock_dep.alias = "shared-name"
+        mock_dep.is_virtual = False
+        mock_package = MagicMock()
+        mock_package.get_apm_dependencies.return_value = [mock_dep]
+        self._write_local_bundle_lockfile(["apm_modules/shared-name/.apm/instructions/x.md"])
+        with patch(
+            "apm_cli.primitives.discovery.APMPackage.from_apm_yml",
+            return_value=mock_package,
+        ):
+            result = get_dependency_declaration_order(self.tmp)
+        # "shared-name" appears exactly once, and the alias (declared)
+        # comes first.
+        self.assertEqual(result.count("shared-name"), 1)
+        self.assertEqual(result[0], "shared-name")
+
+    def test_multiple_local_bundles_sorted_deterministically(self):
+        """Two local bundles surface in deterministic order (alphabetical
+        by slug) so compile output is reproducible across runs.
+        """
+        apm_yml = Path(self.tmp) / "apm.yml"
+        apm_yml.write_text("name: test\nversion: 1.0.0\n")
+        self._write_local_bundle_lockfile(
+            [
+                "apm_modules/bundle-b/.apm/instructions/b.md",
+                "apm_modules/bundle-a/.apm/instructions/a.md",
+            ]
+        )
+        result = get_dependency_declaration_order(self.tmp)
+        # bundle-a appears before bundle-b regardless of file insertion
+        # order in the lockfile list.
+        idx_a = result.index("bundle-a")
+        idx_b = result.index("bundle-b")
+        self.assertLess(idx_a, idx_b)
+
+    def test_non_apm_modules_paths_ignored(self):
+        """``local_deployed_files`` also records files outside
+        apm_modules/ (e.g. .github/instructions/x.md from the same bundle
+        install). Those must NOT produce phantom slugs.
+        """
+        apm_yml = Path(self.tmp) / "apm.yml"
+        apm_yml.write_text("name: test\nversion: 1.0.0\n")
+        self._write_local_bundle_lockfile(
+            [
+                ".github/instructions/style.md",
+                ".agents/skills/coding/SKILL.md",
+                "apm_modules/real-bundle/.apm/instructions/x.md",
+            ]
+        )
+        result = get_dependency_declaration_order(self.tmp)
+        # The legitimate apm_modules entry must produce its slug.
+        self.assertIn("real-bundle", result)
+        # The non-apm_modules entries must NOT produce phantom slugs --
+        # check absence of plausible spoofs derived from their paths
+        # (filenames or first-segment dir names) without forbidding
+        # unrelated dependency entries from coexisting.
+        for phantom in ("style", ".github", "coding", ".agents"):
+            self.assertNotIn(phantom, result)
+
+    def test_non_instructions_apm_subdirs_also_recognized(self):
+        """Future-proof: bundles may stage other primitive types under
+        apm_modules/<slug>/.apm/ (e.g. context/, agents/). The slug
+        derivation must trigger on any apm_modules/<slug>/.apm/* path,
+        not only instructions/.
+        """
+        apm_yml = Path(self.tmp) / "apm.yml"
+        apm_yml.write_text("name: test\nversion: 1.0.0\n")
+        self._write_local_bundle_lockfile(["apm_modules/ctx-bundle/.apm/context/notes.context.md"])
+        result = get_dependency_declaration_order(self.tmp)
+        self.assertIn("ctx-bundle", result)
 
 
 class TestScanLocalPrimitives(unittest.TestCase):

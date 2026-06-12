@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Tuple  # noqa: F401, UP035
+from typing import TYPE_CHECKING
 
 from ..constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 
@@ -180,33 +180,46 @@ class DetectionEvidence:
 def gather_detection_evidence(package_path: Path) -> DetectionEvidence:
     """Collect all package-type signals from a directory in one pass.
 
-    Pure: no side-effects, no file mutations.  Cheap (a handful of stat
-    calls).  See :class:`DetectionEvidence` for the shape of the return
-    value.
+    Pure: no side-effects, no file mutations. Stat-cheap except when
+    ``apm.yml`` is present without a ``.apm/`` directory, in which case it
+    is parsed once to detect declared dependencies.  See
+    :class:`DetectionEvidence` for the shape of the return value.
+
+    Internally delegates to :class:`~.format_detection.PackageFormatRegistry`
+    so each signal is gathered by its dedicated detector.
+
+    Note: ``plugin_dirs_present`` is always populated (enumerating
+    ``agents/``, ``skills/``, ``commands/`` if they exist) even when no
+    plugin manifest is present, because observability callers use the field
+    for near-miss warnings independently of classification.
     """
-    from ..utils.helpers import find_plugin_json
+    from .format_detection import (
+        _PLUGIN_DIRS,
+        PackageFormatRegistry,
+    )
 
+    registry = PackageFormatRegistry()
+    report = registry.detect(package_path)
+
+    cp = report.claude_plugin
+    sm = report.skill_md
+    ay = report.apm_yml
+    hj = report.hook_json
+
+    plugin_json_path = cp.plugin_json_path if cp is not None else None
+    has_claude_plugin_dir = cp.has_claude_plugin_dir if cp is not None else False
+    has_plugin_manifest = cp is not None
+
+    # Always enumerate plugin-layout dirs for observability (near-miss warnings
+    # want to know about agents/skills/commands even when no manifest is present).
     plugin_dirs_present = tuple(name for name in _PLUGIN_DIRS if (package_path / name).is_dir())
-    plugin_json_path = find_plugin_json(package_path)
-    has_claude_plugin_dir = (package_path / ".claude-plugin").is_dir()
 
-    # Plugin manifest = plugin.json OR .claude-plugin/ directory.
-    has_plugin_manifest = plugin_json_path is not None or has_claude_plugin_dir
-
-    # Nested skill dirs: directories under skills/ that contain a SKILL.md.
-    nested_skill_dirs: tuple[str, ...] = ()
-    skills_dir = package_path / "skills"
-    if skills_dir.is_dir():
-        nested_skill_dirs = tuple(
-            d.name
-            for d in sorted(skills_dir.iterdir())
-            if d.is_dir() and (d / SKILL_MD_FILENAME).exists()
-        )
+    nested_skill_dirs = sm.nested_skill_dirs if sm is not None else ()
 
     return DetectionEvidence(
-        has_apm_yml=(package_path / APM_YML_FILENAME).exists(),
-        has_skill_md=(package_path / SKILL_MD_FILENAME).exists(),
-        has_hook_json=_has_hook_json(package_path),
+        has_apm_yml=ay is not None,
+        has_skill_md=sm is not None and sm.skill_md_path is not None,
+        has_hook_json=hj is not None,
         plugin_json_path=plugin_json_path,
         plugin_dirs_present=plugin_dirs_present,
         has_claude_plugin_dir=has_claude_plugin_dir,
@@ -220,21 +233,20 @@ def detect_package_type(
 ) -> tuple[PackageType, Path | None]:
     """Classify a package directory into a ``PackageType``.
 
-    Single source of truth for the detection cascade.  Pure: no
-    side-effects, no file mutations.
+    Thin facade over :class:`~.format_detection.PackageFormatRegistry` +
+    :class:`~.format_detection.NormalizationPlanner`.  All detection logic
+    lives in those classes; this function preserves the existing call-site
+    signature ``(PackageType, plugin_json_path | None)``.
 
-    Cascade order (first match wins):
+    Cascade order (first match wins -- implemented in NormalizationPlanner):
 
     1. ``MARKETPLACE_PLUGIN`` -- plugin manifest present: ``plugin.json``
-       OR ``.claude-plugin/`` directory.  This is the strictest signal
-       (explicit plugin packaging intent).
+       OR ``.claude-plugin/`` directory.
     2. ``HYBRID`` -- root ``SKILL.md`` AND ``apm.yml`` present.
     3. ``CLAUDE_SKILL`` -- root ``SKILL.md`` only (no ``apm.yml``).
     4. ``SKILL_BUNDLE`` -- nested ``skills/<x>/SKILL.md`` detected;
        ``apm.yml`` optional; no ``.apm/`` required.
-    5. ``APM_PACKAGE`` -- ``apm.yml`` present. ``.apm/`` is optional: a
-       dep-only ``apm.yml`` (no ``.apm/`` and no nested skills) is a valid
-       curated aggregator that contributes no own primitives (#1094).
+    5. ``APM_PACKAGE`` -- ``apm.yml`` present with ``.apm/`` or declared deps.
     6. ``HOOK_PACKAGE`` -- ``hooks/*.json`` only, no other signals.
     7. ``INVALID`` -- nothing recognisable.
 
@@ -243,43 +255,11 @@ def detect_package_type(
         is non-None only when ``MARKETPLACE_PLUGIN`` was matched via an
         actual ``plugin.json`` file (not via directory evidence alone).
     """
-    evidence = gather_detection_evidence(package_path)
+    from .format_detection import NormalizationPlanner, PackageFormatRegistry
 
-    # 1. Plugin manifest present -> MARKETPLACE_PLUGIN
-    if evidence.has_plugin_manifest:
-        return PackageType.MARKETPLACE_PLUGIN, evidence.plugin_json_path
-
-    # 2. Root SKILL.md + apm.yml -> HYBRID
-    if evidence.has_apm_yml and evidence.has_skill_md:
-        return PackageType.HYBRID, None
-
-    # 3. Root SKILL.md only -> CLAUDE_SKILL
-    if evidence.has_skill_md:
-        return PackageType.CLAUDE_SKILL, None
-
-    # 4. Nested skills/<x>/SKILL.md -> SKILL_BUNDLE (apm.yml optional)
-    if evidence.nested_skill_dirs:
-        return PackageType.SKILL_BUNDLE, None
-
-    # 5. apm.yml present -> APM classification.
-    #    With .apm/ OR declared dependencies, a valid APM_PACKAGE.
-    #    Without either, INVALID (the user committed to "this is an APM
-    #    package" by adding apm.yml; we trust that signal and surface the
-    #    standard "missing .apm/" diagnostic instead of silently falling
-    #    through to a hooks/skill-bundle classification). Dep-only is
-    #    valid as a curated aggregator (#1094).
-    if evidence.has_apm_yml:
-        apm_dir = package_path / APM_DIR
-        if apm_dir.exists() or _apm_yml_declares_dependencies(package_path / APM_YML_FILENAME):
-            return PackageType.APM_PACKAGE, None
-        return PackageType.INVALID, None
-
-    # 6. hooks/*.json only -> HOOK_PACKAGE
-    if evidence.has_hook_json:
-        return PackageType.HOOK_PACKAGE, None
-
-    # 7. Nothing recognisable -> INVALID
-    return PackageType.INVALID, None
+    report = PackageFormatRegistry().detect(package_path)
+    pkg_type, plugin_json_path = NormalizationPlanner().plan(report)
+    return pkg_type, plugin_json_path
 
 
 def _apm_yml_declares_dependencies(apm_yml_path: Path) -> bool:

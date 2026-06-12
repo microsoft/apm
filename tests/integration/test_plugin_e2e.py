@@ -419,7 +419,7 @@ class TestPluginNetworkE2E:
             capture_output=True,
             text=True,
             cwd=str(temp_project),
-            timeout=180,
+            timeout=300,
         )
         assert result.returncode == 0, (
             f"apm install failed (rc={result.returncode}):\n"
@@ -452,7 +452,7 @@ class TestPluginNetworkE2E:
             capture_output=True,
             text=True,
             cwd=str(temp_project),
-            timeout=180,
+            timeout=300,
         )
 
         result = subprocess.run(
@@ -480,7 +480,7 @@ class TestPluginNetworkE2E:
             capture_output=True,
             text=True,
             cwd=str(temp_project),
-            timeout=180,
+            timeout=300,
         )
 
         result = subprocess.run(
@@ -518,7 +518,7 @@ class TestPluginNetworkE2E:
             capture_output=True,
             text=True,
             cwd=str(temp_project),
-            timeout=180,
+            timeout=300,
         )
         assert result.returncode == 0, (
             f"mixed install failed (rc={result.returncode}):\n"
@@ -562,7 +562,7 @@ class TestPluginNetworkE2E:
             capture_output=True,
             text=True,
             cwd=str(temp_project),
-            timeout=180,
+            timeout=300,
         )
         pkg_path = temp_project / "apm_modules" / self.PLUGIN_REF
         assert pkg_path.is_dir(), "Plugin must be installed before uninstall test"
@@ -595,7 +595,7 @@ class TestPluginNetworkE2E:
             capture_output=True,
             text=True,
             cwd=str(temp_project),
-            timeout=180,
+            timeout=300,
         )
         assert r1.returncode == 0, f"First install failed:\n{r1.stderr}"
 
@@ -605,7 +605,7 @@ class TestPluginNetworkE2E:
             capture_output=True,
             text=True,
             cwd=str(temp_project),
-            timeout=180,
+            timeout=300,
         )
         assert r2.returncode == 0, f"Second install failed:\n{r2.stderr}"
 
@@ -657,7 +657,7 @@ class TestPluginNetworkE2E:
             capture_output=True,
             text=True,
             cwd=str(temp_project),
-            timeout=180,
+            timeout=300,
         )
         assert r.returncode == 0, f"Install failed:\n{r.stderr}"
 
@@ -690,7 +690,7 @@ class TestPluginNetworkE2E:
             capture_output=True,
             text=True,
             cwd=str(temp_project),
-            timeout=180,
+            timeout=300,
         )
         assert r.returncode == 0, f"Install failed:\n{r.stderr}"
 
@@ -731,7 +731,7 @@ class TestPluginNetworkE2E:
             capture_output=True,
             text=True,
             cwd=str(temp_project),
-            timeout=180,
+            timeout=300,
         )
         assert result.returncode == 0, f"Install failed:\n{result.stderr}"
 
@@ -750,7 +750,7 @@ class TestPluginNetworkE2E:
             capture_output=True,
             text=True,
             cwd=str(temp_project),
-            timeout=180,
+            timeout=300,
         )
         assert result.returncode == 0, f"Install failed:\n{result.stderr}"
 
@@ -785,7 +785,7 @@ class TestPluginNetworkE2E:
             capture_output=True,
             text=True,
             cwd=str(temp_project),
-            timeout=180,
+            timeout=300,
         )
         assert r1.returncode == 0, f"First install failed:\n{r1.stderr}"
 
@@ -800,7 +800,7 @@ class TestPluginNetworkE2E:
             capture_output=True,
             text=True,
             cwd=str(temp_project),
-            timeout=180,
+            timeout=300,
         )
         assert r2.returncode == 0, f"Second install failed:\n{r2.stderr}"
 

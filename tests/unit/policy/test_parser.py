@@ -5,7 +5,12 @@ import tempfile
 import textwrap
 import unittest
 
-from apm_cli.policy.parser import PolicyValidationError, load_policy, validate_policy
+from apm_cli.policy.parser import (
+    PolicyValidationError,
+    _build_policy,
+    load_policy,
+    validate_policy,
+)
 from apm_cli.policy.schema import ApmPolicy
 
 
@@ -72,6 +77,12 @@ class TestValidatePolicy(unittest.TestCase):
         errors, warnings = validate_policy({"unmanaged_files": {"action": "block"}})  # noqa: RUF059
         self.assertEqual(len(errors), 1)
         self.assertIn("unmanaged_files.action", errors[0])
+
+    def test_unmanaged_files_must_be_mapping(self):
+        for bad in ([], ["x"], "warn", 1):
+            errors, warnings = validate_policy({"unmanaged_files": bad})  # noqa: RUF059
+            self.assertEqual(len(errors), 1, repr(bad))
+            self.assertIn("unmanaged_files must be a YAML mapping", errors[0])
 
     def test_negative_cache_ttl(self):
         errors, warnings = validate_policy({"cache": {"ttl": -1}})  # noqa: RUF059
@@ -218,6 +229,8 @@ class TestLoadPolicyFromString(unittest.TestCase):
         self.assertIsNone(policy.dependencies.allow)
         self.assertEqual(policy.dependencies.max_depth, 50)
         self.assertFalse(policy.manifest.require_explicit_includes)
+        self.assertIsNone(policy.unmanaged_files.action)
+        self.assertIsNone(policy.unmanaged_files.directories)
 
     def test_require_explicit_includes_true(self):
         yaml_str = textwrap.dedent("""
@@ -274,7 +287,8 @@ class TestLoadPolicyFromString(unittest.TestCase):
         """)
         policy, warnings = load_policy(yaml_str)  # noqa: RUF059
         self.assertEqual(policy.dependencies.allow, ("org/*",))
-        self.assertEqual(policy.dependencies.deny, ())
+        self.assertIsNone(policy.dependencies.deny)
+        self.assertEqual(policy.dependencies.effective_deny, ())
         self.assertEqual(policy.dependencies.max_depth, 50)
         self.assertEqual(policy.mcp.self_defined, "warn")
 
@@ -323,7 +337,29 @@ class TestLoadPolicyFromString(unittest.TestCase):
         policy, _ = load_policy("name: test\nenforcement: warn\n")
         self.assertIsNone(policy.unmanaged_files.action)
         self.assertEqual(policy.unmanaged_files.effective_action, "ignore")
-        self.assertEqual(policy.unmanaged_files.directories, ())
+        self.assertIsNone(policy.unmanaged_files.directories)
+
+    def test_absent_dependencies_block_gives_none_deny_and_require(self):
+        """Entirely absent dependencies: block -> deny=None, require=None (Fix 2)."""
+        policy, _ = load_policy("name: p\nversion: '1'\nenforcement: warn\n")
+        self.assertIsNone(policy.dependencies.deny, "absent block must yield deny=None")
+        self.assertIsNone(policy.dependencies.require, "absent block must yield require=None")
+
+    def test_yaml_null_deny_gives_none(self):
+        """YAML 'deny: null' (or bare 'deny:') must be treated as no opinion, not empty list (Fix 2)."""
+        yaml_str = "name: p\nversion: '1'\nenforcement: warn\ndependencies:\n  deny:\n  require:\n"
+        policy, _ = load_policy(yaml_str)
+        self.assertIsNone(policy.dependencies.deny, "deny: null must yield None, not ()")
+        self.assertIsNone(policy.dependencies.require, "require: null must yield None, not ()")
+
+    def test_explicit_empty_deny_list_gives_empty_tuple(self):
+        """Explicit 'deny: []' must give () (explicit empty override), not None."""
+        yaml_str = (
+            "name: p\nversion: '1'\nenforcement: warn\ndependencies:\n  deny: []\n  require: []\n"
+        )
+        policy, _ = load_policy(yaml_str)
+        self.assertEqual(policy.dependencies.deny, (), "deny: [] must yield ()")
+        self.assertEqual(policy.dependencies.require, (), "require: [] must yield ()")
 
 
 class TestLoadPolicyFromFile(unittest.TestCase):
@@ -361,6 +397,33 @@ class TestLoadPolicyFromFile(unittest.TestCase):
             self.assertEqual(policy.name, "pathlib-test")
         finally:
             os.unlink(str(path))
+
+
+class TestSecurityAuditParsing(unittest.TestCase):
+    """Validation + build for the security.audit policy section."""
+
+    def test_valid_security_audit(self):
+        data = {"security": {"audit": {"on_install": "block", "external": ["skillspector"]}}}
+        errors, _ = validate_policy(data)
+        self.assertEqual(errors, [])
+        policy = _build_policy(data)
+        self.assertEqual(policy.security.audit.on_install, "block")
+        self.assertEqual(policy.security.audit.external, ("skillspector",))
+
+    def test_invalid_on_install_value(self):
+        errors, _ = validate_policy({"security": {"audit": {"on_install": "nope"}}})
+        self.assertTrue(errors)
+        self.assertIn("on_install", errors[0])
+
+    def test_security_is_known_top_level_key(self):
+        # Should not surface an "unknown key" warning.
+        _, warnings = validate_policy({"security": {"audit": {"on_install": "warn"}}})
+        self.assertFalse(any("security" in w for w in warnings))
+
+    def test_missing_security_defaults_to_none(self):
+        policy = _build_policy({})
+        self.assertIsNone(policy.security.audit.on_install)
+        self.assertIsNone(policy.security.audit.external)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,1165 @@
+JUDGE BATCH FOR PAGE: docs/src/content/docs/reference/cli/install.md
+Apply assets/judge-prompt.md to each tuple below.
+Return one JSON verdict per claim_id, in a JSON array.
+---
+
+TUPLE claim_id=c1:
+{
+  "claim_id": "c1",
+  "claim_text": "apm install resolves dependencies in apm.yml, downloads with transitive resolution and content-addressed cache, runs a built-in security scan, and deploys primitives to detected targets.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 123,
+      "snippet": "# When the user runs ``apm install <pkg>``, ``_validate_and_add_packages_to_apm_yml``",
+      "matched_keyword": "apm install"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 165,
+      "snippet": "    ``apm install <pkg>`` or the manifest did not exist before mutation).",
+      "matched_keyword": "apm install"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 239,
+      "snippet": "# ``apm install --mcp foo -- npx -y srv`` we cannot distinguish that from",
+      "matched_keyword": "apm install"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 240,
+      "snippet": "# ``apm install --mcp foo npx -y srv`` once Click is done parsing.",
+      "matched_keyword": "apm install"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1005,
+      "snippet": "        \"targets the same way `apm install` does (--target > apm.yml targets: > \"",
+      "matched_keyword": "apm install"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 26,
+      "snippet": "# Re-export the pre-deploy security scan so that bare-name call sites inside",
+      "matched_keyword": "security scan"
+    },
+    {
+      "file": "src/apm_cli/install/__init__.py",
+      "line": 18,
+      "snippet": "    helpers/        cross-cutting helpers (security scan, gitignore)",
+      "matched_keyword": "security scan"
+    },
+    {
+      "file": "src/apm_cli/install/template.py",
+      "line": 46,
+      "snippet": "    Here we focus on the deployment side: security scan, primitive",
+      "matched_keyword": "security scan"
+    },
+    {
+      "file": "src/apm_cli/install/helpers/__init__.py",
+      "line": 1,
+      "snippet": "\"\"\"Cross-cutting install helpers (security scan, gitignore).\"\"\"",
+      "matched_keyword": "security scan"
+    },
+    {
+      "file": "src/apm_cli/install/helpers/security_scan.py",
+      "line": 1,
+      "snippet": "\"\"\"Pre-deploy security scan that runs before any file is written to the project tree.",
+      "matched_keyword": "security scan"
+    },
+    {
+      "file": "src/apm_cli/install/cache_pin.py",
+      "line": 23,
+      "snippet": "against active cache tampering requires content-addressed hashes /",
+      "matched_keyword": "content-addressed"
+    },
+    {
+      "file": "src/apm_cli/install/cache_pin.py",
+      "line": 23,
+      "snippet": "against active cache tampering requires content-addressed hashes /",
+      "matched_keyword": "content-addressed"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 39,
+      "snippet": "    _guard_transitive_insecure_dependencies,  # noqa: F401",
+      "matched_keyword": "transitive"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 218,
+      "snippet": "    trust_transitive_mcp: bool",
+      "matched_keyword": "transitive"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 928,
+      "snippet": "    \"--trust-transitive-mcp\",",
+      "matched_keyword": "transitive"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 930,
+      "snippet": "    help=\"Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)\",",
+      "matched_keyword": "transitive"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 966,
+      "snippet": "    help=\"Allow transitive HTTP (insecure) dependencies from this hostname. Repeat for multiple hosts.\",",
+      "matched_keyword": "transitive"
+    }
+  ],
+  "evidence_count": 17
+}
+
+TUPLE claim_id=c2:
+{
+  "claim_id": "c2",
+  "claim_text": "apm install writes apm.lock.yaml so the next install on any machine reproduces the same files.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/install/service.py",
+      "line": 100,
+      "snippet": "        Looks up ``apm.lock.yaml`` next to the manifest's ``apm.yml``,",
+      "matched_keyword": "apm.lock.yaml"
+    },
+    {
+      "file": "src/apm_cli/install/service.py",
+      "line": 118,
+      "snippet": "        lockfile_path = project_dir / \"apm.lock.yaml\"",
+      "matched_keyword": "apm.lock.yaml"
+    },
+    {
+      "file": "src/apm_cli/install/service.py",
+      "line": 122,
+      "snippet": "                \"--frozen requires apm.lock.yaml to exist. \"",
+      "matched_keyword": "apm.lock.yaml"
+    },
+    {
+      "file": "src/apm_cli/install/service.py",
+      "line": 130,
+      "snippet": "                f\"--frozen could not read apm.lock.yaml: {e}\",",
+      "matched_keyword": "apm.lock.yaml"
+    },
+    {
+      "file": "src/apm_cli/install/service.py",
+      "line": 135,
+      "snippet": "                \"--frozen requires apm.lock.yaml to exist. \"",
+      "matched_keyword": "apm.lock.yaml"
+    }
+  ],
+  "evidence_count": 5
+}
+
+TUPLE claim_id=c3:
+{
+  "claim_id": "c3",
+  "claim_text": "With no arguments installs everything from apm.yml; with PACKAGE_REF arguments adds those packages to apm.yml and installs only what was added.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/install/phases/lockfile.py",
+      "line": 188,
+      "snippet": "                    existing.add_dependency(dep)",
+      "matched_keyword": "add_dependency"
+    },
+    {
+      "file": "src/apm_cli/core/script_runner.py",
+      "line": 858,
+      "snippet": "            self._add_dependency_to_config(package_ref)",
+      "matched_keyword": "add_dependency"
+    },
+    {
+      "file": "src/apm_cli/core/script_runner.py",
+      "line": 866,
+      "snippet": "    def _add_dependency_to_config(self, package_ref: str) -> None:",
+      "matched_keyword": "add_dependency"
+    },
+    {
+      "file": "src/apm_cli/integration/hook_integrator.py",
+      "line": 706,
+      "snippet": "                HookIntegrator._add_dependency_source(sources, package_path)",
+      "matched_keyword": "add_dependency"
+    },
+    {
+      "file": "src/apm_cli/integration/hook_integrator.py",
+      "line": 780,
+      "snippet": "    def _add_dependency_source(sources: set[str], package_path: Path) -> bool:",
+      "matched_keyword": "add_dependency"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 124,
+      "snippet": "# mutates ``apm.yml`` BEFORE the install pipeline runs.  If the pipeline fails",
+      "matched_keyword": "apm.yml"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 126,
+      "snippet": "# ``apm.yml`` forever.  These helpers snapshot the raw bytes before mutation",
+      "matched_keyword": "apm.yml"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 135,
+      "snippet": "    \"\"\"Atomically restore ``apm.yml`` from a raw-bytes snapshot.",
+      "matched_keyword": "apm.yml"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 162,
+      "snippet": "    \"\"\"Restore ``apm.yml`` from *snapshot* if one was captured, then log.",
+      "matched_keyword": "apm.yml"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 171,
+      "snippet": "        logger.progress(\"apm.yml restored to its previous state.\")",
+      "matched_keyword": "apm.yml"
+    }
+  ],
+  "evidence_count": 10
+}
+
+TUPLE claim_id=c4:
+{
+  "claim_id": "c4",
+  "claim_text": "http:// deps are refused unless --allow-insecure or --allow-insecure-host HOSTNAME is passed.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 895,
+      "snippet": "    help=\"Install APM and MCP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)\"",
+      "matched_keyword": "http://"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 958,
+      "snippet": "    help=\"Allow HTTP (insecure) dependencies. Required when dependencies use http:// URLs.\",",
+      "matched_keyword": "http://"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1047,
+      "snippet": "        \"MCP registry URL (http:// or https://) for resolving --mcp NAME. \"",
+      "matched_keyword": "http://"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1145,
+      "snippet": "        apm install --allow-insecure http://...  # HTTP URL (needs allow_insecure)",
+      "matched_keyword": "http://"
+    },
+    {
+      "file": "src/apm_cli/install/mcp/registry.py",
+      "line": 135,
+      "snippet": "            f\"supported; use http:// or https://. WebSocket URLs (ws/wss) \"",
+      "matched_keyword": "http://"
+    }
+  ],
+  "evidence_count": 5
+}
+
+TUPLE claim_id=c5:
+{
+  "claim_id": "c5",
+  "claim_text": "--frozen flag enables lockfile-only install that refuses to resolve anything new and fails if apm.yml and apm.lock.yaml have drifted.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 227,
+      "snippet": "    frozen: bool = False",
+      "matched_keyword": "frozen"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 922,
+      "snippet": "    \"--frozen\",",
+      "matched_keyword": "frozen"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1106,
+      "snippet": "    frozen,",
+      "matched_keyword": "frozen"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1168,
+      "snippet": "    if frozen and update:",
+      "matched_keyword": "frozen"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1170,
+      "snippet": "            \"--frozen and --update are mutually exclusive. \"",
+      "matched_keyword": "frozen"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1451,
+      "snippet": "            # byte-exact -- no YAML drift.",
+      "matched_keyword": "drift"
+    },
+    {
+      "file": "src/apm_cli/install/services.py",
+      "line": 159,
+      "snippet": "    # Drift-replay safety guard (#drift): when ``scratch_root`` is set,",
+      "matched_keyword": "drift"
+    },
+    {
+      "file": "src/apm_cli/install/services.py",
+      "line": 162,
+      "snippet": "    # read-only contract of ``apm audit --check drift`` enforceable.",
+      "matched_keyword": "drift"
+    },
+    {
+      "file": "src/apm_cli/install/drift.py",
+      "line": 1,
+      "snippet": "\"\"\"Drift-detection replay engine for ``apm audit --check drift``.",
+      "matched_keyword": "drift"
+    },
+    {
+      "file": "src/apm_cli/install/drift.py",
+      "line": 16,
+      "snippet": "Design constraints (see ``WIP/drift/06-final-plan.md``):",
+      "matched_keyword": "drift"
+    }
+  ],
+  "evidence_count": 10
+}
+
+TUPLE claim_id=c6:
+{
+  "claim_id": "c6",
+  "claim_text": "--force overwrites locally-authored files on collision and bypasses the security scan's critical-finding block.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 206,
+      "snippet": "    force: bool",
+      "matched_keyword": "force"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 792,
+      "snippet": "    force,",
+      "matched_keyword": "force"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 822,
+      "snippet": "    # -- W2-mcp-preflight: policy enforcement before MCP install --",
+      "matched_keyword": "force"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 882,
+      "snippet": "        force=force,",
+      "matched_keyword": "force"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 917,
+      "snippet": "    \"--force\",",
+      "matched_keyword": "force"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 919,
+      "snippet": "    help=\"Overwrite locally-authored files on collision and deploy despite critical security findings (does NOT refresh refs; use 'apm update' for that)\",",
+      "matched_keyword": "critical"
+    },
+    {
+      "file": "src/apm_cli/install/cache_pin.py",
+      "line": 10,
+      "snippet": "critical correctness hazard:",
+      "matched_keyword": "critical"
+    },
+    {
+      "file": "src/apm_cli/install/summary.py",
+      "line": 8,
+      "snippet": "critical security findings.",
+      "matched_keyword": "critical"
+    },
+    {
+      "file": "src/apm_cli/install/summary.py",
+      "line": 32,
+      "snippet": "    hard-fail on critical security findings.",
+      "matched_keyword": "critical"
+    },
+    {
+      "file": "src/apm_cli/install/summary.py",
+      "line": 40,
+      "snippet": "        force: When ``True``, suppresses the hard-fail on critical",
+      "matched_keyword": "critical"
+    }
+  ],
+  "evidence_count": 10
+}
+
+TUPLE claim_id=c7:
+{
+  "claim_id": "c7",
+  "claim_text": "--target accepts: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills with 'all' expanding to every harness except agent-skills.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 901,
+      "snippet": "        \"Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude, windsurf)\"",
+      "matched_keyword": "copilot"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 951,
+      "snippet": "    help=\"Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Repeating the flag (e.g. '-t a -t b') is NOT supported -- only the last value wins; use commas. Highest",
+      "matched_keyword": "copilot"
+    },
+    {
+      "file": "src/apm_cli/integration/copilot_app_db.py",
+      "line": 4,
+      "snippet": "``~/.copilot/data.db`` (SQLite, WAL journal mode).  APM deploys prompts",
+      "matched_keyword": "copilot"
+    },
+    {
+      "file": "src/apm_cli/integration/copilot_app_db.py",
+      "line": 12,
+      "snippet": "1. **Resolution** -- locate ``~/.copilot/data.db`` on the current machine",
+      "matched_keyword": "copilot"
+    },
+    {
+      "file": "src/apm_cli/integration/copilot_app_db.py",
+      "line": 16,
+      "snippet": "   ``apm.lock.yaml`` via the synthetic ``copilot-app-db://workflows/<id>``",
+      "matched_keyword": "copilot"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 901,
+      "snippet": "        \"Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude, windsurf)\"",
+      "matched_keyword": "claude"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 951,
+      "snippet": "    help=\"Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Repeating the flag (e.g. '-t a -t b') is NOT supported -- only the last value wins; use commas. Highest",
+      "matched_keyword": "claude"
+    },
+    {
+      "file": "src/apm_cli/integration/targets.py",
+      "line": 57,
+      "snippet": "    \"\"\"Short unique identifier (``\"copilot\"``, ``\"claude\"``, ``\"cursor\"``).\"\"\"",
+      "matched_keyword": "claude"
+    },
+    {
+      "file": "src/apm_cli/integration/targets.py",
+      "line": 171,
+      "snippet": "    * ``\"claude\"`` -- emits ``CLAUDE.md`` and ``.claude/rules/`` files.",
+      "matched_keyword": "claude"
+    },
+    {
+      "file": "src/apm_cli/integration/targets.py",
+      "line": 183,
+      "snippet": "    e.g. ``\".claude/settings.json\"`` for Claude (hooks merge into a settings",
+      "matched_keyword": "claude"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 901,
+      "snippet": "        \"Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude, windsurf)\"",
+      "matched_keyword": "cursor"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 951,
+      "snippet": "    help=\"Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Repeating the flag (e.g. '-t a -t b') is NOT supported -- only the last value wins; use commas. Highest",
+      "matched_keyword": "cursor"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1080,
+      "snippet": "        \"Deploy skill files to per-client paths (e.g. .cursor/skills/) instead of \"",
+      "matched_keyword": "cursor"
+    },
+    {
+      "file": "src/apm_cli/integration/targets.py",
+      "line": 39,
+      "snippet": "    content transformer (e.g. ``\"cursor_rules\"``).\"\"\"",
+      "matched_keyword": "cursor"
+    },
+    {
+      "file": "src/apm_cli/integration/targets.py",
+      "line": 57,
+      "snippet": "    \"\"\"Short unique identifier (``\"copilot\"``, ``\"claude\"``, ``\"cursor\"``).\"\"\"",
+      "matched_keyword": "cursor"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 951,
+      "snippet": "    help=\"Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Repeating the flag (e.g. '-t a -t b') is NOT supported -- only the last value wins; use commas. Highest",
+      "matched_keyword": "agent-skills"
+    },
+    {
+      "file": "src/apm_cli/integration/targets.py",
+      "line": 174,
+      "snippet": "    * ``None`` -- target has no compile output (agent-skills, copilot-cowork).",
+      "matched_keyword": "agent-skills"
+    },
+    {
+      "file": "src/apm_cli/integration/targets.py",
+      "line": 565,
+      "snippet": "    # multiple tools (Codex, etc.). Explicit --target agent-skills only.",
+      "matched_keyword": "agent-skills"
+    },
+    {
+      "file": "src/apm_cli/integration/targets.py",
+      "line": 566,
+      "snippet": "    \"agent-skills\": TargetProfile(",
+      "matched_keyword": "agent-skills"
+    },
+    {
+      "file": "src/apm_cli/integration/targets.py",
+      "line": 567,
+      "snippet": "        name=\"agent-skills\",",
+      "matched_keyword": "agent-skills"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 951,
+      "snippet": "    help=\"Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Repeating the flag (e.g. '-t a -t b') is NOT supported -- only the last value wins; use commas. Highest",
+      "matched_keyword": "'all'"
+    },
+    {
+      "file": "src/apm_cli/core/target_detection.py",
+      "line": 505,
+      "snippet": "                    \"'all' cannot be combined with other targets\",",
+      "matched_keyword": "'all'"
+    },
+    {
+      "file": "src/apm_cli/core/target_detection.py",
+      "line": 755,
+      "snippet": "    \"\"\"Expand 'all' to (signals union yaml_targets). Raises NoHarnessError if empty.\"\"\"",
+      "matched_keyword": "'all'"
+    },
+    {
+      "file": "src/apm_cli/commands/pack.py",
+      "line": 162,
+      "snippet": "        \"Use 'all' for every configured output, 'none' to skip marketplace. \"",
+      "matched_keyword": "'all'"
+    },
+    {
+      "file": "src/apm_cli/commands/compile/cli.py",
+      "line": 334,
+      "snippet": "    help=\"Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = co",
+      "matched_keyword": "'all'"
+    }
+  ],
+  "evidence_count": 25
+}
+
+TUPLE claim_id=c8:
+{
+  "claim_id": "c8",
+  "claim_text": "-g/--global flag installs to user scope (~/.apm/) instead of current project; MCP servers deploy only to global-capable runtimes.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 974,
+      "snippet": "    help=\"Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Codex CLI).\",",
+      "matched_keyword": "~/.apm/"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1144,
+      "snippet": "        apm install -g org/pkg1                 # Install to user scope (~/.apm/)",
+      "matched_keyword": "~/.apm/"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1398,
+      "snippet": "            logger.progress(\"Installing to user scope (~/.apm/)\")",
+      "matched_keyword": "~/.apm/"
+    },
+    {
+      "file": "src/apm_cli/config.py",
+      "line": 155,
+      "snippet": "        key: The JSON key to remove from ``~/.apm/config.json``.",
+      "matched_keyword": "~/.apm/"
+    },
+    {
+      "file": "src/apm_cli/config.py",
+      "line": 266,
+      "snippet": "      2. ``allow_protocol_fallback`` value from ``~/.apm/config.json``",
+      "matched_keyword": "~/.apm/"
+    }
+  ],
+  "evidence_count": 5
+}
+
+TUPLE claim_id=c9:
+{
+  "claim_id": "c9",
+  "claim_text": "--parallel-downloads N defaults to 4 and can be disabled with 0.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 213,
+      "snippet": "    parallel_downloads: int",
+      "matched_keyword": "parallel_downloads"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1109,
+      "snippet": "    parallel_downloads,",
+      "matched_keyword": "parallel_downloads"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1236,
+      "snippet": "                        \"--parallel-downloads\": parallel_downloads != 4,",
+      "matched_keyword": "parallel_downloads"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1490,
+      "snippet": "            parallel_downloads=parallel_downloads,",
+      "matched_keyword": "parallel_downloads"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1719,
+      "snippet": "                parallel_downloads=ctx.parallel_downloads,",
+      "matched_keyword": "parallel_downloads"
+    }
+  ],
+  "evidence_count": 5
+}
+
+TUPLE claim_id=c10:
+{
+  "claim_id": "c10",
+  "claim_text": "--skill NAME flag installs only named skills from a SKILL_BUNDLE package and selection is persisted to apm.yml and apm.lock.yaml.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1059,
+      "snippet": "    help=\"Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Persisted in apm.yml and apm.lock so bare 'apm install' is deterministic. Use --skill '*' to reset to all skills.\",",
+      "matched_keyword": "SKILL_BUNDLE"
+    },
+    {
+      "file": "src/apm_cli/install/request.py",
+      "line": 46,
+      "snippet": "    skill_subset: tuple[str, ...] | None = None  # --skill filter for SKILL_BUNDLE packages",
+      "matched_keyword": "SKILL_BUNDLE"
+    },
+    {
+      "file": "src/apm_cli/install/sources.py",
+      "line": 66,
+      "snippet": "        PackageType.SKILL_BUNDLE: \"Skill Bundle (skills/<name>/SKILL.md)\",",
+      "matched_keyword": "SKILL_BUNDLE"
+    },
+    {
+      "file": "src/apm_cli/install/context.py",
+      "line": 145,
+      "snippet": "    skill_subset: tuple[str, ...] | None = None  # --skill filter for SKILL_BUNDLE packages",
+      "matched_keyword": "SKILL_BUNDLE"
+    },
+    {
+      "file": "src/apm_cli/install/pipeline.py",
+      "line": 790,
+      "snippet": "        # Path-safety violation in SKILL_BUNDLE or other nested",
+      "matched_keyword": "SKILL_BUNDLE"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 229,
+      "snippet": "    skill_subset: \"builtins.tuple[str, ...] | None\" = None",
+      "matched_keyword": "skill_subset"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 230,
+      "snippet": "    skill_subset_from_cli: bool = False",
+      "matched_keyword": "skill_subset"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 337,
+      "snippet": "    skill_subset=None,",
+      "matched_keyword": "skill_subset"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 475,
+      "snippet": "            if skill_subset:",
+      "matched_keyword": "skill_subset"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 480,
+      "snippet": "                for _s in skill_subset:",
+      "matched_keyword": "skill_subset"
+    }
+  ],
+  "evidence_count": 10
+}
+
+TUPLE claim_id=c11:
+{
+  "claim_id": "c11",
+  "claim_text": "--mcp NAME adds an MCP server entry to apm.yml with --transport inferred from --url or post-`--` argv when omitted.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1677,
+      "snippet": "    old_mcp_servers: builtins.set = builtins.set()",
+      "matched_keyword": "mcp_servers"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1682,
+      "snippet": "        old_mcp_servers = builtins.set(_existing_lock.mcp_servers)",
+      "matched_keyword": "mcp_servers"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1831,
+      "snippet": "    new_mcp_servers: builtins.set = builtins.set()",
+      "matched_keyword": "mcp_servers"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1858,
+      "snippet": "        new_mcp_servers = MCPIntegrator.get_server_names(mcp_deps)",
+      "matched_keyword": "mcp_servers"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1862,
+      "snippet": "        stale_servers = old_mcp_servers - new_mcp_servers",
+      "matched_keyword": "mcp_servers"
+    }
+  ],
+  "evidence_count": 5
+}
+
+TUPLE claim_id=c12:
+{
+  "claim_id": "c12",
+  "claim_text": "Exit 0 = success; exit 1 = install failure including security scan blocks, auth errors, resolution errors; exit 2 = usage error.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 635,
+      "snippet": "        sys.exit(1)",
+      "matched_keyword": "exit"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 681,
+      "snippet": "        sys.exit(1)",
+      "matched_keyword": "exit"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 740,
+      "snippet": "            sys_exit=sys.exit,",
+      "matched_keyword": "exit"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 857,
+      "snippet": "        sys.exit(1)",
+      "matched_keyword": "exit"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1162,
+      "snippet": "    # F5 (#1116): elapsed wall time covers EVERY exit path. Captured",
+      "matched_keyword": "exit"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 635,
+      "snippet": "        sys.exit(1)",
+      "matched_keyword": "sys.exit"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 681,
+      "snippet": "        sys.exit(1)",
+      "matched_keyword": "sys.exit"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 740,
+      "snippet": "            sys_exit=sys.exit,",
+      "matched_keyword": "sys.exit"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 857,
+      "snippet": "        sys.exit(1)",
+      "matched_keyword": "sys.exit"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1368,
+      "snippet": "            sys.exit(2)",
+      "matched_keyword": "sys.exit"
+    },
+    {
+      "file": "src/apm_cli/commands/pack.py",
+      "line": 73,
+      "snippet": "        ctx.exit(1)",
+      "matched_keyword": "ctx.exit"
+    },
+    {
+      "file": "src/apm_cli/commands/pack.py",
+      "line": 462,
+      "snippet": "            ctx.exit(3)",
+      "matched_keyword": "ctx.exit"
+    },
+    {
+      "file": "src/apm_cli/commands/pack.py",
+      "line": 464,
+      "snippet": "            ctx.exit(4)",
+      "matched_keyword": "ctx.exit"
+    },
+    {
+      "file": "src/apm_cli/commands/pack.py",
+      "line": 475,
+      "snippet": "        ctx.exit(3)",
+      "matched_keyword": "ctx.exit"
+    },
+    {
+      "file": "src/apm_cli/commands/pack.py",
+      "line": 477,
+      "snippet": "        ctx.exit(4)",
+      "matched_keyword": "ctx.exit"
+    }
+  ],
+  "evidence_count": 15
+}
+
+TUPLE claim_id=c13:
+{
+  "claim_id": "c13",
+  "claim_text": "apm install --frozen fails if direct dependency is absent from apm.lock.yaml or lockfile is missing, exiting with code 1.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/install/service.py",
+      "line": 53,
+      "snippet": "            FrozenInstallError: when ``request.frozen`` is True and the",
+      "matched_keyword": "frozen"
+    },
+    {
+      "file": "src/apm_cli/install/service.py",
+      "line": 58,
+      "snippet": "        # Enforce --frozen BEFORE invoking the pipeline.  The check is",
+      "matched_keyword": "frozen"
+    },
+    {
+      "file": "src/apm_cli/install/service.py",
+      "line": 61,
+      "snippet": "        # for the pipeline (which never sees a `frozen` flag).",
+      "matched_keyword": "frozen"
+    },
+    {
+      "file": "src/apm_cli/install/service.py",
+      "line": 62,
+      "snippet": "        if request.frozen:",
+      "matched_keyword": "frozen"
+    },
+    {
+      "file": "src/apm_cli/install/service.py",
+      "line": 63,
+      "snippet": "            self._enforce_frozen(request)",
+      "matched_keyword": "frozen"
+    },
+    {
+      "file": "src/apm_cli/install/service.py",
+      "line": 51,
+      "snippet": "                to import (e.g. missing optional extras).  Adapters are",
+      "matched_keyword": "missing"
+    },
+    {
+      "file": "src/apm_cli/install/service.py",
+      "line": 54,
+      "snippet": "                lockfile is missing or structurally out of sync with",
+      "matched_keyword": "missing"
+    },
+    {
+      "file": "src/apm_cli/install/plan.py",
+      "line": 414,
+      "snippet": "            reasons.append(f\"  - {key} is declared in apm.yml but missing from apm.lock.yaml\")",
+      "matched_keyword": "missing"
+    },
+    {
+      "file": "src/apm_cli/install/local_bundle_handler.py",
+      "line": 302,
+      "snippet": "    Returns an empty list when the file is missing, malformed, or has no",
+      "matched_keyword": "missing"
+    },
+    {
+      "file": "src/apm_cli/install/request.py",
+      "line": 50,
+      "snippet": "    # --frozen: refuse to install if lockfile is missing or stale relative",
+      "matched_keyword": "missing"
+    }
+  ],
+  "evidence_count": 10
+}
+
+TUPLE claim_id=c14:
+{
+  "claim_id": "c14",
+  "claim_text": "Security scan source files for hidden Unicode and tag-character/bidi-override patterns before deployment; critical findings block and exit 1.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/security/content_scanner.py",
+      "line": 28,
+      "snippet": "    category: str  # e.g. \"tag-character\", \"bidi-override\", \"zero-width\"",
+      "matched_keyword": "bidi"
+    },
+    {
+      "file": "src/apm_cli/security/content_scanner.py",
+      "line": 45,
+      "snippet": "    (0x202A, 0x202A, \"critical\", \"bidi-override\", \"Left-to-right embedding (LRE)\"),",
+      "matched_keyword": "bidi"
+    },
+    {
+      "file": "src/apm_cli/security/content_scanner.py",
+      "line": 46,
+      "snippet": "    (0x202B, 0x202B, \"critical\", \"bidi-override\", \"Right-to-left embedding (RLE)\"),",
+      "matched_keyword": "bidi"
+    },
+    {
+      "file": "src/apm_cli/security/content_scanner.py",
+      "line": 47,
+      "snippet": "    (0x202C, 0x202C, \"critical\", \"bidi-override\", \"Pop directional formatting (PDF)\"),",
+      "matched_keyword": "bidi"
+    },
+    {
+      "file": "src/apm_cli/security/content_scanner.py",
+      "line": 48,
+      "snippet": "    (0x202D, 0x202D, \"critical\", \"bidi-override\", \"Left-to-right override (LRO)\"),",
+      "matched_keyword": "bidi"
+    },
+    {
+      "file": "src/apm_cli/security/content_scanner.py",
+      "line": 28,
+      "snippet": "    category: str  # e.g. \"tag-character\", \"bidi-override\", \"zero-width\"",
+      "matched_keyword": "tag-character"
+    },
+    {
+      "file": "src/apm_cli/security/content_scanner.py",
+      "line": 41,
+      "snippet": "        \"tag-character\",",
+      "matched_keyword": "tag-character"
+    },
+    {
+      "file": "src/apm_cli/security/content_scanner.py",
+      "line": 28,
+      "snippet": "    category: str  # e.g. \"tag-character\", \"bidi-override\", \"zero-width\"",
+      "matched_keyword": "tag-character"
+    },
+    {
+      "file": "src/apm_cli/security/content_scanner.py",
+      "line": 41,
+      "snippet": "        \"tag-character\",",
+      "matched_keyword": "tag-character"
+    },
+    {
+      "file": "src/apm_cli/security/content_scanner.py",
+      "line": 1,
+      "snippet": "\"\"\"Content scanner for detecting hidden Unicode characters in text files.",
+      "matched_keyword": "hidden Unicode"
+    },
+    {
+      "file": "src/apm_cli/security/content_scanner.py",
+      "line": 1,
+      "snippet": "\"\"\"Content scanner for detecting hidden Unicode characters in text files.",
+      "matched_keyword": "hidden Unicode"
+    },
+    {
+      "file": "src/apm_cli/bundle/unpacker.py",
+      "line": 163,
+      "snippet": "        # 3b. Security scan: check bundle contents for hidden Unicode characters",
+      "matched_keyword": "hidden Unicode"
+    },
+    {
+      "file": "src/apm_cli/commands/audit.py",
+      "line": 3,
+      "snippet": "Scans installed APM packages (or arbitrary files) for hidden Unicode",
+      "matched_keyword": "hidden Unicode"
+    },
+    {
+      "file": "src/apm_cli/commands/audit.py",
+      "line": 618,
+      "snippet": "    hidden Unicode characters, optionally stripping them.",
+      "matched_keyword": "hidden Unicode"
+    },
+    {
+      "file": "src/apm_cli/security/gate.py",
+      "line": 1,
+      "snippet": "\"\"\"Centralized security scanning gate for all APM commands.",
+      "matched_keyword": "security scan"
+    },
+    {
+      "file": "src/apm_cli/security/gate.py",
+      "line": 75,
+      "snippet": "    \"\"\"Single entry point for security scanning across all commands.\"\"\"",
+      "matched_keyword": "security scan"
+    },
+    {
+      "file": "src/apm_cli/install/__init__.py",
+      "line": 18,
+      "snippet": "    helpers/        cross-cutting helpers (security scan, gitignore)",
+      "matched_keyword": "security scan"
+    },
+    {
+      "file": "src/apm_cli/install/template.py",
+      "line": 46,
+      "snippet": "    Here we focus on the deployment side: security scan, primitive",
+      "matched_keyword": "security scan"
+    },
+    {
+      "file": "src/apm_cli/install/helpers/__init__.py",
+      "line": 1,
+      "snippet": "\"\"\"Cross-cutting install helpers (security scan, gitignore).\"\"\"",
+      "matched_keyword": "security scan"
+    }
+  ],
+  "evidence_count": 19
+}
+
+TUPLE claim_id=c15:
+{
+  "claim_id": "c15",
+  "claim_text": "ref: field accepts semver ranges for git-source deps; APM runs git ls-remote, picks highest matching tag, and pins tag plus commit SHA in apm.lock.yaml.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/deps/installed_package.py",
+      "line": 31,
+      "snippet": "    dep_ref:",
+      "matched_keyword": "ref:"
+    },
+    {
+      "file": "src/apm_cli/deps/installed_package.py",
+      "line": 58,
+      "snippet": "        when a git-source dep used a semver range as ``ref:`` (issue #1488).",
+      "matched_keyword": "ref:"
+    },
+    {
+      "file": "src/apm_cli/deps/installed_package.py",
+      "line": 63,
+      "snippet": "    dep_ref: DependencyReference",
+      "matched_keyword": "ref:"
+    },
+    {
+      "file": "src/apm_cli/deps/git_semver_resolver.py",
+      "line": 5,
+      "snippet": "shorthand) or ``ref: ^1.2.0`` (object form) in ``apm.yml``, the install",
+      "matched_keyword": "ref:"
+    },
+    {
+      "file": "src/apm_cli/deps/git_semver_resolver.py",
+      "line": 63,
+      "snippet": "# ``v``) and writes ``ref: 1.2.3`` would see ``NoMatchingTagError``",
+      "matched_keyword": "ref:"
+    },
+    {
+      "file": "src/apm_cli/deps/git_semver_resolver.py",
+      "line": 119,
+      "snippet": "        without re-running ``git ls-remote``.",
+      "matched_keyword": "git ls-remote"
+    },
+    {
+      "file": "src/apm_cli/deps/git_semver_resolver.py",
+      "line": 192,
+      "snippet": "        The :class:`RefResolver` to use for ``git ls-remote`` calls.",
+      "matched_keyword": "git ls-remote"
+    },
+    {
+      "file": "src/apm_cli/deps/github_downloader.py",
+      "line": 816,
+      "snippet": "        probes, Contents API directory probe, ``git ls-remote`` fallback).",
+      "matched_keyword": "git ls-remote"
+    },
+    {
+      "file": "src/apm_cli/deps/git_remote_ops.py",
+      "line": 15,
+      "snippet": "    \"\"\"Parse ``git ls-remote --tags --heads`` output into RemoteRef objects.",
+      "matched_keyword": "git ls-remote"
+    },
+    {
+      "file": "src/apm_cli/deps/git_remote_ops.py",
+      "line": 28,
+      "snippet": "        output: Raw stdout from ``git ls-remote``.",
+      "matched_keyword": "git ls-remote"
+    },
+    {
+      "file": "src/apm_cli/deps/installed_package.py",
+      "line": 59,
+      "snippet": "        When present the lockfile records ``constraint`` / ``resolved_tag`` /",
+      "matched_keyword": "resolved_tag"
+    },
+    {
+      "file": "src/apm_cli/deps/git_semver_resolver.py",
+      "line": 109,
+      "snippet": "    resolved_tag:",
+      "matched_keyword": "resolved_tag"
+    },
+    {
+      "file": "src/apm_cli/deps/git_semver_resolver.py",
+      "line": 124,
+      "snippet": "    resolved_tag: str",
+      "matched_keyword": "resolved_tag"
+    },
+    {
+      "file": "src/apm_cli/deps/git_semver_resolver.py",
+      "line": 278,
+      "snippet": "            resolved_tag=tag_name,",
+      "matched_keyword": "resolved_tag"
+    },
+    {
+      "file": "src/apm_cli/deps/lockfile.py",
+      "line": 65,
+      "snippet": "    resolved_tag: str | None = None",
+      "matched_keyword": "resolved_tag"
+    },
+    {
+      "file": "src/apm_cli/deps/installed_package.py",
+      "line": 34,
+      "snippet": "    resolved_commit:",
+      "matched_keyword": "resolved_commit"
+    },
+    {
+      "file": "src/apm_cli/deps/installed_package.py",
+      "line": 64,
+      "snippet": "    resolved_commit: str | None",
+      "matched_keyword": "resolved_commit"
+    },
+    {
+      "file": "src/apm_cli/deps/github_downloader.py",
+      "line": 906,
+      "snippet": "        resolved_commit = self._resolve_commit_sha_for_ref(dep_ref, ref)",
+      "matched_keyword": "resolved_commit"
+    },
+    {
+      "file": "src/apm_cli/deps/github_downloader.py",
+      "line": 994,
+      "snippet": "        # failure the resolved_commit stays None and the suffix renders as",
+      "matched_keyword": "resolved_commit"
+    },
+    {
+      "file": "src/apm_cli/deps/github_downloader.py",
+      "line": 1006,
+      "snippet": "            resolved_commit=resolved_commit,",
+      "matched_keyword": "resolved_commit"
+    }
+  ],
+  "evidence_count": 20
+}

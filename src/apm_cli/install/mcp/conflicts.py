@@ -9,7 +9,6 @@ turns invalid ``apm install --mcp`` flag combinations into
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Optional, Tuple  # noqa: F401, UP035
 
 import click
 
@@ -38,12 +37,14 @@ def validate_mcp_conflicts(
     global_: bool,
     only: str | None,
     update: bool,
-    use_ssh: bool,
-    use_https: bool,
-    allow_protocol_fallback: bool,
+    any_transport_flag: bool,
     registry_url: str | None = None,
 ) -> None:
-    """Apply conflict matrix E1-E15.  Raises ``click.UsageError`` on hit."""
+    """Apply conflict matrix E1-E15.  Raises ``click.UsageError`` on hit.
+
+    ``any_transport_flag`` should be ``use_ssh or use_https or
+    allow_protocol_fallback`` (pre-evaluated by the caller).
+    """
     # E10: flags require --mcp -- run first so users get the right hint.
     if mcp_name is None:
         flag_values = {
@@ -84,7 +85,7 @@ def validate_mcp_conflicts(
         raise click.UsageError("cannot use --only apm with --mcp")
 
     # E4: transport selection flags do not apply.
-    if use_ssh or use_https or allow_protocol_fallback:
+    if any_transport_flag:
         raise click.UsageError(
             "transport selection flags (--ssh/--https/--allow-protocol-fallback) "
             "don't apply to MCP entries"

@@ -28,6 +28,7 @@ dependencies:
   require: []                           # required packages
   require_resolution: project-wins      # project-wins | policy-wins | block
   max_depth: 50                         # transitive depth limit
+  require_pinned_constraint: false      # when true, ban unbounded dep ranges (NO_REF, '*', bare branch, '>=X' without upper bound)
 
 mcp:
   allow: []                             # allowed server patterns
@@ -55,7 +56,99 @@ manifest:
 unmanaged_files:
   action: ignore                        # ignore | warn | deny
   directories: []                       # directories to scan
+
+registry_source:                        # experimental: requires `apm experimental enable registries`
+  require: []                           # registry names that MUST be reachable in the merged registry map
+  allow_non_registry: true              # when false, blocks any dep not routed through a configured registry
+
+bin_deploy:                             # marketplace_plugin bin/ executable deployment (Claude, global installs)
+  deny_all: false                       # when true, suppress bin/ deploy for every plugin
+  deny: []                              # canonical strings (owner/name) whose bin/ must not deploy
 ```
+
+## Registry source governance (experimental)
+
+Gate dependency sources to REST-based APM registries declared via the
+`registries:` block in `apm.yml` (or in `~/.apm/config.json`). Applies
+to direct AND transitive dependencies.
+
+```yaml
+# .github/apm-policy.yml
+registry_source:
+  require:
+    - corp-main                         # this registry MUST be reachable
+  allow_non_registry: false             # block any dep not routed through a registry
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `require` | `[]` | Registry names that MUST appear in the merged registry map (project `apm.yml` + workspace `~/.apm/apm.yml` + `~/.apm/config.json`). Fail-closed if a listed name has no URL. |
+| `allow_non_registry` | `true` | When `false`, every dep MUST be routed through a configured registry; git-shorthand and `- git:` deps are blocked at install time. |
+
+The check fires from all four call sites (`policy_gate`,
+`policy_target_check`, `run_policy_checks`, `run_policy_preflight`) so
+`apm install`, `apm install <pkg>`, `apm deps update`, and
+`apm audit --ci` all enforce the same gate.
+
+## External scanner governance (experimental)
+
+Gate the behaviour of third-party SARIF scanners run by `apm audit
+--external <name>` (behind `apm experimental enable external-scanners`).
+The stance is **restrict-only**: policy can tighten scanner behaviour but
+never adds argv tokens itself and never forces LLM egress from an
+untrusted project-local policy.
+
+```yaml
+# .github/apm-policy.yml
+security:
+  audit:
+    external: [skillspector]              # scanners the org permits
+    scanners:                             # NEW, optional per-scanner governance
+      skillspector:
+        allow_args: false                 # strip all user/CLI extra-args (kill-switch)
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `scanners.<name>.allow_args` | unset (no opinion) | When `false`, all user/CLI `--external-args` and config `external.<name>.args` are stripped to an empty list before the scanner runs -- locks the scanner to its vetted invocation. AND-merged across inheritance: any ancestor setting `false` wins. |
+
+Notes:
+- Policy **never injects argv** -- only the local user contributes scanner
+  flags (via `--external-args` or `external.<name>.args`), and those are
+  allowlist-validated by the adapter.
+- `allow_args: false` is enforced at the **install-time** audit path (which
+  loads org policy). A bare `apm audit` does not load org policy, so it
+  relies on the adapter's allowlist for arg safety.
+- LLM mode is opt-in by the user only; a project-local policy cannot mandate
+  it (this avoids turning a checked-in policy file into a content-exfiltration
+  channel).
+
+## Plugin bin/ deployment governance
+
+When a `marketplace_plugin` package ships a `bin/` directory, a global
+install (`apm install -g`) deploys those executables into
+`~/.claude/skills/<name>/bin/` so Claude Code invokes them as bare
+commands (the skills-directory plugin contract). Deployment is
+Claude-only and user-scope only; project-scope installs never deploy
+executables.
+
+```yaml
+# .github/apm-policy.yml
+bin_deploy:
+  deny_all: true                        # block every plugin's bin/ deploy org-wide
+  # or target specific packages:
+  deny:
+    - myorg/untrusted-plugin            # canonical owner/name string
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `deny_all` | `false` | When `true`, suppresses bin/ deployment for every `marketplace_plugin`, regardless of `deny`. |
+| `deny` | `[]` | Canonical package strings (`owner/name`) whose bin/ executables must not deploy. |
+
+Deployed executables are placed on Claude Code's `PATH` and invoked
+without further confirmation, so use this field to opt out in
+environments where plugin executables are not trusted by default.
 
 ## Local content governance
 
@@ -77,17 +170,20 @@ undeclared local content at install / audit time.
 | `warn` | Violations reported but do not fail |
 | `block` | Violations abort `apm install` (exit 1) AND fail `apm audit --ci` |
 
-## Inheritance rules (tighten-only)
+## Inheritance rules
 
-Child policies can only tighten parent policies, never relax them:
+Most fields tighten as the policy chain descends. The exception is `deny` and
+`require` lists: a child policy may use `[]` to explicitly clear an inherited
+list (removing entries the parent set). All other fields obey the rules below:
 
 | Field | Merge rule |
 |-------|-----------|
 | `enforcement` | Escalates: `off` < `warn` < `block` |
 | Allow lists | Intersection (child narrows parent) |
-| Deny lists | Union (child adds to parent) |
-| `require` | Union (combines required packages) |
+| Deny lists | Union (child adds to parent). Omitting or `null` = transparent; `[]` = explicit empty override. |
+| `require` | Union (combines required packages). Omitting or `null` = transparent; `[]` = explicit empty override. |
 | `max_depth` | `min(parent, child)` |
+| `require_pinned_constraint` | Logical OR (once enabled, child cannot relax) |
 | `mcp.self_defined` | Escalates: `allow` < `warn` < `deny` |
 | `source_attribution` | `parent OR child` (either enables) |
 
@@ -138,7 +234,7 @@ apm audit --ci --policy https://...         # remote policy URL
 
 **Note:** Install-time policy enforcement (issue #827) is in active development. The behaviour described below reflects the shipping design.
 
-**Non-goal — structured output:** install-time enforcement does NOT emit JSON or SARIF. Output is human-readable terminal text only. For machine-readable policy reports use `apm audit --ci --format json` or `apm audit --ci --format sarif`.
+**Non-goal  --  structured output:** install-time enforcement does NOT emit JSON or SARIF. Output is human-readable terminal text only. For machine-readable policy reports use `apm audit --ci --format json` or `apm audit --ci --format sarif`.
 
 ### 1. What APM policy is
 
@@ -149,18 +245,18 @@ may use. This section covers how that contract is enforced at `apm install` time
 ### 2. Discovery and applicability
 
 APM auto-discovers policy from `<org>/.github/apm-policy.yml` for any GitHub
-remote — both `github.com` and GitHub Enterprise (GHE). Non-GitHub remotes (ADO,
+remote  --  both `github.com` and GitHub Enterprise (GHE). Non-GitHub remotes (ADO,
 GitLab, plain git) currently fall through with no policy applied; tracked as a
 follow-up. Repositories with no detectable git remote (unpacked bundles, temp
 dirs) emit an explicit "could not determine org" line and skip discovery.
 
-The `--policy <override>` flag is **audit-only today** — it works on
+The `--policy <override>` flag is **audit-only today**  --  it works on
 `apm audit --ci` but is not yet wired through `apm install`.
 
 ### 3. Inheritance and composition
 
 Policy resolves through the chain: enterprise hub -> org -> repo override.
-The merge is **tighten-only** (see "Inheritance rules" above).
+The merge follows "Inheritance rules" above (most fields tighten; deny/require lists support explicit `[]` override).
 
 **Multi-level extends:** install-time enforcement and `apm audit --ci` both
 resolve the full `extends:` chain up to `MAX_CHAIN_DEPTH = 5`. Cycles are
@@ -179,12 +275,12 @@ merges what it resolved and emits a `Policy chain incomplete` warning.
 
 | Command | Behaviour |
 |---------|-----------|
-| `apm install` | NEW — gate runs after resolve, before integration / target writes |
-| `apm install <pkg>` | NEW — snapshot apm.yml, run gate, rollback on block |
-| `apm install --mcp` | NEW — dedicated MCP preflight |
-| `apm deps update` | NEW — runs the install pipeline, so the same gate applies |
-| `apm install --dry-run` | NEW — read-only preflight; renders "would be blocked" |
-| `apm audit --ci` | Existing — same checks against on-disk manifest + lockfile |
+| `apm install` | NEW  --  gate runs after resolve, before integration / target writes |
+| `apm install <pkg>` | NEW  --  snapshot apm.yml, run gate, rollback on block |
+| `apm install --mcp` | NEW  --  dedicated MCP preflight |
+| `apm deps update` | NEW  --  runs the install pipeline, so the same gate applies |
+| `apm install --dry-run` | NEW  --  read-only preflight; renders "would be blocked" |
+| `apm audit --ci` | Existing  --  same checks against on-disk manifest + lockfile |
 
 `pack` and `bundle` are out of scope (author-side, not dependency consumers).
 
@@ -194,9 +290,9 @@ merges what it resolved and emits a `Policy chain incomplete` warning.
 `require_resolution: project-wins` has a narrow semantic:
 
 - Downgrades **version-pin mismatches** on required packages to warnings only.
-- Does **NOT** downgrade missing required packages — those still block under
+- Does **NOT** downgrade missing required packages  --  those still block under
   `enforcement: block`.
-- Does **NOT** override an inherited org `deny` — parent deny always wins.
+- Does **NOT** override an inherited org `deny`  --  parent deny always wins.
 
 ### 7. CLI examples
 
@@ -380,12 +476,13 @@ Violation classes:
 | `denylist` | `dependencies.deny` match | Remove dep from `apm.yml`, request org-policy update, or `--no-policy` for one-off bypass |
 | `allowlist` | Dep not in non-empty `dependencies.allow` | Add to org allowlist or switch to an approved package |
 | `required` | Missing `dependencies.require` entry, or version-pin mismatch | Add the dep (and pin) to `apm.yml`. Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block |
+| `pinned-constraint` | `dependencies.require_pinned_constraint: true` + a direct dep with no ref, a wildcard, a bare branch, or a bare `>=X.Y` | Pin the dep to an exact version (`1.2.3` or npm/cargo-style `=1.2.3`; pip-style `==1.2.3` is not supported), caret/tilde/bounded semver range, literal `vX.Y.Z` tag, or a full SHA. Roll out enforcement with `warn` before `block`. |
 | `transport` | MCP transport not in `mcp.transport.allow` | Switch transport, or request `mcp.transport.allow` update |
 | `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | Re-run with `--target <allowed>`, or adjust `compilation.target` in `apm.yml` |
 | `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny` / `transport` / `self_defined` | Remove offending dep, request policy update, or set `mcp.trust_transitive: true` |
 
 Full message text per outcome and per class lives in
-`docs/src/content/docs/enterprise/policy-reference.md` §10. Violation messages
+`docs/src/content/docs/enterprise/policy-reference.md` section10. Violation messages
 flow through `InstallLogger.policy_violation`; under `block` they print inline
 as `[x]` errors and exit `1`.
 
@@ -399,7 +496,7 @@ Checklist to publish a policy:
 3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming
    repos for one cycle without breaking installs.
 4. When the warn-cycle is clean, switch to `enforcement: block`. Communicate
-   the change — `apm install` will start failing for non-compliant repos.
+   the change  --  `apm install` will start failing for non-compliant repos.
 5. Use `extends:` for team-specific overrides on top of the org baseline
    rather than forking the file.
 

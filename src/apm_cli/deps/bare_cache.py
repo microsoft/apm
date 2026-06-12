@@ -25,12 +25,15 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from git import Repo
+
+from ..utils.git_sparse import apply_sparse_cone
 
 if TYPE_CHECKING:
     from ..models.apm_package import DependencyReference
@@ -76,7 +79,7 @@ def _scrub_bare_remote_url(bare_path: Path, git_exe: str, env: dict[str, str]) -
     """
     try:
         result = subprocess.run(
-            [git_exe, "-C", str(bare_path), "remote", "set-url", "origin", "redacted://"],
+            [git_exe, "--git-dir", str(bare_path), "remote", "set-url", "origin", "redacted://"],
             env=env,
             check=False,
             capture_output=True,
@@ -197,13 +200,13 @@ def bare_clone_with_fallback(
                         capture_output=True,
                     )
                     subprocess.run(
-                        [git_exe, "-C", str(target), "remote", "add", "origin", url],
+                        [git_exe, "--git-dir", str(target), "remote", "add", "origin", url],
                         env=env,
                         check=True,
                         capture_output=True,
                     )
                     subprocess.run(
-                        [git_exe, "-C", str(target), "fetch", "--depth=1", "origin", ref],
+                        [git_exe, "--git-dir", str(target), "fetch", "--depth=1", "origin", ref],
                         env=env,
                         check=True,
                         capture_output=True,
@@ -214,7 +217,7 @@ def bare_clone_with_fallback(
                     # Without update-ref, consumer's `git rev-parse HEAD`
                     # is ambiguous. See 6.18.
                     subprocess.run(
-                        [git_exe, "-C", str(target), "update-ref", "HEAD", ref],
+                        [git_exe, "--git-dir", str(target), "update-ref", "HEAD", ref],
                         env=env,
                         check=True,
                         capture_output=True,
@@ -244,7 +247,7 @@ def bare_clone_with_fallback(
             full_sha_result = subprocess.run(
                 [
                     git_exe,
-                    "-C",
+                    "--git-dir",
                     str(target),
                     "rev-parse",
                     "--verify",
@@ -257,7 +260,7 @@ def bare_clone_with_fallback(
             )
             full_sha = full_sha_result.stdout.strip()
             subprocess.run(
-                [git_exe, "-C", str(target), "update-ref", "HEAD", full_sha],
+                [git_exe, "--git-dir", str(target), "update-ref", "HEAD", full_sha],
                 env=env,
                 check=True,
                 capture_output=True,
@@ -351,6 +354,7 @@ def fetch_sha_into_bare(
     def _rev_parse_present() -> bool:
         """Return True if sha is already reachable in the bare."""
         try:
+            # no env= needed -- purely local git plumbing, no network access
             result = subprocess.run(
                 [
                     git_exe,
@@ -366,6 +370,58 @@ def fetch_sha_into_bare(
             return result.returncode == 0
         except Exception:
             return False
+
+    def _pin_sha_as_head_ref() -> None:
+        """Add refs/heads/apm-pin-<sha-prefix> so the SHA is reachable via git-clone.
+
+        ``git clone --local --shared`` from a *shallow* bare ignores
+        ``--shared`` and falls back to the upload-pack protocol, which
+        only transfers objects reachable from advertised refs.  A SHA
+        fetched by :func:`fetch_sha_into_bare` is inserted into the
+        object store but is *not* referenced by any ref, so the clone
+        silently omits it and subsequent ``git checkout <sha>`` fails.
+
+        Creating a synthetic ``refs/heads/apm-pin-*`` ref makes the
+        commit reachable via the default ``refs/heads/*`` refspec, so
+        upload-pack includes it.  Best-effort: a failure here is logged
+        at DEBUG level and does not abort the install (the fallback is
+        a fresh bare clone for the pinned package).
+        """
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            _log.debug(
+                "fetch_sha_into_bare: sha %r is not a valid 40-char hex SHA, skipping pin ref",
+                sha,
+            )
+            return
+        ref_name = f"refs/heads/apm-pin-{sha[:12]}"
+        try:
+            # no env= needed -- purely local git plumbing, no network access
+            result = subprocess.run(
+                [git_exe, "--git-dir", str(bare_path), "update-ref", ref_name, sha],
+                capture_output=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                _log.debug(
+                    "fetch_sha_into_bare: pinned %s as %s in %s",
+                    sha[:12],
+                    ref_name,
+                    bare_path,
+                )
+            else:
+                _log.debug(
+                    "fetch_sha_into_bare: update-ref exited %d for %s in %s",
+                    result.returncode,
+                    sha[:12],
+                    bare_path,
+                )
+        except Exception as exc:
+            _log.debug(
+                "fetch_sha_into_bare: could not create pin ref for %s in %s: %s",
+                sha[:12],
+                bare_path,
+                exc,
+            )
 
     def _scrub_fetch_head() -> None:
         """Truncate FETCH_HEAD to remove the token-embedded URL written by fetch."""
@@ -385,6 +441,7 @@ def fetch_sha_into_bare(
     _log.debug("fetch_sha_into_bare: checking if %s is present in %s", sha[:12], bare_path)
     if _rev_parse_present():
         _log.debug("fetch_sha_into_bare: SHA %s already present, skipping fetch", sha[:12])
+        _pin_sha_as_head_ref()
         return True
 
     # Step 2: shallow fetch by full SHA (only for full 40-char SHAs).
@@ -395,7 +452,7 @@ def fetch_sha_into_bare(
 
         def _fetch_action_sha(url: str, env: dict[str, str], target: Path) -> None:
             subprocess.run(
-                [git_exe, "-C", str(bare_path), "fetch", "--depth=1", url, sha],
+                [git_exe, "--git-dir", str(target), "fetch", "--depth=1", url, sha],
                 env=env,
                 check=True,
                 capture_output=True,
@@ -412,6 +469,7 @@ def fetch_sha_into_bare(
             _scrub_fetch_head()
             if _rev_parse_present():
                 _log.debug("fetch_sha_into_bare: shallow fetch of %s succeeded", sha[:12])
+                _pin_sha_as_head_ref()
                 return True
         except subprocess.CalledProcessError as exc:
             stderr_text = ""
@@ -437,7 +495,7 @@ def fetch_sha_into_bare(
 
     def _fetch_action_broad(url: str, env: dict[str, str], target: Path) -> None:
         subprocess.run(
-            [git_exe, "-C", str(bare_path), "fetch", f"--depth={broad_depth}", url],
+            [git_exe, "--git-dir", str(target), "fetch", f"--depth={broad_depth}", url],
             env=env,
             check=True,
             capture_output=True,
@@ -454,6 +512,7 @@ def fetch_sha_into_bare(
         _scrub_fetch_head()
         if _rev_parse_present():
             _log.debug("fetch_sha_into_bare: broad fetch succeeded, %s now present", sha[:12])
+            _pin_sha_as_head_ref()
             return True
     except subprocess.CalledProcessError as exc:
         stderr_text = ""
@@ -486,6 +545,7 @@ def materialize_from_bare(
     ref: str | None,
     env: dict[str, str],
     known_sha: str | None = None,
+    sparse_paths: list[str] | None = None,
 ) -> str:
     """Create a working-tree checkout from a bare repo via local-shared clone.
 
@@ -509,6 +569,16 @@ def materialize_from_bare(
       - ``filter.lfs.smudge=""`` + ``filter.lfs.required=false``
         disables LFS smudge cross-platform (the empty string trick
         works everywhere; ``cat`` is not on Windows PATH).
+
+    Sparse-cone (perf #1433):
+      - When ``sparse_paths`` is set, ``git sparse-checkout init --cone``
+        followed by ``git sparse-checkout set <paths...>`` runs BEFORE
+        ``git checkout``, so only the requested top-level directories
+        are materialized in the working tree. The bare's object DB is
+        unchanged; only the consumer working tree shrinks.
+      - Sparse-checkout failures are RAISED (not silently fallen back)
+        because a silent fallback would re-introduce the 78 MB bloat
+        this parameter exists to avoid.
 
     Returns:
         The resolved commit SHA. Caller threads this into
@@ -577,6 +647,8 @@ def materialize_from_bare(
             check=False,
         )
     checkout_target = known_sha or "HEAD"
+    if sparse_paths:
+        apply_sparse_cone(git_exe, consumer_dir, list(sparse_paths), env=env)
     subprocess.run(
         [git_exe, "-C", str(consumer_dir), "checkout", checkout_target],
         capture_output=True,

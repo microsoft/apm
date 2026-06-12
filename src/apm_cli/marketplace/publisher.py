@@ -32,11 +32,14 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field  # noqa: F401
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional  # noqa: F401
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .semver import SemVer
 
 import yaml
 
@@ -47,13 +50,13 @@ from ..utils.path_security import (
 )
 from ._git_utils import redact_token as _redact_token
 from ._io import atomic_write
-from .errors import MarketplaceError, MarketplaceYmlError  # noqa: F401
+from .errors import MarketplaceError
 from .git_stderr import translate_git_stderr
+from .migration import load_marketplace_config
 from .ref_resolver import RefResolver
 from .resolver import parse_marketplace_ref
 from .semver import parse_semver
 from .tag_pattern import render_tag
-from .yml_schema import load_marketplace_yml
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +290,8 @@ class MarketplacePublisher:
     Parameters
     ----------
     marketplace_root:
-        Path to the marketplace repository root (must contain
+        Path to the marketplace repository root (must contain an
+        ``apm.yml`` with a ``marketplace`` block, or the legacy
         ``marketplace.yml``).
     ref_resolver:
         Optional ``RefResolver`` instance (reserved for future use).
@@ -314,10 +318,9 @@ class MarketplacePublisher:
         self._yml = None
 
     def _load_yml(self):
-        """Lazy-load marketplace.yml."""
+        """Lazy-load marketplace config (apm.yml or legacy marketplace.yml)."""
         if self._yml is None:
-            yml_path = self._root / "marketplace.yml"
-            self._yml = load_marketplace_yml(yml_path)
+            self._yml = load_marketplace_config(self._root)
         return self._yml
 
     # -- plan ---------------------------------------------------------------
@@ -332,9 +335,10 @@ class MarketplacePublisher:
     ) -> PublishPlan:
         """Compute a publish plan.
 
-        Reads the local ``marketplace.yml`` to discover the marketplace
-        name and version, validates all targets, and computes a
-        deterministic branch name and commit message.
+        Reads the local marketplace config (``apm.yml`` or legacy
+        ``marketplace.yml``) to discover the marketplace name and version,
+        validates all targets, and computes a deterministic branch name
+        and commit message.
 
         Parameters
         ----------
@@ -356,7 +360,8 @@ class MarketplacePublisher:
         Raises
         ------
         MarketplaceYmlError
-            If ``marketplace.yml`` cannot be loaded or is invalid.
+            If the marketplace config (``apm.yml`` or legacy
+            ``marketplace.yml``) cannot be loaded or is invalid.
         PathTraversalError
             If any target's ``path_in_repo`` is a path traversal.
         """
@@ -500,6 +505,153 @@ class MarketplacePublisher:
         # Return in plan.targets order
         return [results[i] for i in range(len(plan.targets))]
 
+    # -- per-target helpers -------------------------------------------------
+
+    def _load_consumer_manifest(
+        self,
+        clone_dir: Path,
+        target: ConsumerTarget,
+        plan: PublishPlan,
+    ) -> tuple[dict | None, Path, TargetResult | None]:
+        """Load and validate consumer apm.yml.
+
+        Returns ``(data, apm_yml_path, None)`` on success or
+        ``(None, apm_yml_path, TargetResult)`` on first error.
+        """
+        apm_yml_path = clone_dir / target.path_in_repo
+        try:
+            ensure_path_within(apm_yml_path, clone_dir)
+        except PathTraversalError:
+            return (
+                None,
+                apm_yml_path,
+                TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message="Path traversal rejected: " + target.path_in_repo,
+                ),
+            )
+
+        if not apm_yml_path.exists():
+            return (
+                None,
+                apm_yml_path,
+                TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message=f"File not found: {target.path_in_repo}",
+                ),
+            )
+
+        try:
+            raw_text = apm_yml_path.read_text(encoding="utf-8")
+            data = yaml.safe_load(raw_text)
+        except (yaml.YAMLError, OSError) as exc:
+            return (
+                None,
+                apm_yml_path,
+                TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message=f"Failed to parse {target.path_in_repo}: {exc}",
+                ),
+            )
+
+        if not isinstance(data, dict):
+            return (
+                None,
+                apm_yml_path,
+                TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message="Invalid apm.yml: expected a mapping",
+                ),
+            )
+
+        deps = data.get("dependencies")
+        if not isinstance(deps, dict):
+            return (
+                None,
+                apm_yml_path,
+                TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message=f"Marketplace '{plan.marketplace_name}' not referenced in apm.yml",
+                ),
+            )
+
+        apm_deps = deps.get("apm")
+        if not isinstance(apm_deps, list):
+            return (
+                None,
+                apm_yml_path,
+                TargetResult(
+                    target=target,
+                    outcome=PublishOutcome.FAILED,
+                    message=f"Marketplace '{plan.marketplace_name}' not referenced in apm.yml",
+                ),
+            )
+
+        return data, apm_yml_path, None
+
+    def _check_ref_guards(
+        self,
+        matches: list[tuple[int, str, str | None, str]],
+        target: ConsumerTarget,
+        plan: PublishPlan,
+        new_sv: SemVer | None,
+    ) -> TargetResult | None:
+        """Check ref-change and downgrade guards. Returns error result or None."""
+        new_ref = plan.new_ref
+        for _idx, _pname, old_ref, entry_str in matches:
+            if old_ref == new_ref:
+                continue
+
+            # Ref-change guard
+            if old_ref is None:
+                if not plan.allow_ref_change:
+                    return TargetResult(
+                        target=target,
+                        outcome=PublishOutcome.SKIPPED_REF_CHANGE,
+                        message=(
+                            f"Entry '{entry_str}' uses implicit "
+                            "latest; pass allow_ref_change to pin"
+                        ),
+                        old_version=None,
+                        new_version=new_ref,
+                    )
+            else:
+                old_sv = parse_semver(old_ref.lstrip("vV"))
+                if old_sv is None and new_sv is not None:
+                    if not plan.allow_ref_change:
+                        return TargetResult(
+                            target=target,
+                            outcome=PublishOutcome.SKIPPED_REF_CHANGE,
+                            message=(
+                                f"Entry '{entry_str}' uses "
+                                f"non-semver ref '{old_ref}'; "
+                                "pass allow_ref_change to switch"
+                            ),
+                            old_version=old_ref,
+                            new_version=new_ref,
+                        )
+
+                # Downgrade guard
+                if old_sv and new_sv and new_sv < old_sv:
+                    if not plan.allow_downgrade:
+                        return TargetResult(
+                            target=target,
+                            outcome=PublishOutcome.SKIPPED_DOWNGRADE,
+                            message=(
+                                f"Downgrade from {old_ref} to "
+                                f"{new_ref}; pass allow_downgrade "
+                                "to override"
+                            ),
+                            old_version=old_ref,
+                            new_version=new_ref,
+                        )
+        return None
+
     # -- per-target processing ----------------------------------------------
 
     def _process_single_target(
@@ -556,56 +708,12 @@ class MarketplacePublisher:
                 )
 
             # 3. Load consumer apm.yml
-            apm_yml_path = clone_dir / target.path_in_repo
-            try:
-                ensure_path_within(apm_yml_path, clone_dir)
-            except PathTraversalError:
-                return TargetResult(
-                    target=target,
-                    outcome=PublishOutcome.FAILED,
-                    message=("Path traversal rejected: " + target.path_in_repo),
-                )
-
-            if not apm_yml_path.exists():
-                return TargetResult(
-                    target=target,
-                    outcome=PublishOutcome.FAILED,
-                    message=f"File not found: {target.path_in_repo}",
-                )
-
-            try:
-                raw_text = apm_yml_path.read_text(encoding="utf-8")
-                data = yaml.safe_load(raw_text)
-            except (yaml.YAMLError, OSError) as exc:
-                return TargetResult(
-                    target=target,
-                    outcome=PublishOutcome.FAILED,
-                    message=(f"Failed to parse {target.path_in_repo}: {exc}"),
-                )
-
-            if not isinstance(data, dict):
-                return TargetResult(
-                    target=target,
-                    outcome=PublishOutcome.FAILED,
-                    message="Invalid apm.yml: expected a mapping",
-                )
+            data, apm_yml_path, manifest_err = self._load_consumer_manifest(clone_dir, target, plan)
+            if manifest_err is not None:
+                return manifest_err
 
             # 4. Find matching marketplace entries in dependencies.apm
-            deps = data.get("dependencies")
-            if not isinstance(deps, dict):
-                return TargetResult(
-                    target=target,
-                    outcome=PublishOutcome.FAILED,
-                    message=(f"Marketplace '{plan.marketplace_name}' not referenced in apm.yml"),
-                )
-
-            apm_deps = deps.get("apm")
-            if not isinstance(apm_deps, list):
-                return TargetResult(
-                    target=target,
-                    outcome=PublishOutcome.FAILED,
-                    message=(f"Marketplace '{plan.marketplace_name}' not referenced in apm.yml"),
-                )
+            apm_deps = data["dependencies"]["apm"]
 
             # Parse each entry with parse_marketplace_ref
             new_ref = plan.new_ref
@@ -643,56 +751,9 @@ class MarketplacePublisher:
 
             # 6. Guards -- check every entry that would change
             new_sv = parse_semver(new_ref.lstrip("vV"))
-
-            for _idx, _pname, old_ref, entry_str in matches:
-                if old_ref == new_ref:
-                    continue  # Already at target -- no guard needed
-
-                # Ref-change guard
-                if old_ref is None:
-                    # Implicit latest -> explicit pin
-                    if not plan.allow_ref_change:
-                        return TargetResult(
-                            target=target,
-                            outcome=PublishOutcome.SKIPPED_REF_CHANGE,
-                            message=(
-                                f"Entry '{entry_str}' uses implicit "
-                                "latest; pass allow_ref_change to pin"
-                            ),
-                            old_version=None,
-                            new_version=new_ref,
-                        )
-                else:
-                    old_sv = parse_semver(old_ref.lstrip("vV"))
-                    if old_sv is None and new_sv is not None:
-                        # Non-semver ref -> semver tag
-                        if not plan.allow_ref_change:
-                            return TargetResult(
-                                target=target,
-                                outcome=(PublishOutcome.SKIPPED_REF_CHANGE),
-                                message=(
-                                    f"Entry '{entry_str}' uses "
-                                    f"non-semver ref '{old_ref}'; "
-                                    "pass allow_ref_change to switch"
-                                ),
-                                old_version=old_ref,
-                                new_version=new_ref,
-                            )
-
-                    # Downgrade guard
-                    if old_sv and new_sv and new_sv < old_sv:
-                        if not plan.allow_downgrade:
-                            return TargetResult(
-                                target=target,
-                                outcome=(PublishOutcome.SKIPPED_DOWNGRADE),
-                                message=(
-                                    f"Downgrade from {old_ref} to "
-                                    f"{new_ref}; pass allow_downgrade "
-                                    "to override"
-                                ),
-                                old_version=old_ref,
-                                new_version=new_ref,
-                            )
+            guard_err = self._check_ref_guards(matches, target, plan, new_sv)
+            if guard_err is not None:
+                return guard_err
 
             # 7. No-change check
             needs_update = any(old_ref != new_ref for _, _, old_ref, _ in matches)

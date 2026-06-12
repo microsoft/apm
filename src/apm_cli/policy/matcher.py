@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
-from typing import Optional, Tuple  # noqa: F401, UP035
 
 from .schema import DependencyPolicy, McpPolicy
 
@@ -73,7 +72,7 @@ def check_dependency_allowed(
     policy: DependencyPolicy,
 ) -> tuple[bool, str]:
     """Check if a dependency is allowed by policy."""
-    return _check_allow_deny(canonical_ref, policy.allow, policy.deny)
+    return _check_allow_deny(canonical_ref, policy.allow, policy.effective_deny)
 
 
 def check_mcp_allowed(

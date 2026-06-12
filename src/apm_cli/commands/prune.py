@@ -6,13 +6,13 @@ from pathlib import Path
 
 import click
 
-from ..constants import APM_LOCK_FILENAME, APM_MODULES_DIR, APM_YML_FILENAME  # noqa: F401
+from ..constants import APM_MODULES_DIR, APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 
 # APM Dependencies
 from ..deps.lockfile import LockFile, get_lockfile_path
 from ..models.apm_package import APMPackage
-from ..utils.path_security import PathTraversalError, safe_rmtree  # noqa: F401
+from ..utils.path_security import safe_rmtree
 from ._helpers import (
     _build_expected_install_paths,
     _expand_with_ancestors,

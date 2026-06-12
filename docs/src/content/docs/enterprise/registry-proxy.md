@@ -1,260 +1,297 @@
 ---
-title: "Registry Proxy & Air-gapped"
-description: "Route APM dependency and marketplace traffic through Artifactory or a compatible proxy. Two operating modes, bypass-prevention guarantees, air-gapped CI playbook."
+title: Registry Proxy and Air-Gapped Installs
+description: Route APM downloads through a corporate HTTP proxy, JFrog Artifactory, or an internal marketplace mirror.
 sidebar:
   order: 6
 ---
 
-This page documents how APM routes dependency downloads through an enterprise
-registry proxy (Artifactory or compatible), the trust contract that proves
-traffic cannot bypass the proxy, and the playbook for fully air-gapped CI.
+Enterprise networks rarely allow agents to reach `github.com` directly.
+APM supports three layered controls for that:
+
+1. Standard `HTTPS_PROXY` / `NO_PROXY` env vars for forward proxies.
+2. `PROXY_REGISTRY_URL` for a JFrog Artifactory (or compatible) mirror
+   that fronts every package download.
+3. `apm marketplace add --host ...` to register internal marketplaces
+   served from GHES, GHE.com, or GitLab self-managed.
+
+:::note[Not to be confused with **Registries**]
+The **registry proxy** documented here transparently fronts an upstream Git
+host (GitHub, GitLab) so dependency clones flow through your enterprise
+infrastructure. Configured per-machine via `PROXY_REGISTRY_*` env vars.
+
+A **dedicated registry** ([Registries guide](../guides/registries/)) is a
+separate, additive package source that speaks the [Registry HTTP API](../reference/registry-http-api/)
+directly — no Git host upstream. Configured per-project in `apm.yml` via the
+top-level `registries:` block, and currently requires `apm experimental enable registries`.
+
+Both can be used together; they're orthogonal.
+:::
 
 For the *policy-cache* offline story (a different mechanism), see
-[Governance #9](../governance-guide/#9-air-gapped-and-offline).
+[Governance #9](./governance-guide/#9-air-gapped-and-offline).
 
-## Why this exists
+For consumer-side token setup, see
+[Authentication](../consumer/authentication/) and
+[Private and org packages](../consumer/private-and-org-packages/).
 
-Three audiences ask the same question with different words:
+## When to use what
 
-- **CISO**: "Can I prove ALL dependency traffic flows through Artifactory?
-  What stops a developer or a CI job from going around it?"
-- **VP Engineering**: "We have standardized on Artifactory for npm and PyPI
-  for a decade. Does APM fit that pattern, or is it a new exception?"
-- **Platform tech lead**: "How do I roll this out across N repos? What goes
-  in CI? What is the failure mode when the proxy is down?"
+| Goal | Mechanism |
+|---|---|
+| Allowlist outbound traffic at the firewall | `HTTPS_PROXY` |
+| Mirror every dependency archive for audit and replay | `PROXY_REGISTRY_URL` |
+| Serve internal `marketplace.json` listings from a private host | `apm marketplace add --host` |
+| Fully air-gapped CI (no egress at all) | Pre-built bundle from `apm pack` |
 
-APM answers all three with the same mechanism: a transparent proxy layer that
-rewrites GitHub-based dependency downloads to fetch via Artifactory's Archive
-Entry Download API, plus a lockfile-level guard that prevents bypass.
+The three compose. A typical hardened setup uses `HTTPS_PROXY` for
+network egress, `PROXY_REGISTRY_URL` for dependency mirroring, and an
+internal marketplace for discovery.
 
-## Operating modes
+## Standard HTTP proxy
 
-APM supports two modes. Most teams want transparent mode; explicit FQDN mode
-is for repos that must pin specific dependencies to the proxy regardless of
-the developer's environment.
-
-### Mode 1: Transparent proxy (recommended)
-
-Set environment variables. APM rewrites every GitHub-hosted dependency
-download (packages and `marketplace.json`) to fetch via the proxy. No changes
-to `apm.yml`.
+APM downloads packages with `requests` and `git`. Both honor the
+standard env vars set by your platform team:
 
 ```bash
-# Required
-export PROXY_REGISTRY_URL="https://art.example.com/artifactory/github"
+export HTTPS_PROXY=http://proxy.corp.example.com:8080
+export HTTP_PROXY=http://proxy.corp.example.com:8080
+export NO_PROXY=localhost,127.0.0.1,.corp.example.com
+```
 
-# Optional
-export PROXY_REGISTRY_TOKEN="<bearer-token>"   # sent as Authorization: Bearer
-export PROXY_REGISTRY_ONLY=1                   # block all direct VCS fallback
+No APM-specific configuration is required. If `git clone` works against
+your private repos through the proxy, `apm install` works too.
+
+## Mirror dependencies through Artifactory
+
+`PROXY_REGISTRY_URL` rewrites every GitHub-hosted dependency download
+to fetch via Artifactory's Archive Entry Download API. Set in the
+shell profile, the dev container, or CI secrets.
+
+```bash
+export PROXY_REGISTRY_URL=https://art.example.com/artifactory/github
+export PROXY_REGISTRY_TOKEN=<bearer-token>   # optional
+export PROXY_REGISTRY_ONLY=1                 # block direct VCS fallback
 ```
 
 | Variable | Purpose |
 |---|---|
-| `PROXY_REGISTRY_URL` | Full proxy URL including any path prefix (e.g. `/artifactory/github`). When set, all GitHub dependency archives are fetched from this base. |
-| `PROXY_REGISTRY_TOKEN` | Optional bearer token sent on every proxy request. Composes with `GITHUB_APM_PAT` (see [Auth composition](#auth-composition)). |
-| `PROXY_REGISTRY_ONLY` | When set to `1`, APM never falls back to direct VCS hosts. Combined with the lockfile guard below, this is the bypass-prevention contract. |
+| `PROXY_REGISTRY_URL` | Full proxy base including any path prefix. When set, all GitHub archives route here. |
+| `PROXY_REGISTRY_TOKEN` | Bearer token sent on proxy requests. Independent of `GITHUB_APM_PAT`. |
+| `PROXY_REGISTRY_ONLY` | `1` blocks direct VCS fallback at runtime and on lockfile replay. |
+| `PROXY_REGISTRY_ALLOW_HTTP` | `1` silences the plaintext-token warning when the proxy is on `http://`. Use only inside an isolated network. |
 
-Apply globally (shell profile, CI secrets, dev-container env) and every
-`apm install` and `apm marketplace` command in the org routes through the proxy.
-
-:::caution
 Deprecated aliases `ARTIFACTORY_BASE_URL`, `ARTIFACTORY_APM_TOKEN`, and
-`ARTIFACTORY_ONLY` still work but emit a `DeprecationWarning`. Migrate to the
-`PROXY_REGISTRY_*` names.
-:::
+`ARTIFACTORY_ONLY` still work but emit `DeprecationWarning`. Migrate to
+the `PROXY_REGISTRY_*` names.
 
-### Mode 2: Explicit FQDN in `apm.yml`
+### Bypass prevention
 
-Reference the proxy directly in the dependency string:
+When `PROXY_REGISTRY_ONLY=1`, APM refuses to fall back to `github.com`,
+GHE.com, or GHES. The lockfile records `registry_prefix` for every
+proxy-routed dependency. On replay, an entry pinned to a direct VCS
+host aborts the install:
+
+```text
+ERROR: PROXY_REGISTRY_ONLY=1 but the following lockfile entries are
+locked to direct VCS hosts and would bypass the proxy:
+  - acme/security-baseline (host: github.com)
+Run 'apm install --update' to re-resolve through the proxy.
+```
+
+`apm install --update` re-resolves through the active proxy and
+rewrites `apm.lock.yaml`.
+
+### Coverage
+
+| Surface | Routed via proxy |
+|---|---|
+| `apm install` (GitHub-hosted deps) | Yes |
+| `apm install` (Azure DevOps deps) | No -- ADO uses a different path |
+| `apm install --mcp` (MCP servers) | No -- separate registry |
+| `apm marketplace` (`marketplace.json` fetch) | Yes; falls back to GitHub Contents API unless `PROXY_REGISTRY_ONLY=1` |
+| Policy file fetch (`apm-policy.yml`) | No -- uses the GitHub API directly |
+
+### Nested-group repos (GitLab subgroups behind the proxy)
+
+GitHub uses a fixed `owner/repo` shape, but GitLab projects can sit at any
+subgroup depth (e.g. `group/subgroup/project`). When
+`PROXY_REGISTRY_ONLY=1` is set, APM treats path segments past the second
+as part of the repo slug; the real boundary between repo path and
+in-repo virtual sub-path is then settled at install time by the same
+deterministic boundary probe used for explicit FQDN deps (see
+[Explicit Artifactory FQDN](#explicit-artifactory-fqdn-deterministic-boundary-probe)
+below):
+
+```yaml
+# apm.yml -- 3-segment GitLab project behind a registry proxy
+dependencies:
+  apm:
+    - group/subgroup/project#main          # resolves to the full nested path
+    - group/sub-a/sub-b/project#v1.2.0     # arbitrary depth supported
+```
+
+Virtual sub-paths under nested-group repos work via the probe: parse
+defaults to all-as-repo, then the install-time resolver HEAD-probes
+candidate splits against the proxy and rebuilds the dependency
+reference at the first split whose archive responds 2xx-3xx:
 
 ```yaml
 dependencies:
   apm:
-    - art.example.com/artifactory/github/acme-corp/security-baseline#v1.4.0
+    # The probe walks shallow-first and lands on the real boundary --
+    # ``group/subgroup/project`` is the repo, ``skills/<name>`` is the
+    # virtual sub-path -- no marker-segment heuristic involved.
+    - group/subgroup/project/skills/<name>
+    # Files ending in ``.prompt.md`` / ``.instructions.md`` /
+    # ``.chatmode.md`` / ``.agent.md`` are structurally a virtual file
+    # at parse time; the probe still confirms which directory the file
+    # sits under is part of the repo path.
+    - group/subgroup/project/<name>.prompt.md
 ```
 
-APM detects the Artifactory path and fetches via the Archive Entry Download
-API for that dependency only. The rest of the manifest behaves normally.
+Probe authentication matches the URL being probed: bare-shorthand deps
+(Mode 2) use the proxy's own bearer token from `PROXY_REGISTRY_TOKEN`,
+while explicit-FQDN deps (Mode 1) use the per-host auth resolver -- in
+both cases the audience matches the probed URL, never the upstream Git
+host.
 
-Use this mode when:
+#### Trade-off: lockfile env-dependence
 
-- A specific dependency must always come from the proxy regardless of who
-  runs `apm install`.
-- You are publishing a template manifest that downstream consumers should
-  install through your proxy without configuring environment variables.
+The fold-into-repo behavior is gated on `PROXY_REGISTRY_ONLY` to keep the
+legacy two-segment shape for direct installs. Consequence: the same
+shorthand parses differently with vs. without the env set. For a team
+that always runs through the proxy, this is invisible. For a mixed CI
+fleet, expect lockfile drift if some agents have the env and others
+don't -- pin the env in the same place you pin Python and APM versions.
 
-## Bypass-prevention contract
+#### Configuring the upstream remote (GitLab)
 
-This is the CISO trust statement. APM enforces "all traffic through the
-proxy" with two cooperating mechanisms.
+When the proxy fronts a private GitLab instance, the proxy itself must
+authenticate upstream -- the client (APM) does not need a token if the
+proxy is configured to accept anonymous reads on its API.
 
-### 1. `PROXY_REGISTRY_ONLY=1` blocks direct fetches at runtime
+In the Artifactory UI, for the remote pointing at GitLab:
 
-When set, APM refuses to fall back to `github.com`, GitHub Enterprise Cloud,
-GHES, or any other direct VCS host. If `PROXY_REGISTRY_URL` is not set or
-does not match the dependency's host, the install aborts:
+| Field | Value |
+|---|---|
+| URL | `https://<gitlab-host>` (no path prefix) |
+| Repository Path Prefix | *blank* (any value gets prepended to every upstream request) |
+| Username | empty *or* the GitLab username |
+| Password / Token | the raw GitLab PAT value -- no `PRIVATE-TOKEN:` prefix |
+| Token Authentication | enable when the password is a GitLab PAT |
+| VCS Provider | `GitLab` |
 
-```
-RuntimeError: PROXY_REGISTRY_ONLY is set but no Artifactory proxy is
-configured for 'acme-corp/security-baseline'. Set PROXY_REGISTRY_URL or
-use explicit Artifactory FQDN syntax.
-```
-
-### 2. Lockfile validation guard prevents replay-from-bypass
-
-When a download routes through the proxy, the resulting `apm.lock.yaml`
-entry pins the proxy as the source of truth:
-
-```yaml
-dependencies:
-  - repo_url: acme-corp/security-baseline
-    host: art.example.com
-    registry_prefix: artifactory/github
-    resolved_commit: a1b2c3d4...
-    content_hash: "sha256:9f86d081..."
-```
-
-On every subsequent `apm install` with `PROXY_REGISTRY_ONLY=1`, APM scans
-the lockfile. If any entry is locked to a direct VCS host (github.com, GHE
-Cloud, GHES) instead of the proxy, the install aborts and lists the
-conflicting dependencies:
-
-```
-ERROR: PROXY_REGISTRY_ONLY=1 but the following lockfile entries are
-locked to direct VCS hosts and would bypass the proxy:
-  - acme-corp/security-baseline (host: github.com)
-  - other-org/skill-pack (host: ghes.corp.example.com)
-Run 'apm install --update' to re-resolve through the proxy.
-```
-
-`apm install --update` re-resolves dependencies through the active proxy
-and rewrites the lockfile.
-
-### Trust statement (paste into procurement responses)
-
-> When `PROXY_REGISTRY_ONLY=1` is set in CI, APM cannot install a
-> dependency that did not flow through the configured proxy. Any attempt to
-> install a lockfile entry pinned to a direct VCS host aborts with a
-> non-zero exit code before any download occurs.
-
-## Coverage matrix
-
-What is and is not routed through the proxy:
-
-| Surface | Routed via proxy | Notes |
-|---|---|---|
-| `apm install` (GitHub-hosted deps) | Yes | Packages from github.com, GHE Cloud, GHES |
-| `apm install` (Azure DevOps deps) | **No** | ADO uses a different download path; Artifactory backends recognize GitHub/GitLab archive prefixes only |
-| `apm install --mcp` | **No** | MCP servers come from a separate registry, not GitHub archives |
-| `apm marketplace add` / `browse` / `search` / `update` | Yes | `marketplace.json` fetched via Archive Entry Download; falls back to GitHub Contents API unless `PROXY_REGISTRY_ONLY=1` |
-| `apm pack` / `apm unpack` | N/A | Operate offline once dependencies are local; see [Air-gapped CI playbook](#air-gapped-ci-playbook) |
-| Policy file fetch (`apm-policy.yml`) | **No** | Policy discovery uses the GitHub API directly. See [Governance #9](../governance-guide/#9-air-gapped-and-offline) for the policy-cache offline story. |
-
-When `PROXY_REGISTRY_ONLY=1` is set and a surface is not proxy-routed (ADO,
-MCP), APM aborts rather than silently fetching direct.
-
-## Air-gapped CI playbook
-
-The "fully air-gapped" story has two valid shapes. Pick based on whether CI
-has network reach to the proxy.
-
-### Shape A: CI can reach the proxy
-
-CI is on the corp network with Artifactory access; only the public internet
-is blocked.
-
-```yaml
-# .github/workflows/ci.yml
-env:
-  PROXY_REGISTRY_URL: https://art.corp.example.com/artifactory/github
-  PROXY_REGISTRY_TOKEN: ${{ secrets.ARTIFACTORY_TOKEN }}
-  PROXY_REGISTRY_ONLY: "1"
-
-jobs:
-  install:
-    runs-on: self-hosted
-    steps:
-      - uses: actions/checkout@v4
-      - uses: microsoft/apm-action@v1
-      - run: apm install
-      - run: apm audit --ci --policy ./vendored-policy.yml
-```
-
-`apm install` routes every dependency and `marketplace.json` fetch through
-Artifactory. `apm audit --ci --policy` enforces governance from a vendored
-policy file with no network calls (see [Governance #9](../governance-guide/#9-air-gapped-and-offline)).
-The lockfile guard catches any entry that would bypass the proxy on
-re-install.
-
-### Shape B: CI has no network at all (bundle delivery)
-
-CI cannot reach the proxy or the public internet. Build a bundle on a
-connected host, transport it, restore it offline.
+The PAT must carry **`read_repository`** scope -- `read_api` alone does
+not permit `/-/archive/` downloads. Verify directly against GitLab
+before saving on the remote:
 
 ```bash
-# On a connected build host (with proxy configured)
-export PROXY_REGISTRY_URL=https://art.corp.example.com/artifactory/github
-export PROXY_REGISTRY_ONLY=1
-apm install
-apm pack --format apm --archive -o ./artifacts/
-
-# Transport ./artifacts/*.tar.gz to the air-gapped network
-
-# In air-gapped CI (no APM, no Python, no network)
-tar xzf bundle.tar.gz -C .
-# Files are deployed; agents can read them immediately
+curl -sI -H "PRIVATE-TOKEN: $PAT" \
+  "https://<gitlab-host>/<group>/<project>/-/archive/<ref>/<basename>-<ref>.zip" \
+  | head -3
+# Want: HTTP/1.1 200 OK + Content-Type: application/zip
 ```
 
-See [Pack & Distribute](../../guides/pack-distribute/) for bundle structure
-and the `apm-action` restore mode.
+#### Default branch gotcha
 
-### Prewarming the policy cache
+APM defaults to `main` when no ref is provided. GitLab projects whose
+default branch is still `master` will return HTTP 404 for every archive
+URL APM tries. Pin the ref in `apm.yml` (`<repo>#master`) when the
+project hasn't been renamed.
 
-Independent of dependency traffic, the *policy* fetch goes direct to
-GitHub. For air-gapped runs that need policy enforcement on `apm install`,
-prewarm `<project_root>/apm_modules/.policy-cache/` or use
-`apm audit --ci --policy <path>` as the gating check. Details in
-[Governance #9](../governance-guide/#9-air-gapped-and-offline).
+#### Explicit Artifactory FQDN: deterministic boundary probe
 
-## Failure modes
+When a dep is written with the full proxy URL --
+`<host>/artifactory/<key>/<owner>/<repo>[/<more>]` -- parse time gives a
+simple `owner / first-segment / rest-as-virtual` split. The real
+boundary is settled at install time by an authoritative resolver that
+mirrors APM's native GitLab probing pattern, without a separate metadata
+API:
 
-| Symptom | Cause | Resolution |
+1. Enumerate every plausible `(owner, repo, virtual_path)` split
+   shallow-first.
+2. `HEAD` each candidate's archive URL on the proxy (no follow on
+   redirects, so the bearer token can't leak cross-host).
+3. The first candidate that responds 2xx-3xx wins; the dependency
+   reference is rebuilt at that boundary and persisted to `apm.yml` as
+   a structured `git:` + `path:` entry.
+
+If every candidate is rejected the resolver raises -- there is no
+silent fallback to the parse-time guess:
+
+| Result | Behaviour |
+|---|---|
+| Single candidate (e.g. `host/artifactory/key/owner/repo`) | Parse-time ref returned unchanged; no HEAD probe issued. |
+| All candidates `4xx` (excluding 401/403) | `ValueError: ... did not resolve to a reachable repository archive` |
+| All candidates `401`/`403` | `ValueError: ... authentication problem, not a missing repo` -- check the token's read scope. |
+
+To opt out of probing -- e.g. when the proxy is offline at install time
+or when you want a deterministic byte-for-byte string -- use the
+explicit `//` boundary marker, which short-circuits the resolver to a
+single candidate:
+
+```text
+<host>/artifactory/<key>/<owner>/<deep>/<slug>//<virtual/path>
+```
+
+When a surface is not proxy-routed and `PROXY_REGISTRY_ONLY=1`, APM
+aborts rather than silently fetching direct.
+
+## Internal marketplaces
+
+A marketplace is a Git repo containing a `marketplace.json`. To point
+at one hosted on GHES, GHE.com, or GitLab self-managed:
+
+```bash
+apm marketplace add acme-tools/agents \
+  --host ghes.corp.example.com \
+  --ref main
+```
+
+The entry is stored in `~/.apm/marketplaces.json`. Auth uses the same
+PAT as private dependency installs (`GITHUB_APM_PAT`,
+`GITHUB_APM_PAT_<ORG>`, or the GitLab equivalent). See
+[Private and org packages](../consumer/private-and-org-packages/).
+
+## Cache behavior
+
+APM keeps a local cache at `~/.apm/cache/`:
+
+- Git checkouts (full repository clones, reused across resolves).
+- HTTP cache (proxy responses, `marketplace.json` snapshots).
+
+The proxy is upstream of the cache. A cached entry is keyed by the
+resolved URL, so switching `PROXY_REGISTRY_URL` produces a fresh
+download. Integrity is unchanged: every install verifies the
+`content_hash` recorded in `apm.lock.yaml` regardless of where the
+bytes came from. A tampered proxy that rewrites archive contents is
+caught by the lockfile guard, not the cache.
+
+Inspect or reset the cache with `apm cache info`, `apm cache prune`,
+and `apm cache clean`.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
 |---|---|---|
-| `RuntimeError: PROXY_REGISTRY_ONLY is set but no Artifactory proxy is configured for '<dep>'` | `PROXY_REGISTRY_ONLY=1` set but `PROXY_REGISTRY_URL` is empty, or the dep is on an unproxied host (ADO) | Set `PROXY_REGISTRY_URL`, or use explicit FQDN syntax in `apm.yml`, or unset `PROXY_REGISTRY_ONLY` for that dep type |
-| `ERROR: PROXY_REGISTRY_ONLY=1 but the following lockfile entries are locked to direct VCS hosts` | Lockfile was generated before the proxy was configured | Run `apm install --update` to re-resolve through the proxy |
-| HTTP 401/403 from the proxy | Missing or invalid `PROXY_REGISTRY_TOKEN`, or token lacks read on the upstream repo | Verify the token has Artifactory read on the repository being fetched |
-| Proxy unreachable (timeout, DNS) with `PROXY_REGISTRY_ONLY=1` | Proxy down, network partition | Install fails closed. Restore proxy connectivity or fall back to a pre-built [bundle](../../guides/pack-distribute/) |
-| `DeprecationWarning: ARTIFACTORY_BASE_URL is deprecated` | Using legacy env-var names | Rename to `PROXY_REGISTRY_*`. Old names continue to work but will be removed in a future major release |
-| Warning: lockfile entry locked to proxy is missing `content_hash` | Older proxy-routed entry without integrity hash | Run `apm install --update` to populate. Without `content_hash`, a tampered proxy could redirect downloads without detection |
+| `RuntimeError: PROXY_REGISTRY_ONLY is set but no Artifactory proxy is configured for '<dep>'` | `PROXY_REGISTRY_ONLY=1` with no `PROXY_REGISTRY_URL`, or dep is on an unproxied host (ADO, MCP) | Set `PROXY_REGISTRY_URL`, or unset `PROXY_REGISTRY_ONLY` for that dep type |
+| `ERROR: ... locked to direct VCS hosts` | Lockfile predates the proxy | `apm install --update` |
+| HTTP 401/403 from the proxy | Missing or invalid `PROXY_REGISTRY_TOKEN` | Verify the token has read on the upstream repo path |
+| `git clone` hangs through the proxy | `HTTPS_PROXY` not set in the env that runs `git` | Export it in the shell that invokes `apm install`; CI secrets often miss this |
+| `DeprecationWarning: ARTIFACTORY_BASE_URL is deprecated` | Legacy env names | Rename to `PROXY_REGISTRY_*` |
+| Plaintext-token warning on proxy startup | Token sent over `http://` | Use `https://`, or set `PROXY_REGISTRY_ALLOW_HTTP=1` if the link is internal-only |
+| `Invalid zip archive` with a body that starts `<!DOCTYPE html>` and is ~17KB | Upstream returned a sign-in page; proxy cached the HTML | Configure upstream credentials on the registry remote, purge the cache, then refetch |
+| 3-segment dep (`group/sub/project`) fails with HTTP 404 from the proxy | APM treated `project` as a virtual sub-path | Set `PROXY_REGISTRY_ONLY=1`; see [Nested-group repos](#nested-group-repos-gitlab-subgroups-behind-the-proxy) |
+| HTTP 404 on every ref of an existing GitLab project | Default branch is `master`, APM defaults to `main` | Pin the ref: `<repo>#master` in `apm.yml` |
+| Upstream URL in `X-Artifactory-Origin-Remote-Path` has a duplicated group name | The remote's "Repository Path Prefix" is prepending a segment that's also in the request | Clear the prefix field on the remote |
 
-## Auth composition
-
-`PROXY_REGISTRY_TOKEN` and the GitHub PAT (`GITHUB_APM_PAT`, `GITHUB_TOKEN`,
-`GH_TOKEN`) are independent and used for different request paths:
-
-- Requests to `PROXY_REGISTRY_URL` send `Authorization: Bearer
-  <PROXY_REGISTRY_TOKEN>`.
-- Requests to `github.com` / GHE / GHES (only possible when
-  `PROXY_REGISTRY_ONLY` is unset) use the GitHub PAT.
-
-In a hybrid setup where `PROXY_REGISTRY_ONLY` is unset and some dependencies
-fall back to direct GitHub (because they are not mirrored), both tokens are
-used: proxy traffic auths with the bearer, direct traffic auths with the
-PAT. Set both in CI secrets if you support hybrid.
-
-For strict environments, set `PROXY_REGISTRY_ONLY=1` and only configure
-`PROXY_REGISTRY_TOKEN`. The GitHub PAT is then unused at install time.
-
-## HTTP proxies
-
-The proxy can be served over HTTP, but APM treats this as an insecure
-dependency channel. The same approval surface applies as for any HTTP
-dependency: see [HTTP (insecure) dependencies](../security/#http-insecure-dependencies).
-Production deployments should always use HTTPS.
+For fully disconnected CI (no proxy reach at all), build a bundle on a
+connected host with `apm pack` and restore offline. See
+[Pack and distribute](../producer/pack-a-bundle/).
 
 ## See also
 
-- [Governance #9](../governance-guide/#9-air-gapped-and-offline) -- offline policy enforcement (different mechanism)
-- [Security Model](../security/) -- attack surface, content scanning, HTTP dep handling
-- [Pack & Distribute](../../guides/pack-distribute/) -- bundle delivery for fully disconnected CI
-- [Marketplaces](../../guides/marketplaces/) -- marketplace command surface
+- [Authentication](../consumer/authentication/) -- token resolution order
+- [Private and org packages](../consumer/private-and-org-packages/) -- per-host PAT scoping
+- [Pack and distribute](../producer/pack-a-bundle/) -- air-gapped bundle delivery
+- [Governance overview](./governance-overview/) -- policy-cache offline story

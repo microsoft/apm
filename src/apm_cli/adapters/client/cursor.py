@@ -13,7 +13,6 @@ import json
 import os
 from pathlib import Path
 
-from ...core.docker_args import DockerArgsProcessor
 from ...core.token_manager import GitHubTokenManager
 from .copilot import CopilotClientAdapter
 
@@ -37,8 +36,21 @@ class CursorClientAdapter(CopilotClientAdapter):
     _supports_runtime_env_substitution: bool = False
 
     # ------------------------------------------------------------------ #
-    # Config path
+    # Auth-header injection override (for testability)
     # ------------------------------------------------------------------ #
+
+    def _apply_auth_and_headers(
+        self, config, remote, server_info, env_overrides, runtime_label="Cursor"
+    ):
+        """Inject GitHub token and registry-supplied headers into *config*.
+
+        Overrides the parent to supply ``GitHubTokenManager`` from *this*
+        module's namespace, allowing tests to patch
+        ``apm_cli.adapters.client.cursor.GitHubTokenManager`` correctly.
+        """
+        self._apply_auth_and_headers_impl(
+            config, remote, server_info, env_overrides, runtime_label, GitHubTokenManager
+        )
 
     def get_config_path(self):
         """Return the path to ``.cursor/mcp.json`` in the repository root.
@@ -74,6 +86,7 @@ class CursorClientAdapter(CopilotClientAdapter):
 
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(current_config, f, indent=2)
+        os.chmod(config_path, 0o600)
 
     def get_current_config(self):
         """Read the current ``.cursor/mcp.json`` contents."""
@@ -155,40 +168,7 @@ class CursorClientAdapter(CopilotClientAdapter):
             config["type"] = "http"
             config["url"] = (remote.get("url") or "").strip()
 
-            # Add authentication headers for GitHub MCP server
-            server_name = server_info.get("name", "")
-            is_github_server = self._is_github_server(server_name, remote.get("url", ""))
-
-            if is_github_server:
-                _tm = GitHubTokenManager()
-                github_token = _tm.get_token_for_purpose("copilot") or os.getenv(
-                    "GITHUB_PERSONAL_ACCESS_TOKEN"
-                )
-                if github_token:
-                    config["headers"] = {"Authorization": f"Bearer {github_token}"}
-
-            # Add any additional headers from registry if present
-            headers = remote.get("headers", [])
-            if headers:
-                if "headers" not in config:
-                    config["headers"] = {}
-                for header in headers:
-                    header_name = header.get("name", "")
-                    header_value = header.get("value", "")
-                    if header_name and header_value:
-                        # Prevent registry-supplied headers from overriding
-                        # the injected GitHub token
-                        if header_name == "Authorization" and is_github_server:
-                            continue
-                        resolved_value = self._resolve_env_variable(
-                            header_name, header_value, env_overrides
-                        )
-                        config["headers"][header_name] = resolved_value
-
-            # Warn about unresolvable ${input:...} references in headers
-            if config.get("headers"):
-                self._warn_input_variables(config["headers"], server_info.get("name", ""), "Cursor")
-
+            self._apply_auth_and_headers(config, remote, server_info, env_overrides, "Cursor")
             return config
 
         # --- local packages ---
@@ -203,63 +183,10 @@ class CursorClientAdapter(CopilotClientAdapter):
             )
 
         if packages:
-            package = self._select_best_package(packages)
-
-            if package:
-                registry_name = self._infer_registry_name(package)
-                package_name = package.get("name", "")
-                runtime_hint = package.get("runtime_hint", "")
-                runtime_arguments = package.get("runtime_arguments", [])
-                package_arguments = package.get("package_arguments", [])
-                env_vars = package.get("environment_variables", [])
-
-                resolved_env = self._resolve_environment_variables(env_vars, env_overrides)
-                processed_runtime_args = self._process_arguments(
-                    runtime_arguments, resolved_env, runtime_vars
-                )
-                processed_package_args = self._process_arguments(
-                    package_arguments, resolved_env, runtime_vars
-                )
-
-                config["type"] = "stdio"
-
-                if registry_name == "npm":
-                    config["command"] = runtime_hint or "npx"
-                    config["args"] = (
-                        ["-y", package_name] + processed_runtime_args + processed_package_args  # noqa: RUF005
-                    )
-                    if resolved_env:
-                        config["env"] = resolved_env
-                elif registry_name == "docker":
-                    config["command"] = "docker"
-                    if processed_runtime_args:
-                        config["args"] = self._inject_env_vars_into_docker_args(
-                            processed_runtime_args, resolved_env
-                        )
-                    else:
-                        config["args"] = DockerArgsProcessor.process_docker_args(
-                            ["run", "-i", "--rm", package_name], resolved_env
-                        )
-                elif registry_name == "pypi":
-                    config["command"] = runtime_hint or "uvx"
-                    config["args"] = (
-                        [package_name] + processed_runtime_args + processed_package_args  # noqa: RUF005
-                    )
-                    if resolved_env:
-                        config["env"] = resolved_env
-                elif registry_name == "homebrew":
-                    config["command"] = (
-                        package_name.split("/")[-1] if "/" in package_name else package_name
-                    )
-                    config["args"] = processed_runtime_args + processed_package_args
-                    if resolved_env:
-                        config["env"] = resolved_env
-                else:
-                    config["command"] = runtime_hint or package_name
-                    config["args"] = processed_runtime_args + processed_package_args
-                    if resolved_env:
-                        config["env"] = resolved_env
-            else:
+            package = self._select_and_dispatch_best_package(
+                config, packages, env_overrides, runtime_vars, set_type_stdio=True
+            )
+            if not package:
                 raise ValueError(
                     f"No supported package type found for Cursor. "
                     f"Server: {server_info.get('name', 'unknown')}. "
@@ -297,23 +224,11 @@ class CursorClientAdapter(CopilotClientAdapter):
             return True  # nothing to do, not an error
 
         try:
-            # Use cached server info if available, otherwise fetch from registry
-            if server_info_cache and server_url in server_info_cache:
-                server_info = server_info_cache[server_url]
-            else:
-                server_info = self.registry_client.find_server_by_reference(server_url)
-
-            if not server_info:
-                print(f"Error: MCP server '{server_url}' not found in registry")
+            server_info = self._fetch_server_info(server_url, server_info_cache)
+            if server_info is None:
                 return False
 
-            # Determine config key
-            if server_name:
-                config_key = server_name
-            elif "/" in server_url:
-                config_key = server_url.split("/")[-1]
-            else:
-                config_key = server_url
+            config_key = self._determine_config_key(server_url, server_name)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             self.update_config({config_key: server_config})

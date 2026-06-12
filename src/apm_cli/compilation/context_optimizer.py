@@ -7,14 +7,11 @@ following the Minimal Context Principle.
 
 import builtins
 import fnmatch
-import glob
 import os
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from functools import lru_cache  # noqa: F401
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
 
 from ..output.models import (
     CompilationResults,
@@ -25,8 +22,9 @@ from ..output.models import (
     ProjectAnalysis,
 )
 from ..primitives.models import Instruction
-from ..utils.exclude import should_exclude, validate_exclude_patterns
+from ..utils.exclude import matches_glob, should_exclude, validate_exclude_patterns
 from ..utils.paths import portable_relpath
+from ..utils.patterns import has_top_level_comma, parse_apply_to
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 # When this module is imported during 'apm compile', Click's active context
@@ -171,15 +169,35 @@ class ContextOptimizer:
         return result
 
     def _cached_glob(self, pattern: str) -> builtins.list[str]:
-        """Cache glob results to avoid repeated filesystem scans."""
+        """Return project files matching ``pattern`` (``**`` recursive), cached.
+
+        Replaces ``glob.glob(pattern, recursive=True)``, whose ``**`` follows
+        directory **symlinks** and descends excluded trees like
+        ``node_modules``/``dist``. On a pnpm project the symlinked ``.pnpm``
+        store exposes shared packages through exponentially many paths, so a
+        single ``**`` pattern made ``apm compile`` walk an effectively
+        unbounded space -- pinning one core near 100% CPU with multi-GB RSS and
+        never terminating.
+
+        Instead, filter the cached project file list (:meth:`_get_all_files`,
+        which walks once with :func:`os.walk` -- no symlink following -- and
+        prunes excluded/hidden dirs) with the shared ``**``-aware matcher
+        (:func:`apm_cli.utils.exclude.matches_glob`).
+        """
         if pattern not in self._glob_cache:
-            old_cwd = os.getcwd()
-            try:
-                os.chdir(str(self.base_dir))  # Convert Path to string for os.chdir
-                self._glob_cache[pattern] = glob.glob(pattern, recursive=True)
-            finally:
-                os.chdir(old_cwd)
+            self._glob_cache[pattern] = self._safe_recursive_glob(pattern)
         return self._glob_cache[pattern]
+
+    def _safe_recursive_glob(self, pattern: str) -> builtins.list[str]:
+        """Symlink-safe, exclusion-aware ``glob(recursive=True)`` replacement:
+        match the cached project file list against ``pattern`` (POSIX rel paths).
+        """
+        results: builtins.list[str] = []
+        for path in self._get_all_files():
+            rel = portable_relpath(path, self.base_dir)
+            if matches_glob(rel, pattern):
+                results.append(rel)
+        return results
 
     def _get_all_files(self) -> builtins.list[Path]:
         """Get cached list of all files in project."""
@@ -570,20 +588,21 @@ class ContextOptimizer:
         if not matching_directories:
             # Smart fallback: Try to place in semantically appropriate directory
             intended_dir = self._extract_intended_directory_from_pattern(pattern)
+            name = getattr(instruction, "name", None) or instruction.file_path.stem
 
             if intended_dir:
                 # Place in the intended directory (e.g., docs/ for docs/**/*.md)
                 placement = intended_dir
                 reasoning = f"No matching files found, placed in intended directory '{portable_relpath(intended_dir, self.base_dir)}'"
                 self._warnings.append(
-                    f"Pattern '{pattern}' matches no files - placing in intended directory '{portable_relpath(intended_dir, self.base_dir)}'"
+                    f"applyTo for '{name}' matched no files - placing in '{portable_relpath(intended_dir, self.base_dir)}'"
                 )
             else:
                 # Fallback to root for global patterns
                 placement = self.base_dir
                 reasoning = "No matching files found, fallback to root placement"
                 self._warnings.append(
-                    f"Pattern '{pattern}' matches no files - placing at project root"
+                    f"applyTo for '{name}' matched no files - placing at project root"
                 )
 
             # Calculate relevance score for the fallback placement
@@ -659,11 +678,19 @@ class ContextOptimizer:
         """Extract the intended directory from a pattern like 'docs/**/*.md' -> 'docs'.
 
         Args:
-            pattern (str): File pattern to analyze.
+            pattern (str): File pattern (may be a comma-separated list).
 
         Returns:
             Optional[Path]: Intended directory path, or None if pattern is global.
         """
+        # For comma-lists, only the first segment is consulted - the
+        # placement still flows into a single directory.
+        if has_top_level_comma(pattern):
+            segments = parse_apply_to(pattern)
+            if not segments:
+                return None
+            pattern = segments[0]
+
         if not pattern or pattern.startswith("**/"):
             return None  # Global pattern
 
@@ -711,11 +738,19 @@ class ContextOptimizer:
 
         Args:
             file_path (Path): File path to check
-            pattern (str): Glob pattern to match against
+            pattern (str): Glob pattern or comma-separated list of globs.
 
         Returns:
-            bool: True if file matches pattern
+            bool: True if file matches pattern (or any segment of a list).
         """
+        # applyTo accepts a comma-separated list of globs; treat any
+        # segment match as a hit so list patterns mirror per-glob semantics.
+        # Only split on top-level commas - commas inside brace alternation
+        # (e.g. ``**/*.{css,scss}``) must stay attached for brace expansion.
+        if has_top_level_comma(pattern):
+            segments = parse_apply_to(pattern)
+            return any(self._file_matches_pattern(file_path, seg) for seg in segments)
+
         # Expand any brace patterns
         expanded_patterns = self._expand_glob_pattern(pattern)
 

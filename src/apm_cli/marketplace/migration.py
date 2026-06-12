@@ -23,7 +23,6 @@ import enum
 import logging
 from io import StringIO
 from pathlib import Path
-from typing import Optional  # noqa: F401
 
 import yaml
 

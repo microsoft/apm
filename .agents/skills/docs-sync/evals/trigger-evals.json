@@ -1,0 +1,41 @@
+{
+  "description": "Trigger evals for the docs-sync skill dispatch description. 10 should-trigger + 10 should-NOT-trigger. 60/40 train/val split. Validation split is the ship gate (>=0.5 on should-trigger AND <0.5 on should-not-trigger).",
+  "should_trigger": {
+    "train": [
+      "PR opened: adds --no-cache flag to apm install",
+      "PR opened: renames apm pack to apm bundle",
+      "PR opened: adds new package format wheel to apm pack",
+      "PR opened: removes the deprecated --legacy-resolver flag from apm install",
+      "PR opened: adds new schema field 'registry-proxy-url' to apm.yml",
+      "this PR changes the default value of apm.lock.yaml integrity field"
+    ],
+    "val": [
+      "PR opened: refactors AuthResolver to support new GHE auth method, changes error messages",
+      "PR opened: adds new apm verb 'apm graph' that visualizes dependency tree",
+      "PR opened: changes the format of apm-policy.yml's allowed-sources field",
+      "PR opened: adds new primitive type 'workflow' to the producer authoring surface"
+    ]
+  },
+  "should_not_trigger": {
+    "train": [
+      "PR opened: refactor internal hashing helper, no public API change",
+      "PR opened: add unit tests for AuthResolver edge cases",
+      "PR opened: bump ruff dev dependency to latest",
+      "PR opened: fix typo in CHANGELOG.md",
+      "PR opened: update copilot-setup-steps.yml runner image",
+      "PR opened: rewrite README intro paragraph (docs-only PR)"
+    ],
+    "val": [
+      "PR opened: extract _build_git_env helper into separate module (internal refactor)",
+      "PR opened: fix flaky integration test test_install_concurrent",
+      "PR opened: rewrite docs/src/content/docs/getting-started/quickstart.md (docs-only PR)",
+      "PR opened: update .github/instructions/changelog.instructions.md"
+    ]
+  },
+  "notes": [
+    "Docs-only PRs explicitly do NOT trigger -- docs-sync reviews CODE PRs for docs impact; docs PRs go through doc-writer review separately.",
+    "Pure refactors with no user-observable surface change must NOT trigger -- the L0 path gate should catch them.",
+    "Test-only PRs and CI-only PRs must NOT trigger.",
+    "The classifier may still emit no_change verdict on a borderline case; the dispatch eval here is about whether the SKILL is invoked, not the verdict."
+  ]
+}

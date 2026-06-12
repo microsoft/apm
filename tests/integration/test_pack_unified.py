@@ -104,6 +104,130 @@ class TestPackUnified:
         # No bundle directory should appear
         assert not (tmp_path / "build").exists()
 
+    def test_pack_marketplace_writes_codex_when_selected(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+        apm = tmp_path / "apm.yml"
+        apm.write_text(
+            apm.read_text(encoding="utf-8")
+            .replace(
+                "  owner:\n",
+                "  outputs: [claude, codex]\n  owner:\n",
+                1,
+            )
+            .replace(
+                "      homepage: https://example.com\n",
+                "      homepage: https://example.com\n      category: Productivity\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(pack_cmd, [])
+
+        assert result.exit_code == 0, result.output
+        claude_out = tmp_path / ".claude-plugin" / "marketplace.json"
+        codex_out = tmp_path / ".agents" / "plugins" / "marketplace.json"
+        assert claude_out.exists()
+        assert codex_out.exists()
+        data = json.loads(codex_out.read_text(encoding="utf-8"))
+        assert data["plugins"][0]["source"] == {
+            "source": "local",
+            "path": "./.github/plugins/azure",
+        }
+
+    def test_pack_marketplace_uses_configured_output_paths(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+        apm = tmp_path / "apm.yml"
+        apm.write_text(
+            apm.read_text(encoding="utf-8")
+            .replace(
+                "  owner:\n",
+                "  outputs: [claude, codex]\n"
+                "  claude:\n"
+                "    output: dist/claude-marketplace.json\n"
+                "  codex:\n"
+                "    output: dist/codex-marketplace.json\n"
+                "  owner:\n",
+                1,
+            )
+            .replace(
+                "      homepage: https://example.com\n",
+                "      homepage: https://example.com\n      category: Productivity\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(pack_cmd, [])
+
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / "dist" / "claude-marketplace.json").exists()
+        assert (tmp_path / "dist" / "codex-marketplace.json").exists()
+        assert not (tmp_path / ".claude-plugin" / "marketplace.json").exists()
+        assert not (tmp_path / ".agents" / "plugins" / "marketplace.json").exists()
+
+    def test_pack_marketplace_output_override_only_affects_claude_in_dual_output_config(
+        self, runner, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+        apm = tmp_path / "apm.yml"
+        apm.write_text(
+            apm.read_text(encoding="utf-8")
+            .replace(
+                "  owner:\n",
+                "  outputs: [claude, codex]\n"
+                "  codex:\n"
+                "    output: dist/codex-marketplace.json\n"
+                "  owner:\n",
+                1,
+            )
+            .replace(
+                "      homepage: https://example.com\n",
+                "      homepage: https://example.com\n      category: Productivity\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        claude_override = tmp_path / "dist" / "legacy-override.json"
+
+        result = runner.invoke(pack_cmd, ["--marketplace-path", f"claude={claude_override}"])
+
+        assert result.exit_code == 0, result.output
+        assert claude_override.exists()
+        assert (tmp_path / "dist" / "codex-marketplace.json").exists()
+        assert not (tmp_path / ".claude-plugin" / "marketplace.json").exists()
+
+    def test_pack_rejects_codex_output_traversal(self, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+        apm = tmp_path / "apm.yml"
+        apm.write_text(
+            apm.read_text(encoding="utf-8")
+            .replace(
+                "  owner:\n",
+                "  outputs: [codex]\n"
+                "  codex:\n"
+                "    output: ../../outside-marketplace.json\n"
+                "  owner:\n",
+                1,
+            )
+            .replace(
+                "      homepage: https://example.com\n",
+                "      homepage: https://example.com\n      category: Productivity\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(pack_cmd, [])
+
+        assert result.exit_code == 1
+        assert "traversal" in result.output.lower()
+        assert not (tmp_path.parent.parent / "outside-marketplace.json").exists()
+
     def test_pack_both(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         # Add both blocks
@@ -150,7 +274,7 @@ marketplace:
         _write_marketplace_block_yml(tmp_path)
 
         out_path = tmp_path / "out" / "m.json"
-        result = runner.invoke(pack_cmd, ["--marketplace-output", str(out_path)])
+        result = runner.invoke(pack_cmd, ["--marketplace-path", f"claude={out_path}"])
 
         assert result.exit_code == 0, result.output
         assert out_path.exists()
@@ -242,3 +366,43 @@ class TestMarketplaceBuildSubcommandRemoved:
         assert result.exit_code == 2
         assert "apm pack" in result.output
         assert "was removed" in result.output
+
+
+# ---------------------------------------------------------------------------
+# --check-clean drift recipe (issue #1381 acceptance criterion)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckCleanDriftRecipe:
+    """Integration tests: --check-clean drift detection emits the recovery recipe."""
+
+    def test_drift_recipe_contains_amend_and_force_with_lease(self, runner, tmp_path, monkeypatch):
+        """Missing marketplace.json triggers exit 4 with both recovery incantations.
+
+        Issue #1381 AC: the error text must contain both 'commit --amend' and
+        'force-with-lease' so producers can recover without consulting external docs.
+        """
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+
+        result = runner.invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline"])
+
+        assert result.exit_code == 4, f"Expected exit 4, got {result.exit_code}:\n{result.output}"
+        assert "commit --amend" in result.output, (
+            "--check-clean drift output must include the amend recipe"
+        )
+        assert "force-with-lease" in result.output, (
+            "--check-clean drift output must include the force-with-lease recipe"
+        )
+
+    def test_drift_recipe_embeds_marketplace_json_path(self, runner, tmp_path, monkeypatch):
+        """The git add line in the recipe must embed the marketplace.json path."""
+        monkeypatch.chdir(tmp_path)
+        _write_marketplace_block_yml(tmp_path)
+
+        result = runner.invoke(pack_cmd, ["--check-clean", "--dry-run", "--offline"])
+
+        assert result.exit_code == 4
+        # Verify the git add -- <path> line embeds the path so producers can copy-paste.
+        assert "git add" in result.output
+        assert "marketplace.json" in result.output

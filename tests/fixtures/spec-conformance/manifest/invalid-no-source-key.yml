@@ -1,0 +1,9 @@
+# Exercises: req-mf-001 (depEntry minimum-presence) - MUST be rejected by schema validation
+# Invalid: a dependency entry in object form declares neither `git:`, `id:`,
+# `path:`, nor `registry:`. The manifest JSON Schema $defs.depEntry oneOf
+# clause REQUIRES exactly one source key per object-form entry.
+name: missing-source-key-example
+version: "1.0.0"
+dependencies:
+  apm:
+    - version: "^1.0.0"

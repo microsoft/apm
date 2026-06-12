@@ -1,7 +1,7 @@
 """Local-bundle detection, integrity verification, and target-mismatch checks.
 
 This module powers ``apm install <local-bundle-path>`` (issue #1098).  A local
-bundle is a directory or ``.tar.gz`` produced by ``apm pack`` -- it contains a
+bundle is a directory, ``.zip``, or ``.tar.gz`` produced by ``apm pack`` -- it contains a
 ``plugin.json`` at its root and (for bundles produced by recent versions of
 APM) an ``apm.lock.yaml`` carrying the per-file SHA-256 manifest under
 ``pack.bundle_files``.
@@ -27,20 +27,29 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-import sys
-import tarfile
 import tempfile
+import zipfile
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import Any
 
 import yaml
 
+from ..utils.archive import (
+    MAX_ZIP_ENTRIES,
+    MAX_ZIP_UNCOMPRESSED,
+    ArchiveError,
+    _extract_tar_gz_file,
+    safe_extract_zip,
+)
 from ..utils.path_security import (
     PathTraversalError,
     ensure_path_within,
     validate_path_segments,
 )
+
+_MAX_ZIP_ENTRIES = MAX_ZIP_ENTRIES
+_MAX_ZIP_UNCOMPRESSED = MAX_ZIP_UNCOMPRESSED
 
 
 @dataclass(frozen=True)
@@ -58,7 +67,7 @@ class LocalBundleInfo:
             the lockfile).
         pack_targets: Targets the bundle was packed for, derived from
             ``lockfile["pack"]["target"]``.  Empty list when unknown.
-        is_archive: ``True`` when the source path was a ``.tar.gz``.
+        is_archive: ``True`` when the source path was a ``.zip`` or ``.tar.gz``.
         temp_dir: Extraction directory for tarballs (caller must clean up).
             ``None`` for directory bundles.
     """
@@ -131,7 +140,7 @@ def _build_info(bundle_dir: Path, *, is_archive: bool, temp_dir: Path | None) ->
     )
 
 
-def _looks_like_archive(path: Path) -> bool:
+def _looks_like_tarball(path: Path) -> bool:
     name = path.name.lower()
     return name.endswith(".tar.gz") or name.endswith(".tgz")
 
@@ -144,25 +153,18 @@ def _looks_like_legacy_apm_bundle(path: Path) -> bool:
     checks for the signal, and cleans up.  Returns ``False`` on any I/O
     error (caller should fall through to the generic error message).
     """
-    if not (path.is_file() and _looks_like_archive(path)):
+    if not (path.is_file() and _looks_like_tarball(path)):
         return False
     tmp = Path(tempfile.mkdtemp(prefix="apm-legacy-probe-"))
     try:
-        with tarfile.open(path, "r:gz") as tar:
-            for member in tar.getmembers():
-                if member.issym() or member.islnk():
-                    return False
-            if sys.version_info >= (3, 12):
-                tar.extractall(tmp, filter="data")
-            else:
-                tar.extractall(tmp)  # noqa: S202
+        _extract_tar_gz_file(path, str(tmp))
         # Locate the inner directory (apm pack uses arcname=<bundle-name>)
         root = tmp
         children = [p for p in tmp.iterdir() if p.is_dir()]
         if len(children) == 1:
             root = children[0]
         return (root / "apm.lock.yaml").is_file() and not (root / "plugin.json").is_file()
-    except (tarfile.TarError, OSError):
+    except (ArchiveError, OSError):
         return False
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -186,16 +188,48 @@ def _find_extracted_root(extract_dir: Path) -> Path | None:
     return None
 
 
+def _extract_zip_bundle(path: Path) -> LocalBundleInfo | None:
+    """Extract a ``.zip`` bundle to a temp dir and return :class:`LocalBundleInfo`.
+
+    Applies the same security checks as the tar.gz branch and enforces the ZIP
+    size quota while streaming each entry. Returns ``None`` only when the file
+    is not a readable ZIP bundle or no ``plugin.json`` root is found; security
+    violations raise ``ValueError`` with a targeted reason.
+    """
+    temp_dir = Path(tempfile.mkdtemp(prefix="apm-local-bundle-"))
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            safe_extract_zip(
+                zf,
+                temp_dir,
+                max_entries=_MAX_ZIP_ENTRIES,
+                max_uncompressed=_MAX_ZIP_UNCOMPRESSED,
+                error_type=ValueError,
+            )
+    except (zipfile.BadZipFile, OSError):
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return None
+    except ValueError:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
+    bundle_root = _find_extracted_root(temp_dir)
+    if bundle_root is None:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return None
+    return _build_info(bundle_root, is_archive=True, temp_dir=temp_dir)
+
+
 def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
     """Probe *path*; return :class:`LocalBundleInfo` or ``None``.
 
     A path qualifies when it is either:
 
     - A directory containing ``plugin.json`` at its root, OR
+    - A ``.zip`` archive whose extracted root contains ``plugin.json``, OR
     - A ``.tar.gz`` / ``.tgz`` archive whose extracted root contains
       ``plugin.json``.
 
-    Tarballs are extracted to a fresh temporary directory; the caller is
+    Archives are extracted to a fresh temporary directory; the caller is
     responsible for cleaning ``info.temp_dir`` after the install completes.
     """
     path = Path(path)
@@ -207,42 +241,14 @@ def detect_local_bundle(path: Path) -> LocalBundleInfo | None:
             return None
         return _build_info(path, is_archive=False, temp_dir=None)
 
-    if path.is_file() and _looks_like_archive(path):
+    if path.is_file() and path.name.lower().endswith(".zip"):
+        return _extract_zip_bundle(path)
+
+    if path.is_file() and _looks_like_tarball(path):
         temp_dir = Path(tempfile.mkdtemp(prefix="apm-local-bundle-"))
         try:
-            with tarfile.open(path, "r:gz") as tar:
-                # Reject member symlinks/hardlinks and absolute / parent paths
-                # for safety (analogous to the pack-side filter).  Using
-                # ``validate_path_segments`` normalises backslashes and
-                # percent-decoding, and ``PureWindowsPath`` catches drive-letter
-                # absolute forms (e.g. ``C:/foo``) that ``startswith('/')`` misses.
-                for member in tar.getmembers():
-                    if member.issym() or member.islnk():
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        return None
-                    name = member.name
-                    if (
-                        name.startswith("/")
-                        or PureWindowsPath(name).drive
-                        or PureWindowsPath(name).is_absolute()
-                    ):
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        return None
-                    try:
-                        validate_path_segments(name, context="tar member")
-                    except PathTraversalError:
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        return None
-                # tarfile.extractall(filter="data") requires Python 3.12+.
-                # The repo declares requires-python = ">=3.10", so on 3.10/3.11
-                # we extract without the filter.  The pre-extraction validation
-                # above is the primary gate (rejects symlinks, absolute paths,
-                # and any '..' segment), not filter="data".
-                if sys.version_info >= (3, 12):
-                    tar.extractall(temp_dir, filter="data")
-                else:
-                    tar.extractall(temp_dir)  # noqa: S202 -- validated above
-        except (tarfile.TarError, OSError):
+            _extract_tar_gz_file(path, str(temp_dir))
+        except (ArchiveError, OSError):
             shutil.rmtree(temp_dir, ignore_errors=True)
             return None
         bundle_root = _find_extracted_root(temp_dir)

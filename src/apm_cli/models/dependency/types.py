@@ -3,7 +3,6 @@
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional  # noqa: F401
 
 
 class GitReferenceType(Enum):
@@ -16,11 +15,12 @@ class GitReferenceType(Enum):
 
 @dataclass
 class RemoteRef:
-    """A single remote Git reference (tag or branch) with its commit SHA."""
+    """A single remote Git reference with its commit SHA."""
 
     name: str
     ref_type: GitReferenceType
     commit_sha: str
+    annotated: bool = False
 
 
 class VirtualPackageType(Enum):

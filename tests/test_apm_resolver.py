@@ -1,10 +1,12 @@
 """Comprehensive tests for APM dependency resolver."""
 
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from tempfile import TemporaryDirectory
-from unittest.mock import Mock, patch  # noqa: F401
+from unittest.mock import Mock, patch
 
+from apm_cli.marketplace.errors import BuildError, PluginNotFoundError
+from apm_cli.marketplace.resolver import MarketplacePluginResolution
 from src.apm_cli.deps.apm_resolver import APMDependencyResolver
 from src.apm_cli.deps.dependency_graph import (
     CircularRef,
@@ -607,3 +609,332 @@ class TestRemoteParentLocalPathFailClosed(unittest.TestCase):
                 local_dep.get_unique_key(),
                 resolver._rejected_remote_local_keys,
             )
+
+    def test_remote_parent_same_repo_sibling_path_expands_to_remote_virtual_dep(self):
+        with TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir) / "consumer"
+            modules_dir = project_root / "apm_modules"
+            project_root.mkdir()
+            (project_root / "apm.yml").write_text(
+                """
+name: consumer
+version: 1.0.0
+dependencies:
+  apm:
+    - git: microsoft/mono
+      path: packages/frontend
+      ref: feature
+""".lstrip()
+            )
+            callback_refs = []
+
+            def download_callback(dep_ref, apm_modules_dir, parent_chain="", parent_pkg=None):
+                callback_refs.append(dep_ref)
+                install_path = dep_ref.get_install_path(apm_modules_dir)
+                install_path.mkdir(parents=True, exist_ok=True)
+                if dep_ref.virtual_path == "packages/frontend":
+                    (install_path / "apm.yml").write_text(
+                        """
+name: frontend
+version: 1.0.0
+dependencies:
+  apm:
+    - path: ../shared
+""".lstrip()
+                    )
+                elif dep_ref.virtual_path == "packages/shared":
+                    (install_path / "apm.yml").write_text(
+                        """
+name: shared
+version: 1.0.0
+""".lstrip()
+                    )
+                else:
+                    raise AssertionError(f"unexpected virtual path: {dep_ref.virtual_path}")
+                return install_path
+
+            resolver = APMDependencyResolver(
+                apm_modules_dir=modules_dir,
+                download_callback=download_callback,
+                max_parallel=1,
+            )
+
+            graph = resolver.resolve_dependencies(project_root)
+
+            shared = graph.dependency_tree.get_node("microsoft/mono/packages/shared#feature")
+            self.assertIsNotNone(shared)
+            self.assertEqual(shared.dependency_ref.repo_url, "microsoft/mono")
+            self.assertEqual(shared.dependency_ref.virtual_path, "packages/shared")
+            self.assertFalse(Path(shared.dependency_ref.virtual_path).is_absolute())
+            self.assertFalse(PureWindowsPath(shared.dependency_ref.virtual_path).is_absolute())
+            self.assertEqual(shared.dependency_ref.reference, "feature")
+            self.assertFalse(shared.dependency_ref.is_local)
+            self.assertEqual(resolver._rejected_remote_local_keys, set())
+            self.assertTrue(
+                any(
+                    ref.virtual_path == "packages/shared" and not ref.is_local
+                    for ref in callback_refs
+                )
+            )
+
+    def test_remote_parent_path_escape_outside_repo_root_is_rejected(self):
+        self._assert_remote_local_path_rejected(
+            parent_path="packages/frontend",
+            child_path="../../../outside",
+            rejected_key="../../../outside",
+        )
+
+    def test_remote_parent_path_to_different_repo_clone_is_rejected(self):
+        self._assert_remote_local_path_rejected(
+            parent_path=None,
+            child_path="../repo-b/shared",
+            rejected_key="../repo-b/shared",
+        )
+
+    def _assert_remote_local_path_rejected(
+        self, *, parent_path: str | None, child_path: str, rejected_key: str
+    ):
+        with TemporaryDirectory() as tmpdir:
+            project_root = Path(tmpdir) / "consumer"
+            modules_dir = project_root / "apm_modules"
+            project_root.mkdir()
+            if parent_path is None:
+                dep_block = "    - microsoft/repo-a\n"
+                parent_virtual_path = None
+            else:
+                dep_block = (
+                    f"    - git: microsoft/repo-a\n      path: {parent_path}\n      ref: main\n"
+                )
+                parent_virtual_path = parent_path
+            (project_root / "apm.yml").write_text(
+                f"""
+name: consumer
+version: 1.0.0
+dependencies:
+  apm:
+{dep_block}""".lstrip()
+            )
+            callback_refs = []
+
+            def download_callback(dep_ref, apm_modules_dir, parent_chain="", parent_pkg=None):
+                callback_refs.append(dep_ref)
+                install_path = dep_ref.get_install_path(apm_modules_dir)
+                install_path.mkdir(parents=True, exist_ok=True)
+                (install_path / "apm.yml").write_text(
+                    f"""
+name: parent
+version: 1.0.0
+dependencies:
+  apm:
+    - path: {child_path}
+""".lstrip()
+                )
+                return install_path
+
+            resolver = APMDependencyResolver(
+                apm_modules_dir=modules_dir,
+                download_callback=download_callback,
+                max_parallel=1,
+            )
+
+            graph = resolver.resolve_dependencies(project_root)
+
+            self.assertIn(rejected_key, resolver._rejected_remote_local_keys)
+            self.assertIsNone(graph.dependency_tree.get_node(rejected_key))
+            self.assertFalse(
+                any(
+                    ref is not callback_refs[0] and ref.repo_url == "microsoft/repo-a"
+                    for ref in callback_refs
+                )
+            )
+            if parent_virtual_path is not None:
+                self.assertEqual(callback_refs[0].virtual_path, parent_virtual_path)
+
+
+class TestMarketplaceResolution(unittest.TestCase):
+    """Tests for marketplace dependency resolution in the BFS resolver."""
+
+    def _make_marketplace_dep(
+        self, name="gopls-lsp", marketplace="claude-plugins-official", version_spec=None
+    ):
+        return DependencyReference(
+            repo_url=f"_marketplace/{marketplace}/{name}",
+            is_marketplace=True,
+            marketplace_name=marketplace,
+            marketplace_plugin_name=name,
+            marketplace_version_spec=version_spec,
+        )
+
+    @staticmethod
+    def _make_resolution(canonical, dep_ref=None):
+        plugin = Mock(name="mock-plugin")
+        return MarketplacePluginResolution(
+            canonical=canonical,
+            plugin=plugin,
+            dependency_reference=dep_ref,
+        )
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_resolve_marketplace_dep_success(self, mock_resolve):
+        mock_resolve.return_value = self._make_resolution("acme/gopls-lsp#main")
+        resolver = APMDependencyResolver()
+        dep = self._make_marketplace_dep()
+        result = resolver._resolve_marketplace_dep(dep)
+        assert result is not None
+        assert result.repo_url == "acme/gopls-lsp"
+        assert result.reference == "main"
+        assert not result.is_marketplace
+        mock_resolve.assert_called_once_with(
+            "gopls-lsp",
+            "claude-plugins-official",
+            version_spec=None,
+            auth_resolver=None,
+            warning_handler=unittest.mock.ANY,
+        )
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_resolve_marketplace_dep_known_error_raises(self, mock_resolve):
+        mock_resolve.side_effect = PluginNotFoundError("gopls-lsp", "claude-plugins-official")
+        resolver = APMDependencyResolver()
+        dep = self._make_marketplace_dep()
+        with self.assertRaises(PluginNotFoundError):
+            resolver._resolve_marketplace_dep(dep)
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_resolve_marketplace_dep_unknown_error_propagates(self, mock_resolve):
+        mock_resolve.side_effect = RuntimeError("unexpected bug")
+        resolver = APMDependencyResolver()
+        dep = self._make_marketplace_dep()
+        with self.assertRaises(RuntimeError):
+            resolver._resolve_marketplace_dep(dep)
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_resolve_marketplace_dep_passes_auth_resolver(self, mock_resolve):
+        mock_resolve.return_value = self._make_resolution("acme/gopls-lsp#main")
+        auth = Mock()
+        resolver = APMDependencyResolver(auth_resolver=auth)
+        dep = self._make_marketplace_dep()
+        resolver._resolve_marketplace_dep(dep)
+        mock_resolve.assert_called_once_with(
+            "gopls-lsp",
+            "claude-plugins-official",
+            version_spec=None,
+            auth_resolver=auth,
+            warning_handler=unittest.mock.ANY,
+        )
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_resolve_marketplace_dep_passes_version_spec(self, mock_resolve):
+        mock_resolve.return_value = self._make_resolution("acme/gopls-lsp#v2.1.3")
+        resolver = APMDependencyResolver()
+        dep = self._make_marketplace_dep(version_spec="~2.1.0")
+        result = resolver._resolve_marketplace_dep(dep)
+        assert result.reference == "v2.1.3"
+        mock_resolve.assert_called_once_with(
+            "gopls-lsp",
+            "claude-plugins-official",
+            version_spec="~2.1.0",
+            auth_resolver=None,
+            warning_handler=unittest.mock.ANY,
+        )
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_resolve_marketplace_dep_prefers_dependency_reference(self, mock_resolve):
+        structured_ref = DependencyReference(
+            repo_url="gitlab.com/acme/plugins",
+            reference="v2.0",
+            virtual_path="gopls-lsp",
+            is_virtual=True,
+        )
+        mock_resolve.return_value = self._make_resolution(
+            "gitlab.com/acme/plugins#v2.0",
+            dep_ref=structured_ref,
+        )
+        resolver = APMDependencyResolver()
+        dep = self._make_marketplace_dep()
+        result = resolver._resolve_marketplace_dep(dep)
+        assert result is structured_ref
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_marketplace_deps_resolved_in_tree(self, mock_resolve):
+        mock_resolve.return_value = self._make_resolution("acme/gopls-lsp#main")
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_yml = project_root / "apm.yml"
+            apm_yml.write_text(
+                "name: test-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n"
+                "    - name: gopls-lsp\n      marketplace: claude-plugins-official\n"
+            )
+            resolver = APMDependencyResolver()
+            result = resolver.resolve_dependencies(project_root)
+            assert result.flattened_dependencies.total_dependencies() == 1
+            assert "acme/gopls-lsp" in result.flattened_dependencies.dependencies
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_marketplace_dep_failure_surfaces_error(self, mock_resolve):
+        mock_resolve.side_effect = PluginNotFoundError("bad-plugin", "fake-marketplace")
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_yml = project_root / "apm.yml"
+            apm_yml.write_text(
+                "name: test-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n"
+                "    - name: bad-plugin\n      marketplace: fake-marketplace\n"
+            )
+            resolver = APMDependencyResolver()
+            result = resolver.resolve_dependencies(project_root)
+            assert result.flattened_dependencies.total_dependencies() == 0
+            assert result.has_errors()
+            assert any(
+                "bad-plugin" in e and "fake-marketplace" in e for e in result.resolution_errors
+            )
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_marketplace_build_error_surfaces_error(self, mock_resolve):
+        mock_resolve.side_effect = BuildError("git ls-remote failed", package="bad-plugin")
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_yml = project_root / "apm.yml"
+            apm_yml.write_text(
+                "name: test-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n"
+                "    - name: bad-plugin\n      marketplace: fake-marketplace\n"
+            )
+            resolver = APMDependencyResolver()
+            result = resolver.resolve_dependencies(project_root)
+            assert result.has_errors()
+            assert any("git ls-remote failed" in e for e in result.resolution_errors)
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_marketplace_dep_unknown_error_propagates_through_tree(self, mock_resolve):
+        mock_resolve.side_effect = RuntimeError("unexpected")
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_yml = project_root / "apm.yml"
+            apm_yml.write_text(
+                "name: test-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n"
+                "    - name: bad-plugin\n      marketplace: fake-marketplace\n"
+            )
+            resolver = APMDependencyResolver()
+            with self.assertRaises(RuntimeError):
+                resolver.resolve_dependencies(project_root)
+
+    @patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin")
+    def test_marketplace_mixed_with_git_deps(self, mock_resolve):
+        mock_resolve.return_value = self._make_resolution("acme/gopls-lsp#main")
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            apm_yml = project_root / "apm.yml"
+            apm_yml.write_text(
+                "name: test-pkg\nversion: 1.0.0\n"
+                "dependencies:\n  apm:\n"
+                "    - user/other-dep\n"
+                "    - name: gopls-lsp\n      marketplace: claude-plugins-official\n"
+            )
+            resolver = APMDependencyResolver()
+            result = resolver.resolve_dependencies(project_root)
+            assert result.flattened_dependencies.total_dependencies() == 2
+            assert "user/other-dep" in result.flattened_dependencies.dependencies
+            assert "acme/gopls-lsp" in result.flattened_dependencies.dependencies

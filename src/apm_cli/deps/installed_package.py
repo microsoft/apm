@@ -9,9 +9,11 @@ field self-documenting.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional  # noqa: F401
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from apm_cli.deps.git_semver_resolver import GitSemverResolution
+    from apm_cli.deps.registry.resolver import RegistryResolution
     from apm_cli.deps.registry_proxy import RegistryConfig
     from apm_cli.models.dependency.reference import DependencyReference
 
@@ -44,6 +46,18 @@ class InstalledPackage:
         when this package was downloaded, or ``None`` for direct VCS installs.
         When present, the lockfile stores the proxy host (FQDN) and prefix so
         that subsequent installs replay through the same proxy.
+    registry_resolution:
+        The :class:`~apm_cli.deps.registry.resolver.RegistryResolution` produced
+        by the dedicated-registry resolver, or ``None`` for git/local/proxy
+        installs. When present, the lockfile records ``resolved_url`` /
+        ``resolved_hash`` / ``version`` from it so re-installs verify against
+        the same content (design §6.1). Distinct concept from ``registry_config``
+        (Artifactory VCS proxy).
+    git_semver_resolution:
+        The :class:`~apm_cli.deps.git_semver_resolver.GitSemverResolution` produced
+        when a git-source dep used a semver range as ``ref:`` (issue #1488).
+        When present the lockfile records ``constraint`` / ``resolved_tag`` /
+        ``resolved_at`` and ``resolved_ref`` is set to the concrete tag.
     """
 
     dep_ref: DependencyReference
@@ -52,3 +66,5 @@ class InstalledPackage:
     resolved_by: str | None
     is_dev: bool = False
     registry_config: RegistryConfig | None = None
+    registry_resolution: RegistryResolution | None = None
+    git_semver_resolution: GitSemverResolution | None = None

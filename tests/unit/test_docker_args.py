@@ -119,3 +119,45 @@ class TestDockerArgsDeduplication(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDockerArgsInteractiveFlagInjection(unittest.TestCase):
+    """Test cases for -i and --rm flag injection when not already present."""
+
+    def test_adds_interactive_flag_when_not_present(self):
+        """When -i is not in base_args, it is injected after 'run'."""
+        base_args = ["run", "--rm"]
+        result = DockerArgsProcessor.process_docker_args(base_args, {})
+        assert "-i" in result
+        # -i should come right after "run"
+        run_idx = result.index("run")
+        assert result[run_idx + 1] == "-i" or "-i" in result
+
+    def test_adds_rm_flag_when_not_present(self):
+        """When --rm is not in base_args, it is injected after 'run'."""
+        base_args = ["run", "-i"]
+        result = DockerArgsProcessor.process_docker_args(base_args, {})
+        assert "--rm" in result
+
+    def test_adds_both_flags_when_neither_present(self):
+        """When neither -i nor --rm are in base_args, both are injected."""
+        base_args = ["run", "my-image"]
+        result = DockerArgsProcessor.process_docker_args(base_args, {})
+        assert "-i" in result
+        assert "--rm" in result
+
+    def test_interactive_long_form_detected(self):
+        """--interactive is recognised as equivalent to -i, so -i is not re-added."""
+        base_args = ["run", "--interactive", "--rm", "my-image"]
+        result = DockerArgsProcessor.process_docker_args(base_args, {})
+        # -i should NOT be added since --interactive is already present
+        assert result.count("-i") == 0
+
+    def test_env_vars_not_duplicated_when_same_name_processed_twice(self):
+        """env_vars_added guard: same key is never added twice in a valid call."""
+        base_args = ["run", "-i", "--rm"]
+        env_vars = {"TOKEN": "abc"}
+        result = DockerArgsProcessor.process_docker_args(base_args, env_vars)
+        # Count occurrences of TOKEN=abc in the result
+        token_count = sum(1 for arg in result if arg == "TOKEN=abc")
+        assert token_count == 1

@@ -8,14 +8,13 @@ output format specifically optimized for Claude's project memory system.
 import builtins
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 
 from ..primitives.models import Chatmode, Instruction, PrimitiveCollection
-from ..utils.paths import portable_relpath
+from ..utils.paths import resolve_base_and_source_dirs
 from ..version import get_version
 from .constants import BUILD_ID_PLACEHOLDER
 from .constitution import read_constitution
-from .template_builder import render_instructions_block
+from .template_builder import build_attributed_instructions
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 set = builtins.set
@@ -37,6 +36,7 @@ class ClaudePlacement:
     dependencies: builtins.list[str] = field(default_factory=list)  # @import paths
     coverage_patterns: builtins.set[str] = field(default_factory=set)
     source_attribution: builtins.dict[str, str] = field(default_factory=dict)
+    is_root: bool = False
 
 
 @dataclass
@@ -62,16 +62,20 @@ class ClaudeFormatter:
     not included in CLAUDE.md (same as AGENTS.md behavior).
     """
 
-    def __init__(self, base_dir: str = "."):
+    def __init__(self, base_dir: str = ".", source_dir: str | None = None):
         """Initialize the Claude formatter.
 
         Args:
-            base_dir (str): Base directory for compilation.
+            base_dir (str): Base directory for compilation -- where CLAUDE.md
+                outputs are written.  Defaults to the current directory.
+            source_dir (Optional[str]): Where source primitives and the
+                constitution are read from.  Defaults to ``base_dir`` for
+                back-compat; set explicitly when ``apm compile --root``
+                redirects writes but sources remain in ``$PWD`` so that
+                ``<!-- Source: ... -->`` provenance comments render relative
+                to the user's working directory rather than the deploy root.
         """
-        try:
-            self.base_dir = Path(base_dir).resolve()
-        except (OSError, FileNotFoundError):
-            self.base_dir = Path(base_dir).absolute()
+        self.base_dir, self.source_dir = resolve_base_and_source_dirs(base_dir, source_dir)
 
         self.warnings: builtins.list[str] = []
         self.errors: builtins.list[str] = []
@@ -98,24 +102,43 @@ class ClaudeFormatter:
         try:
             config = config or {}
             source_attribution = config.get("source_attribution", True)
+            skip_instructions = config.get("skip_instructions", False)
 
             # Generate Claude placements from the placement map
             placements = self._generate_placements(
                 placement_map, primitives, source_attribution=source_attribution
             )
 
-            # Generate content for each placement
+            # Generate content for each placement.
+            # When instructions are skipped (already in .claude/rules/), only
+            # emit root CLAUDE.md if it has other content (constitution or
+            # dependencies); subdirectory placements are omitted entirely.
+            has_constitution = bool(read_constitution(self.base_dir))
             content_map = {}
             for placement in placements:
-                content = self._generate_claude_content(placement, primitives)
+                if skip_instructions:
+                    if not placement.is_root:
+                        continue
+                    if not placement.dependencies and not has_constitution:
+                        continue
+                content = self._generate_claude_content(
+                    placement,
+                    primitives,
+                    skip_instructions=skip_instructions,
+                    source_attribution=source_attribution,
+                )
                 content_map[placement.claude_path] = content
 
+            # Filter placements to only those that produced content so stats
+            # and downstream consumers see an accurate picture.
+            emitted_placements = [p for p in placements if p.claude_path in content_map]
+
             # Compile statistics
-            stats = self._compile_stats(placements, primitives)
+            stats = self._compile_stats(emitted_placements, primitives)
 
             return ClaudeCompilationResult(
                 success=len(self.errors) == 0,
-                placements=placements,
+                placements=emitted_placements,
                 content_map=content_map,
                 warnings=self.warnings.copy(),
                 errors=self.errors.copy(),
@@ -151,19 +174,20 @@ class ClaudeFormatter:
         """
         placements = []
 
-        # Handle empty placement map with constitution
+        # Handle empty placement map with constitution or dependencies
         if not placement_map:
-            constitution = read_constitution(self.base_dir)
-            if constitution:
-                # Create root placement for constitution-only projects
+            constitution = read_constitution(self.source_dir)
+            dependencies = self._collect_dependencies()
+            if constitution or dependencies:
                 root_path = self.base_dir / "CLAUDE.md"
                 placement = ClaudePlacement(
                     claude_path=root_path,
                     instructions=[],
                     agents=list(primitives.chatmodes),
-                    dependencies=self._collect_dependencies(),
+                    dependencies=dependencies,
                     coverage_patterns=set(),
                     source_attribution={},
+                    is_root=True,
                 )
                 placements.append(placement)
         else:
@@ -197,6 +221,7 @@ class ClaudeFormatter:
                     dependencies=self._collect_dependencies() if is_root else [],
                     coverage_patterns=patterns,
                     source_attribution=source_map,
+                    is_root=is_root,
                 )
 
                 placements.append(placement)
@@ -236,24 +261,43 @@ class ClaudeFormatter:
         return sorted(dependencies)
 
     def _generate_claude_content(
-        self, placement: ClaudePlacement, primitives: PrimitiveCollection
+        self,
+        placement: ClaudePlacement,
+        primitives: PrimitiveCollection,
+        *,
+        skip_instructions: bool = False,
+        source_attribution: bool = False,
     ) -> str:
         """Generate CLAUDE.md content for a specific placement.
 
         Args:
             placement (ClaudePlacement): Placement result with instructions.
             primitives (PrimitiveCollection): Full primitive collection.
+            skip_instructions (bool): If True, omit the Project Standards section.
+            source_attribution (bool): Controls the opt-in cosmetic annotations
+                only: when True, the APM Version comment and the footer are
+                included; when False (default) they are omitted to reduce token
+                overhead. CLAUDE_HEADER and Build ID are always emitted
+                regardless of this flag: CLAUDE_HEADER is a functional marker
+                used by ``apm compile --clean`` to distinguish APM-generated
+                files from hand-authored ones (stale-file removal, issue #1729);
+                Build ID is always present for drift normalization.
 
         Returns:
             str: Generated CLAUDE.md content.
         """
         sections = []
 
-        # Header
+        # Header - Build ID and CLAUDE_HEADER are always present.
+        # CLAUDE_HEADER is a functional marker used by `apm compile --clean` to
+        # distinguish APM-generated files from hand-authored ones (stale-file
+        # removal for issue #1729). Build ID is always present for drift
+        # normalization. The APM version comment is cosmetic and opt-in.
         sections.append("# CLAUDE.md")
         sections.append(CLAUDE_HEADER)
         sections.append(BUILD_ID_PLACEHOLDER)
-        sections.append(f"<!-- APM Version: {get_version()} -->")
+        if source_attribution:
+            sections.append(f"<!-- APM Version: {get_version()} -->")
         sections.append("")
 
         # Dependencies section (only for root CLAUDE.md)
@@ -264,47 +308,38 @@ class ClaudeFormatter:
             sections.append("")
 
         # Constitution section (only for root CLAUDE.md)
-        is_root = placement.claude_path.parent == self.base_dir
-        if is_root:
-            constitution = read_constitution(self.base_dir)
+        if placement.is_root:
+            constitution = read_constitution(self.source_dir)
             if constitution:
                 sections.append("# Constitution")
                 sections.append("")
                 sections.append(constitution.strip())
                 sections.append("")
 
-        # Project Standards section (grouped by pattern)
-        if placement.instructions:
+        # Project Standards section (grouped by pattern).
+        # Skipped when instructions are already deployed to .claude/rules/ by
+        # `apm install`, since Claude Code reads both locations and would see
+        # duplicate content.
+        if placement.instructions and not skip_instructions:
             sections.append("# Project Standards")
             sections.append("")
 
-            def _emit(instruction: Instruction) -> builtins.list[str]:
-                lines: builtins.list[str] = []
-                if placement.source_attribution:
-                    source = placement.source_attribution.get(str(instruction.file_path), "local")
-                    rel_path = portable_relpath(instruction.file_path, self.base_dir)
-                    lines.append(f"<!-- Source: {source} {rel_path} -->")
-                lines.append(instruction.content.strip())
-                lines.append("")
-                return lines
-
             sections.extend(
-                render_instructions_block(
+                build_attributed_instructions(
                     placement.instructions,
-                    base_dir=self.base_dir,
-                    emit_instruction=_emit,
+                    placement.source_attribution,
+                    self.source_dir,
                 )
             )
 
-        # Note: CLAUDE.md only contains instructions (Project Standards).
-        # Agents/workflows are NOT included - they go to .github/agents/ as separate files.
-        # This matches AGENTS.md behavior which also only contains instructions.
+        # Agents/workflows go to .github/agents/ as separate files, not here.
 
-        # Footer
-        sections.append("---")
-        sections.append("*This file was generated by APM CLI. Do not edit manually.*")
-        sections.append("*To regenerate: `apm compile`*")
-        sections.append("")
+        # Footer is opt-in (cosmetic).
+        if source_attribution:
+            sections.append("---")
+            sections.append("*This file was generated by APM CLI. Do not edit manually.*")
+            sections.append("*To regenerate: `apm compile`*")
+            sections.append("")
 
         return "\n".join(sections)
 

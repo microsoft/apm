@@ -17,11 +17,17 @@ import os
 import shutil  # noqa: F401
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from unittest import mock  # noqa: F401
 
 import pytest
 import toml
+
+# Phrase the CLI prints when the upstream MCP registry
+# (https://api.mcp.github.com) is transiently unreachable. Tests treat this
+# as retryable rather than a real product failure.
+_REGISTRY_TRANSIENT_MARKER = "could not reach mcp registry"
 
 
 def _is_registry_healthy() -> bool:
@@ -87,6 +93,48 @@ def run_command(cmd, check=True, capture_output=True, timeout=180, cwd=None, inp
         pytest.fail(f"Command failed: {cmd}\nStdout: {e.stdout}\nStderr: {e.stderr}")
 
 
+def run_mcp_command_with_retry(cmd, timeout=30, attempts=4, backoff_seconds=5):
+    """Run an MCP-registry-dependent command, retrying on transient registry outages.
+
+    The upstream MCP registry (api.mcp.github.com) occasionally returns 5xx /
+    refuses connections for a few seconds at a time. The CLI surfaces this with
+    the marker phrase "Could not reach MCP registry". Treat that exact failure
+    mode as retryable; treat any other non-zero exit as a real failure.
+    """
+    last_result = None
+    for attempt in range(1, attempts + 1):
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            encoding="utf-8",
+            errors="replace",
+        )
+        last_result = result
+        if result.returncode == 0:
+            return result
+
+        combined = f"{result.stdout}\n{result.stderr}".lower()
+        if _REGISTRY_TRANSIENT_MARKER not in combined:
+            pytest.fail(f"Command failed: {cmd}\nStdout: {result.stdout}\nStderr: {result.stderr}")
+
+        if attempt < attempts:
+            sleep_for = backoff_seconds * attempt
+            print(
+                f"[retry] MCP registry transiently unavailable on attempt {attempt}/"
+                f"{attempts}; sleeping {sleep_for}s before retry"
+            )
+            time.sleep(sleep_for)
+
+    pytest.skip(
+        f"MCP registry (api.mcp.github.com) unreachable after {attempts} attempts; "
+        f"last stdout: {last_result.stdout if last_result else ''}"
+    )
+
+
 @pytest.fixture(scope="module")
 def temp_e2e_home():
     """Create a temporary home directory for E2E testing."""
@@ -140,9 +188,8 @@ class TestMCPRegistryE2E:
         """Test MCP registry search functionality."""
         print("\n=== Testing MCP Registry Search ===")
 
-        # Test search for GitHub MCP server
-        result = run_command(f"{apm_binary} mcp search github", timeout=30)
-        assert result.returncode == 0, f"MCP search failed: {result.stderr}"
+        # Test search for GitHub MCP server (retry on transient registry outage)
+        result = run_mcp_command_with_retry(f"{apm_binary} mcp search github", timeout=30)
 
         # Verify output contains expected results
         output = result.stdout.lower()
@@ -151,9 +198,10 @@ class TestMCPRegistryE2E:
 
         print(f"[OK] MCP search found GitHub servers:\n{result.stdout[:500]}...")
 
-        # Test search with limit
-        result = run_command(f"{apm_binary} mcp search filesystem --limit 3", timeout=30)
-        assert result.returncode == 0, f"MCP search with limit failed: {result.stderr}"
+        # Test search with limit (retry on transient registry outage)
+        result = run_mcp_command_with_retry(
+            f"{apm_binary} mcp search filesystem --limit 3", timeout=30
+        )
 
         print("[OK] MCP search with limit works")
 
@@ -161,10 +209,12 @@ class TestMCPRegistryE2E:
         """Test MCP registry server details functionality."""
         print("\n=== Testing MCP Registry Show ===")
 
-        # Test show GitHub MCP server details
+        # Test show GitHub MCP server details. The upstream registry
+        # (api.mcp.github.com) is occasionally unavailable for a few seconds;
+        # the CLI surfaces that as "Could not reach MCP registry" -- retry on
+        # that exact marker rather than treating it as a product regression.
         github_server = "io.github.github/github-mcp-server"
-        result = run_command(f"{apm_binary} mcp show {github_server}", timeout=30)
-        assert result.returncode == 0, f"MCP show failed: {result.stderr}"
+        result = run_mcp_command_with_retry(f"{apm_binary} mcp show {github_server}", timeout=30)
 
         # Verify output contains server details
         output = result.stdout.lower()

@@ -12,13 +12,35 @@ the real CLI entry point instead of calling internal functions directly.
 import json
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch  # noqa: F401
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
 from click.testing import CliRunner
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+
+def _stub_downloader_for_lockfile(mock_dl_cls) -> None:
+    """Configure a patched ``GitHubPackageDownloader`` class mock so the
+    install pipeline's lockfile writer can serialize the downloader's
+    return value. Without this, ``resolved_reference.resolved_commit``
+    is an auto-generated ``MagicMock`` that pyyaml cannot represent,
+    which produces a diagnostic error -> non-zero exit code under the
+    Bug 2 contract (#1496). These tests only care about lockfile
+    MCP-server bookkeeping, not the downloader's wire-format, so the
+    stub is intentionally minimal.
+    """
+    instance = mock_dl_cls.return_value
+    pkg_info = MagicMock()
+    pkg_info.resolved_reference.resolved_commit = "0" * 40
+    pkg_info.resolved_reference.ref_name = "main"
+    pkg_info.resolved_reference.is_branch = True
+    pkg_info.resolved_reference.is_tag = False
+    pkg_info.resolved_reference.is_sha = False
+    pkg_info.package_type.value = "apm_package"
+    instance.download_package.return_value = pkg_info
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -155,6 +177,7 @@ class TestSelectiveInstallTransitiveMCPIntegration:
     def test_lockfile_records_transitive_mcp_servers(
         self, mock_dl_cls, mock_mcp_install, mock_validate, mock_updates, cli_env
     ):
+        _stub_downloader_for_lockfile(mock_dl_cls)
         tmp_path, runner = cli_env
         from apm_cli.cli import cli
 
@@ -191,6 +214,7 @@ class TestSelectiveInstallTransitiveMCPIntegration:
         self, mock_dl_cls, mock_mcp_install, mock_validate, mock_updates, cli_env
     ):
         """_install_mcp_dependencies must be called with transitive deps."""
+        _stub_downloader_for_lockfile(mock_dl_cls)
         tmp_path, runner = cli_env  # noqa: RUF059
         from apm_cli.cli import cli
 
@@ -222,6 +246,7 @@ class TestDeepChainIntegration:
     def test_deep_chain_mcp_in_lockfile(
         self, mock_dl_cls, mock_mcp_install, mock_validate, mock_updates, tmp_path
     ):
+        _stub_downloader_for_lockfile(mock_dl_cls)
         orig_cwd = os.getcwd()
         os.chdir(tmp_path)
         try:
@@ -295,6 +320,7 @@ class TestDiamondDependencyIntegration:
     def test_diamond_mcp_in_lockfile(
         self, mock_dl_cls, mock_mcp_install, mock_validate, mock_updates, tmp_path
     ):
+        _stub_downloader_for_lockfile(mock_dl_cls)
         orig_cwd = os.getcwd()
         os.chdir(tmp_path)
         try:
@@ -375,6 +401,7 @@ class TestMultiPackageSelectiveInstallIntegration:
     def test_multiple_packages_mcp_merged(
         self, mock_dl_cls, mock_mcp_install, mock_validate, mock_updates, tmp_path
     ):
+        _stub_downloader_for_lockfile(mock_dl_cls)
         orig_cwd = os.getcwd()
         os.chdir(tmp_path)
         try:
@@ -449,6 +476,7 @@ class TestFullInstallTransitiveMCPIntegration:
     def test_full_install_collects_transitive_mcp(
         self, mock_dl_cls, mock_mcp_install, mock_updates, cli_env
     ):
+        _stub_downloader_for_lockfile(mock_dl_cls)
         tmp_path, runner = cli_env
         from apm_cli.cli import cli
 
@@ -474,6 +502,7 @@ class TestStaleRemovalAfterUpdate:
     def test_stale_mcp_removed_on_update(
         self, mock_dl_cls, mock_mcp_install, mock_updates, tmp_path
     ):
+        _stub_downloader_for_lockfile(mock_dl_cls)
         orig_cwd = os.getcwd()
         os.chdir(tmp_path)
         try:
@@ -558,6 +587,7 @@ class TestNoMCPWhenOnlyAPM:
     @patch("apm_cli.commands._helpers.check_for_updates", return_value=None)
     @patch("apm_cli.deps.github_downloader.GitHubPackageDownloader")
     def test_only_apm_preserves_mcp_servers(self, mock_dl_cls, mock_updates, cli_env):
+        _stub_downloader_for_lockfile(mock_dl_cls)
         tmp_path, runner = cli_env
 
         # Seed lockfile with existing MCP servers

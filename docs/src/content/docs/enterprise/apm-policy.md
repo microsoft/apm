@@ -5,7 +5,7 @@ sidebar:
   order: 7
 ---
 
-For the full enterprise rollout playbook and bypass contract, see the [Governance Guide](../governance-guide/).
+For the full enterprise rollout playbook and bypass contract, see the [Governance Guide](./governance-guide/).
 
 :::caution[Experimental Feature]
 The `apm-policy.yml` schema, inheritance, and discovery ship today and are usable for testing and feedback. Policy enforcement at install time and via `apm audit --ci --policy` is an early preview. Fields, defaults, and check behaviour may change based on community input. Pin your policy to a specific APM version and watch the [CHANGELOG](https://github.com/microsoft/apm/blob/main/CHANGELOG.md) for breaking changes.
@@ -13,7 +13,7 @@ The `apm-policy.yml` schema, inheritance, and discovery ship today and are usabl
 
 `apm-policy.yml` is a single YAML file that defines what AI agent dependencies, MCP servers, and compilation targets are allowed across an organization. It is the governance pillar of APM — the file your security team owns and your repos inherit.
 
-This page is the mental model. For the full schema, see the [Policy Reference](../policy-reference/). For wiring it into CI, see the [CI Policy Enforcement guide](../../guides/ci-policy-setup/).
+This page is the mental model. For the full schema, see the [Policy Reference](./policy-reference/). For wiring it into CI, see the [Enforce in CI guide](./enforce-in-ci/).
 
 ---
 
@@ -27,8 +27,9 @@ It declares:
 - Allow / deny lists for **MCP servers** and their transports.
 - Required packages (e.g. an org-wide standards package every repo must consume).
 - Compilation target rules (which agent runtimes are permitted).
-- Manifest rules (required `apm.yml` fields, allowed content types).
+- Manifest rules (required `apm.yml` fields and explicit `includes:` requirements).
 - Behaviour for unmanaged files in governed directories.
+- Registry-source rules for requiring named registries and blocking non-registry sources.
 
 It does **not** scan code semantics or behave like an antivirus. It enforces declarations against an allow/deny list before APM writes any file.
 
@@ -51,7 +52,7 @@ Alternative sources, useful for testing or non-GitHub setups:
 - **Local file** — `apm audit --ci --policy ./apm-policy.yml`
 - **HTTPS URL** — `apm audit --ci --policy https://example.com/apm-policy.yml`
 
-See [Alternative policy sources](../../guides/ci-policy-setup/#alternative-policy-sources) for details.
+See [Enforce in CI](./enforce-in-ci/) for alternative policy sources and CI wiring details.
 
 ---
 
@@ -71,12 +72,12 @@ dependencies:
 
 mcp:
   transport:
-    allow: [http, stdio]   # block sse and streamable-http
+    allow: [http, stdio]   # explicit allow list: blocks sse and streamable-http
 ```
 
-Three rules: only contoso and microsoft packages are allowed, untrusted-org is blocked outright, and MCP transports are restricted to `http` and `stdio`.
+Three rules: only contoso and microsoft packages are allowed, untrusted-org is blocked outright, and MCP transports are restricted to `http` and `stdio`. With no `mcp.transport.allow` set, all transports are permitted by default; the example above shows how to restrict.
 
-> **Note on transitive MCPs:** the `mcp.trust_transitive` policy field is currently parsed but not enforced — the actual gate is the `--trust-transitive-mcp` CLI flag (defaults to deny). See [Governance Guide §5a](../governance-guide/#5a-what-does-not-enforce-policy) for the full list of parsed-but-not-enforced fields.
+> **Note on transitive MCPs:** the `mcp.trust_transitive` policy field is currently parsed but not enforced — the actual gate is the `--trust-transitive-mcp` CLI flag (defaults to deny). See [Governance Guide §5a](./governance-guide/#5a-what-does-not-enforce-policy) for the full list of parsed-but-not-enforced fields.
 
 ---
 
@@ -88,13 +89,13 @@ Policy is evaluated at two points. Both use the same policy file and the same me
 
 `apm install` resolves the dependency tree, then runs the policy gate against the resolved set, then writes any files. A blocking violation halts the install with a non-zero exit code; nothing is written to disk. This protects developers who run `apm install` locally — they cannot accidentally deploy a denied package even without CI.
 
-> **Bypass note:** `apm install --no-policy` and the `APM_POLICY_DISABLE=1` environment variable skip this gate locally. They also skip 16 of the 22 checks when `apm audit --ci` runs in the same shell. See the [Governance Guide bypass contract](../governance-guide/#7-the-bypass--non-bypass-contract) for the full surface.
+> **Bypass note:** `apm install --no-policy` and the `APM_POLICY_DISABLE=1` environment variable skip this gate locally. The env var also skips all 19 policy checks when `apm audit --ci` runs in the same shell; the 8 baseline lockfile checks still run. See the [Governance Guide bypass contract](./governance-guide/#7-the-bypass--non-bypass-contract) for the full surface.
 
 ### CI time (audit gate)
 
-`apm audit --ci --policy org` runs the same checks (plus 7 baseline lockfile checks) and is intended as a required status check on pull requests. It produces SARIF output that GitHub Code Scanning renders inline on the PR diff.
+`apm audit --ci --policy org` runs the same checks (plus 8 baseline lockfile checks) and is intended as a required status check on pull requests. It produces SARIF output that GitHub Code Scanning renders inline on the PR diff.
 
-For setup, see [CI Policy Enforcement](../../guides/ci-policy-setup/).
+For setup, see [Enforce in CI](./enforce-in-ci/).
 
 ---
 
@@ -113,13 +114,13 @@ The merge rules in plain English:
 
 The `enforcement` field escalates: `off` < `warn` < `block`. A child can move enforcement from `warn` to `block`, never the reverse.
 
-Inheritance chains up to **5 levels** are supported, so an enterprise hub policy can flow into an org policy, which flows into a team policy, which flows into a repo override:
+The canonical chain is three semantic levels (enterprise hub -> org policy -> repo override), with a maximum chain depth of **5** to allow intermediate `extends:` jumps. An example longer chain:
 
 ```
 Enterprise hub  ->  Org policy  ->  Team policy  ->  Repo override
 ```
 
-The full merge table for every field (including `require_resolution`, `mcp.self_defined`, `manifest.scripts`, and `unmanaged_files.action`) is in the [Policy Reference: Inheritance](../policy-reference/#inheritance) section.
+The full merge table for every field (including `require_resolution`, `mcp.self_defined`, `manifest.scripts`, and `unmanaged_files.action`) is in the [Policy Reference: Inheritance](./policy-reference/#inheritance) section.
 
 ---
 
@@ -148,12 +149,12 @@ In CI, `apm audit --ci --policy org` produces the same finding as a SARIF result
 
 ## Forensics
 
-For lockfile-based forensic recipes, see [Lock file as audit trail](../governance/#lock-file-as-audit-trail) and the [Governance Guide §13: enforcement audit log](../governance-guide/#13-the-enforcement-audit-log).
+For lockfile-based forensic recipes, see the [Governance Guide §13: enforcement audit log](./governance-guide/#13-the-enforcement-audit-log).
 
 ---
 
 ## Next steps
 
-- **Schema and every field** — [Policy Reference](../policy-reference/)
-- **Wire it into CI with SARIF** — [CI Policy Enforcement](../../guides/ci-policy-setup/)
-- **Broader governance model** (lock files, audit trails, compliance scenarios) — [Governance & Compliance](../governance/)
+- **Schema and every field** — [Policy Reference](./policy-reference/)
+- **Wire it into CI with SARIF** — [Enforce in CI](./enforce-in-ci/)
+- **Broader governance model** (lock files, audit trails, compliance scenarios) -- [Governance Guide](./governance-guide/)

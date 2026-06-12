@@ -32,20 +32,26 @@ Key design rules
 from __future__ import annotations
 
 import re
+import urllib.parse as _urlparse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple  # noqa: F401, UP035
+from typing import Any, Mapping  # noqa: UP035
 
 import yaml
 
 from ..utils.path_security import PathTraversalError, validate_path_segments
 from .errors import MarketplaceYmlError
+from .output_profiles import MARKETPLACE_OUTPUTS, known_output_names
 
 __all__ = [
     "LOCAL_SOURCE_RE",
+    "SOURCE_BASE_RE",
     "SOURCE_RE",
     "MarketplaceBuild",
+    "MarketplaceClaudeConfig",
+    "MarketplaceCodexConfig",
     "MarketplaceConfig",
+    "MarketplaceOutputSpec",
     "MarketplaceOwner",
     "MarketplaceYml",  # backwards-compat alias
     "MarketplaceYmlError",
@@ -53,6 +59,10 @@ __all__ = [
     "load_marketplace_from_apm_yml",
     "load_marketplace_from_legacy_yml",
     "load_marketplace_yml",
+    "parse_source_base",
+    "split_host_from_source",
+    "split_source_base",
+    "validate_source_value",
 ]
 
 # ---------------------------------------------------------------------------
@@ -65,11 +75,73 @@ _SEMVER_RE = re.compile(
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 
-# Source field accepts either ``owner/repo`` (remote) or ``./...`` (local
-# path within the same repo).  Used by both yml_schema and yml_editor for
-# source field validation.
-SOURCE_RE = re.compile(r"^(?:[^/]+/[^/]+|\./.*)$")
+# Source field accepts:
+#   - ``owner/repo`` (remote, default host)
+#   - ``host.tld/owner/repo`` (remote on a non-default host, shorthand)
+#   - ``https://host.tld/owner/repo`` (remote on a non-default host, full URL)
+#   - ``https://host.tld/owner/repo.git`` (same, with optional ``.git`` suffix)
+#   - ``./...`` (local path within the same repo)
+#
+# Used by both yml_schema and yml_editor for source field validation.
+#
+# The host segment is restricted to RFC-1123 hostname characters
+# (letters, digits, hyphens, dots) and must contain at least one dot
+# (i.e. look like a FQDN, to disambiguate from ``owner/repo``).  Userinfo
+# (``user@host``), port (``host:port``), query strings, fragments, SSH SCP
+# (``git@host:path``) and non-``https`` URL schemes are explicitly rejected
+# to avoid RFC 3986 confused-deputy attacks.
+_HOST_PAT = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-]*"
+# SECURITY: segment regexes are shape filters only. Traversal defense lives in
+# validate_path_segments(), which rejects empty, '.', and '..' path segments.
+_SEGMENT_PAT = r"[A-Za-z0-9._-]+"
+_OWNER_REPO_PAT = rf"{_SEGMENT_PAT}/{_SEGMENT_PAT}"
+_RELATIVE_SOURCE_PAT = rf"{_SEGMENT_PAT}(?:/{_SEGMENT_PAT})*"
+
+SOURCE_RE = re.compile(
+    r"^(?:"
+    rf"https://{_HOST_PAT}/{_OWNER_REPO_PAT}(?:\.git)?"
+    rf"|{_HOST_PAT}/{_OWNER_REPO_PAT}"
+    rf"|{_OWNER_REPO_PAT}"
+    r"|\./.*"
+    r")$"
+)
 LOCAL_SOURCE_RE = re.compile(r"^\./")
+SOURCE_BASE_RE = re.compile(rf"^https://{_HOST_PAT}/{_RELATIVE_SOURCE_PAT}$")
+_RELATIVE_SOURCE_RE = re.compile(rf"^{_RELATIVE_SOURCE_PAT}$")
+# Matches ``host.tld/owner/repo`` (3 segments, first is FQDN-ish).
+_HOST_PREFIXED_SOURCE_RE = re.compile(rf"^({_HOST_PAT})/({_OWNER_REPO_PAT})$")
+# Matches ``https://host.tld/owner/repo[.git]`` and captures host + owner/repo.
+_HTTPS_URL_SOURCE_RE = re.compile(rf"^https://({_HOST_PAT})/({_OWNER_REPO_PAT})(?:\.git)?$")
+
+
+def split_source_base(source_base: str) -> tuple[str, str]:
+    """Split a ``parse_source_base``-validated value into host and path."""
+    without_scheme = source_base.removeprefix("https://")
+    host, path_prefix = without_scheme.split("/", 1)
+    return host, path_prefix
+
+
+def split_host_from_source(source: str) -> tuple[str | None, str]:
+    """Split a host-qualified source into ``(host, owner/repo)``.
+
+    Accepts both shorthand (``host.tld/owner/repo``) and full HTTPS URL
+    (``https://host.tld/owner/repo[.git]``) forms.  Returns ``(None, source)``
+    for the plain ``owner/repo`` shorthand or local ``./...`` paths.
+
+    A trailing ``.git`` suffix on the repo segment is stripped so the
+    returned ``owner/repo`` is normalized regardless of input form.
+    """
+    m = _HTTPS_URL_SOURCE_RE.match(source)
+    if m:
+        host, owner_repo = m.group(1), m.group(2)
+        if owner_repo.endswith(".git"):
+            owner_repo = owner_repo[: -len(".git")]
+        return host, owner_repo
+    m = _HOST_PREFIXED_SOURCE_RE.match(source)
+    if m:
+        return m.group(1), m.group(2)
+    return None, source
+
 
 # Placeholder tokens accepted in ``tag_pattern`` / ``build.tagPattern``.
 _TAG_PLACEHOLDERS = ("{version}", "{name}")
@@ -100,6 +172,7 @@ _PACKAGE_ENTRY_KEYS = frozenset(
         "license",
         "repository",
         "keywords",
+        "category",
     }
 )
 
@@ -162,12 +235,34 @@ _APM_MARKETPLACE_KEYS = frozenset(
         "description",  # optional override of top-level apm.yml description
         "version",  # optional override of top-level apm.yml version
         "owner",
+        "sourceBase",
         "output",
+        "outputs",
+        "claude",
         "metadata",
         "build",
+        "codex",
         "packages",
+        "versioning",
     }
 )
+
+_VERSIONING_KEYS = frozenset({"strategy"})
+
+_VERSIONING_STRATEGIES = frozenset({"lockstep", "tag_pattern", "per_package"})
+
+_CLAUDE_KEYS = frozenset(
+    {
+        "output",
+    }
+)
+
+_CODEX_KEYS = frozenset(
+    {
+        "output",
+    }
+)
+
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
@@ -187,6 +282,38 @@ class MarketplaceBuild:
     """APM-only build configuration block."""
 
     tag_pattern: str = "v{version}"
+
+
+@dataclass(frozen=True)
+class MarketplaceVersioning:
+    """Release-time versioning strategy for the marketplace.
+
+    Controls how ``apm pack --check-versions`` verifies per-package
+    version alignment across local-path packages:
+
+    * ``lockstep`` (default) -- every local package's top-level
+      ``version`` must equal the marketplace's top-level ``version``.
+    * ``tag_pattern`` -- each rendered tag must be unique across all
+      local packages; missing ``version`` still fails.
+    * ``per_package`` -- only requires that each local package declare
+      a ``version``; equality is not enforced.
+    """
+
+    strategy: str = "lockstep"
+
+
+@dataclass(frozen=True)
+class MarketplaceClaudeConfig:
+    """Claude-specific marketplace output configuration."""
+
+    output: str = ".claude-plugin/marketplace.json"
+
+
+@dataclass(frozen=True)
+class MarketplaceCodexConfig:
+    """Codex-specific marketplace output configuration."""
+
+    output: str = MARKETPLACE_OUTPUTS["codex"].default_output
 
 
 @dataclass(frozen=True)
@@ -222,8 +349,34 @@ class PackageEntry:
     author: Mapping[str, str] | None = None
     license: str | None = None
     repository: str | None = None
+    # Marketplace category metadata. Emitted only by output formats that
+    # consume categories, currently Codex repo marketplace output.
+    category: str | None = None
     # Derived (set by loader, not by user)
     is_local: bool = False
+    # Optional non-default git host parsed from ``source`` of the form
+    # ``host.tld/owner/repo``. ``None`` means use the default host
+    # (``GITHUB_HOST`` env or ``github.com``).
+    host: str | None = None
+
+
+@dataclass(frozen=True)
+class MarketplaceOutputSpec:
+    """Resolved specification for one marketplace output format.
+
+    Produced by the map-form ``outputs:`` parser. When ``path_explicit``
+    is True, the manifest set an explicit ``path:`` value (vs. the
+    profile default).
+    """
+
+    name: str
+    """Format name (matches a key in ``MARKETPLACE_OUTPUTS``)."""
+
+    path: str
+    """Resolved output path (explicit or profile default)."""
+
+    path_explicit: bool = False
+    """True if the user set an explicit ``path:`` in the outputs map."""
 
 
 @dataclass(frozen=True)
@@ -249,9 +402,16 @@ class MarketplaceConfig:
     version: str
     owner: MarketplaceOwner
     output: str = ".claude-plugin/marketplace.json"
+    outputs: tuple[str, ...] = ("claude",)
+    claude: MarketplaceClaudeConfig = field(default_factory=MarketplaceClaudeConfig)
+    codex: MarketplaceCodexConfig = field(default_factory=MarketplaceCodexConfig)
     metadata: dict[str, Any] = field(default_factory=dict)
     build: MarketplaceBuild = field(default_factory=MarketplaceBuild)
+    versioning: MarketplaceVersioning = field(default_factory=MarketplaceVersioning)
+    source_base: str | None = None
     packages: tuple[PackageEntry, ...] = ()
+    output_specs: tuple[MarketplaceOutputSpec, ...] = ()
+    warnings: tuple[str, ...] = ()
     # Origin tracking + override-detection metadata
     source_path: Path | None = None
     is_legacy: bool = False
@@ -294,23 +454,103 @@ def _validate_semver(version: str, *, context: str = "version") -> None:
         )
 
 
-def _validate_source(source: str, *, index: int) -> None:
-    """Validate ``source`` field shape and path safety.
+def _source_error(ctx: str, source: str, *, source_base: str | None) -> MarketplaceYmlError:
+    forms = [
+        "'<owner>/<repo>'",
+        "'<host.tld>/<owner>/<repo>'",
+        "'https://<host.tld>/<owner>/<repo>[.git]'",
+        "'./<path>'",
+    ]
+    if source_base is not None:
+        forms.append("'<relative-path>' when sourceBase is set")
+    return MarketplaceYmlError(f"'{ctx}' must be one of {', '.join(forms)}, got '{source}'")
 
-    Accepts either ``owner/repo`` (remote) or ``./...`` (local path).
-    """
-    ctx = f"packages[{index}].source"
-    if not SOURCE_RE.match(source):
-        raise MarketplaceYmlError(
-            f"'{ctx}' must match '<owner>/<repo>' or './<path>' shape, got '{source}'"
+
+def validate_source_value(
+    source: str,
+    *,
+    context: str,
+    source_base: str | None = None,
+) -> None:
+    """Validate a package ``source`` field shape and path safety."""
+    matches_existing_shape = bool(SOURCE_RE.match(source))
+    if not matches_existing_shape:
+        # The source matched no supported shape. If its first segment looks
+        # like a FQDN it is trying to name a host but does not form a valid
+        # host-prefixed override (host/owner/repo) -- reject it rather than
+        # silently compose it onto ``sourceBase`` (confused-deputy footgun,
+        # documented in manifest-schema.md Section 7.5).
+        first_segment = source.split("/", 1)[0]
+        looks_like_unsupported_host_override = "/" in source and bool(
+            re.fullmatch(_HOST_PAT, first_segment)
         )
+        matches_relative_source = bool(_RELATIVE_SOURCE_RE.match(source))
+        if looks_like_unsupported_host_override:
+            raise MarketplaceYmlError(
+                f"'{context}' looks like a host-prefixed source but does not match "
+                f"'<host.tld>/<owner>/<repo>'. Use a full HTTPS URL override "
+                f"('https://...') or remove the host to compose onto sourceBase."
+            )
+        if source_base is None or not matches_relative_source:
+            raise _source_error(context, source, source_base=source_base)
     is_local = bool(LOCAL_SOURCE_RE.match(source))
     try:
         # Local paths legitimately start with ``.`` (current dir) and
         # may have trailing-slash forms like ``./``.  Allow ``.`` here.
-        validate_path_segments(source, context=ctx, allow_current_dir=is_local)
+        validate_path_segments(source, context=context, allow_current_dir=is_local)
     except PathTraversalError as exc:
         raise MarketplaceYmlError(str(exc)) from exc
+
+
+def _validate_source(source: str, *, index: int, source_base: str | None = None) -> None:
+    """Validate ``source`` field shape and path safety."""
+    validate_source_value(
+        source,
+        context=f"packages[{index}].source",
+        source_base=source_base,
+    )
+
+
+def parse_source_base(raw: Any) -> str | None:
+    """Parse and validate marketplace-level ``sourceBase``."""
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise MarketplaceYmlError("'sourceBase' must be a non-empty string")
+
+    raw_source_base = raw.strip()
+    if not raw_source_base.startswith("https://"):
+        raise MarketplaceYmlError("'sourceBase' must start with https://")
+
+    parsed = _urlparse.urlparse(raw_source_base)
+    source_base = raw_source_base.rstrip("/")
+    if parsed.username or parsed.password or "@" in parsed.netloc:
+        raise MarketplaceYmlError("'sourceBase' must not include userinfo")
+    if ":" in parsed.netloc:
+        raise MarketplaceYmlError("'sourceBase' must not include a port")
+    if parsed.query:
+        raise MarketplaceYmlError("'sourceBase' must not include a query string")
+    if parsed.fragment:
+        raise MarketplaceYmlError("'sourceBase' must not include a fragment")
+    if not parsed.hostname or not re.fullmatch(_HOST_PAT, parsed.hostname):
+        raise MarketplaceYmlError("'sourceBase' host must be a FQDN")
+    if source_base.endswith(".git"):
+        raise MarketplaceYmlError("'sourceBase' must not end with .git")
+
+    path = parsed.path.lstrip("/")
+    if path.endswith("/"):
+        path = path[:-1]
+    if not path:
+        raise MarketplaceYmlError("'sourceBase' must include at least one path segment")
+    try:
+        validate_path_segments(path, context="sourceBase", reject_empty=True)
+    except PathTraversalError as exc:
+        raise MarketplaceYmlError(str(exc)) from exc
+    if not SOURCE_BASE_RE.match(source_base):
+        raise MarketplaceYmlError(
+            "'sourceBase' path segments may only contain letters, digits, dot, underscore, or hyphen"
+        )
+    return source_base
 
 
 def _validate_tag_pattern(pattern: str, *, context: str) -> None:
@@ -373,7 +613,195 @@ def _parse_build(raw: Any) -> MarketplaceBuild:
     return MarketplaceBuild(tag_pattern=tag_pattern)
 
 
-def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
+def _parse_versioning(raw: Any) -> MarketplaceVersioning:
+    """Parse and validate the optional ``marketplace.versioning`` block."""
+    if raw is None:
+        return MarketplaceVersioning()
+    if not isinstance(raw, dict):
+        raise MarketplaceYmlError(f"'versioning' must be a mapping, got {type(raw).__name__}")
+    _check_unknown_keys(raw, _VERSIONING_KEYS, context="versioning")
+    strategy = raw.get("strategy", "lockstep")
+    if not isinstance(strategy, str) or not strategy.strip():
+        raise MarketplaceYmlError("'versioning.strategy' must be a non-empty string")
+    strategy = strategy.strip()
+    if strategy not in _VERSIONING_STRATEGIES:
+        valid = ", ".join(sorted(_VERSIONING_STRATEGIES))
+        raise MarketplaceYmlError(
+            f"'versioning.strategy' must be one of: {valid}; got {strategy!r}"
+        )
+    return MarketplaceVersioning(strategy=strategy)
+
+
+def _parse_claude(raw: Any, *, default_output: str) -> MarketplaceClaudeConfig:
+    """Parse and validate the optional ``marketplace.claude`` block."""
+    if raw is None:
+        return MarketplaceClaudeConfig(output=default_output)
+    if not isinstance(raw, dict):
+        raise MarketplaceYmlError("'claude' must be a mapping")
+    _check_unknown_keys(raw, _CLAUDE_KEYS, context="claude")
+
+    output = raw.get("output", default_output)
+    if not isinstance(output, str) or not output.strip():
+        raise MarketplaceYmlError("'claude.output' must be a non-empty string")
+    output = output.strip()
+    try:
+        validate_path_segments(output, context="claude.output")
+    except PathTraversalError as exc:
+        raise MarketplaceYmlError(str(exc)) from exc
+
+    return MarketplaceClaudeConfig(output=output)
+
+
+def _parse_codex(raw: Any) -> MarketplaceCodexConfig:
+    """Parse and validate the optional ``marketplace.codex`` block."""
+    if raw is None:
+        return MarketplaceCodexConfig()
+    if not isinstance(raw, dict):
+        raise MarketplaceYmlError("'codex' must be a mapping")
+    _check_unknown_keys(raw, _CODEX_KEYS, context="codex")
+
+    output = raw.get("output", MARKETPLACE_OUTPUTS["codex"].default_output)
+    if not isinstance(output, str) or not output.strip():
+        raise MarketplaceYmlError("'codex.output' must be a non-empty string")
+    output = output.strip()
+    try:
+        validate_path_segments(output, context="codex.output")
+    except PathTraversalError as exc:
+        raise MarketplaceYmlError(str(exc)) from exc
+
+    return MarketplaceCodexConfig(output=output)
+
+
+def _parse_outputs(
+    raw: Any,
+    warnings_sink: list[str] | None = None,
+) -> tuple[tuple[str, ...], tuple[MarketplaceOutputSpec, ...]]:
+    """Parse the marketplace output selector.
+
+    Accepts:
+    - ``None`` → default (claude only).
+    - A list of strings → back-compat list form (emits deprecation warning).
+    - A string → single-element back-compat list form.
+    - A dict → new map form with optional per-format ``path:``.
+
+    Returns ``(outputs_tuple, output_specs_tuple)``.
+    """
+    if raw is None:
+        default_spec = MarketplaceOutputSpec(
+            name="claude",
+            path=MARKETPLACE_OUTPUTS["claude"].default_output,
+            path_explicit=False,
+        )
+        return ("claude",), (default_spec,)
+
+    # --- Map form (new) ---
+    if isinstance(raw, dict):
+        outputs: list[str] = []
+        specs: list[MarketplaceOutputSpec] = []
+        seen: set[str] = set()
+        known = known_output_names()
+
+        for key, value in raw.items():
+            if not isinstance(key, str) or not key.strip():
+                raise MarketplaceYmlError("'outputs' map keys must be non-empty strings")
+            name = key.strip()
+            if name not in known:
+                raise MarketplaceYmlError(
+                    f"Unknown marketplace output '{name}'. "
+                    f"Permitted outputs: {', '.join(sorted(known))}"
+                )
+            if name in seen:
+                raise MarketplaceYmlError(f"Duplicate marketplace output '{name}'")
+            seen.add(name)
+
+            # Value can be null/{}/mapping with optional path
+            path_explicit = False
+            path = MARKETPLACE_OUTPUTS[name].default_output
+            if value is not None:
+                if not isinstance(value, dict):
+                    raise MarketplaceYmlError(f"'outputs.{name}' must be a mapping or null")
+                raw_path = value.get("path")
+                if raw_path is not None:
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        raise MarketplaceYmlError(
+                            f"'outputs.{name}.path' must be a non-empty string"
+                        )
+                    path = raw_path.strip()
+                    path_explicit = True
+                    try:
+                        validate_path_segments(path, context=f"outputs.{name}.path")
+                    except PathTraversalError as exc:
+                        raise MarketplaceYmlError(str(exc)) from exc
+                # Check for unknown keys inside the format entry
+                _valid_output_entry_keys = {"path"}
+                unknown = set(value.keys()) - _valid_output_entry_keys
+                if unknown:
+                    raise MarketplaceYmlError(
+                        f"Unknown key(s) in 'outputs.{name}': {', '.join(sorted(unknown))}"
+                    )
+
+            outputs.append(name)
+            specs.append(MarketplaceOutputSpec(name=name, path=path, path_explicit=path_explicit))
+
+        if not outputs:
+            raise MarketplaceYmlError("'outputs' must contain at least one marketplace output")
+        return tuple(outputs), tuple(specs)
+
+    # --- List / string form (deprecated back-compat) ---
+    if isinstance(raw, str):
+        raw_items = [raw]
+    elif isinstance(raw, list):
+        raw_items = raw
+    else:
+        raise MarketplaceYmlError("'outputs' must be a string, list, or mapping")
+
+    outputs_list: list[str] = []
+    specs_list: list[MarketplaceOutputSpec] = []
+    seen_set: set[str] = set()
+    for index, item in enumerate(raw_items):
+        if not isinstance(item, str) or not item.strip():
+            raise MarketplaceYmlError(f"'outputs[{index}]' must be a non-empty string")
+        output = item.strip()
+        known_outputs = known_output_names()
+        if output not in known_outputs:
+            raise MarketplaceYmlError(
+                f"Unknown marketplace output '{output}'. "
+                f"Permitted outputs: {', '.join(sorted(known_outputs))}"
+            )
+        if output in seen_set:
+            raise MarketplaceYmlError(f"Duplicate marketplace output '{output}'")
+        seen_set.add(output)
+        outputs_list.append(output)
+        specs_list.append(
+            MarketplaceOutputSpec(
+                name=output,
+                path=MARKETPLACE_OUTPUTS[output].default_output,
+                path_explicit=False,
+            )
+        )
+
+    if not outputs_list:
+        raise MarketplaceYmlError("'outputs' must contain at least one marketplace output")
+
+    # Emit deprecation warning for list/string form
+    names_str = ", ".join(outputs_list)
+    map_lines = "\n".join(f"        {n}: {{}}" for n in outputs_list)
+    deprecation_msg = (
+        f"outputs: [{names_str}] is deprecated; use the map form:\n\n"
+        f"      outputs:\n{map_lines}\n\n"
+        f"    The list form will be removed in v0.15."
+    )
+    if warnings_sink is not None:
+        warnings_sink.append(deprecation_msg)
+
+    return tuple(outputs_list), tuple(specs_list)
+
+
+def _parse_package_entry(
+    raw: Any,
+    index: int,
+    source_base: str | None = None,
+) -> PackageEntry:
     """Parse and validate a single ``packages`` entry."""
     if not isinstance(raw, dict):
         raise MarketplaceYmlError(f"packages[{index}] must be a mapping")
@@ -383,8 +811,13 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
 
     name = _require_str(raw, "name", context=f"packages[{index}]")
     source = _require_str(raw, "source", context=f"packages[{index}]")
-    _validate_source(source, index=index)
+    _validate_source(source, index=index, source_base=source_base)
     is_local = bool(LOCAL_SOURCE_RE.match(source))
+    # Detect host-prefixed source (e.g. ``host.tld/owner/repo``) and split
+    # the host off so downstream consumers continue to see ``owner/repo``.
+    host: str | None = None
+    if not is_local:
+        host, source = split_host_from_source(source)
 
     # APM-only: subdir (irrelevant for local packages but harmless)
     subdir: str | None = raw.get("subdir")
@@ -512,6 +945,15 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
             raise MarketplaceYmlError(f"'packages[{index}].repository' must be a non-empty string")
         repository = repository.strip()
 
+    # Optional marketplace category. Claude output strips this; Codex output
+    # requires and emits it.
+    category: str | None = None
+    raw_category = raw.get("category")
+    if raw_category is not None:
+        if not isinstance(raw_category, str) or not raw_category.strip():
+            raise MarketplaceYmlError(f"'packages[{index}].category' must be a non-empty string")
+        category = raw_category.strip()
+
     return PackageEntry(
         name=name,
         source=source,
@@ -526,7 +968,9 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
         author=author,
         license=license_val,
         repository=repository,
+        category=category,
         is_local=is_local,
+        host=host,
     )
 
 
@@ -725,16 +1169,24 @@ def _build_config(
     """Shared parser for the marketplace fields once name/desc/version
     have been resolved (either inherited or read directly).
     """
+    warnings_sink: list[str] = []
+
     # -- owner --
     raw_owner = marketplace_dict.get("owner")
     if raw_owner is None:
         raise MarketplaceYmlError("'owner' is required")
     owner = _parse_owner(raw_owner)
 
-    # -- output (default differs between legacy and new layouts) --
-    output = marketplace_dict.get("output")
-    if output is None:
-        output = default_output
+    # -- output selection --
+    outputs, output_specs = _parse_outputs(
+        marketplace_dict.get("outputs"), warnings_sink=warnings_sink
+    )
+
+    # -- Claude output (default differs between legacy and new layouts) --
+    # ``output`` remains as a backwards-compatible shorthand for
+    # ``claude.output``. The explicit block wins when both are present.
+    legacy_output = marketplace_dict.get("output")
+    output = default_output if legacy_output is None else legacy_output
     if not isinstance(output, str) or not output.strip():
         raise MarketplaceYmlError("'output' must be a non-empty string")
     output = output.strip()
@@ -744,6 +1196,9 @@ def _build_config(
         validate_path_segments(output, context="marketplace output")
     except PathTraversalError as exc:
         raise MarketplaceYmlError(str(exc)) from exc
+
+    claude = _parse_claude(marketplace_dict.get("claude"), default_output=output)
+    output = claude.output
 
     # -- metadata (Anthropic pass-through, preserve verbatim) --
     metadata: dict[str, Any] = {}
@@ -765,8 +1220,55 @@ def _build_config(
         except PathTraversalError as exc:
             raise MarketplaceYmlError(str(exc)) from exc
 
+    # -- marketplace source base --
+    source_base = parse_source_base(marketplace_dict.get("sourceBase"))
+
     # -- build --
     build = _parse_build(marketplace_dict.get("build"))
+
+    # -- versioning (release-gate strategy) --
+    versioning = _parse_versioning(marketplace_dict.get("versioning"))
+
+    # -- codex output --
+    codex = _parse_codex(marketplace_dict.get("codex"))
+
+    # -- Sibling-vs-map conflict detection (A1: sibling wins) --
+    # Only fire when the user EXPLICITLY set a sibling block AND the map
+    # also has an explicit path. Default/absent sibling is not a conflict.
+    has_explicit_claude = marketplace_dict.get("claude") is not None
+    has_explicit_codex = marketplace_dict.get("codex") is not None
+
+    final_specs_list = list(output_specs)
+    for i, spec in enumerate(final_specs_list):
+        if spec.path_explicit:
+            sibling_path: str | None = None
+            if spec.name == "claude" and has_explicit_claude and claude.output != spec.path:
+                sibling_path = claude.output
+            elif spec.name == "codex" and has_explicit_codex and codex.output != spec.path:
+                sibling_path = codex.output
+            if sibling_path is not None:
+                warnings_sink.append(
+                    f"marketplace.outputs.{spec.name}.path ('{spec.path}') "
+                    f"conflicts with marketplace.{spec.name}.output "
+                    f"('{sibling_path}').\n"
+                    f"    Using marketplace.{spec.name}.output for backwards "
+                    f"compatibility.\n\n"
+                    f"    To resolve: pick one source and remove the other.\n"
+                    f"      Keep map form (recommended):\n"
+                    f"        outputs:\n"
+                    f"          {spec.name}:\n"
+                    f"            path: {sibling_path}\n"
+                    f"        # remove the marketplace.{spec.name}: block\n\n"
+                    f"    The marketplace.{spec.name} sibling block becomes a "
+                    f"schema error in v0.15."
+                )
+                # Sibling wins: override the spec's path
+                final_specs_list[i] = MarketplaceOutputSpec(
+                    name=spec.name,
+                    path=sibling_path,
+                    path_explicit=True,
+                )
+    output_specs = tuple(final_specs_list)
 
     # -- packages --
     raw_packages = marketplace_dict.get("packages")
@@ -778,7 +1280,7 @@ def _build_config(
     entries: list[PackageEntry] = []
     seen_names: dict[str, int] = {}
     for idx, raw_entry in enumerate(raw_packages):
-        entry = _parse_package_entry(raw_entry, idx)
+        entry = _parse_package_entry(raw_entry, idx, source_base=source_base)
         lower_name = entry.name.lower()
         if lower_name in seen_names:
             raise MarketplaceYmlError(
@@ -788,15 +1290,33 @@ def _build_config(
         seen_names[lower_name] = idx
         entries.append(entry)
 
+    for output_name in outputs:
+        profile = MARKETPLACE_OUTPUTS[output_name]
+        for field_name in profile.required_package_fields:
+            missing = [entry.name for entry in entries if not getattr(entry, field_name)]
+            if missing:
+                names = ", ".join(missing)
+                raise MarketplaceYmlError(
+                    f"packages must define '{field_name}' when marketplace.outputs includes "
+                    f"'{output_name}' (missing: {names})"
+                )
+
     return MarketplaceConfig(
         name=name,
         description=description,
         version=version,
         owner=owner,
         output=output,
+        outputs=outputs,
+        claude=claude,
+        codex=codex,
         metadata=metadata,
         build=build,
+        source_base=source_base,
+        versioning=versioning,
         packages=tuple(entries),
+        output_specs=output_specs,
+        warnings=tuple(warnings_sink),
         source_path=source_path,
         is_legacy=is_legacy,
         name_overridden=name_overridden,

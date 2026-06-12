@@ -13,10 +13,8 @@ This is the Template Method companion to the Strategy pattern in
 
 from __future__ import annotations
 
-from typing import Dict, Optional  # noqa: F401, UP035
-
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
-from apm_cli.install.services import integrate_package_primitives
+from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.install.sources import DependencySource, Materialization
 
 
@@ -77,12 +75,14 @@ def _integrate_materialization(
             m.package_info,
             ctx.project_root,
             targets=ctx.targets,
-            prompt_integrator=ctx.integrators["prompt"],
-            agent_integrator=ctx.integrators["agent"],
-            skill_integrator=ctx.integrators["skill"],
-            instruction_integrator=ctx.integrators["instruction"],
-            command_integrator=ctx.integrators["command"],
-            hook_integrator=ctx.integrators["hook"],
+            integrators=IntegratorBundle(
+                prompt=ctx.integrators["prompt"],
+                agent=ctx.integrators["agent"],
+                skill=ctx.integrators["skill"],
+                instruction=ctx.integrators["instruction"],
+                command=ctx.integrators["command"],
+                hook=ctx.integrators["hook"],
+            ),
             force=ctx.force,
             managed_files=ctx.managed_files,
             diagnostics=diagnostics,
@@ -101,7 +101,7 @@ def _integrate_materialization(
             ),
             ctx=ctx,
         )
-        for k in (
+        mutation_keys = (
             "prompts",
             "agents",
             "skills",
@@ -109,9 +109,12 @@ def _integrate_materialization(
             "instructions",
             "commands",
             "hooks",
-            "links_resolved",
-        ):
+        )
+        for k in (*mutation_keys, "links_resolved"):
             deltas[k] = int_result[k]
+        # Source-level install deltas are promoted only when primitives changed.
+        if any(int_result[k] > 0 for k in mutation_keys):
+            deltas["installed"] = 1
         ctx.package_deployed_files[dep_key] = int_result["deployed_files"]
     except Exception as e:
         # Per-source error wording: each DependencySource subclass

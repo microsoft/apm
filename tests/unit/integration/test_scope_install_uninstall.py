@@ -203,13 +203,13 @@ class TestCopilotInstallUninstallCycle:
             assert not (self.project_root / p).exists(), f"not removed: {p}"
 
     def test_user_scope(self):
-        """At user scope, agents deploy to .copilot/; instructions filtered."""
+        """At user scope, agents and prompts deploy to .copilot/; instructions concat."""
         target = KNOWN_TARGETS["copilot"].for_scope(user_scope=True)
         assert target is not None
         assert target.root_dir == ".copilot"
-        # instructions and prompts filtered out at user scope
-        assert "instructions" not in target.primitives
-        assert "prompts" not in target.primitives
+        # Instructions supported at user scope via concat (#650)
+        assert "instructions" in target.primitives
+        assert target.primitives["instructions"].format_id == "copilot_user_instructions"
 
         pkg_info = _make_pkg(self.project_root, instructions=True, agents=True, prompts=True)
 
@@ -221,7 +221,7 @@ class TestCopilotInstallUninstallCycle:
         agent_result = agent_integrator.integrate_agents_for_target(
             target, pkg_info, self.project_root
         )
-        # instructions should be no-op because primitive not in target
+        # instructions now deploy as a single concat file
         inst_result = inst_integrator.integrate_instructions_for_target(
             target, pkg_info, self.project_root
         )
@@ -230,24 +230,43 @@ class TestCopilotInstallUninstallCycle:
         )
 
         assert agent_result.files_integrated >= 1
-        assert inst_result.files_integrated == 0
-        assert prompt_result.files_integrated == 0
+        assert inst_result.files_integrated == 1
+        assert prompt_result.files_integrated >= 1
 
-        deployed = _posix_relpaths(self.project_root, agent_result.target_paths)
+        all_paths = (
+            agent_result.target_paths + inst_result.target_paths + prompt_result.target_paths
+        )
+        deployed = _posix_relpaths(self.project_root, all_paths)
         assert any(p.startswith(".copilot/agents/") for p in deployed)
+        assert any(p == ".copilot/prompts/helper.prompt.md" for p in deployed)
+        assert ".copilot/copilot-instructions.md" in deployed
 
         for p in deployed:
             assert (self.project_root / p).exists()
+
+        assert (self.project_root / ".copilot" / "prompts" / "helper.prompt.md").exists()
+        assert (self.project_root / ".copilot" / "copilot-instructions.md").exists()
 
         # .github/ must NOT be touched
         assert not (self.project_root / ".github").exists()
 
         # -- uninstall -----------------------------------------------------
-        sync = agent_integrator.sync_for_target(
+        agent_sync = agent_integrator.sync_for_target(
             target, pkg_info.package, self.project_root, managed_files=deployed
         )
-        assert sync["errors"] == 0
-        assert sync["files_removed"] == len(deployed)
+        inst_sync = inst_integrator.sync_for_target(
+            target, pkg_info.package, self.project_root, managed_files=deployed
+        )
+        prompt_sync = prompt_integrator.sync_for_target(
+            target, pkg_info.package, self.project_root, managed_files=deployed
+        )
+        assert agent_sync["errors"] == 0
+        assert inst_sync["errors"] == 0
+        assert prompt_sync["errors"] == 0
+        total_removed = (
+            agent_sync["files_removed"] + inst_sync["files_removed"] + prompt_sync["files_removed"]
+        )
+        assert total_removed == len(deployed)
         for p in deployed:
             assert not (self.project_root / p).exists()
 

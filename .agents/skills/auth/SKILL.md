@@ -8,7 +8,7 @@ description: >
 
 # Auth Skill
 
-[Auth expert persona](../../agents/auth-expert.agent.md)
+[Auth expert persona](../../../.apm/agents/auth-expert.agent.md)
 
 ## When to activate
 

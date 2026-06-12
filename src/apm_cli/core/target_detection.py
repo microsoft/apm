@@ -1,7 +1,7 @@
 """Target detection for auto-selecting compilation and integration targets.
 
 This module implements the auto-detection pattern for determining which agent
-targets (Copilot, Claude, Cursor, OpenCode, Codex, Gemini) should be used
+targets (Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Kiro) should be used
 based on existing project structure and configuration.
 
 Detection priority (highest to lowest):
@@ -23,7 +23,7 @@ are accepted as aliases and map to the same internal value.
 
 import warnings
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union  # noqa: F401, UP035
+from typing import Literal, Union
 
 import click
 
@@ -58,6 +58,7 @@ TargetType = Literal[
     "codex",
     "gemini",
     "windsurf",
+    "kiro",
     "agent-skills",
     "all",
     "minimal",
@@ -97,6 +98,7 @@ UserTargetType = Literal[
     "codex",
     "gemini",
     "windsurf",
+    "kiro",
     "agent-skills",
     "all",
     "minimal",
@@ -136,6 +138,8 @@ def detect_target(  # noqa: PLR0911
             return "gemini", "explicit --target flag"
         elif explicit_target == "windsurf":
             return "windsurf", "explicit --target flag"
+        elif explicit_target == "kiro":
+            return "kiro", "explicit --target flag"
         elif explicit_target == "agent-skills":
             return "agent-skills", "explicit --target flag"
         elif explicit_target == "all":
@@ -157,6 +161,8 @@ def detect_target(  # noqa: PLR0911
             return "gemini", "apm.yml target"
         elif config_target == "windsurf":
             return "windsurf", "apm.yml target"
+        elif config_target == "kiro":
+            return "kiro", "apm.yml target"
         elif config_target == "agent-skills":
             return "agent-skills", "apm.yml target"
         elif config_target == "all":
@@ -170,6 +176,7 @@ def detect_target(  # noqa: PLR0911
     codex_exists = (project_root / ".codex").is_dir()
     gemini_exists = (project_root / ".gemini").is_dir()
     windsurf_exists = (project_root / ".windsurf").is_dir()
+    kiro_exists = (project_root / ".kiro").is_dir()
     detected = []
     if github_exists:
         detected.append(".github/")
@@ -185,6 +192,8 @@ def detect_target(  # noqa: PLR0911
         detected.append(".gemini/")
     if windsurf_exists:
         detected.append(".windsurf/")
+    if kiro_exists:
+        detected.append(".kiro/")
 
     if len(detected) >= 2:
         return "all", f"detected {' and '.join(detected)} folders"
@@ -202,6 +211,8 @@ def detect_target(  # noqa: PLR0911
         return "gemini", "detected .gemini/ folder"
     elif windsurf_exists:
         return "windsurf", "detected .windsurf/ folder"
+    elif kiro_exists:
+        return "kiro", "detected .kiro/ folder"
     else:
         return "minimal", REASON_NO_TARGET_FOLDER
 
@@ -221,7 +232,17 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
     """
     if isinstance(target, frozenset):
         return "agents" in target or "gemini" in target
-    return target in ("vscode", "opencode", "codex", "gemini", "windsurf", "all", "minimal")
+    return target in (
+        "vscode",
+        "opencode",
+        "codex",
+        "gemini",
+        "windsurf",
+        "kiro",
+        "hermes",
+        "all",
+        "minimal",
+    )
 
 
 def should_compile_claude_md(target: CompileTargetType) -> bool:
@@ -278,6 +299,35 @@ def should_compile_copilot_instructions_md(target: CompileTargetType) -> bool:
     return target in ("vscode", "all")
 
 
+def can_dedup_agents_md_instructions(target: CompileTargetType) -> bool:
+    """Check if instruction dedup is safe for AGENTS.md.
+
+    Returns True only when every target that reads AGENTS.md also reads
+    ``.github/instructions/`` -- meaning instructions can safely be omitted
+    from AGENTS.md without losing context for any consumer.
+
+    Today only Copilot (vscode) reads both locations.  Codex, OpenCode,
+    Windsurf, and Gemini rely on AGENTS.md as their sole instruction source
+    and must always receive instruction content (issue #1678).
+
+    Args:
+        target: The detected or configured target.  May be a string or a
+            frozenset of compiler families for multi-target lists.
+
+    Returns:
+        bool: True if instructions can be omitted from AGENTS.md.
+    """
+    if isinstance(target, frozenset):
+        # Conservative policy: only dedup when the target set is exactly
+        # {"vscode"} (Copilot alone).  Any additional family -- including
+        # "agents" -- means at least one consumer that does not read
+        # .github/instructions/ may be present, so we keep instructions
+        # in AGENTS.md to be safe.
+        return target == frozenset({"vscode"})
+    # Single-string targets: only "vscode" reads .github/instructions/.
+    return target == "vscode"
+
+
 def get_target_description(target: UserTargetType) -> str:
     """Get a human-readable description of what will be generated for a target.
 
@@ -299,8 +349,11 @@ def get_target_description(target: UserTargetType) -> str:
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .windsurf/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
+        "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
-        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .agents/",
+        "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
+        "hermes": "AGENTS.md + .agents/skills/ (project) or ~/.hermes/skills/ + config.yaml MCP (--global) -- experimental",
+        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
@@ -313,14 +366,16 @@ def get_target_description(target: UserTargetType) -> str:
 #: The complete set of real (non-pseudo) canonical targets.
 #: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
 ALL_CANONICAL_TARGETS = frozenset(
-    {"vscode", "claude", "cursor", "opencode", "codex", "gemini", "windsurf"}
+    {"vscode", "claude", "cursor", "opencode", "codex", "gemini", "windsurf", "kiro"}
 )
 
 #: Targets that the parser must accept but that are gated at runtime by
 #: ``is_enabled()`` in ``core/experimental.py`` and ``_flag_gated()`` in
 #: ``integration/targets.py``.  They are NOT included in the
 #: ``parse_target_arg("all")`` expansion -- explicit opt-in only.
-EXPERIMENTAL_TARGETS: frozenset[str] = frozenset({"copilot-cowork"})
+EXPERIMENTAL_TARGETS: frozenset[str] = frozenset(
+    {"copilot-cowork", "copilot-app", "openclaw", "hermes"}
+)
 
 #: Stable targets excluded from "all" expansion (cross-client deploy
 #: locations). Unlike EXPERIMENTAL_TARGETS, these are GA -- they just do
@@ -623,11 +678,16 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("cursor", "dir", ".cursor"),
     ("cursor", "file", ".cursorrules"),  # legacy; .cursor/ is canonical
     ("copilot", "file", ".github/copilot-instructions.md"),
+    ("copilot", "dir", ".github/instructions"),
+    ("copilot", "dir", ".github/agents"),
+    ("copilot", "dir", ".github/prompts"),
+    ("copilot", "dir", ".github/hooks"),
     ("codex", "dir", ".codex"),
     ("gemini", "dir", ".gemini"),
     ("gemini", "file", "GEMINI.md"),
     ("opencode", "dir", ".opencode"),
     ("windsurf", "dir", ".windsurf"),
+    ("kiro", "dir", ".kiro"),
 ]
 
 # Ordered list of targets for display (excludes agent-skills meta-target).
@@ -639,6 +699,7 @@ CANONICAL_TARGETS_ORDERED: list[str] = [
     "gemini",
     "opencode",
     "windsurf",
+    "kiro",
 ]
 
 # Canonical deploy directories for each target.
@@ -650,6 +711,7 @@ CANONICAL_DEPLOY_DIRS: dict[str, str] = {
     "gemini": ".gemini/",
     "opencode": ".opencode/",
     "windsurf": ".windsurf/",
+    "kiro": ".kiro/",
 }
 
 # The primary (lowest-friction) signal for each target, used in
@@ -662,6 +724,7 @@ CANONICAL_SIGNAL: dict[str, str] = {
     "gemini": "GEMINI.md",
     "opencode": ".opencode/",
     "windsurf": ".windsurf/",
+    "kiro": ".kiro/",
 }
 
 

@@ -110,6 +110,7 @@ class TestInstallCharacterisation:
                     mcp_deps=mock_mcp_deps,
                     runtime="vscode",
                     exclude="cursor",
+                    explicit_target="vscode",
                     logger=logger,
                 )
                 assert isinstance(result, int)
@@ -130,6 +131,7 @@ class TestInstallCharacterisation:
                 MCPIntegrator.install(
                     mcp_deps=mock_mcp_deps,
                     runtime="vscode",
+                    explicit_target="vscode",
                     logger=logger,
                 )
                 assert mock_install.called

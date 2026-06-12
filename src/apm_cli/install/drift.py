@@ -35,11 +35,13 @@ from typing import TYPE_CHECKING
 import click
 
 from apm_cli.core.command_logger import CommandLogger
+from apm_cli.deps.path_anchoring import resolve_local_dep_dir
 from apm_cli.utils.console import STATUS_SYMBOLS
 from apm_cli.utils.guards import _ReadOnlyProjectGuard
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.integration.targets import TargetProfile
 
 
 # ---------------------------------------------------------------------------
@@ -92,9 +94,7 @@ class CacheMissError(RuntimeError):
 # the drift module.
 # ---------------------------------------------------------------------------
 
-from apm_cli.utils.normalization import (  # noqa: E402, F401  -- re-exported for back-compat
-    _BOM,
-    _BUILD_ID_PATTERN,
+from apm_cli.utils.normalization import (  # noqa: E402, F401  -- re-exported; tests import helpers from apm_cli.install.drift
     _normalize,
     _normalize_line_endings,
     _strip_bom,
@@ -201,16 +201,30 @@ def _materialize_install_path(
     project_root: Path,
     apm_modules_dir: Path,
     cache_only: bool,
+    *,
+    lockfile: LockFile | None = None,
 ) -> Path:
     """Resolve the on-disk path for a locked dep's package contents.
 
-    For local deps -- contents live at ``project_root / lock_dep.local_path``.
+    For local deps -- contents live at the source directory the install
+    resolver anchored on: ``project_root`` for direct (root-declared) deps,
+    or the declaring package's directory for transitive ``../sibling`` deps
+    (resolved via ``resolved_by``; see
+    :func:`apm_cli.deps.path_anchoring.resolve_local_dep_dir`). The
+    ``lockfile`` is required to walk that chain; it is unused for remote
+    deps and for direct local deps (``resolved_by is None``).
     For remote deps -- contents live at the canonical apm_modules subpath.
 
     Raises
     ------
     CacheMissError
-        If ``cache_only`` is True and the path does not exist.
+        If ``cache_only`` is True and the resolved source path does not
+        exist (cold-cache-like: the source is simply not present yet).
+    LocalResolutionError
+        If a local dep's ``resolved_by`` chain is internally inconsistent
+        (missing / ambiguous / non-local / cyclic parent). This is a
+        corrupt-lockfile condition and MUST fail loud -- it is not caught
+        by the drift gate's cache-miss soft-skip.
     NotImplementedError
         If ``cache_only`` is False (network-enabled replay is a follow-up).
     """
@@ -220,7 +234,7 @@ def _materialize_install_path(
     if lock_dep.source == "local":
         if not lock_dep.local_path:
             raise CacheMissError(f"local dep {lock_dep.repo_url!r} has no local_path in lockfile")
-        candidate = (project_root / lock_dep.local_path).resolve()
+        candidate = resolve_local_dep_dir(lock_dep, lockfile, project_root)
         if not candidate.exists():
             raise CacheMissError(
                 f"local source missing for {lock_dep.local_path!r}: expected {candidate}"
@@ -394,7 +408,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         Surfaced verbatim when a locked dep is not in the cache.
     """
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
-    from apm_cli.install.services import integrate_package_primitives
+    from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
     from apm_cli.integration.targets import resolve_targets
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -423,6 +437,14 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 
     diagnostics = DiagnosticCollector(verbose=logger.verbose)
     integrators = _make_integrators()
+
+    # Pre-create target root dirs in scratch so integrators with
+    # auto_create=False do not skip non-skill primitives during replay.
+    # During a real install, these directories already exist in the project;
+    # in the scratch replay they must be seeded explicitly.
+    for _target in targets:
+        _scratch_target_root = scratch_root / _target.root_dir
+        _scratch_target_root.mkdir(parents=True, exist_ok=True)
 
     # Defense-in-depth: snapshot every file under a governed root and
     # under apm.lock.yaml, then assert no mutation on exit. The primary
@@ -456,6 +478,7 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                         project_root,
                         apm_modules_dir,
                         cache_only=config.cache_only,
+                        lockfile=lock,
                     )
 
                 package_info = _build_package_info(lock_dep, install_path)
@@ -465,12 +488,14 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     package_info,
                     scratch_root,
                     targets=targets,
-                    prompt_integrator=integrators["prompt"],
-                    agent_integrator=integrators["agent"],
-                    skill_integrator=integrators["skill"],
-                    instruction_integrator=integrators["instruction"],
-                    command_integrator=integrators["command"],
-                    hook_integrator=integrators["hook"],
+                    integrators=IntegratorBundle(
+                        prompt=integrators["prompt"],
+                        agent=integrators["agent"],
+                        skill=integrators["skill"],
+                        instruction=integrators["instruction"],
+                        command=integrators["command"],
+                        hook=integrators["hook"],
+                    ),
                     force=True,
                     managed_files=set(),
                     diagnostics=diagnostics,
@@ -506,13 +531,29 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
 _INLINE_DIFF_BYTE_CAP = 100 * 1024  # 100 KB
 
 
-def _governed_root_dirs(targets) -> set[str]:
-    """Return the set of top-level managed directory names to walk."""
+def _governed_root_dirs(targets: list[TargetProfile]) -> set[str]:
+    """Return the set of top-level managed directory names to walk.
+
+    Includes each target's top-level ``root_dir`` (plus ``.apm``) AND every
+    per-primitive ``deploy_root`` override (e.g. the ``copilot`` target routing
+    ``skills`` to ``.agents``). Walking the deploy roots is what lets the drift
+    differ compare committed skill bundles under ``.agents/skills/`` against the
+    replay, closing the gap where deployed skill content could silently diverge
+    from source (issue #1716). The replay reproduces the deploy-time link
+    rewrite faithfully, so byte-identical skills do not surface as false drift.
+    Only the first path segment is kept so nested deploy roots collapse to a
+    single walk root.
+    """
     roots: set[str] = {".apm"}
     for t in targets or []:
         root = getattr(t, "root_dir", None)
         if root:
             roots.add(str(root).split("/", 1)[0])
+        primitives = getattr(t, "primitives", None) or {}
+        for mapping in primitives.values():
+            deploy_root = getattr(mapping, "deploy_root", None)
+            if deploy_root:
+                roots.add(str(deploy_root).split("/", 1)[0])
     return roots
 
 

@@ -185,13 +185,36 @@ def test_install_py_under_legacy_budget():
     by the new ``apm update`` command and CI-safe install flow. All
     additions are entry-point glue at the Click handler boundary; the
     actual logic lives in ``apm_cli/install/`` (plan, errors, service).
+
+    Issue #1537 (sync/check/status/doctor workflow) raised 2010 -> 2014
+    to add two contextual error-hint blocks: an ``apm doctor`` tip on
+    ``AuthenticationError`` and an ``apm outdated`` -> ``apm update``
+    tip on ``FrozenInstallError``. Both are entry-point glue (one
+    ``_rich_info(..., symbol="info")`` call per handler, expanded to
+    multiple lines by ruff's formatter) -- no new logic.
+
+    The unified install-time audit feature (external scanners +
+    optional ``apm audit`` at install, behind the ``external_scanners``
+    experimental flag) raised 2014 -> 2045 to add the ``--audit`` and
+    ``--no-audit`` Click options plus their signature params and a
+    single override-resolution call. All glue at the handler boundary;
+    the precedence logic lives in ``apm_cli/core/install_audit.py`` and
+    the phase itself in ``apm_cli/install/phases/audit.py``.
+
+    Issue #888 (``--root DIR`` deploy redirection) raised 2045 -> 2085
+    to add the ``--root`` Click option plus its signature param, the
+    ``--root`` + ``--global`` UsageError guard, and the
+    ``install_root_redirect`` bracket (manual ``__enter__`` + a single
+    ``__exit__`` in the existing ``finally``). All glue at the handler
+    boundary; the chdir + source-root-override mechanism lives in
+    ``apm_cli/install/root_redirect.py`` and ``apm_cli/core/scope.py``.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 2010, (
-        f"commands/install.py grew to {n} LOC (budget 2010). "
+    assert n <= 2085, (
+        f"commands/install.py grew to {n} LOC (budget 2085). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
-        "(.github/skills/python-architecture/SKILL.md) and propose an "
+        "(.apm/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."
     )

@@ -12,10 +12,8 @@ import yaml
 from ....core.command_logger import CommandLogger
 from ....marketplace.errors import (
     GitLsRemoteError,
-    MarketplaceYmlError,  # noqa: F401
     OfflineMissError,
 )
-from ..._helpers import _is_interactive  # noqa: F401
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 

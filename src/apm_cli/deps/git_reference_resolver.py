@@ -109,6 +109,19 @@ class GitReferenceResolver:
         Azure DevOps, GitLab, generic). Artifactory dependencies return
         an empty list (no git repo).
         """
+        return self._list_remote_refs(dep_ref, include_heads=True)
+
+    def list_remote_tag_refs(self, dep_ref: DependencyReference) -> list[RemoteRef]:
+        """Enumerate remote tags only, preserving annotated-tag metadata."""
+        return self._list_remote_refs(dep_ref, include_heads=False)
+
+    def _list_remote_refs(
+        self,
+        dep_ref: DependencyReference,
+        *,
+        include_heads: bool,
+    ) -> list[RemoteRef]:
+        """Enumerate remote tags, optionally including branch heads."""
         host = self._host
 
         if dep_ref.is_artifactory():
@@ -145,10 +158,11 @@ class GitReferenceResolver:
         from . import github_downloader as _gd
 
         g = _gd.git.cmd.Git()
+        ls_args = ("--tags", "--heads") if include_heads else ("--tags",)
 
         def _primary_op():
             try:
-                output = g.ls_remote("--tags", "--heads", remote_url, env=ls_env)
+                output = g.ls_remote(*ls_args, remote_url, env=ls_env)
                 return ("ok", output)
             except GitCommandError as exc:
                 return ("err", exc)
@@ -165,7 +179,7 @@ class GitReferenceResolver:
                 auth_scheme="bearer",
             )
             try:
-                output = g.ls_remote("--tags", "--heads", bearer_url, env=bearer_env)
+                output = g.ls_remote(*ls_args, bearer_url, env=bearer_env)
                 return ("ok", output)
             except GitCommandError as exc:
                 return ("err", exc)
@@ -196,7 +210,8 @@ class GitReferenceResolver:
         is_github = is_github_hostname(dep_host) if dep_host else True
         is_generic = not is_ado and not is_github
 
-        error_msg = f"Failed to list remote refs for {repo_url_base}. "
+        ref_kind = "remote refs" if include_heads else "remote tags"
+        error_msg = f"Failed to list {ref_kind} for {repo_url_base}. "
         if is_generic:
             if dep_host:
                 host_info = host.auth_resolver.classify_host(dep_host, port=dep_ref.port)
@@ -315,6 +330,40 @@ class GitReferenceResolver:
                 resolved_commit=None,
                 ref_name=effective_ref,
             )
+
+        # Semver range resolution: enumerate remote tags, pick the highest match.
+        # Non-semver refs fall through to the existing branch/commit/clone path.
+        if ref:
+            from ..deps.registry.semver import is_semver_range, pick_best
+
+            if is_semver_range(ref):
+                remote_refs = self.list_remote_refs(dep_ref)
+                # Build version-string → (tag_name, sha) map.
+                # Strip the common 'v' prefix (e.g. 'v1.2.3' → '1.2.3').
+                candidates: dict[str, tuple[str, str]] = {}
+                for rr in remote_refs:
+                    if rr.ref_type != GitReferenceType.TAG:
+                        continue
+                    raw_tag = rr.name
+                    version_str = raw_tag[1:] if raw_tag.startswith("v") else raw_tag
+                    from ..marketplace.semver import parse_semver
+
+                    if parse_semver(version_str) is not None:
+                        candidates[version_str] = (raw_tag, rr.commit_sha)
+                best_version = pick_best(ref, list(candidates.keys()))
+                if best_version is None:
+                    available = sorted(candidates.keys())[:10]
+                    raise ValueError(
+                        f"No git tag in {dep_ref.repo_url!r} satisfies semver range {ref!r}. "
+                        f"Available semver tags: {available}"
+                    )
+                best_tag, best_sha = candidates[best_version]
+                return ResolvedReference(
+                    original_ref=ref,
+                    ref_type=GitReferenceType.TAG,
+                    ref_name=best_tag,
+                    resolved_commit=best_sha,
+                )
 
         is_likely_commit = bool(ref) and re.match(r"^[a-f0-9]{7,40}$", ref.lower()) is not None
 

@@ -192,6 +192,7 @@ class _GitHubFamilyBase:
             self._url_host(dep_ref),
             dep_ref.repo_url,
             port=getattr(dep_ref, "port", None),
+            user=getattr(dep_ref, "ssh_user", None) or "git",
         )
 
     def build_clone_http_url(self, dep_ref: DependencyReference) -> str:
@@ -391,7 +392,12 @@ class GitLabBackend:
 
     def build_clone_ssh_url(self, dep_ref: DependencyReference) -> str:
         host = getattr(dep_ref, "host", None) or self.host_info.host
-        return build_ssh_url(host, dep_ref.repo_url, port=getattr(dep_ref, "port", None))
+        return build_ssh_url(
+            host,
+            dep_ref.repo_url,
+            port=getattr(dep_ref, "port", None),
+            user=getattr(dep_ref, "ssh_user", None) or "git",
+        )
 
     def build_clone_http_url(self, dep_ref: DependencyReference) -> str:
         port = getattr(dep_ref, "port", None)
@@ -430,14 +436,12 @@ class GitLabBackend:
 
 @dataclass(frozen=True)
 class GenericGitBackend:
-    """Backend for non-GitHub non-ADO managed hosts (GitLab, Gitea, Gogs, Bitbucket).
+    """Backend for non-GitHub non-ADO generic hosts (Gitea, Gogs, Bitbucket).
 
     These hosts have heterogeneous APIs but support a common shape:
     HTTPS / SSH clones plus a Gitea-compatible Contents API at
     ``/api/v1/`` with a ``/api/v3/`` fallback for v3-only deployments.
-
-    GitLab is currently classified as ``"generic"`` and accessed via the
-    full repo URL (clone + sparse checkout), not the Contents API.
+    GitLab-class hosts use :class:`GitLabBackend` instead.
     """
 
     host_info: HostInfo
@@ -469,7 +473,12 @@ class GenericGitBackend:
 
     def build_clone_ssh_url(self, dep_ref: DependencyReference) -> str:
         host = getattr(dep_ref, "host", None) or self.host_info.host
-        return build_ssh_url(host, dep_ref.repo_url, port=getattr(dep_ref, "port", None))
+        return build_ssh_url(
+            host,
+            dep_ref.repo_url,
+            port=getattr(dep_ref, "port", None),
+            user=getattr(dep_ref, "ssh_user", None) or "git",
+        )
 
     def build_clone_http_url(self, dep_ref: DependencyReference) -> str:
         port = getattr(dep_ref, "port", None)
@@ -513,6 +522,11 @@ _BACKEND_BY_KIND: dict[str, type] = {
 }
 
 
+def _host_type_for_backend_dispatch(dep_ref: DependencyReference | None) -> str | None:
+    """Return a structural host_type from dependency-like refs."""
+    return getattr(dep_ref, "host_type", None)
+
+
 def backend_for(
     dep_ref: DependencyReference | None,
     auth_resolver: AuthResolver,
@@ -538,6 +552,7 @@ def backend_for(
     Returns:
         The :class:`HostBackend` for the resolved host.
     """
+    host_type = _host_type_for_backend_dispatch(dep_ref)
     if dep_ref is not None and dep_ref.host:
         host = dep_ref.host
         port = getattr(dep_ref, "port", None)
@@ -551,7 +566,11 @@ def backend_for(
     if dep_ref is not None:
         try:
             if dep_ref.is_azure_devops():
-                info = auth_resolver.classify_host(host, port=port)
+                info = auth_resolver.classify_host(
+                    host,
+                    port=port,
+                    host_type=host_type,
+                )
                 if not isinstance(info, HostInfo):
                     info = HostInfo(
                         host=host,
@@ -564,7 +583,11 @@ def backend_for(
         except (AttributeError, TypeError):
             pass
 
-    info = auth_resolver.classify_host(host, port=port)
+    info = auth_resolver.classify_host(
+        host,
+        port=port,
+        host_type=host_type,
+    )
     cls: type | None = None
     if isinstance(info, HostInfo):
         cls = _BACKEND_BY_KIND.get(info.kind)

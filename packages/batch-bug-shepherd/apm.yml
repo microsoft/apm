@@ -1,0 +1,25 @@
+name: batch-bug-shepherd
+version: 0.1.0
+description: Drive a batch of suspected bugs from raw issue list to mergeable PR queue -- triage in parallel, gate against PRINCIPLES.md, detect in-flight PRs, dispatch greenfield fixes, then drive every PR to merge via shepherd-driver with mutation-break + lint gates.
+author: Microsoft
+license: MIT
+
+# Manually-invoked outer-loop bug-queue orchestrator. Composes one
+# APM skill:
+#  - shepherd-driver : the per-PR drive-to-merge engine (review panel,
+#                      fold-vs-defer, push, CI watch, conflict
+#                      resolution). Transitively pulls apm-review-panel.
+#
+# Belt + suspenders (genesis step 3.5 = BOTH): the manifest dep below
+# declares the edge (local-path key resolves relative to THIS package
+# dir per apm-usage dependencies.md), and the SKILL.md body keeps a
+# runtime probe for `../shepherd-driver` at the deploy site as a
+# backstop ("Composition with shepherd-driver"). Real edges are
+# declared because the <= 0.14.1 orphaned-lockfile bug is fixed from
+# 0.16 onward.
+dependencies:
+  apm:
+    - ../shepherd-driver
+  mcp: []
+
+scripts: {}

@@ -166,15 +166,21 @@ jobs:
     outputs:
       matrix: ${{ steps.compute.outputs.matrix }}
     steps:
-      # SECURITY (S3): never echo $groups, $matrix, or any matrix.group.* value
-      # in any apm-prep step. private-key is a real secret string here.
+      # SECURITY (S3): the matrix written to $GITHUB_OUTPUT below carries
+      # NO secret values -- only routing metadata (id, kind, index, owner,
+      # repositories, packages, has-app). Credentials are resolved per-row
+      # in the apm job via $GITHUB_ENV (see "Resolve credentials" step).
+      # This avoids GitHub Actions' cross-job output redaction filter
+      # (HostContext.SecretMasker.MaskSecrets in actions/runner), which
+      # silently strips any job output whose value contains a registered
+      # secret substring and emits "Skip output '<name>' since it may
+      # contain secret." See: docs/.../security-guides/security-hardening.
       - name: Compute APM credential-group matrix
         id: compute
         env:
           AW_APM_PACKAGES: ${{ github.aw.import-inputs.packages }}
           AW_APM_APPS: ${{ github.aw.import-inputs.apps }}
           AW_APM_LEGACY_APP_ID: ${{ github.aw.import-inputs.app-id }}
-          AW_APM_LEGACY_PRIVATE_KEY: ${{ github.aw.import-inputs.private-key }}
           AW_APM_LEGACY_OWNER: ${{ github.aw.import-inputs.owner }}
           AW_APM_LEGACY_REPOS: ${{ github.aw.import-inputs.repositories }}
         run: |
@@ -207,7 +213,6 @@ jobs:
             --argjson packages "$packages_json" \
             --argjson apps "$apps_json" \
             --arg legacy_id "$legacy_id" \
-            --arg legacy_pk "${AW_APM_LEGACY_PRIVATE_KEY:-}" \
             --arg legacy_owner "${AW_APM_LEGACY_OWNER:-}" \
             --arg legacy_repos "${AW_APM_LEGACY_REPOS:-}" \
             'def slug(s): s | gsub("[^a-zA-Z0-9-]"; "-") | ascii_downcase | .[0:32];
@@ -215,12 +220,21 @@ jobs:
                g + (if (g.id // "") == "" then {id: ("auto-" + slug(g.owner // "default"))} else {} end);
              [
                (if (($packages // []) | length) > 0 and $legacy_id == ""
-                  then [{id:"default",("app-id"):"",("private-key"):"",owner:"",repositories:"",packages:$packages}]
+                  then [{id:"default",kind:"default",index:0,owner:"",repositories:"",packages:$packages,("has-app"):"false"}]
                   else [] end),
                (if $legacy_id != ""
-                  then [with_id({id:"legacy",("app-id"):$legacy_id,("private-key"):$legacy_pk,owner:$legacy_owner,repositories:$legacy_repos,packages:($packages // [])})]
+                  then [with_id({id:"legacy",kind:"legacy",index:0,owner:$legacy_owner,repositories:$legacy_repos,packages:($packages // []),("has-app"):"true"})]
                   else [] end),
-               (($apps // []) | map(with_id(.)))
+               (($apps // []) | to_entries | map(
+                  with_id({
+                    id: (.value.id // ""),
+                    kind: "apps",
+                    index: .key,
+                    owner: (.value.owner // ""),
+                    repositories: (.value.repositories // ""),
+                    packages: (.value.packages // []),
+                    ("has-app"): "true"
+                  })))
              ] | add // []')
 
           count=$(echo "$groups" | jq 'length')
@@ -242,7 +256,9 @@ jobs:
             fi
           done < <(echo "$groups" | jq -r '.[].id')
 
-          # SAFE: emit only id + package-count to logs. Never $groups in full.
+          # Emit only id + package-count to logs to keep notice output tight.
+          # The matrix itself is non-secret under the env-relay design, but a
+          # condensed summary remains easier to scan in the run UI.
           {
             echo "matrix={\"group\":$groups}"
           } >> "$GITHUB_OUTPUT"
@@ -256,14 +272,85 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.apm-prep.outputs.matrix) }}
+    env:
+      # gh-aw text-substitutes these at compile time. They land in the
+      # apm job's per-replica env, which the runner masks in logs but
+      # does NOT redact-strip the way job outputs are. From here the
+      # "Resolve credentials" step picks the right row by matrix.group
+      # routing metadata and relays only the resolved values into
+      # $GITHUB_ENV. This is the workaround for GitHub Actions silently
+      # dropping job outputs whose value contains a registered secret
+      # substring (HostContext.SecretMasker output filter).
+      AW_APM_LEGACY_APP_ID: ${{ github.aw.import-inputs.app-id }}
+      AW_APM_LEGACY_PRIVATE_KEY: ${{ github.aw.import-inputs.private-key }}
+      AW_APM_APPS: ${{ github.aw.import-inputs.apps }}
     steps:
+      - name: Resolve credentials for this matrix row
+        if: ${{ matrix.group.has-app == 'true' }}
+        env:
+          ROW_KIND: ${{ matrix.group.kind }}
+          ROW_INDEX: ${{ matrix.group.index }}
+        run: |
+          # SECURITY: never `set -x` or `echo "$pk"` in this step. ::add-mask::
+          # registers the PEM as a single multi-line substring; the masker will
+          # not match individual PEM lines printed in isolation, so any future
+          # debug echo of $pk line-by-line would leak the key body in clear text.
+          set -euo pipefail
+          case "$ROW_KIND" in
+            legacy)
+              app_id="${AW_APM_LEGACY_APP_ID:-}"
+              pk="${AW_APM_LEGACY_PRIVATE_KEY:-}"
+              ;;
+            apps)
+              apps_json="${AW_APM_APPS:-[]}"
+              app_id=$(printf '%s' "$apps_json" | jq -r --argjson i "$ROW_INDEX" '.[$i]["app-id"] // ""')
+              pk=$(printf '%s' "$apps_json" | jq -r --argjson i "$ROW_INDEX" '.[$i]["private-key"] // ""')
+              ;;
+            *)
+              echo "::error::unexpected apm matrix kind '$ROW_KIND' for row with has-app=true"
+              exit 1
+              ;;
+          esac
+          if [ -z "$app_id" ] || [ -z "$pk" ]; then
+            echo "::error::missing app-id or private-key for apm row kind=$ROW_KIND index=$ROW_INDEX"
+            exit 1
+          fi
+          # Normalise trailing newline. Bash $(jq ...) strips ALL trailing
+          # newlines from PEMs read out of the apps[] JSON, while a direct
+          # env-var assignment preserves them. Stripping any tail and adding
+          # exactly one makes the legacy and apps paths produce byte-identical
+          # ROW_PRIVATE_KEY values so downstream tolerance is irrelevant.
+          pk="${pk%$'\n'}"
+          # Defence in depth: the PK is already masked because it came from
+          # a secrets-context reference at compile time (gh-aw substitutes
+          # the configured private-key secret into AW_APM_*), but
+          # registering it again here makes the contract explicit and
+          # survives any future gh-aw template churn that might lose the
+          # secret tag. NOTE: do not write GitHub Actions expression syntax
+          # (dollar-doublecurly ... doublecurly) inside this comment.
+          # gh-aw v0.76+ harvests such tokens out of bash run-block bodies
+          # (even inside `#` comments) and hoists them into the step env,
+          # which fails workflow load when the inner expression resolves
+          # to a sequence (e.g. wildcard secrets-context references).
+          echo "::add-mask::$pk"
+          # Use a random heredoc delimiter to eliminate any chance of a PEM
+          # line collision terminating the value early. The official docs
+          # explicitly warn against fixed delimiters for arbitrary multi-line
+          # values: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#multiline-strings
+          delim="APMPK_$(openssl rand -hex 16)"
+          {
+            echo "ROW_APP_ID=$app_id"
+            printf 'ROW_PRIVATE_KEY<<%s\n' "$delim"
+            printf '%s\n' "$pk"
+            printf '%s\n' "$delim"
+          } >> "$GITHUB_ENV"
       - name: Mint installation token
         id: token
-        if: ${{ matrix.group.app-id != '' }}
+        if: ${{ matrix.group.has-app == 'true' }}
         uses: actions/create-github-app-token@v3.1.1
         with:
-          app-id: ${{ matrix.group.app-id }}
-          private-key: ${{ matrix.group.private-key }}
+          app-id: ${{ env.ROW_APP_ID }}
+          private-key: ${{ env.ROW_PRIVATE_KEY }}
           owner: ${{ matrix.group.owner != '' && matrix.group.owner || github.repository_owner }}
           repositories: ${{ matrix.group.repositories }}
       - name: Render package list

@@ -27,7 +27,6 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple  # noqa: F401, UP035
 from urllib.parse import urlparse
 
 import requests
@@ -1049,8 +1048,8 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
         "cache": {"ttl": policy.cache.ttl},
         "dependencies": {
             "allow": _opt_list(policy.dependencies.allow),
-            "deny": list(policy.dependencies.deny),
-            "require": list(policy.dependencies.require),
+            "deny": _opt_list(policy.dependencies.deny),
+            "require": _opt_list(policy.dependencies.require),
             "require_resolution": policy.dependencies.require_resolution,
             "max_depth": policy.dependencies.max_depth,
         },
@@ -1080,7 +1079,7 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
         },
         "unmanaged_files": {
             "action": policy.unmanaged_files.action,
-            "directories": list(policy.unmanaged_files.directories),
+            "directories": list(policy.unmanaged_files.directories or ()),
         },
     }
 
@@ -1104,9 +1103,9 @@ def _is_policy_empty(policy: ApmPolicy) -> bool:
     beyond the permissive defaults.
     """
     return (
-        not policy.dependencies.deny
+        not policy.dependencies.effective_deny
         and policy.dependencies.allow is None
-        and not policy.dependencies.require
+        and not policy.dependencies.effective_require
         and not policy.mcp.deny
         and policy.mcp.allow is None
         and policy.mcp.transport.allow is None

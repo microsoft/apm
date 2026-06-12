@@ -1,4 +1,4 @@
-"""``apm marketplace doctor`` command."""
+"""``apm doctor`` (and legacy ``apm marketplace doctor``) command implementation."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from ...core.command_logger import CommandLogger
 from ...marketplace.errors import MarketplaceYmlError
 from ...marketplace.git_stderr import translate_git_stderr
 from ...marketplace.migration import ConfigSource, detect_config_source
+from ...marketplace.output_profiles import known_output_names
 from ...marketplace.yml_schema import (
     load_marketplace_from_apm_yml,
     load_marketplace_yml,
@@ -24,11 +25,14 @@ from . import (
 )
 
 
-@marketplace.command(help="Run environment diagnostics for marketplace publishing")
-@click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def doctor(verbose):
-    """Check git, network, auth, and marketplace config readiness."""
-    logger = CommandLogger("marketplace-doctor", verbose=verbose)
+def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
+    """Execute the doctor diagnostics and return an exit code.
+
+    Shared between the top-level ``apm doctor`` command and the legacy
+    ``apm marketplace doctor`` alias so both surfaces produce identical
+    output. Returns ``0`` if all critical checks pass, ``1`` otherwise.
+    """
+    logger = CommandLogger(logger_name, verbose=verbose)
     checks = []
 
     # Check 1: git on PATH
@@ -190,7 +194,33 @@ def doctor(verbose):
         )
     )
 
-    # Check 6: duplicate package names (defence-in-depth)
+    # Check 6: format coverage (informational; only when config is present)
+    if yml_obj is not None:
+        configured = frozenset(getattr(yml_obj, "outputs", ()) or ())
+        supported = known_output_names()
+        missing = sorted(supported - configured)
+        configured_sorted = sorted(configured)
+        if not missing:
+            fc_detail = f"Publishing for all known formats: {', '.join(configured_sorted)}."
+            fc_passed = True
+        else:
+            fc_detail = (
+                f"Configured: {', '.join(configured_sorted) or '(none)'}. "
+                f"Also supported: {', '.join(missing)}. "
+                f"Add e.g. '{missing[0]}: {{}}' under 'marketplace.outputs' "
+                "in apm.yml to publish for more consumers."
+            )
+            fc_passed = True  # informational; never fails
+        checks.append(
+            _DoctorCheck(
+                name="format coverage",
+                passed=fc_passed,
+                detail=fc_detail,
+                informational=True,
+            )
+        )
+
+    # Check 7: duplicate package names (defence-in-depth)
     if yml_obj is not None:
         dup_detail = _find_duplicate_names(yml_obj)
         if dup_detail:
@@ -212,9 +242,64 @@ def doctor(verbose):
                 )
             )
 
+    # Check 8: version alignment (informational; only when config is present)
+    if yml_obj is not None and hasattr(yml_obj, "versioning"):
+        from ...marketplace.version_check import check_version_alignment
+
+        va_report = check_version_alignment(yml_obj, Path.cwd())
+        total = len(va_report.packages)
+        aligned = sum(1 for p in va_report.packages if p.ok)
+        if total == 0:
+            va_detail = f"strategy={va_report.strategy}, no local packages to align"
+            va_passed = True
+        elif va_report.ok:
+            va_detail = f"strategy={va_report.strategy}, {aligned}/{total} packages aligned"
+            va_passed = True
+        else:
+            misaligned = [p.path for p in va_report.packages if not p.ok]
+            misaligned_count = len(misaligned)
+            va_detail = (
+                f"strategy={va_report.strategy}, "
+                f"{misaligned_count}/{total} packages misaligned: "
+                f"{misaligned[0]}"
+            )
+            va_passed = False
+        checks.append(
+            _DoctorCheck(
+                name="version alignment",
+                passed=va_passed,
+                detail=va_detail,
+                informational=True,
+            )
+        )
+
     _render_doctor_table(logger, checks)
 
     # Exit: 0 if checks 1-2 pass; config checks are informational
     critical_checks = [c for c in checks if not c.informational]
     if any(not c.passed for c in critical_checks):
-        sys.exit(1)
+        return 1
+    return 0
+
+
+@marketplace.command(
+    name="doctor",
+    help="DEPRECATED: use 'apm doctor' instead. Run environment diagnostics.",
+    hidden=True,
+)
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
+def doctor(verbose):
+    """Deprecated alias for ``apm doctor``.
+
+    Prints a one-line deprecation hint and forwards to :func:`run_doctor`.
+    The command stays functional for one release to give CI pipelines and
+    scripts time to migrate; it is hidden from ``apm marketplace --help``
+    so new users discover the top-level form.
+    """
+    click.echo(
+        "[!] 'apm marketplace doctor' is deprecated; use 'apm doctor' instead.",
+        err=True,
+    )
+    exit_code = run_doctor(verbose, logger_name="marketplace-doctor")
+    if exit_code != 0:
+        sys.exit(exit_code)

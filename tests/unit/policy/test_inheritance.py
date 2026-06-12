@@ -14,6 +14,7 @@ from apm_cli.policy.inheritance import (
 )
 from apm_cli.policy.schema import (
     ApmPolicy,
+    AuditPolicy,
     CompilationPolicy,
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
@@ -22,6 +23,7 @@ from apm_cli.policy.schema import (
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
+    SecurityPolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -154,6 +156,72 @@ class TestDependencyRequireMerge(unittest.TestCase):
             ApmPolicy(dependencies=DependencyPolicy(require=["contoso/hooks"])),
         )
         self.assertEqual(result.dependencies.require, ("contoso/hooks",))
+
+
+class TestDependencyTransparency(unittest.TestCase):
+    """Child omitting dependencies block is transparent for deny/require (fixes #1201)."""
+
+    def test_parent_require_child_omits_deps_block(self):
+        """Parent require + child omits dependencies entirely -> require flows through."""
+        result = merge_policies(
+            ApmPolicy(dependencies=DependencyPolicy(require=("contoso/hooks",))),
+            ApmPolicy(),  # child omits dependencies -> require=None
+        )
+        self.assertEqual(result.dependencies.require, ("contoso/hooks",))
+
+    def test_parent_deny_child_omits_deps_block(self):
+        """Parent deny + child omits dependencies entirely -> deny flows through."""
+        result = merge_policies(
+            ApmPolicy(dependencies=DependencyPolicy(deny=("evil/*",))),
+            ApmPolicy(),  # child omits dependencies -> deny=None
+        )
+        self.assertEqual(result.dependencies.deny, ("evil/*",))
+
+    def test_parent_require_child_explicit_empty_require(self):
+        """Child explicit empty require=() overrides parent (AC#2)."""
+        result = merge_policies(
+            ApmPolicy(dependencies=DependencyPolicy(require=("contoso/hooks",))),
+            ApmPolicy(dependencies=DependencyPolicy(require=())),
+        )
+        self.assertEqual(result.dependencies.require, ())
+
+    def test_parent_deny_child_explicit_empty_deny(self):
+        """Child explicit empty deny=() overrides parent."""
+        result = merge_policies(
+            ApmPolicy(dependencies=DependencyPolicy(deny=("evil/*",))),
+            ApmPolicy(dependencies=DependencyPolicy(deny=())),
+        )
+        self.assertEqual(result.dependencies.deny, ())
+
+    def test_three_level_chain_require_transparency(self):
+        """Enterprise require -> org omits -> repo omits -> require preserved."""
+        result = resolve_policy_chain(
+            [
+                ApmPolicy(dependencies=DependencyPolicy(require=("contoso/core",))),
+                ApmPolicy(),  # org omits
+                ApmPolicy(),  # repo omits
+            ]
+        )
+        self.assertEqual(result.dependencies.require, ("contoso/core",))
+
+    def test_three_level_chain_deny_transparency(self):
+        """Enterprise deny -> org omits -> repo omits -> deny preserved."""
+        result = resolve_policy_chain(
+            [
+                ApmPolicy(dependencies=DependencyPolicy(deny=("banned/*",))),
+                ApmPolicy(),  # org omits
+                ApmPolicy(),  # repo omits
+            ]
+        )
+        self.assertEqual(result.dependencies.deny, ("banned/*",))
+
+    def test_both_none_merged_none(self):
+        """Both parent and child omit dependencies -> None (no opinion)."""
+        result = merge_policies(ApmPolicy(), ApmPolicy())
+        self.assertIsNone(result.dependencies.deny)
+        self.assertIsNone(result.dependencies.require)
+        self.assertEqual(result.dependencies.effective_deny, ())
+        self.assertEqual(result.dependencies.effective_require, ())
 
 
 class TestRequireResolutionEscalation(unittest.TestCase):
@@ -424,6 +492,33 @@ class TestUnmanagedFilesMerge(unittest.TestCase):
         )
         self.assertEqual(result.unmanaged_files.directories, (".prompts",))
 
+    def test_child_omitting_unmanaged_files_inherits_parent_issue_1198(self):
+        """extends: child without unmanaged_files must not downgrade org deny."""
+        parent = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(
+                action="deny",
+                directories=(
+                    ".github/instructions",
+                    ".github/agents",
+                    ".github/hooks",
+                ),
+            ),
+        )
+        child = ApmPolicy(
+            dependencies=DependencyPolicy(deny=("**/some-pattern",)),
+            unmanaged_files=UnmanagedFilesPolicy(action=None, directories=None),
+        )
+        result = merge_policies(parent, child)
+        self.assertEqual(result.unmanaged_files.action, "deny")
+        self.assertEqual(
+            result.unmanaged_files.directories,
+            (
+                ".github/instructions",
+                ".github/agents",
+                ".github/hooks",
+            ),
+        )
+
 
 class TestUnmanagedFilesTransparency(unittest.TestCase):
     """Child omitting unmanaged_files is transparent (fixes #1198)."""
@@ -601,7 +696,8 @@ class TestEdgeCases(unittest.TestCase):
         result = merge_policies(ApmPolicy(), ApmPolicy())
         self.assertEqual(result.enforcement, "warn")
         self.assertEqual(result.cache.ttl, 3600)
-        self.assertEqual(result.dependencies.deny, ())
+        self.assertIsNone(result.dependencies.deny)  # None = no opinion from either side
+        self.assertEqual(result.dependencies.effective_deny, ())
         self.assertIsNone(result.dependencies.allow)
 
     def test_extends_cleared_after_merge(self):
@@ -618,6 +714,36 @@ class TestEdgeCases(unittest.TestCase):
     def test_name_fallback_to_parent(self):
         result = merge_policies(ApmPolicy(name="parent"), ApmPolicy(name=""))
         self.assertEqual(result.name, "parent")
+
+
+class TestSecurityAuditMerge(unittest.TestCase):
+    """security.audit merges as a floor: tightens, never relaxes."""
+
+    @staticmethod
+    def _p(on_install=None, external=None):
+        return ApmPolicy(
+            security=SecurityPolicy(audit=AuditPolicy(on_install=on_install, external=external))
+        )
+
+    def test_parent_floor_holds_over_weaker_child(self):
+        result = merge_policies(self._p("block"), self._p("warn"))
+        self.assertEqual(result.security.audit.on_install, "block")
+
+    def test_child_can_tighten_over_parent(self):
+        result = merge_policies(self._p("warn"), self._p("block"))
+        self.assertEqual(result.security.audit.on_install, "block")
+
+    def test_none_parent_transparency(self):
+        result = merge_policies(self._p(None), self._p("warn"))
+        self.assertEqual(result.security.audit.on_install, "warn")
+
+    def test_none_child_transparency(self):
+        result = merge_policies(self._p("block"), self._p(None))
+        self.assertEqual(result.security.audit.on_install, "block")
+
+    def test_external_union_merged(self):
+        result = merge_policies(self._p("block", ("skillspector",)), self._p("block", ("sarif",)))
+        self.assertEqual(set(result.security.audit.external), {"skillspector", "sarif"})
 
 
 if __name__ == "__main__":

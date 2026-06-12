@@ -102,11 +102,11 @@ class TestValidateUninstallPackages:
         logger.warning.assert_called_once()
 
     def test_invalid_format_no_slash_logs_error(self):
-        """Package without slash is rejected with an error message."""
+        """Package without slash is rejected with an error message and tracked in not_found."""
         logger = _make_logger()
         to_remove, not_found = _validate_uninstall_packages(["badpackage"], ["org/repo"], logger)
         assert to_remove == []
-        assert not_found == []
+        assert "badpackage" in not_found
         logger.error.assert_called_once()
 
     def test_multiple_packages_partial_match(self):
@@ -147,6 +147,31 @@ class TestValidateUninstallPackages:
         to_remove, not_found = _validate_uninstall_packages(["org/repo"], [ref], logger)
         assert ref in to_remove
         assert not_found == []
+
+    def test_windows_absolute_path_not_rejected_as_invalid_format(self):
+        r"""Regression for v0.14.1 Windows release failure (PR #1413).
+
+        Pre-fix, ``_validate_uninstall_packages`` rejected any package arg
+        that did not contain a forward slash with "Invalid package format".
+        Windows absolute paths like ``C:\Users\runner\AppData\...\my-pkg``
+        have no ``/`` and were silently dropped, so the corresponding
+        copilot-app DB row leaked across uninstall. Both Windows-style and
+        relative ``.\`` paths must round-trip through the validator without
+        triggering the marketplace-format error.
+        """
+        logger = _make_logger()
+        win_path = r"C:\Users\runneradmin\AppData\Local\Temp\my-pkg"
+        rel_win = r".\local-pkg"
+        # Deps list is empty so we only assert the validator does NOT
+        # mistake the path for a malformed marketplace ref.
+        to_remove, not_found = _validate_uninstall_packages([win_path, rel_win], [], logger)
+        assert to_remove == []
+        # Both arguments are reported "not found in apm.yml" (warning) rather
+        # than "Invalid package format" (error). The latter would leave the
+        # copilot-app integration cleanup with nothing to clean.
+        logger.error.assert_not_called()
+        assert win_path in not_found
+        assert rel_win in not_found
 
 
 # ===========================================================================
@@ -545,3 +570,332 @@ class TestBuildChildrenIndex:
         assert len(index["org/root"]) == 2
         child_urls = {d.repo_url for d in index["org/root"]}
         assert child_urls == {"org/x", "org/y"}
+
+
+# ===========================================================================
+# _resolve_marketplace_packages
+# ===========================================================================
+
+
+class TestResolveMarketplacePackages:
+    """Tests for _resolve_marketplace_packages."""
+
+    def test_lockfile_first_resolution(self):
+        """Lockfile entry with matching provenance is used without a network call."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()
+        dep = LockedDependency(
+            repo_url="acme/my-plugin",
+            resolved_commit="abc123",
+            discovered_via="official",
+            marketplace_plugin_name="my-plugin",
+        )
+        lockfile.add_dependency(dep)
+        logger = _make_logger()
+
+        result = _resolve_marketplace_packages(["my-plugin@official"], lockfile, logger)
+
+        assert result["my-plugin@official"] == "acme/my-plugin"
+        logger.error.assert_not_called()
+
+    def test_lockfile_first_ignores_wrong_marketplace(self):
+        """Provenance mismatch emits a warning and still resolves via the lockfile entry."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()
+        dep = LockedDependency(
+            repo_url="acme/my-plugin",
+            resolved_commit="abc123",
+            discovered_via="other-marketplace",
+            marketplace_plugin_name="my-plugin",
+        )
+        lockfile.add_dependency(dep)
+        logger = _make_logger()
+
+        result = _resolve_marketplace_packages(["my-plugin@official"], lockfile, logger)
+
+        # Provenance mismatch: warning emitted, registry NOT called, canonical still resolved
+        logger.warning.assert_called_once()
+        assert "installed via other-marketplace" in logger.warning.call_args[0][0]
+        assert result["my-plugin@official"] == "acme/my-plugin"
+
+    def test_registry_fallback_when_not_in_lockfile(self):
+        """Registry canonical not present in the lockfile is refused by the supply-chain guard."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()  # empty lockfile — registry result won't be in it
+        logger = _make_logger()
+
+        with patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin") as mock_resolve:
+            mock_resolve.return_value = MagicMock(canonical="acme/resolved-plugin")
+            result = _resolve_marketplace_packages(["resolved-plugin@official"], lockfile, logger)
+
+        # Registry was called, but supply-chain guard refused the result
+        mock_resolve.assert_called_once_with("resolved-plugin", "official", auth_resolver=None)
+        assert result["resolved-plugin@official"] is None
+        logger.error.assert_called_once()
+        assert "could not be resolved" in logger.error.call_args[0][0]
+
+    def test_no_lockfile_goes_directly_to_registry(self):
+        """When lockfile is None, resolution proceeds directly to registry."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        logger = _make_logger()
+
+        with patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin") as mock_resolve:
+            mock_resolve.return_value = MagicMock(canonical="acme/my-plugin")
+            result = _resolve_marketplace_packages(["my-plugin@official"], None, logger)
+
+        mock_resolve.assert_called_once_with("my-plugin", "official", auth_resolver=None)
+        assert result["my-plugin@official"] == "acme/my-plugin"
+
+    def test_network_error_logs_error_and_maps_to_none(self):
+        """Registry failure logs a marketplace-specific error and returns None."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        logger = _make_logger()
+
+        with patch(
+            "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            side_effect=RuntimeError("network failure"),
+        ):
+            result = _resolve_marketplace_packages(["my-plugin@official"], None, logger)
+
+        assert result["my-plugin@official"] is None
+        logger.error.assert_called_once()
+        assert "could not be resolved" in logger.error.call_args[0][0]
+
+    def test_non_marketplace_refs_are_skipped(self):
+        """Strings without @ are not included in the returned dict."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        logger = _make_logger()
+        result = _resolve_marketplace_packages(["org/repo"], None, logger)
+
+        assert result == {}
+        logger.error.assert_not_called()
+
+    def test_batch_continues_after_single_failure(self):
+        """A failing package does not prevent resolution of subsequent packages."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()
+        dep = LockedDependency(
+            repo_url="acme/ok-plugin",
+            resolved_commit="abc123",
+            discovered_via="official",
+            marketplace_plugin_name="ok-plugin",
+        )
+        lockfile.add_dependency(dep)
+        logger = _make_logger()
+
+        with patch(
+            "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            side_effect=RuntimeError("network failure"),
+        ):
+            result = _resolve_marketplace_packages(
+                ["fail-plugin@official", "ok-plugin@official"], lockfile, logger
+            )
+
+        # fail-plugin has no lockfile entry and registry fails -> None
+        assert result["fail-plugin@official"] is None
+        # ok-plugin found in lockfile -> resolved without touching registry
+        assert result["ok-plugin@official"] == "acme/ok-plugin"
+        # Error logged once for the failing package only
+        logger.error.assert_called_once()
+
+    def test_dry_run_skips_registry(self):
+        """When dry_run=True, Stage 2 registry call is skipped entirely."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        logger = _make_logger()
+
+        with patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin") as mock_resolve:
+            result = _resolve_marketplace_packages(
+                ["my-plugin@official"], None, logger, dry_run=True
+            )
+
+        mock_resolve.assert_not_called()
+        assert result["my-plugin@official"] is None
+        # Dry-run emits a warning (not error) since no operation was attempted.
+        logger.warning.assert_called_once()
+        warn_msg = logger.warning.call_args[0][0]
+        assert "dry-run" in warn_msg.lower()
+        logger.error.assert_not_called()
+
+    def test_supply_chain_guard_refuses_canonical_not_in_lockfile(self):
+        """Registry canonical absent from lockfile is refused; result is None."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()  # empty -- registry result won't be present
+        logger = _make_logger()
+
+        with patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin") as mock_resolve:
+            mock_resolve.return_value = MagicMock(canonical="acme/injected-plugin")
+            result = _resolve_marketplace_packages(["injected-plugin@official"], lockfile, logger)
+
+        assert result["injected-plugin@official"] is None
+        # Warning (not verbose_detail) must surface the refusal at normal verbosity.
+        logger.warning.assert_called_once()
+        warn_msg = logger.warning.call_args[0][0]
+        assert "acme/injected-plugin" in warn_msg
+        assert "apm.lock.yaml" in warn_msg
+        logger.error.assert_called_once()
+
+    def test_provenance_mismatch_warns_and_resolves(self):
+        """Lockfile entry via a different marketplace emits a warning but still resolves."""
+        from apm_cli.commands.uninstall.engine import _resolve_marketplace_packages
+
+        lockfile = LockFile()
+        dep = LockedDependency(
+            repo_url="acme/cross-plugin",
+            resolved_commit="abc123",
+            discovered_via="other-marketplace",
+            marketplace_plugin_name="cross-plugin",
+        )
+        lockfile.add_dependency(dep)
+        logger = _make_logger()
+
+        result = _resolve_marketplace_packages(["cross-plugin@official"], lockfile, logger)
+
+        logger.warning.assert_called_once()
+        warn_msg = logger.warning.call_args[0][0]
+        assert "installed via other-marketplace" in warn_msg
+        assert result["cross-plugin@official"] == "acme/cross-plugin"
+        logger.error.assert_not_called()
+
+
+# ===========================================================================
+# _validate_uninstall_packages -- marketplace ref extensions
+# ===========================================================================
+
+
+class TestValidateUninstallPackagesMarketplace:
+    """Tests for marketplace-ref support in _validate_uninstall_packages."""
+
+    def test_marketplace_ref_matched_via_lockfile(self):
+        """Marketplace ref resolved via lockfile is matched against current deps."""
+        lockfile = LockFile()
+        dep = LockedDependency(
+            repo_url="acme/my-plugin",
+            resolved_commit="abc123",
+            discovered_via="official",
+            marketplace_plugin_name="my-plugin",
+        )
+        lockfile.add_dependency(dep)
+        logger = _make_logger()
+
+        to_remove, not_found = _validate_uninstall_packages(
+            ["my-plugin@official"], ["acme/my-plugin"], logger, lockfile
+        )
+
+        assert "acme/my-plugin" in to_remove
+        assert not_found == []
+        # Progress message must reference both the marketplace ref and canonical form
+        progress_msg = logger.progress.call_args[0][0]
+        assert "my-plugin@official" in progress_msg
+        assert "acme/my-plugin" in progress_msg
+
+    def test_marketplace_ref_resolved_but_not_in_deps(self):
+        """Resolved marketplace ref not present in apm.yml uses marketplace warning."""
+        lockfile = LockFile()
+        dep = LockedDependency(
+            repo_url="acme/my-plugin",
+            resolved_commit="abc123",
+            discovered_via="official",
+            marketplace_plugin_name="my-plugin",
+        )
+        lockfile.add_dependency(dep)
+        logger = _make_logger()
+
+        to_remove, not_found = _validate_uninstall_packages(
+            ["my-plugin@official"], ["org/other"], logger, lockfile
+        )
+
+        assert to_remove == []
+        assert "my-plugin@official" in not_found
+        warning_msg = logger.warning.call_args[0][0]
+        # Marketplace-specific not-found wording contains both ref and canonical
+        assert "my-plugin@official" in warning_msg
+        assert "acme/my-plugin" in warning_msg
+
+    def test_marketplace_ref_resolution_fails_is_skipped(self):
+        """When resolution returns None, the package is recorded as not_found."""
+        logger = _make_logger()
+
+        with patch(
+            "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            side_effect=RuntimeError("fail"),
+        ):
+            to_remove, not_found = _validate_uninstall_packages(
+                ["my-plugin@official"], ["org/repo"], logger
+            )
+
+        assert to_remove == []
+        # Unresolvable marketplace refs MUST appear in packages_not_found so callers
+        # report accurate "N package(s) not found" counts (API contract).
+        assert "my-plugin@official" in not_found
+        logger.error.assert_called_once()
+
+    def test_canonical_ref_behaviour_unchanged(self):
+        """Canonical 'owner/repo' refs are still matched exactly as before."""
+        logger = _make_logger()
+
+        to_remove, not_found = _validate_uninstall_packages(["org/repo"], ["org/repo"], logger)
+
+        assert "org/repo" in to_remove
+        assert not_found == []
+        # Progress message must NOT show a parenthesised canonical
+        progress_msg = logger.progress.call_args[0][0]
+        assert "(as " not in progress_msg
+
+    def test_invalid_format_no_slash_no_at_still_errors(self):
+        """A bare word with neither slash nor @ still triggers an error."""
+        logger = _make_logger()
+
+        to_remove, not_found = _validate_uninstall_packages(["badpackage"], ["org/repo"], logger)
+
+        assert to_remove == []
+        # Invalid-format inputs MUST appear in packages_not_found (API contract).
+        assert "badpackage" in not_found
+        logger.error.assert_called_once()
+        err_msg = logger.error.call_args[0][0]
+        assert "owner/repo" in err_msg
+        # Error must surface marketplace notation symmetrically with install.
+        assert "plugin-name@marketplace" in err_msg
+
+    def test_mixed_canonical_and_marketplace_refs(self):
+        """Batch mixing canonical and marketplace refs processes both correctly."""
+        lockfile = LockFile()
+        dep = LockedDependency(
+            repo_url="acme/mkt-plugin",
+            resolved_commit="abc123",
+            discovered_via="official",
+            marketplace_plugin_name="mkt-plugin",
+        )
+        lockfile.add_dependency(dep)
+        logger = _make_logger()
+
+        to_remove, not_found = _validate_uninstall_packages(
+            ["org/canonical", "mkt-plugin@official"],
+            ["org/canonical", "acme/mkt-plugin"],
+            logger,
+            lockfile,
+        )
+
+        assert len(to_remove) == 2
+        assert not_found == []
+
+    def test_lockfile_none_falls_back_to_registry(self):
+        """When lockfile is None, marketplace refs fall through to registry."""
+        logger = _make_logger()
+
+        with patch("apm_cli.marketplace.resolver.resolve_marketplace_plugin") as mock_resolve:
+            mock_resolve.return_value = MagicMock(canonical="acme/my-plugin")
+            to_remove, _not_found = _validate_uninstall_packages(
+                ["my-plugin@official"], ["acme/my-plugin"], logger, None
+            )
+
+        assert "acme/my-plugin" in to_remove
+        mock_resolve.assert_called_once_with("my-plugin", "official", auth_resolver=None)

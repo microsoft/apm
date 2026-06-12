@@ -226,3 +226,105 @@ class TestDependencyReferenceParsesEMUAndAdoSsh:
         dep = deps[0]
         assert dep.host == "github.com"
         assert dep.repo_url == "contoso/my-pkg"
+
+
+class TestSshUserThreadedThroughCloneUrl:
+    """Defends issue #1383 end-to-end.
+
+    Pre-fix: writing ``myuser@github.com:org/repo`` in apm.yml resulted in
+    ``apm install`` cloning ``git@github.com:org/repo.git`` (wrong user). The
+    custom user was parsed by regex but discarded; the host backend always
+    asked ``build_ssh_url`` for the hardcoded ``git`` user.
+
+    Post-fix: the SSH user is captured at parse time, validated against the
+    supply-chain allowlist, and threaded through to the clone URL.
+
+    These tests parse through the real ``APMPackage.from_apm_yml`` entry
+    point AND then invoke the real ``GitHubBackend.build_clone_ssh_url`` so
+    a regression in either layer surfaces here.
+    """
+
+    def test_custom_scp_user_survives_through_clone_url(self, tmp_path):
+        from apm_cli.core.auth import HostInfo
+        from apm_cli.deps.host_backends import GitHubBackend
+
+        apm_yml = _write_minimal_apm_yml(tmp_path, deps=["myuser@github.com:contoso/my-pkg"])
+        pkg = APMPackage.from_apm_yml(apm_yml)
+        deps = pkg.get_apm_dependencies()
+        assert len(deps) == 1
+        dep = deps[0]
+        assert dep.ssh_user == "myuser"
+
+        host_info = HostInfo(
+            host="github.com",
+            kind="github",
+            has_public_repos=True,
+            api_base="https://api.github.com",
+        )
+        backend = GitHubBackend(host_info)
+        clone_url = backend.build_clone_ssh_url(dep)
+        assert clone_url == "myuser@github.com:contoso/my-pkg.git"
+
+    def test_custom_ssh_protocol_user_with_port_survives_through_clone_url(self, tmp_path):
+        from apm_cli.core.auth import HostInfo
+        from apm_cli.deps.host_backends import GenericGitBackend
+
+        apm_yml = _write_minimal_apm_yml(
+            tmp_path, deps=["ssh://buildbot@git.corp.com:7999/team/my-pkg.git"]
+        )
+        pkg = APMPackage.from_apm_yml(apm_yml)
+        deps = pkg.get_apm_dependencies()
+        assert len(deps) == 1
+        dep = deps[0]
+        assert dep.ssh_user == "buildbot"
+        assert dep.port == 7999
+
+        host_info = HostInfo(
+            host="git.corp.com",
+            kind="generic",
+            has_public_repos=False,
+            api_base="https://git.corp.com",
+        )
+        backend = GenericGitBackend(host_info)
+        clone_url = backend.build_clone_ssh_url(dep)
+        assert clone_url == "ssh://buildbot@git.corp.com:7999/team/my-pkg.git"
+
+    def test_legacy_git_user_clone_url_unchanged_for_backward_compat(self, tmp_path):
+        """Regression guard: the default ``git@`` SSH user MUST stay the
+        default for any dep written without an explicit user. This is what
+        every existing apm.yml in the wild relies on."""
+        from apm_cli.core.auth import HostInfo
+        from apm_cli.deps.host_backends import GitHubBackend
+
+        apm_yml = _write_minimal_apm_yml(tmp_path, deps=["git@github.com:contoso/my-pkg"])
+        pkg = APMPackage.from_apm_yml(apm_yml)
+        deps = pkg.get_apm_dependencies()
+        host_info = HostInfo(
+            host="github.com",
+            kind="github",
+            has_public_repos=True,
+            api_base="https://api.github.com",
+        )
+        backend = GitHubBackend(host_info)
+        clone_url = backend.build_clone_ssh_url(deps[0])
+        assert clone_url == "git@github.com:contoso/my-pkg.git"
+
+    def test_option_injection_user_in_apm_yml_is_rejected(self, tmp_path):
+        """A malicious or typo'd apm.yml that starts the SSH user with ``-``
+        (which OpenSSH would interpret as an option flag like
+        ``-oProxyCommand=...``) MUST fail at parse time, not silently flow
+        into ``git clone`` argv."""
+        apm_yml = _write_minimal_apm_yml(tmp_path, deps=["-oProxy@github.com:contoso/my-pkg"])
+        with pytest.raises(ValueError):
+            APMPackage.from_apm_yml(apm_yml).get_apm_dependencies()
+
+    def test_percent_encoded_ssh_user_is_rejected(self, tmp_path):
+        """``urlparse('ssh://%2DoProxyCommand@host/repo').username`` returns
+        ``-oProxyCommand`` — the percent-decode would smuggle option injection
+        past the allowlist. The parser must reject percent-encoded userinfo
+        BEFORE urlparse decodes it."""
+        apm_yml = _write_minimal_apm_yml(
+            tmp_path, deps=["ssh://%2DoProxyCommand@github.com/contoso/my-pkg.git"]
+        )
+        with pytest.raises(ValueError):
+            APMPackage.from_apm_yml(apm_yml).get_apm_dependencies()

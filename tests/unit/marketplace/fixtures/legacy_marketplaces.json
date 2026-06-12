@@ -1,0 +1,25 @@
+{
+  "version": "1.0",
+  "marketplaces": [
+    {
+      "name": "acme-default",
+      "owner": "acme",
+      "repo": "marketplace"
+    },
+    {
+      "name": "ghes-mkt",
+      "owner": "team",
+      "repo": "internal-marketplace",
+      "host": "ghe.contoso.com",
+      "branch": "release"
+    },
+    {
+      "name": "gitlab-mkt",
+      "owner": "group/sub",
+      "repo": "tools",
+      "host": "gitlab.com",
+      "branch": "develop",
+      "path": "custom/marketplace.json"
+    }
+  ]
+}

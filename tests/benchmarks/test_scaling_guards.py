@@ -7,9 +7,9 @@ below a threshold, catching O(n^2) regressions without full benchmarking.
 Threshold rationale
 -------------------
 For 10x input growth an O(n) algorithm should give ~10x wall-clock growth.
-An O(n^2) algorithm would give ~100x.  We use ``ratio < 25`` as the guard
-so that noisy CI runners do not flake while quadratic regressions are still
-caught.
+An O(n^2) algorithm would give ~100x.  Each guard's threshold is set to
+~30% above the measured baseline ratio so that noisy CI runners do not
+flake while quadratic regressions are still caught.
 """
 
 import os
@@ -93,7 +93,7 @@ class TestChildrenIndexScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_large / t_small
-        assert ratio < 25, (
+        assert ratio < 15, (
             f"Scaling ratio {ratio:.1f}x for 10x input suggests "
             f"O(n^2) regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
@@ -149,7 +149,16 @@ class TestDiscoveryScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_large / t_small
-        assert ratio < 25, (
+        # Threshold 20x: a true O(n^2) regression for 10x input would
+        # produce ~100x. The slack above 10x absorbs measurement noise
+        # plus the fact that small-tree timings (~5ms) are dominated by
+        # per-call overhead (Path.resolve on the base dir, perf-stats
+        # bookkeeping) that does NOT scale with file count; further
+        # optimizing the per-file loop makes the small case faster
+        # proportionally faster than the large case, inflating the
+        # ratio without any algorithmic regression. See #1533 perf
+        # work.
+        assert ratio < 20, (
             f"Scaling ratio {ratio:.1f}x for 10x input suggests "
             f"O(n^2) regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
@@ -181,8 +190,8 @@ class TestConsoleSingletonScaling:
             for _ in range(n):
                 _get_console()
 
-        t_small = _median_time(lambda: call_n(100))
-        t_large = _median_time(lambda: call_n(1000))
+        t_small = _median_time(lambda: call_n(1000))
+        t_large = _median_time(lambda: call_n(10000))
 
         if t_small < 1e-7:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
@@ -227,7 +236,7 @@ class TestComputePackageHashScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_large / t_small
-        assert ratio < 25, (
+        assert ratio < 16, (
             f"Scaling ratio {ratio:.1f}x for 10x input suggests "
             f"O(n^2) regression (t_small={t_small:.6f}s, "
             f"t_large={t_large:.6f}s)"
@@ -314,10 +323,9 @@ class TestShouldExcludeScaling:
     def test_scaling_ratio(self, tmp_path):
         """Depth 5 vs depth 15 with a 2-segment ** pattern.
 
-        For a 3x depth increase, the ratio should be < 25x (sub-quadratic).
-        A quadratic algorithm would give ~9x just from depth, but with
-        2 ** segments the branching factor can compound.  25x is our
-        generous guard against super-quadratic blowup.
+        For a 3x depth increase, the ratio should stay < 2x (sub-quadratic).
+        A quadratic algorithm would give ~9x just from depth; < 2x confirms
+        the matcher scales well below that.
         """
         from apm_cli.utils.exclude import should_exclude, validate_exclude_patterns
 
@@ -335,8 +343,508 @@ class TestShouldExcludeScaling:
             pytest.skip("below measurement threshold -- too fast to measure reliably")
 
         ratio = t_deep / t_shallow
-        assert ratio < 25, (
+        assert ratio < 2, (
             f"Scaling ratio {ratio:.1f}x for 3x depth increase suggests "
             f"super-quadratic regression (t_shallow={t_shallow:.6f}s, "
             f"t_deep={t_deep:.6f}s)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 7. Sparse-cone variant key scaling (_variant_key)
+# ---------------------------------------------------------------------------
+
+
+def _make_sparse_paths(n: int) -> list[str]:
+    """Build a list of *n* distinct top-level sparse-cone paths."""
+    return [f"plugins/pkg-{i}/skills/skill-{i}" for i in range(n)]
+
+
+class TestVariantKeyScaling:
+    """_variant_key must stay O(n log n) in path count.
+
+    The function sorts, deduplicates, JSON-serialises and SHA-256-hashes
+    the sparse path list. For 10x input growth (200->2000) an O(n log n)
+    algorithm gives a theoretical ratio of ~14.3x; an O(n^2) algorithm
+    would give ~100x. We use ``ratio < 25`` as the guard -- tight enough
+    to catch quadratic regressions while leaving ~74% margin above the
+    theoretical baseline.
+
+    Uses repeated calls per sample to push total runtime above the
+    measurement floor and reduce timer noise on fast CI runners.
+    """
+
+    def test_scaling_ratio(self) -> None:
+        from apm_cli.cache.git_cache import _variant_key
+
+        small_paths = _make_sparse_paths(200)
+        large_paths = _make_sparse_paths(2000)
+        repeats = 500
+
+        def call_n(paths: list[str]) -> None:
+            for _ in range(repeats):
+                _variant_key(paths)
+
+        t_small = _median_time(lambda: call_n(small_paths))
+        t_large = _median_time(lambda: call_n(large_paths))
+
+        if t_small < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        ratio = t_large / t_small
+        assert ratio < 25, (
+            f"Scaling ratio {ratio:.1f}x for 10x input suggests "
+            f"O(n^2) regression (t_small={t_small:.6f}s, "
+            f"t_large={t_large:.6f}s)"
+        )
+
+    def test_canonicalization(self) -> None:
+        """Variant key is order-insensitive, duplicate-insensitive, and deterministic."""
+        from apm_cli.cache.git_cache import _variant_key
+
+        # Order-insensitive
+        assert _variant_key(["b", "a"]) == _variant_key(["a", "b"])
+        # Duplicate-insensitive
+        assert _variant_key(["a", "a"]) == _variant_key(["a"])
+        # Distinct sets produce distinct keys
+        assert _variant_key(["a"]) != _variant_key(["b"])
+        # None / empty -> "full"
+        assert _variant_key(None) == "full"
+        assert _variant_key([]) == "full"
+
+
+# ---------------------------------------------------------------------------
+# 8. Sparse-cone checkout variant lookup scaling
+# ---------------------------------------------------------------------------
+
+
+class TestVariantLookupScaling:
+    """Checkout variant resolution must be O(1) per lookup.
+
+    The cache layout places variants at ``<shard>/<sha>/<variant>/``.
+    This guard creates many sibling variant directories for the same
+    SHA and verifies that checking whether one specific variant exists
+    does not degrade with the number of siblings. The ``is_dir()``
+    call is an inode lookup -- O(1) on all supported filesystems.
+    Measured baseline is ~1x; we use ``ratio < 2`` to leave ~30% margin
+    for noisy CI runners while catching any accidental directory scan.
+    """
+
+    def test_scaling_ratio(self, tmp_path: Path) -> None:
+        from apm_cli.cache.git_cache import _variant_key
+
+        sha_dir_small = tmp_path / "small" / "abc123"
+        sha_dir_large = tmp_path / "large" / "abc123"
+        sha_dir_small.mkdir(parents=True)
+        sha_dir_large.mkdir(parents=True)
+
+        target_variant = _variant_key(["target/path"])
+
+        # Small: 50 sibling variants
+        for i in range(50):
+            v = _variant_key([f"path-{i}"])
+            (sha_dir_small / v).mkdir()
+        (sha_dir_small / target_variant).mkdir(exist_ok=True)
+
+        # Large: 500 sibling variants
+        for i in range(500):
+            v = _variant_key([f"path-{i}"])
+            (sha_dir_large / v).mkdir()
+        (sha_dir_large / target_variant).mkdir(exist_ok=True)
+
+        repeats = 2000
+
+        def check_exists(sha_dir: Path) -> None:
+            target = sha_dir / target_variant
+            for _ in range(repeats):
+                target.is_dir()
+
+        t_small = _median_time(lambda: check_exists(sha_dir_small))
+        t_large = _median_time(lambda: check_exists(sha_dir_large))
+
+        if t_small < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        ratio = t_large / t_small
+        assert ratio < 2, (
+            f"Scaling ratio {ratio:.1f}x for 10x sibling variants suggests "
+            f"linear scan regression (t_small={t_small:.6f}s, "
+            f"t_large={t_large:.6f}s)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 9. Hook sidecar re-injection scaling (_reinject_apm_source_from_sidecar)
+# ---------------------------------------------------------------------------
+
+
+def _make_hook_and_sidecar(n: int) -> tuple[dict, dict]:
+    """Build hooks + sidecar dicts with *n* entries per event."""
+    entries = [{"command": f"echo {i}", "pattern": f"*.{i}"} for i in range(n)]
+    sidecar_entries = [
+        {"command": f"echo {i}", "pattern": f"*.{i}", "_apm_source": f"pkg-{i}"} for i in range(n)
+    ]
+    return {"onFileCreate": list(entries)}, {"onFileCreate": list(sidecar_entries)}
+
+
+class TestSidecarReinjectionScaling:
+    """_reinject_apm_source_from_sidecar must stay O(n).
+
+    The function matches disk entries against sidecar entries to restore
+    ownership markers. Uses dict-based lookup for O(n) matching.
+    """
+
+    def test_scaling_ratio(self) -> None:
+        import copy
+
+        from apm_cli.integration.hook_integrator import (
+            _reinject_apm_source_from_sidecar,
+        )
+
+        hooks_s, sidecar_s = _make_hook_and_sidecar(50)
+        hooks_l, sidecar_l = _make_hook_and_sidecar(500)
+        repeats = 200
+
+        def run(hooks, sidecar):
+            for _ in range(repeats):
+                h = copy.deepcopy(hooks)
+                _reinject_apm_source_from_sidecar(h, sidecar)
+
+        t_small = _median_time(lambda: run(hooks_s, sidecar_s))
+        t_large = _median_time(lambda: run(hooks_l, sidecar_l))
+
+        if t_small < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        ratio = t_large / t_small
+        assert ratio < 15, (
+            f"Scaling ratio {ratio:.1f}x for 10x input suggests "
+            f"super-linear regression (t_small={t_small:.6f}s, "
+            f"t_large={t_large:.6f}s)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 10. Hook dedup scaling (inline dedup from _integrate_merged_hooks)
+# ---------------------------------------------------------------------------
+
+
+def _dedup_hook_entries(entries: list[dict]) -> list[dict]:
+    """Reproduce the dedup logic from _integrate_merged_hooks.
+
+    Uses set-based lookup for O(n) deduplication.
+    """
+    import json
+
+    seen_keys: set[str] = set()
+    deduped: list = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            deduped.append(entry)
+            continue
+        cmp = {k: v for k, v in sorted(entry.items()) if k != "_apm_source"}
+        source = entry.get("_apm_source")
+        dedup_key = json.dumps({"s": source, "c": cmp}, sort_keys=True)
+        if dedup_key not in seen_keys:
+            seen_keys.add(dedup_key)
+            deduped.append(entry)
+    return deduped
+
+
+class TestHookDedupScaling:
+    """Hook entry deduplication must stay O(n).
+
+    Previously used a list scan (O(n^2)); now uses set-based lookup.
+    This guard catches regressions back to quadratic.
+    """
+
+    def test_scaling_ratio(self) -> None:
+        small_entries = [
+            {"command": f"echo {i}", "pattern": f"*.{i}", "_apm_source": f"pkg-{i}"}
+            for i in range(50)
+        ]
+        large_entries = [
+            {"command": f"echo {i}", "pattern": f"*.{i}", "_apm_source": f"pkg-{i}"}
+            for i in range(500)
+        ]
+        repeats = 200
+
+        def run(entries):
+            for _ in range(repeats):
+                _dedup_hook_entries(entries)
+
+        t_small = _median_time(lambda: run(small_entries))
+        t_large = _median_time(lambda: run(large_entries))
+
+        if t_small < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        ratio = t_large / t_small
+        assert ratio < 15, (
+            f"Scaling ratio {ratio:.1f}x for 10x input suggests "
+            f"quadratic regression (t_small={t_small:.6f}s, "
+            f"t_large={t_large:.6f}s)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 11. Dependency tree flattening scaling (flatten_dependencies)
+# ---------------------------------------------------------------------------
+
+
+def _make_dependency_tree(n: int, depths: int = 3):
+    """Build a synthetic DependencyTree with *n* nodes across *depths* levels."""
+    from apm_cli.deps.dependency_graph import DependencyNode, DependencyTree
+    from apm_cli.models.apm_package import APMPackage, DependencyReference
+
+    root = APMPackage(name="root", version="1.0.0")
+    tree = DependencyTree(root_package=root)
+    per_level = max(1, n // depths)
+
+    for d in range(1, depths + 1):
+        for i in range(per_level):
+            idx = (d - 1) * per_level + i
+            dep_ref = DependencyReference(repo_url=f"org/pkg-{idx}")
+            pkg = APMPackage(name=f"pkg-{idx}", version="1.0.0")
+            node = DependencyNode(package=pkg, dependency_ref=dep_ref, depth=d)
+            tree.add_node(node)
+
+    return tree
+
+
+class TestFlattenDependenciesScaling:
+    """flatten_dependencies must stay O(n log n).
+
+    BFS traversal with sort per depth level. This guard catches
+    accidental quadratic regressions in the core install path.
+    Uses same depth for both sizes to isolate node-count scaling.
+    """
+
+    def test_scaling_ratio(self) -> None:
+        from apm_cli.deps.apm_resolver import APMDependencyResolver
+
+        resolver = APMDependencyResolver.__new__(APMDependencyResolver)
+
+        small_tree = _make_dependency_tree(50, depths=3)
+        large_tree = _make_dependency_tree(500, depths=3)
+        repeats = 200
+
+        def run(tree):
+            for _ in range(repeats):
+                resolver.flatten_dependencies(tree)
+
+        t_small = _median_time(lambda: run(small_tree))
+        t_large = _median_time(lambda: run(large_tree))
+
+        if t_small < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        ratio = t_large / t_small
+        assert ratio < 21, (
+            f"Scaling ratio {ratio:.1f}x for 10x input suggests "
+            f"O(n^2) regression (t_small={t_small:.6f}s, "
+            f"t_large={t_large:.6f}s)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 12. JSON key diff scaling (json_key_diff)
+# ---------------------------------------------------------------------------
+
+
+def _make_flat_diff_dict(n: int, prefix: str = "") -> dict:
+    """Build a flat dict with *n* keys for diff benchmarking."""
+    return {f"{prefix}key-{i}": f"value-{i}" for i in range(n)}
+
+
+class TestJsonKeyDiffScaling:
+    """json_key_diff must stay O(n log n) in total key count.
+
+    Recursive tree walk that emits per-leaf differences. The
+    sorted(set(old.keys()) | set(new.keys())) at each level adds
+    an n log n factor. This guard catches quadratic regressions.
+    """
+
+    def test_scaling_ratio(self) -> None:
+        from apm_cli.marketplace.drift_check import json_key_diff
+
+        small_a = _make_flat_diff_dict(100)
+        small_b = _make_flat_diff_dict(100, "alt-")
+        large_a = _make_flat_diff_dict(1000)
+        large_b = _make_flat_diff_dict(1000, "alt-")
+        repeats = 200
+
+        def run(a, b):
+            for _ in range(repeats):
+                json_key_diff(a, b)
+
+        t_small = _median_time(lambda: run(small_a, small_b))
+        t_large = _median_time(lambda: run(large_a, large_b))
+
+        if t_small < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        ratio = t_large / t_small
+        assert ratio < 22, (
+            f"Scaling ratio {ratio:.1f}x for 10x key count suggests "
+            f"quadratic regression (t_small={t_small:.6f}s, "
+            f"t_large={t_large:.6f}s)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 13. Render instructions block scaling (render_instructions_block)
+# ---------------------------------------------------------------------------
+
+
+class TestRenderInstructionsScaling:
+    """render_instructions_block must stay O(n log n).
+
+    Groups by pattern + sorts within each group. Central to
+    AGENTS.md / CLAUDE.md compilation.
+    """
+
+    def test_scaling_ratio(self, tmp_path: Path) -> None:
+        from apm_cli.compilation.template_builder import render_instructions_block
+        from apm_cli.primitives.models import Instruction
+
+        def make_instructions(n: int) -> list[Instruction]:
+            instrs = []
+            for i in range(n):
+                pattern = "src/**/*.py" if i % 3 == 0 else ("tests/**/*.py" if i % 3 == 1 else "")
+                instrs.append(
+                    Instruction(
+                        name=f"instr-{i}",
+                        file_path=tmp_path / f"pkg-{i % 20}" / f"instr-{i}.instructions.md",
+                        description=f"Instruction {i}",
+                        apply_to=pattern,
+                        content=f"# Instruction {i}\nDo thing {i}.\n",
+                    )
+                )
+            return instrs
+
+        small = make_instructions(50)
+        large = make_instructions(500)
+
+        def emit(inst):
+            return [f"<!-- {inst.name} -->", inst.content, ""]
+
+        repeats = 200
+
+        def run(instrs):
+            for _ in range(repeats):
+                render_instructions_block(instrs, base_dir=tmp_path, emit_instruction=emit)
+
+        t_small = _median_time(lambda: run(small))
+        t_large = _median_time(lambda: run(large))
+
+        if t_small < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        ratio = t_large / t_small
+        assert ratio < 21, (
+            f"Scaling ratio {ratio:.1f}x for 10x input suggests "
+            f"O(n^2) regression (t_small={t_small:.6f}s, "
+            f"t_large={t_large:.6f}s)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 14. LockFile.get_installed_paths scaling
+# ---------------------------------------------------------------------------
+
+
+class TestGetInstalledPathsScaling:
+    """LockFile.get_installed_paths must stay O(n log n).
+
+    Iterates all deps (via sorted get_all_dependencies), computes
+    install paths, deduplicates via set. Called from multiple code paths.
+    """
+
+    def test_scaling_ratio(self, tmp_path: Path) -> None:
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+        def make_lockfile(n: int) -> LockFile:
+            lf = LockFile()
+            for i in range(n):
+                lf.add_dependency(
+                    LockedDependency(
+                        repo_url=f"https://github.com/org/pkg-{i}",
+                        depth=(i % 5) + 1,
+                    )
+                )
+            return lf
+
+        small_lf = make_lockfile(50)
+        large_lf = make_lockfile(500)
+        modules_dir = tmp_path / "apm_modules"
+        modules_dir.mkdir()
+        repeats = 20
+
+        def run(lf):
+            for _ in range(repeats):
+                lf.get_installed_paths(modules_dir)
+
+        t_small = _median_time(lambda: run(small_lf))
+        t_large = _median_time(lambda: run(large_lf))
+
+        if t_small < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        ratio = t_large / t_small
+        assert ratio < 21, (
+            f"Scaling ratio {ratio:.1f}x for 10x input suggests "
+            f"O(n^2) regression (t_small={t_small:.6f}s, "
+            f"t_large={t_large:.6f}s)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 15. Hook data rewriting scaling (_rewrite_hooks_data)
+# ---------------------------------------------------------------------------
+
+
+class TestRewriteHooksDataScaling:
+    """_rewrite_hooks_data must stay O(E * M) -- linear in total matchers.
+
+    Deep-copies + rewrites command paths for each event/matcher/key.
+    This guard catches regressions from the deep copy or nested loop.
+    """
+
+    def test_scaling_ratio(self, tmp_path: Path) -> None:
+        from apm_cli.integration.hook_integrator import HookIntegrator
+
+        integrator = HookIntegrator()
+
+        def make_hooks_data(events: int, matchers: int) -> dict:
+            data: dict = {"hooks": {}}
+            for e in range(events):
+                data["hooks"][f"onEvent{e}"] = [
+                    {"command": f"echo {m}", "pattern": f"*.{m}"} for m in range(matchers)
+                ]
+            return data
+
+        pkg_path = tmp_path / "pkg"
+        pkg_path.mkdir()
+
+        small_data = make_hooks_data(10, 5)
+        large_data = make_hooks_data(50, 20)
+        repeats = 100
+
+        def run(data):
+            for _ in range(repeats):
+                integrator._rewrite_hooks_data(data, pkg_path, "test-pkg", "copilot")
+
+        t_small = _median_time(lambda: run(small_data))
+        t_large = _median_time(lambda: run(large_data))
+
+        if t_small < 1e-7:
+            pytest.skip("below measurement threshold -- too fast to measure reliably")
+
+        # 10*5=50 -> 50*20=1000: 20x growth in total matchers
+        ratio = t_large / t_small
+        assert ratio < 30, (
+            f"Scaling ratio {ratio:.1f}x for 20x total matchers suggests "
+            f"super-linear regression (t_small={t_small:.6f}s, "
+            f"t_large={t_large:.6f}s)"
         )

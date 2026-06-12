@@ -13,7 +13,6 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 from urllib.parse import urlparse
 
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
@@ -43,6 +42,10 @@ class LinkResolutionContext:
     # are a true 1:1 pair. Compilation must leave this False because the
     # source_file is a synthetic AGENTS.md output dir, not per-link provenance.
     enable_asset_rewrite: bool = False
+    # Source subtree copied whole to the target. Relative links whose targets
+    # stay inside this subtree already resolve after copy and should remain
+    # portable bundle-local links.
+    preserved_source_root: Path | None = None
 
 
 class UnifiedLinkResolver:
@@ -97,7 +100,11 @@ class UnifiedLinkResolver:
                 self.context_registry[qualified_name] = context.file_path
 
     def resolve_links_for_installation(
-        self, content: str, source_file: Path, target_file: Path
+        self,
+        content: str,
+        source_file: Path,
+        target_file: Path,
+        preserved_source_root: Path | None = None,
     ) -> str:
         """Resolve links when copying files during installation.
 
@@ -117,6 +124,7 @@ class UnifiedLinkResolver:
             content: File content to process
             source_file: Original file path in apm_modules/
             target_file: Target path in .github/
+            preserved_source_root: Source subtree copied intact with the target.
 
         Returns:
             Content with resolved links
@@ -129,6 +137,7 @@ class UnifiedLinkResolver:
             available_contexts=self.context_registry,
             package_root=self.package_root,
             enable_asset_rewrite=self.package_root is not None,
+            preserved_source_root=preserved_source_root,
         )
 
         return self._rewrite_markdown_links(content, ctx)
@@ -493,6 +502,13 @@ class UnifiedLinkResolver:
 
         if not candidate.exists() or not candidate.is_file():
             return None
+
+        if ctx.preserved_source_root is not None:
+            try:
+                ensure_path_within(candidate, ctx.preserved_source_root)
+                return None
+            except PathTraversalError:
+                pass
 
         try:
             ensure_path_within(candidate, ctx.package_root)

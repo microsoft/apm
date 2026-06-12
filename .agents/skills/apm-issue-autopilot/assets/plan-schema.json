@@ -1,0 +1,127 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "issue-solution-plan",
+  "description": "Persisted per-issue task DAG emitted by the Plan stage (python-architect synthesis). Structured in waves with per-task staffing, interdependencies, and checkpoints. This is the B4 PLAN MEMENTO the pipeline child reloads before every wave and every spawn.",
+  "type": "object",
+  "required": ["kind", "issue", "acceptance_shape", "tasks", "waves", "replan_count"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "issue-solution-plan" },
+    "issue": { "type": "integer" },
+    "design_brief_ref": {
+      "type": "string",
+      "description": "Path/anchor in plan.md to the Ideate design_brief."
+    },
+    "acceptance_shape": {
+      "type": "array",
+      "description": "Observable conditions that define DONE for the whole issue (the B5 contract from Ideate). Verified at acceptance close before the PR opens.",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "type", "staff", "deps", "wave", "acceptance", "checkpoint", "files_hint"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "description": "Stable kebab-case id, unique within the plan." },
+          "title": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["bug", "feature", "docs", "refactor", "performance"],
+            "description": "Selects the per-task typed coverage gate (implement-<type>.md)."
+          },
+          "files_hint": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "REQUIRED. The complete set of files/globs this task is allowed to touch. The wave gate enforces this deterministically (git diff --name-only): a task that touches a file outside its files_hint, or two tasks in a wave whose files_hint overlap, is a planning error and fails the wave. Shared/generated files must be assigned to exactly ONE task in the wave."
+          },
+          "staff": {
+            "type": "string",
+            "description": "Persona that implements this task. Default python-architect; may be devx-ux-expert for surface/UX tasks. Name only -- the repo persona is referenced, never re-implemented.",
+            "default": "python-architect"
+          },
+          "role_class": {
+            "type": "string",
+            "enum": ["trivial", "implementer", "planner"],
+            "default": "implementer",
+            "description": "B12 model-routing class the pipeline maps to a concrete model via model-routing.md. implementer (default) for normal coding tasks; trivial for docs-only/pure-text tasks; planner ONLY for security/auth/supply-chain/schema-migration tasks (which also require model_override + stakes_justification). The architect sets the class; the pipeline resolves the SKU. Do not over-route."
+          },
+          "model_override": {
+            "type": "string",
+            "description": "Optional explicit concrete model SKU, overriding the role_class mapping. Use ONLY for a high-stakes task; when present, stakes_justification is REQUIRED."
+          },
+          "stakes_justification": {
+            "type": "string",
+            "description": "One line stating why this task's stakes justify model_override. REQUIRED whenever model_override is set."
+          },
+          "deps": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Ids of tasks that MUST complete (and integrate) before this task starts. Drives the topological wave assignment."
+          },
+          "wave": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Wave index. All tasks in one wave MUST be mutually independent (no intra-wave deps) so their branches integrate without conflict by construction."
+          },
+          "acceptance": {
+            "type": "string",
+            "description": "How this single task is proven (the typed coverage gate it must satisfy)."
+          },
+          "checkpoint": {
+            "type": "string",
+            "description": "What the wave gate verifies for this task after integration."
+          }
+        },
+        "allOf": [
+          {
+            "if": { "required": ["model_override"] },
+            "then": { "required": ["stakes_justification"] }
+          }
+        ]
+      }
+    },
+    "waves": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["wave", "task_ids", "goal"],
+        "additionalProperties": false,
+        "properties": {
+          "wave": { "type": "integer", "minimum": 1 },
+          "task_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "goal": { "type": "string", "description": "One line: what integrated state this wave establishes." },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "integrated", "superseded"],
+            "description": "Resume marker. 'integrated' = fast-forwarded onto the issue branch (immutable evidence); the executor never re-runs it. 'superseded' = replaced by a re-plan. Defaults to pending.",
+            "default": "pending"
+          },
+          "base_sha": {
+            "type": "string",
+            "description": "The issue-branch sha this wave was integrated on top of (set at run time). Lets a crashed pipeline reset a half-done wave to a known-clean base."
+          },
+          "integration_check": {
+            "type": "string",
+            "description": "Optional extra check the orchestrator runs after integrating the wave (e.g. full suite, a specific scenario)."
+          }
+        }
+      }
+    },
+    "replan_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of re-plans-from-failed-wave consumed. Hard cap 2 (see wave-gate-rubric.md)."
+    },
+    "active_from_wave": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Resume point. The executor starts at this wave, not wave 1; waves below it are already 'integrated' on the issue branch. A re-plan re-emits this wave and later waves and sets this to the failed wave's index."
+    }
+  }
+}

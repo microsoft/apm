@@ -9,8 +9,24 @@ from unittest.mock import MagicMock, call, patch  # noqa: F401
 
 import pytest
 
-from apm_cli.install.services import _deployed_path_entry
+from apm_cli.install.services import IntegratorBundle, _deployed_path_entry
 from apm_cli.integration.targets import KNOWN_TARGETS
+
+# ---------------------------------------------------------------------------
+# Helper: convert legacy integrators dict to IntegratorBundle
+# ---------------------------------------------------------------------------
+
+
+def _to_bundle(d: dict) -> IntegratorBundle:
+    return IntegratorBundle(
+        prompt=d["prompt_integrator"],
+        agent=d["agent_integrator"],
+        skill=d["skill_integrator"],
+        instruction=d["instruction_integrator"],
+        command=d["command_integrator"],
+        hook=d["hook_integrator"],
+    )
+
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -50,6 +66,35 @@ def _make_cowork_target(cowork_root: Path) -> Any:
     return replace(KNOWN_TARGETS["copilot-cowork"], resolved_deploy_root=cowork_root)
 
 
+def _make_copilot_app_target(app_root: Path) -> Any:
+    """Return a TargetProfile with resolved_deploy_root set for copilot-app."""
+    return replace(KNOWN_TARGETS["copilot-app"], resolved_deploy_root=app_root)
+
+
+# ---------------------------------------------------------------------------
+# IntegratorBundle frozen contract
+# ---------------------------------------------------------------------------
+
+
+class TestIntegratorBundleFrozen:
+    """IntegratorBundle must be immutable (frozen=True contract)."""
+
+    def test_cannot_mutate_field(self) -> None:
+        from dataclasses import FrozenInstanceError
+        from unittest.mock import MagicMock
+
+        bundle = IntegratorBundle(
+            prompt=MagicMock(),
+            agent=MagicMock(),
+            skill=MagicMock(),
+            instruction=MagicMock(),
+            command=MagicMock(),
+            hook=MagicMock(),
+        )
+        with pytest.raises(FrozenInstanceError):
+            bundle.prompt = MagicMock()  # type: ignore[misc]
+
+
 # ---------------------------------------------------------------------------
 # TestDeployedPathEntry
 # ---------------------------------------------------------------------------
@@ -79,6 +124,28 @@ class TestDeployedPathEntry:
         ):
             result = _deployed_path_entry(target_path, project_root, targets=[cowork_target])
         assert result == "cowork://skills/my-skill/SKILL.md"
+
+    def test_copilot_app_uri_for_out_of_tree_synthetic_path(self, tmp_path: Path) -> None:
+        """copilot-app synthesises ``<root>/workflows/<id>`` paths that
+        live outside the project tree; ``_deployed_path_entry`` must
+        encode them as ``copilot-app-db://workflows/<id>`` so the
+        lockfile pipeline does not try to make them project-relative."""
+        app_root = tmp_path / "copilot-data"
+        app_root.mkdir()
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        wf_id = "apm--acme-org--demo-pkg--daily-digest"
+        target_path = app_root / "workflows" / wf_id
+        app_target = _make_copilot_app_target(app_root)
+
+        result = _deployed_path_entry(target_path, project_root, targets=[app_target])
+
+        assert result == f"copilot-app-db://workflows/{wf_id}"
+
+        # Round-trip: the URI must decode back to the original id.
+        from apm_cli.integration.copilot_app_db import from_lockfile_uri
+
+        assert from_lockfile_uri(result) == wf_id
 
     def test_runtime_error_when_no_matching_target(self, tmp_path: Path) -> None:
         """Out-of-tree path with no dynamic-root target must raise, not silently store an absolute path."""
@@ -194,6 +261,7 @@ class TestAmendment6Warning:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
 
         # Mock dispatch table to skip integration loops
@@ -210,7 +278,7 @@ class TestAmendment6Warning:
                 package_name="test-pkg",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -234,7 +302,7 @@ class TestAmendment6Warning:
                 package_name="test-pkg2",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -272,6 +340,7 @@ class TestAmendment6Warning:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
 
         with patch(
@@ -285,7 +354,7 @@ class TestAmendment6Warning:
                 diagnostics=MagicMock(),
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -320,6 +389,7 @@ class TestAmendment6Warning:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
 
         with patch(
@@ -333,7 +403,7 @@ class TestAmendment6Warning:
                 diagnostics=MagicMock(),
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -367,6 +437,7 @@ class TestAmendment6Warning:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
 
         # ctx=None should not raise
@@ -381,7 +452,7 @@ class TestAmendment6Warning:
                 diagnostics=MagicMock(),
                 logger=logger,
                 ctx=None,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -415,6 +486,7 @@ class TestAmendment6Warning:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
 
         with patch(
@@ -429,7 +501,7 @@ class TestAmendment6Warning:
                 package_name="my-awesome-pkg",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -468,6 +540,7 @@ class TestAmendment6Warning:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
 
         with patch(
@@ -482,7 +555,7 @@ class TestAmendment6Warning:
                 package_name="diag-pkg",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -527,6 +600,7 @@ class TestAmendment6Warning:
         skill_result.target_paths = []
         skill_result.skill_created = False
         skill_result.sub_skills_promoted = 0
+        skill_result.bin_deployed = 0
         integrators["skill_integrator"].integrate_package_skill.return_value = skill_result
 
         with patch(
@@ -541,7 +615,7 @@ class TestAmendment6Warning:
                 package_name="prompts-only-pkg",
                 logger=logger,
                 ctx=ctx,
-                **integrators,
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )

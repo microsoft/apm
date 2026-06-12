@@ -9,10 +9,14 @@ import pytest
 from apm_cli.utils.diagnostics import (
     CATEGORY_AUTH,
     CATEGORY_COLLISION,
+    CATEGORY_DRIFT,
     CATEGORY_ERROR,
     CATEGORY_INFO,
     CATEGORY_OVERWRITE,
     CATEGORY_WARNING,
+    DRIFT_MODIFIED,
+    DRIFT_ORPHANED,
+    DRIFT_UNINTEGRATED,
     Diagnostic,
     DiagnosticCollector,
     _group_by_package,
@@ -583,3 +587,325 @@ class TestAuthCategory:
         auth_idx = next(i for i, t in enumerate(call_order) if "authentication" in t)
         coll_idx = next(i for i, t in enumerate(call_order) if "skipped" in t)
         assert auth_idx < coll_idx, "auth should render before collision"
+
+
+_MOCK_BASE = "apm_cli.utils.diagnostics"
+
+
+# ── Drift category ───────────────────────────────────────────────────
+
+
+class TestDriftCategory:
+    """Tests for DiagnosticCollector.drift() and drift_count."""
+
+    def test_drift_records_modified(self):
+        dc = DiagnosticCollector()
+        dc.drift("readme.md", kind=DRIFT_MODIFIED, package="pkg-a")
+        assert dc.has_diagnostics is True
+        assert dc.drift_count == 1
+        d = dc._diagnostics[0]
+        assert d.category == CATEGORY_DRIFT
+        assert d.message == "readme.md"
+        assert d.severity == DRIFT_MODIFIED
+        assert d.package == "pkg-a"
+
+    def test_drift_records_unintegrated(self):
+        dc = DiagnosticCollector()
+        dc.drift("tools/helper.sh", kind=DRIFT_UNINTEGRATED, package="tooling")
+        assert dc.drift_count == 1
+        d = dc._diagnostics[0]
+        assert d.severity == DRIFT_UNINTEGRATED
+
+    def test_drift_records_orphaned_no_package(self):
+        dc = DiagnosticCollector()
+        dc.drift(".github/workflows/ci.yml", kind=DRIFT_ORPHANED)
+        assert dc.drift_count == 1
+        d = dc._diagnostics[0]
+        assert d.severity == DRIFT_ORPHANED
+        assert d.package == ""
+
+    def test_drift_with_detail(self):
+        dc = DiagnosticCollector()
+        dc.drift("file.md", kind=DRIFT_MODIFIED, detail="--- a\n+++ b")
+        d = dc._diagnostics[0]
+        assert d.detail == "--- a\n+++ b"
+
+    def test_drift_count_zero_with_no_drift(self):
+        dc = DiagnosticCollector()
+        dc.warn("unrelated")
+        assert dc.drift_count == 0
+
+    def test_drift_count_multiple(self):
+        dc = DiagnosticCollector()
+        dc.drift("a.md", kind=DRIFT_MODIFIED)
+        dc.drift("b.md", kind=DRIFT_ORPHANED)
+        dc.warn("other")
+        assert dc.drift_count == 2
+
+    def test_drift_thread_safe(self):
+        dc = DiagnosticCollector()
+        errors = []
+
+        def add():
+            try:
+                dc.drift("f.md", kind=DRIFT_MODIFIED)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=add) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert not errors
+        assert dc.drift_count == 10
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_render_drift_group_summary(self, mock_info, mock_warning, mock_echo, mock_console):
+        dc = DiagnosticCollector()
+        dc.drift("readme.md", kind=DRIFT_MODIFIED, package="pkg-a")
+        dc.drift("tools.sh", kind=DRIFT_ORPHANED)
+        dc.render_summary()
+        warning_texts = [str(c) for c in mock_warning.call_args_list]
+        assert any("Drift detected" in t for t in warning_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_render_drift_shows_modified_count(
+        self, mock_info, mock_warning, mock_echo, mock_console
+    ):
+        dc = DiagnosticCollector()
+        dc.drift("a.md", kind=DRIFT_MODIFIED, package="pkg")
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert any("modified" in t.lower() for t in echo_texts)
+        assert any("pkg" in t for t in echo_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_render_drift_shows_unintegrated(
+        self, mock_info, mock_warning, mock_echo, mock_console
+    ):
+        dc = DiagnosticCollector()
+        dc.drift("b.sh", kind=DRIFT_UNINTEGRATED)
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert any("unintegrated" in t.lower() for t in echo_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_render_drift_verbose_shows_detail(
+        self, mock_info, mock_warning, mock_echo, mock_console
+    ):
+        dc = DiagnosticCollector(verbose=True)
+        dc.drift("file.md", kind=DRIFT_MODIFIED, detail="diff line 1\ndiff line 2")
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert any("diff line 1" in t for t in echo_texts)
+        assert any("diff line 2" in t for t in echo_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_render_drift_non_verbose_no_detail(
+        self, mock_info, mock_warning, mock_echo, mock_console
+    ):
+        dc = DiagnosticCollector(verbose=False)
+        dc.drift("file.md", kind=DRIFT_MODIFIED, detail="secret diff")
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert not any("secret diff" in t for t in echo_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_render_drift_orphaned_marker(self, mock_info, mock_warning, mock_echo, mock_console):
+        dc = DiagnosticCollector()
+        dc.drift("orphan.md", kind=DRIFT_ORPHANED)
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert any("O" in t and "orphan.md" in t for t in echo_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_render_drift_no_package_prefix(self, mock_info, mock_warning, mock_echo, mock_console):
+        """Drift item with no package: no [pkg] prefix in output."""
+        dc = DiagnosticCollector()
+        dc.drift("orphan.md", kind=DRIFT_ORPHANED, package="")
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        # The file message should appear but no [pkg] bracket
+        assert any("orphan.md" in t for t in echo_texts)
+
+
+# ── Security category verbose rendering ─────────────────────────────
+
+
+class TestSecurityCategoryVerbose:
+    """Tests covering verbose paths in _render_security_group."""
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_critical_verbose_shows_per_file(
+        self, mock_info, mock_warning, mock_echo, mock_console
+    ):
+        dc = DiagnosticCollector(verbose=True)
+        dc.security("malicious.md", severity="critical", package="pkg-x")
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert any("malicious.md" in t for t in echo_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_critical_verbose_shows_package_group(
+        self, mock_info, mock_warning, mock_echo, mock_console
+    ):
+        dc = DiagnosticCollector(verbose=True)
+        dc.security("a.md", severity="critical", package="mypkg")
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert any("mypkg" in t for t in echo_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_critical_verbose_no_package_no_prefix(
+        self, mock_info, mock_warning, mock_echo, mock_console
+    ):
+        """Critical finding with empty package → no [pkg] header line."""
+        dc = DiagnosticCollector(verbose=True)
+        dc.security("badfile.md", severity="critical", package="")
+        dc.render_summary()
+        # Should not error; the file message should appear
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert any("badfile.md" in t for t in echo_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_warning_verbose_shows_files(self, mock_info, mock_warning, mock_echo, mock_console):
+        dc = DiagnosticCollector(verbose=True)
+        dc.security("warn-file.md", severity="warning", package="wpkg")
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert any("warn-file.md" in t for t in echo_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_warning_verbose_shows_package_header(
+        self, mock_info, mock_warning, mock_echo, mock_console
+    ):
+        dc = DiagnosticCollector(verbose=True)
+        dc.security("warn-file.md", severity="warning", package="wpkg2")
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert any("wpkg2" in t for t in echo_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_info_security_verbose_shows_count(
+        self, mock_info, mock_warning, mock_echo, mock_console
+    ):
+        dc = DiagnosticCollector(verbose=True)
+        dc.security("unusual.md", severity="info", package="")
+        dc.render_summary()
+        info_texts = [str(c) for c in mock_info.call_args_list]
+        assert any("unusual characters" in t for t in info_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_info_security_non_verbose_not_shown(
+        self, mock_info, mock_warning, mock_echo, mock_console
+    ):
+        dc = DiagnosticCollector(verbose=False)
+        dc.security("unusual.md", severity="info", package="")
+        dc.render_summary()
+        info_texts = [str(c) for c in mock_info.call_args_list]
+        assert not any("unusual characters" in t for t in info_texts)
+
+
+# ── Warning/Info detail rendering ────────────────────────────────────
+
+
+class TestRenderWarningWithDetail:
+    """Tests covering the detail-in-verbose path for warnings."""
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_warning_verbose_shows_detail(self, mock_info, mock_warning, mock_echo, mock_console):
+        dc = DiagnosticCollector(verbose=True)
+        dc.warn("something wrong", package="pkg", detail="extra context")
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert any("extra context" in t for t in echo_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_warning_non_verbose_no_detail(self, mock_info, mock_warning, mock_echo, mock_console):
+        dc = DiagnosticCollector(verbose=False)
+        dc.warn("msg", detail="hidden detail")
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert not any("hidden detail" in t for t in echo_texts)
+
+
+class TestRenderInfoWithDetail:
+    """Tests covering the detail-in-verbose path for info category."""
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_info_verbose_shows_detail(self, mock_info, mock_warning, mock_echo, mock_console):
+        dc = DiagnosticCollector(verbose=True)
+        # Directly append an INFO diagnostic with detail to bypass the warn-only path
+        from apm_cli.utils.diagnostics import CATEGORY_INFO, Diagnostic
+
+        dc._diagnostics.append(
+            Diagnostic(message="hint", category=CATEGORY_INFO, detail="more info")
+        )
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert any("more info" in t for t in echo_texts)
+
+    @patch(f"{_MOCK_BASE}._get_console", return_value=None)
+    @patch(f"{_MOCK_BASE}._rich_echo")
+    @patch(f"{_MOCK_BASE}._rich_warning")
+    @patch(f"{_MOCK_BASE}._rich_info")
+    def test_info_non_verbose_no_detail(self, mock_info, mock_warning, mock_echo, mock_console):
+        dc = DiagnosticCollector(verbose=False)
+        from apm_cli.utils.diagnostics import CATEGORY_INFO, Diagnostic
+
+        dc._diagnostics.append(Diagnostic(message="hint", category=CATEGORY_INFO, detail="secret"))
+        dc.render_summary()
+        echo_texts = [str(c) for c in mock_echo.call_args_list]
+        assert not any("secret" in t for t in echo_texts)

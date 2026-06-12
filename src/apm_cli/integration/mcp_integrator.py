@@ -10,23 +10,24 @@ The existing adapters (client/, package_manager/) and registry operations
 """
 
 import builtins
+import copy
+import json
 import logging
 import re
 import shutil
 import warnings
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
-
-import click  # noqa: F401
 
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+from apm_cli.integration._shared import deduplicate_deps, resolve_locked_apm_yml_paths
+from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.console import (
-    _get_console,
-    _rich_error,  # noqa: F401
-    _rich_info,  # noqa: F401
+    _get_console,  # noqa: F401 -- re-exported; mcp_integrator_install imports this via lazy import
+    _rich_error,
+    _rich_info,
     _rich_success,
-    _rich_warning,  # noqa: F401
 )
 
 _log = logging.getLogger(__name__)
@@ -47,6 +48,145 @@ def _is_vscode_available(project_root: Path | str | None = None) -> bool:
     """
     root = Path(project_root) if project_root is not None else Path.cwd()
     return shutil.which("code") is not None or (root / ".vscode").is_dir()
+
+
+def _clean_json_mcp_config(
+    config_path: Path,
+    stale_names: builtins.set,
+    logger,
+    label: str,
+    servers_key: str = "mcpServers",
+    trailing_newline: bool = False,
+    use_rich: bool = False,
+) -> int:
+    """Remove stale entries from a JSON-based MCP config file.
+
+    Args:
+        config_path: Path to the JSON config file.
+        stale_names: Set of server names to remove (expanded form).
+        logger: Command logger for progress messages.
+        label: Human-readable config label used in log messages.
+        servers_key: Key under which MCP servers are stored (default: ``"mcpServers"``).
+        trailing_newline: When True, append a trailing newline after JSON serialisation.
+        use_rich: When True, emit removal notices via ``_rich_success``; otherwise use
+            ``logger.progress``.
+
+    Returns:
+        Number of entries removed.
+    """
+    if not config_path.exists():
+        return 0
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        servers = config.get(servers_key, {})
+        removed = [n for n in stale_names if n in servers]
+        for name in removed:
+            del servers[name]
+        if removed:
+            text = json.dumps(config, indent=2)
+            if trailing_newline:
+                text += "\n"
+            config_path.write_text(text, encoding="utf-8")
+            for name in removed:
+                msg = f"Removed stale MCP server '{name}' from {label}"
+                if use_rich:
+                    _rich_success(msg, symbol="check")
+                else:
+                    logger.progress(msg)
+        return len(removed)
+    except Exception:
+        _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
+        return 0
+
+
+def _clean_toml_mcp_config(
+    config_path: Path,
+    stale_names: builtins.set,
+    label: str,
+    logger=None,
+    use_rich: bool = True,
+) -> int:
+    """Remove stale entries from a TOML-based MCP config file.
+
+    Args:
+        config_path: Path to the TOML config file.
+        stale_names: Set of server names to remove (expanded form).
+        label: Human-readable config label used in log messages.
+        logger: Optional command logger for progress messages. When provided
+            and *use_rich* is False, removal notices use ``logger.progress``.
+        use_rich: When True (default), emit removal notices via ``_rich_success``;
+            otherwise use ``logger.progress``.
+
+    Returns:
+        Number of entries removed.
+    """
+    if not config_path.exists():
+        return 0
+    try:
+        import toml as _toml
+
+        config = _toml.loads(config_path.read_text(encoding="utf-8"))
+        servers = config.get("mcp_servers", {})
+        removed = [n for n in stale_names if n in servers]
+        for name in removed:
+            del servers[name]
+        if removed:
+            config_path.write_text(_toml.dumps(config), encoding="utf-8")
+            for name in removed:
+                msg = f"Removed stale MCP server '{name}' from {label}"
+                if use_rich:
+                    _rich_success(msg, symbol="check")
+                elif logger is not None:
+                    logger.progress(msg)
+        return len(removed)
+    except Exception:
+        _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
+        return 0
+
+
+def _clean_claude_config(
+    config_path: Path,
+    stale_names: builtins.set,
+    logger,
+    is_user_scope: bool = False,
+) -> int:
+    """Remove stale entries from a Claude Code JSON config file.
+
+    Handles both the project-level ``.mcp.json`` and the user-level
+    ``~/.claude.json``, which share the same JSON structure but differ in
+    scope-validation requirements and log labels.
+
+    Args:
+        config_path: Path to the Claude JSON config file.
+        stale_names: Set of server names to remove (expanded form).
+        logger: Command logger for progress messages.
+        is_user_scope: When True, validates that the top-level config is a dict
+            (``~/.claude.json`` guard) and uses the user-scope log label.
+
+    Returns:
+        Number of entries removed.
+    """
+    label = "~/.claude.json" if is_user_scope else ".mcp.json"
+    if not config_path.exists():
+        return 0
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        if is_user_scope and not isinstance(config, dict):
+            return 0
+        servers = config.get("mcpServers", {})
+        if not isinstance(servers, dict):
+            servers = {}
+        removed = [n for n in stale_names if n in servers]
+        for name in removed:
+            del servers[name]
+        if removed:
+            config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+            for name in removed:
+                logger.progress(f"Removed stale MCP server '{name}' from {label}")
+        return len(removed)
+    except Exception:
+        _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
+        return 0
 
 
 class MCPIntegrator:
@@ -88,30 +228,8 @@ class MCPIntegrator:
         from apm_cli.models.apm_package import APMPackage
 
         # Build set of expected apm.yml paths from apm.lock
-        locked_paths = None
-        direct_paths: builtins.set = builtins.set()
-        lockfile = None
-        if lock_path and lock_path.exists():
-            lockfile = LockFile.read(lock_path)
-            if lockfile is not None:
-                locked_paths = builtins.set()
-                for dep in lockfile.get_package_dependencies():
-                    if dep.repo_url:
-                        yml = (
-                            apm_modules_dir / dep.repo_url / dep.virtual_path / "apm.yml"
-                            if dep.virtual_path
-                            else apm_modules_dir / dep.repo_url / "apm.yml"
-                        )
-                        locked_paths.add(yml.resolve())
-                        if dep.depth == 1:
-                            direct_paths.add(yml.resolve())
-
-        # Prefer iterating lock-derived paths directly (existing files only).
-        # Fall back to full scan only when lock parsing is unavailable.
-        if locked_paths is not None:
-            apm_yml_paths = [path for path in sorted(locked_paths) if path.exists()]
-        else:
-            apm_yml_paths = apm_modules_dir.rglob("apm.yml")
+        resolved, direct_paths = resolve_locked_apm_yml_paths(apm_modules_dir, lock_path)
+        apm_yml_paths = resolved if resolved is not None else apm_modules_dir.rglob("apm.yml")
 
         collected = []
         for apm_yml_path in apm_yml_paths:
@@ -163,23 +281,7 @@ class MCPIntegrator:
         Root deps are listed before transitive, so root overlays take
         precedence.
         """
-        seen_names: builtins.set = builtins.set()
-        result = []
-        for dep in deps:
-            if hasattr(dep, "name"):
-                name = dep.name
-            elif isinstance(dep, dict):
-                name = dep.get("name", "")
-            else:
-                name = str(dep)
-            if not name:
-                if dep not in result:
-                    result.append(dep)
-                continue
-            if name not in seen_names:
-                seen_names.add(name)
-                result.append(dep)
-        return result
+        return deduplicate_deps(deps)
 
     # ------------------------------------------------------------------
     # Server info helpers
@@ -309,12 +411,6 @@ class MCPIntegrator:
         if dep.version:
             warnings.warn(
                 f"MCP overlay field 'version' on '{dep.name}' is not yet applied "
-                f"at install time and will be ignored.",
-                stacklevel=2,
-            )
-        if isinstance(dep.registry, str):
-            warnings.warn(
-                f"MCP overlay field 'registry' on '{dep.name}' is not yet applied "
                 f"at install time and will be ignored.",
                 stacklevel=2,
             )
@@ -507,54 +603,24 @@ class MCPIntegrator:
 
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
 
-        # Clean .vscode/mcp.json
+        # Per-runtime cleanup -- each helper reads, diffs, writes, and logs.
         if "vscode" in target_runtimes:
-            vscode_mcp = project_root_path / ".vscode" / "mcp.json"
-            if vscode_mcp.exists():
-                try:
-                    import json as _json
+            _clean_json_mcp_config(
+                project_root_path / ".vscode" / "mcp.json",
+                expanded_stale,
+                logger,
+                ".vscode/mcp.json",
+                servers_key="servers",
+            )
 
-                    config = _json.loads(vscode_mcp.read_text(encoding="utf-8"))
-                    servers = config.get("servers", {})
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        vscode_mcp.write_text(_json.dumps(config, indent=2), encoding="utf-8")
-                        for name in removed:
-                            logger.progress(
-                                f"Removed stale MCP server '{name}' from .vscode/mcp.json"
-                            )
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from .vscode/mcp.json",
-                        exc_info=True,
-                    )
-
-        # Clean ~/.copilot/mcp-config.json
         if "copilot" in target_runtimes:
-            copilot_mcp = Path.home() / ".copilot" / "mcp-config.json"
-            if copilot_mcp.exists():
-                try:
-                    import json as _json
-
-                    config = _json.loads(copilot_mcp.read_text(encoding="utf-8"))
-                    servers = config.get("mcpServers", {})
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        copilot_mcp.write_text(_json.dumps(config, indent=2), encoding="utf-8")
-                        for name in removed:
-                            _rich_success(
-                                f"Removed stale MCP server '{name}' from Copilot CLI config",
-                                symbol="check",
-                            )
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from Copilot CLI config",
-                        exc_info=True,
-                    )
+            _clean_json_mcp_config(
+                Path.home() / ".copilot" / "mcp-config.json",
+                expanded_stale,
+                logger,
+                "Copilot CLI config",
+                use_rich=True,
+            )
 
         # Clean the scope-resolved Codex config.toml (mcp_servers section)
         if "codex" in target_runtimes:
@@ -567,184 +633,120 @@ class MCPIntegrator:
                     user_scope=user_scope,
                 ).get_config_path()
             )
-            if codex_cfg.exists():
-                try:
-                    import toml as _toml
+            _clean_toml_mcp_config(codex_cfg, expanded_stale, "Codex CLI config")
 
-                    config = _toml.loads(codex_cfg.read_text(encoding="utf-8"))
-                    servers = config.get("mcp_servers", {})
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        codex_cfg.write_text(_toml.dumps(config), encoding="utf-8")
-                        for name in removed:
-                            _rich_success(
-                                f"Removed stale MCP server '{name}' from Codex CLI config",
-                                symbol="check",
-                            )
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from Codex CLI config",
-                        exc_info=True,
-                    )
-
-        # Clean .cursor/mcp.json (only if .cursor/ directory exists)
         if "cursor" in target_runtimes:
-            cursor_mcp = project_root_path / ".cursor" / "mcp.json"
-            if cursor_mcp.exists():
-                try:
-                    import json as _json
-
-                    config = _json.loads(cursor_mcp.read_text(encoding="utf-8"))
-                    servers = config.get("mcpServers", {})
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        cursor_mcp.write_text(_json.dumps(config, indent=2), encoding="utf-8")
-                        for name in removed:
-                            _rich_success(
-                                f"Removed stale MCP server '{name}' from .cursor/mcp.json",
-                                symbol="check",
-                            )
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from .cursor/mcp.json",
-                        exc_info=True,
-                    )
+            _clean_json_mcp_config(
+                project_root_path / ".cursor" / "mcp.json",
+                expanded_stale,
+                logger,
+                ".cursor/mcp.json",
+                use_rich=True,
+            )
 
         # Clean opencode.json (only if .opencode/ directory exists)
         if "opencode" in target_runtimes:
-            opencode_cfg = project_root_path / "opencode.json"
-            if opencode_cfg.exists() and (project_root_path / ".opencode").is_dir():
-                try:
-                    import json as _json
+            if (project_root_path / ".opencode").is_dir():
+                _clean_json_mcp_config(
+                    project_root_path / "opencode.json",
+                    expanded_stale,
+                    logger,
+                    "opencode.json",
+                    servers_key="mcp",
+                )
 
-                    config = _json.loads(opencode_cfg.read_text(encoding="utf-8"))
-                    servers = config.get("mcp", {})
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        opencode_cfg.write_text(_json.dumps(config, indent=2), encoding="utf-8")
-                        for name in removed:
-                            logger.progress(f"Removed stale MCP server '{name}' from opencode.json")
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from opencode.json",
-                        exc_info=True,
-                    )
-
-        # Clean ~/.codeium/windsurf/mcp_config.json
         if "windsurf" in target_runtimes:
-            windsurf_mcp = Path.home() / ".codeium" / "windsurf" / "mcp_config.json"
-            if windsurf_mcp.exists():
+            _clean_json_mcp_config(
+                Path.home() / ".codeium" / "windsurf" / "mcp_config.json",
+                expanded_stale,
+                logger,
+                "Windsurf config",
+                use_rich=True,
+            )
+
+        if "kiro" in target_runtimes:
+            from apm_cli.factory import ClientFactory
+
+            kiro_cfg = Path(
+                ClientFactory.create_client(
+                    "kiro",
+                    project_root=project_root_path,
+                    user_scope=user_scope or scope is InstallScope.USER,
+                ).get_config_path()
+            )
+            _clean_json_mcp_config(
+                kiro_cfg,
+                expanded_stale,
+                logger,
+                "Kiro MCP config",
+                use_rich=True,
+            )
+
+        # Clean JetBrains Copilot user-scope mcp.json
+        if "intellij" in target_runtimes:
+            from apm_cli.adapters.client.intellij import _intellij_config_dir
+            from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
+
+            try:
+                intellij_mcp = _intellij_config_dir() / "mcp.json"
+            except PathTraversalError:
+                _log.debug(
+                    "Skipping JetBrains Copilot stale cleanup: config dir unavailable",
+                    exc_info=True,
+                )
+                intellij_mcp = None
+            if intellij_mcp is not None and intellij_mcp.exists():
                 try:
                     import json as _json
 
-                    config = _json.loads(windsurf_mcp.read_text(encoding="utf-8"))
-                    servers = config.get("mcpServers", {})
+                    ensure_path_within(intellij_mcp, Path.home())
+                    config = _json.loads(intellij_mcp.read_text(encoding="utf-8"))
+                    servers = config.get("servers")
+                    if not isinstance(servers, dict):
+                        servers = {}
+                        config["servers"] = servers
                     removed = [n for n in expanded_stale if n in servers]
                     for name in removed:
                         del servers[name]
                     if removed:
-                        windsurf_mcp.write_text(_json.dumps(config, indent=2), encoding="utf-8")
+                        intellij_mcp.write_text(_json.dumps(config, indent=2), encoding="utf-8")
                         for name in removed:
                             _rich_success(
-                                f"Removed stale MCP server '{name}' from Windsurf config",
+                                f"Removed stale MCP server '{name}' from {intellij_mcp}",
                                 symbol="check",
                             )
-                except Exception:
+                except (OSError, ValueError):
                     _log.debug(
-                        "Failed to clean stale MCP servers from Windsurf config",
+                        "Failed to clean stale MCP servers from JetBrains Copilot config",
                         exc_info=True,
                     )
 
         # Clean .gemini/settings.json (only if .gemini/ directory exists)
         if "gemini" in target_runtimes:
-            gemini_cfg = Path.cwd() / ".gemini" / "settings.json"
-            if gemini_cfg.exists():
-                try:
-                    import json as _json
-
-                    config = _json.loads(gemini_cfg.read_text(encoding="utf-8"))
-                    servers = config.get("mcpServers", {})
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        gemini_cfg.write_text(_json.dumps(config, indent=2), encoding="utf-8")
-                        for name in removed:
-                            if logger:
-                                logger.progress(
-                                    f"Removed stale MCP server '{name}' from .gemini/settings.json"
-                                )
-                            else:
-                                _rich_success(
-                                    f"Removed stale MCP server '{name}' from .gemini/settings.json",
-                                    symbol="check",
-                                )
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from .gemini/settings.json",
-                        exc_info=True,
-                    )
+            _clean_json_mcp_config(
+                project_root_path / ".gemini" / "settings.json",
+                expanded_stale,
+                logger,
+                ".gemini/settings.json",
+            )
 
         # Clean Claude Code project .mcp.json (only if .claude/ directory exists)
         if clean_claude_project:
-            claude_mcp = project_root_path / ".mcp.json"
-            if claude_mcp.exists() and (project_root_path / ".claude").is_dir():
-                try:
-                    import json as _json
-
-                    config = _json.loads(claude_mcp.read_text(encoding="utf-8"))
-                    servers = config.get("mcpServers", {})
-                    if not isinstance(servers, dict):
-                        servers = {}
-                    removed = [n for n in expanded_stale if n in servers]
-                    for name in removed:
-                        del servers[name]
-                    if removed:
-                        claude_mcp.write_text(
-                            _json.dumps(config, indent=2) + "\n", encoding="utf-8"
-                        )
-                        for name in removed:
-                            logger.progress(f"Removed stale MCP server '{name}' from .mcp.json")
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from .mcp.json",
-                        exc_info=True,
-                    )
+            if (project_root_path / ".claude").is_dir():
+                _clean_claude_config(
+                    project_root_path / ".mcp.json",
+                    expanded_stale,
+                    logger,
+                )
 
         # Clean Claude Code user ~/.claude.json (USER scope only)
         if clean_claude_user:
-            claude_user = Path.home() / ".claude.json"
-            if claude_user.exists():
-                try:
-                    import json as _json
-
-                    config = _json.loads(claude_user.read_text(encoding="utf-8"))
-                    if isinstance(config, dict):
-                        servers = config.get("mcpServers", {})
-                        if not isinstance(servers, dict):
-                            servers = {}
-                        removed = [n for n in expanded_stale if n in servers]
-                        for name in removed:
-                            del servers[name]
-                        if removed:
-                            claude_user.write_text(
-                                _json.dumps(config, indent=2) + "\n", encoding="utf-8"
-                            )
-                            for name in removed:
-                                logger.progress(
-                                    f"Removed stale MCP server '{name}' from ~/.claude.json"
-                                )
-                except Exception:
-                    _log.debug(
-                        "Failed to clean stale MCP servers from ~/.claude.json",
-                        exc_info=True,
-                    )
+            _clean_claude_config(
+                Path.home() / ".claude.json",
+                expanded_stale,
+                logger,
+                is_user_scope=True,
+            )
 
     # ------------------------------------------------------------------
     # Lockfile persistence
@@ -773,12 +775,17 @@ class MCPIntegrator:
         if not lock_path.exists():
             return
         try:
-            lockfile = LockFile.read(lock_path)
-            if lockfile is None:
+            existing_lockfile = LockFile.read(lock_path)
+            if existing_lockfile is None:
                 return
+            lockfile = copy.deepcopy(existing_lockfile)
             lockfile.mcp_servers = sorted(mcp_server_names)
             if mcp_configs is not None:
                 lockfile.mcp_configs = mcp_configs
+            if lockfile.is_semantically_equivalent(existing_lockfile):
+                _log.debug("MCP lockfile unchanged -- skipping write")
+                return
+            lockfile.generated_at = datetime.now(timezone.utc).isoformat()
             lockfile.save(lock_path)
         except Exception:
             _log.debug(
@@ -810,6 +817,8 @@ class MCPIntegrator:
                 detected.add("llm")
             if re.search(r"\bwindsurf\b", command):
                 detected.add("windsurf")
+            if re.search(r"\bkiro\b", command):
+                detected.add("kiro")
 
         return builtins.list(detected)
 
@@ -837,7 +846,7 @@ class MCPIntegrator:
             except ImportError:
                 available = []
                 for rt in mcp_compatible:
-                    if shutil.which(rt):
+                    if find_runtime_binary(rt):
                         available.append(rt)
                 return available
 
@@ -848,7 +857,7 @@ class MCPIntegrator:
             mcp_compatible = [
                 rt for rt in detected_runtimes if rt in ClientFactory.supported_clients()
             ]
-            return [rt for rt in mcp_compatible if shutil.which(rt)]
+            return [rt for rt in mcp_compatible if find_runtime_binary(rt)]
 
     # ------------------------------------------------------------------
     # Per-runtime installation
@@ -928,10 +937,11 @@ class MCPIntegrator:
             logger.progress(f"Dependencies for {runtime}: {', '.join(mcp_deps)}")
             return False
         except ValueError as e:
+            from apm_cli.factory import ClientFactory
+
+            supported_runtimes = ", ".join(sorted(ClientFactory.supported_clients()))
             logger.warning(f"Runtime {runtime} not supported: {e}")
-            logger.progress(
-                "Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, claude, windsurf, llm"
-            )
+            logger.progress(f"Supported runtimes: {supported_runtimes}")
             return False
         except Exception as e:
             _log.debug("Unexpected error installing for runtime %s", runtime, exc_info=True)
@@ -942,8 +952,6 @@ class MCPIntegrator:
     # Main orchestrator
     # ------------------------------------------------------------------
 
-    _PROJECT_SCOPED_RUNTIMES: tuple[str, ...] = ("codex", "claude")
-
     @staticmethod
     def _gate_project_scoped_runtimes(
         target_runtimes: list[str],
@@ -951,32 +959,160 @@ class MCPIntegrator:
         user_scope: bool,
         project_root,
         apm_config: dict | None,
-        explicit_target: str | None,
+        explicit_target: str | list[str] | None,
     ) -> list[str]:
-        """Drop project-scoped runtimes that are not active project targets.
+        """Filter *target_runtimes* against the project's active targets.
 
-        Codex and Claude Code both write project-scoped MCP config files
-        (``.codex/config.toml`` and ``.mcp.json``) whose creation should be
-        opt-in.  When auto-detection brought one of them in but the project's
-        own targets do not include it, we silently strip it -- mirroring the
-        Cursor/OpenCode/Gemini directory-presence convention.
+        UX parity with ``apm install`` for apm dependencies: the active
+        target set (explicit ``--target`` > ``targets:`` field >
+        directory-signal detection) is the whitelist for MCP writes. Any
+        runtime outside that set is skipped with an info line naming both
+        what was dropped and the active set, so users can audit the
+        decision input without re-reading apm.yml (#1335).
+
+        Strict resolution model -- mirrors :func:`resolve_targets`,
+        the same call ``apm install`` uses
+        (``install/phases/targets.py:233``):
+
+          - flag > yaml-targets > directory signals (no permissive
+            "fallback to copilot" greenfield default);
+          - no flag, no ``targets:``, and no harness-signal directory ->
+            :class:`NoHarnessError` (red ``[x]``, write nothing);
+          - multiple ambiguous signals with no disambiguation ->
+            :class:`AmbiguousHarnessError` (same fail-closed shape).
+
+        ``explicit_target`` accepts ``str``, ``list[str]``, or a CSV
+        string (``"claude,copilot"``) -- the latter is produced by
+        legacy callers; it is normalized to a list before the resolver
+        is invoked so the canonical-name validator does not reject it as
+        one unknown token.
+
+        A malformed ``targets:`` field (conflicting ``target:`` +
+        ``targets:``, ``targets: []``, or unknown canonical name) likewise
+        fails closed: nothing is written.
+
+        Exit semantics differ deliberately from ``install/phases/targets.py``:
+        the canonical install phase calls ``raise SystemExit(2)`` when
+        resolution fails; this gate may be invoked mid-bundle (see
+        ``install/local_bundle_handler``) where a hard exit would corrupt
+        partial state, so we render the same red ``[x]`` voice and return
+        an empty list (fail-closed-continue).
+
+        ``user_scope=True`` is a deliberate carve-out: user-scope writes
+        target ``~/.config`` paths the user owns globally, so the
+        project-level whitelist is irrelevant. Documented in the
+        consumer install-mcp-servers guide.
         """
         if user_scope:
             return target_runtimes
-        gated = [rt for rt in MCPIntegrator._PROJECT_SCOPED_RUNTIMES if rt in target_runtimes]
-        if not gated:
-            return target_runtimes
 
-        from apm_cli.integration.targets import active_targets
+        from apm_cli.core.apm_yml import (
+            ConflictingTargetsError,
+            EmptyTargetsListError,
+            UnknownTargetError,
+            parse_targets_field,
+        )
+        from apm_cli.core.errors import (
+            AmbiguousHarnessError,
+            NoHarnessError,
+        )
+        from apm_cli.core.target_detection import resolve_targets
+        from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
 
+        # --- step 1: parse declared targets (fail-closed on any invalid form)
+        yaml_targets: list[str] | None = None
+        if apm_config:
+            try:
+                parsed = parse_targets_field(apm_config)
+                yaml_targets = parsed if parsed else None
+            except (
+                ConflictingTargetsError,
+                EmptyTargetsListError,
+                UnknownTargetError,
+            ) as exc:
+                # Voice mirrors the canonical `apm install` skills phase
+                # (install/phases/targets.py:213): red [x] lead-with-outcome,
+                # then the structured error body. symbol="" suppresses the
+                # auto-prefix on the body because the exception text already
+                # begins with "[x] ..." (see core/errors.py).
+                _rich_error(
+                    "Skipping all MCP config writes -- apm.yml 'targets' field is invalid.",
+                    symbol="error",
+                )
+                _rich_error(str(exc), symbol="")
+                _log.debug(
+                    "parse_targets_field failed; failing closed (no MCP writes)",
+                    exc_info=True,
+                )
+                return []
+
+        # --- step 2: normalize CSV explicit_target sugar to a list -----
+        # `_wire_bundle_mcp_servers` historically passes a CSV string; the
+        # canonical-name validator inside _resolve_targets_v2 would reject
+        # the whole CSV as one unknown token. Normalize first.
+        flag: str | list[str] | None
+        if isinstance(explicit_target, str) and "," in explicit_target:
+            flag = [t.strip() for t in explicit_target.split(",") if t.strip()]
+        else:
+            flag = explicit_target
+
+        # Apply the runtime->canonical-target alias BEFORE passing the flag
+        # to resolve_targets. The canonical-name validator inside the
+        # resolver only knows about CANONICAL_TARGETS (claude/copilot/...);
+        # it rejects runtime aliases (vscode/agents) as unknown tokens.
+        # The MCP gate, however, must accept those aliases because users
+        # naturally type `--target vscode` for the VS Code Copilot runtime.
+        if flag is not None:
+            tokens = [flag] if isinstance(flag, str) else list(flag)
+            flag = [RUNTIME_TO_CANONICAL_TARGET.get(t, t) for t in tokens]
+
+        # --- step 3: delegate to the canonical v2 resolver -------------
+        # This is the same call the `apm install` skills phase makes at
+        # install/phases/targets.py:233. It enforces the strict
+        # flag > yaml > signals chain and raises NoHarnessError /
+        # AmbiguousHarnessError on greenfield / under-disambiguated
+        # projects -- the ASYMMETRY closed by this PR is that the gate
+        # used to silently fall back to [copilot] in those cases.
         root = project_root or Path.cwd()
-        config_target = explicit_target or (apm_config.get("target") if apm_config else None)
-        active = {t.name for t in active_targets(root, config_target)}
-        out = list(target_runtimes)
-        for rt in gated:
-            if rt not in active:
-                _log.debug("%s gated out: active_targets=%s", rt.capitalize(), sorted(active))
-                out = [r for r in out if r != rt]
+        try:
+            resolved = resolve_targets(root, flag=flag, yaml_targets=yaml_targets)
+        except (NoHarnessError, AmbiguousHarnessError) as exc:
+            _rich_error(
+                "Skipping all MCP config writes -- could not resolve active targets.",
+                symbol="error",
+            )
+            _rich_error(str(exc), symbol="")
+            _log.debug(
+                "resolve_targets failed; failing closed (no MCP writes)",
+                exc_info=True,
+            )
+            return []
+
+        active = set(resolved.targets)
+
+        # Runtime name "vscode" maps to canonical target "copilot" (same
+        # alias active_targets honors); shared table prevents drift with
+        # the alias resolution in integration/targets.py.
+        out = [rt for rt in target_runtimes if RUNTIME_TO_CANONICAL_TARGET.get(rt, rt) in active]
+        dropped = sorted(set(target_runtimes) - set(out))
+        if dropped:
+            # Mirror the canonical `Targets: X  (source: Y)` provenance shape
+            # (install/phases/targets.py:265, core/target_detection.py:777):
+            # double-space before the parenthetical. The "or '<none>'" guard is
+            # defensive -- an empty active set is unreachable when
+            # _resolve_targets_v2 succeeded, but if a future contract change
+            # widens that contract we surface "<none>" rather than render
+            # "(active targets: )" which reads as a renderer bug.
+            active_csv = ", ".join(sorted(active)) or "<none>"
+            _rich_info(
+                f"Skipped MCP config for {', '.join(dropped)}  (active targets: {active_csv})",
+                symbol="info",
+            )
+            _log.debug(
+                "Active-targets gate dropped: %s (active=%s)",
+                dropped,
+                sorted(active),
+            )
         return out
 
     @staticmethod
@@ -1017,524 +1153,19 @@ class MCPIntegrator:
         Returns:
             Number of MCP servers newly configured or updated.
         """
-        if logger is None:
-            logger = NullCommandLogger()
-        if not mcp_deps:
-            logger.warning("No MCP dependencies found in apm.yml")
-            return 0
+        from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
-        from apm_cli.core.scope import InstallScope
-
-        # The explicit scope enum takes precedence over the raw user_scope bool
-        # so callers cannot accidentally mix user-scope runtime filtering with
-        # project-scope config writes (or the inverse).
-        if scope is InstallScope.USER:
-            user_scope = True
-        elif scope is InstallScope.PROJECT:
-            user_scope = False
-
-        # Split into registry-resolved and self-defined deps
-        # Backward compat: plain strings are treated as registry deps
-        registry_deps = [
-            dep
-            for dep in mcp_deps
-            if isinstance(dep, str)
-            or (hasattr(dep, "is_registry_resolved") and dep.is_registry_resolved)
-        ]
-        self_defined_deps = [
-            dep for dep in mcp_deps if hasattr(dep, "is_self_defined") and dep.is_self_defined
-        ]
-        registry_dep_names = [dep.name if hasattr(dep, "name") else dep for dep in registry_deps]
-        registry_dep_map = {dep.name: dep for dep in registry_deps if hasattr(dep, "name")}
-
-        console = _get_console()
-        # Track servers that were re-applied due to config drift
-        servers_to_update: builtins.set = builtins.set()
-        # Track successful updates separately so the summary counts are accurate
-        # even when some drift-detected servers fail to install.
-        successful_updates: builtins.set = builtins.set()
-        if stored_mcp_configs is None:
-            stored_mcp_configs = {}
-
-        # Start MCP section with clean header
-        if console:
-            try:
-                from rich.text import Text
-
-                header = Text()
-                header.append("+- MCP Servers (", style="cyan")
-                header.append(str(len(mcp_deps)), style="cyan bold")
-                header.append(")", style="cyan")
-                console.print(header)
-            except Exception:
-                logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
-        else:
-            logger.progress(f"Installing MCP dependencies ({len(mcp_deps)})...")
-
-        # Runtime detection and multi-runtime installation
-        if runtime:
-            # Single runtime mode
-            target_runtimes = [runtime]
-            logger.progress(f"Targeting specific runtime: {runtime}")
-        else:
-            project_root_path = Path(project_root) if project_root is not None else Path.cwd()
-
-            if apm_config is None:
-                # Lazy load  -- only when the caller doesn't provide it
-                try:
-                    apm_yml = project_root_path / "apm.yml"
-                    if apm_yml.exists():
-                        from apm_cli.utils.yaml_io import load_yaml
-
-                        apm_config = load_yaml(apm_yml)
-                except Exception:
-                    apm_config = None
-
-            # Step 1: Get all installed runtimes on the system
-            try:
-                from apm_cli.factory import ClientFactory
-                from apm_cli.runtime.manager import RuntimeManager
-
-                manager = RuntimeManager()
-                installed_runtimes = []
-
-                for runtime_name in [
-                    "copilot",
-                    "codex",
-                    "vscode",
-                    "cursor",
-                    "opencode",
-                    "gemini",
-                    "windsurf",
-                    "claude",
-                ]:
-                    try:
-                        if runtime_name == "vscode":
-                            if _is_vscode_available(project_root=project_root_path):
-                                ClientFactory.create_client(runtime_name)
-                                installed_runtimes.append(runtime_name)
-                        elif runtime_name == "cursor":
-                            # Cursor is opt-in: only target when .cursor/ exists
-                            if (project_root_path / ".cursor").is_dir():
-                                ClientFactory.create_client(runtime_name)
-                                installed_runtimes.append(runtime_name)
-                        elif runtime_name == "opencode":
-                            # OpenCode is opt-in: only target when .opencode/ exists
-                            if (project_root_path / ".opencode").is_dir():
-                                ClientFactory.create_client(runtime_name)
-                                installed_runtimes.append(runtime_name)
-                        elif runtime_name == "gemini":
-                            # Gemini CLI is opt-in: only target when .gemini/ exists
-                            if (Path.cwd() / ".gemini").is_dir():
-                                ClientFactory.create_client(runtime_name)
-                                installed_runtimes.append(runtime_name)
-                        elif runtime_name == "windsurf":
-                            # Windsurf is opt-in: only target when .windsurf/ exists
-                            if (project_root_path / ".windsurf").is_dir():
-                                ClientFactory.create_client(runtime_name)
-                                installed_runtimes.append(runtime_name)
-                        elif runtime_name == "claude":
-                            # Claude Code is opt-in: target when .claude/ exists
-                            # in the project (project-scope writes) OR when the
-                            # `claude` binary is on PATH (user-scope writes).
-                            # The PATH check is the gate that prevents the
-                            # adapter from writing to ~/.claude.json on hosts
-                            # where Claude Code was never installed.
-                            if (project_root_path / ".claude").is_dir() or (
-                                shutil.which("claude") is not None
-                            ):
-                                ClientFactory.create_client(runtime_name)
-                                installed_runtimes.append(runtime_name)
-                        else:  # noqa: PLR5501
-                            if manager.is_runtime_available(runtime_name):
-                                ClientFactory.create_client(runtime_name)
-                                installed_runtimes.append(runtime_name)
-                    except (ValueError, ImportError):
-                        continue
-            except ImportError:
-                installed_runtimes = [
-                    rt for rt in ["copilot", "codex"] if shutil.which(rt) is not None
-                ]
-                # VS Code: check binary on PATH or .vscode/ directory presence
-                if _is_vscode_available(project_root=project_root_path):
-                    installed_runtimes.append("vscode")
-                # Cursor is directory-presence based, not binary-based
-                if (project_root_path / ".cursor").is_dir():
-                    installed_runtimes.append("cursor")
-                # OpenCode is directory-presence based
-                if (project_root_path / ".opencode").is_dir():
-                    installed_runtimes.append("opencode")
-                # Gemini CLI is directory-presence based
-                if (Path.cwd() / ".gemini").is_dir():
-                    installed_runtimes.append("gemini")
-                # Windsurf is directory-presence based
-                if (project_root_path / ".windsurf").is_dir():
-                    installed_runtimes.append("windsurf")
-                # Claude Code: directory-presence OR binary-on-PATH
-                if (project_root_path / ".claude").is_dir() or (shutil.which("claude") is not None):
-                    installed_runtimes.append("claude")
-
-            # Step 2: Get runtimes referenced in apm.yml scripts
-            script_runtimes = MCPIntegrator._detect_runtimes(
-                apm_config.get("scripts", {}) if apm_config else {}
-            )
-
-            # Step 3: Target runtimes BOTH installed AND referenced in scripts
-            if script_runtimes:
-                target_runtimes = [rt for rt in installed_runtimes if rt in script_runtimes]
-
-                if verbose:
-                    if console:
-                        console.print("|  [cyan][i]  Runtime Detection[/cyan]")
-                        console.print(f"|     +- Installed: {', '.join(installed_runtimes)}")
-                        console.print(f"|     +- Used in scripts: {', '.join(script_runtimes)}")
-                        if target_runtimes:
-                            console.print(
-                                f"|     +- Target: {', '.join(target_runtimes)} "
-                                f"(available + used in scripts)"
-                            )
-                        console.print("|")
-                    else:
-                        logger.verbose_detail(
-                            f"Installed runtimes: {', '.join(installed_runtimes)}"
-                        )
-                        logger.verbose_detail(f"Script runtimes: {', '.join(script_runtimes)}")
-                        if target_runtimes:
-                            logger.verbose_detail(f"Target runtimes: {', '.join(target_runtimes)}")
-
-                if not target_runtimes:
-                    logger.warning("Scripts reference runtimes that are not installed")
-                    logger.progress("Install missing runtimes with: apm runtime setup <runtime>")
-            else:
-                target_runtimes = installed_runtimes
-                if target_runtimes:
-                    if verbose:
-                        logger.verbose_detail(
-                            f"No scripts detected, using all installed runtimes: "
-                            f"{', '.join(target_runtimes)}"
-                        )
-                else:
-                    logger.warning("No MCP-compatible runtimes installed")
-                    logger.progress("Install a runtime with: apm runtime setup copilot")
-
-            # Apply exclusions
-            if exclude:
-                target_runtimes = [r for r in target_runtimes if r != exclude]
-
-            # All runtimes excluded  -- nothing to configure
-            if not target_runtimes and installed_runtimes:
-                logger.warning(
-                    f"All installed runtimes excluded (--exclude {exclude}), "
-                    "skipping MCP configuration"
-                )
-                return 0
-
-            # Fall back to VS Code only if no runtimes are installed at all
-            if not target_runtimes and not installed_runtimes:
-                target_runtimes = ["vscode"]
-                logger.progress("No runtimes installed, using VS Code as fallback")
-
-        # Codex MCP is project-scoped: only configure it when Codex is an
-        # active project target (silent skip, same as Cursor/OpenCode/Gemini).
-        # Claude Code is gated identically: a host-wide `claude` binary should
-        # not opt every APM project into `.mcp.json` writes.
-        target_runtimes = MCPIntegrator._gate_project_scoped_runtimes(
-            target_runtimes,
-            user_scope=user_scope,
-            project_root=project_root,
+        return run_mcp_install(
+            mcp_deps,
+            runtime=runtime,
+            exclude=exclude,
+            verbose=verbose,
             apm_config=apm_config,
+            stored_mcp_configs=stored_mcp_configs,
+            project_root=project_root,
+            user_scope=user_scope,
             explicit_target=explicit_target,
+            logger=logger,
+            diagnostics=diagnostics,
+            scope=scope,
         )
-
-        # Explicit runtime/exclusion/gating can leave nothing to configure.
-        if not target_runtimes:
-            return 0
-
-        # Scope filtering: at USER scope, keep only global-capable runtimes.
-        # Applied after both explicit --runtime and auto-discovery paths.
-        if scope is InstallScope.USER:
-            from apm_cli.factory import ClientFactory as _CF
-
-            pre_filter = list(target_runtimes)
-            filtered_runtimes = []
-            for rt in target_runtimes:
-                try:
-                    client = _CF.create_client(rt)
-                except ValueError:
-                    continue
-                if client.supports_user_scope:
-                    filtered_runtimes.append(rt)
-            target_runtimes = filtered_runtimes
-            skipped = set(pre_filter) - set(target_runtimes)
-            if skipped:
-                msg = (
-                    f"Skipped workspace-only runtimes at user scope: "
-                    f"{', '.join(sorted(skipped))}"
-                    f" -- omit --global to install these"
-                )
-                logger.warning(msg)
-            if not target_runtimes:
-                logger.warning(
-                    "No runtimes support user-scope MCP installation (supported: copilot, codex)"
-                )
-                return 0
-
-        # Use the new registry operations module for better server detection
-        configured_count = 0
-
-        # --- Registry-based deps ---
-        if registry_dep_names:
-            try:
-                from apm_cli.registry.operations import MCPServerOperations
-
-                operations = MCPServerOperations()
-
-                # Early validation: check all servers exist in registry (fail-fast).
-                # F4 (#1116): emit a single batch heartbeat so users see the
-                # registry round-trip in progress instead of silent stall.
-                logger.mcp_lookup_heartbeat(len(registry_dep_names))
-                if verbose:
-                    logger.verbose_detail(f"Validating {len(registry_deps)} registry servers...")
-                valid_servers, invalid_servers = operations.validate_servers_exist(
-                    registry_dep_names
-                )
-
-                if invalid_servers:
-                    logger.error(f"Server(s) not found in registry: {', '.join(invalid_servers)}")
-                    logger.progress("Run 'apm mcp search <query>' to find available servers")
-                    raise RuntimeError(f"Cannot install {len(invalid_servers)} missing server(s)")
-
-                if valid_servers:
-                    servers_to_install = operations.check_servers_needing_installation(
-                        target_runtimes,
-                        valid_servers,
-                        project_root=project_root,
-                        user_scope=user_scope,
-                    )
-                    already_configured_candidates = [
-                        dep for dep in valid_servers if dep not in servers_to_install
-                    ]
-
-                    # Detect config drift for "already configured" servers
-                    if stored_mcp_configs and already_configured_candidates:
-                        drifted_reg_deps = [
-                            registry_dep_map[n]
-                            for n in already_configured_candidates
-                            if n in registry_dep_map
-                        ]
-                        drifted = MCPIntegrator._detect_mcp_config_drift(
-                            drifted_reg_deps,
-                            stored_mcp_configs,
-                        )
-                        if drifted:
-                            servers_to_update.update(drifted)
-                            MCPIntegrator._append_drifted_to_install_list(
-                                servers_to_install, drifted
-                            )
-                    already_configured_servers = [
-                        dep for dep in already_configured_candidates if dep not in servers_to_update
-                    ]
-
-                    if not servers_to_install:
-                        if console:
-                            for dep in already_configured_servers:
-                                console.print(
-                                    f"|  [green]+[/green] {dep} [dim](already configured)[/dim]"
-                                )
-                        else:
-                            logger.success("All registry MCP servers already configured")
-                    else:
-                        if already_configured_servers:
-                            if console:
-                                for dep in already_configured_servers:
-                                    console.print(
-                                        f"|  [green]+[/green] {dep} [dim](already configured)[/dim]"
-                                    )
-                            else:
-                                logger.verbose_detail(
-                                    "Already configured registry MCP servers: "
-                                    f"{', '.join(already_configured_servers)}"
-                                )
-
-                        # Batch fetch server info once
-                        if verbose:
-                            logger.verbose_detail(
-                                f"Installing {len(servers_to_install)} servers..."
-                            )
-                        server_info_cache = operations.batch_fetch_server_info(servers_to_install)
-
-                        # Apply overlays
-                        for server_name in servers_to_install:
-                            dep = registry_dep_map.get(server_name)
-                            if dep:
-                                MCPIntegrator._apply_overlay(server_info_cache, dep)
-
-                        # Collect env and runtime variables
-                        shared_env_vars = operations.collect_environment_variables(
-                            servers_to_install, server_info_cache
-                        )
-                        for server_name in servers_to_install:
-                            dep = registry_dep_map.get(server_name)
-                            if dep and dep.env:
-                                shared_env_vars.update(dep.env)
-                        shared_runtime_vars = operations.collect_runtime_variables(
-                            servers_to_install, server_info_cache
-                        )
-
-                        # Install for each target runtime
-                        for dep in servers_to_install:
-                            is_update = dep in servers_to_update
-                            if console:
-                                action_text = "Updating" if is_update else "Configuring"
-                                console.print(f"|  [cyan]>[/cyan]  {dep}")
-                                console.print(
-                                    f"|     +- {action_text} for "
-                                    f"{', '.join([rt.title() for rt in target_runtimes])}..."
-                                )
-
-                            any_ok = False
-                            for rt in target_runtimes:
-                                if verbose:
-                                    logger.verbose_detail(f"Configuring {rt}...")
-                                if MCPIntegrator._install_for_runtime(
-                                    rt,
-                                    [dep],
-                                    shared_env_vars,
-                                    server_info_cache,
-                                    shared_runtime_vars,
-                                    project_root=project_root,
-                                    user_scope=user_scope,
-                                    logger=logger,
-                                ):
-                                    any_ok = True
-
-                            if any_ok:
-                                if console:
-                                    label = "updated" if is_update else "configured"
-                                    console.print(
-                                        f"|  [green]+[/green]  {dep} -> "
-                                        f"{', '.join([rt.title() for rt in target_runtimes])}"
-                                        f" [dim]({label})[/dim]"
-                                    )
-                                configured_count += 1
-                                if is_update:
-                                    successful_updates.add(dep)
-                            elif console:
-                                console.print(f"|  [red]x[/red]  {dep}  -- failed for all runtimes")
-
-            except ImportError:
-                logger.warning("Registry operations not available")
-                logger.error("Cannot validate MCP servers without registry operations")
-                raise RuntimeError("Registry operations module required for MCP installation")  # noqa: B904
-
-        # --- Self-defined deps (registry: false) ---
-        if self_defined_deps:
-            self_defined_names = [dep.name for dep in self_defined_deps]
-            self_defined_to_install = (
-                MCPIntegrator._check_self_defined_servers_needing_installation(
-                    self_defined_names,
-                    target_runtimes,
-                    project_root=project_root,
-                    user_scope=user_scope,
-                )
-            )
-            already_configured_candidates_sd = [
-                name for name in self_defined_names if name not in self_defined_to_install
-            ]
-
-            # Detect config drift for "already configured" self-defined servers
-            if stored_mcp_configs and already_configured_candidates_sd:
-                drifted_sd_deps = [
-                    dep for dep in self_defined_deps if dep.name in already_configured_candidates_sd
-                ]
-                drifted_sd = MCPIntegrator._detect_mcp_config_drift(
-                    drifted_sd_deps,
-                    stored_mcp_configs,
-                )
-                if drifted_sd:
-                    servers_to_update.update(drifted_sd)
-                    MCPIntegrator._append_drifted_to_install_list(
-                        self_defined_to_install, drifted_sd
-                    )
-            already_configured_self_defined = [
-                name for name in already_configured_candidates_sd if name not in servers_to_update
-            ]
-
-            if already_configured_self_defined:
-                if console:
-                    for name in already_configured_self_defined:
-                        console.print(f"|  [green]+[/green] {name} [dim](already configured)[/dim]")
-                else:
-                    count = len(already_configured_self_defined)
-                    logger.success(f"{count} self-defined server(s) already configured")
-                    for name in already_configured_self_defined:
-                        logger.verbose_detail(f"{name} already configured, skipping")
-
-            for dep in self_defined_deps:
-                if dep.name not in self_defined_to_install:
-                    continue
-
-                is_update = dep.name in servers_to_update
-                synthetic_info = MCPIntegrator._build_self_defined_info(dep)
-                self_defined_cache = {dep.name: synthetic_info}
-                self_defined_env = dep.env or {}
-
-                if console:
-                    transport_label = dep.transport or "stdio"
-                    action_text = "Updating" if is_update else "Configuring"
-                    console.print(
-                        f"|  [cyan]>[/cyan]  {dep.name} "
-                        f"[dim](self-defined, {transport_label})[/dim]"
-                    )
-                    console.print(
-                        f"|     +- {action_text} for "
-                        f"{', '.join([rt.title() for rt in target_runtimes])}..."
-                    )
-
-                any_ok = False
-                for rt in target_runtimes:
-                    if verbose:
-                        logger.verbose_detail(f"Configuring {dep.name} for {rt}...")
-                    if MCPIntegrator._install_for_runtime(
-                        rt,
-                        [dep.name],
-                        self_defined_env,
-                        self_defined_cache,
-                        project_root=project_root,
-                        user_scope=user_scope,
-                        logger=logger,
-                    ):
-                        any_ok = True
-
-                if any_ok:
-                    if console:
-                        label = "updated" if is_update else "configured"
-                        console.print(
-                            f"|  [green]+[/green]  {dep.name} -> "
-                            f"{', '.join([rt.title() for rt in target_runtimes])}"
-                            f" [dim]({label})[/dim]"
-                        )
-                    configured_count += 1
-                    if is_update:
-                        successful_updates.add(dep.name)
-                elif console:
-                    console.print(f"|  [red]x[/red]  {dep.name}  -- failed for all runtimes")
-
-        # Close the panel
-        if console:
-            if configured_count > 0:
-                # Use successful_updates (not servers_to_update) for accurate counts.
-                # servers_to_update = all drift-detected servers (some may have failed).
-                # successful_updates = servers that were re-applied AND succeeded.
-                update_count = builtins.len(successful_updates)
-                new_count = configured_count - update_count
-                parts = []
-                if new_count > 0:
-                    parts.append(f"configured {new_count} server{'s' if new_count != 1 else ''}")
-                if update_count > 0:
-                    parts.append(f"updated {update_count} server{'s' if update_count != 1 else ''}")
-                console.print(f"+- [green]{', '.join(parts).capitalize()}[/green]")
-            else:
-                console.print("+- [green]All servers up to date[/green]")
-
-        return configured_count

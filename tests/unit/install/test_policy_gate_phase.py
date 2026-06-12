@@ -831,6 +831,77 @@ class TestExplicitIncludesWiring:
 
     @patch(_PATCH_CHECKS)
     @patch(_PATCH_DISCOVER)
+    def test_deps_to_install_forwarded_as_first_positional(self, mock_discover, mock_checks):
+        """Transitive enforcement contract: ``policy_gate`` forwards
+        ``ctx.deps_to_install`` (the BFS-flattened set produced by the
+        resolve phase) directly as the first positional arg to the dep
+        check seam. The check then iterates every dep in that list.
+
+        This pins down the coupling so a refactor that accidentally
+        filtered deps to "direct only" before the policy gate would
+        fail this test.
+        """
+        from apm_cli.models.apm_package import DependencyReference
+
+        mock_discover.return_value = _make_fetch_result("found", enforcement="block")
+        mock_checks.return_value = _passing_audit()
+        direct = DependencyReference(repo_url="acme/direct", reference="main")
+        transitive = DependencyReference(repo_url="acme/nested", reference="main")
+        ctx = _make_ctx(deps=[direct, transitive])
+
+        run(ctx)
+
+        # First positional arg to run_dependency_policy_checks is the deps list.
+        args, _ = mock_checks.call_args
+        assert list(args[0]) == [direct, transitive], (
+            "policy_gate must forward ctx.deps_to_install unchanged (transitive set included)"
+        )
+
+    @patch(_PATCH_CHECKS)
+    @patch(_PATCH_DISCOVER)
+    def test_registries_plumbed_from_apm_package(self, mock_discover, mock_checks):
+        """``policy_gate.run()`` must forward ``apm_package.registries``
+        as the ``registries=`` kwarg so the dep check seam can
+        distinguish 'configured' from 'unreachable' in the registry-
+        source policy check.
+        """
+        mock_discover.return_value = _make_fetch_result("found", enforcement="block")
+        mock_checks.return_value = _passing_audit()
+
+        fake_pkg = MagicMock()
+        fake_pkg.includes = None
+        fake_pkg.registries = {"corp-main": "https://registry.corp.example.com"}
+        ctx = _make_ctx(apm_package=fake_pkg)
+
+        run(ctx)
+
+        kwargs = mock_checks.call_args[1]
+        assert kwargs.get("registries") == fake_pkg.registries
+
+    @patch(_PATCH_CHECKS)
+    @patch(_PATCH_DISCOVER)
+    def test_registries_kwarg_omitted_when_manifest_has_no_registries(
+        self, mock_discover, mock_checks
+    ):
+        """When ``apm_package.registries`` is ``None`` (no registries:
+        block in the manifest), the kwarg should not be passed -- so the
+        check defaults to fail-closed for any ``policy.require`` name.
+        """
+        mock_discover.return_value = _make_fetch_result("found", enforcement="block")
+        mock_checks.return_value = _passing_audit()
+
+        fake_pkg = MagicMock()
+        fake_pkg.includes = None
+        fake_pkg.registries = None
+        ctx = _make_ctx(apm_package=fake_pkg)
+
+        run(ctx)
+
+        kwargs = mock_checks.call_args[1]
+        assert "registries" not in kwargs
+
+    @patch(_PATCH_CHECKS)
+    @patch(_PATCH_DISCOVER)
     def test_explicit_includes_violation_raises(self, mock_discover, mock_checks):
         # Simulate the seam returning an explicit-includes violation;
         # under enforcement=block, run() must raise PolicyViolationError.

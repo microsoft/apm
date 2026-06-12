@@ -153,7 +153,7 @@ class TestPromptCollisionDetection:
     """Collision detection in PromptIntegrator.integrate_package_prompts."""
 
     def test_managed_files_none_no_collision_check(self, tmp_path: Path):
-        """Legacy mode: managed_files=None → always overwrite."""
+        """managed_files=None treated as empty set: pre-existing file is a collision."""
         prompts_dir = tmp_path / ".github" / "prompts"
         prompts_dir.mkdir(parents=True)
         (prompts_dir / "review.prompt.md").write_text("# user version")
@@ -162,9 +162,9 @@ class TestPromptCollisionDetection:
         result = PromptIntegrator().integrate_package_prompts(
             info, tmp_path, force=False, managed_files=None
         )
-        assert result.files_integrated == 1
-        assert result.files_skipped == 0
-        assert (prompts_dir / "review.prompt.md").read_text() == "# pkg version"
+        assert result.files_integrated == 0
+        assert result.files_skipped >= 1
+        assert (prompts_dir / "review.prompt.md").read_text() == "# user version"
 
     def test_empty_managed_set_all_collisions(self, tmp_path: Path):
         """managed_files=set() → every pre-existing file is a collision."""
@@ -303,7 +303,7 @@ class TestAgentCollisionDetection:
     """Collision detection in AgentIntegrator for .github/agents/."""
 
     def test_managed_files_none_no_collision_check(self, tmp_path: Path):
-        """Legacy mode: always overwrite when managed_files=None."""
+        """managed_files=None treated as empty set: pre-existing file is a collision."""
         agents_dir = tmp_path / ".github" / "agents"
         agents_dir.mkdir(parents=True)
         (agents_dir / "security.agent.md").write_text("# user")
@@ -312,8 +312,9 @@ class TestAgentCollisionDetection:
         result = AgentIntegrator().integrate_package_agents(
             info, tmp_path, force=False, managed_files=None
         )
-        assert result.files_integrated >= 1
-        assert result.files_skipped == 0
+        assert result.files_skipped >= 1
+        assert result.files_integrated == 0
+        assert (agents_dir / "security.agent.md").read_text() == "# user"
 
     def test_empty_managed_set_all_collisions(self, tmp_path: Path):
         """managed_files=set() → every pre-existing file is a collision."""
@@ -349,7 +350,7 @@ class TestClaudeAgentCollisionDetection:
     """Collision detection in AgentIntegrator for .claude/agents/."""
 
     def test_managed_files_none_no_collision_check(self, tmp_path: Path):
-        """Legacy mode: always overwrite when managed_files=None."""
+        """managed_files=None treated as empty set: pre-existing file is a collision."""
         claude_dir = tmp_path / ".claude" / "agents"
         claude_dir.mkdir(parents=True)
         (claude_dir / "security.md").write_text("# user")
@@ -358,8 +359,9 @@ class TestClaudeAgentCollisionDetection:
         result = AgentIntegrator().integrate_package_agents_claude(
             info, tmp_path, force=False, managed_files=None
         )
-        assert result.files_integrated >= 1
-        assert result.files_skipped == 0
+        assert result.files_skipped >= 1
+        assert result.files_integrated == 0
+        assert (claude_dir / "security.md").read_text() == "# user"
 
     def test_empty_managed_set_all_collisions(self, tmp_path: Path):
         """managed_files=set() → every pre-existing file is a collision."""
@@ -466,7 +468,7 @@ class TestCommandCollisionDetection:
     """Collision detection in CommandIntegrator.integrate_package_commands."""
 
     def test_managed_files_none_no_collision_check(self, tmp_path: Path):
-        """Legacy mode: managed_files=None → always overwrite."""
+        """managed_files=None treated as empty set: pre-existing file is a collision."""
         cmds_dir = tmp_path / ".claude" / "commands"
         cmds_dir.mkdir(parents=True)
         (cmds_dir / "review.md").write_text("# user version")
@@ -475,9 +477,9 @@ class TestCommandCollisionDetection:
         result = CommandIntegrator().integrate_package_commands(
             info, tmp_path, force=False, managed_files=None
         )
-        assert result.files_integrated == 1
-        assert result.files_skipped == 0
-        assert (cmds_dir / "review.md").read_text() != "# user version"
+        assert result.files_integrated == 0
+        assert result.files_skipped >= 1
+        assert (cmds_dir / "review.md").read_text() == "# user version"
 
     def test_empty_managed_set_all_collisions(self, tmp_path: Path):
         """managed_files=set() → every pre-existing file is a collision."""
@@ -631,7 +633,7 @@ class TestHookCollisionDetection:
     """Collision detection in HookIntegrator.integrate_package_hooks."""
 
     def test_managed_files_none_no_collision_check(self, tmp_path: Path):
-        """Legacy mode: managed_files=None → always overwrite."""
+        """managed_files=None treated as empty set: pre-existing file is a collision."""
         hooks_dir = tmp_path / ".github" / "hooks"
         hooks_dir.mkdir(parents=True)
         (hooks_dir / "test-pkg-hooks.json").write_text('{"user": true}')
@@ -640,7 +642,8 @@ class TestHookCollisionDetection:
         result = HookIntegrator().integrate_package_hooks(
             info, tmp_path, force=False, managed_files=None
         )
-        assert result.files_integrated >= 1
+        assert result.files_integrated == 0
+        assert json.loads((hooks_dir / "test-pkg-hooks.json").read_text()) == {"user": True}
 
     def test_empty_managed_set_all_collisions(self, tmp_path: Path):
         """managed_files=set() → pre-existing hook file is a collision."""

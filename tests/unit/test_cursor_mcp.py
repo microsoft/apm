@@ -342,5 +342,62 @@ class TestCursorTokenInjection(unittest.TestCase):
         self.assertIn("No supported package type", str(ctx.exception))
 
 
+class TestCursorSelfDefinedStdioEnvResolution(unittest.TestCase):
+    """Regression coverage for a latent partner-bug of issue #1266.
+
+    Before #1266 the Cursor adapter routed `raw["env"]` (a dict) through
+    `_resolve_environment_variables`, but the legacy-mode branch of that
+    method only handled the registry list-of-dict shape -- the dict shape
+    was silently iterated as KEYS, every key failed the `isinstance(..., dict)`
+    check, and the env block came out empty. The fix adds a dedicated
+    dict-shape legacy branch to the resolver so the same call site now
+    correctly resolves all three placeholder syntaxes.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cursor_dir = Path(self.tmp.name) / ".cursor"
+        self.cursor_dir.mkdir()
+        self.mcp_json = self.cursor_dir / "mcp.json"
+        self._cwd_patcher = patch("os.getcwd", return_value=self.tmp.name)
+        self._cwd_patcher.start()
+        self.adapter = CursorClientAdapter()
+
+    def tearDown(self):
+        self._cwd_patcher.stop()
+        self.tmp.cleanup()
+
+    def test_dict_shape_env_does_not_silently_drop(self):
+        server_info = {
+            "name": "bitbucket",
+            "id": "",
+            "_raw_stdio": {
+                "command": "pnpx",
+                "args": ["@aashari/mcp-server-atlassian-bitbucket@3.1.0"],
+                "env": {
+                    "TOKEN_DOLLAR": "${ATLASSIAN_API_TOKEN}",
+                    "TOKEN_ENVPREFIX": "${env:ATLASSIAN_API_TOKEN}",
+                    "TOKEN_ANGLE": "<ATLASSIAN_API_TOKEN>",
+                    "LITERAL_EMAIL": "user@example.com",
+                },
+            },
+        }
+        env_overrides = {"ATLASSIAN_API_TOKEN": "real-secret-xyz123"}
+
+        with patch.object(self.adapter, "registry_client") as mock_registry:
+            mock_registry.find_server_by_reference.return_value = server_info
+            self.adapter.configure_mcp_server("bitbucket", env_overrides=env_overrides)
+
+        env_block = json.loads(self.mcp_json.read_text(encoding="utf-8"))["mcpServers"][
+            "bitbucket"
+        ]["env"]
+        # The pre-fix latent bug returned {}; the fix returns the resolved
+        # literal values for every placeholder syntax.
+        self.assertEqual(env_block["TOKEN_DOLLAR"], "real-secret-xyz123")
+        self.assertEqual(env_block["TOKEN_ENVPREFIX"], "real-secret-xyz123")
+        self.assertEqual(env_block["TOKEN_ANGLE"], "real-secret-xyz123")
+        self.assertEqual(env_block["LITERAL_EMAIL"], "user@example.com")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -11,10 +11,9 @@ extends: values:
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
-
 from .schema import (
     ApmPolicy,
+    AuditPolicy,
     CompilationPolicy,
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
@@ -23,6 +22,8 @@ from .schema import (
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
+    ScannerGovernance,
+    SecurityPolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -34,6 +35,7 @@ _RESOLUTION_LEVELS = {"project-wins": 0, "policy-wins": 1, "block": 2}
 _SELF_DEFINED_LEVELS = {"allow": 0, "warn": 1, "deny": 2}
 _UNMANAGED_ACTION_LEVELS = {"ignore": 0, "warn": 1, "deny": 2}
 _SCRIPTS_LEVELS = {"allow": 0, "deny": 1}
+_AUDIT_ON_INSTALL_LEVELS = {"off": 0, "warn": 1, "block": 2}
 
 
 class PolicyInheritanceError(Exception):
@@ -63,6 +65,7 @@ def merge_policies(parent: ApmPolicy, child: ApmPolicy) -> ApmPolicy:
         compilation=_merge_compilation(parent.compilation, child.compilation),
         manifest=_merge_manifest(parent.manifest, child.manifest),
         unmanaged_files=_merge_unmanaged_files(parent.unmanaged_files, child.unmanaged_files),
+        security=_merge_security(parent.security, child.security),
     )
 
 
@@ -137,13 +140,19 @@ def _merge_cache(parent: PolicyCache, child: PolicyCache) -> PolicyCache:
 
 def _merge_dependencies(parent: DependencyPolicy, child: DependencyPolicy) -> DependencyPolicy:
     return DependencyPolicy(
-        deny=_union(parent.deny, child.deny),
+        deny=_merge_list_field(parent.deny, child.deny),
         allow=_intersect_allow(parent.allow, child.allow),
-        require=_union(parent.require, child.require),
+        require=_merge_list_field(parent.require, child.require),
         require_resolution=_escalate(
             _RESOLUTION_LEVELS, parent.require_resolution, child.require_resolution
         ),
         max_depth=min(parent.max_depth, child.max_depth),
+        # Strict-wins: once a parent (org) policy enables the pin
+        # requirement, a child cannot relax it. This matches
+        # ``allow``/``deny``/``require`` semantics where the child can
+        # only narrow, never broaden.
+        require_pinned_constraint=parent.require_pinned_constraint
+        or child.require_pinned_constraint,
     )
 
 
@@ -191,24 +200,143 @@ def _merge_manifest(parent: ManifestPolicy, child: ManifestPolicy) -> ManifestPo
     )
 
 
+def _coerce_unmanaged_action_for_escalate(value: str | None) -> str:
+    """Treat ``None`` as the weakest rung when comparing two concrete opinions."""
+    return "ignore" if value is None else value
+
+
+def _coerce_unmanaged_directories_for_union(value: tuple[str, ...] | None) -> tuple[str, ...]:
+    return () if value is None else value
+
+
 def _merge_unmanaged_files(
     parent: UnmanagedFilesPolicy, child: UnmanagedFilesPolicy
 ) -> UnmanagedFilesPolicy:
+    """Merge unmanaged-files policy; omitted child block is transparent (#1198)."""
+    if child.action is None and child.directories is None:
+        return parent
+
     if child.action is None:
-        merged_action = parent.action
-    elif parent.action is None:
-        merged_action = child.action
+        eff_action_raw = parent.action
     else:
-        merged_action = _escalate(_UNMANAGED_ACTION_LEVELS, parent.action, child.action)
-    return UnmanagedFilesPolicy(
-        action=merged_action,
-        directories=_union(parent.directories, child.directories),
+        eff_action_raw = _escalate(
+            _UNMANAGED_ACTION_LEVELS,
+            _coerce_unmanaged_action_for_escalate(parent.action),
+            child.action,
+        )
+
+    if child.directories is None:
+        eff_dirs = parent.directories
+    else:
+        eff_dirs = _union(
+            _coerce_unmanaged_directories_for_union(parent.directories),
+            child.directories,
+        )
+
+    eff_action = eff_action_raw if eff_action_raw is not None else "ignore"
+    eff_dirs_out: tuple[str, ...] = () if eff_dirs is None else eff_dirs
+
+    return UnmanagedFilesPolicy(action=eff_action, directories=eff_dirs_out)
+
+
+def _merge_security(parent: SecurityPolicy, child: SecurityPolicy) -> SecurityPolicy:
+    """Merge the security section: audit tightens but never relaxes.
+
+    ``on_install`` escalates on the off < warn < block ladder with
+    None-transparency (``None`` means "no opinion"; the other side flows
+    through).  ``external`` (required scanners) is union-merged like other
+    require lists -- a child can add scanners but not drop a parent's.
+    """
+    p, c = parent.audit, child.audit
+    if p.on_install is None:
+        on_install = c.on_install
+    elif c.on_install is None:
+        on_install = p.on_install
+    else:
+        on_install = _escalate(_AUDIT_ON_INSTALL_LEVELS, p.on_install, c.on_install)
+    return SecurityPolicy(
+        audit=AuditPolicy(
+            on_install=on_install,
+            external=_merge_list_field(p.external, c.external),
+            scanners=_merge_scanners(p.scanners, c.scanners),
+        ),
     )
+
+
+def _merge_scanners(
+    parent: tuple[tuple[str, ScannerGovernance], ...] | None,
+    child: tuple[tuple[str, ScannerGovernance], ...] | None,
+) -> tuple[tuple[str, ScannerGovernance], ...] | None:
+    """Merge per-scanner governance: union of names; ``allow_args`` AND-merged.
+
+    Restrict-only -- any ancestor forbidding args (``allow_args=False``) wins,
+    so a child can tighten but never relax a parent's kill-switch. ``None``
+    means "no opinion" and flows through transparently.
+    """
+    if parent is None and child is None:
+        return None
+    p_map = dict(parent or ())
+    c_map = dict(child or ())
+    merged: list[tuple[str, ScannerGovernance]] = []
+    seen: set[str] = set()
+    for name in list(p_map) + [n for n in c_map if n not in p_map]:
+        if name in seen:
+            continue
+        seen.add(name)
+        merged.append((name, _merge_governance(p_map.get(name), c_map.get(name))))
+    return tuple(merged)
+
+
+def _merge_governance(
+    parent: ScannerGovernance | None,
+    child: ScannerGovernance | None,
+) -> ScannerGovernance:
+    """AND-merge two governance blocks (``allow_args=False`` always wins).
+
+    ``None`` is "no opinion" and flows through transparently; ``False``
+    (forbid args) beats ``True`` so an org floor can never be relaxed.
+    """
+    p_allow = parent.allow_args if parent is not None else None
+    c_allow = child.allow_args if child is not None else None
+    if p_allow is False or c_allow is False:
+        allow_args: bool | None = False
+    elif p_allow is None and c_allow is None:
+        allow_args = None
+    else:
+        allow_args = True
+    return ScannerGovernance(allow_args=allow_args)
 
 
 # ---------------------------------------------------------------------------
 # List helpers
 # ---------------------------------------------------------------------------
+
+
+def _merge_list_field(
+    parent: tuple[str, ...] | None,
+    child: tuple[str, ...] | None,
+) -> tuple[str, ...] | None:
+    """Merge a deny/require list field with None-transparency and union.
+
+    * ``child is None``  -- no opinion; parent flows through (transparent).
+    * ``child`` is empty -- explicit empty override; clears parent entries,
+      returning ``()``.  Child can use ``[]`` in YAML to clear an inherited
+      deny/require list.
+    * both truthy        -- union; child entries are added to parent entries
+      (deduped, parent order preserved).
+
+    Always returns a ``tuple`` or ``None``; never a bare list.
+    """
+    if child is None:
+        # Transparent: parent flows through.  Normalise to tuple if non-None
+        # so callers always receive a uniform type regardless of how parent
+        # was constructed in tests (list vs tuple).
+        return _union((), parent) if parent is not None else None
+    if not child:
+        return ()  # explicit empty: override parent
+    if parent is None or not parent:
+        return _union((), child)  # parent has nothing; child wins
+    return _union(parent, child)  # both have values: union
 
 
 def _union(a: tuple[str, ...], b: tuple[str, ...]) -> tuple[str, ...]:

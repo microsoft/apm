@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "gate-proceed-clean-accept",
+  "summary": "A triaged issue is a clean, bounded, high-confidence bug accept with a complete implementation brief and no red flags. With the skill loaded, the confidence gate maps it to auto-proceed; after the single maintainer approval it is implemented in its own worktree with a regression-trap + mutation-break coverage gate, then driven to merge via shepherd-driver. Without the skill, the baseline often skips the mutation-break gate and the worktree isolation.",
+  "scenario": {
+    "user_query": "autopilot to merge: #410 (CLI raises KeyError on empty config file instead of a clear error)",
+    "ground_truth": {
+      "410_decision": "accept",
+      "410_type": "type/bug",
+      "410_red_flags": [],
+      "410_confidence": "high",
+      "410_brief_complete": true,
+      "410_expected_gate": "auto-proceed"
+    },
+    "expected_behavior_with_skill": [
+      "triage child returns accept, type/bug, confidence high, empty red_flags, complete implementation_brief",
+      "confidence gate maps the row to gate=auto-proceed",
+      "row still requires maintainer approved before any code is written",
+      "implement child runs in its own worktree and proves a regression trap that fails under mutation-break before the fix",
+      "PR is opened linking Closes #410 and handed to shepherd-driver to drive to merge"
+    ]
+  },
+  "fixtures": {
+    "with_skill": "fixtures/gate-proceed-clean-accept.with_skill.md",
+    "without_skill": "fixtures/gate-proceed-clean-accept.without_skill.md"
+  },
+  "rubric": [
+    {"id": "gate-auto-proceed", "pattern": "(?is)(gate\\s*[:=]?\\s*auto[- ]?proceed|auto[- ]?proceed)", "weight": 2, "description": "Clean accept routes to auto-proceed."},
+    {"id": "still-needs-approval", "pattern": "(?is)(maintainer\\s+approv|approved\\b|sign[- ]?off)[^.\\n]{0,60}(before|prior)", "weight": 2, "description": "Auto-proceed still gated on the single maintainer approval."},
+    {"id": "worktree-isolation", "pattern": "(?is)(own\\s+worktree|worktree\\s+isolation|dedicated\\s+worktree)", "weight": 2, "description": "Implementation runs in an isolated worktree."},
+    {"id": "mutation-break", "pattern": "(?is)mutation[- ]?break", "weight": 2, "description": "Bug type proves the regression trap under a mutation-break gate."},
+    {"id": "handoff-to-driver", "pattern": "(?is)(shepherd-driver|drive[^.\\n]{0,30}merge)", "weight": 1, "description": "PR is driven to merge via shepherd-driver."}
+  ]
+}

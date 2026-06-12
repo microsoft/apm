@@ -133,6 +133,28 @@ def _build_with_mock(
     return builder.build()
 
 
+def _build_with_host_mock(
+    tmp_path: Path,
+    yml_content: str,
+    refs_by_remote: dict[str, list[RemoteRef]],
+    options: BuildOptions | None = None,
+) -> BuildReport:
+    """Build with a mock resolver that handles default *and* host-prefixed entries.
+
+    The standard ``_build_with_mock`` only patches ``_resolver`` (the default
+    resolver). Host-prefixed entries trigger ``_get_resolver_for_host`` which
+    constructs a real ``RefResolver`` bound to the override host. For unit
+    tests we want every host to resolve through the same in-memory mock.
+    """
+    yml_path = _write_yml(tmp_path, yml_content)
+    opts = options or BuildOptions(offline=True)
+    builder = MarketplaceBuilder(yml_path, opts)
+    mock = _MockRefResolver(refs_by_remote)
+    builder._resolver = mock  # type: ignore[assignment]
+    builder._get_resolver_for_host = lambda _host: mock  # type: ignore[assignment]
+    return builder.build()
+
+
 # ---------------------------------------------------------------------------
 # parse_semver
 # ---------------------------------------------------------------------------
@@ -910,6 +932,257 @@ class TestSourceComposition:
         cr = data["plugins"][0]
         assert "path" not in cr["source"]
 
+    # -- default-host (``owner/repo``) ------------------------------------
+
+    def test_default_host_emits_github_shorthand(self, tmp_path: Path) -> None:
+        """A plain ``owner/repo`` source emits the ``github`` shorthand form."""
+        refs = {"acme/code-reviewer": _make_refs("v2.0.0")}
+        yml = """\
+name: acme-tools
+description: Test
+version: 1.0.0
+owner:
+  name: Acme
+  email: t@acme.example.com
+  url: https://acme.example.com
+packages:
+  - name: code-reviewer
+    source: acme/code-reviewer
+    version: "^2.0.0"
+"""
+        report = _build_with_mock(tmp_path, yml, refs)
+        data = json.loads(report.output_path.read_text("utf-8"))
+        src = data["plugins"][0]["source"]
+        assert src["source"] == "github"
+        assert src["repo"] == "acme/code-reviewer"
+        assert "url" not in src
+        # The github shorthand never carries a ``path`` key.
+        assert "path" not in src
+
+    # -- host-prefixed sources --------------------------------------------
+
+    def test_host_prefixed_without_subdir_emits_url_source(self, tmp_path: Path) -> None:
+        """``host.tld/owner/repo`` (no subdir) emits a full URL via ``source: url``."""
+        refs = {"acme/agents": _make_refs("v0.3.0")}
+        yml = """\
+name: ghe-tools
+description: Test
+version: 1.0.0
+owner:
+  name: Acme
+  email: t@acme.example.com
+  url: https://acme.example.com
+packages:
+  - name: baseline-rules
+    source: ghe.example.com/acme/agents
+    ref: v0.3.0
+"""
+        report = _build_with_host_mock(tmp_path, yml, refs)
+        data = json.loads(report.output_path.read_text("utf-8"))
+        src = data["plugins"][0]["source"]
+        assert src["source"] == "url"
+        assert src["url"] == "https://ghe.example.com/acme/agents"
+        assert "repo" not in src
+        assert "path" not in src
+
+    def test_host_prefixed_with_subdir_emits_git_subdir_url(self, tmp_path: Path) -> None:
+        """``host.tld/owner/repo`` + subdir emits ``git-subdir`` with a full https URL."""
+        refs = {"acme/agents": _make_refs("v0.3.0")}
+        yml = """\
+name: ghe-tools
+description: Test
+version: 1.0.0
+owner:
+  name: Acme
+  email: t@acme.example.com
+  url: https://acme.example.com
+packages:
+  - name: baseline-rules
+    source: ghe.example.com/acme/agents
+    subdir: packages/baseline-rules
+    ref: v0.3.0
+"""
+        report = _build_with_host_mock(tmp_path, yml, refs)
+        data = json.loads(report.output_path.read_text("utf-8"))
+        src = data["plugins"][0]["source"]
+        assert src["source"] == "git-subdir"
+        assert src["url"] == "https://ghe.example.com/acme/agents"
+        assert src["path"] == "packages/baseline-rules"
+
+    def test_default_host_with_subdir_emits_shorthand_url(self, tmp_path: Path) -> None:
+        """``owner/repo`` + subdir keeps the historical ``url: owner/repo`` shape."""
+        refs = {"acme/test-generator": _make_refs("v1.0.0")}
+        yml = """\
+name: acme-tools
+description: Test
+version: 1.0.0
+owner:
+  name: Acme
+  email: t@acme.example.com
+  url: https://acme.example.com
+packages:
+  - name: test-generator
+    source: acme/test-generator
+    version: "~1.0.0"
+    subdir: src/plugin
+"""
+        report = _build_with_mock(tmp_path, yml, refs)
+        data = json.loads(report.output_path.read_text("utf-8"))
+        src = data["plugins"][0]["source"]
+        assert src["source"] == "git-subdir"
+        # Default host: keep the shorthand "owner/repo" (no scheme), preserving
+        # backwards compatibility with marketplaces emitted before host-prefix
+        # support landed.
+        assert src["url"] == "acme/test-generator"
+        assert src["path"] == "src/plugin"
+
+    def test_explicit_default_host_prefix_emits_shorthand(self, tmp_path: Path) -> None:
+        """``github.com/owner/repo`` (explicit default host) emits ``source: github``.
+
+        Without this normalization, consumers (Claude Code, CI) that
+        pattern-match on ``source == "github"`` would silently skip
+        packages whose authors happened to write the host out in full,
+        even though the form is documented as equivalent.
+        """
+        refs = {"acme/explicit": _make_refs("v1.0.0")}
+        yml = """\
+name: explicit-host
+description: Test
+version: 1.0.0
+owner:
+  name: Acme
+  email: t@acme.example.com
+  url: https://acme.example.com
+packages:
+  - name: explicit
+    source: github.com/acme/explicit
+    ref: v1.0.0
+"""
+        report = _build_with_mock(tmp_path, yml, refs)
+        data = json.loads(report.output_path.read_text("utf-8"))
+        src = data["plugins"][0]["source"]
+        assert src["source"] == "github"
+        assert src["repo"] == "acme/explicit"
+        assert "url" not in src
+
+    def test_per_host_resolvers_use_host_specific_code_path(self, tmp_path: Path) -> None:
+        """Host-prefixed entries flow through ``_get_resolver_for_host``.
+
+        Verifies the integration glue without exercising the network: the
+        builder must reach the per-host code path for non-default-host
+        entries and the build must succeed when that path returns a working
+        resolver.  Real per-host caching and token isolation are verified
+        in :class:`TestGetResolverForHostTokenIsolation` below.
+        """
+        refs = {
+            "acme/code-reviewer": _make_refs("v2.0.0"),
+            "team/repo": _make_refs("v1.0.0"),
+        }
+        yml = """\
+name: mixed-tools
+description: Test
+version: 1.0.0
+owner:
+  name: Mixed
+  email: t@mixed.example.com
+  url: https://mixed.example.com
+packages:
+  - name: code-reviewer
+    source: acme/code-reviewer
+    version: "^2.0.0"
+  - name: gitlab-tool
+    source: gitlab.example.org/team/repo
+    ref: v1.0.0
+"""
+        yml_path = _write_yml(tmp_path, yml)
+        builder = MarketplaceBuilder(yml_path, BuildOptions(offline=True))
+        mock = _MockRefResolver(refs)
+        builder._resolver = mock  # type: ignore[assignment]
+        called_hosts: list[str] = []
+
+        def _spy(host: str) -> _MockRefResolver:
+            called_hosts.append(host)
+            return mock
+
+        builder._get_resolver_for_host = _spy  # type: ignore[assignment]
+        builder.build()
+        assert "gitlab.example.org" in called_hosts
+
+
+class TestGetResolverForHostTokenIsolation:
+    """Real (non-mocked) ``_get_resolver_for_host`` token-isolation guarantees.
+
+    Exercises the actual implementation -- including the AuthResolver wiring
+    -- so the secure-by-default property cannot regress silently.
+    """
+
+    def test_default_host_returns_shared_default_resolver(self, tmp_path: Path) -> None:
+        """``host=None`` and ``host==self._host`` both return the default resolver."""
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        builder = MarketplaceBuilder(yml_path, BuildOptions(offline=True))
+        default = builder._get_resolver_for_host(None)
+        assert builder._get_resolver_for_host(builder._host) is default
+
+    def test_non_default_host_never_forwards_default_token(self, tmp_path: Path) -> None:
+        """A token resolved for the default host is never sent to a foreign host."""
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        builder = MarketplaceBuilder(yml_path, BuildOptions(offline=True))
+        builder._github_token = "ghp_default_host_secret"
+        builder._auth_resolved = True
+        resolver = builder._get_resolver_for_host("ghe.example.com")
+        assert resolver._host == "ghe.example.com"
+        # Offline mode short-circuits AuthResolver and yields no token.
+        assert resolver._token is None
+        assert resolver._token != builder._github_token
+
+    def test_non_default_host_consults_auth_resolver(self, tmp_path: Path) -> None:
+        """Non-default hosts call ``AuthResolver.resolve(host)`` for their own token."""
+        from unittest.mock import MagicMock
+
+        from apm_cli.core.auth import AuthContext, HostInfo
+
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        # offline=False so the AuthResolver branch is exercised.
+        builder = MarketplaceBuilder(yml_path, BuildOptions(offline=False))
+        fake_ctx = AuthContext(
+            token="ghs_ghe_specific_token",
+            source="GITHUB_APM_PAT_GHE",
+            token_type="classic",
+            host_info=HostInfo(
+                host="ghe.example.com",
+                kind="ghes",
+                has_public_repos=False,
+                api_base="https://ghe.example.com/api/v3",
+            ),
+            git_env={},
+            auth_scheme="basic",
+        )
+        fake_auth = MagicMock()
+        fake_auth.resolve.return_value = fake_ctx
+        builder._auth_resolver = fake_auth
+        resolver = builder._get_resolver_for_host("ghe.example.com")
+        assert resolver._host == "ghe.example.com"
+        assert resolver._token == "ghs_ghe_specific_token"
+        fake_auth.resolve.assert_called_once_with("ghe.example.com")
+
+    def test_per_host_resolver_is_cached(self, tmp_path: Path) -> None:
+        """Repeated lookups for the same host return the same instance."""
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        builder = MarketplaceBuilder(yml_path, BuildOptions(offline=True))
+        first = builder._get_resolver_for_host("ghe.example.com")
+        second = builder._get_resolver_for_host("ghe.example.com")
+        assert first is second
+
+    def test_distinct_hosts_get_distinct_resolvers(self, tmp_path: Path) -> None:
+        """Different non-default hosts get isolated resolver instances."""
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        builder = MarketplaceBuilder(yml_path, BuildOptions(offline=True))
+        ghe = builder._get_resolver_for_host("ghe.example.com")
+        gitlab = builder._get_resolver_for_host("gitlab.example.org")
+        assert ghe is not gitlab
+        assert ghe._host == "ghe.example.com"
+        assert gitlab._host == "gitlab.example.org"
+
 
 # ---------------------------------------------------------------------------
 # Deterministic output (round-trip)
@@ -1039,34 +1312,6 @@ class TestComposeMarketplaceJson:
         builder = MarketplaceBuilder(yml_path, BuildOptions(offline=True))
         result = builder.compose_marketplace_json([])
         assert result["plugins"] == []
-
-
-# ---------------------------------------------------------------------------
-# Output override
-# ---------------------------------------------------------------------------
-
-
-class TestOutputOverride:
-    """Tests for --output flag."""
-
-    def test_custom_output_path(self, tmp_path: Path) -> None:
-        yml = """\
-        name: test-mkt
-        description: Test
-        version: 1.0.0
-        owner:
-          name: Test
-        packages:
-          - name: pkg1
-            source: acme/pkg1
-            version: "^1.0.0"
-        """
-        refs = {"acme/pkg1": _make_refs("v1.0.0")}
-        custom_out = tmp_path / "custom" / "output.json"
-        opts = BuildOptions(output_override=custom_out)
-        report = _build_with_mock(tmp_path, yml, refs, options=opts)
-        assert report.output_path == custom_out
-        assert custom_out.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -1289,6 +1534,22 @@ class TestDuplicateNameWarnings:
         assert isinstance(report.warnings, tuple)
         assert len(report.warnings) == 0
 
+    def test_empty_build_report_primary_output_is_safe(self) -> None:
+        report = BuildReport(outputs=())
+
+        primary = report.primary_output
+
+        assert primary.profile == ""
+        assert primary.resolved == ()
+        assert primary.errors == ()
+        assert primary.warnings == ()
+        assert primary.diagnostics == ()
+        assert primary.output_path == Path(".")
+        assert primary.unchanged_count == 0
+        assert primary.added_count == 0
+        assert primary.updated_count == 0
+        assert primary.removed_count == 0
+
 
 # ---------------------------------------------------------------------------
 # _fetch_remote_metadata tests
@@ -1495,6 +1756,163 @@ class TestFetchRemoteMetadata:
         call_args = mock_open.call_args
         req = call_args[0][0]
         assert req.get_header("Authorization") is None
+
+
+# ---------------------------------------------------------------------------
+# _fetch_local_metadata tests
+# ---------------------------------------------------------------------------
+
+
+class TestFetchLocalMetadata:
+    """Tests for best-effort local apm.yml metadata reads."""
+
+    def _make_pkg(
+        self,
+        *,
+        name: str = "local-tool",
+        subdir: str | None = "./packages/local-tool",
+    ) -> ResolvedPackage:
+        return ResolvedPackage(
+            name=name,
+            source_repo="",
+            subdir=subdir,
+            ref="",
+            sha="",
+            requested_version=None,
+            tags=(),
+            is_prerelease=False,
+        )
+
+    def _make_builder(self, tmp_path: Path) -> MarketplaceBuilder:
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        return MarketplaceBuilder(yml_path)
+
+    def test_reads_description_and_version_from_apm_yml(self, tmp_path: Path) -> None:
+        """File on disk with both fields -> both returned."""
+        pkg_dir = tmp_path / "packages" / "local-tool"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text(
+            "name: local-tool\ndescription: A local tool\nversion: 1.2.3\n",
+            encoding="utf-8",
+        )
+        builder = self._make_builder(tmp_path)
+        result = builder._fetch_local_metadata(self._make_pkg())
+        assert result is not None
+        assert result["description"] == "A local tool"
+        assert result["version"] == "1.2.3"
+
+    def test_description_only(self, tmp_path: Path) -> None:
+        """File with description but no version -> only description returned."""
+        pkg_dir = tmp_path / "packages" / "local-tool"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text(
+            "name: local-tool\ndescription: Only desc\n",
+            encoding="utf-8",
+        )
+        builder = self._make_builder(tmp_path)
+        result = builder._fetch_local_metadata(self._make_pkg())
+        assert result is not None
+        assert result["description"] == "Only desc"
+        assert "version" not in result
+
+    def test_missing_apm_yml_returns_none(self, tmp_path: Path) -> None:
+        """Subdir exists but has no apm.yml -> None, no crash."""
+        (tmp_path / "packages" / "local-tool").mkdir(parents=True)
+        builder = self._make_builder(tmp_path)
+        result = builder._fetch_local_metadata(self._make_pkg())
+        assert result is None
+
+    def test_missing_subdir_returns_none(self, tmp_path: Path) -> None:
+        """Subdir does not exist -> None, no crash."""
+        builder = self._make_builder(tmp_path)
+        result = builder._fetch_local_metadata(self._make_pkg())
+        assert result is None
+
+    def test_path_escapes_project_root_returns_none(self, tmp_path: Path) -> None:
+        """A subdir that resolves outside the project root is skipped."""
+        builder = self._make_builder(tmp_path)
+        pkg = self._make_pkg(subdir="../escape")
+        result = builder._fetch_local_metadata(pkg)
+        assert result is None
+
+    def test_subdir_resolves_to_project_root_returns_none(self, tmp_path: Path) -> None:
+        """Source that resolves to project root reads the marketplace's own
+        apm.yml, not a package manifest -- skip rather than emit the
+        marketplace description as a package description.
+        """
+        builder = self._make_builder(tmp_path)
+        pkg = self._make_pkg(subdir="./")
+        result = builder._fetch_local_metadata(pkg)
+        assert result is None
+
+    def test_project_root_skip_uses_normalized_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Project-root skip compares the same normalized path shape."""
+        (tmp_path / "apm.yml").write_text(
+            "name: root-tool\ndescription: Root description\n",
+            encoding="utf-8",
+        )
+        builder = self._make_builder(tmp_path)
+
+        class ExtendedProjectRoot:
+            def __truediv__(self, other: str) -> Path:
+                return tmp_path / other
+
+            def resolve(self) -> Path:
+                return Path(f"\\\\?\\{tmp_path.resolve()}")
+
+        def fake_ensure_path_within(_path: Any, _base_dir: Any) -> Path:
+            return tmp_path.resolve()
+
+        monkeypatch.setattr(
+            "apm_cli.marketplace.builder.ensure_path_within",
+            fake_ensure_path_within,
+        )
+        builder._project_root = ExtendedProjectRoot()  # type: ignore[assignment]
+
+        pkg = self._make_pkg(subdir="./")
+        result = builder._fetch_local_metadata(pkg)
+
+        assert result is None
+
+    def test_apm_yml_symlink_escape_returns_none(self, tmp_path: Path) -> None:
+        """A symlinked package apm.yml that escapes the root is skipped."""
+        outside = tmp_path.parent / "outside-apm.yml"
+        outside.write_text(
+            "name: local-tool\ndescription: Outside description\n",
+            encoding="utf-8",
+        )
+        pkg_dir = tmp_path / "packages" / "local-tool"
+        pkg_dir.mkdir(parents=True)
+        try:
+            (pkg_dir / "apm.yml").symlink_to(outside)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+
+        builder = self._make_builder(tmp_path)
+        result = builder._fetch_local_metadata(self._make_pkg())
+
+        assert result is None
+
+    def test_malformed_yaml_returns_none(self, tmp_path: Path) -> None:
+        """Bad YAML -> None, no exception propagates."""
+        pkg_dir = tmp_path / "packages" / "local-tool"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text(
+            "name: local-tool\ndescription: [unclosed",
+            encoding="utf-8",
+        )
+        builder = self._make_builder(tmp_path)
+        result = builder._fetch_local_metadata(self._make_pkg())
+        assert result is None
+
+    def test_empty_subdir_field_returns_none(self, tmp_path: Path) -> None:
+        """Defensive: a ResolvedPackage with subdir=None is skipped."""
+        builder = self._make_builder(tmp_path)
+        pkg = self._make_pkg(subdir=None)
+        result = builder._fetch_local_metadata(pkg)
+        assert result is None
 
 
 class _FakeHTTPResponse:
@@ -1882,6 +2300,114 @@ class TestFetchRemoteMetadataGHEHost:
         with patch(
             "apm_cli.marketplace.builder.urllib.request.urlopen",
         ) as mock_open:
+            result = builder._fetch_remote_metadata(pkg)
+        assert result is None
+        mock_open.assert_not_called()
+
+    def test_metadata_fetch_uses_package_host_not_builder_host(self, tmp_path: Path) -> None:
+        """``pkg.host`` overrides ``self._host`` for URL + token + classification.
+
+        Regression guard: previously ``_fetch_remote_metadata`` branched
+        only on ``self._host``, so a GHE-hosted package would be fetched
+        from ``raw.githubusercontent.com`` -- potentially returning an
+        unrelated github.com repo's metadata.  After the fix, the
+        package's own host drives every decision.
+        """
+        from unittest.mock import MagicMock
+
+        from apm_cli.core.auth import AuthContext, HostInfo
+
+        pkg = self._make_pkg(source_repo="platform/agents", subdir=None)
+        pkg = ResolvedPackage(
+            name=pkg.name,
+            source_repo=pkg.source_repo,
+            subdir=pkg.subdir,
+            ref=pkg.ref,
+            sha=pkg.sha,
+            requested_version=pkg.requested_version,
+            tags=pkg.tags,
+            is_prerelease=pkg.is_prerelease,
+            host="ghe.corp.example.com",
+        )
+        builder = self._make_builder(tmp_path)
+        # Builder default is github.com with a github.com-scoped token.
+        builder._host = "github.com"
+        builder._github_token = "ghp_default_host_secret"
+        builder._host_info = SimpleNamespace(kind="github", api_base="https://api.github.com")
+        # AuthResolver returns a GHE-specific token for the package's host.
+        fake_auth = MagicMock()
+        fake_auth.resolve.return_value = AuthContext(
+            token="ghs_ghe_specific_token",
+            source="GITHUB_APM_PAT_GHE",
+            token_type="classic",
+            host_info=HostInfo(
+                host="ghe.corp.example.com",
+                kind="ghes",
+                has_public_repos=False,
+                api_base="https://ghe.corp.example.com/api/v3",
+            ),
+            git_env={},
+            auth_scheme="basic",
+        )
+        builder._auth_resolver = fake_auth
+        yaml_body = b"description: GHE tool\nversion: 0.3.1\n"
+        mock_resp = _FakeHTTPResponse(yaml_body)
+        # Force the package host to classify as GHES so the GitHub-family
+        # REST path is exercised (an arbitrary FQDN classifies as
+        # ``generic`` and is correctly skipped).
+        with (
+            patch(
+                "apm_cli.core.auth.AuthResolver.classify_host",
+                return_value=HostInfo(
+                    host="ghe.corp.example.com",
+                    kind="ghes",
+                    has_public_repos=False,
+                    api_base="https://ghe.corp.example.com/api/v3",
+                ),
+            ),
+            patch(
+                "apm_cli.marketplace.builder.urllib.request.urlopen",
+                return_value=mock_resp,
+            ) as mock_open,
+        ):
+            result = builder._fetch_remote_metadata(pkg)
+        assert result == {"description": "GHE tool", "version": "0.3.1"}
+        req = mock_open.call_args[0][0]
+        parsed = urllib.parse.urlparse(req.full_url)
+        # URL hits the package's host, not the builder default.
+        assert parsed.hostname == "ghe.corp.example.com"
+        assert "raw.githubusercontent.com" not in req.full_url
+        # Token sent is the GHE-specific one, never the default-host token.
+        assert req.get_header("Authorization") == "token ghs_ghe_specific_token"
+
+    def test_metadata_fetch_skipped_for_non_github_package_host(self, tmp_path: Path) -> None:
+        """Non-GitHub-class ``pkg.host`` (e.g. GitLab) skips fetch entirely."""
+        from unittest.mock import patch as _patch
+
+        pkg = ResolvedPackage(
+            name="gitlab-tool",
+            source_repo="team/repo",
+            subdir=None,
+            ref="v1.0.0",
+            sha=_SHA_A,
+            requested_version="^1.0.0",
+            tags=(),
+            is_prerelease=False,
+            host="gitlab.example.org",
+        )
+        builder = self._make_builder(tmp_path)
+        builder._host = "github.com"
+        builder._host_info = SimpleNamespace(kind="github", api_base="https://api.github.com")
+        with (
+            _patch(
+                "apm_cli.core.auth.AuthResolver.classify_host",
+                return_value=SimpleNamespace(kind="gitlab", api_base=None),
+            ),
+            _patch.object(builder, "_resolve_token_for_host", return_value=None),
+            patch(
+                "apm_cli.marketplace.builder.urllib.request.urlopen",
+            ) as mock_open,
+        ):
             result = builder._fetch_remote_metadata(pkg)
         assert result is None
         mock_open.assert_not_called()

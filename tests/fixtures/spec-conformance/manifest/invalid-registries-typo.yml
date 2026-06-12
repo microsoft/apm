@@ -1,0 +1,10 @@
+# req-mf-015 (producer rejects unknown keys in registries entry)
+# The `registries.<name>` entry's `additionalProperties: false`
+# clause rejects any non-spec, non-x-prefixed key. `frobnicate` is
+# neither a documented key nor x-namespaced.
+name: invalid-registries-typo
+version: "1.0.0"
+registries:
+  contoso:
+    url: https://registry.contoso.example.com
+    frobnicate: true

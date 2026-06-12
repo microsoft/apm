@@ -1,13 +1,12 @@
 """GitHub Copilot CLI runtime adapter for APM."""
 
 import json
-import os  # noqa: F401
-import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, Optional  # noqa: F401, UP035
+from typing import Any
 
-from .base import RuntimeAdapter
+from .base import RuntimeAdapter, _stream_subprocess_output
+from .utils import find_runtime_binary
 
 
 class CopilotRuntime(RuntimeAdapter):
@@ -57,25 +56,7 @@ class CopilotRuntime(RuntimeAdapter):
                 cmd.extend(["--add-dir", str(directory)])
 
             # Execute Copilot CLI with real-time streaming
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Merge stderr into stdout for streaming
-                text=True,
-                encoding="utf-8",
-                bufsize=1,  # Line buffered
-            )
-
-            output_lines = []
-
-            # Stream output in real-time
-            for line in iter(process.stdout.readline, ""):
-                # Print to terminal in real-time
-                print(line, end="", flush=True)
-                output_lines.append(line)
-
-            # Wait for process to complete
-            return_code = process.wait(timeout=600)  # 10 minute timeout for complex tasks
+            output_lines, return_code = _stream_subprocess_output(cmd, timeout=600)
 
             if return_code != 0:
                 full_output = "".join(output_lines)
@@ -90,8 +71,6 @@ class CopilotRuntime(RuntimeAdapter):
             return "".join(output_lines).strip()
 
         except subprocess.TimeoutExpired:
-            if "process" in locals():
-                process.kill()
             raise RuntimeError("Copilot CLI execution timed out after 10 minutes")  # noqa: B904
         except FileNotFoundError:
             raise RuntimeError(  # noqa: B904
@@ -169,7 +148,7 @@ class CopilotRuntime(RuntimeAdapter):
         Returns:
             bool: True if runtime is available, False otherwise
         """
-        return shutil.which("copilot") is not None
+        return find_runtime_binary("copilot") is not None
 
     @staticmethod
     def get_runtime_name() -> str:

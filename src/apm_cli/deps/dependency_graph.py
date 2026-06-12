@@ -2,8 +2,7 @@
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path  # noqa: F401
-from typing import Any, Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
+from typing import Any, Optional
 
 from ..models.apm_package import APMPackage, DependencyReference
 
@@ -82,6 +81,7 @@ class DependencyTree:
         default_factory=lambda: defaultdict(list)
     )
     max_depth: int = 0
+    resolution_errors: list[str] = field(default_factory=list)
 
     def add_node(self, node: DependencyNode) -> None:
         """Add a node to the tree."""

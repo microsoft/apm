@@ -1,0 +1,74 @@
+{
+  "description": "Content evals for docs-sync. Each scenario is exercised with_skill (docs-sync loaded) and without_skill (no skill, just a generic doc reviewer). If outputs are indistinguishable, the skill is not adding value -- redesign or delete (genesis evals doctrine).",
+  "scenarios": [
+    {
+      "id": "E1-surgical-cli-fix",
+      "label": "Surgical CLI fix -- no doc impact",
+      "setup": {
+        "pr_title": "fix: improve error message when apm install hits 404",
+        "diff_summary": "src/apm_cli/commands/install.py: change one error string from 'package not found' to 'package not found at <url>'",
+        "files_changed": ["src/apm_cli/commands/install.py"],
+        "loc_changed": 3
+      },
+      "expected_verdict": "no_change",
+      "expected_cost_ceiling": 2,
+      "expected_panel_spawns": 0,
+      "value_delta_hypothesis": "Without the skill, a maintainer might wonder if docs need updating; with it, the L0 gate emits a clean 'no impact' advisory in <1 LLM call."
+    },
+    {
+      "id": "E2-new-flag-added",
+      "label": "New flag added -- in-place edit on reference page",
+      "setup": {
+        "pr_title": "feat: add --no-cache flag to apm install",
+        "diff_summary": "src/apm_cli/commands/install.py: add click.option('--no-cache', is_flag=True). Update install logic to bypass the local cache.",
+        "files_changed": ["src/apm_cli/commands/install.py", "src/apm_cli/install/resolver.py"],
+        "loc_changed": 47
+      },
+      "expected_verdict": "in_place",
+      "expected_scope_pages": ["docs/src/content/docs/consumer/install.md"],
+      "expected_cost_ceiling": 8,
+      "expected_panel_spawns": 5,
+      "expected_panel_outputs": [
+        "doc-writer drafts a flag-table entry for --no-cache",
+        "python-architect verifies via `apm install --help` that the flag exists and the description matches the draft",
+        "editorial-owner trims any marketing voice",
+        "growth-hacker checks the flag is mentioned in the consumer ramp, not just the reference",
+        "CDO confirms the patch fits the consumer promise"
+      ],
+      "value_delta_hypothesis": "Without the skill, the flag would ship undocumented and surface in the next user issue ('how do I bypass the cache?'). With the skill, the patch is attached to the PR comment ready to apply."
+    },
+    {
+      "id": "E3-new-package-format",
+      "label": "New package format -- structural change",
+      "setup": {
+        "pr_title": "feat: add wheel format to apm pack",
+        "diff_summary": "src/apm_cli/commands/pack.py: add --format wheel support. New module src/apm_cli/pack/wheel.py. Update apm.yml schema to allow format: wheel.",
+        "files_changed": [
+          "src/apm_cli/commands/pack.py",
+          "src/apm_cli/pack/wheel.py",
+          "src/apm_cli/models/apm_package.py"
+        ],
+        "loc_changed": 312
+      },
+      "expected_verdict": "structural",
+      "expected_structural_proposal": {
+        "new_pages": ["docs/src/content/docs/reference/package-formats/wheel.md"],
+        "in_place_pages": [
+          "docs/src/content/docs/producer/pack-a-bundle.md",
+          "docs/src/content/docs/reference/package-types/index.md"
+        ]
+      },
+      "expected_cost_ceiling": 14,
+      "expected_panel_spawns": 8,
+      "expected_panel_outputs": [
+        "architect proposes new reference page slug, outlines H2 sections, identifies bridges",
+        "doc-writer drafts the new page outline and the in-place edits on the producer ramp",
+        "python-architect verifies via `apm pack --help` that --format wheel exists and runs apm pack --format wheel --dry-run on a fixture",
+        "editorial-owner ensures the new page reads in APM voice",
+        "growth-hacker checks the new format is referenced from the producer ramp index",
+        "CDO arbitrates whether 'wheel' belongs in reference/package-formats/ or producer/pack-a-bundle.md sub-section -- chooses based on 3-promise narrative"
+      ],
+      "value_delta_hypothesis": "Without the skill, the new format would either be undocumented (silent drift) or get one paragraph crammed into producer/pack-a-bundle.md (concept bloat). With the skill, the structural proposal is on the table at PR-open time and the maintainer ratifies via the docs-sync-confirm label."
+    }
+  ]
+}

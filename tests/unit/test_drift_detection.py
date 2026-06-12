@@ -136,6 +136,28 @@ class TestDetectRefChange(unittest.TestCase):
         dep = _dep(reference="abc1234")
         self.assertTrue(detect_ref_change(dep, locked))
 
+    # --- local-path deps (issue: false source-flip) ---
+
+    def test_local_path_dep_parses_with_local_source(self):
+        """parse() must tag a local-path dep with source='local' so every
+        reader (drift, bundle packer, registry_proxy, outdated) and the
+        lockfile agree on its source instead of defaulting to git.
+        """
+        dep = DependencyReference.parse("./packages/foo")
+        self.assertTrue(dep.is_local)
+        self.assertEqual(dep.local_path, "./packages/foo")
+        self.assertEqual(dep.source, "local")
+
+    def test_local_path_dep_not_source_flip(self):
+        """A parsed local-path manifest dep (source='local') and a lockfile
+        entry recording source='local' must normalize to the same source, so a
+        local dep never reads as a git->local flip (false ref-consistency
+        failure in CI).
+        """
+        locked = _LockedDep(source="local", local_path="./packages/foo", resolved_ref=None)
+        dep = DependencyReference.parse("./packages/foo")
+        self.assertFalse(detect_ref_change(dep, locked))
+
 
 # ---------------------------------------------------------------------------
 # detect_orphans

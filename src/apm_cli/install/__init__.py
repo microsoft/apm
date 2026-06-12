@@ -13,6 +13,7 @@ Architecture:
     sources.py      DependencySource Strategy hierarchy
     template.py     run_integration_template() Template Method
     validation.py   manifest validation (dependency syntax, existence checks)
+    package_selection.py scoped package selection from validation outcomes
 
     phases/         one module per pipeline phase
     helpers/        cross-cutting helpers (security scan, gitignore)

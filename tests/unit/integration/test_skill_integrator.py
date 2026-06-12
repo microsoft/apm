@@ -4139,3 +4139,409 @@ class TestCopySkillToTargetSymlinkContainment:
                     package_info=mock_info,
                     targets=[target],
                 )
+
+
+class TestPluginBinDeploy:
+    """Acceptance tests for marketplace_plugin bin/ deployment (issue #1544)."""
+
+    def _make_plugin_package(self, install_path: Path, pkg_name: str = "myowner/myplugin") -> Mock:
+        """Create a minimal MARKETPLACE_PLUGIN PackageInfo mock."""
+        mock_info = Mock(spec=PackageInfo)
+        mock_info.package_type = PackageType.MARKETPLACE_PLUGIN
+        mock_info.install_path = install_path
+        mock_info.get_canonical_dependency_string.return_value = pkg_name
+        # dependency_ref=None: package is not a virtual FILE package
+        mock_info.dependency_ref = None
+        return mock_info
+
+    def test_deploys_bin_and_manifest_for_marketplace_plugin(self, tmp_path: Path) -> None:
+        """bin/ executables and plugin.json are deployed to ~/.claude/skills/<name>/."""
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        # Simulate claude target present
+        (project_root / ".claude").mkdir()
+
+        # Build fake package directory
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+        plugin_manifest_dir = pkg_dir / ".claude-plugin"
+        plugin_manifest_dir.mkdir()
+        (plugin_manifest_dir / "plugin.json").write_text('{"name": "myplugin"}')
+
+        pkg_info = self._make_plugin_package(pkg_dir)
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+        )
+
+        # skill_created stays False -- deploying executables is not creating a
+        # skill -- but bin_deployed reflects the work and it is not "skipped".
+        assert result.skill_created is False
+        assert result.skill_skipped is False
+        assert result.bin_deployed == 2  # bin/myplugin + .claude-plugin/plugin.json
+
+        deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
+        assert deployed_bin.is_file(), f"bin/myplugin not found at {deployed_bin}"
+
+        deployed_manifest = (
+            project_root / ".claude" / "skills" / "myplugin" / ".claude-plugin" / "plugin.json"
+        )
+        assert deployed_manifest.is_file(), f"plugin.json not found at {deployed_manifest}"
+
+        tp_files = {p for p in result.target_paths}
+        assert deployed_bin in tp_files, "deployed bin not in target_paths"
+        assert deployed_manifest in tp_files, "plugin.json not in target_paths"
+
+        # Verify user-only execute: S_IXUSR set, S_IXGRP and S_IXOTH cleared.
+        import os
+        import stat as _stat
+
+        if os.name == "posix":
+            mode = deployed_bin.stat().st_mode
+            assert mode & _stat.S_IXUSR, "owner execute bit must be set"
+            assert not (mode & _stat.S_IXGRP), "group execute bit must NOT be set"
+            assert not (mode & _stat.S_IXOTH), "other execute bit must NOT be set"
+
+    def test_bin_deploy_hardens_permissions_on_idempotent_reinstall(self, tmp_path: Path) -> None:
+        """Re-install of content-identical bin/ file still applies user-only execute.
+
+        Guard against a regression where the hash-match early-return path skips
+        the chmod mask, leaving previously-deployed files with loose permissions.
+        """
+        import os
+        import stat as _stat
+
+        if os.name != "posix":
+            return  # permission model only applies on POSIX
+
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir, pkg_name="myowner/myplugin")
+
+        integrator = SkillIntegrator()
+        # First install -- establishes the file.
+        integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+        )
+
+        deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
+        assert deployed_bin.is_file()
+
+        # Simulate a file previously deployed with loose permissions (0o755).
+        deployed_bin.chmod(0o755)
+        mode_before = deployed_bin.stat().st_mode
+        assert mode_before & _stat.S_IXGRP, "pre-condition: group-execute set"
+
+        # Second install with identical content -- must harden permissions.
+        integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+        )
+
+        mode_after = deployed_bin.stat().st_mode
+        assert mode_after & _stat.S_IXUSR, "owner execute bit must be set"
+        assert not (mode_after & _stat.S_IXGRP), "group execute bit must be cleared on re-install"
+        assert not (mode_after & _stat.S_IXOTH), "other execute bit must be cleared on re-install"
+
+    def test_bin_deploy_suppressed_by_policy_deny(self, tmp_path: Path) -> None:
+        """bin_deploy.deny list suppresses deployment for the matching package."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.policy.schema import ApmPolicy, BinDeployPolicy
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir, pkg_name="myowner/myplugin")
+
+        policy = ApmPolicy(bin_deploy=BinDeployPolicy(deny=("myowner/myplugin",)))
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+            policy=policy,
+        )
+
+        deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
+        assert not deployed_bin.exists(), "bin/myplugin should NOT be deployed when in deny list"
+        assert result.skill_created is False
+
+    def test_bin_deploy_suppressed_by_deny_all(self, tmp_path: Path) -> None:
+        """bin_deploy.deny_all suppresses deployment for all packages."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.policy.schema import ApmPolicy, BinDeployPolicy
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir, pkg_name="myowner/myplugin")
+
+        policy = ApmPolicy(bin_deploy=BinDeployPolicy(deny_all=True))
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+            policy=policy,
+        )
+
+        deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
+        assert not deployed_bin.exists(), "bin/myplugin should NOT be deployed when deny_all=True"
+        assert result.skill_created is False
+
+    def test_no_bin_deploy_when_no_bin_dir(self, tmp_path: Path) -> None:
+        """Packages without bin/ directory do not trigger bin deploy."""
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        # No bin/ dir
+
+        pkg_info = self._make_plugin_package(pkg_dir)
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+        )
+
+        assert result.skill_created is False
+        skill_dir = project_root / ".claude" / "skills" / "myplugin"
+        assert not skill_dir.exists()
+
+    def test_no_bin_deploy_when_scope_is_project(self, tmp_path: Path) -> None:
+        """bin/ is NOT deployed when scope is project (user-scope only for v1)."""
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir)
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.PROJECT,
+        )
+
+        deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
+        assert not deployed_bin.exists()
+        assert result.skill_created is False
+        # The plugin ships a bin/, so the skip must be reported (not silent) so
+        # the install layer can hint the user to re-run with -g.
+        assert result.bin_deployed == 0
+        assert result.bin_skipped_reason == "project_scope"
+
+    def test_force_overwrites_identical_bin(self, tmp_path: Path) -> None:
+        """force=True copies bin/ executables even when src and dest hashes match."""
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir)
+
+        # Pre-seed an identical copy so hash-check would normally skip it.
+        dest_bin = project_root / ".claude" / "skills" / "myplugin" / "bin"
+        dest_bin.mkdir(parents=True)
+        import shutil
+
+        shutil.copy2(bin_dir / "myplugin", dest_bin / "myplugin")
+
+        integrator = SkillIntegrator()
+        # Without force: the file is skipped (hash matches).
+        result_no_force = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+            force=False,
+        )
+        assert result_no_force.bin_deployed >= 1
+
+        # With force=True: the file must be (re-)deployed unconditionally.
+        # Modify the dest to a different content so we can detect the overwrite.
+        (dest_bin / "myplugin").write_text("#!/bin/sh\necho stale\n")
+        result_force = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+            force=True,
+        )
+        assert result_force.bin_deployed >= 1
+        assert (dest_bin / "myplugin").read_text() == "#!/bin/sh\necho hello\n", (
+            "force=True must overwrite stale dest with fresh src content"
+        )
+
+    def test_deploys_bin_when_plugin_also_ships_skills(self, tmp_path: Path) -> None:
+        """Regression (#1591): a plugin that ships skills/ must STILL deploy bin/.
+
+        Previously bin/ deploy lived only in the no-skill fallback branch, so a
+        marketplace_plugin with a skills/ bundle returned early and never got
+        its bin/ executables -- the central use case (a skill plus its helper
+        binary) was the broken one.
+        """
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        # bin/ helper
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+        # skills/ bundle -- forces the _integrate_skill_bundle routing branch
+        skill_dir = pkg_dir / "skills" / "mytool"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: mytool\n---\nbody\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir)
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+        )
+
+        deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
+        assert deployed_bin.is_file(), "bin/ must deploy even when the plugin ships skills/"
+        assert result.bin_deployed >= 1
+        assert deployed_bin in set(result.target_paths)
+
+    def test_deploys_bin_when_plugin_has_root_skill_md(self, tmp_path: Path) -> None:
+        """Regression (#1591): a plugin with a root SKILL.md must STILL deploy bin/.
+
+        Covers the third routing branch -- _integrate_native_skill -- which the
+        skill-bundle and fallback regression traps do not exercise. A root
+        SKILL.md routes through native-skill integration; bin/ must still fold
+        in via _merge_bin_paths.
+        """
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        # bin/ helper
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+        # root SKILL.md -- forces the _integrate_native_skill routing branch
+        (pkg_dir / "SKILL.md").write_text("---\nname: myplugin\n---\nbody\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir)
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+        )
+
+        deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
+        assert deployed_bin.is_file(), "bin/ must deploy even when the plugin has a root SKILL.md"
+        assert result.bin_deployed >= 1
+        assert deployed_bin in set(result.target_paths)
+
+    def test_symlink_in_bin_dir_not_deployed(self, tmp_path: Path) -> None:
+        """A symlink inside the package bin/ is silently skipped (not deployed).
+
+        Defense-in-depth: a malicious package could ship `bin/evil -> /etc/passwd`.
+        _deploy_bin_files rejects symlink sources, so the link must not appear at
+        the destination nor be counted in bin_deployed / target_paths.
+        """
+        import os
+
+        from apm_cli.core.scope import InstallScope
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        # A legitimate executable plus a malicious symlink target outside the pkg.
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+        secret = tmp_path / "secret.txt"
+        secret.write_text("top secret\n")
+        os.symlink(secret, bin_dir / "evil")
+
+        pkg_info = self._make_plugin_package(pkg_dir)
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+        )
+
+        skill_base = project_root / ".claude" / "skills" / "myplugin"
+        assert (skill_base / "bin" / "myplugin").is_file(), "legit bin must still deploy"
+        assert not (skill_base / "bin" / "evil").exists(), (
+            "symlink sources in bin/ must be silently skipped"
+        )
+        assert (skill_base / "bin" / "evil") not in set(result.target_paths)

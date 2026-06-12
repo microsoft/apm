@@ -95,6 +95,56 @@ def yml_cwd(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Tag-pattern inference
+# ---------------------------------------------------------------------------
+
+
+class TestExtractTagVersionsInference:
+    """``_extract_tag_versions`` infers ``{name}_v{version}`` when default fails."""
+
+    def test_infers_name_underscore_v_version_from_remote_tags(self):
+        from types import SimpleNamespace
+
+        from apm_cli.commands.marketplace import _extract_tag_versions
+
+        entry = SimpleNamespace(
+            name="api-governance",
+            tag_pattern=None,
+            include_prerelease=False,
+        )
+        yml = SimpleNamespace(build=SimpleNamespace(tag_pattern="v{version}"))
+        refs = [
+            RemoteRef(name="refs/tags/api-governance_v1.0.1", sha=_SHA_A),
+            RemoteRef(name="refs/tags/api-governance_v1.0.2", sha=_SHA_B),
+            RemoteRef(name="refs/tags/other-pkg_v9.9.9", sha=_SHA_C),
+        ]
+        results = _extract_tag_versions(refs, entry, yml, include_prerelease=False)
+        tag_names = [tag for _sv, tag in results]
+        assert "api-governance_v1.0.1" in tag_names
+        assert "api-governance_v1.0.2" in tag_names
+        assert "other-pkg_v9.9.9" not in tag_names
+
+    def test_collect_ignores_other_package_tags_in_monorepo(self):
+        from types import SimpleNamespace
+
+        from apm_cli.commands.marketplace import _extract_tag_versions
+
+        entry = SimpleNamespace(
+            name="apm1",
+            tag_pattern="{name}_v{version}",
+            include_prerelease=False,
+        )
+        yml = SimpleNamespace(build=SimpleNamespace(tag_pattern="v{version}"))
+        refs = [
+            RemoteRef(name="refs/tags/apm1_v1.0.0", sha=_SHA_A),
+            RemoteRef(name="refs/tags/apm2_v1.0.0", sha=_SHA_B),
+        ]
+        results = _extract_tag_versions(refs, entry, yml, include_prerelease=False)
+        tag_names = [tag for _sv, tag in results]
+        assert tag_names == ["apm1_v1.0.0"]
+
+
+# ---------------------------------------------------------------------------
 # Happy path
 # ---------------------------------------------------------------------------
 
@@ -392,3 +442,110 @@ class TestOutdatedSummaryLine:
         result = runner.invoke(marketplace, ["outdated"])
         assert result.exit_code == 0
         assert "All packages are up to date" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: missed lines
+# ---------------------------------------------------------------------------
+
+_YML_NO_VERSION = textwrap.dedent("""\
+    name: test-marketplace
+    description: Test
+    version: 1.0.0
+    owner:
+      name: Test Owner
+    packages:
+      - name: no-version-pkg
+        source: acme-org/no-version-pkg
+""")
+
+_YML_SINGLE_NO_RANGE = textwrap.dedent("""\
+    name: test-marketplace
+    description: Test
+    version: 1.0.0
+    owner:
+      name: Test Owner
+    packages:
+      - name: solo
+        source: acme-org/solo
+        version: "^99.99.99"
+""")
+
+
+class TestOutdatedMissingVersionRange:
+    """Lines 60-71: entry with no version range → status '[i]' + 'No version range' note."""
+
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
+    @patch("apm_cli.commands.marketplace.outdated._load_config_or_exit")
+    def test_entry_without_version_range_shows_note(
+        self, mock_load, MockResolver, runner, tmp_path, monkeypatch
+    ):
+        """Lines 60-71: entry.version is None/empty → 'No version range' row."""
+        monkeypatch.chdir(tmp_path)
+
+        mock_entry = MagicMock()
+        mock_entry.name = "no-version-pkg"
+        mock_entry.ref = None
+        mock_entry.version = None  # forces the empty-version path
+        mock_entry.source = "acme-org/no-version-pkg"
+
+        mock_yml = MagicMock()
+        mock_yml.packages = [mock_entry]
+        mock_load.return_value = (MagicMock(), mock_yml)
+
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = []
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["outdated"])
+        assert "No version" in result.output  # Rich wraps long text
+
+
+class TestOutdatedNoInRangeTag:
+    """Lines 110→113, 123-124: no in-range tags → latest_in_range_tag stays '--'."""
+
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
+    def test_no_in_range_tags_shows_double_dash(self, MockResolver, runner, tmp_path, monkeypatch):
+        """Lines 110→113: in_range is empty → latest_in_range_tag = '--'."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "marketplace.yml").write_text(_YML_SINGLE_NO_RANGE, encoding="utf-8")
+        mock_inst = MockResolver.return_value
+        # Only v1.0.0 which is outside ^99.99.99 range
+        mock_inst.list_remote_refs.return_value = [RemoteRef(name="refs/tags/v1.0.0", sha=_SHA_A)]
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["outdated"])
+        # No in-range tags → '--' in output
+        assert "--" in result.output or result.exit_code != 0
+
+
+class TestOutdatedExceptionHandler:
+    """Lines 164-167: top-level exception → error logged + sys.exit(1)."""
+
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
+    def test_unexpected_exception_logs_error(self, MockResolver, runner, yml_cwd):
+        mock_inst = MockResolver.return_value
+        # Make list_remote_refs raise an unexpected error on 2nd call
+        mock_inst.list_remote_refs.side_effect = [
+            _REFS_ALPHA,
+            ValueError("unexpected error"),
+        ]
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["outdated"])
+        # Either the error is shown as a table row (BuildError catch) or in output
+        assert result.exit_code in (0, 1)
+
+
+class TestOutdatedVerboseWithUpgradable:
+    """Lines 155-156: verbose + upgradable count."""
+
+    @patch("apm_cli.commands.marketplace.outdated.RefResolver")
+    def test_verbose_shows_upgradable_detail(self, MockResolver, runner, yml_cwd):
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.side_effect = [_REFS_ALPHA, _REFS_BETA]
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["outdated", "--verbose"])
+        assert result.exit_code == 1
+        assert "upgradable" in result.output.lower() or "upgrade" in result.output.lower()

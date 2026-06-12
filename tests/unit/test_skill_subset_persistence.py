@@ -311,6 +311,47 @@ class TestApmYmlWriter:
         entry = data["dependencies"]["apm"][0]
         assert entry["skills"] == ["alpha", "gamma"]
 
+    def test_no_dependencies_key_returns_false(self, tmp_path):
+        """Manifest with no 'dependencies' key at all returns False (line 30: deps_section={})."""
+        from apm_cli.commands._apm_yml_writer import set_skill_subset_for_entry
+
+        manifest = self._write_manifest(tmp_path, "name: test\n")
+        result = set_skill_subset_for_entry(manifest, "owner/repo", ["skill"])
+        assert result is False
+
+    def test_entry_matches_non_str_non_dict_returns_false(self):
+        """Non-str/non-dict entry in _entry_matches returns False (line 70)."""
+        from apm_cli.commands._apm_yml_writer import _entry_matches
+
+        assert _entry_matches(42, "owner/repo") is False
+        assert _entry_matches(None, "owner/repo") is False
+        assert _entry_matches(["owner/repo"], "owner/repo") is False
+
+    def test_entry_matches_parse_error_returns_false(self):
+        """ValueError from DependencyReference.parse returns False (lines 72-73)."""
+        from unittest.mock import patch
+
+        from apm_cli.commands._apm_yml_writer import _entry_matches
+
+        with patch(
+            "apm_cli.commands._apm_yml_writer.DependencyReference.parse",
+            side_effect=ValueError("bad ref"),
+        ):
+            result = _entry_matches("bad-ref-string", "owner/repo")
+        assert result is False
+
+    def test_apply_subset_non_str_non_dict_returns_entry_unchanged(self):
+        """Non-str/non-dict entry is returned unchanged from _apply_subset (line 84)."""
+        from apm_cli.commands._apm_yml_writer import _apply_subset
+
+        entry = 42
+        result = _apply_subset(entry, ["skill"])
+        assert result == entry
+
+        entry_list = ["owner/repo"]
+        result_list = _apply_subset(entry_list, None)
+        assert result_list == entry_list
+
 
 # ============================================================================
 # _check_skill_subset_consistency audit check

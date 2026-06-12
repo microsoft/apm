@@ -41,7 +41,7 @@ Enhancement suggestions are welcome! Please:
 2. Create a new branch for your feature/fix: `git checkout -b feature/your-feature-name` or `git checkout -b fix/issue-description`.
 3. Make your changes.
 4. Run tests: `uv run pytest`
-5. Ensure your code passes linting: `uv run ruff check src/ tests/`
+5. Ensure your code passes linting: `uv run --extra dev ruff check src/ tests/`
 6. Commit your changes with a descriptive message.
 7. Push to your fork.
 8. Submit a pull request.
@@ -109,10 +109,18 @@ This project follows:
 CI enforces all lint and formatting rules automatically. You can run them locally:
 
 ```bash
-uv run ruff check src/ tests/        # lint
-uv run ruff check --fix src/ tests/   # lint with auto-fix
-uv run ruff format src/ tests/        # format
+uv run --extra dev ruff check src/ tests/         # lint
+uv run --extra dev ruff check --fix src/ tests/   # lint with auto-fix
+uv run --extra dev ruff format src/ tests/        # format
 ```
+
+Verify Ruff lint and format before pushing:
+
+```bash
+uv run --extra dev ruff check src/ tests/ && uv run --extra dev ruff format --check src/ tests/
+```
+
+CI also runs repository guardrails from `.github/workflows/ci.yml`, including duplication and auth-boundary checks.
 
 ### Optional: local pre-commit hooks
 

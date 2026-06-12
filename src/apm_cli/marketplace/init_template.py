@@ -89,6 +89,7 @@ def render_marketplace_yml_template(
 _MARKETPLACE_BLOCK_TEMPLATE = """\
 # Marketplace authoring config (APM-only).
 # Run 'apm pack' to compile this block to .claude-plugin/marketplace.json.
+# Optionally enable Codex output below to also write .agents/plugins/marketplace.json.
 #
 # Top-level 'name', 'description', and 'version' are inherited from
 # the project (above) by default.  Override them inside this block when
@@ -106,14 +107,33 @@ marketplace:
   build:
     tagPattern: "v{{version}}"
 
+  # Output targets (map form). 'claude' is enabled by default;
+  # uncomment 'codex' below to publish the Codex artifact too.
+  # Each output writes to its profile default path; add 'path:'
+  # under a key to override.
+  outputs:
+    claude: {{}}
+    # codex: {{}}
+    #
+    # Note: enabling codex requires every package below to declare
+    # 'category:' (e.g. category: Productivity).
+
+  # CI tip: build one or all formats with a machine-readable manifest:
+  #   apm pack --marketplace=claude,codex --json | jq -r '.marketplace.outputs[].path'
+
   packages:
     - name: example-package
       description: Human-readable description of the package
       source: {owner}/example-package
       version: "^1.0.0"
+      # Required when outputs includes codex:
+      # category: Productivity
       # Optional overrides:
       # subdir: path/inside/repo
-      # tagPattern: "example-package-v{{version}}"
+      # Per-package version tag (recommended for monorepos so each
+      # package can be released independently). Leave commented for
+      # repo-wide lockstep tagging.
+      # tag_pattern: "{{name}}-v{{version}}"
       # include_prerelease: false
       # ref: main  # pin to an explicit ref instead of a version range
 
@@ -122,6 +142,7 @@ marketplace:
     #   source: ./packages/local-tool
     #   description: A locally vendored tool
     #   version: 0.1.0
+    #   # tag_pattern: "{{name}}-v{{version}}"
 """
 
 

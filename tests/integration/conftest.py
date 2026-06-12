@@ -25,6 +25,50 @@ from pathlib import Path
 
 import pytest
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+@pytest.fixture(autouse=True)
+def _integration_process_cwd_guard():
+    """Keep process cwd valid across integration tests on POSIX workers.
+
+    If a test changes the working directory into a directory that is later
+    deleted without leaving first, the kernel leaves the process parked on a
+    detached inode and :func:`os.getcwd` raises :exc:`FileNotFoundError`.
+    That poisons the rest of an xdist worker (merge-queue CI runs
+    ``-n 2 --dist loadgroup``).
+    """
+    try:
+        os.getcwd()
+    except (FileNotFoundError, OSError):
+        os.chdir(_REPO_ROOT)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_console_state():
+    """Reset the console singleton after each test.
+
+    Several commands (e.g. ``pack --json``) call
+    ``set_console_stderr(True)`` to route rich/click output to stderr.
+    If a test exercises such a command and the function never reaches
+    its cleanup path, ``_console_stderr`` stays ``True`` and later
+    tests see empty stdout because ``click.echo(..., err=True)``
+    silently diverts output.
+
+    This fixture is a safety net -- it yields first (so the test runs
+    with whatever state it sets up) and unconditionally resets
+    afterwards.
+    """
+    yield
+    from apm_cli.utils.console import _reset_console
+
+    _reset_console()
+    try:
+        os.getcwd()
+    except (FileNotFoundError, OSError):
+        os.chdir(_REPO_ROOT)
+
 
 def make_copilot_project(tmp_path: Path, name: str = "test-project") -> Path:
     """Create a temp project with a valid copilot signal.

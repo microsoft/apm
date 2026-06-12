@@ -278,6 +278,38 @@ class TestNoOrphans:
         assert not result.passed
         assert "extra/orphan" in result.details
 
+    def test_transitive_dep_not_flagged_as_orphan(self, tmp_path):
+        """Transitive deps (resolved_by set) are NOT root orphans.
+
+        A sub-package's local-path dep appears in the root lockfile with
+        ``resolved_by`` set. The root manifest cannot remove it; flagging
+        it as an orphan would create an unfixable CI failure.
+        """
+        _write_apm_yml(tmp_path, deps=["owner/repo"])
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: owner/repo
+                    deployed_files: []
+                  - repo_url: _local/sub
+                    source: local
+                    local_path: ../sub
+                    depth: 2
+                    resolved_by: _local/parent
+                    deployed_files: []
+            """),
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
+
+        manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_no_orphans(manifest, lock)
+        assert result.passed, result.details
+
 
 # -- Config consistency ---------------------------------------------
 
@@ -455,6 +487,67 @@ class TestContentIntegrity:
         assert any("hash-drift" in d and "installed.md" in d for d in result.details), (
             result.details
         )
+
+    def test_agents_skill_tamper_fails_content_integrity(self, tmp_path):
+        # Trap A (issue #1716): a deployed skill under the copilot skills
+        # deploy_root (.agents/skills/<s>/SKILL.md) must be covered by the
+        # per-file content-integrity manifest. Tampering the deployed file
+        # without re-installing has to fail `apm audit --ci --no-drift`.
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        rel = ".agents/skills/demo/SKILL.md"
+        _make_deployed_file(tmp_path, rel, "---\nname: demo\n---\nOriginal skill\n")
+        recorded_hash = compute_file_hash(tmp_path / rel)
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent(f"""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: owner/repo
+                    deployed_files:
+                      - .agents/skills/demo
+                      - {rel}
+                    deployed_file_hashes:
+                      {rel}: '{recorded_hash}'
+            """),
+        )
+        # Tamper the deployed skill after install (no re-deploy).
+        (tmp_path / rel).write_text("---\nname: demo\n---\nTampered skill\n", encoding="utf-8")
+
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_content_integrity(tmp_path, lock)
+        assert not result.passed
+        assert any("hash-drift" in d and rel in d for d in result.details), result.details
+
+    def test_agents_skill_clean_passes_content_integrity(self, tmp_path):
+        # Companion to Trap A: an untampered deployed skill hashes clean.
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        rel = ".agents/skills/demo/SKILL.md"
+        _make_deployed_file(tmp_path, rel, "---\nname: demo\n---\nOriginal skill\n")
+        recorded_hash = compute_file_hash(tmp_path / rel)
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent(f"""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: owner/repo
+                    deployed_files:
+                      - .agents/skills/demo
+                      - {rel}
+                    deployed_file_hashes:
+                      {rel}: '{recorded_hash}'
+            """),
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_content_integrity(tmp_path, lock)
+        assert result.passed, result.details
 
     def test_hash_skips_missing_file(self, tmp_path):
         # Lockfile records a file with a hash, but the file is missing on
@@ -1119,3 +1212,238 @@ class TestRunBaselineChecksMalformedManifest:
         assert parse_check.name == "manifest-parse"
         assert "Cannot parse apm.yml" in parse_check.message
         assert "fix the YAML syntax error in apm.yml and re-run" in parse_check.message
+
+
+# -- Group 5: _check_drift cache-miss skip behavior ----------------
+
+
+class TestCheckDriftCacheMiss:
+    """_check_drift must return passed=True (skip-with-info) on CacheMissError.
+
+    A cache miss means the user has not yet run ``apm install`` -- failing
+    the check in that situation would block every fresh checkout and is
+    unhelpful.  The drift check skips with a clear informational message
+    instead of marking the audit as failed.
+    """
+
+    def test_cache_miss_returns_passed_true(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CacheMissError must produce passed=True, not a failure."""
+        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.install.drift import CacheMissError
+        from apm_cli.policy.ci_checks import _check_drift
+
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies: []
+            """),
+        )
+        lockfile = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lockfile is not None
+
+        def _raise_cache_miss(*_args: object, **_kwargs: object) -> None:
+            raise CacheMissError("org/foo@deadbeef: no cache entry found")
+
+        monkeypatch.setattr("apm_cli.install.drift.run_replay", _raise_cache_miss)
+
+        check_result, findings = _check_drift(tmp_path, lockfile)
+
+        assert check_result.passed, "cache miss must not fail the drift check"
+        assert findings == [], "no findings expected on cache miss"
+
+    def test_cache_miss_message_indicates_skip(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The skip message must guide the user to run 'apm install'."""
+        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.install.drift import CacheMissError
+        from apm_cli.policy.ci_checks import _check_drift
+
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies: []
+            """),
+        )
+        lockfile = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lockfile is not None
+
+        def _raise_cache_miss(*_args: object, **_kwargs: object) -> None:
+            raise CacheMissError("org/foo@deadbeef: no cache entry found")
+
+        monkeypatch.setattr("apm_cli.install.drift.run_replay", _raise_cache_miss)
+
+        check_result, _ = _check_drift(tmp_path, lockfile)
+
+        assert check_result.name == "drift"
+        assert "skipped" in check_result.message.lower()
+        assert "apm install" in check_result.message
+
+    def test_cache_miss_does_not_block_other_checks(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Adding the cache-miss drift result to a CIAuditResult must not
+        cause the aggregate to fail -- passed=True from the skip must
+        propagate correctly when combined with other passing checks."""
+        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.install.drift import CacheMissError
+        from apm_cli.policy.ci_checks import _check_drift
+
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies: []
+            """),
+        )
+        lockfile = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lockfile is not None
+
+        def _raise_cache_miss(*_args: object, **_kwargs: object) -> None:
+            raise CacheMissError("cold cache")
+
+        monkeypatch.setattr("apm_cli.install.drift.run_replay", _raise_cache_miss)
+
+        drift_result, findings = _check_drift(tmp_path, lockfile)
+
+        # Simulate a CIAuditResult that already has passing baseline checks
+        # plus the drift skip result; the aggregate must remain passing.
+        from apm_cli.policy.models import CIAuditResult
+
+        aggregate = CIAuditResult()
+        aggregate.checks.append(CheckResult(name="lockfile-exists", passed=True, message="ok"))
+        aggregate.checks.append(CheckResult(name="ref-consistency", passed=True, message="ok"))
+        aggregate.checks.append(drift_result)
+
+        assert drift_result.passed, "cache miss must produce a passing drift result"
+        assert findings == [], "cache miss must produce no findings"
+        assert aggregate.passed, "cache-miss skip must not fail the aggregate CIAuditResult"
+
+
+class TestCheckDriftLocalResolutionError:
+    """_check_drift must HARD-FAIL on LocalResolutionError.
+
+    A corrupt local dependency graph (missing / ambiguous / cyclic
+    ``resolved_by`` parent) is internal lockfile inconsistency, NOT a cold
+    cache. Folding it into the cache-miss soft-skip is exactly how a
+    resolution bug silently disables drift detection repo-wide, so it must
+    surface as passed=False.
+    """
+
+    def test_local_resolution_error_returns_passed_false(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.deps.path_anchoring import LocalResolutionError
+        from apm_cli.policy.ci_checks import _check_drift
+
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies: []
+            """),
+        )
+        lockfile = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lockfile is not None
+
+        def _raise_local_resolution(*_args: object, **_kwargs: object) -> None:
+            raise LocalResolutionError(
+                "resolved_by parent '_local/ghost' of '_local/orphan' is not a "
+                "local dependency in the lockfile"
+            )
+
+        monkeypatch.setattr("apm_cli.install.drift.run_replay", _raise_local_resolution)
+
+        check_result, findings = _check_drift(tmp_path, lockfile)
+
+        assert not check_result.passed, "corrupt local graph must fail the drift check"
+        assert check_result.name == "drift"
+        assert "skipped" not in check_result.message.lower(), (
+            "a corrupt local graph must not masquerade as a soft skip"
+        )
+        assert findings == []
+
+
+class TestManifestMissingWarning:
+    """Tests for the manifest-missing warning when apm.yml is absent."""
+
+    def test_no_artifacts_no_warning(self, tmp_path: Path) -> None:
+        """Clean non-APM project: no apm.yml, no .apm/, no lockfile -> no warning."""
+        result = run_baseline_checks(tmp_path)
+        names = [c.name for c in result.checks]
+        assert "manifest-missing" not in names
+        assert result.passed
+
+    def test_apm_dir_triggers_warning(self, tmp_path: Path) -> None:
+        """apm.yml absent but .apm/ dir exists -> manifest-missing warning."""
+        (tmp_path / ".apm").mkdir()
+        result = run_baseline_checks(tmp_path)
+        names = [c.name for c in result.checks]
+        assert "manifest-missing" in names
+        check = next(c for c in result.checks if c.name == "manifest-missing")
+        assert check.passed is True
+        assert ".apm/" in check.message or "apm.lock.yaml" in check.message
+
+    def test_lockfile_triggers_warning(self, tmp_path: Path) -> None:
+        """apm.yml absent but apm.lock.yaml exists -> manifest-missing warning."""
+        (tmp_path / "apm.lock.yaml").write_text("packages: []\n", encoding="utf-8")
+        result = run_baseline_checks(tmp_path)
+        names = [c.name for c in result.checks]
+        assert "manifest-missing" in names
+        check = next(c for c in result.checks if c.name == "manifest-missing")
+        assert check.passed is True
+
+    def test_manifest_present_no_warning(self, tmp_path: Path) -> None:
+        """apm.yml present -> no manifest-missing check at all."""
+        _write_apm_yml(tmp_path)
+        result = run_baseline_checks(tmp_path)
+        names = [c.name for c in result.checks]
+        assert "manifest-missing" not in names
+
+    def test_apm_dir_ci_mode_fails(self, tmp_path: Path) -> None:
+        """In CI mode, .apm/ without apm.yml fails the check."""
+        (tmp_path / ".apm").mkdir()
+        result = run_baseline_checks(tmp_path, ci_mode=True)
+        check = next(c for c in result.checks if c.name == "manifest-missing")
+        assert check.passed is False
+        assert not result.passed
+
+    def test_lockfile_ci_mode_fails(self, tmp_path: Path) -> None:
+        """In CI mode, apm.lock.yaml without apm.yml fails the check."""
+        (tmp_path / "apm.lock.yaml").write_text("packages: []\n", encoding="utf-8")
+        result = run_baseline_checks(tmp_path, ci_mode=True)
+        check = next(c for c in result.checks if c.name == "manifest-missing")
+        assert check.passed is False
+        assert not result.passed
+
+    def test_legacy_lockfile_triggers_warning(self, tmp_path: Path) -> None:
+        """apm.yml absent but legacy apm.lock exists -> manifest-missing warning."""
+        (tmp_path / "apm.lock").write_text("packages: []\n", encoding="utf-8")
+        result = run_baseline_checks(tmp_path)
+        names = [c.name for c in result.checks]
+        assert "manifest-missing" in names
+        check = next(c for c in result.checks if c.name == "manifest-missing")
+        assert check.passed is True
+
+    def test_legacy_lockfile_ci_mode_fails(self, tmp_path: Path) -> None:
+        """In CI mode, legacy apm.lock without apm.yml fails the check."""
+        (tmp_path / "apm.lock").write_text("packages: []\n", encoding="utf-8")
+        result = run_baseline_checks(tmp_path, ci_mode=True)
+        check = next(c for c in result.checks if c.name == "manifest-missing")
+        assert check.passed is False
+        assert not result.passed
+
+    def test_no_artifacts_ci_mode_still_passes(self, tmp_path: Path) -> None:
+        """Clean project with no APM artifacts passes even in CI mode."""
+        result = run_baseline_checks(tmp_path, ci_mode=True)
+        names = [c.name for c in result.checks]
+        assert "manifest-missing" not in names
+        assert result.passed

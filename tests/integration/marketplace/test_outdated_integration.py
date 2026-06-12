@@ -61,6 +61,15 @@ def _refs_alpha():
     ]
 
 
+def _refs_alpha_named():
+    """alpha: monorepo-style tags with package name prefix."""
+    return [
+        RemoteRef(name="refs/tags/alpha_v1.0.0", sha="a" * 40),
+        RemoteRef(name="refs/tags/alpha_v1.1.0", sha="b" * 40),
+        RemoteRef(name="refs/tags/beta_v9.9.9", sha="c" * 40),
+    ]
+
+
 def _refs_beta():
     """beta: v2.0.0 only -- no newer version available."""
     return [
@@ -78,6 +87,7 @@ def _refs_pinned():
 def _side_effect(owner_repo: str):
     return {
         "org/alpha": _refs_alpha(),
+        "org/alpha-monorepo": _refs_alpha_named(),
         "org/beta": _refs_beta(),
         "org/pinned": _refs_pinned(),
     }.get(owner_repo, [])
@@ -205,6 +215,26 @@ class TestOutdatedVersionRanges:
         combined = result.output
         # v2.0.0 is the latest overall; it should appear in the overall-latest column
         assert "v2.0.0" in combined
+
+    def test_name_underscore_tags_are_inferred_end_to_end(self, tmp_path: Path):
+        """Monorepo tags like alpha_v1.1.0 are reported through the CLI path."""
+        yml_content = """\
+name: outdated-test
+description: Marketplace for outdated tests
+version: 1.0.0
+owner:
+  name: Test Org
+packages:
+  - name: alpha
+    source: org/alpha-monorepo
+    version: "^1.0.0"
+    tags:
+      - test
+"""
+        result = _run_outdated(tmp_path, yml_content=yml_content)
+        assert result.exit_code == 1
+        assert "alpha_v1.1.0" in result.output
+        assert "beta_v9.9.9" not in result.output
 
 
 class TestOutdatedMissingYml:

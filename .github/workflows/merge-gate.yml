@@ -120,13 +120,22 @@ jobs:
           # Keep this in sync with the underlying workflows.
           # NOTE: 'gate' (this job) MUST NOT appear here -- it would
           # deadlock waiting for itself.
-          EXPECTED_CHECKS: ${{ github.event_name == 'merge_group' && 'Build & Test (Linux),APM Self-Check,NOTICE Drift Check,Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || 'Build & Test (Linux),APM Self-Check,NOTICE Drift Check' }}
+          # PR context: only the shard jobs gate. Coverage Combine runs
+          # in parallel as a non-required signal so global 80% drift is
+          # visible in the PR UI without paying ~3 min of runner-
+          # allocation latency on the critical path.
+          # merge_group context: Coverage Combine IS required, so the
+          # global 80% floor blocks the actual merge.
+          EXPECTED_CHECKS: ${{ github.event_name == 'merge_group' && 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),Coverage Combine (Linux),APM Self-Check,NOTICE Drift Check,Build (Linux),Smoke Test (Linux),Integration Tests (Linux),Release Validation (Linux)' || 'Build & Test Shard 1 (Linux),Build & Test Shard 2 (Linux),APM Self-Check,NOTICE Drift Check' }}
           # Poll budget: ci-integration.yml chains Build -> Smoke ->
           # Integration (timeout 20m) -> Release Validation (timeout 20m).
           # Theoretical worst case ~50m; observed today ~5m end-to-end.
           # Sized at 55m to absorb growth without false-failing the gate.
           TIMEOUT_MIN: '55'
-          POLL_SEC: '30'
+          # 5s poll keeps perceived gate latency low. With ~3 expected checks
+          # per poll = ~36 gh API calls/min, well under the 5000/hr quota.
+          # cancel-in-progress concurrency bounds parallel polling per PR.
+          POLL_SEC: '5'
         run: |
           chmod +x .github/scripts/ci/merge_gate_wait.sh
           .github/scripts/ci/merge_gate_wait.sh

@@ -21,6 +21,15 @@ Deprecated aliases (still functional, emit ``DeprecationWarning``)::
     ARTIFACTORY_BASE_URL  -> PROXY_REGISTRY_URL
     ARTIFACTORY_APM_TOKEN -> PROXY_REGISTRY_TOKEN
     ARTIFACTORY_ONLY      -> PROXY_REGISTRY_ONLY
+
+Related: :mod:`apm_cli.deps.registry`
+    A separate, additive package source that fetches APM packages over a
+    REST contract instead of a VCS proxy. Suitable when the package
+    server speaks the APM Registry HTTP API directly rather than acting
+    as a transparent Git mirror. Configured per-project in ``apm.yml``
+    via the top-level ``registries:`` block; orthogonal to the
+    ``PROXY_REGISTRY_*`` env vars documented here. See
+    ``docs/src/content/docs/guides/registries.md``.
 """
 
 from __future__ import annotations
@@ -29,7 +38,7 @@ import os
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, List, Optional, Protocol, runtime_checkable  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:

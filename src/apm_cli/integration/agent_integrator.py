@@ -9,15 +9,18 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List  # noqa: F401, UP035
+from typing import TYPE_CHECKING
 
 import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
+from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
+    from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
 class AgentIntegrator(BaseIntegrator):
@@ -28,7 +31,7 @@ class AgentIntegrator(BaseIntegrator):
 
         Searches in:
         - Package root directory (.agent.md and .chatmode.md)
-        - .apm/agents/ subdirectory (new standard)
+        - .apm/agents/ subdirectory (new standard, recursive)
         - .apm/chatmodes/ subdirectory (legacy)
 
         Args:
@@ -37,31 +40,23 @@ class AgentIntegrator(BaseIntegrator):
         Returns:
             List[Path]: List of absolute paths to agent files
         """
-        agent_files = []
-
-        # Search in package root
-        if package_path.exists():
-            agent_files.extend(package_path.glob("*.agent.md"))
-            agent_files.extend(package_path.glob("*.chatmode.md"))  # Legacy
-
-        # Search in .apm/agents/ (new standard)
-        # Use rglob so agents in subdirectories (e.g. from plugin mapping) are
-        # still discovered.
+        files: list[Path] = []
+        # Flat search in package root
+        files += self.find_files_by_glob(package_path, "*.agent.md")
+        files += self.find_files_by_glob(package_path, "*.chatmode.md")
+        # Recursive search in .apm/agents/ (use ** glob for subdirectories)
         apm_agents = package_path / ".apm" / "agents"
         if apm_agents.exists():
-            agent_files.extend(apm_agents.rglob("*.agent.md"))
-            # Also pick up plain .md files in agents/; plugins may not use
-            # the .agent.md convention  -- the directory name already implies type
-            for md_file in apm_agents.rglob("*.md"):
-                if not md_file.name.endswith(".agent.md") and md_file not in agent_files:
-                    agent_files.append(md_file)
-
-        # Search in .apm/chatmodes/ (legacy)
+            files += self.find_files_by_glob(apm_agents, "**/*.agent.md")
+            # Also pick up plain .md files; the directory name implies type
+            for f in self.find_files_by_glob(apm_agents, "**/*.md"):
+                if not f.name.endswith(".agent.md") and f not in files:
+                    files.append(f)
+        # Flat search in .apm/chatmodes/ (legacy)
         apm_chatmodes = package_path / ".apm" / "chatmodes"
         if apm_chatmodes.exists():
-            agent_files.extend(apm_chatmodes.glob("*.chatmode.md"))
-
-        return agent_files
+            files += self.find_files_by_glob(apm_chatmodes, "*.chatmode.md")
+        return files
 
     # NOTE: find_skill_file(), integrate_skill(), and _generate_skill_agent_content()
     # have been REMOVED as part of T5 (skill-strategy.md).
@@ -101,6 +96,7 @@ class AgentIntegrator(BaseIntegrator):
         force: bool = False,
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
+        scope=None,
     ) -> IntegrationResult:
         """Integrate agents from a package for a single *target*.
 
@@ -127,6 +123,7 @@ class AgentIntegrator(BaseIntegrator):
 
         files_integrated = 0
         files_skipped = 0
+        files_adopted = 0
         target_paths: list[Path] = []
         total_links_resolved = 0
 
@@ -137,26 +134,45 @@ class AgentIntegrator(BaseIntegrator):
                 target,
             )
             target_path = agents_dir / target_filename
+            # Defense-in-depth: target_filename comes from
+            # get_target_filename_for_target which strips path separators,
+            # but assert containment under agents_dir so a future
+            # regression cannot smuggle a traversal sequence past the
+            # adopt branch (which fires *before* check_collision and
+            # would otherwise blindly trust the computed path). Mirrors
+            # the guard already in command_integrator and
+            # instruction_integrator.
+            try:
+                ensure_path_within(target_path, agents_dir)
+            except PathTraversalError as exc:
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        message=f"Rejected agent target path: {exc}",
+                        package=package_info.package.name,
+                    )
+                files_skipped += 1
+                continue
+
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.check_collision(
-                target_path,
-                rel_path,
-                managed_files,
-                force,
-                diagnostics=diagnostics,
-            ):
-                files_skipped += 1
+            skip, adopted = self._check_adopt_or_skip(
+                target_path, source_file, rel_path, managed_files, force, diagnostics, target_paths
+            )
+            if skip:
+                if adopted:
+                    files_adopted += 1
+                else:
+                    files_skipped += 1
                 continue
 
             if mapping.format_id == "codex_agent":
                 self._write_codex_agent(source_file, target_path)
                 links_resolved = 0
-            elif mapping.format_id == "windsurf_agent_skill":
-                links_resolved = self._write_windsurf_agent_skill(
-                    source_file, target_path, diagnostics=diagnostics
-                )
             else:
+                if mapping.format_id == "opencode_agent":
+                    self._warn_opencode_frontmatter(
+                        source_file, diagnostics, package_info.package.name
+                    )
                 links_resolved = self.copy_agent(source_file, target_path)
             total_links_resolved += links_resolved
             files_integrated += 1
@@ -168,6 +184,7 @@ class AgentIntegrator(BaseIntegrator):
             files_skipped=files_skipped,
             target_paths=target_paths,
             links_resolved=total_links_resolved,
+            files_adopted=files_adopted,
         )
 
     def sync_for_target(
@@ -227,10 +244,50 @@ class AgentIntegrator(BaseIntegrator):
         Returns:
             int: Number of links resolved
         """
+        if source.is_symlink():
+            raise ValueError(f"Refusing to read symlink source: {source}")
         content = source.read_text(encoding="utf-8")
         content, links_resolved = self.resolve_links(content, source, target)
         target.write_text(content, encoding="utf-8")
         return links_resolved
+
+    # ------------------------------------------------------------------
+    # OpenCode validate-and-warn (Phase 1 of #581)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _warn_opencode_frontmatter(
+        source: Path,
+        diagnostics: DiagnosticCollector | None,
+        package_name: str,
+    ) -> None:
+        """Emit warnings for OpenCode-incompatible agent frontmatter.
+
+        Phase 1 only: surfaces Zod-fatal shapes (tools as list/string,
+        named colors outside the OpenCode theme enum) so users learn
+        why OpenCode will refuse to load the agent. The file is still
+        copied verbatim; Phase 2 (per-target frontmatter transformer)
+        is tracked separately.
+        """
+        if diagnostics is None:
+            return
+        if source.is_symlink():
+            return
+        try:
+            content = source.read_text(encoding="utf-8")
+        except OSError:
+            return
+        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
+        if not fm_match:
+            return
+        try:
+            fm = yaml.safe_load(fm_match.group(1)) or {}
+        except yaml.YAMLError:
+            return
+        if not isinstance(fm, dict):
+            return
+        for message in validate_opencode_frontmatter(fm, source, package_name=package_name):
+            diagnostics.warn(message=message, package=package_name)
 
     # ------------------------------------------------------------------
     # Codex agent transformer (MD -> TOML)
@@ -248,6 +305,8 @@ class AgentIntegrator(BaseIntegrator):
         Parses YAML frontmatter for ``name`` and ``description``, uses
         the markdown body as ``developer_instructions``.
         """
+        if source.is_symlink():
+            raise ValueError(f"Refusing to read symlink source: {source}")
         import toml as _toml
 
         content = source.read_text(encoding="utf-8")
@@ -274,75 +333,6 @@ class AgentIntegrator(BaseIntegrator):
             "developer_instructions": body.strip(),
         }
         target.write_text(_toml.dumps(doc), encoding="utf-8")
-
-    # ------------------------------------------------------------------
-    # Windsurf agent-skill transformer (agent.md -> skills/<name>/SKILL.md)
-    # ------------------------------------------------------------------
-
-    def _write_windsurf_agent_skill(
-        self, source: Path, target: Path, diagnostics=None
-    ) -> int:  # not @staticmethod: needs self.resolve_links()
-        """Transform an ``.agent.md`` file to a Windsurf Skill (``SKILL.md``).
-
-        Windsurf Skills are the closest equivalent to a specialist persona:
-        - Invocable with ``@skill-name`` (like ``@agent-name`` in Copilot)
-        - Auto-invoked by Cascade when the description matches the task
-        - Support a directory with supplementary resource files
-
-        The conversion:
-        - Keeps ``name`` (or derives from filename) and ``description``.
-        - Strips agent-specific keys (``model``, ``tools``) and emits a
-          diagnostic warning when those fields are dropped.
-        - Preserves the markdown body verbatim.
-        """
-        content = source.read_text(encoding="utf-8")
-
-        stem = source.name
-        if stem.endswith(".agent.md"):
-            stem = stem[:-9]
-        elif stem.endswith(".chatmode.md"):
-            stem = stem[:-12]
-        else:
-            stem = Path(stem).stem
-
-        fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
-        if fm_match:
-            body = content[fm_match.end() :]
-            try:
-                fm = yaml.safe_load(fm_match.group(1)) or {}
-            except Exception:
-                fm = {}
-        else:
-            body = content
-            fm = {}
-
-        dropped = [k for k in ("tools", "model") if fm.get(k)]
-        if dropped and diagnostics is not None:
-            diagnostics.warn(
-                f"Windsurf skill conversion dropped frontmatter field(s) "
-                f"{', '.join(dropped)} from {source.name}",
-                detail="Windsurf Skills do not support agent-only fields; "
-                "only name, description, and body are preserved.",
-            )
-
-        name = fm.get("name", stem)
-        description = fm.get("description", "")
-
-        # Use yaml.safe_dump to safely serialize values -- prevents YAML key
-        # injection via multi-line name/description strings.
-
-        fm_data: dict = {"name": name}
-        if description:
-            fm_data["description"] = description
-        fm_yaml = yaml.safe_dump(  # yaml-io-exempt: serializes to string, not file handle
-            fm_data, default_flow_style=False, allow_unicode=True
-        ).rstrip("\n")
-
-        result = f"---\n{fm_yaml}\n---\n" + body
-        result, links_resolved = self.resolve_links(result, source, target)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(result, encoding="utf-8")
-        return links_resolved
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.
     def integrate_package_agents(
@@ -385,6 +375,7 @@ class AgentIntegrator(BaseIntegrator):
 
         files_integrated = 0
         files_skipped = 0
+        files_adopted = 0
         target_paths: list[Path] = []
         total_links_resolved = 0
 
@@ -395,18 +386,30 @@ class AgentIntegrator(BaseIntegrator):
                 copilot,
             )
             target_path = agents_dir / target_filename
-            rel_path = portable_relpath(target_path, project_root)
-
-            if self.check_collision(
-                target_path, rel_path, managed_files, force, diagnostics=diagnostics
-            ):
+            try:
+                ensure_path_within(target_path, agents_dir)
+            except PathTraversalError as exc:
+                if diagnostics is not None:
+                    diagnostics.warn(
+                        message=f"Rejected agent target path: {exc}",
+                        package=package_info.package.name,
+                    )
                 files_skipped += 1
                 continue
+            rel_path = portable_relpath(target_path, project_root)
 
-            links_resolved = self.copy_agent(source_file, target_path)
-            total_links_resolved += links_resolved
-            files_integrated += 1
-            target_paths.append(target_path)
+            if self.try_adopt_identical(target_path, source_file, target_paths):
+                files_adopted += 1
+            else:
+                if self.check_collision(
+                    target_path, rel_path, managed_files, force, diagnostics=diagnostics
+                ):
+                    files_skipped += 1
+                    continue
+                links_resolved = self.copy_agent(source_file, target_path)
+                total_links_resolved += links_resolved
+                files_integrated += 1
+                target_paths.append(target_path)
 
             if claude_agents_dir:
                 claude_target = KNOWN_TARGETS["claude"]
@@ -416,8 +419,19 @@ class AgentIntegrator(BaseIntegrator):
                     claude_target,
                 )
                 claude_path = claude_agents_dir / claude_filename
+                try:
+                    ensure_path_within(claude_path, claude_agents_dir)
+                except PathTraversalError as exc:
+                    if diagnostics is not None:
+                        diagnostics.warn(
+                            message=f"Rejected claude agent target path: {exc}",
+                            package=package_info.package.name,
+                        )
+                    continue
                 claude_rel = portable_relpath(claude_path, project_root)
-                if not self.check_collision(
+                if self.try_adopt_identical(claude_path, source_file, target_paths):
+                    files_adopted += 1
+                elif not self.check_collision(
                     claude_path, claude_rel, managed_files, force, diagnostics=diagnostics
                 ):
                     self.copy_agent(source_file, claude_path)
@@ -431,8 +445,19 @@ class AgentIntegrator(BaseIntegrator):
                     cursor_target,
                 )
                 cursor_path = cursor_agents_dir / cursor_filename
+                try:
+                    ensure_path_within(cursor_path, cursor_agents_dir)
+                except PathTraversalError as exc:
+                    if diagnostics is not None:
+                        diagnostics.warn(
+                            message=f"Rejected cursor agent target path: {exc}",
+                            package=package_info.package.name,
+                        )
+                    continue
                 cursor_rel = portable_relpath(cursor_path, project_root)
-                if not self.check_collision(
+                if self.try_adopt_identical(cursor_path, source_file, target_paths):
+                    files_adopted += 1
+                elif not self.check_collision(
                     cursor_path, cursor_rel, managed_files, force, diagnostics=diagnostics
                 ):
                     self.copy_agent(source_file, cursor_path)
@@ -444,6 +469,7 @@ class AgentIntegrator(BaseIntegrator):
             files_skipped=files_skipped,
             target_paths=target_paths,
             links_resolved=total_links_resolved,
+            files_adopted=files_adopted,
         )
 
     # DEPRECATED: use get_target_filename_for_target(KNOWN_TARGETS["claude"], ...) instead.
@@ -551,7 +577,7 @@ class AgentIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["cursor"], ...) instead.
-    def sync_integration_cursor(
+    def sync_integration_cursor(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
         self,
         apm_package,
         project_root: Path,
@@ -589,7 +615,7 @@ class AgentIntegrator(BaseIntegrator):
         )
 
     # DEPRECATED: use sync_for_target(KNOWN_TARGETS["opencode"], ...) instead.
-    def sync_integration_opencode(
+    def sync_integration_opencode(  # pylint: disable=duplicate-code  # deprecated shim; structural similarity is intentional
         self,
         apm_package,
         project_root: Path,

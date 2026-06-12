@@ -17,14 +17,18 @@ import json
 import os
 import subprocess
 import tarfile
+import zipfile
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import patch
 
 import pytest
 import yaml
 from click.testing import CliRunner
 
+from apm_cli.bundle.packer import pack_bundle
 from apm_cli.cli import cli
+from apm_cli.deps.lockfile import LockFile
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -96,6 +100,17 @@ def _make_tarball(tmp_path: Path, bundle_dir: Path) -> Path:
     archive = tmp_path / "test-bundle.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(bundle_dir, arcname=bundle_dir.name)
+    return archive
+
+
+def _make_zip(tmp_path: Path, bundle_dir: Path) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    archive = tmp_path / "test-bundle.zip"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for fp in sorted(bundle_dir.rglob("*")):
+            if fp.is_symlink() or not fp.is_file():
+                continue
+            zf.write(fp, arcname=f"{bundle_dir.name}/{fp.relative_to(bundle_dir).as_posix()}")
     return archive
 
 
@@ -210,6 +225,61 @@ class TestInstallLocalBundleE2E:
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
         assert (project / ".github" / "agents" / "reviewer.md").is_file()
+
+    def test_install_local_bundle_from_zip(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Install a plugin bundle from .zip -> files deployed without network."""
+        bundle = _make_plugin_bundle(tmp_path / "src")
+        archive = _make_zip(tmp_path / "archives", bundle)
+        project = _make_project(tmp_path / "dst")
+
+        with (
+            patch("subprocess.run", side_effect=_network_sentinel_subprocess_run),
+            patch("subprocess.Popen", side_effect=_network_sentinel_subprocess_popen),
+        ):
+            result = _invoke_install(
+                project, str(archive), "--target", "copilot", monkeypatch=monkeypatch
+            )
+
+        assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
+        assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
+        assert (project / ".github" / "agents" / "reviewer.md").is_file()
+        assert (project / ".github" / "instructions" / "style.md").is_file()
+
+    def test_install_local_bundle_from_pack_tar_gz(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pack tar.gz escape hatch -> local install deploys files without network."""
+        source = tmp_path / "source-project"
+        source.mkdir()
+        (source / "apm.yml").write_text(
+            yaml.dump({"name": "packed-plugin", "version": "1.0.0"}),
+            encoding="utf-8",
+        )
+        LockFile().write(source / "apm.lock.yaml")
+        skill_path = source / ".apm" / "skills" / "coding" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text("# Coding Skill\n", encoding="utf-8")
+        archive = pack_bundle(
+            source,
+            tmp_path / "archives",
+            fmt="plugin",
+            archive=True,
+            archive_format="tar.gz",
+        ).bundle_path
+        project = _make_project(tmp_path / "dst")
+
+        with (
+            patch("subprocess.run", side_effect=_network_sentinel_subprocess_run),
+            patch("subprocess.Popen", side_effect=_network_sentinel_subprocess_popen),
+        ):
+            result = _invoke_install(
+                project, str(archive), "--target", "copilot", monkeypatch=monkeypatch
+            )
+
+        assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
+        assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
 
     def test_install_local_bundle_multi_target(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1013,10 +1083,14 @@ class TestBundleMcpWiringE2E:
         names = sorted(d.name for d in captured["deps"])
         assert names == ["filesystem", "github"]
 
-        # Resolved targets reach the integrator as a CSV in
-        # ``explicit_target``.  Both copilot and claude must appear.
-        target_csv = captured["kwargs"].get("explicit_target") or ""
-        target_set = {t.strip() for t in target_csv.split(",") if t.strip()}
+        # Resolved targets reach the integrator via ``explicit_target``,
+        # which accepts either a CSV string or a list of canonical names.
+        # Both copilot and claude must appear.
+        explicit = captured["kwargs"].get("explicit_target") or ""
+        if isinstance(explicit, str):
+            target_set = {t.strip() for t in explicit.split(",") if t.strip()}
+        else:
+            target_set = {t.strip() for t in explicit if t and t.strip()}
         assert "copilot" in target_set
         assert "claude" in target_set
 
@@ -1080,3 +1154,124 @@ class TestBundleMcpWiringE2E:
 
         assert result.exit_code == 0, result.output
         mock_install.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Regression for issue #1363 -- local-bundle compile round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestLocalBundleCompileRoundTrip:
+    """Regression coverage for issue #1363.
+
+    Before the fix, ``apm install <local-bundle> -t <compile-only-target>``
+    staged instructions under ``apm_modules/<slug>/.apm/instructions/`` but
+    ``apm compile`` never discovered them, because the discovery scan only
+    walked paths declared in ``apm.yml`` deps + ``apm.lock.yaml``
+    ``dependencies[]``. Local-bundle install intentionally does NOT mutate
+    ``apm.yml`` (services.py:489-490), so the staged content was invisible
+    and compile produced no ``AGENTS.md`` / ``GEMINI.md``.
+
+    The fix derives bundle slugs from the lockfile's top-level
+    ``local_deployed_files`` field (already written by
+    ``local_bundle_handler.py:194-199``) and surfaces them to the discovery
+    scan. This test exercises the full install -> compile pipeline for
+    every compile-only target the bug affects.
+    """
+
+    OUTPUT_FILE_BY_TARGET: ClassVar[dict[str, str]] = {
+        "opencode": "AGENTS.md",
+        "codex": "AGENTS.md",
+        "gemini": "GEMINI.md",
+    }
+
+    @pytest.mark.parametrize("target", ["opencode", "codex", "gemini"])
+    def test_install_then_compile_produces_output_with_staged_instruction(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        target: str,
+    ) -> None:
+        """For every compile-only target, install a local bundle whose
+        only payload is an instruction, then run ``apm compile`` and
+        assert the target's output file is produced with the staged
+        instruction content embedded.
+        """
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        # Bundle with a single distinctive instruction so we can assert
+        # the body is present in the compiled output.
+        marker = "PEP8-MARKER-issue-1363"
+        files = {
+            "instructions/style.instructions.md": (
+                "---\n"
+                "description: Style guide for the bundle\n"
+                "applyTo: '**/*.py'\n"
+                "---\n\n"
+                f"# Style Guide\nFollow PEP8. {marker}\n"
+            ),
+        }
+        bundle = _make_plugin_bundle(
+            tmp_path / "src",
+            plugin_id="bundle-1363",
+            pack_target="all",
+            files=files,
+        )
+        project = _make_project(tmp_path / "dst")
+        # Pre-create the target's root_dir so auto-detect resolves to it
+        # (mirrors a real project configured for that IDE).
+        (project / KNOWN_TARGETS[target].root_dir).mkdir(parents=True, exist_ok=True)
+
+        install_result = _invoke_install(project, str(bundle), monkeypatch=monkeypatch)
+        assert install_result.exit_code == 0, (
+            f"install failed for target={target}: {install_result.output!r}"
+        )
+        # Sanity: the staging path the fix relies on must exist on disk.
+        staged = (
+            project
+            / "apm_modules"
+            / "bundle-1363"
+            / ".apm"
+            / "instructions"
+            / "style.instructions.md"
+        )
+        assert staged.is_file(), (
+            f"local-bundle install did not stage at {staged} for target={target}"
+        )
+
+        # Now run `apm compile --target <target>` in the project dir.
+        # Pin cwd explicitly rather than rely on a side-effect from
+        # ``_invoke_install`` (which monkeypatch.chdir'd into the
+        # project): future refactors of the install helper must not
+        # silently break this E2E.
+        monkeypatch.chdir(project)
+        runner = CliRunner()
+        compile_result = runner.invoke(
+            cli,
+            ["compile", "--target", target],
+            catch_exceptions=False,
+        )
+        assert compile_result.exit_code == 0, (
+            f"compile failed for target={target}: {compile_result.output!r}"
+        )
+
+        # The target's compile output file must exist AND contain the
+        # marker from the staged instruction. This is the regression
+        # signal: before the fix, the output file was not produced at
+        # all ("Compilation completed but produced no output files").
+        out_name = self.OUTPUT_FILE_BY_TARGET[target]
+        out_path = project / out_name
+        assert out_path.is_file(), (
+            f"compile did not produce {out_name} for target={target}; "
+            f"output: {compile_result.output!r}"
+        )
+        body = out_path.read_text(encoding="utf-8")
+        # For gemini, GEMINI.md is a thin pointer to AGENTS.md
+        # (``@./AGENTS.md``), so the staged content lands in AGENTS.md
+        # itself. Walk that pointer when present.
+        if target == "gemini" and "@./AGENTS.md" in body:
+            body = (project / "AGENTS.md").read_text(encoding="utf-8")
+        assert marker in body, (
+            f"compile did not include staged instruction marker in {out_name} "
+            f"for target={target}; body head: {body[:400]!r}"
+        )

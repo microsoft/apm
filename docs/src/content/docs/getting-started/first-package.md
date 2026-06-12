@@ -10,15 +10,15 @@ auto-activates inside Copilot or Claude, add a custom agent that pairs with
 it, install both into a project, and ship the result as a plugin. No prompts,
 no `cat <<EOF`, no compile step you do not need.
 
-If you want the conceptual map first, read [Anatomy of an APM Package](../../introduction/anatomy-of-an-apm-package/).
+If you want the conceptual map first, read [Anatomy of an APM Package](/apm/concepts/package-anatomy/).
 Otherwise, start here.
 
 ## Prerequisites
 
-- APM installed -- see [Installation](/apm/getting-started/installation/).
+- APM installed -- see [Installation](./installation/).
 - A GitHub account and an empty repo for publishing (step 5).
-- A runtime where you can try the result: GitHub Copilot, Claude Code, or
-  Cursor.
+- A runtime where you can try the result: GitHub Copilot, Claude Code, Kiro,
+  or Cursor.
 
 ## 1. Scaffold
 
@@ -114,7 +114,7 @@ the skill fires.
 > [`.apm/skills/python-architecture/SKILL.md`](https://github.com/microsoft/apm/blob/main/.apm/skills/python-architecture/SKILL.md)
 > in this repo. Same shape, different concern.
 
-See the [Skills guide](/apm/guides/skills/) for the full schema.
+See the [Skills guide](/apm/producer/author-primitives/skills/) for the full schema.
 
 ## 3. Add a custom agent
 
@@ -161,15 +161,15 @@ Do not rewrite the code yourself. Point and explain.
 > A real example: this repo's documentation agent lives at
 > [`.apm/agents/doc-writer.agent.md`](https://github.com/microsoft/apm/blob/main/.apm/agents/doc-writer.agent.md).
 
-See the [Agent Workflows guide](/apm/guides/agent-workflows/) for more.
+See the [Agent Workflows guide](/apm/producer/author-primitives/instructions-and-agents/) for more.
 
 ## 4. Deploy and use
 
-Run install with no arguments. APM treats your repo as the package and
-deploys its `.apm/` content into the runtime directories your tools read:
+Run install with an explicit target. APM treats your repo as the package and
+deploys its `.apm/` content into the Copilot runtime directories:
 
 ```bash
-apm install
+apm install --target copilot
 ```
 
 Output:
@@ -209,15 +209,15 @@ team-skills/
 `apm install` resolves which harness directories to populate using a strict
 priority chain: `--target` flag > `apm.yml` `targets:` > auto-detect from
 filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.github/copilot-instructions.md`,
-`.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`). The example layout
+`.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`). The example layout
 above shows `.github/` because `.github/copilot-instructions.md` exists in the
-project; if you also have `.claude/`, `.cursor/`, `.opencode/`, or `.gemini/`, those
-directories get populated too. With no signal at all, `apm install` exits with
+project; if you also have `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, or
+`.kiro/`, those directories get populated too. With no signal at all, `apm install` exits with
 code 2 and a teaching message instead of silently picking a target -- declare an
 intent explicitly via `--target copilot` (or another harness), or by adding
 `targets: [copilot]` to `apm.yml`. Run `apm targets` to inspect what APM detects
 in the current directory. To target explicitly, see the
-[Compilation guide](/apm/guides/compilation/).
+[Compilation guide](/apm/producer/compile/).
 
 > **What about `apm compile`?** Compile is a different concern: it
 > generates merged `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` files for tools
@@ -285,12 +285,14 @@ plugin-native layout. Convention dirs (`agents/`, `skills/`, `commands/`,
 `plugin.json` does not list them.
 
 If you know up front that you want to ship a plugin, you can scaffold with
-`apm init --plugin team-skills`, which adds `plugin.json` next to `apm.yml`
-from day one. APM still gives you dependency management, the lockfile, and
-audit while you author; pack produces the plugin bundle when you ship.
+[`apm plugin init`](/apm/reference/cli/plugin/) `team-skills`, which adds
+`plugin.json` next to `apm.yml` from day one. See [Repo shapes](/apm/producer/repo-shapes/)
+to pick a layout before you commit. APM still gives you dependency management,
+the lockfile, and audit while you author; pack produces the plugin bundle
+when you ship.
 
-For the full reference, see the [Pack & Distribute guide](/apm/guides/pack-distribute/)
-and the [Plugin authoring guide](/apm/guides/plugins/).
+For the full reference, see the [Pack & Distribute guide](/apm/producer/)
+and the [Plugin authoring guide](/apm/producer/author-primitives/).
 
 ## Choosing a package layout
 
@@ -309,17 +311,17 @@ APM recognizes three layouts. Pick the one that matches what you are shipping:
   it directly without restructuring.
 
 For the full comparison and metadata precedence rules, see
-[Package Types](../../reference/package-types/).
+[Package Types](../reference/package-types/).
 
 ## Next steps
 
-- [Anatomy of an APM Package](/apm/introduction/anatomy-of-an-apm-package/)
+- [Anatomy of an APM Package](/apm/concepts/package-anatomy/)
   -- the full mental model: `.apm/` vs `apm_modules/` vs `.github/`.
-- [Skills guide](/apm/guides/skills/) -- bundled resources, sub-skills,
+- [Skills guide](/apm/producer/author-primitives/skills/) -- bundled resources, sub-skills,
   activation tuning.
-- [Agent Workflows guide](/apm/guides/agent-workflows/) -- chaining agents,
+- [Agent Workflows guide](/apm/producer/author-primitives/instructions-and-agents/) -- chaining agents,
   GitHub Agentic Workflows integration.
-- [Dependencies guide](/apm/guides/dependencies/) -- depend on other APM
+- [Dependencies guide](/apm/consumer/manage-dependencies/) -- depend on other APM
   packages, file-level imports, version pinning.
-- [`apm audit`](/apm/reference/cli-commands/) -- scan dependencies for
+- [`apm audit`](/apm/reference/cli/install/) -- scan dependencies for
   policy violations before they ship.

@@ -6,7 +6,8 @@ The forms accepted by ``discover_policy`` (the ground-truth parser in
 - ``apm_cli.policy._help_text.POLICY_SOURCE_FORMS_HELP`` (Python constant)
 - ``apm audit --policy`` Click help (uses the constant)
 - ``apm policy status --policy-source`` Click help (uses the constant)
-- ``docs/src/content/docs/reference/cli-commands.md`` (manual prose)
+- ``docs/src/content/docs/reference/cli/audit.md`` (manual prose, table row)
+- ``docs/src/content/docs/reference/cli/policy.md`` (manual prose, table row)
 
 If any of these drift, the tests below fail. See #998 for the underlying
 incident that motivated this lockstep.
@@ -19,17 +20,15 @@ from click.testing import CliRunner
 
 from apm_cli.policy._help_text import POLICY_SOURCE_FORMS_HELP
 
-# Canonical user-facing forms accepted by ``--policy`` / ``--policy-source``.
-# Tokens chosen to be robust against Click's help-text reflow (no internal
-# whitespace) and to uniquely identify each form.
 EXPECTED_FORM_TOKENS = ("'org'", "owner/repo", "https://", "file path")
 
-# Same set of forms, written with the markdown backtick convention used in
-# the docs (the docs render Click-style single quotes as inline code).
 DOCS_FORM_TOKENS = ("`org`", "`owner/repo`", "`https://`", "file path")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DOCS_PATH = REPO_ROOT / "docs" / "src" / "content" / "docs" / "reference" / "cli-commands.md"
+DOCS_AUDIT_PATH = REPO_ROOT / "docs" / "src" / "content" / "docs" / "reference" / "cli" / "audit.md"
+DOCS_POLICY_PATH = (
+    REPO_ROOT / "docs" / "src" / "content" / "docs" / "reference" / "cli" / "policy.md"
+)
 
 
 def _normalize_help_output(text: str) -> str:
@@ -88,41 +87,39 @@ def test_policy_status_help_uses_canonical_constant():
         )
 
 
-def _bullet_starting_with(text: str, marker: str) -> str:
-    """Return the bullet line that begins with ``marker`` (up to next newline).
+def _row_starting_with(text: str, marker: str, source_path: Path) -> str:
+    """Return the markdown table row whose first cell starts with ``marker``.
 
-    Used to scope assertions to a specific flag's documentation bullet
-    instead of the whole docs file -- a form keyword may appear elsewhere
-    in cli-commands.md (e.g. unrelated marketplace examples), so a global
-    count is not strict enough to catch a removal from the bullet we
-    actually care about.
+    The new docs structure (one page per command) renders flag docs as
+    table rows like ``| `--policy SOURCE` | auto | description... |``.
+    We grab the entire row (up to the next newline) so assertions can
+    scope to the cell of interest without scanning the whole page.
     """
     idx = text.find(marker)
     if idx < 0:
-        raise AssertionError(f"Could not find bullet starting with {marker!r} in {DOCS_PATH.name}")
+        raise AssertionError(f"Could not find row starting with {marker!r} in {source_path.name}")
     end = text.find("\n", idx)
     return text[idx:end] if end >= 0 else text[idx:]
 
 
 def test_docs_audit_policy_bullet_lists_all_forms():
-    """The ``apm audit --policy SOURCE`` doc bullet lists every canonical form."""
-    text = DOCS_PATH.read_text(encoding="utf-8")
-    bullet = _bullet_starting_with(text, "- `--policy SOURCE`")
+    """The ``apm audit --policy SOURCE`` doc row lists every canonical form."""
+    text = DOCS_AUDIT_PATH.read_text(encoding="utf-8")
+    row = _row_starting_with(text, "| `--policy SOURCE`", DOCS_AUDIT_PATH)
     for token in DOCS_FORM_TOKENS:
-        assert token in bullet, (
-            f"`apm audit --policy SOURCE` doc bullet missing form: {token!r}.\n"
-            f"Bullet text:\n  {bullet}"
+        assert token in row, (
+            f"`apm audit --policy SOURCE` doc row missing form: {token!r}.\nRow text:\n  {row}"
         )
 
 
 def test_docs_policy_status_bullet_lists_all_forms():
-    """The ``apm policy status --policy-source SOURCE`` bullet lists every canonical form."""
-    text = DOCS_PATH.read_text(encoding="utf-8")
-    bullet = _bullet_starting_with(text, "- `--policy-source SOURCE`")
+    """The ``apm policy status --policy-source SOURCE`` row lists every canonical form."""
+    text = DOCS_POLICY_PATH.read_text(encoding="utf-8")
+    row = _row_starting_with(text, "| `--policy-source SOURCE`", DOCS_POLICY_PATH)
     for token in DOCS_FORM_TOKENS:
-        assert token in bullet, (
-            f"`apm policy status --policy-source SOURCE` doc bullet missing form: {token!r}.\n"
-            f"Bullet text:\n  {bullet}"
+        assert token in row, (
+            f"`apm policy status --policy-source SOURCE` doc row missing form: {token!r}.\n"
+            f"Row text:\n  {row}"
         )
 
 

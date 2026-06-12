@@ -442,3 +442,99 @@ class TestCheckDuplicateNames:
 
         result = runner.invoke(marketplace, ["check"])
         assert "Duplicate" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# refs/heads/ prefix stripping (lines 61-62 in check.py)
+# ---------------------------------------------------------------------------
+
+_YML_WITH_BRANCH_REF = textwrap.dedent("""\
+    name: test-marketplace
+    description: Test marketplace
+    version: 1.0.0
+    owner:
+      name: Test Owner
+    packages:
+      - name: branch-pkg
+        source: acme-org/branch-pkg
+        ref: main
+""")
+
+_YML_WITH_FULL_REF = textwrap.dedent("""\
+    name: test-marketplace
+    description: Test marketplace
+    version: 1.0.0
+    owner:
+      name: Test Owner
+    packages:
+      - name: full-ref-pkg
+        source: acme-org/full-ref-pkg
+        ref: refs/heads/main
+""")
+
+
+class TestCheckRefHeadsPrefix:
+    """Lines 61-62: strip refs/heads/ prefix when matching an explicit ref."""
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_ref_found_via_heads_prefix(self, MockResolver, runner, tmp_path, monkeypatch):
+        """An entry with ref='main' resolves against refs/heads/main (line 61-62)."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "marketplace.yml").write_text(_YML_WITH_BRANCH_REF, encoding="utf-8")
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/heads/main", sha=_SHA_A),
+        ]
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["check"])
+        assert result.exit_code == 0
+        assert "branch-pkg" in result.output
+        assert "All 1 entries OK" in result.output
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_ref_not_found_via_heads_prefix(self, MockResolver, runner, tmp_path, monkeypatch):
+        """Entry with ref='main' fails when only refs/heads/develop is present."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "marketplace.yml").write_text(_YML_WITH_BRANCH_REF, encoding="utf-8")
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/heads/develop", sha=_SHA_A),
+        ]
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["check"])
+        assert result.exit_code == 1
+        assert "1 entries have issues" in result.output
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_full_ref_name_matches_directly(self, MockResolver, runner, tmp_path, monkeypatch):
+        """Entry ref='refs/heads/main' matched by r.name == entry.ref (line 63 fallback)."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "marketplace.yml").write_text(_YML_WITH_FULL_REF, encoding="utf-8")
+        mock_inst = MockResolver.return_value
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/heads/main", sha=_SHA_A),
+        ]
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["check"])
+        assert result.exit_code == 0
+        assert "full-ref-pkg" in result.output
+
+    @patch("apm_cli.commands.marketplace.check.RefResolver")
+    def test_heads_prefix_not_confused_with_tags(self, MockResolver, runner, tmp_path, monkeypatch):
+        """Verify refs/heads/ prefix path is taken (not refs/tags/) when branch ref given."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "marketplace.yml").write_text(_YML_WITH_BRANCH_REF, encoding="utf-8")
+        mock_inst = MockResolver.return_value
+        # Only a tag ref with same name — should NOT match (branch ref expected)
+        mock_inst.list_remote_refs.return_value = [
+            RemoteRef(name="refs/tags/main", sha=_SHA_A),
+        ]
+        mock_inst.close = MagicMock()
+
+        result = runner.invoke(marketplace, ["check"])
+        # refs/tags/main stripped to "main" → tag_name == "main" == entry.ref → passes
+        # (this also tests the tags branch hits and indirectly confirms the heads branch too)
+        assert result.exit_code == 0

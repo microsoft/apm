@@ -102,6 +102,11 @@ def test_signal_whitelist_gemini_md_is_signal(tmp_path):
     assert "gemini" in _signal_targets(tmp_path)
 
 
+def test_signal_whitelist_kiro_dir_is_signal(tmp_path):
+    (tmp_path / ".kiro").mkdir()
+    assert "kiro" in _signal_targets(tmp_path)
+
+
 def test_signal_whitelist_cursorrules_is_signal(tmp_path):
     _touch(tmp_path / ".cursorrules", "# Cursor\n")
     assert "cursor" in _signal_targets(tmp_path)
@@ -109,6 +114,26 @@ def test_signal_whitelist_cursorrules_is_signal(tmp_path):
 
 def test_signal_whitelist_copilot_instructions_is_signal(tmp_path):
     _touch(tmp_path / ".github" / "copilot-instructions.md", "# Copilot\n")
+    assert "copilot" in _signal_targets(tmp_path)
+
+
+def test_signal_whitelist_github_instructions_dir_is_copilot_signal(tmp_path):
+    (tmp_path / ".github" / "instructions").mkdir(parents=True)
+    assert "copilot" in _signal_targets(tmp_path)
+
+
+def test_signal_whitelist_github_agents_dir_is_copilot_signal(tmp_path):
+    (tmp_path / ".github" / "agents").mkdir(parents=True)
+    assert "copilot" in _signal_targets(tmp_path)
+
+
+def test_signal_whitelist_github_prompts_dir_is_copilot_signal(tmp_path):
+    (tmp_path / ".github" / "prompts").mkdir(parents=True)
+    assert "copilot" in _signal_targets(tmp_path)
+
+
+def test_signal_whitelist_github_hooks_dir_is_copilot_signal(tmp_path):
+    (tmp_path / ".github" / "hooks").mkdir(parents=True)
     assert "copilot" in _signal_targets(tmp_path)
 
 

@@ -358,9 +358,12 @@ run_e2e_tests() {
     log_info "Invoking pytest tests/integration/ (marker registry handles per-test gating)"
     # Allow CI to pass extra pytest args (sharding, xdist) via the
     # PYTEST_EXTRA_ARGS env var. Empty by default for local runs.
+    # The ${arr[@]+"${arr[@]}"} guard keeps an empty array expansion safe
+    # under `set -u` on bash 3.2 (the default /bin/bash on macOS), where a
+    # bare "${arr[@]}" on an empty array raises an unbound-variable error.
     # shellcheck disable=SC2206
     extra_args=(${PYTEST_EXTRA_ARGS:-})
-    if pytest tests/integration/ -v --tb=short "${extra_args[@]}"; then
+    if pytest tests/integration/ -v --tb=short ${extra_args[@]+"${extra_args[@]}"}; then
         log_success "Integration test suite passed (collected and ran via pytest discovery)"
     else
         log_error "Integration test suite reported failures"

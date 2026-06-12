@@ -1,18 +1,96 @@
-# Root conftest.py — shared pytest configuration
+# Root conftest.py -- shared pytest configuration
 #
 # Test directory structure:
-#   tests/unit/          — Fast isolated unit tests (default CI scope)
-#   tests/integration/   — E2E tests requiring network / external services
-#   tests/acceptance/    — Acceptance criteria tests
-#   tests/benchmarks/    — Performance benchmarks (excluded by default)
-#   tests/test_*.py      — Root-level tests (mixed unit/integration)
+#   tests/unit/          -- Fast isolated unit tests (default CI scope)
+#   tests/integration/   -- E2E tests requiring network / external services
+#   tests/acceptance/    -- Acceptance criteria tests
+#   tests/benchmarks/    -- Performance benchmarks (excluded by default)
+#   tests/test_*.py      -- Root-level tests (mixed unit/integration)
 #
 # Quick reference:
 #   uv run pytest tests/unit tests/test_console.py -x   # CI-equivalent fast run
 #   uv run pytest                                         # Full suite
 #   uv run pytest -m benchmark                            # Benchmarks only
+#
+# Path.home() override (top of file, runs at conftest import time on every
+# pytest-xdist worker): the windows-2025-vs2026 GitHub-hosted runner does not
+# seed USERPROFILE / HOMEDRIVE / HOMEPATH for pytest-xdist worker subprocesses,
+# so Path.home() raises RuntimeError. Earlier attempts patched only the env
+# vars in tests/unit/conftest.py, but at least one xdist worker (gw2) still
+# evaluated Path.home() before that conftest's import-time mutation took
+# effect. Override Path.home() directly here -- the root conftest is loaded
+# by every worker before any test in any test directory runs, so this is
+# the earliest hook we have without writing a pytest plugin.
+
+import os
+import tempfile
+from pathlib import Path
 
 import pytest
+
+_TMP_HOME = Path(tempfile.mkdtemp(prefix="apm-test-home-"))
+
+
+def _ensure_home_env(home: Path) -> None:
+    home_str = str(home)
+    os.environ["HOME"] = home_str
+    if os.name == "nt":
+        os.environ["USERPROFILE"] = home_str
+        drive, _, tail = home_str.partition(":")
+        if tail:
+            os.environ["HOMEDRIVE"] = f"{drive}:"
+            os.environ["HOMEPATH"] = tail
+
+
+_ensure_home_env(_TMP_HOME)
+
+
+def _hermetic_home(_cls=Path) -> Path:
+    """Resolve a home dir without ever raising.
+
+    Honors HOME / USERPROFILE / HOMEDRIVE+HOMEPATH so per-test
+    `monkeypatch.setenv("HOME", ...)` (or its Windows-trio equivalent)
+    keeps working. Falls back to a hermetic tmp dir only when the env
+    is empty -- which is the windows-2025-vs2026 xdist worker case.
+    """
+    home = os.environ.get("HOME")
+    if not home and os.name == "nt":
+        home = os.environ.get("USERPROFILE")
+        if not home:
+            drive = os.environ.get("HOMEDRIVE", "")
+            tail = os.environ.get("HOMEPATH", "")
+            if tail:
+                home = drive + tail
+    return Path(home) if home else _TMP_HOME
+
+
+# Override Path.home() so any code path -- production or test -- that calls
+# it during the test run gets the hermetic tmp dir, regardless of whether
+# the runner subprocess inherited a usable HOME / USERPROFILE.
+Path.home = classmethod(_hermetic_home)  # type: ignore[method-assign]
+
+
+# Same problem, different code path: Path("~/pkg").expanduser() goes through
+# ntpath.expanduser, which raises RuntimeError("Could not determine home
+# directory.") on the windows-2025-vs2026 runner when USERPROFILE and
+# HOMEPATH are both absent. Production code (e.g. install.package_resolution
+# user_scope_rejection_reason) relies on expanduser to detect that ~/pkg is
+# absolute. Wrap Path.expanduser so the RuntimeError can never surface.
+_ORIGINAL_EXPANDUSER = Path.expanduser
+
+
+def _hermetic_expanduser(self):
+    try:
+        return _ORIGINAL_EXPANDUSER(self)
+    except RuntimeError:
+        parts = self.parts
+        if not parts or not parts[0].startswith("~"):
+            return self
+        remainder = parts[1:]
+        return _TMP_HOME.joinpath(*remainder) if remainder else _TMP_HOME
+
+
+Path.expanduser = _hermetic_expanduser  # type: ignore[method-assign]
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -23,3 +101,24 @@ def _validate_primitive_coverage():
 
     dispatch = get_dispatch_table()
     check_primitive_coverage(dispatch)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_discovery_state():
+    """Clear process-scoped discovery cache + perf counters between tests.
+
+    These globals are reset at the top of ``run_install_pipeline`` in
+    production, but unit tests exercise ``discover_primitives`` and
+    ``find_primitive_files`` directly. Without this fixture, cache hits
+    from test A would silently shadow walk-time measurements (and even
+    primitive results) in test B -- making the suite order-dependent.
+    See review notes for #1533.
+    """
+    from apm_cli.primitives.discovery import clear_discovery_cache
+    from apm_cli.utils import perf_stats
+
+    clear_discovery_cache()
+    perf_stats.reset()
+    yield
+    clear_discovery_cache()
+    perf_stats.reset()

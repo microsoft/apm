@@ -1,7 +1,7 @@
 """Unit tests for apm_cli.bundle.packer."""
 
 import os
-import tarfile
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -210,14 +210,40 @@ class TestPackBundle:
 
         result = pack_bundle(project, out, archive=True)
 
-        assert result.bundle_path.name == "test-pkg-1.0.0.tar.gz"
+        assert result.bundle_path.name == "test-pkg-1.0.0.zip"
         assert result.bundle_path.exists()
         # The directory should be cleaned up
         assert not (out / "test-pkg-1.0.0").exists()
-        # Archive is valid
-        with tarfile.open(result.bundle_path, "r:gz") as tar:
-            names = tar.getnames()
+        # Archive is valid zip (magic bytes PK\x03\x04) -- not gzip
+        assert zipfile.is_zipfile(result.bundle_path)
+        assert result.bundle_path.read_bytes()[:2] != b"\x1f\x8b", "must not be gzip"
+        with zipfile.ZipFile(result.bundle_path, "r") as zf:
+            names = zf.namelist()
             assert any("a.md" in n for n in names)
+
+    def test_pack_archive_tar_gz(self, tmp_path):
+        deployed = [".github/agents/a.md"]
+        project = _setup_project(tmp_path, deployed, target="vscode")
+        out = tmp_path / "build"
+
+        result = pack_bundle(project, out, archive=True, archive_format="tar.gz")
+
+        assert result.bundle_path.name == "test-pkg-1.0.0.tar.gz"
+        assert result.bundle_path.exists()
+        assert not (out / "test-pkg-1.0.0").exists()
+        import tarfile
+
+        with tarfile.open(result.bundle_path, "r:gz") as tf:
+            names = tf.getnames()
+            assert any("a.md" in n for n in names)
+
+    def test_pack_archive_invalid_format_raises(self, tmp_path):
+        deployed = [".github/agents/a.md"]
+        project = _setup_project(tmp_path, deployed, target="vscode")
+        out = tmp_path / "build"
+
+        with pytest.raises(ValueError, match="Unknown archive_format"):
+            pack_bundle(project, out, archive=True, archive_format="bz2")
 
     def test_pack_custom_output_dir(self, tmp_path):
         deployed = [".github/agents/a.md"]
@@ -238,6 +264,32 @@ class TestPackBundle:
 
         assert set(result.files) == set(deployed)
         # Nothing written to disk
+        assert not out.exists()
+
+    def test_pack_archive_dry_run_reports_projected_zip_path(self, tmp_path):
+        deployed = [".github/agents/a.md"]
+        project = _setup_project(tmp_path, deployed, target="vscode")
+        out = tmp_path / "build"
+
+        result = pack_bundle(project, out, archive=True, dry_run=True)
+
+        assert result.bundle_path == out / "test-pkg-1.0.0.zip"
+        assert not out.exists()
+
+    def test_pack_archive_dry_run_reports_projected_tar_gz_path(self, tmp_path):
+        deployed = [".github/agents/a.md"]
+        project = _setup_project(tmp_path, deployed, target="vscode")
+        out = tmp_path / "build"
+
+        result = pack_bundle(
+            project,
+            out,
+            archive=True,
+            archive_format="tar.gz",
+            dry_run=True,
+        )
+
+        assert result.bundle_path == out / "test-pkg-1.0.0.tar.gz"
         assert not out.exists()
 
     def test_pack_no_lockfile_errors(self, tmp_path):

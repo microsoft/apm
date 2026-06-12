@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "items": [
+    {"id": "fire-01", "query": "auto-tackle the open issue queue: triage everything first, then drive accepts to mergeable PRs", "expected": "fire", "split": "train", "notes": "Primary phrase: triage-central intake-to-merge over the queue."},
+    {"id": "fire-02", "query": "run these issues to merge #501 #502 #503 -- triage each, escalate anything doubtful to me", "expected": "fire", "split": "train", "notes": "Issue list + triage-first + escalate-by-default."},
+    {"id": "fire-03", "query": "clear the backlog to PRs but only auto-implement the clear, bounded ones", "expected": "fire", "split": "train", "notes": "Backlog-to-PRs with confidence gate language."},
+    {"id": "fire-04", "query": "take the whole issue backlog -- bugs, features, docs -- and get each to a mergeable PR", "expected": "fire", "split": "train", "notes": "ANY issue type, not bugs-only (distinguishes from batch-bug-shepherd)."},
+    {"id": "fire-05", "query": "process these issues end to end with triage as the gate: #88, #89, #90, #91", "expected": "fire", "split": "train", "notes": "End-to-end + triage-as-gate on an issue list."},
+    {"id": "fire-06", "query": "autopilot the issue queue: classify, get my sign-off in one review, then implement the approved ones", "expected": "fire", "split": "train", "notes": "Single consolidated review + implement approved."},
+    {"id": "fire-07", "query": "drive every open feature and bug to merge, but surface design-needed ones for my call", "expected": "fire", "split": "val", "notes": "Mixed type + escalate needs-design."},
+    {"id": "fire-08", "query": "take #640 (a refactor) and #641 (a docs fix) from intake to a ready PR each", "expected": "fire", "split": "val", "notes": "Non-bug types intake-to-PR."},
+    {"id": "fire-09", "query": "tackle the issue queue automatically with one triage review for the whole batch", "expected": "fire", "split": "val", "notes": "One-review-for-the-batch constraint."},
+    {"id": "fire-10", "query": "sweep all open issues to mergeable PRs, escalating to me on any doubt", "expected": "fire", "split": "val", "notes": "Any-issue sweep + escalate-by-default."},
+
+    {"id": "no-fire-01", "query": "sweep the bug queue and drive every bug to a mergeable state", "expected": "no_fire", "split": "train", "notes": "Bugs-only queue sweep -> batch-bug-shepherd, NOT autopilot."},
+    {"id": "no-fire-02", "query": "review my PR #712 -- give me a full panel pass", "expected": "no_fire", "split": "train", "notes": "Single-PR review -> apm-review-panel."},
+    {"id": "no-fire-03", "query": "triage this one new issue and tell me the label set", "expected": "no_fire", "split": "train", "notes": "Single-issue triage -> apm-triage-panel, no drive-to-merge."},
+    {"id": "no-fire-04", "query": "drive these in-flight community bug PRs to merge: #1410, #1422", "expected": "no_fire", "split": "train", "notes": "In-flight bug PR shepherding -> batch-bug-shepherd."},
+    {"id": "no-fire-05", "query": "draft a PR body for the auth refactor branch", "expected": "no_fire", "split": "train", "notes": "PR description -> pr-description-skill."},
+    {"id": "no-fire-06", "query": "open an issue describing the crash I just saw", "expected": "no_fire", "split": "train", "notes": "Issue creation, not intake-to-merge."},
+    {"id": "no-fire-07", "query": "explain the resolver flow to me, I don't get it", "expected": "no_fire", "split": "val", "notes": "Code explanation, not autopilot."},
+    {"id": "no-fire-08", "query": "implement issue #233 for me right now, skip triage", "expected": "no_fire", "split": "val", "notes": "Explicitly bypass triage -> autopilot's central gate is paramount; this is a plain implement request."},
+    {"id": "no-fire-09", "query": "write a release note for v0.14.0", "expected": "no_fire", "split": "val", "notes": "Release-note work."},
+    {"id": "no-fire-10", "query": "update the docs site to mention the copilot-app target", "expected": "no_fire", "split": "val", "notes": "Direct docs edit, not queue intake-to-merge."}
+  ]
+}

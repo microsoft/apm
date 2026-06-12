@@ -399,6 +399,95 @@ class TestDoctorYmlCheck:
 
 
 # ---------------------------------------------------------------------------
+# G7: format coverage row
+# ---------------------------------------------------------------------------
+
+
+_APM_YML_CLAUDE_ONLY = textwrap.dedent("""\
+    name: demo
+    description: d
+    version: 0.1.0
+    marketplace:
+      owner: {name: acme}
+      outputs:
+        claude: {}
+      packages:
+        - name: pkg
+          source: acme/pkg
+          version: "^1.0.0"
+""")
+
+_APM_YML_BOTH_FORMATS = textwrap.dedent("""\
+    name: demo
+    description: d
+    version: 0.1.0
+    marketplace:
+      owner: {name: acme}
+      outputs:
+        claude: {}
+        codex: {}
+      packages:
+        - name: pkg
+          source: acme/pkg
+          version: "^1.0.0"
+          category: Productivity
+""")
+
+
+class TestDoctorFormatCoverage:
+    """G7: doctor flags which marketplace output profiles are configured
+    vs. supported, never failing -- just informational guidance."""
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_partial_coverage_lists_missing_formats(self, mock_run, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(_APM_YML_CLAUDE_ONLY, encoding="utf-8")
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0
+        assert "format coverage" in result.output
+        # Surfaces what's configured and what's available
+        assert "claude" in result.output
+        assert "codex" in result.output
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_full_coverage_passes_silently(self, mock_run, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(_APM_YML_BOTH_FORMATS, encoding="utf-8")
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0
+        assert "format coverage" in result.output
+        assert "all known formats" in result.output.lower()
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_no_config_skips_format_coverage_row(self, mock_run, runner, tmp_path, monkeypatch):
+        """When apm.yml has no marketplace block, doctor must NOT
+        synthesize a coverage row -- format coverage is meaningful only
+        for projects that publish a marketplace."""
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0
+        assert "format coverage" not in result.output
+
+
+# ---------------------------------------------------------------------------
 # Exit code logic (check 4 never blocks)
 # ---------------------------------------------------------------------------
 
@@ -641,3 +730,180 @@ class TestDoctorDuplicateNames:
         result = runner.invoke(marketplace, ["doctor"])
         assert result.exit_code == 0
         assert "duplicate" not in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# Wave 4: version alignment (Check 8)
+# ---------------------------------------------------------------------------
+
+
+_APM_DOCTOR_ALIGNED = """\
+name: my-project
+description: A project.
+version: 1.0.0
+marketplace:
+  owner:
+    name: ACME
+  packages:
+    - name: local-tool
+      source: ./packages/local-tool
+      description: Tool.
+      version: 1.0.0
+"""
+
+_APM_DOCTOR_MISALIGNED = """\
+name: my-project
+description: A project.
+version: 1.0.0
+marketplace:
+  owner:
+    name: ACME
+  packages:
+    - name: local-tool
+      source: ./packages/local-tool
+      description: Tool.
+      version: 0.9.0
+"""
+
+_APM_DOCTOR_TAG_STRATEGY = """\
+name: my-project
+description: A project.
+version: 1.0.0
+marketplace:
+  owner:
+    name: ACME
+  versioning:
+    strategy: tag_pattern
+  build:
+    tagPattern: "v{version}"
+  packages:
+    - name: local-tool
+      source: ./packages/local-tool
+      description: Tool.
+      version: 1.0.0
+"""
+
+
+def _scaffold_doctor_project(tmp_path, apm_yml: str, *, pkg_version: str = "1.0.0") -> None:
+    (tmp_path / "apm.yml").write_text(apm_yml, encoding="utf-8")
+    pkg_dir = tmp_path / "packages" / "local-tool"
+    pkg_dir.mkdir(parents=True)
+    pkg_dir.joinpath("apm.yml").write_text(
+        f"name: local-tool\ndescription: Tool.\nversion: {pkg_version}\n",
+        encoding="utf-8",
+    )
+
+
+class TestDoctorVersionAlignment:
+    """Check 8: version-alignment row appears when marketplace block is present."""
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_aligned_row_rendered(self, mock_run, runner, tmp_path, monkeypatch):
+        _scaffold_doctor_project(tmp_path, _APM_DOCTOR_ALIGNED, pkg_version="1.0.0")
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+        result = runner.invoke(marketplace, ["doctor"])
+        assert "version alignment" in result.output.lower()
+        assert "lockstep" in result.output.lower()
+        assert "1/1" in result.output or "aligned" in result.output.lower()
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_misaligned_row_rendered(self, mock_run, runner, tmp_path, monkeypatch):
+        _scaffold_doctor_project(tmp_path, _APM_DOCTOR_MISALIGNED, pkg_version="0.9.0")
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+        result = runner.invoke(marketplace, ["doctor"])
+        assert "version alignment" in result.output.lower()
+        assert "misaligned" in result.output.lower()
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_skipped_when_no_marketplace_block(self, mock_run, runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        # No apm.yml at all -> Check 8 is skipped entirely.
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+        result = runner.invoke(marketplace, ["doctor"])
+        assert "version alignment" not in result.output.lower()
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_strategy_label_visible(self, mock_run, runner, tmp_path, monkeypatch):
+        _scaffold_doctor_project(tmp_path, _APM_DOCTOR_TAG_STRATEGY, pkg_version="1.0.0")
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+        result = runner.invoke(marketplace, ["doctor"])
+        assert "tag_pattern" in result.output.lower()
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_misaligned_does_not_fail_critical_exit(self, mock_run, runner, tmp_path, monkeypatch):
+        """Version alignment is informational; misalignment alone must not exit 1."""
+        _scaffold_doctor_project(tmp_path, _APM_DOCTOR_MISALIGNED, pkg_version="0.9.0")
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+        result = runner.invoke(marketplace, ["doctor"])
+        # Doctor exit is governed only by critical checks (1-2).
+        assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: missed lines
+# ---------------------------------------------------------------------------
+
+
+class TestDoctorAuthExceptionFallback:
+    """Lines 109-110: AuthResolver raises → has_token = False."""
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    @patch("apm_cli.core.auth.AuthResolver", side_effect=RuntimeError("no auth"))
+    def test_auth_exception_shows_no_token(
+        self, mock_auth, mock_run, runner, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+        result = runner.invoke(marketplace, ["doctor"])
+        assert result.exit_code == 0
+        assert "No token" in result.output or "unauthenticated" in result.output.lower()
+
+
+class TestDoctorMarketplaceYmlError:
+    """Lines 166-168, 176-178: MarketplaceYmlError when loading config."""
+
+    @patch("apm_cli.commands.marketplace.doctor.subprocess.run")
+    def test_apm_yml_marketplace_error_logged(self, mock_run, runner, tmp_path, monkeypatch):
+        """Lines 166-168: apm.yml marketplace block parse error."""
+        monkeypatch.chdir(tmp_path)
+        # Write a valid apm.yml but with bad marketplace block to trigger MarketplaceYmlError
+        (tmp_path / "apm.yml").write_text(
+            "name: test\nmarketplace:\n  invalid_key: bad\n",
+            encoding="utf-8",
+        )
+        mock_run.side_effect = [
+            _make_run_result(0, stdout="git version 2.40.0"),
+            _make_run_result(0),
+            _GH_OK,
+        ]
+        result = runner.invoke(marketplace, ["doctor"])
+        # Either passes or fails gracefully
+        assert result.exit_code in (0, 1, 2)

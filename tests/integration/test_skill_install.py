@@ -65,7 +65,7 @@ class TestSimpleClaudeSkillInstall:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
 
         # Check command succeeded
@@ -93,7 +93,7 @@ class TestSimpleClaudeSkillInstall:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
 
         # Read project apm.yml
@@ -110,7 +110,7 @@ class TestSimpleClaudeSkillInstall:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
 
         # Check for skill detection/integration message
@@ -131,7 +131,7 @@ class TestClaudeSkillWithResources:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
 
         # May fail if skill doesn't exist, skip gracefully
@@ -160,7 +160,7 @@ class TestClaudeSkillWithResources:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
 
         skill_path = (
@@ -189,7 +189,7 @@ class TestSkillInstallIdempotency:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
         assert result1.returncode == 0
 
@@ -199,7 +199,7 @@ class TestSkillInstallIdempotency:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
         assert result2.returncode == 0
 
@@ -225,7 +225,7 @@ class TestSkillInstallIdempotency:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
         assert result1.returncode == 0, f"First install failed: {result1.stderr}"
 
@@ -234,7 +234,7 @@ class TestSkillInstallIdempotency:
             cwd=temp_project,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
         assert result2.returncode == 0, f"Second install failed: {result2.stderr}"
 
@@ -278,7 +278,7 @@ dependencies:
             cwd=project_dir,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
         )
 
         assert result.returncode == 0

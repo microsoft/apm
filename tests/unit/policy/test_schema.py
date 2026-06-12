@@ -4,6 +4,7 @@ import unittest
 
 from apm_cli.policy.schema import (
     ApmPolicy,
+    AuditPolicy,
     CompilationPolicy,
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
@@ -12,6 +13,7 @@ from apm_cli.policy.schema import (
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
+    SecurityPolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -39,8 +41,10 @@ class TestDependencyPolicyDefaults(unittest.TestCase):
     def test_defaults(self):
         dep = DependencyPolicy()
         self.assertIsNone(dep.allow)
-        self.assertEqual(dep.deny, ())
-        self.assertEqual(dep.require, ())
+        self.assertIsNone(dep.deny)
+        self.assertIsNone(dep.require)
+        self.assertEqual(dep.effective_deny, ())
+        self.assertEqual(dep.effective_require, ())
         self.assertEqual(dep.require_resolution, "project-wins")
         self.assertEqual(dep.max_depth, 50)
 
@@ -97,8 +101,8 @@ class TestUnmanagedFilesPolicyDefaults(unittest.TestCase):
     def test_defaults(self):
         uf = UnmanagedFilesPolicy()
         self.assertIsNone(uf.action)
+        self.assertIsNone(uf.directories)
         self.assertEqual(uf.effective_action, "ignore")
-        self.assertEqual(uf.directories, ())
 
 
 class TestApmPolicyDefaults(unittest.TestCase):
@@ -116,6 +120,10 @@ class TestApmPolicyDefaults(unittest.TestCase):
         self.assertIsInstance(policy.compilation, CompilationPolicy)
         self.assertIsInstance(policy.manifest, ManifestPolicy)
         self.assertIsInstance(policy.unmanaged_files, UnmanagedFilesPolicy)
+        self.assertIsInstance(policy.security, SecurityPolicy)
+        self.assertIsInstance(policy.security.audit, AuditPolicy)
+        self.assertIsNone(policy.security.audit.on_install)
+        self.assertIsNone(policy.security.audit.external)
 
     def test_custom_construction(self):
         policy = ApmPolicy(
@@ -135,6 +143,27 @@ class TestApmPolicyDefaults(unittest.TestCase):
         policy = ApmPolicy()
         with self.assertRaises(AttributeError):
             policy.name = "modified"  # type: ignore[misc]
+
+
+class TestSecurityPolicyDefaults(unittest.TestCase):
+    """Test SecurityPolicy / AuditPolicy defaults and construction."""
+
+    def test_defaults(self):
+        sec = SecurityPolicy()
+        self.assertIsInstance(sec.audit, AuditPolicy)
+        self.assertIsNone(sec.audit.on_install)
+        self.assertIsNone(sec.audit.external)
+
+    def test_custom_construction(self):
+        audit = AuditPolicy(on_install="block", external=("skillspector",))
+        sec = SecurityPolicy(audit=audit)
+        self.assertEqual(sec.audit.on_install, "block")
+        self.assertEqual(sec.audit.external, ("skillspector",))
+
+    def test_frozen(self):
+        audit = AuditPolicy()
+        with self.assertRaises(AttributeError):
+            audit.on_install = "block"  # type: ignore[misc]
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ dependencies:
   require: []                   # Required packages
   require_resolution: project-wins  # project-wins | policy-wins | block
   max_depth: 50                 # Max transitive dependency depth
+  require_pinned_constraint: false  # Ban unbounded version ranges
 
 mcp:
   allow: []                     # Allowed MCP server patterns
@@ -39,7 +40,7 @@ mcp:
 
 compilation:
   target:
-    allow: []                   # vscode | claude | cursor | opencode | codex | all
+    allow: []                   # copilot | claude | cursor | opencode | codex | gemini | vscode | windsurf | kiro | agent-skills | all
     enforce: null               # Enforce specific target (must be present in list)
   strategy:
     enforce: null               # distributed | single-file
@@ -54,6 +55,10 @@ manifest:
 unmanaged_files:
   action: ignore                # ignore | warn | deny
   directories: []               # Directories to monitor
+
+registry_source:
+  require: []                   # Registry names required for dependencies
+  allow_non_registry: true      # false = block git/local sources
 ```
 
 ## Top-level fields
@@ -95,7 +100,7 @@ Org-side posture when consumers cannot fetch this policy AND have a stale cached
 | `warn` | Loud warning emitted; install proceeds with the cached policy (or with no policy if cache is empty). Default. |
 | `block` | Fail-closed when a cached policy is available but a refresh fails. |
 
-Consumers can opt into fail-closed semantics for the no-cache case from their `apm.yml` via `policy.fetch_failure_default: block` -- see [Network failure semantics](#95-network-failure-semantics) for the full matrix and [`apm.yml` policy block](../../reference/manifest-schema/#39-policy) for the consumer-side fields.
+Consumers can opt into fail-closed semantics for the no-cache case from their `apm.yml` via `policy.fetch_failure_default: block` -- see [Network failure semantics](#95-network-failure-semantics) for the full matrix and [`apm.yml` policy block](../reference/manifest-schema/#39-policy) for the consumer-side fields.
 
 ---
 
@@ -163,6 +168,17 @@ Maximum allowed transitive dependency depth. Default: `50`. Set lower to limit s
 dependencies:
   max_depth: 3  # Direct + 2 levels of transitive
 ```
+
+### `require_pinned_constraint`
+
+Default: `false`. When `true`, every APM dependency declared in `apm.yml` must use a bounded constraint -- a semver range with an upper bound, a literal version tag (e.g. `v1.5.3`), or a 40-char commit SHA. Empty refs, bare branch names, wildcards (`*`, `1.x`), and open-upper ranges (`>=1.0.0`, `>1.0.0`) all fail the `dependency-pinned-constraint` check.
+
+```yaml
+dependencies:
+  require_pinned_constraint: true
+```
+
+Transitive deps are also classified; they pass when their parent manifests pinned them. See the [policy schema reference](../reference/policy-schema/#require_pinned_constraint-reference) for the full classification table and diagnostic format.
 
 ---
 
@@ -276,7 +292,7 @@ Whether the `scripts` section is allowed in `apm.yml`:
 
 ### `content_types.allow`
 
-Restrict which content types packages can declare:
+Parsed allow-list for package content types. This field is not enforced in APM 0.16.0:
 
 ```yaml
 manifest:
@@ -331,7 +347,7 @@ Allow and deny lists use glob-style patterns:
 
 `*` matches any characters within a single path segment (no `/`). `**` matches across any number of segments.
 
-Deny patterns are evaluated first. If a reference matches any deny pattern, it fails regardless of the allow list. An empty allow list permits everything not denied.
+Deny patterns are evaluated first. If a reference matches any deny pattern, it fails regardless of the allow list. A `null` allow list permits everything not denied; an empty allow list permits nothing.
 
 ---
 
@@ -345,10 +361,14 @@ Deny patterns are evaluated first. If a reference matches any deny pattern, it f
 | `ref-consistency` | Every dependency's manifest ref matches the lockfile's resolved ref |
 | `deployed-files-present` | All files listed in lockfile `deployed_files` exist on disk |
 | `no-orphaned-packages` | No lockfile packages are absent from the manifest |
+| `skill-subset-consistency` | `skills:` selections in `apm.yml` match `skill_subset` in the lockfile |
 | `config-consistency` | MCP server configs match lockfile baseline |
-| `content-integrity` | Deployed files contain no critical hidden Unicode characters |
+| `content-integrity` | Deployed files contain no critical hidden Unicode characters and their SHA-256 hashes match the lockfile |
+| `includes-consent` | Advisory check that `includes:` selections in the manifest match what was deployed |
 
 ### Policy checks (run with `--ci --policy`)
+
+There are 19 policy checks in APM 0.16.0.
 
 **Dependencies:**
 
@@ -360,6 +380,8 @@ Deny patterns are evaluated first. If a reference matches any deny pattern, it f
 | `required-packages-deployed` | Required packages appear in lockfile with deployed files |
 | `required-package-version` | Required packages with version pins match per `require_resolution` |
 | `transitive-depth` | No dependency exceeds `max_depth` |
+| `dependency-pinned-constraint` | Every dep uses a bounded constraint (semver range, literal tag, or SHA) when `require_pinned_constraint: true` |
+| `registry-source` | Dependencies come from required registries when `registry_source` is configured |
 
 **MCP:**
 
@@ -383,6 +405,7 @@ Deny patterns are evaluated first. If a reference matches any deny pattern, it f
 | Check | Validates |
 |-------|-----------|
 | `required-manifest-fields` | All required fields are present and non-empty |
+| `explicit-includes` | `includes:` is explicit when `require_explicit_includes: true` |
 | `scripts-policy` | Scripts section absent if policy denies it |
 
 **Unmanaged files:**
@@ -418,6 +441,7 @@ A child policy can only tighten constraints — never relax them:
 | `require` | Union — combines required packages |
 | `require_resolution` | Escalates: `project-wins` < `policy-wins` < `block` |
 | `max_depth` | `min(parent, child)` |
+| `require_pinned_constraint` | OR -- once parent sets `true`, child cannot relax |
 | `mcp.self_defined` | Escalates: `allow` < `warn` < `deny` |
 | `manifest.scripts` | Escalates: `allow` < `deny` |
 | `unmanaged_files.action` | Escalates: `ignore` < `warn` < `deny` |
@@ -524,7 +548,7 @@ dependencies:
 ## Install-time enforcement
 
 :::note[Non-goal: structured output]
-Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-readable terminal text only. For machine-readable policy reports (CI gating, dashboards, code-scanning uploads) use `apm audit --ci --format json` or `apm audit --ci --format sarif` — see [`apm audit`](../../reference/cli-commands/#apm-audit---scan-for-hidden-unicode-characters) in the CLI reference.
+Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-readable terminal text only. For machine-readable policy reports (CI gating, dashboards, code-scanning uploads) use `apm audit --ci --format json` or `apm audit --ci --format sarif` — see [`apm audit`](../reference/cli/audit/) in the CLI reference.
 :::
 
 ### 1. What APM policy is
@@ -547,10 +571,11 @@ Install-time enforcement and `apm audit --ci` both resolve the **full multi-leve
 
 Install-time enforcement runs the same rule families documented in [Check reference](#check-reference):
 
-- **Dependencies** — `allow`, `deny`, `require` (presence + optional version pin), `max_depth`.
-- **MCP** — `allow`, `deny`, `transport.allow`, `self_defined`, `trust_transitive`.
+- **Dependencies** — `allow`, `deny`, `require` (presence + optional version pin), `max_depth`, `require_pinned_constraint`.
+- **Registry source** — `require`, `allow_non_registry`.
+- **MCP** — `allow`, `deny`, `transport.allow`, `self_defined`.
 - **Compilation** — `target.allow` / `target.enforce` (target-aware, evaluated against the resolved target list).
-- **Manifest** — `required_fields`, `scripts`, `content_types.allow`.
+- **Manifest** — `required_fields`, `require_explicit_includes`, `scripts`.
 - **Unmanaged files** — `action` against the configured `directories`.
 
 ### 5. When enforcement runs
@@ -765,6 +790,16 @@ Compute the pin on Linux with `sha256sum .github/apm-policy.yml | awk '{print "s
 
 ### 9.7. `apm policy status`: diagnostic snapshot
 
+:::caution[Always exits 0 by default]
+`apm policy status` ALWAYS exits 0 in its default mode, even when
+policy discovery fails or the resolved policy reports violations. It
+is a diagnostic surface, not a CI gate. To make CI fail when policy
+is unreachable or misconfigured, pass `--check` (exits 1 unless
+`outcome=found`). To gate on rule violations, use
+`apm audit --ci --policy <source>` -- baseline + policy checks
+contribute to its non-zero exit.
+:::
+
 Inspect the current policy posture without running an install or audit. The default exit code is always 0, so it is safe for human and SIEM use:
 
 ```shell
@@ -850,7 +885,8 @@ When `enforcement=block`, any of the following exit `1` and abort before integra
 | `required` | Missing `dependencies.require` entry, or pin mismatch | `Policy violation: <required-dep> -- required by org policy but not declared in apm.yml` (or `... required >=X but apm.yml pins <Y>`) | Add the required dep to `apm.yml` (and pin the required version). Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block. |
 | `transport` | MCP transport not in `mcp.transport.allow` | `Policy violation: <mcp-server> -- transport <t> not in mcp.transport.allow=[<list>]` | Switch the server to an allowed transport, or request `mcp.transport.allow` updates. |
 | `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | `Policy violation: target <t> -- not in compilation.target.allow=[<list>]` | Re-run with `--target <allowed>`, or update `compilation.target` in `apm.yml`. Evaluated post-`targets` phase, so CLI overrides are honoured. |
-| `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny`/`transport`/`self_defined` | `Transitive MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.` plus per-server `Policy violation: ...` | Remove the offending dep, request an org policy update, or set `mcp.trust_transitive: true` if the org chooses to allow transitive MCP entries. |
+| `pinned-constraint` | `require_pinned_constraint: true` and a dep declares an unbounded ref | `Policy violation: N dependency(ies) use unbounded constraints (hint: pin to a semver range, literal tag, or SHA)` plus per-dep `<dep>: <reason>` | Pin each listed dep to a semver range with an upper bound (`^1.2.3`, `>=1.0,<2.0`), a literal tag (`v1.5.3`), or a 40-char SHA. Roll out under `enforcement: warn` first to size the fleet impact. |
+| `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny`/`transport`/`self_defined` | `Transitive MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.` plus per-server `Policy violation: ...` | Remove the offending dep, request an org policy update, or pass `--trust-transitive-mcp` only as a reviewed break-glass CLI choice. |
 
 All violation messages above flow through `InstallLogger.policy_violation`; under `block` they print inline as `[x]` errors and exit `1`. Use `apm audit --ci --format json` for the same set of findings in machine-readable form.
 
@@ -887,6 +923,6 @@ manifest:
 
 ## Related
 
-- [Governance](../../enterprise/governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
-- [CI Policy Enforcement](../../guides/ci-policy-setup/) -- step-by-step CI setup tutorial
-- [GitHub Rulesets](../../integrations/github-rulesets/) -- enforce policy as a required status check
+- [Governance](./governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
+- [Enforce in CI](./enforce-in-ci/) -- step-by-step CI setup tutorial
+- [GitHub Rulesets](../integrations/github-rulesets/) -- enforce policy as a required status check

@@ -168,8 +168,8 @@ class TestInstructionIntegrator:
         assert target.exists()
         assert target.read_text() == "# Python rules"
 
-    def test_integrate_overwrites_when_no_manifest(self):
-        """Without managed_files (no manifest), overwrites existing files."""
+    def test_integrate_blocks_when_no_manifest(self):
+        """Without managed_files (no manifest), a pre-existing file is treated as a collision."""
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
         inst_dir.mkdir(parents=True)
@@ -182,8 +182,10 @@ class TestInstructionIntegrator:
         pkg_info = self._make_package_info(pkg)
         result = self.integrator.integrate_package_instructions(pkg_info, self.project_root)
 
-        assert result.files_integrated == 1
-        assert (target_dir / "python.instructions.md").read_text() == "# New version"
+        # managed_files=None is now treated as empty set -> collision -> file protected
+        assert result.files_integrated == 0
+        assert result.files_skipped == 1
+        assert (target_dir / "python.instructions.md").read_text() == "# Old version"
 
     def test_integrate_skips_user_file_collision(self):
         """Skips user-authored file when managed_files says it's not APM-owned."""
@@ -474,11 +476,11 @@ class TestInstructionNameCollision:
         assert (target_dir / "python.instructions.md").read_text() == "# APM Python standards"
 
     def test_two_packages_same_instruction_name_last_wins(self):
-        """When two packages deploy the same filename, last-installed wins."""
+        """When two packages deploy the same filename, last-installed wins (managed file update)."""
         target_dir = self.project_root / ".github" / "instructions"
         target_dir.mkdir(parents=True)
 
-        # Package A installs first
+        # Package A installs first (no pre-existing file)
         pkg_a = self.project_root / "pkg-a"
         inst_a = pkg_a / ".apm" / "instructions"
         inst_a.mkdir(parents=True)
@@ -486,15 +488,20 @@ class TestInstructionNameCollision:
         info_a = self._make_package_info(pkg_a, "pkg-a")
         self.integrator.integrate_package_instructions(info_a, self.project_root)
 
-        # Package B installs second — same filename
+        # Package B installs second — same filename.
+        # The file from pkg-A is in managed_files (recorded by the lockfile on first install),
+        # so pkg-B is allowed to overwrite it.
         pkg_b = self.project_root / "pkg-b"
         inst_b = pkg_b / ".apm" / "instructions"
         inst_b.mkdir(parents=True)
         (inst_b / "python.instructions.md").write_text("# Package B rules")
         info_b = self._make_package_info(pkg_b, "pkg-b")
-        self.integrator.integrate_package_instructions(info_b, self.project_root)
+        managed = {".github/instructions/python.instructions.md"}
+        self.integrator.integrate_package_instructions(
+            info_b, self.project_root, managed_files=managed
+        )
 
-        # Last write wins
+        # Last write wins when the file is in managed_files
         assert (target_dir / "python.instructions.md").read_text() == "# Package B rules"
 
 
@@ -652,12 +659,18 @@ class TestCursorRulesIntegration:
         assert result.files_integrated == 0
         assert result.target_paths == []
 
-    def test_collision_detection_skips_user_file(self):
-        """Skips user-authored .mdc file when not in managed_files."""
+    def test_collision_overwrites_existing_rule_file(self):
+        """Rule dirs are APM-owned: an existing .mdc is overwritten, not skipped.
+
+        Pre-#1662 this asserted a collision skip. The new invariant
+        (output_compare=True) is that target_name derives 1:1 from the source,
+        so any existing file here is APM's and must be (re)written -- never
+        treated as a user-authored collision -- regardless of managed_files.
+        """
         (self.project_root / ".cursor").mkdir()
         rules_dir = self.project_root / ".cursor" / "rules"
         rules_dir.mkdir()
-        (rules_dir / "python.mdc").write_text("# User rules")
+        (rules_dir / "python.mdc").write_text("# Stale rules")
 
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
@@ -669,9 +682,39 @@ class TestCursorRulesIntegration:
             pkg_info, self.project_root, managed_files=set()
         )
 
-        assert result.files_integrated == 0
-        assert result.files_skipped == 1
-        assert (rules_dir / "python.mdc").read_text() == "# User rules"
+        assert result.files_integrated == 1
+        assert result.files_skipped == 0
+        deployed = (rules_dir / "python.mdc").read_text()
+        assert "# APM rules" in deployed
+        assert "Stale rules" not in deployed
+
+    def test_managed_files_has_no_effect_on_rule_dir(self):
+        """managed_files is not consulted for output_compare (rule-dir) targets.
+
+        Whether or not the path is recorded as managed, the existing rule is
+        (re)written from the source. Guards the #1662 regression where the file
+        fell out of managed_files and stopped propagating edits.
+        """
+        (self.project_root / ".cursor").mkdir()
+        rules_dir = self.project_root / ".cursor" / "rules"
+        rules_dir.mkdir()
+        (rules_dir / "python.mdc").write_text("# Stale rules")
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text("# APM rules")
+
+        pkg_info = _make_package_info(pkg)
+        # managed_files=None (no manifest) must behave identically to
+        # managed_files=set(): the rule is still adopted/overwritten.
+        result = self.integrator.integrate_package_instructions_cursor(
+            pkg_info, self.project_root, managed_files=None
+        )
+
+        assert result.files_integrated == 1
+        assert result.files_skipped == 0
+        assert "# APM rules" in (rules_dir / "python.mdc").read_text()
 
     def test_overwrites_managed_file(self):
         """Overwrites file when it's in managed_files."""
@@ -959,12 +1002,18 @@ class TestClaudeRulesIntegration:
         assert result.files_integrated == 0
         assert result.target_paths == []
 
-    def test_collision_detection_skips_user_file(self):
-        """Skips user-authored .md file when not in managed_files."""
+    def test_collision_overwrites_existing_rule_file(self):
+        """Rule dirs are APM-owned: an existing .md is overwritten, not skipped.
+
+        Pre-#1662 this asserted a collision skip. The new invariant
+        (output_compare=True) is that target_name derives 1:1 from the source,
+        so any existing file here is APM's and must be (re)written -- never
+        treated as a user-authored collision -- regardless of managed_files.
+        """
         (self.project_root / ".claude").mkdir()
         rules_dir = self.project_root / ".claude" / "rules"
         rules_dir.mkdir()
-        (rules_dir / "python.md").write_text("# User rules")
+        (rules_dir / "python.md").write_text("# Stale rules")
 
         pkg = self.project_root / "package"
         inst_dir = pkg / ".apm" / "instructions"
@@ -976,9 +1025,37 @@ class TestClaudeRulesIntegration:
             pkg_info, self.project_root, managed_files=set()
         )
 
-        assert result.files_integrated == 0
-        assert result.files_skipped == 1
-        assert (rules_dir / "python.md").read_text() == "# User rules"
+        assert result.files_integrated == 1
+        assert result.files_skipped == 0
+        deployed = (rules_dir / "python.md").read_text()
+        assert "# APM rules" in deployed
+        assert "Stale rules" not in deployed
+
+    def test_managed_files_has_no_effect_on_rule_dir(self):
+        """managed_files is not consulted for output_compare (rule-dir) targets.
+
+        Whether or not the path is recorded as managed, the existing rule is
+        (re)written from the source. Guards the #1662 regression where the file
+        fell out of managed_files and stopped propagating edits.
+        """
+        (self.project_root / ".claude").mkdir()
+        rules_dir = self.project_root / ".claude" / "rules"
+        rules_dir.mkdir()
+        (rules_dir / "python.md").write_text("# Stale rules")
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text("# APM rules")
+
+        pkg_info = _make_package_info(pkg)
+        result = self.integrator.integrate_package_instructions_claude(
+            pkg_info, self.project_root, managed_files=None
+        )
+
+        assert result.files_integrated == 1
+        assert result.files_skipped == 0
+        assert "# APM rules" in (rules_dir / "python.md").read_text()
 
     def test_overwrites_managed_file(self):
         """Overwrites file when it's in managed_files."""
@@ -1174,6 +1251,142 @@ class TestConvertToWindsurfRules:
         assert 'globs: "src/**/*.ts"' in result
 
 
+# ==================================================================
+# Comma-separated applyTo splitting tests (issue #1366)
+# Covers Claude, Cursor, Windsurf converters and Copilot verbatim path.
+# ==================================================================
+
+
+class TestApplyToCommaSplitting:
+    """Verify all three converters split comma-separated applyTo globs."""
+
+    # ---- Claude ----
+
+    def test_claude_comma_list_emits_yaml_list(self):
+        content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# Rules"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert "paths:" in result
+        assert '  - "**/src/**"' in result
+        assert '  - "**/api/**"' in result
+        assert '  - "**/services/**"' in result
+
+    def test_claude_comma_whitespace_trimmed(self):
+        content = "---\napplyTo: '**/*.py, **/*.pyi , src/**/*.ts'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert '  - "**/*.py"' in result
+        assert '  - "**/*.pyi"' in result
+        assert '  - "src/**/*.ts"' in result
+        assert '  - " **/*.pyi"' not in result
+
+    def test_claude_trailing_comma_dropped(self):
+        content = "---\napplyTo: '**/*.py,'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert "paths:" in result
+        assert '  - "**/*.py"' in result
+        assert result.count('  - "') == 1
+        assert '  - ""' not in result
+
+    def test_claude_leading_comma_dropped(self):
+        content = "---\napplyTo: ',**/*.py'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert result.count('  - "') == 1
+        assert '  - "**/*.py"' in result
+
+    def test_claude_single_comma_treated_as_empty(self):
+        content = "---\napplyTo: ','\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert "paths:" not in result
+        assert "# R" in result
+
+    def test_claude_whitespace_only_treated_as_empty(self):
+        content = "---\napplyTo: '   '\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_claude_rules(content)
+        assert "paths:" not in result
+        assert "# R" in result
+
+    # ---- Cursor ----
+
+    def test_cursor_comma_list_emits_yaml_list(self):
+        content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "globs:" in result
+        assert '  - "**/src/**"' in result
+        assert '  - "**/api/**"' in result
+        assert '  - "**/services/**"' in result
+        assert 'globs: "**/src/**,' not in result
+
+    def test_cursor_single_glob_stays_scalar(self):
+        content = "---\napplyTo: '**/*.py'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert 'globs: "**/*.py"' in result
+        assert '  - "**/*.py"' not in result
+
+    def test_cursor_comma_whitespace_trimmed(self):
+        content = "---\napplyTo: 'a, b , c'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert '  - "a"' in result
+        assert '  - "b"' in result
+        assert '  - "c"' in result
+
+    def test_cursor_single_comma_treated_as_empty(self):
+        content = "---\napplyTo: ','\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert "globs" not in result
+
+    def test_cursor_trailing_comma_normalises_to_single(self):
+        content = "---\napplyTo: '**/*.py,'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_cursor_rules(content)
+        assert 'globs: "**/*.py"' in result
+
+    # ---- Windsurf ----
+
+    def test_windsurf_comma_list_emits_yaml_list(self):
+        content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_windsurf_rules(content)
+        assert "trigger: glob" in result
+        assert "globs:" in result
+        assert '  - "**/src/**"' in result
+        assert '  - "**/api/**"' in result
+        assert '  - "**/services/**"' in result
+        assert 'globs: "**/src/**,' not in result
+
+    def test_windsurf_single_glob_stays_scalar(self):
+        content = "---\napplyTo: '**/*.py'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_windsurf_rules(content)
+        assert 'globs: "**/*.py"' in result
+
+    def test_windsurf_comma_whitespace_trimmed(self):
+        content = '---\napplyTo: "a, b , c"\n---\n\n# R'
+        result = InstructionIntegrator._convert_to_windsurf_rules(content)
+        assert '  - "a"' in result
+        assert '  - "b"' in result
+        assert '  - "c"' in result
+
+    def test_windsurf_single_comma_falls_back_to_always_on(self):
+        content = '---\napplyTo: ","\n---\n\n# R'
+        result = InstructionIntegrator._convert_to_windsurf_rules(content)
+        assert "trigger: always_on" in result
+        assert "globs" not in result
+
+    # ---- Copilot verbatim preservation ----
+
+    def test_copilot_preserves_comma_list_verbatim(self):
+        """Copilot must NEVER split applyTo - consuming tool handles it."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "src.instructions.md"
+            dst = Path(td) / "dst.instructions.md"
+            src.write_text(
+                "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# Multi rules\n"
+            )
+            integrator = InstructionIntegrator()
+            integrator.copy_instruction(src, dst)
+            written = dst.read_text()
+            assert "applyTo: '**/src/**,**/api/**,**/services/**'" in written
+            assert "paths:" not in written
+
+
 class TestWindsurfRulesIntegration:
     """Test end-to-end Windsurf rules deployment."""
 
@@ -1275,3 +1488,155 @@ class TestWindsurfRulesIntegration:
         rules_dir = self.project_root / ".windsurf" / "rules"
         assert (rules_dir / "python.md").exists()
         assert (rules_dir / "testing.md").exists()
+
+    def test_collision_overwrites_existing_rule_file(self):
+        """Rule dirs are APM-owned: an existing .md is overwritten, not skipped.
+
+        Matches the cursor/claude invariant for the third output_compare format.
+        """
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        (self.project_root / ".windsurf").mkdir()
+        rules_dir = self.project_root / ".windsurf" / "rules"
+        rules_dir.mkdir()
+        (rules_dir / "python.md").write_text("# Stale rules")
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text("# APM rules")
+
+        pkg_info = _make_package_info(pkg)
+        windsurf = KNOWN_TARGETS["windsurf"]
+        result = self.integrator.integrate_instructions_for_target(
+            windsurf, pkg_info, self.project_root, managed_files=set()
+        )
+
+        assert result.files_integrated == 1
+        assert result.files_skipped == 0
+        deployed = (rules_dir / "python.md").read_text()
+        assert "# APM rules" in deployed
+        assert "Stale rules" not in deployed
+
+    def test_managed_files_has_no_effect_on_rule_dir(self):
+        """managed_files is not consulted for output_compare (rule-dir) targets."""
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        (self.project_root / ".windsurf").mkdir()
+        rules_dir = self.project_root / ".windsurf" / "rules"
+        rules_dir.mkdir()
+        (rules_dir / "python.md").write_text("# Stale rules")
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text("# APM rules")
+
+        pkg_info = _make_package_info(pkg)
+        windsurf = KNOWN_TARGETS["windsurf"]
+        result = self.integrator.integrate_instructions_for_target(
+            windsurf, pkg_info, self.project_root, managed_files=None
+        )
+
+        assert result.files_integrated == 1
+        assert result.files_skipped == 0
+        assert "# APM rules" in (rules_dir / "python.md").read_text()
+
+    def test_force_rewrites_byte_identical_rule(self):
+        """force=True rewrites even a byte-identical rule (no silent adopt).
+
+        The no-churn adopt path is gated on ``not force`` so ``--force`` always
+        rewrites and counts the file as integrated, not adopted.
+        """
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
+        (self.project_root / ".windsurf").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text("# Python")
+
+        pkg_info = _make_package_info(pkg)
+        windsurf = KNOWN_TARGETS["windsurf"]
+
+        # First deploy creates the file.
+        first = self.integrator.integrate_instructions_for_target(
+            windsurf, pkg_info, self.project_root
+        )
+        assert first.files_integrated == 1
+
+        # Re-deploy without force adopts (byte-identical, no churn).
+        adopt = self.integrator.integrate_instructions_for_target(
+            windsurf, pkg_info, self.project_root
+        )
+        assert adopt.files_integrated == 0
+        assert adopt.files_adopted == 1
+        # Adopted files MUST still be recorded in target_paths so they stay
+        # tracked in the lockfile manifest.  The #1662 regression was that
+        # paths were NOT recorded, causing rules to fall out of managed_files.
+        assert len(adopt.target_paths) == 1
+
+        # Re-deploy WITH force rewrites instead of adopting.
+        forced = self.integrator.integrate_instructions_for_target(
+            windsurf, pkg_info, self.project_root, force=True
+        )
+        assert forced.files_integrated == 1
+        assert forced.files_adopted == 0
+
+    def test_verbose_breadcrumb_rewrite_vs_adopt(self):
+        """adopt-vs-rewrite breadcrumbs are emitted only under verbose diagnostics.
+
+        When diagnostics.verbose is True:
+        - a rewrite emits a '[*] rewritten:' line
+        - a subsequent adopt emits a '[=] adopted-unchanged:' line
+        When diagnostics.verbose is False, neither line is emitted.
+        """
+        from unittest.mock import patch
+
+        from apm_cli.integration.targets import KNOWN_TARGETS
+        from apm_cli.utils.diagnostics import DiagnosticCollector
+
+        (self.project_root / ".windsurf").mkdir()
+
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text("# Python")
+
+        pkg_info = _make_package_info(pkg)
+        windsurf = KNOWN_TARGETS["windsurf"]
+
+        diag_verbose = DiagnosticCollector(verbose=True)
+        captured: list[str] = []
+
+        def _fake_echo(msg, **_kw):
+            captured.append(msg)
+
+        # First deploy (rewrite): verbose breadcrumb must appear.
+        with patch("apm_cli.integration.instruction_integrator._rich_echo", side_effect=_fake_echo):
+            result = self.integrator.integrate_instructions_for_target(
+                windsurf, pkg_info, self.project_root, diagnostics=diag_verbose
+            )
+        assert result.files_integrated == 1
+        assert any("[*] rewritten:" in m for m in captured), f"no rewrite breadcrumb in {captured}"
+
+        # Second deploy (adopt, byte-identical): verbose breadcrumb must appear.
+        captured.clear()
+        with patch("apm_cli.integration.instruction_integrator._rich_echo", side_effect=_fake_echo):
+            adopt = self.integrator.integrate_instructions_for_target(
+                windsurf, pkg_info, self.project_root, diagnostics=diag_verbose
+            )
+        assert adopt.files_adopted == 1
+        assert any("[=] adopted-unchanged:" in m for m in captured), (
+            f"no adopt breadcrumb in {captured}"
+        )
+
+        # Non-verbose diagnostics: no breadcrumb lines at all.
+        captured.clear()
+        diag_quiet = DiagnosticCollector(verbose=False)
+        with patch("apm_cli.integration.instruction_integrator._rich_echo", side_effect=_fake_echo):
+            self.integrator.integrate_instructions_for_target(
+                windsurf, pkg_info, self.project_root, diagnostics=diag_quiet
+            )
+        assert not captured, f"unexpected output under quiet diagnostics: {captured}"

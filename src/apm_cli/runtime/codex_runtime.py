@@ -1,10 +1,10 @@
 """Codex runtime adapter for APM."""
 
-import shutil
 import subprocess
-from typing import Any, Dict, Optional  # noqa: F401, UP035
+from typing import Any
 
 from .base import RuntimeAdapter
+from .utils import find_runtime_binary
 
 
 class CodexRuntime(RuntimeAdapter):
@@ -33,14 +33,13 @@ class CodexRuntime(RuntimeAdapter):
         Returns:
             str: The response text from Codex
         """
-        import os  # noqa: F401
-        import sys  # noqa: F401
 
         try:
             # Use codex exec to execute the prompt with real-time streaming
             # Always skip git repo check when running from APM
+            codex_binary = find_runtime_binary("codex") or "codex"
             process = subprocess.Popen(
-                ["codex", "exec", "--skip-git-repo-check", prompt_content],
+                [codex_binary, "exec", "--skip-git-repo-check", prompt_content],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,  # Merge stderr into stdout for streaming
                 text=True,
@@ -136,7 +135,7 @@ class CodexRuntime(RuntimeAdapter):
         Returns:
             bool: True if runtime is available, False otherwise
         """
-        return shutil.which("codex") is not None
+        return find_runtime_binary("codex") is not None
 
     @staticmethod
     def get_runtime_name() -> str:

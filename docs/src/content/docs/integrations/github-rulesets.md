@@ -7,6 +7,11 @@ sidebar:
 
 GitHub Rulesets and branch protection rules can require status checks before merging. APM commands like `apm install`, `apm compile`, and `apm unpack` already block critical hidden-character findings automatically. `apm audit` adds structured reporting (SARIF, JSON, markdown) and exit codes (**0** = clean, **1** = critical, **2** = warnings) for CI integration. `apm audit --ci` verifies lockfile consistency, and `--policy org` enforces organizational rules.
 
+> Note: `apm unpack` is DEPRECATED. New pipelines should use
+> `apm install <bundle-path>` instead -- it applies the same content
+> scanning and integrates with the project lockfile. See
+> [Pack a bundle](../../producer/pack-a-bundle/).
+
 ## How It Works
 
 The workflow is straightforward:
@@ -73,7 +78,7 @@ Once configured, any PR that introduces content issues detected by `apm audit` w
 - **Compilation rules** -- target and strategy constraints
 - **Unmanaged file detection** -- flag files in integration directories not tracked by the lockfile
 
-For full setup instructions, see the [CI Policy Enforcement](../../guides/ci-policy-setup/) guide. For the complete policy schema, see the [Policy Reference](../../enterprise/policy-reference/).
+For full setup instructions, see the [Enforce in CI](../../enterprise/enforce-in-ci/) guide. For the complete policy schema, see the [Policy Reference](../../enterprise/policy-reference/).
 
 ## Governance Levels
 
@@ -85,7 +90,7 @@ For full setup instructions, see the [CI Policy Enforcement](../../guides/ci-pol
 | 4 | GitHub recommends apm-action for agent governance | Future |
 | 5 | Native Rulesets UI for agent configuration policy | Future |
 
-Levels 1-3 are fully functional today. See the [CI Policy Enforcement](../../guides/ci-policy-setup/) guide for step-by-step setup. Levels 4-5 represent deeper GitHub platform integration that would reduce setup friction.
+Levels 1-3 are fully functional today. See the [Enforce in CI](../../enterprise/enforce-in-ci/) guide for step-by-step setup. Levels 4-5 represent deeper GitHub platform integration that would reduce setup friction.
 
 ## Combining with Other Checks
 
@@ -159,7 +164,7 @@ The status check name must match the **job name** in your workflow file (e.g., `
 
 ## Related
 
-- [CI Policy Enforcement](../../guides/ci-policy-setup/) -- step-by-step CI setup for policy enforcement
+- [Enforce in CI](../../enterprise/enforce-in-ci/) -- step-by-step CI setup for policy enforcement
 - [Governance](../../enterprise/governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
 - [Policy Reference](../../enterprise/policy-reference/) -- full `apm-policy.yml` schema reference
 - [CI/CD Pipelines](../ci-cd/) -- general CI integration guide

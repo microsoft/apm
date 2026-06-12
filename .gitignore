@@ -1,3 +1,6 @@
+# Local tool state (gh CLI, etc.)
+.local/
+
 # Project-specific files
 APPROACH.md
 next-steps.md
@@ -12,6 +15,7 @@ __pycache__/
 .Python
 build/build/
 build/apm/
+build/conformance-coverage.json
 *.bak
 develop-eggs/
 dist/
@@ -46,6 +50,8 @@ ENV/
 # Test coverage
 .coverage
 .coverage.*
+.coverage_*.json
+coverage*.json
 htmlcov/
 .tox/
 .pytest_cache/
@@ -76,3 +82,7 @@ scout-pipeline-result.png
 .cursor/mcp.json
 .playwright-mcp/
 server.pid
+.docs-rewrite-plan/
+build/apm-*/
+copilot-scratch/
+.local/

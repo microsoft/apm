@@ -13,7 +13,9 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
+from apm_cli.commands.install import install
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
 from apm_cli.integration.prompt_integrator import PromptIntegrator
@@ -269,6 +271,131 @@ class TestPluginIntegration:
         assert "dependencies:" in content
         assert "owner/dependency-package" in content
         assert "another/required-package#v1.0" in content
+
+    def test_plugin_with_marketplace_dependencies(self, tmp_path):
+        """Test plugin with marketplace-style dependencies parses correctly."""
+        plugin_dir = tmp_path / "plugin-with-mkt-deps"
+        plugin_dir.mkdir()
+
+        plugin_json = plugin_dir / "plugin.json"
+        plugin_json.write_text(
+            json.dumps(
+                {
+                    "name": "golang",
+                    "version": "0.3.0",
+                    "description": "Go dev tools",
+                    "dependencies": [
+                        {"name": "gopls-lsp", "marketplace": "claude-plugins-official"}
+                    ],
+                }
+            )
+        )
+
+        result = validate_apm_package(plugin_dir)
+
+        assert result.package_type == PackageType.MARKETPLACE_PLUGIN
+        assert result.is_valid
+        assert result.package is not None
+
+        deps = result.package.get_apm_dependencies()
+        assert len(deps) == 1
+        assert deps[0].is_marketplace is True
+        assert deps[0].marketplace_name == "claude-plugins-official"
+        assert deps[0].marketplace_plugin_name == "gopls-lsp"
+
+    def test_install_fails_on_unresolvable_marketplace_dependency(self, tmp_path, monkeypatch):
+        """apm install fails closed when marketplace dependency resolution fails."""
+        from apm_cli.marketplace.errors import PluginNotFoundError
+
+        (tmp_path / "apm.yml").write_text(
+            "name: consumer\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - name: missing-plugin\n"
+            "      marketplace: missing-marketplace\n"
+        )
+
+        def fail_resolution(*_args, **_kwargs):
+            raise PluginNotFoundError("missing-plugin", "missing-marketplace")
+
+        monkeypatch.setattr(
+            "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+            fail_resolution,
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = CliRunner().invoke(install, [])
+
+        assert result.exit_code != 0
+        assert "Dependency resolution failed" in result.output
+        assert "missing-plugin" in result.output
+
+    def test_plugin_with_mixed_dependencies(self, tmp_path):
+        """Test plugin with both string and marketplace dependencies."""
+        plugin_dir = tmp_path / "plugin-mixed-deps"
+        plugin_dir.mkdir()
+
+        plugin_json = plugin_dir / "plugin.json"
+        plugin_json.write_text(
+            json.dumps(
+                {
+                    "name": "mixed-plugin",
+                    "version": "1.0.0",
+                    "dependencies": [
+                        "owner/string-dep",
+                        {"name": "mkt-dep", "marketplace": "my-marketplace"},
+                    ],
+                }
+            )
+        )
+
+        result = validate_apm_package(plugin_dir)
+
+        assert result.is_valid
+        deps = result.package.get_apm_dependencies()
+        assert len(deps) == 2
+        assert deps[0].is_marketplace is False
+        assert deps[0].repo_url == "owner/string-dep"
+        assert deps[1].is_marketplace is True
+        assert deps[1].marketplace_plugin_name == "mkt-dep"
+
+    def test_plugin_with_mcp_and_marketplace_deps(self, tmp_path):
+        """Test plugin with .mcp.json and marketplace dependencies together."""
+        plugin_dir = tmp_path / "plugin-mcp-mkt"
+        plugin_dir.mkdir()
+
+        plugin_json = plugin_dir / "plugin.json"
+        plugin_json.write_text(
+            json.dumps(
+                {
+                    "name": "golang",
+                    "version": "0.3.0",
+                    "description": "Go dev tools",
+                    "dependencies": [
+                        {"name": "gopls-lsp", "marketplace": "claude-plugins-official"}
+                    ],
+                }
+            )
+        )
+
+        mcp_json = plugin_dir / ".mcp.json"
+        mcp_json.write_text(
+            json.dumps({"mcpServers": {"gopls": {"command": "gopls", "args": ["mcp"]}}})
+        )
+
+        result = validate_apm_package(plugin_dir)
+
+        assert result.is_valid
+        pkg = result.package
+
+        apm_deps = pkg.get_apm_dependencies()
+        assert len(apm_deps) == 1
+        assert apm_deps[0].is_marketplace is True
+
+        mcp_deps = pkg.get_mcp_dependencies()
+        assert len(mcp_deps) == 1
+        assert mcp_deps[0].name == "gopls"
 
     def test_plugin_metadata_preservation(self, tmp_path):
         """Test that all plugin metadata is preserved in apm.yml."""
@@ -536,3 +663,75 @@ class TestPluginIntegration:
         assert not (project_root / ".cursor").exists(), (
             "install must NOT create .cursor/ when the user has not opted in"
         )
+
+    def test_plugin_with_marketplace_deps_deploys_to_claude_target(self, tmp_path):
+        """Plugin with marketplace deps + MCP + skills deploys to .claude/ target."""
+        plugin_dir = tmp_path / "golang-plugin"
+        plugin_dir.mkdir()
+
+        # Simulate the openshift-eng golang plugin structure
+        plugin_json_dir = plugin_dir / ".claude-plugin"
+        plugin_json_dir.mkdir()
+        (plugin_json_dir / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "golang",
+                    "version": "0.3.0",
+                    "description": "Go development tools",
+                    "dependencies": [
+                        {"name": "gopls-lsp", "marketplace": "claude-plugins-official"}
+                    ],
+                }
+            )
+        )
+
+        # MCP server definition
+        (plugin_dir / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"gopls": {"command": "gopls", "args": ["mcp"]}}})
+        )
+
+        # A skill
+        skill_dir = plugin_dir / "skills" / "go-format"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Go Format\nFormat Go code with gofmt.")
+
+        # Validate the plugin
+        validation = validate_apm_package(plugin_dir)
+        assert validation.is_valid, f"Validation errors: {validation.errors}"
+        assert validation.package_type == PackageType.MARKETPLACE_PLUGIN
+
+        package = validation.package
+
+        # Verify marketplace dep parsed correctly
+        apm_deps = package.get_apm_dependencies()
+        assert len(apm_deps) == 1
+        assert apm_deps[0].is_marketplace is True
+        assert apm_deps[0].marketplace_plugin_name == "gopls-lsp"
+
+        # Verify MCP server extracted
+        mcp_deps = package.get_mcp_dependencies()
+        assert len(mcp_deps) == 1
+        assert mcp_deps[0].name == "gopls"
+
+        # Deploy to Claude target
+        package_info = PackageInfo(
+            package=package,
+            install_path=plugin_dir,
+            resolved_reference=ResolvedReference(
+                original_ref="main",
+                ref_type=GitReferenceType.BRANCH,
+                resolved_commit="abc123",
+                ref_name="main",
+            ),
+            installed_at=datetime.now().isoformat(),
+            package_type=validation.package_type,
+        )
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        skill_result = SkillIntegrator().integrate_package_skill(package_info, project_root)
+        assert skill_result.skill_created or skill_result.skill_skipped
+
+        # Verify .apm/ has the MCP config pass-through
+        assert (plugin_dir / ".apm" / ".mcp.json").exists()

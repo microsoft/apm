@@ -21,8 +21,7 @@ import re
 import subprocess
 import threading
 import time
-from dataclasses import dataclass, field  # noqa: F401
-from typing import Dict, List, Optional  # noqa: F401, UP035
+from dataclasses import dataclass
 
 from ..utils.github_host import build_https_clone_url, default_host
 from ._git_utils import redact_token as _redact_token

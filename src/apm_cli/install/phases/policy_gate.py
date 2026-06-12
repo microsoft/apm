@@ -101,6 +101,13 @@ def run(ctx: InstallContext) -> None:
     apm_package = getattr(ctx, "apm_package", None)
     if apm_package is not None:
         extra_kwargs["manifest_includes"] = getattr(apm_package, "includes", None)
+        # Plumb the manifest registries: block so _check_registry_source
+        # can distinguish "configured" from "unreachable". Without this,
+        # any policy.registry_source.require name is falsely flagged as
+        # unconfigured even when the user wired the registry correctly.
+        registries_map = getattr(apm_package, "registries", None)
+        if registries_map is not None:
+            extra_kwargs["registries"] = registries_map
 
     audit_result = run_dependency_policy_checks(
         ctx.deps_to_install,
@@ -110,6 +117,7 @@ def run(ctx: InstallContext) -> None:
         effective_target=None,  # target-aware checks after targets phase
         fetch_outcome=fetch_result.outcome,
         fail_fast=(enforcement == "block"),
+        direct_dep_keys={d.get_unique_key() for d in getattr(ctx, "all_apm_deps", []) or []},
         **extra_kwargs,
     )
 

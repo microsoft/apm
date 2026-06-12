@@ -415,7 +415,9 @@ class TestLockedDependencyHttpRoundTrip:
         )
 
         parsed = LockFile.from_yaml(lockfile.to_yaml())
-        dep = parsed.get_dependency("acme/rules")
+        # Non-default hosts are host-qualified in the lockfile dedup key (#773),
+        # so look the entry up by its host-qualified key.
+        dep = parsed.get_dependency("git.company.internal/acme/rules")
 
         assert dep is not None
         assert dep.is_insecure is True
@@ -442,6 +444,7 @@ class TestRefChangedDetection:
         locked_dep = Mock()
         locked_dep.resolved_ref = resolved_ref
         locked_dep.resolved_commit = resolved_commit
+        locked_dep.source = None
         return locked_dep
 
     def test_no_drift_when_refs_match(self):
