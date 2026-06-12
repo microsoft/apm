@@ -44,6 +44,7 @@ class TestMCPDependencyModel:
                 "version": "1.2.3",
                 "package": "npm",
                 "headers": {"X-Auth": "token"},
+                "env_headers": {"X-Env-Auth": "AUTH_TOKEN"},
                 "tools": ["read", "write"],
             }
         )
@@ -54,6 +55,7 @@ class TestMCPDependencyModel:
         assert dep.version == "1.2.3"
         assert dep.package == "npm"
         assert dep.headers == {"X-Auth": "token"}
+        assert dep.env_headers == {"X-Env-Auth": "AUTH_TOKEN"}
         assert dep.tools == ["read", "write"]
 
     def test_from_dict_self_defined_http(self):
@@ -350,6 +352,7 @@ class TestMCPDependencyModel:
             version="2.0.0",
             package="npm",
             headers={"X-H": "v"},
+            env_headers={"X-Env-H": "ENV_H"},
             tools=["tool1"],
             url="http://example.com",
             command="cmd",
@@ -362,6 +365,7 @@ class TestMCPDependencyModel:
         assert d["version"] == "2.0.0"
         assert d["package"] == "npm"
         assert d["headers"] == {"X-H": "v"}
+        assert d["env_headers"] == {"X-Env-H": "ENV_H"}
         assert d["tools"] == ["tool1"]
         assert d["url"] == "http://example.com"
         assert d["command"] == "cmd"
@@ -514,6 +518,38 @@ class TestMCPDependencyHardening:
         with pytest.raises(ValueError, match="control characters"):
             dep.validate(strict=False)
 
+    # -- Env header validation ---------------------------------------------
+
+    def test_env_headers_normal_pass(self):
+        dep = MCPDependency(name="srv", env_headers={"X-Api-Key": "MCP_API_KEY"})
+        dep.validate(strict=False)
+
+    @pytest.mark.parametrize(
+        "key,val",
+        [
+            ("X-Bad\rKey", "TOKEN"),
+            ("X-Bad\nKey", "TOKEN"),
+            ("X-OK", "TOKEN\rBAD"),
+            ("X-OK", "TOKEN\nBAD"),
+        ],
+    )
+    def test_env_headers_crlf_rejected(self, key, val):
+        dep = MCPDependency(name="srv", env_headers={key: val})
+        with pytest.raises(ValueError, match="control characters"):
+            dep.validate(strict=False)
+
+    @pytest.mark.parametrize("header_name", ["", "   "])
+    def test_env_headers_header_name_rejected(self, header_name):
+        dep = MCPDependency(name="srv", env_headers={header_name: "MCP_API_KEY"})
+        with pytest.raises(ValueError, match=f"Invalid env_header '{header_name}=MCP_API_KEY'"):
+            dep.validate(strict=False)
+
+    @pytest.mark.parametrize("env_name", ["", "1TOKEN", "TOKEN-NAME", "TOKEN.NAME", "${TOKEN}"])
+    def test_env_headers_env_name_rejected(self, env_name):
+        dep = MCPDependency(name="srv", env_headers={"X-Api-Key": env_name})
+        with pytest.raises(ValueError, match="environment variable name"):
+            dep.validate(strict=False)
+
     # -- Command path-traversal check ---------------------------------------
 
     @pytest.mark.parametrize(
@@ -626,6 +662,19 @@ class TestBuildSelfDefinedServerInfo:
         assert len(headers) == 1
         assert headers[0] == {"name": "Authorization", "value": "Bearer token"}
 
+    def test_http_with_env_headers(self):
+        dep = MCPDependency(
+            name="env-hdr-srv",
+            registry=False,
+            transport="http",
+            url="http://example.com",
+            env_headers={"Authorization": "MCP_AUTH_TOKEN"},
+        )
+        result = MCPIntegrator._build_self_defined_info(dep)
+        env_headers = result["remotes"][0]["env_headers"]
+        assert len(env_headers) == 1
+        assert env_headers[0] == {"name": "Authorization", "env": "MCP_AUTH_TOKEN"}
+
     def test_stdio_with_env(self):
         dep = MCPDependency(
             name="env-srv",
@@ -728,6 +777,65 @@ class TestApplyMCPOverlay:
         headers = cache["srv"]["remotes"][0]["headers"]
         assert len(headers) == 1
         assert headers[0] == {"name": "X-Custom", "value": "val"}
+
+    def test_env_headers_merged_into_remotes(self):
+        cache = {
+            "srv": {
+                "remotes": [{"url": "http://x", "env_headers": []}],
+            }
+        }
+        dep = MCPDependency(name="srv", env_headers={"X-Token": "TOKEN_ENV"})
+        MCPIntegrator._apply_overlay(cache, dep)
+        env_headers = cache["srv"]["remotes"][0]["env_headers"]
+        assert len(env_headers) == 1
+        assert env_headers[0] == {"name": "X-Token", "env": "TOKEN_ENV"}
+
+    def test_env_headers_overlay_treats_none_as_empty(self):
+        cache = {
+            "srv": {
+                "remotes": [{"url": "http://x", "env_headers": None}],
+            }
+        }
+        dep = MCPDependency(name="srv", env_headers={"X-Token": "TOKEN_ENV"})
+        MCPIntegrator._apply_overlay(cache, dep)
+        env_headers = cache["srv"]["remotes"][0]["env_headers"]
+        assert env_headers == [{"name": "X-Token", "env": "TOKEN_ENV"}]
+
+    def test_env_headers_overlay_replaces_existing_list_entry(self):
+        cache = {
+            "srv": {
+                "remotes": [
+                    {
+                        "url": "http://x",
+                        "env_headers": [{"name": "X-Token", "env": "OLD_TOKEN"}],
+                    }
+                ],
+            }
+        }
+        dep = MCPDependency(name="srv", env_headers={"X-Token": "NEW_TOKEN"})
+        MCPIntegrator._apply_overlay(cache, dep)
+        MCPIntegrator._apply_overlay(cache, dep)
+        env_headers = cache["srv"]["remotes"][0]["env_headers"]
+        assert env_headers == [{"name": "X-Token", "env": "NEW_TOKEN"}]
+
+    def test_env_headers_overlay_normalizes_existing_dict_shape(self):
+        cache = {
+            "srv": {
+                "remotes": [
+                    {
+                        "url": "http://x",
+                        "env_headers": {"X-Existing": "OLD_ENV"},
+                    }
+                ],
+            }
+        }
+        dep = MCPDependency(name="srv", env_headers={"X-Token": "TOKEN_ENV"})
+        MCPIntegrator._apply_overlay(cache, dep)
+        env_headers = cache["srv"]["remotes"][0]["env_headers"]
+        assert env_headers == [
+            {"name": "X-Existing", "env": "OLD_ENV"},
+            {"name": "X-Token", "env": "TOKEN_ENV"},
+        ]
 
     def test_tools_embedded(self):
         cache = {"srv": {"packages": [{"registry_name": "npm"}]}}

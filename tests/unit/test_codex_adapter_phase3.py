@@ -344,6 +344,92 @@ class TestFormatServerConfig:
         with pytest.raises(ValueError, match="no package information"):
             adapter._format_server_config(server_info)
 
+    def test_remote_env_headers_map_to_codex_env_http_headers(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        server_info = {
+            "name": "remote-env",
+            "id": "uuid-remote",
+            "packages": [],
+            "remotes": [
+                {
+                    "url": "https://example.com/mcp",
+                    "transport_type": "http",
+                    "headers": [{"name": "X-Static", "value": "literal"}],
+                    "env_headers": [
+                        {"name": "Authorization", "env": "MCP_AUTH_TOKEN"},
+                        {"name": "X-Api-Key", "env": "MCP_API_KEY"},
+                    ],
+                }
+            ],
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert cfg["url"] == "https://example.com/mcp"
+        assert cfg["http_headers"] == {"X-Static": "literal"}
+        assert cfg["env_http_headers"] == {
+            "Authorization": "MCP_AUTH_TOKEN",
+            "X-Api-Key": "MCP_API_KEY",
+        }
+
+    def test_remote_env_headers_accept_dict_shape(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        server_info = {
+            "name": "remote-env-dict",
+            "id": "uuid-remote-dict",
+            "packages": [],
+            "remotes": [
+                {
+                    "url": "https://example.com/mcp",
+                    "transport_type": "http",
+                    "env_headers": {
+                        "Authorization": "MCP_AUTH_TOKEN",
+                        "X-Api-Key": "MCP_API_KEY",
+                    },
+                }
+            ],
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert cfg["env_http_headers"] == {
+            "Authorization": "MCP_AUTH_TOKEN",
+            "X-Api-Key": "MCP_API_KEY",
+        }
+
+    def test_remote_env_headers_none_is_ignored(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        server_info = {
+            "name": "remote-env-none",
+            "id": "uuid-remote-none",
+            "packages": [],
+            "remotes": [
+                {
+                    "url": "https://example.com/mcp",
+                    "transport_type": "http",
+                    "env_headers": None,
+                }
+            ],
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert "env_http_headers" not in cfg
+
+    def test_remote_env_headers_list_shape_normalizes_entries(self, tmp_path: Path) -> None:
+        adapter = _make_adapter(project_root=tmp_path)
+        server_info = {
+            "name": "remote-env-list-normalized",
+            "id": "uuid-remote-list-normalized",
+            "packages": [],
+            "remotes": [
+                {
+                    "url": "https://example.com/mcp",
+                    "transport_type": "http",
+                    "env_headers": [
+                        {"name": 123, "env": "MCP_NUMERIC_HEADER"},
+                        "not-a-header-entry",
+                    ],
+                }
+            ],
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert cfg["env_http_headers"] == {"123": "MCP_NUMERIC_HEADER"}
+
     def test_npm_package_basic(self, tmp_path: Path) -> None:
         adapter = _make_adapter(project_root=tmp_path)
         pkg = {

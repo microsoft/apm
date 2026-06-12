@@ -25,6 +25,7 @@ import json
 from pathlib import Path
 
 import pytest
+import toml
 
 from apm_cli.integration.mcp_integrator import MCPIntegrator
 from apm_cli.models.dependency.mcp import MCPDependency
@@ -41,6 +42,20 @@ def _make_stdio_dep(name: str = "test-srv") -> MCPDependency:
             "transport": "stdio",
             "command": "echo",
             "args": ["mcp-targets-gate-e2e"],
+        }
+    )
+
+
+def _make_streamable_http_dep(name: str = "test-remote") -> MCPDependency:
+    """Build a self-defined remote MCP dependency that needs no network."""
+    return MCPDependency.from_dict(
+        {
+            "name": name,
+            "registry": False,
+            "transport": "streamable-http",
+            "url": "https://example.com/mcp",
+            "headers": {"X-Static": "literal"},
+            "env_headers": {"Authorization": "MCP_AUTH_TOKEN"},
         }
     )
 
@@ -207,3 +222,28 @@ class TestMCPTargetsGatingE2E:
             "not receive a silent copilot-vscode MCP write -- the "
             "pre-#1336 fallback is gone."
         )
+
+    def test_codex_env_headers_write_env_http_headers(self, tmp_path):
+        """Codex should receive runtime env-header bindings, not baked secrets.
+
+        This covers the full install boundary:
+        ``MCPDependency.env_headers`` -> ``MCPIntegrator`` remote info ->
+        ``CodexClientAdapter`` -> ``.codex/config.toml``.
+        """
+        project = tmp_path / "proj-codex-env-headers"
+        project.mkdir()
+        _seed_signal(project, "codex")
+
+        MCPIntegrator.install(
+            [_make_streamable_http_dep("e2e-codex-env-headers")],
+            project_root=project,
+            apm_config={"targets": ["codex"]},
+        )
+
+        config_path = _codex_mcp_path(project)
+        assert config_path.exists(), "Codex MCP config must be written for the codex target"
+        config = toml.loads(config_path.read_text(encoding="utf-8"))
+        server = config["mcp_servers"]["e2e-codex-env-headers"]
+        assert server["url"] == "https://example.com/mcp"
+        assert server["http_headers"] == {"X-Static": "literal"}
+        assert server["env_http_headers"] == {"Authorization": "MCP_AUTH_TOKEN"}

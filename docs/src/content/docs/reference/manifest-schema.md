@@ -498,6 +498,7 @@ A plain registry reference: `io.github.github/github-mcp-server`.
 | `registry` | `bool` or `string` | OPTIONAL | Default: `true` (public registry) | `false` = self-defined (private) server. String = custom registry URL. |
 | `package` | `enum<string>` | OPTIONAL | `npm`, `pypi`, `oci` | Package manager type hint. |
 | `headers` | `map<string, string>` | OPTIONAL | | Custom HTTP headers for remote endpoints. Same variable syntax as `env`. |
+| `env_headers` | `map<string, string>` | OPTIONAL | | Remote HTTP header names mapped to environment variable names. Targets with native support emit runtime env-header bindings instead of resolving or storing the value. |
 | `tools` | `list<string>` | OPTIONAL | Default: `["*"]` | Restrict which tools are exposed. |
 | `url` | `string` | Conditional | | Endpoint URL. REQUIRED when `registry: false` and `transport` is `http`, `sse`, or `streamable-http`. |
 | `command` | `string` | Conditional | Single binary path; no embedded whitespace unless `args` is also present | Binary path. REQUIRED when `registry: false` and `transport` is `stdio`. |
@@ -551,6 +552,11 @@ Values in `headers` and `env` may contain three placeholder syntaxes. APM resolv
 - **Recommended:** Use `${VAR}` or `${env:VAR}` in all new manifests - they work on every target that supports remote MCP servers. `<VAR>` is legacy; in VS Code it would silently render as literal text in the generated config.
 - **Registry-backed servers** - APM auto-generates input prompts from registry metadata only for required variables. Optional variables do not generate prompts or runtime config entries when no value is available. If a user has already edited an optional value in runtime config, reinstall preserves that value rather than overwriting it.
 - **Self-defined servers** - APM detects `${input:...}` patterns in `apm.yml` and generates matching input definitions automatically.
+- **Remote env headers** - `env_headers` is for targets with native HTTP
+  header environment-variable bindings. Values are environment variable names,
+  not header values. For Codex, `env_headers: { Authorization: MCP_TOKEN }`
+  becomes `env_http_headers = { Authorization = "MCP_TOKEN" }` in
+  `config.toml`.
 
 GitHub Actions templates (`${{ ... }}`) are intentionally left untouched.
 
@@ -565,6 +571,8 @@ dependencies:
         Authorization: "Bearer ${MY_SECRET_TOKEN}"      # bare env-var
         X-Tenant: "${env:TENANT_ID}"                    # env-prefixed
         X-Project: "${input:my-server-project}"         # VS Code input prompt
+      env_headers:
+        X-Api-Key: MCP_API_KEY                          # Codex env_http_headers
 ```
 
 ---
