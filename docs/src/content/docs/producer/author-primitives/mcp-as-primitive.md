@@ -50,6 +50,7 @@ either a bare string or a mapping. Fields, from
 | `url` | self-defined `http`/`sse`/`streamable-http` | `http://` or `https://` only. |
 | `env` | optional, stdio | Map of env vars passed to the child process. |
 | `headers` | optional, remote | Map of HTTP headers. CR/LF rejected. |
+| `env_headers` | optional, remote | Map of HTTP header names to environment variable names for targets with native env-header support, such as Codex `env_http_headers`. |
 | `tools` | optional | Allowlist of tool names. Default `["*"]`. |
 | `version` | optional | Pin a registry server version. |
 | `registry` | optional | `false` = self-defined; URL = custom registry. |
@@ -77,6 +78,8 @@ dependencies:
       url: https://mcp.linear.app/sse
       headers:
         Authorization: "Bearer ${LINEAR_TOKEN}"
+      env_headers:
+        X-Api-Key: LINEAR_API_KEY
 ```
 
 ## What the consumer sees on install
@@ -103,6 +106,14 @@ shipped. Do not embed tokens. Two patterns work:
   url: https://mcp.linear.app/sse
   headers:
     Authorization: "Bearer ${LINEAR_TOKEN}"
+
+# Native env-header binding -- targets that support it read the variable at runtime
+- name: my-remote
+  registry: false
+  transport: streamable-http
+  url: https://mcp.example.com/mcp
+  env_headers:
+    Authorization: MY_REMOTE_MCP_TOKEN
 
 # Stdio env -- value passed verbatim; use ${VAR} for indirection
 - name: my-internal

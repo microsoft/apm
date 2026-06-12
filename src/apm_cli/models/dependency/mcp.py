@@ -20,6 +20,7 @@ _KNOWN_DICT_KEYS = frozenset(
         "registry",
         "package",
         "headers",
+        "env_headers",
         "tools",
         "url",
         "command",
@@ -27,6 +28,7 @@ _KNOWN_DICT_KEYS = frozenset(
 )
 
 _NAME_REGEX = re.compile(r"^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$")
+_ENV_VAR_NAME_REGEX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 
@@ -50,6 +52,7 @@ class MCPDependency:
     registry: Any | None = None  # None=default, False=self-defined, str=custom registry URL
     package: str | None = None  # "npm" | "pypi" | "oci" — select package type
     headers: dict[str, str] | None = None  # Custom HTTP headers for remote endpoints
+    env_headers: dict[str, str] | None = None  # Header name -> environment variable name
     tools: list[str] | None = None  # Restrict exposed tools (default is ["*"])
     url: str | None = None  # Required for self-defined http/sse transports
     command: str | None = None  # Required for self-defined stdio transports
@@ -91,6 +94,7 @@ class MCPDependency:
             registry=d.get("registry"),
             package=d.get("package"),
             headers=d.get("headers"),
+            env_headers=d.get("env_headers"),
             tools=d.get("tools"),
             url=d.get("url"),
             command=d.get("command"),
@@ -124,6 +128,7 @@ class MCPDependency:
             "registry",
             "package",
             "headers",
+            "env_headers",
             "tools",
             "url",
             "command",
@@ -152,6 +157,9 @@ class MCPDependency:
         if self.headers:
             safe_headers = {k: "***" for k in self.headers}
             parts.append(f"headers={safe_headers}")
+        if self.env_headers:
+            safe_env_headers = {k: str(v) for k, v in self.env_headers.items()}
+            parts.append(f"env_headers={safe_env_headers!r}")
         if self.args is not None:
             parts.append("args=...")
         if self.tools:
@@ -216,6 +224,24 @@ class MCPDependency:
                     raise ValueError(
                         f"Invalid header '{k_str}={v_str}': control characters "
                         f"(CR/LF) not allowed in keys or values"
+                    )
+        if self.env_headers:
+            for k, v in self.env_headers.items():
+                k_str = str(k) if k is not None else ""
+                v_str = str(v) if v is not None else ""
+                if not k_str.strip():
+                    raise ValueError(
+                        f"Invalid env_header '{k_str}={v_str}': header name cannot be empty"
+                    )
+                if "\r" in k_str or "\n" in k_str or "\r" in v_str or "\n" in v_str:
+                    raise ValueError(
+                        f"Invalid env_header '{k_str}={v_str}': control characters "
+                        f"(CR/LF) not allowed in keys or values"
+                    )
+                if not _ENV_VAR_NAME_REGEX.match(v_str):
+                    raise ValueError(
+                        f"Invalid env_header '{k_str}={v_str}': value must be an "
+                        f"environment variable name like 'MCP_AUTH_TOKEN'"
                     )
         if self.command is not None:
             if not isinstance(self.command, str):

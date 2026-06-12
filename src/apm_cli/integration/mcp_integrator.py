@@ -315,6 +315,8 @@ class MCPIntegrator:
             }
             if dep.headers:
                 remote["headers"] = [{"name": k, "value": v} for k, v in dep.headers.items()]
+            if dep.env_headers:
+                remote["env_headers"] = [{"name": k, "env": v} for k, v in dep.env_headers.items()]
             info["remotes"] = [remote]
         else:
             # Build as a stdio package
@@ -390,6 +392,36 @@ class MCPIntegrator:
                     remote["headers"] = existing_headers
                 elif isinstance(existing_headers, builtins.dict):
                     existing_headers.update(dep.headers)
+
+        # Env headers overlay: merge header -> environment-variable bindings.
+        if dep.env_headers and "remotes" in info:
+            for remote in info["remotes"]:
+                existing_env_headers = remote.get("env_headers", [])
+                if existing_env_headers is None:
+                    existing_env_headers = []
+                if isinstance(existing_env_headers, builtins.list):
+                    merged_env_headers = {}
+                    for header in existing_env_headers:
+                        if not isinstance(header, builtins.dict):
+                            continue
+                        h_name = header.get("name", "")
+                        env_name = header.get("env", "")
+                        if h_name and env_name:
+                            merged_env_headers[str(h_name)] = str(env_name)
+                    for k, v in dep.env_headers.items():
+                        merged_env_headers[str(k)] = str(v)
+                    remote["env_headers"] = [
+                        {"name": k, "env": v} for k, v in merged_env_headers.items()
+                    ]
+                elif isinstance(existing_env_headers, builtins.dict):
+                    merged_env_headers = {
+                        str(k): str(v) for k, v in existing_env_headers.items() if k and v
+                    }
+                    for k, v in dep.env_headers.items():
+                        merged_env_headers[str(k)] = str(v)
+                    remote["env_headers"] = [
+                        {"name": k, "env": v} for k, v in merged_env_headers.items()
+                    ]
 
         # Args overlay: merge into package runtime arguments
         if dep.args and "packages" in info:
