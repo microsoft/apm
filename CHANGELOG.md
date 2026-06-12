@@ -62,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preserving hand-authored files. Use `--no-dedup` / `--force-instructions`
   to write full `AGENTS.md` files anyway. (by @tillig; closes #1730, related:
   #1138, #1550) (#1742)
+- `apm marketplace check` now resolves each package against its effective host with that host's token, matching `apm pack`. Entries on a non-default host -- a `host.tld/owner/repo` shorthand or a relative source composed onto `marketplace.sourceBase` -- previously failed with `git ls-remote` exit 128 because `check` always probed the default host with no token; local `./` packages now skip the network. Follows up #1736.
 
 ## [0.19.0] - 2026-06-09
 

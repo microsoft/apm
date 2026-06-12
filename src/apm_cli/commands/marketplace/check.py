@@ -8,9 +8,11 @@ import traceback
 import click
 
 from ...core.command_logger import CommandLogger
+from ...marketplace.auth_helpers import resolve_token_for_host
 from ...marketplace.errors import GitLsRemoteError, OfflineMissError
 from ...marketplace.ref_resolver import RefResolver
 from ...marketplace.semver import satisfies_range
+from ...marketplace.yml_schema import split_source_base
 from . import (
     _CheckResult,
     _extract_tag_versions,
@@ -19,6 +21,24 @@ from . import (
     _warn_duplicate_names,
     marketplace,
 )
+
+
+def _entry_coordinates(entry, source_base):
+    """Return ``(host, owner_repo)`` for *entry*, mirroring the build-time
+    routing in ``MarketplaceBuilder._remote_source_coordinates`` so that
+    ``check`` and ``pack`` resolve every entry against the same host.
+
+    - A per-entry host (``host.tld/owner/repo`` or full URL) is an override.
+    - Otherwise, when ``marketplace.sourceBase`` is set, a host-less source
+      composes onto the base.
+    - Otherwise the source stays a default-host ``owner/repo``.
+    """
+    if entry.host:
+        return entry.host, entry.source
+    if source_base:
+        base_host, base_path = split_source_base(source_base)
+        return base_host, f"{base_path}/{entry.source}"
+    return None, entry.source
 
 
 @marketplace.command(help="Validate marketplace entries are resolvable")
@@ -40,15 +60,44 @@ def check(offline, verbose):
             symbol="info",
         )
 
-    resolver = RefResolver(offline=offline)
+    # One resolver per effective host. An entry whose source named a
+    # non-default host -- a host-prefixed source or a relative source
+    # composed onto ``marketplace.sourceBase`` -- must be resolved against
+    # that host with the host's token, exactly like ``apm pack`` does.
+    # Default-host entries keep the bare ambient-credential path.
+    source_base = getattr(yml, "source_base", None)
+    resolvers: dict[str | None, RefResolver] = {}
+
+    def _resolver_for(host: str | None) -> RefResolver:
+        if host not in resolvers:
+            if host is None:
+                resolvers[host] = RefResolver(offline=offline)
+            else:
+                token = resolve_token_for_host(host, offline=offline)
+                resolvers[host] = RefResolver(offline=offline, host=host, token=token)
+        return resolvers[host]
+
     results = []
     failure_count = 0
 
     try:
         for entry in yml.packages:
+            # Local-path packages skip git resolution entirely.
+            if entry.is_local:
+                results.append(
+                    _CheckResult(
+                        name=entry.name,
+                        reachable=True,
+                        version_found=True,
+                        ref_ok=True,
+                        error="",
+                    )
+                )
+                continue
             try:
-                # Attempt to resolve each entry
-                refs = resolver.list_remote_refs(entry.source)
+                # Resolve each entry against its effective host + composed path.
+                host, owner_repo = _entry_coordinates(entry, source_base)
+                refs = _resolver_for(host).list_remote_refs(owner_repo)
 
                 # Check version/ref resolution
                 ref_ok = False
@@ -152,4 +201,5 @@ def check(offline, verbose):
             logger.success(f"All {total} entries OK", symbol="check")
 
     finally:
-        resolver.close()
+        for resolver in resolvers.values():
+            resolver.close()
