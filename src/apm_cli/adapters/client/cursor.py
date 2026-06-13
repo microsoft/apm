@@ -148,6 +148,7 @@ class CursorClientAdapter(CopilotClientAdapter):
                 else arg
                 for arg in args
             ]
+            self._merge_extra(config, server_info)
             return config
 
         # --- remote endpoints ---
@@ -169,6 +170,7 @@ class CursorClientAdapter(CopilotClientAdapter):
             config["url"] = (remote.get("url") or "").strip()
 
             self._apply_auth_and_headers(config, remote, server_info, env_overrides, "Cursor")
+            self._merge_extra(config, server_info)
             return config
 
         # --- local packages ---
@@ -194,6 +196,7 @@ class CursorClientAdapter(CopilotClientAdapter):
                     f"{[p.get('registry_name', 'unknown') for p in packages]}."
                 )
 
+        self._merge_extra(config, server_info)
         return config
 
     # ------------------------------------------------------------------ #

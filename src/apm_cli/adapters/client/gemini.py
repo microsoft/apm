@@ -158,6 +158,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
                 else arg
                 for arg in raw.get("args") or []
             ]
+            self._merge_extra(config, server_info)
             return config
 
         # --- remote endpoints ---
@@ -195,6 +196,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
                     config["headers"], server_info.get("name", ""), "Gemini CLI"
                 )
 
+            self._merge_extra(config, server_info)
             return config
 
         # --- local packages ---
@@ -208,6 +210,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
 
         package = self._select_best_package(packages)
         if not package:
+            self._merge_extra(config, server_info)
             return config
 
         registry_name = self._infer_registry_name(package)
@@ -245,6 +248,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
         if resolved_env:
             config["env"] = resolved_env
 
+        self._merge_extra(config, server_info)
         return config
 
     def configure_mcp_server(

@@ -130,6 +130,7 @@ class KiroClientAdapter(CopilotClientAdapter):
                 for arg in raw.get("args") or []
             ]
             self._copy_kiro_extensions(config, server_info)
+            self._merge_extra(config, server_info)
             return config
 
         remotes = server_info.get("remotes", [])
@@ -157,6 +158,7 @@ class KiroClientAdapter(CopilotClientAdapter):
                 config["headers"] = headers
                 self._warn_input_variables(headers, server_info.get("name", ""), "Kiro")
             self._copy_kiro_extensions(config, server_info)
+            self._merge_extra(config, server_info)
             return config
 
         packages = server_info.get("packages", [])
@@ -180,6 +182,7 @@ class KiroClientAdapter(CopilotClientAdapter):
                 f"Server: {server_info.get('name', 'unknown')}."
             )
         self._copy_kiro_extensions(config, server_info)
+        self._merge_extra(config, server_info)
         return config
 
     def configure_mcp_server(

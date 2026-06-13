@@ -442,6 +442,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             tools_override = server_info.get("_apm_tools_override")
             if tools_override:
                 config["tools"] = tools_override
+            self._merge_extra(config, server_info)
             return config
 
         # Check for remote endpoints first (registry-defined priority)
@@ -484,6 +485,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             if tools_override:
                 config["tools"] = tools_override
 
+            self._merge_extra(config, server_info)
             return config
 
         # Get packages from server info
@@ -507,6 +509,7 @@ class CopilotClientAdapter(MCPClientAdapter):
         if tools_override:
             config["tools"] = tools_override
 
+        self._merge_extra(config, server_info)
         return config
 
     def _apply_auth_and_headers(

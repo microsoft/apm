@@ -118,6 +118,20 @@ class MCPClientAdapter(ABC):
     # (e.g. ``VSCodeClientAdapter``) that have no ``KNOWN_TARGETS`` entry.
     mcp_servers_key: str = ""
 
+    @staticmethod
+    def _merge_extra(config: dict, server_info: dict) -> dict:
+        """Merge harness-specific ``_extra`` keys from server_info into config.
+
+        Extra keys never shadow adapter-set keys; they are appended only
+        when absent from the config dict.
+        """
+        extra = server_info.get("_extra")
+        if extra and isinstance(extra, dict):
+            for k, v in extra.items():
+                if k not in config:
+                    config[k] = v
+        return config
+
     # Whether this adapter's config path is user/global-scoped (e.g.
     # ``~/.copilot/``) rather than workspace-scoped (e.g. ``.vscode/``).
     # Adapters that target a global path should override this to ``True``
