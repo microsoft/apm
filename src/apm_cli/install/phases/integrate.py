@@ -364,6 +364,7 @@ def _integrate_root_project(
                 "instructions",
                 "commands",
                 "hooks",
+                "canvases",
             )
         )
         if _local_total > 0 and logger:
@@ -378,6 +379,7 @@ def _integrate_root_project(
             "instructions": _root_result["instructions"],
             "commands": _root_result["commands"],
             "hooks": _root_result["hooks"],
+            "canvases": _root_result.get("canvases", 0),
             "links_resolved": _root_result["links_resolved"],
         }
     except Exception as e:

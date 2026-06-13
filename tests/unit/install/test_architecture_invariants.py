@@ -208,12 +208,20 @@ def test_install_py_under_legacy_budget():
     ``__exit__`` in the existing ``finally``). All glue at the handler
     boundary; the chdir + source-root-override mechanism lives in
     ``apm_cli/install/root_redirect.py`` and ``apm_cli/core/scope.py``.
+
+    Experimental canvas support raised 2085 -> 2110 to add the
+    ``--trust-canvas-extensions`` Click option plus its signature param,
+    the ``trust_canvas`` ``InstallContext`` field, and the trust-signal
+    wiring through ``_install_apm_dependencies`` / ``InstallRequest`` and
+    the local-bundle handler. All glue at the handler boundary; the
+    integrator and its trust gate live in
+    ``apm_cli/integration/canvas_integrator.py``.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 2085, (
-        f"commands/install.py grew to {n} LOC (budget 2085). "
+    assert n <= 2110, (
+        f"commands/install.py grew to {n} LOC (budget 2110). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.apm/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."
