@@ -10,11 +10,13 @@ Safety gates, in order:
 
 1. **Path validation** -- :meth:`BaseIntegrator.validate_deploy_path` rejects
    path traversal and any path not under a known integration prefix.
-2. **Directory rejection** -- APM-managed primitives are file-keyed
+2. **Directory handling** -- APM-managed primitives are file-keyed
    (``SKILL.md`` for skills, individual ``.prompt.md`` / ``.instructions.md``
-   files elsewhere). A ``deployed_files`` entry that resolves to a directory
-   on disk is treated as untrusted (likely a poisoned lockfile entry under a
-   broad prefix like ``.github/instructions/``) and refused.
+   files elsewhere). Directory entries that match a known skill directory
+   pattern (``<prefix>/skills/<name>``) are deferred to a second pass so
+   individual files are removed first; if the directory is then empty (or
+   only contains APM-tracked files with matching hashes) it is safely
+   removed. Non-skill directory entries are still rejected as untrusted.
 3. **Provenance check** -- when the previous lockfile recorded a content
    hash for the file, the on-disk content must still match. If the user
    edited the file after APM deployed it the hash will differ and the
@@ -31,6 +33,7 @@ takes no logger.
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -60,6 +63,172 @@ class CleanupResult:
     deleted_targets: list[Path] = field(default_factory=list)
     """Absolute paths of deleted entries -- input to
     :meth:`BaseIntegrator.cleanup_empty_parents`."""
+
+
+def _is_skill_directory_entry(rel_path: str) -> bool:
+    """Return True when *rel_path* matches a skill directory pattern.
+
+    Skill directories are deployed under ``<prefix>/skills/<name>`` where
+    ``<prefix>`` is a target root or deploy_root (e.g. ``.agents``,
+    ``.github``, ``.claude``, ``.cursor``).  The path must have exactly
+    one component after ``skills/`` (the skill name) to qualify -- deeper
+    entries or ``skills/`` itself do not match.
+    """
+    parts = Path(rel_path).parts
+    # Minimum: prefix, "skills", name -> 3 parts (e.g. ".agents/skills/my-skill")
+    if len(parts) < 3:
+        return False
+    # The second-to-last component must be "skills" and the last is the
+    # skill name.  We require exactly one component after skills/ so that
+    # we only match the top-level skill directory, not subdirectories
+    # within a skill bundle.
+    try:
+        skills_idx = parts.index("skills")
+    except ValueError:
+        return False
+    # Exactly one component after "skills" (the skill name)
+    return skills_idx == len(parts) - 2 and skills_idx >= 1
+
+
+def _safe_remove_skill_directory(
+    skill_dir: Path,
+    rel_path: str,
+    recorded_hashes: dict[str, str],
+    all_stale: set[str],
+    result: CleanupResult,
+    diagnostics,
+    dep_key: str,
+    failed_path_retained: bool,
+) -> None:
+    """Attempt safe removal of an APM-deployed skill directory.
+
+    Called in the deferred second pass after individual files have been
+    deleted.  The directory is removed when:
+
+    - It no longer exists (already cleaned or never created).
+    - It is empty (all files already deleted in the first pass).
+    - All remaining files are tracked in *recorded_hashes* with matching
+      content hashes (APM-owned, unmodified).
+
+    When the directory contains user-created or user-edited files, removal
+    is skipped with a diagnostic listing the blocking entries.
+    """
+    if not skill_dir.exists():
+        return
+
+    if not skill_dir.is_dir() or skill_dir.is_symlink():
+        return
+
+    # Check if directory is empty -- safe to rmdir.
+    try:
+        remaining = list(skill_dir.iterdir())
+    except OSError:
+        result.failed.append(rel_path)
+        return
+
+    if not remaining:
+        try:
+            skill_dir.rmdir()
+            result.deleted.append(rel_path)
+            result.deleted_targets.append(skill_dir)
+        except OSError as exc:
+            result.failed.append(rel_path)
+            _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
+        return
+
+    # Non-empty: verify every remaining file is APM-tracked with
+    # matching hashes.  Recurse into subdirectories (skills can
+    # contain scripts/, assets/, references/ subdirectories).
+    blocking: list[str] = []
+    project_root = skill_dir
+    # Walk up to reconstruct project_root from the rel_path
+    rel_parts = Path(rel_path).parts
+    project_root = skill_dir
+    for _ in rel_parts:
+        project_root = project_root.parent
+
+    for child in skill_dir.rglob("*"):
+        if child.is_dir():
+            continue
+        try:
+            child_rel = child.relative_to(project_root).as_posix()
+        except ValueError:
+            blocking.append(str(child.name))
+            continue
+        expected_hash = recorded_hashes.get(child_rel)
+        if expected_hash is None:
+            # File not tracked by APM -- could be user-created.
+            # Check if it was in the stale set (already processed
+            # and potentially deleted). If not in stale set at all,
+            # it is definitely user content.
+            if child_rel not in all_stale:
+                blocking.append(child_rel)
+                continue
+            # Was in stale set but file still exists -- might have
+            # been skipped (user-edit, failed unlink). Block removal.
+            blocking.append(child_rel)
+            continue
+        # Verify hash matches.
+        try:
+            from ..utils.content_hash import compute_file_hash
+
+            actual_hash = compute_file_hash(child)
+        except Exception:
+            blocking.append(child_rel)
+            continue
+        _strip = _strip_sha256_prefix
+        if _strip(actual_hash) != _strip(expected_hash):
+            blocking.append(child_rel)
+
+    if blocking:
+        diagnostics.warn(
+            (
+                f"Skipped removing skill directory {rel_path}: "
+                f"{len(blocking)} file(s) not owned by APM or "
+                "modified since deployment. Remove manually if "
+                "no longer needed."
+            ),
+            package=dep_key,
+        )
+        result.skipped_unmanaged.append(rel_path)
+        return
+
+    # All remaining files are APM-tracked with matching hashes -- safe
+    # to remove the entire directory tree.
+    try:
+        shutil.rmtree(skill_dir)
+        result.deleted.append(rel_path)
+        result.deleted_targets.append(skill_dir)
+    except OSError as exc:
+        result.failed.append(rel_path)
+        _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained)
+
+
+def _emit_dir_failure(diagnostics, rel_path, exc, dep_key, failed_path_retained):
+    """Emit a diagnostic for a failed directory removal."""
+    if failed_path_retained:
+        diagnostics.warn(
+            (
+                f"Could not remove skill directory {rel_path}: {exc}. "
+                "Path retained in lockfile; will retry on next "
+                "'apm install'."
+            ),
+            package=dep_key,
+        )
+    else:
+        diagnostics.warn(
+            (
+                f"Could not remove skill directory {rel_path}: {exc}. "
+                "The owning package is no longer in apm.yml -- "
+                "remove the directory manually."
+            ),
+            package=dep_key,
+        )
+
+
+def _strip_sha256_prefix(h: str) -> str:
+    """Strip the ``sha256:`` prefix for hash comparison."""
+    return h[len("sha256:") :] if h.startswith("sha256:") else h
 
 
 def remove_stale_deployed_files(
@@ -115,6 +284,18 @@ def remove_stale_deployed_files(
     result = CleanupResult()
     recorded_hashes = recorded_hashes or {}
 
+    # Materialise stale_paths so we can iterate twice: once for the main
+    # file-deletion loop and once as a lookup set for the deferred
+    # directory pass.
+    _stale_list = sorted(stale_paths)
+    _stale_set: set[str] = set(_stale_list)
+
+    # Skill directory entries are deferred to a second pass so individual
+    # files are removed first. After files are deleted the directory is
+    # either empty (safe rmdir) or contains only verified APM-tracked
+    # files (safe rmtree).
+    _deferred_dirs: list[tuple[str, Path]] = []
+
     # Lazy-resolve cowork root at most once per invocation (same
     # pattern as sync_remove_files in base_integrator.py -- PR #926 P4).
     _cowork_root_resolved: bool = False
@@ -122,7 +303,7 @@ def remove_stale_deployed_files(
     _cowork_orphans_skipped: int = 0
     _cowork_resolve_errors: int = 0
 
-    for stale_path in sorted(stale_paths):
+    for stale_path in _stale_list:
         # ── Cowork:// paths ──────────────────────────────────────────
         # Handled BEFORE validate_deploy_path because that method
         # hard-rejects cowork:// when the OneDrive root is unavailable
@@ -179,21 +360,27 @@ def remove_stale_deployed_files(
             # File already gone -- treat as cleaned (no-op success).
             continue
 
-        # Gate 2: directory rejection. APM-managed primitives are
+        # Gate 2: directory handling. APM-managed primitives are
         # file-keyed; a directory entry under an integration prefix is
-        # almost certainly a poisoned lockfile entry that would rmtree
-        # an entire user-managed subtree.
+        # normally treated as untrusted. However, skill directories are
+        # legitimately tracked by APM (services.py records the skill dir
+        # entry alongside its contained files). Skill directories are
+        # deferred to a second pass so individual files are deleted first;
+        # non-skill directory entries are still rejected immediately.
         if stale_target.is_dir() and not stale_target.is_symlink():
-            result.skipped_unmanaged.append(stale_path)
-            diagnostics.warn(
-                (
-                    f"Refused to remove directory entry {stale_path}: APM "
-                    "only deletes individual files. If this entry was added "
-                    "by a malicious or corrupt lockfile, remove it manually "
-                    "from apm.lock.yaml."
-                ),
-                package=dep_key,
-            )
+            if _is_skill_directory_entry(stale_path):
+                _deferred_dirs.append((stale_path, stale_target))
+            else:
+                result.skipped_unmanaged.append(stale_path)
+                diagnostics.warn(
+                    (
+                        f"Refused to remove directory entry {stale_path}: APM "
+                        "only deletes individual files. If this entry was added "
+                        "by a malicious or corrupt lockfile, remove it manually "
+                        "from apm.lock.yaml."
+                    ),
+                    package=dep_key,
+                )
             continue
 
         # Gate 3: provenance check. If APM recorded a content hash for
@@ -227,10 +414,7 @@ def remove_stale_deployed_files(
             # 0.12.0 fix).  ``compute_file_hash`` always returns the
             # prefixed form, so strip the prefix from both sides before
             # comparing to avoid false "user-edited" classifications.
-            def _strip_sha256(h: str) -> str:
-                return h[len("sha256:") :] if h.startswith("sha256:") else h
-
-            if _strip_sha256(actual_hash) != _strip_sha256(expected_hash):
+            if _strip_sha256_prefix(actual_hash) != _strip_sha256_prefix(expected_hash):
                 result.skipped_user_edit.append(stale_path)
                 diagnostics.warn(
                     (
@@ -268,6 +452,21 @@ def remove_stale_deployed_files(
                     ),
                     package=dep_key,
                 )
+
+    # ── Second pass: deferred skill directories ─────────────────────
+    # Individual files have been deleted above. Now attempt safe removal
+    # of skill directories that APM itself created.
+    for _dir_path, _dir_target in _deferred_dirs:
+        _safe_remove_skill_directory(
+            _dir_target,
+            _dir_path,
+            recorded_hashes,
+            _stale_set,
+            result,
+            diagnostics,
+            dep_key,
+            failed_path_retained,
+        )
 
     # One-time warnings for cowork edge cases (mirrors sync_remove_files).
     if _cowork_orphans_skipped > 0:
