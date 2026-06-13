@@ -24,7 +24,6 @@ Design
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
 import re
@@ -32,11 +31,9 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .semver import SemVer
@@ -49,7 +46,21 @@ from ..utils.path_security import (
     validate_path_segments,
 )
 from ._git_utils import redact_token as _redact_token
-from ._io import atomic_write
+from ._publish_state import (
+    ConsumerTarget as ConsumerTarget,
+)
+from ._publish_state import (
+    PublishOutcome as PublishOutcome,
+)
+from ._publish_state import (
+    PublishPlan as PublishPlan,
+)
+from ._publish_state import (
+    PublishState as PublishState,
+)
+from ._publish_state import (
+    TargetResult as TargetResult,
+)
 from .errors import MarketplaceError
 from .git_stderr import translate_git_stderr
 from .migration import load_marketplace_config
@@ -70,11 +81,6 @@ __all__ = [
 ]
 
 # ---------------------------------------------------------------------------
-# Token redaction -- delegated to _git_utils; alias kept for call-site compat.
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
 # Branch name sanitisation
 # ---------------------------------------------------------------------------
 
@@ -90,191 +96,6 @@ _SHELL_META_RE = re.compile(r"[;&|`$(){}!<>\"\']")
 def _sanitise_branch_segment(text: str) -> str:
     """Replace characters that are unsafe for git branch names with hyphens."""
     return _BRANCH_UNSAFE_RE.sub("-", text)
-
-
-# ---------------------------------------------------------------------------
-# Data model
-# ---------------------------------------------------------------------------
-
-
-_REPO_RE = re.compile(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
-_BRANCH_SAFE_RE = re.compile(r"^[a-zA-Z0-9._/-]+$")
-
-
-@dataclass(frozen=True)
-class ConsumerTarget:
-    """A consumer repository whose ``apm.yml`` should be updated."""
-
-    repo: str  # e.g. "acme-org/service-a"
-    branch: str = "main"  # base branch on the consumer to PR into
-    path_in_repo: str = "apm.yml"  # location of the consumer's apm.yml
-
-    def __post_init__(self) -> None:
-        if not _REPO_RE.match(self.repo):
-            raise ValueError(
-                f"ConsumerTarget.repo must be in 'owner/name' format "
-                f"using only alphanumerics, dots, hyphens, and underscores. "
-                f"Got: {self.repo!r}"
-            )
-        if not _BRANCH_SAFE_RE.match(self.branch) or ".." in self.branch:
-            raise ValueError(
-                f"ConsumerTarget.branch contains disallowed characters. "
-                f"Only alphanumerics, dots, hyphens, underscores, and "
-                f"forward slashes are permitted (no '..' sequences). "
-                f"Got: {self.branch!r}"
-            )
-        from ..utils.path_security import validate_path_segments
-
-        validate_path_segments(self.path_in_repo, context="consumer-targets path_in_repo")
-
-
-@dataclass(frozen=True)
-class PublishPlan:
-    """Computed plan for a publish run -- frozen and deterministic."""
-
-    marketplace_name: str  # name from the local marketplace.yml
-    marketplace_version: str  # version from the local marketplace.yml
-    targets: tuple[ConsumerTarget, ...]
-    commit_message: str  # pre-computed, contains the APM trailer
-    branch_name: str  # pre-computed, deterministic
-    new_ref: str  # rendered tag, e.g. "v2.0.0"
-    tag_pattern_used: str  # tag pattern, e.g. "v{version}"
-    short_hash: str = ""  # deterministic hash suffix for the branch name
-    allow_downgrade: bool = False
-    allow_ref_change: bool = False
-    target_package: str | None = None
-
-
-class PublishOutcome(str, Enum):
-    """Outcome of processing a single consumer target."""
-
-    UPDATED = "updated"
-    NO_CHANGE = "no-change"
-    SKIPPED_DOWNGRADE = "skipped-downgrade"
-    SKIPPED_REF_CHANGE = "skipped-ref-change"
-    FAILED = "failed"
-
-
-@dataclass(frozen=True)
-class TargetResult:
-    """Result of processing a single consumer target."""
-
-    target: ConsumerTarget
-    outcome: PublishOutcome
-    message: str  # human-readable detail
-    old_version: str | None = None
-    new_version: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# Transactional state file
-# ---------------------------------------------------------------------------
-
-_STATE_FILENAME = "publish-state.json"
-_STATE_DIR = ".apm"
-_MAX_HISTORY = 10
-_SCHEMA_VERSION = 1
-
-
-class PublishState:
-    """Transactional state file for publish runs.
-
-    State is persisted at ``.apm/publish-state.json`` relative to the
-    marketplace repo root.  All writes are atomic (write-tmp + fsync +
-    ``os.replace``).
-    """
-
-    def __init__(self, root: Path) -> None:
-        self._root = root.resolve()
-        self._state_dir = self._root / _STATE_DIR
-        self._state_path = self._state_dir / _STATE_FILENAME
-        self._data: dict[str, Any] = {
-            "schemaVersion": _SCHEMA_VERSION,
-            "lastRun": None,
-            "history": [],
-        }
-
-    @classmethod
-    def load(cls, root: Path) -> PublishState:
-        """Load state from disk or return a fresh instance.
-
-        A missing file or corrupt JSON both result in a fresh state --
-        no exception is raised.
-        """
-        instance = cls(root)
-        if instance._state_path.exists():
-            try:
-                text = instance._state_path.read_text(encoding="utf-8")
-                data = json.loads(text)
-                if isinstance(data, dict):
-                    instance._data = data
-            except (json.JSONDecodeError, OSError):
-                pass  # start fresh on corrupt state
-        return instance
-
-    def _atomic_write(self) -> None:
-        """Write state atomically via temp file + fsync + os.replace.
-
-        Path validation and directory creation happen here; the actual
-        write is delegated to the shared ``atomic_write()`` helper from
-        ``_io.py``.
-        """
-        ensure_path_within(self._state_dir, self._root)
-        self._state_dir.mkdir(parents=True, exist_ok=True)
-
-        content = json.dumps(self._data, indent=2) + "\n"
-        atomic_write(self._state_path, content)
-
-    def begin_run(self, plan: PublishPlan) -> None:
-        """Start a new publish run -- writes ``startedAt``."""
-        self._data["lastRun"] = {
-            "startedAt": datetime.now(timezone.utc).isoformat(),
-            "finishedAt": None,
-            "marketplaceName": plan.marketplace_name,
-            "marketplaceVersion": plan.marketplace_version,
-            "branchName": plan.branch_name,
-            "results": [],
-        }
-        self._atomic_write()
-
-    def record_result(self, result: TargetResult) -> None:
-        """Append a target result to the current run."""
-        if self._data.get("lastRun") is None:
-            return
-        self._data["lastRun"]["results"].append(
-            {
-                "repo": result.target.repo,
-                "outcome": result.outcome.value,
-                "message": result.message,
-                "oldVersion": result.old_version,
-                "newVersion": result.new_version,
-            }
-        )
-        self._atomic_write()
-
-    def finalise(self, finished_at: datetime) -> None:
-        """Finalise the current run and rotate history."""
-        if self._data.get("lastRun") is None:
-            return
-        self._data["lastRun"]["finishedAt"] = finished_at.isoformat()
-
-        # Rotate history -- keep at most _MAX_HISTORY entries
-        history = self._data.get("history", [])
-        history.insert(0, dict(self._data["lastRun"]))
-        self._data["history"] = history[:_MAX_HISTORY]
-        self._atomic_write()
-
-    def abort(self, reason: str) -> None:
-        """Mark the current run as aborted."""
-        if self._data.get("lastRun") is None:
-            return
-        self._data["lastRun"]["finishedAt"] = f"ABORTED: {reason}"
-        self._atomic_write()
-
-    @property
-    def data(self) -> dict[str, Any]:
-        """Return the raw state data (read-only snapshot for inspection)."""
-        return dict(self._data)
 
 
 # ---------------------------------------------------------------------------
@@ -654,6 +475,59 @@ class MarketplacePublisher:
 
     # -- per-target processing ----------------------------------------------
 
+    def _clone_and_checkout(
+        self,
+        target: ConsumerTarget,
+        plan: PublishPlan,
+        tmpdir: str,
+        clone_dir: Path,
+    ) -> TargetResult | None:
+        """Shallow-clone target repo and create the publish branch.
+
+        Returns ``None`` on success, or a :class:`TargetResult` with
+        ``FAILED`` outcome on any subprocess error.
+        """
+        url = f"https://github.com/{target.repo}.git"
+        try:
+            self._run_git(
+                [
+                    "git",
+                    "clone",
+                    "--depth=1",
+                    "--branch",
+                    target.branch,
+                    url,
+                    str(clone_dir),
+                ],
+                cwd=tmpdir,
+            )
+        except subprocess.CalledProcessError as exc:
+            stderr = _redact_token(exc.stderr or "")
+            translated = translate_git_stderr(
+                stderr,
+                exit_code=exc.returncode,
+                operation="clone",
+                remote=target.repo,
+            )
+            return TargetResult(
+                target=target,
+                outcome=PublishOutcome.FAILED,
+                message=f"Clone failed: {translated.summary}",
+            )
+
+        try:
+            self._run_git(
+                ["git", "checkout", "-B", plan.branch_name],
+                cwd=str(clone_dir),
+            )
+        except subprocess.CalledProcessError as exc:
+            return TargetResult(
+                target=target,
+                outcome=PublishOutcome.FAILED,
+                message=("Branch creation failed: " + _redact_token(str(exc))),
+            )
+        return None
+
     def _process_single_target(
         self,
         target: ConsumerTarget,
@@ -665,47 +539,10 @@ class MarketplacePublisher:
         with tempfile.TemporaryDirectory(prefix="apm-publish-") as tmpdir:
             clone_dir = Path(tmpdir) / "repo"
 
-            # 1. Shallow clone
-            url = f"https://github.com/{target.repo}.git"
-            try:
-                self._run_git(
-                    [
-                        "git",
-                        "clone",
-                        "--depth=1",
-                        "--branch",
-                        target.branch,
-                        url,
-                        str(clone_dir),
-                    ],
-                    cwd=tmpdir,
-                )
-            except subprocess.CalledProcessError as exc:
-                stderr = _redact_token(exc.stderr or "")
-                translated = translate_git_stderr(
-                    stderr,
-                    exit_code=exc.returncode,
-                    operation="clone",
-                    remote=target.repo,
-                )
-                return TargetResult(
-                    target=target,
-                    outcome=PublishOutcome.FAILED,
-                    message=f"Clone failed: {translated.summary}",
-                )
-
-            # 2. Create publish branch
-            try:
-                self._run_git(
-                    ["git", "checkout", "-B", plan.branch_name],
-                    cwd=str(clone_dir),
-                )
-            except subprocess.CalledProcessError as exc:
-                return TargetResult(
-                    target=target,
-                    outcome=PublishOutcome.FAILED,
-                    message=("Branch creation failed: " + _redact_token(str(exc))),
-                )
+            # 1+2. Shallow clone + create publish branch
+            clone_err = self._clone_and_checkout(target, plan, tmpdir, clone_dir)
+            if clone_err is not None:
+                return clone_err
 
             # 3. Load consumer apm.yml
             data, apm_yml_path, manifest_err = self._load_consumer_manifest(clone_dir, target, plan)

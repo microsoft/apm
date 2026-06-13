@@ -1,7 +1,5 @@
 """Base integrator with shared collision detection and sync logic."""
 
-import errno
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,10 +8,9 @@ from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.primitives.discovery import discover_primitives
 from apm_cli.utils.console import _rich_warning
 
-
-class _SymlinkRaceError(OSError):
-    """Raised by ``_read_bytes_no_follow`` when the path becomes a symlink
-    between the pre-check and the open(). Caught locally; never bubbles."""
+# Re-exported so the original ``base_integrator`` import/patch path keeps
+# working after the TOCTOU-safe read primitive moved to a sibling module.
+from .base_integrator_io import _read_bytes_no_follow, _SymlinkRaceError
 
 
 @dataclass
@@ -50,42 +47,6 @@ class IntegrationResult:
     # actions (list of {event, summary}), rendered_json.
     # Faithfully reflects post-path-rewrite data actually written to disk.
     display_payloads: list = field(default_factory=list)
-
-
-def _read_bytes_no_follow(path: Path) -> bytes:
-    """Read *path* with ``O_NOFOLLOW`` semantics where supported.
-
-    On POSIX, opens the file with ``os.O_NOFOLLOW`` so the kernel
-    rejects the open atomically if the final path component is a
-    symlink. This closes the TOCTOU race between
-    ``Path.is_symlink()`` and ``Path.read_bytes()`` exploited by a
-    co-tenant who can swap files for symlinks.
-
-    On Windows (no ``O_NOFOLLOW``), falls back to a plain read; the
-    caller's upfront ``is_symlink()`` check plus ``ensure_path_within``
-    at the integrator call sites provide the containment guarantee.
-    """
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-    nofollow = getattr(os, "O_NOFOLLOW", 0)
-    flags |= nofollow
-    try:
-        fd = os.open(str(path), flags)
-    except OSError as exc:
-        # ELOOP is the canonical errno for "O_NOFOLLOW refused to open
-        # a symlink"; some Linux kernels return EMLINK or ELOOP-equivalent.
-        if nofollow and exc.errno in (errno.ELOOP, getattr(errno, "EMLINK", -1)):
-            raise _SymlinkRaceError(exc.errno, f"Refused to follow symlink at {path}") from exc
-        raise
-    try:
-        chunks: list[bytes] = []
-        while True:
-            chunk = os.read(fd, 65536)
-            if not chunk:
-                break
-            chunks.append(chunk)
-        return b"".join(chunks)
-    finally:
-        os.close(fd)
 
 
 class BaseIntegrator:
@@ -364,11 +325,9 @@ class BaseIntegrator:
             return False
         target = project_root / rel_path
         try:
-            if not target.resolve().is_relative_to(project_root.resolve()):
-                return False
+            return target.resolve().is_relative_to(project_root.resolve())
         except (ValueError, OSError):
             return False
-        return True
 
     # Backward-compat aliases mapping raw ``{prim}_{target}`` keys to
     # the bucket names that existing callers expect.  Shared between
@@ -442,8 +401,7 @@ class BaseIntegrator:
                             COPILOT_APP_LOCKFILE_PREFIX,
                         )
 
-                        raw_key = f"{prim_name}_{target.name}"
-                        bucket_key = BaseIntegrator._BUCKET_ALIASES.get(raw_key, raw_key)
+                        bucket_key = BaseIntegrator.partition_bucket_key(prim_name, target.name)
                         if bucket_key not in buckets:
                             buckets[bucket_key] = set()
                         prefix_map[COPILOT_APP_LOCKFILE_PREFIX] = bucket_key
@@ -459,8 +417,7 @@ class BaseIntegrator:
                 elif prim_name == "hooks":
                     hook_prefixes.append(prefix)
                 else:
-                    raw_key = f"{prim_name}_{target.name}"
-                    bucket_key = BaseIntegrator._BUCKET_ALIASES.get(raw_key, raw_key)
+                    bucket_key = BaseIntegrator.partition_bucket_key(prim_name, target.name)
                     if bucket_key not in buckets:
                         buckets[bucket_key] = set()
                     prefix_map[prefix] = bucket_key

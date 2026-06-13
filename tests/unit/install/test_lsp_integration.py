@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from apm_cli.install.lsp.integration import run_lsp_integration
+from apm_cli.install.lsp.integration import LSPIntegrationContext, run_lsp_integration
 from apm_cli.models.dependency.lsp import LSPDependency
 
 # ---------------------------------------------------------------------------
@@ -61,9 +61,8 @@ class TestRunLspIntegration:
             lock_path=tmp_path / "apm.lock.yaml",
             existing_lock=None,
             project_root=tmp_path,
-            user_scope=False,
-            should_install=True,
             logger=_mock_logger(),
+            ctx=LSPIntegrationContext(user_scope=False, should_install=True),
         )
 
         assert count == 0
@@ -90,9 +89,8 @@ class TestRunLspIntegration:
             lock_path=tmp_path / "apm.lock.yaml",
             existing_lock=None,
             project_root=tmp_path,
-            user_scope=False,
-            should_install=True,
             logger=_mock_logger(),
+            ctx=LSPIntegrationContext(user_scope=False, should_install=True),
         )
 
         assert count == 1
@@ -118,9 +116,8 @@ class TestRunLspIntegration:
             lock_path=tmp_path / "apm.lock.yaml",
             existing_lock=None,
             project_root=tmp_path,
-            user_scope=False,
-            should_install=True,
             logger=logger,
+            ctx=LSPIntegrationContext(user_scope=False, should_install=True),
         )
 
         assert count == 1
@@ -158,9 +155,8 @@ class TestRunLspIntegration:
             lock_path=tmp_path / "apm.lock.yaml",
             existing_lock=None,
             project_root=tmp_path,
-            user_scope=False,
-            should_install=True,
             logger=_mock_logger(),
+            ctx=LSPIntegrationContext(user_scope=False, should_install=True),
         )
 
         assert count == 2
@@ -195,9 +191,8 @@ class TestStaleCleanup:
             lock_path=tmp_path / "apm.lock.yaml",
             existing_lock=old_lock,
             project_root=tmp_path,
-            user_scope=False,
-            should_install=True,
             logger=_mock_logger(),
+            ctx=LSPIntegrationContext(user_scope=False, should_install=True),
         )
 
         mock_integrator.remove_stale.assert_called_once()
@@ -218,9 +213,8 @@ class TestStaleCleanup:
             lock_path=tmp_path / "apm.lock.yaml",
             existing_lock=old_lock,
             project_root=tmp_path,
-            user_scope=False,
-            should_install=True,
             logger=_mock_logger(),
+            ctx=LSPIntegrationContext(user_scope=False, should_install=True),
         )
 
         mock_integrator.remove_stale.assert_called_once()
@@ -251,9 +245,8 @@ class TestSkipInstall:
             lock_path=tmp_path / "apm.lock.yaml",
             existing_lock=old_lock,
             project_root=tmp_path,
-            user_scope=False,
-            should_install=False,
             logger=_mock_logger(),
+            ctx=LSPIntegrationContext(user_scope=False, should_install=False),
         )
 
         mock_integrator.update_lockfile.assert_called_once()

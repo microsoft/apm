@@ -19,7 +19,9 @@ from apm_cli.integration.hook_integrator import (
     HookIntegrationResult,
     _emit_hook_event_diagnostics,
     _filter_hook_files_for_target,
+    _get_package_name,
 )
+from apm_cli.integration.hook_transforms import _HOOK_COMMAND_KEYS
 from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
@@ -134,8 +136,8 @@ def _write_kiro_hook_docs(
             if not isinstance(matcher, dict):
                 continue
             patterns = _kiro_patterns_from_matcher(matcher)
-            for action in _kiro_actions_from_matcher(matcher, integrator.HOOK_COMMAND_KEYS):
-                then = _kiro_then_from_action(action, integrator.HOOK_COMMAND_KEYS)
+            for action in _kiro_actions_from_matcher(matcher, _HOOK_COMMAND_KEYS):
+                then = _kiro_then_from_action(action, _HOOK_COMMAND_KEYS)
                 if then is None:
                     continue
                 per_event_counts[event_name] = per_event_counts.get(event_name, 0) + 1
@@ -264,7 +266,7 @@ def integrate_kiro_hooks(
 
     hooks_dir = target_dir / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
-    package_name = integrator._get_package_name(package_info, project_root)
+    package_name = _get_package_name(package_info, project_root)
     deploy_root_for_rewrite = project_root if user_scope else None
 
     files_integrated = 0

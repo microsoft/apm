@@ -336,32 +336,46 @@ def validate_apm_package(package_path: Path) -> ValidationResult:
     result.package_type = pkg_type
 
     if pkg_type == PackageType.INVALID:
-        # Two sub-cases of INVALID:
-        # 1. apm.yml present but no .apm/ directory (or .apm is a file)
-        # 2. Nothing recognizable at all
-        apm_yml_path = package_path / APM_YML_FILENAME
-        if apm_yml_path.exists():
-            apm_path = package_path / APM_DIR
-            if apm_path.exists() and not apm_path.is_dir():
-                result.add_error(".apm must be a directory")
-            else:
-                result.add_error(
-                    f"Not a valid APM package: {package_path.name} has apm.yml but "
-                    "is missing the required .apm/ directory. "
-                    "Add .apm/ with primitives (instructions, skills, etc.), "
-                    "declare dependencies in apm.yml (curated aggregator), "
-                    "or add skills/<name>/SKILL.md for a skill bundle."
-                )
-        else:
-            result.add_error(
-                f"Not a valid APM package: no apm.yml, SKILL.md, hooks, or "
-                f"plugin structure found in {package_path.name}. "
-                "Ensure the package has SKILL.md (skill bundle), "
-                "apm.yml + .apm/ (APM package), or plugin.json (Claude plugin) "
-                "at its root."
-            )
+        _add_invalid_package_error(package_path, result)
         return result
 
+    return _dispatch_package_validation(package_path, plugin_json_path, result)
+
+
+def _add_invalid_package_error(package_path: Path, result: ValidationResult) -> None:
+    """Record the appropriate error for an INVALID package directory.
+
+    Two sub-cases of INVALID:
+    1. apm.yml present but no .apm/ directory (or .apm is a file)
+    2. Nothing recognizable at all
+    """
+    apm_yml_path = package_path / APM_YML_FILENAME
+    if apm_yml_path.exists():
+        apm_path = package_path / APM_DIR
+        if apm_path.exists() and not apm_path.is_dir():
+            result.add_error(".apm must be a directory")
+        else:
+            result.add_error(
+                f"Not a valid APM package: {package_path.name} has apm.yml but "
+                "is missing the required .apm/ directory. "
+                "Add .apm/ with primitives (instructions, skills, etc.), "
+                "declare dependencies in apm.yml (curated aggregator), "
+                "or add skills/<name>/SKILL.md for a skill bundle."
+            )
+    else:
+        result.add_error(
+            f"Not a valid APM package: no apm.yml, SKILL.md, hooks, or "
+            f"plugin structure found in {package_path.name}. "
+            "Ensure the package has SKILL.md (skill bundle), "
+            "apm.yml + .apm/ (APM package), or plugin.json (Claude plugin) "
+            "at its root."
+        )
+
+
+def _dispatch_package_validation(
+    package_path: Path, plugin_json_path: Path | None, result: ValidationResult
+) -> ValidationResult:
+    """Route a non-INVALID package to its type-specific validator."""
     # Handle hook-only packages (no apm.yml or SKILL.md)
     if result.package_type == PackageType.HOOK_PACKAGE:
         return _validate_hook_package(package_path, result)

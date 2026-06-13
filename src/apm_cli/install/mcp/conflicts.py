@@ -12,6 +12,8 @@ from collections.abc import Mapping, Sequence
 
 import click
 
+from .spec import MCPRequestSpec
+
 # Mapping for E10: which flags require --mcp.  Keyed by attribute-style
 # name so we can read directly from the Click handler locals.
 MCP_REQUIRED_FLAGS: tuple[tuple[str, str], ...] = (
@@ -25,26 +27,28 @@ MCP_REQUIRED_FLAGS: tuple[tuple[str, str], ...] = (
 
 def validate_mcp_conflicts(
     *,
-    mcp_name: str | None,
+    spec: MCPRequestSpec,
     packages: Sequence[str],
     pre_dash_packages: Sequence[str],
-    transport: str | None,
-    url: str | None,
     env: Mapping[str, str],
     headers: Mapping[str, str],
-    mcp_version: str | None,
-    command_argv: Sequence[str] | None,
     global_: bool,
     only: str | None,
     update: bool,
     any_transport_flag: bool,
-    registry_url: str | None = None,
 ) -> None:
     """Apply conflict matrix E1-E15.  Raises ``click.UsageError`` on hit.
 
     ``any_transport_flag`` should be ``use_ssh or use_https or
     allow_protocol_fallback`` (pre-evaluated by the caller).
     """
+    mcp_name = spec.mcp_name
+    transport = spec.transport
+    url = spec.url
+    mcp_version = spec.mcp_version
+    command_argv = spec.command_argv
+    registry_url = spec.registry_url
+
     # E10: flags require --mcp -- run first so users get the right hint.
     if mcp_name is None:
         flag_values = {

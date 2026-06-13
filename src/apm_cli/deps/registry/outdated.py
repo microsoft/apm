@@ -163,22 +163,16 @@ def check_registry_locked_dep(
     package_name = locked.get_unique_key()
     current = locked.version or ""
 
-    if ctx is None:
+    # Combine two early-exit guards (no context / feature disabled) into one
+    # return statement to keep PLR0911 satisfied.
+    if ctx is None or not is_package_registry_enabled():
+        source = "registry" if ctx is None else "registry (feature disabled)"
         return OutdatedRow(
             package=package_name,
             current=current or "(none)",
             latest="-",
             status="unknown",
-            source="registry",
-        )
-
-    if not is_package_registry_enabled():
-        return OutdatedRow(
-            package=package_name,
-            current=current or "(none)",
-            latest="-",
-            status="unknown",
-            source="registry (feature disabled)",
+            source=source,
         )
 
     manifest_dep = ctx.manifest_index.get(package_name)
@@ -205,23 +199,18 @@ def check_registry_locked_dep(
         )
 
     registry_name = (manifest_dep.registry_name if manifest_dep else None) or ctx.default_registry
-    if not registry_name:
-        return OutdatedRow(
-            package=package_name,
-            current=current,
-            latest="-",
-            status="unknown",
-            source="registry (no default registry)",
+    base_url = ctx.registries.get(registry_name) if registry_name else None
+    # Combine registry-name-missing and base-url-missing into one return.
+    if not registry_name or not base_url:
+        source_detail = (
+            "no default registry" if not registry_name else f"{registry_name!r} not configured"
         )
-
-    base_url = ctx.registries.get(registry_name)
-    if not base_url:
         return OutdatedRow(
             package=package_name,
             current=current,
             latest="-",
             status="unknown",
-            source=f"registry ({registry_name!r} not configured)",
+            source=f"registry ({source_detail})",
         )
 
     source_label = f"registry: {registry_name}"

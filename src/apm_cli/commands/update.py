@@ -565,33 +565,49 @@ def _run_dep_update(
             _rich_info("Run with --verbose for detailed diagnostics.")
         sys.exit(1)
 
+    _finalize_dep_update(
+        plan_state=plan_state,
+        result=result,
+        revision_pin_updates=revision_pin_updates,
+    )
+
+
+def _finalize_dep_update(
+    *,
+    plan_state: _UpdateRunState,
+    result,
+    revision_pin_updates: list[RevisionPinUpdate],
+) -> None:
+    """Record revision-pin tags and emit the post-update summary line."""
     plan = plan_state.plan
     if plan is None or not isinstance(plan, UpdatePlan):
         return
 
-    if plan_state.proceeded:
-        if revision_pin_updates:
-            try:
-                _annotate_lockfile_revision_tags(Path.cwd(), revision_pin_updates)
-            except Exception as e:
-                _rich_error(f"Failed to record revision-pin tags in apm.lock.yaml: {e}")
-                sys.exit(1)
-        installed = getattr(result, "installed_count", 0)
-        if installed and revision_pin_updates:
-            count = len(revision_pin_updates)
-            dep_noun = "dependency" if installed == 1 else "dependencies"
-            pin_noun = "pin" if count == 1 else "pins"
-            _rich_success(
-                f"Updated {installed} APM {dep_noun} and {count} revision {pin_noun} in apm.yml."
-            )
-        elif installed:
-            _rich_success(f"Updated {installed} APM dependencies.")
-        elif revision_pin_updates:
-            count = len(revision_pin_updates)
-            noun = "pin" if count == 1 else "pins"
-            _rich_success(f"Updated {count} revision {noun} in apm.yml.")
-        else:
-            _rich_success("No dependency changes were applied.")
+    if not plan_state.proceeded:
+        return
+
+    if revision_pin_updates:
+        try:
+            _annotate_lockfile_revision_tags(Path.cwd(), revision_pin_updates)
+        except Exception as e:
+            _rich_error(f"Failed to record revision-pin tags in apm.lock.yaml: {e}")
+            sys.exit(1)
+    installed = getattr(result, "installed_count", 0)
+    if installed and revision_pin_updates:
+        count = len(revision_pin_updates)
+        dep_noun = "dependency" if installed == 1 else "dependencies"
+        pin_noun = "pin" if count == 1 else "pins"
+        _rich_success(
+            f"Updated {installed} APM {dep_noun} and {count} revision {pin_noun} in apm.yml."
+        )
+    elif installed:
+        _rich_success(f"Updated {installed} APM dependencies.")
+    elif revision_pin_updates:
+        count = len(revision_pin_updates)
+        noun = "pin" if count == 1 else "pins"
+        _rich_success(f"Updated {count} revision {noun} in apm.yml.")
+    else:
+        _rich_success("No dependency changes were applied.")
 
 
 __all__ = ["update"]

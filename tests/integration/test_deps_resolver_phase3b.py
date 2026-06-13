@@ -42,16 +42,17 @@ def _make_dep_ref(
     is_local: bool = False,
     local_path: str | None = None,
     is_insecure: bool = False,
-    ado_organization: str | None = None,
-    ado_project: str | None = None,
-    ado_repo: str | None = None,
     alias: str | None = None,
+    ado: tuple[str | None, str | None, str | None] = (None, None, None),
     is_parent_repo_inheritance: bool = False,
-    explicit_scheme: str | None = None,
 ) -> Any:
-    """Build a DependencyReference instance without network calls."""
+    """Build a DependencyReference instance without network calls.
+
+    ``ado`` groups the Azure DevOps (organization, project, repo) triple.
+    """
     from apm_cli.models.dependency.reference import DependencyReference
 
+    ado_organization, ado_project, ado_repo = ado
     return DependencyReference(
         repo_url=repo_url,
         host=host,
@@ -62,12 +63,11 @@ def _make_dep_ref(
         is_local=is_local,
         local_path=local_path,
         is_insecure=is_insecure,
+        alias=alias,
         ado_organization=ado_organization,
         ado_project=ado_project,
         ado_repo=ado_repo,
-        alias=alias,
         is_parent_repo_inheritance=is_parent_repo_inheritance,
-        explicit_scheme=explicit_scheme,
     )
 
 
@@ -176,9 +176,7 @@ class TestGitHubDownloaderIsGenericDependencyHost:
         dep = _make_dep_ref(
             host="dev.azure.com",
             repo_url="org/project/repo",
-            ado_organization="org",
-            ado_project="project",
-            ado_repo="repo",
+            ado=("org", "project", "repo"),
         )
         assert dl._is_generic_dependency_host(dep) is False
 

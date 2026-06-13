@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apm_cli.install.services import (
+    IntegrationOptions,
     IntegratorBundle,
     _deployed_path_entry,
     _integrate_local_content,
@@ -214,7 +215,7 @@ class TestIntegratePackagePrimitivesScratchRoot:
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
-                scratch_root=scratch,
+                options=IntegrationOptions(scratch_root=scratch),
             )
 
         assert isinstance(result, dict)
@@ -245,7 +246,7 @@ class TestIntegratePackagePrimitivesScratchRoot:
                 integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
-                scratch_root=scratch,
+                options=IntegrationOptions(scratch_root=scratch),
             )
 
 
@@ -459,12 +460,7 @@ class TestIntegrateLocalContent:
                 tmp_path,
                 targets=[KNOWN_TARGETS["copilot"]],
                 diagnostics=MagicMock(),
-                prompt_integrator=integrators["prompt_integrator"],
-                agent_integrator=integrators["agent_integrator"],
-                skill_integrator=integrators["skill_integrator"],
-                instruction_integrator=integrators["instruction_integrator"],
-                command_integrator=integrators["command_integrator"],
-                hook_integrator=integrators["hook_integrator"],
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
@@ -492,12 +488,7 @@ class TestIntegrateLocalContent:
                 tmp_path,
                 targets=[KNOWN_TARGETS["copilot"]],
                 diagnostics=MagicMock(),
-                prompt_integrator=integrators["prompt_integrator"],
-                agent_integrator=integrators["agent_integrator"],
-                skill_integrator=integrators["skill_integrator"],
-                instruction_integrator=integrators["instruction_integrator"],
-                command_integrator=integrators["command_integrator"],
-                hook_integrator=integrators["hook_integrator"],
+                integrators=_to_bundle(integrators),
                 force=False,
                 managed_files=None,
             )
