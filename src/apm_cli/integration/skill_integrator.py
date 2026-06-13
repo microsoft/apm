@@ -4,13 +4,17 @@ import filecmp
 import hashlib
 import re
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from apm_cli.integration.base_integrator import BaseIntegrator
 
 
-def _build_copy_ignore(*, skip_bin: bool = False):
+def _build_copy_ignore(
+    *,
+    skip_bin: bool = False,
+) -> Callable[[str, list[str]], list[str]]:
     """Build a ``shutil.copytree`` ignore function.
 
     When *skip_bin* is True the returned function also excludes ``bin/``
@@ -23,7 +27,7 @@ def _build_copy_ignore(*, skip_bin: bool = False):
         return ignore_non_content
     _bin_filter = shutil.ignore_patterns("bin")
 
-    def _combined(directory, contents):
+    def _combined(directory: str, contents: list[str]) -> list[str]:
         return list(
             set(ignore_non_content(directory, contents)) | set(_bin_filter(directory, contents))
         )

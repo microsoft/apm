@@ -23,15 +23,20 @@ def _find_manifest() -> Path:
     return manifest
 
 
-def _load_allow_executables(manifest: Path) -> dict[str, dict[str, bool]]:
-    """Load the ``allowExecutables`` block from ``apm.yml``."""
+def _load_allow_executables(manifest: Path) -> dict[str, dict[str, bool]] | None:
+    """Load the ``allowExecutables`` block from ``apm.yml``.
+
+    Returns ``None`` when the project has not declared the block (gate
+    disabled -- backward-compatible) vs ``{}`` when the block is present
+    but empty (gate enabled, deny-all).
+    """
     from ..security.executables import parse_allow_executables
     from ..utils.yaml_io import load_yaml
 
     data = load_yaml(manifest)
     if not isinstance(data, dict):
-        return {}
-    return parse_allow_executables(data) or {}
+        return None
+    return parse_allow_executables(data)
 
 
 @click.command("approve")
@@ -66,8 +71,13 @@ def approve_cmd(packages: tuple[str, ...], pending: bool, approve_all: bool) -> 
     allow_exec = _load_allow_executables(manifest)
 
     if pending:
-        _show_pending(manifest, allow_exec)
+        _show_pending(manifest, allow_exec or {})
         return
+
+    # Approving a package implies opting into the gate; initialise
+    # the block when absent so approvals are persisted correctly.
+    if allow_exec is None:
+        allow_exec = {}
 
     if approve_all:
         _approve_all_pending(manifest, allow_exec)
@@ -92,7 +102,7 @@ def deny_cmd(packages: tuple[str, ...]) -> None:
         apm deny owner/repo
     """
     manifest = _find_manifest()
-    allow_exec = _load_allow_executables(manifest)
+    allow_exec = _load_allow_executables(manifest) or {}
 
     from ..security.executables import write_allow_executables
 

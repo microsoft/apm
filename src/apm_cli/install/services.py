@@ -207,12 +207,21 @@ def _resolve_package_key(package_info: Any, package_name: str) -> str:
     return resolve_package_key(package_info, package_name)
 
 
-def _log_hooks_skip(package_name, package_info, targets, logger) -> None:
-    """Warn about skipped hooks only when the package actually ships them."""
-    # Check whether the package itself ships hook files (.apm/hooks/*.json
-    # or .apm/hooks/*.sh), not whether the target supports hooks.
-    hooks_dir = Path(package_info.install_path) / ".apm" / "hooks"
-    if not hooks_dir.is_dir() or not any(hooks_dir.iterdir()):
+def _log_hooks_skip(
+    package_name: str, package_info: Any, targets: Any, logger: InstallLogger | None
+) -> None:
+    """Warn about skipped hooks only when the package actually ships them.
+
+    Aligned with :meth:`HookIntegrator.find_hook_files`: checks for
+    ``*.json`` in ``.apm/hooks/`` and ``hooks/``.
+    """
+    _install = Path(package_info.install_path)
+    has_hooks = False
+    for hook_dir in [_install / ".apm" / "hooks", _install / "hooks"]:
+        if hook_dir.is_dir() and any(hook_dir.glob("*.json")):
+            has_hooks = True
+            break
+    if not has_hooks:
         return
     _pkg_label = package_name or getattr(package_info, "name", "unknown")
     if logger:

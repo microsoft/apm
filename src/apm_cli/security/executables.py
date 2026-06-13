@@ -1,10 +1,12 @@
-"""Executable primitive approval gate (npm v12-inspired default-deny model).
+"""Executable primitive approval gate (npm v12-inspired opt-in model).
 
 APM packages can declare three kinds of executable primitives -- hooks,
 MCP servers, and bin/ executables -- that run arbitrary code on the
-developer's machine. This module enforces a default-deny policy: none
-of these primitives are deployed unless the consuming project explicitly
-approves them in the ``allowExecutables`` block of its ``apm.yml``.
+developer's machine.  When the consuming project declares an
+``allowExecutables`` block in its ``apm.yml``, this module enforces a
+deny-by-default policy: none of these primitives are deployed unless
+explicitly approved.  Projects that omit the block entirely get
+backward-compatible behaviour (all executables deployed).
 
 The design mirrors npm v12's ``allowScripts`` (shipping July 2026):
 version-pinned per-package approval, interactive prompts at install
@@ -166,7 +168,8 @@ def scan_package_executables(
     """Scan a materialised package directory for executable primitives.
 
     Checks for:
-    - ``.apm/hooks/*.json`` -- hook definitions
+    - ``.apm/hooks/*.json`` and ``hooks/*.json`` -- hook definitions
+      (mirrors :meth:`HookIntegrator.find_hook_files`)
     - ``bin/`` directory -- bin executables
     - MCP is declared in the package's ``apm.yml`` under
       ``dependencies.mcp``, not as files -- so we parse that instead.
@@ -176,13 +179,14 @@ def scan_package_executables(
     """
     key = build_approval_key(package_name, package_version)
 
-    # 1. Hooks: .apm/hooks/ (any file -- .json, .sh, etc.)
-    hook_dir = install_path / ".apm" / "hooks"
+    # 1. Hooks: .apm/hooks/*.json and hooks/*.json (aligned with
+    #    HookIntegrator.find_hook_files -- only JSON files are actionable).
     hook_files: list[Path] = []
-    if hook_dir.is_dir():
-        hook_files = sorted(
-            f for f in hook_dir.iterdir() if f.is_file() and not f.name.startswith(".")
-        )
+    for hook_dir in [install_path / ".apm" / "hooks", install_path / "hooks"]:
+        if hook_dir.is_dir():
+            hook_files.extend(
+                sorted(f for f in hook_dir.glob("*.json") if f.is_file() and not f.is_symlink())
+            )
     hook_details = [f.name for f in hook_files]
 
     # 2. Bin executables: top-level bin/ AND .apm/skills/*/bin/
@@ -312,8 +316,8 @@ def prompt_executable_approval(
             _rich_echo(f"  {decl.package_key} {provenance}: {decl.summary_line()}")
         _rich_echo("")
         _rich_info(
-            "Run 'apm approve <package>' or 'apm install --trust-all' "
-            "to approve, or add entries to allowExecutables in apm.yml.",
+            "Run 'apm approve <package>' to approve, "
+            "or add entries to allowExecutables in apm.yml.",
             symbol="info",
         )
         sys.exit(1)
@@ -389,12 +393,18 @@ def parse_allow_executables(data: dict[str, Any]) -> dict[str, dict[str, bool]] 
             )
         parsed_entry: dict[str, bool] = {}
         for exec_type, value in entry.items():
+            exec_type_str = str(exec_type)
+            if exec_type_str not in ALL_EXEC_TYPES:
+                raise ValueError(
+                    f"allowExecutables[{pkg_key!r}]: unknown exec type "
+                    f"{exec_type_str!r} (valid: {', '.join(ALL_EXEC_TYPES)})"
+                )
             if not isinstance(value, bool):
                 raise ValueError(
-                    f"allowExecutables[{pkg_key!r}][{exec_type!r}] "
+                    f"allowExecutables[{pkg_key!r}][{exec_type_str!r}] "
                     f"must be a boolean, got {type(value).__name__}"
                 )
-            parsed_entry[str(exec_type)] = value
+            parsed_entry[exec_type_str] = value
         result[str(pkg_key)] = parsed_entry
 
     return result
