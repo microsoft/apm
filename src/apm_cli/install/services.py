@@ -66,21 +66,10 @@ def _deployed_path_entry(
     project_root: Path,
     targets: Any,
 ) -> str:
-    """Return the lockfile-safe path string for a deployed file.
+    """Return the lockfile-safe path string for a deployed file."""
 
-    For standard targets the entry is ``project_root``-relative.  For
-    cowork (dynamic-root) targets the entry uses the synthetic
-    ``cowork://`` URI scheme so the lockfile pipeline does not attempt
-    a ``Path.relative_to(project_root)`` that would crash.
-
-    Raises
-    ------
-    RuntimeError
-        If the path is outside the project tree and cannot be
-        translated to a ``cowork://`` URI via any available target.
-    """
-    if targets:
-        for _t in targets:
+    def _try_dynamic_root(tgts) -> str | None:
+        for _t in tgts:
             if _t.resolved_deploy_root is None:
                 continue
             try:
@@ -94,29 +83,45 @@ def _deployed_path_entry(
             from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
 
             return to_lockfile_path(target_path, _t.resolved_deploy_root)
+        return None
+
+    if targets:
+        result = _try_dynamic_root(targets)
+        if result is not None:
+            return result
     try:
         return target_path.relative_to(project_root).as_posix()
     except ValueError:
-        # Path is outside the project tree and no dynamic-root target
-        # contained it. Fall through to the legacy cowork translation
-        # which security-validates against deploy_root and raises
-        # PathTraversalError when out of bounds.
         if targets:
-            for _t in targets:
-                if _t.resolved_deploy_root is None:
-                    continue
-                if _t.name == "copilot-app":
-                    from apm_cli.integration.copilot_app_db import to_lockfile_uri
-
-                    return to_lockfile_uri(target_path.name)
-                from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
-
-                return to_lockfile_path(target_path, _t.resolved_deploy_root)
+            result = _try_dynamic_root(targets)
+            if result is not None:
+                return result
         raise RuntimeError(  # noqa: B904
             f"Cannot translate {target_path!r} to a lockfile path: "
             f"path is outside the project tree and no dynamic-root "
-            f"target matched. This is a bug — please report it."
+            f"target matched. This is a bug -- please report it."
         )
+
+
+def _skill_bundle_file_entries(
+    skill_dir: Path,
+    project_root: Path,
+    targets: Any,
+) -> list[str]:
+    """Expand a deployed skill directory into per-file lockfile entries."""
+    try:
+        if not (skill_dir.is_dir() and not skill_dir.is_symlink()):
+            return []
+    except OSError:
+        return []
+    entries: list[str] = []
+    for bundle_file in sorted(skill_dir.rglob("*")):
+        try:
+            if bundle_file.is_file() and not bundle_file.is_symlink():
+                entries.append(_deployed_path_entry(bundle_file, project_root, targets))
+        except OSError:
+            continue
+    return entries
 
 
 def _log_hook_display_payloads(
@@ -125,11 +130,7 @@ def _log_hook_display_payloads(
     log_fn: Any,
     logger: Any,
 ) -> None:
-    """Emit per-hook-file action summaries for the hook transparency feature.
-
-    Uses post-path-rewrite data from display_payloads, so the output
-    faithfully reflects what was written to disk and will be executed.
-    """
+    """Emit per-hook-file action summaries for hook transparency."""
     for _payload in payloads:
         _src = _payload.get("source_hook_file", "hook file")
         _actions = _payload.get("actions", [])
@@ -198,19 +199,8 @@ def integrate_package_primitives(
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
-    Iterates over *targets* (``TargetProfile`` list) and dispatches each
-    primitive to the appropriate integrator via the target-driven API.
-    Skills are handled separately because ``SkillIntegrator`` already
-    routes across all targets internally.
-
-    When *scope* is ``InstallScope.USER``, targets and primitives that
-    do not support user-scope deployment are silently skipped.
-
-    When *ctx* is provided, the cowork non-skill primitive warning
-    (Amendment 6) is emitted once per install run for packages that
-    contain non-skill primitives when the cowork target is active.
-
-    Returns a dict with integration counters and the list of deployed file paths.
+    Iterates over *targets* and dispatches each primitive to the
+    appropriate integrator. Returns integration counters and deployed paths.
     """
     from apm_cli.integration.dispatch import get_dispatch_table
 
@@ -529,6 +519,13 @@ def integrate_package_primitives(
         )
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
+        # #1716: also record the bundle's contained files so per-file
+        # content hashes cover SKILL.md / assets / scripts. The directory
+        # entry above is retained (cleanup's directory-rejection gate and
+        # the manifest dir-exclusion contract depend on it); the file
+        # entries give ``content-integrity`` its per-file coverage so skill
+        # drift is caught under ``apm audit --ci --no-drift``.
+        deployed.extend(_skill_bundle_file_entries(tp, project_root, targets))
 
     # A3: warm-cache visibility. If nothing was integrated for any kind AND
     # no skill was created, emit one annotation so the user knows the dep

@@ -129,6 +129,16 @@ FLAGS: dict[str, ExperimentalFlag] = {
             "skills at ~/.openclaw/skills/."
         ),
     ),
+    "hermes": ExperimentalFlag(
+        name="hermes",
+        description="Deploy skills, AGENTS.md, and MCP servers to the Hermes agent.",
+        default=False,
+        hint=(
+            "Use '--target hermes' to deploy skills + AGENTS.md to your "
+            "project, or '--target hermes --global' for your personal Hermes "
+            "home at ~/.hermes/ (skills + MCP servers in config.yaml)."
+        ),
+    ),
 }
 
 

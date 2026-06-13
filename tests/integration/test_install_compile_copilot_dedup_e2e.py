@@ -94,13 +94,11 @@ def test_install_then_compile_skips_duplicated_instructions(project_with_instruc
     )
 
     agents_files = sorted(proj.rglob("AGENTS.md"))
-    for agents_md in agents_files:
-        body = agents_md.read_text(encoding="utf-8")
-        assert INSTRUCTION_SENTINEL not in body, (
-            f"AGENTS.md at {agents_md} must NOT carry the duplicated instruction content "
-            "after install populated .github/instructions/. "
-            "Body was:\n" + body
-        )
+    assert not agents_files, (
+        "AGENTS.md must be suppressed entirely when install already populated "
+        f".github/instructions/. Found: {agents_files}"
+    )
+    assert "AGENTS.md not generated" in compile_res.stdout
 
 
 @pytest.mark.integration

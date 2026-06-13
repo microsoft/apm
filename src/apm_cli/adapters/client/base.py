@@ -4,7 +4,7 @@ import os
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from ...utils.console import _rich_error, _rich_warning
 
@@ -27,6 +27,11 @@ _ENV_PLACEHOLDER_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>|" + _ENV_VAR_RE.pattern)
 # Detects the legacy ``<VAR>`` placeholder syntax only. Used to aggregate
 # deprecation warnings across all servers in a single install run.
 _LEGACY_ANGLE_VAR_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>")
+
+
+def registry_field_is_required(field: dict[str, Any]) -> bool:
+    """Return True unless registry metadata explicitly marks a field optional."""
+    return field.get("required", field.get("is_required", True)) is not False
 
 
 def _translate_env_placeholder(value):
@@ -481,7 +486,7 @@ class MCPClientAdapter(ABC):
             name = env_var.get("name", "")
             if not name:
                 continue
-            required = env_var.get("required", True)
+            required = registry_field_is_required(env_var)
 
             value = env_overrides.get(name) or os.getenv(name)
             if not value and required and not skip_prompting:
@@ -797,12 +802,15 @@ class MCPClientAdapter(ABC):
         )
 
         # First pass: identify variables with empty values to warn the user.
-        empty_value_vars = [ev for ev in env_vars if ev.get("required") and not ev.get("value")]
+        empty_value_vars = [
+            ev for ev in env_vars if registry_field_is_required(ev) and not ev.get("value")
+        ]
         if empty_value_vars and skip_prompting:
             var_names = [ev.get("name") for ev in empty_value_vars]
             _rich_warning(
-                f"Warning: The following required environment variables have no default "
-                f"value and cannot be prompted in non-interactive mode: {var_names}"
+                f"Required environment variables have no default value and cannot be "
+                f"prompted in non-interactive mode: {var_names}. Set them in your "
+                "environment and rerun `apm install`."
             )
 
         for env_var in env_vars:
@@ -837,9 +845,9 @@ class MCPClientAdapter(ABC):
 
             # Priority 4: interactive prompt
             default_value = env_var.get("value", "")
-            required = env_var.get("required", False)
+            required = registry_field_is_required(env_var)
 
-            if not skip_prompting:
+            if not skip_prompting and required:
                 from rich.prompt import Prompt
 
                 description = env_var.get("description", "")
@@ -859,11 +867,10 @@ class MCPClientAdapter(ABC):
                 resolved[name] = default_value
             elif required:
                 _rich_warning(
-                    f"Warning: Required environment variable '{name}' could not be resolved. "
-                    f"The MCP server may not function correctly."
+                    f"Required environment variable '{name}' could not be resolved. "
+                    f"The MCP server may not function correctly. Set {name} in your "
+                    "environment and rerun `apm install`."
                 )
                 resolved[name] = ""
-            else:
-                resolved[name] = default_value
 
         return resolved

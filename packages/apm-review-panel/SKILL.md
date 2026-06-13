@@ -58,6 +58,24 @@ surfaces findings; the maintainer and the PR author decide ship.
 - **Single-emission discipline.** Exactly one comment per panel run,
   rendered from `assets/recommendation-template.md` after all subagents
   return.
+- **Non-empty turn exit (the run's hard contract).** gh-aw decides
+  success by inspecting `agent_output` AFTER your turn ends: a turn that
+  ends with zero safe outputs (`agent_output = {"items":[]}`) is detected
+  as a failure, the safe-output detection job is skipped, the
+  `add-comment` job never runs, and the workflow opens a "No Safe Outputs
+  Generated" issue. Therefore your turn MUST end with at least one safe
+  output -- the rendered comment on success (step 7), or an explicit
+  `noop` if the run genuinely cannot produce one. NEVER end the turn
+  empty.
+- **Synchronous fan-out -- never spawn-and-forget.** Every `task` spawn
+  (each panelist AND the CEO synthesizer) is BLOCKING: spawn it, WAIT for
+  its JSON return, then continue. Use the `task` tool's synchronous mode;
+  do NOT use its background/detached mode -- the variant that returns an
+  `agent_id` immediately and runs the subagent in the background -- for
+  any panelist or the CEO. Their returns are LOAD-BEARING: the comment
+  cannot be rendered without them. Spawning the CEO (or a panelist)
+  detached and then ending the turn while it is still running is the
+  documented cause of the empty-output failure above.
 
 ## Agent roster
 
@@ -254,7 +272,11 @@ every mandatory persona always runs. Routing is a CEO synthesis hint.
 ## Execution checklist
 
 Work through these steps in order. Do not skip ahead. Do not emit any
-output to the PR before step 6.
+output to the PR before step 6. Every `task` spawn below is BLOCKING:
+wait for the subagent to return before continuing, and never end your
+turn while a panelist or the CEO synthesizer is still running. The turn
+ends only after the comment (step 7) and label sweep (step 8) -- or, if
+no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
 
 1. **Read PR context** (the orchestrating workflow already fetched it
    via `gh pr view` / `gh pr diff`). Identify changed files for the
@@ -310,7 +332,12 @@ output to the PR before step 6.
 
 5. **Spawn the CEO synthesizer task.** Pass the full set of validated
    panelist JSON returns to a `task` invocation that loads
-   `../../agents/apm-ceo.agent.md`. The prompt MUST:
+   `../../agents/apm-ceo.agent.md`. Run it as a BLOCKING task and WAIT
+   for its JSON return -- do NOT spawn it detached (background mode that
+   returns an `agent_id`) and do NOT end your turn while it runs. Its
+   return is required to render the comment; ending the turn here is the
+   exact cause of the "No Safe Outputs Generated" failure. The prompt
+   MUST:
    - Provide all panelist returns as structured input.
    - Ask for: headline, arbitration prose, principle alignment (only
      applicable principles), curated recommended_followups (prioritized
@@ -379,6 +406,17 @@ output to the PR before step 6.
    sweeping all three on every run is safe and self-healing. NO
    verdict labels are applied.
 
+9. **Guarantee a non-empty exit.** Your final action this turn MUST be a
+   safe output. In the normal path that is the single `add-comment` from
+   step 7 (the `remove-labels` sweep alone does NOT count -- it is not
+   the run's required output). Before ending the turn, confirm step 7
+   actually issued the `add-comment` call and it did not error. If, after
+   every subagent has returned, you genuinely cannot render a comment
+   (e.g. a fatal upstream error), call `noop` so the run records an
+   intentional no-action rather than an empty `agent_output`. Ending the
+   turn with zero safe outputs is a FAILURE, not a success -- see the
+   "Non-empty turn exit" architecture invariant.
+
 ## Output contract (non-negotiable)
 
 - Exactly ONE comment per panel run, rendered from
@@ -440,6 +478,16 @@ output to the PR before step 6.
   each `.agent.md` plus the `safe-outputs.add-comment.max: 2`
   fail-soft. If a subagent ever tries to post a comment, the cap
   catches it.
+- **Empty-safe-output failure (background spawn-and-forget).** The single
+  most common way this panel "succeeds" yet posts nothing is spawning the
+  CEO synthesizer (or a panelist) as a background/detached task and then
+  ending the turn while it is still running. The harness exits with
+  `agent_output = {"items":[]}`, gh-aw skips safe-output detection, the
+  `add-comment` job never runs, and the workflow opens a "No Safe Outputs
+  Generated" issue. Every `task` spawn MUST be awaited to completion, and
+  the turn MUST end with a safe output -- the comment, or an explicit
+  `noop`. See the "Synchronous fan-out" and "Non-empty turn exit"
+  architecture invariants and step 9.
 - **No verdict-label reset workflow.** The previous regime had a
   companion workflow `pr-panel-label-reset.yml` that stripped verdict
   labels on every push. The advisory regime has no verdict labels to

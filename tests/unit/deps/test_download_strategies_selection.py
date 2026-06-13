@@ -24,7 +24,9 @@ from __future__ import annotations
 import base64
 import io
 import json
+import threading
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
@@ -34,6 +36,7 @@ import requests
 
 from apm_cli.deps.download_strategies import DownloadDelegate, _debug
 from apm_cli.models.apm_package import DependencyReference
+from apm_cli.utils.path_security import PathTraversalError
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -68,6 +71,19 @@ def _make_host(
         api_base="https://api.github.com",
     )
     auth.build_error_context.return_value = "Set GITHUB_APM_PAT."
+
+    def _is_generic_dep(dep_ref) -> bool:
+        dep_host = getattr(dep_ref, "host", None)
+        if not dep_host:
+            return False
+        return dep_host != "github.com" and not str(dep_host).endswith(".ghe.com")
+
+    host._resolve_dep_token.side_effect = lambda dep_ref=None: (
+        None if _is_generic_dep(dep_ref) else github_token
+    )
+    host._resolve_dep_auth_ctx.side_effect = lambda dep_ref=None: (
+        None if _is_generic_dep(dep_ref) else ctx
+    )
     host.auth_resolver = auth
     return host
 
@@ -1048,20 +1064,122 @@ class TestDownloadGitlabFile:
             with pytest.raises(RuntimeError, match="Network error"):
                 d.download_gitlab_file(self._dep(), "apm.yml")
 
-    def test_verbose_callback_called_on_success(self) -> None:
+    def test_verbose_callback_called_on_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         host = _make_host()
         self._setup_host_info(host)
         d = DownloadDelegate(host)
         resp = _fake_response(200, b"data")
         host._resilient_get.return_value = resp
         callback = MagicMock()
+        git_error = RuntimeError(
+            "fatal: could not read from https://oauth2:secret@gitlab.example.com/group/repo.git"
+        )
+        monkeypatch.setenv("APM_DEBUG", "1")
 
-        with patch(
-            "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
-            return_value={},
+        with (
+            patch(
+                "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
+                return_value={},
+            ),
+            patch(
+                "apm_cli.deps.download_strategies.GitSparseFileTransport",
+                return_value=MagicMock(fetch_file=MagicMock(side_effect=git_error)),
+            ),
+            patch("builtins.print") as debug_print,
         ):
             d.download_gitlab_file(self._dep(), "apm.yml", verbose_callback=callback)
-        callback.assert_called_once()
+        # The mocked git failure drives the REST fallback path without spawning
+        # subprocess/network work, and raw git stderr must not leak secrets.
+        callback_messages = " ".join(str(c.args[0]) for c in callback.call_args_list)
+        debug_messages = " ".join(str(c.args[0]) for c in debug_print.call_args_list)
+        assert callback.called
+        assert "Downloaded file:" in callback_messages
+        assert "oauth2:secret" not in callback_messages
+        assert "oauth2:secret" not in debug_messages
+
+    def test_path_traversal_from_git_transport_does_not_fallback(self) -> None:
+        """Direct delegate path must propagate traversal rejection without REST."""
+        host = _make_host()
+        self._setup_host_info(host)
+        d = DownloadDelegate(host)
+
+        with (
+            patch(
+                "apm_cli.deps.download_strategies.GitSparseFileTransport",
+                return_value=MagicMock(
+                    fetch_file=MagicMock(side_effect=PathTraversalError("path escapes work tree"))
+                ),
+            ),
+            patch.object(host, "_resilient_get") as mock_api,
+            pytest.raises(PathTraversalError),
+        ):
+            d.download_gitlab_file(self._dep(), "../apm.yml")
+
+        mock_api.assert_not_called()
+
+    def test_ref_injection_from_git_transport_does_not_fallback(self) -> None:
+        """Git refs that look like options must hard-fail without REST fallback."""
+        host = _make_host()
+        self._setup_host_info(host)
+        d = DownloadDelegate(host)
+
+        with patch.object(host, "_resilient_get") as mock_api, pytest.raises(ValueError):
+            d.download_gitlab_file(self._dep(), "agents/spec.agent.md", ref="--upload-pack=x")
+
+        mock_api.assert_not_called()
+
+    def test_same_repo_ref_reuses_git_file_transport(self) -> None:
+        """Two GitLab path: files from one repo/ref share one sparse checkout."""
+        host = _make_host()
+        self._setup_host_info(host)
+        d = DownloadDelegate(host)
+        transport = MagicMock()
+        transport.fetch_file.side_effect = [b"agent", b"prompt"]
+
+        with patch(
+            "apm_cli.deps.download_strategies.GitSparseFileTransport",
+            return_value=transport,
+        ) as transport_cls:
+            first = d.download_gitlab_file(self._dep(), "agents/a.agent.md", ref="main")
+            second = d.download_gitlab_file(self._dep(), "prompts/b.prompt.md", ref="main")
+
+        assert first == b"agent"
+        assert second == b"prompt"
+        transport_cls.assert_called_once()
+        assert [c.args[0] for c in transport.fetch_file.call_args_list] == [
+            "agents/a.agent.md",
+            "prompts/b.prompt.md",
+        ]
+
+    def test_concurrent_same_repo_ref_creates_one_git_file_transport(self) -> None:
+        """Parallel path: files from one repo/ref share one cached checkout safely."""
+        host = _make_host()
+        self._setup_host_info(host)
+        d = DownloadDelegate(host)
+        barrier = threading.Barrier(2)
+
+        class FakeTransport:
+            def fetch_file(self, file_path: str) -> bytes:
+                barrier.wait(timeout=5)
+                return file_path.encode()
+
+            def close(self) -> None:
+                pass
+
+        with patch(
+            "apm_cli.deps.download_strategies.GitSparseFileTransport",
+            return_value=FakeTransport(),
+        ) as transport_cls:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(
+                    pool.map(
+                        lambda path: d.download_gitlab_file(self._dep(), path, ref="main"),
+                        ["agents/a.agent.md", "prompts/b.prompt.md"],
+                    )
+                )
+
+        assert results == [b"agents/a.agent.md", b"prompts/b.prompt.md"]
+        transport_cls.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

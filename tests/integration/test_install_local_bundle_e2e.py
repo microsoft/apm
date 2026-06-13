@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import tarfile
+import zipfile
 from pathlib import Path
 from typing import ClassVar
 from unittest.mock import patch
@@ -25,7 +26,9 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+from apm_cli.bundle.packer import pack_bundle
 from apm_cli.cli import cli
+from apm_cli.deps.lockfile import LockFile
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -97,6 +100,17 @@ def _make_tarball(tmp_path: Path, bundle_dir: Path) -> Path:
     archive = tmp_path / "test-bundle.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(bundle_dir, arcname=bundle_dir.name)
+    return archive
+
+
+def _make_zip(tmp_path: Path, bundle_dir: Path) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    archive = tmp_path / "test-bundle.zip"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for fp in sorted(bundle_dir.rglob("*")):
+            if fp.is_symlink() or not fp.is_file():
+                continue
+            zf.write(fp, arcname=f"{bundle_dir.name}/{fp.relative_to(bundle_dir).as_posix()}")
     return archive
 
 
@@ -211,6 +225,61 @@ class TestInstallLocalBundleE2E:
         assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
         assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
         assert (project / ".github" / "agents" / "reviewer.md").is_file()
+
+    def test_install_local_bundle_from_zip(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Install a plugin bundle from .zip -> files deployed without network."""
+        bundle = _make_plugin_bundle(tmp_path / "src")
+        archive = _make_zip(tmp_path / "archives", bundle)
+        project = _make_project(tmp_path / "dst")
+
+        with (
+            patch("subprocess.run", side_effect=_network_sentinel_subprocess_run),
+            patch("subprocess.Popen", side_effect=_network_sentinel_subprocess_popen),
+        ):
+            result = _invoke_install(
+                project, str(archive), "--target", "copilot", monkeypatch=monkeypatch
+            )
+
+        assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
+        assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
+        assert (project / ".github" / "agents" / "reviewer.md").is_file()
+        assert (project / ".github" / "instructions" / "style.md").is_file()
+
+    def test_install_local_bundle_from_pack_tar_gz(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pack tar.gz escape hatch -> local install deploys files without network."""
+        source = tmp_path / "source-project"
+        source.mkdir()
+        (source / "apm.yml").write_text(
+            yaml.dump({"name": "packed-plugin", "version": "1.0.0"}),
+            encoding="utf-8",
+        )
+        LockFile().write(source / "apm.lock.yaml")
+        skill_path = source / ".apm" / "skills" / "coding" / "SKILL.md"
+        skill_path.parent.mkdir(parents=True)
+        skill_path.write_text("# Coding Skill\n", encoding="utf-8")
+        archive = pack_bundle(
+            source,
+            tmp_path / "archives",
+            fmt="plugin",
+            archive=True,
+            archive_format="tar.gz",
+        ).bundle_path
+        project = _make_project(tmp_path / "dst")
+
+        with (
+            patch("subprocess.run", side_effect=_network_sentinel_subprocess_run),
+            patch("subprocess.Popen", side_effect=_network_sentinel_subprocess_popen),
+        ):
+            result = _invoke_install(
+                project, str(archive), "--target", "copilot", monkeypatch=monkeypatch
+            )
+
+        assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
+        assert (project / ".agents" / "skills" / "coding" / "SKILL.md").is_file()
 
     def test_install_local_bundle_multi_target(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

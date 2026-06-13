@@ -18,6 +18,13 @@
 #   $env:VERSION = 'v1.2.3'
 #   irm https://.../install.ps1 | iex
 #
+# Enterprise bootstrap mirror:
+#   $env:APM_RELEASE_BASE_URL = 'https://mirror.example/apm-releases'
+#   $env:APM_RELEASE_METADATA_URL = 'https://mirror.example/apm-releases/latest.json'
+#   $env:APM_INSTALLER_BASE_URL = 'https://mirror.example/apm-install'
+#   $env:APM_PYPI_INDEX_URL = 'https://mirror.example/pypi/simple'
+#   $env:APM_NO_DIRECT_FALLBACK = '1'
+#
 # Private repositories: set GITHUB_APM_PAT or GITHUB_TOKEN
 #
 # Pinned installs require a .sha256 sidecar unless you opt out:
@@ -54,6 +61,12 @@ if ($apmRepo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
     Write-Host "APM_REPO must be owner/name (letters, digits, ._- only)." -ForegroundColor Red
     exit 1
 }
+
+$releaseBaseUrl = if ($env:APM_RELEASE_BASE_URL) { $env:APM_RELEASE_BASE_URL.Trim().Trim('"').TrimEnd('/') } else { $null }
+$releaseMetadataUrl = if ($env:APM_RELEASE_METADATA_URL) { $env:APM_RELEASE_METADATA_URL.Trim().Trim('"').TrimEnd('/') } else { $null }
+$installerBaseUrl = if ($env:APM_INSTALLER_BASE_URL) { $env:APM_INSTALLER_BASE_URL.Trim().Trim('"').TrimEnd('/') } else { $null }
+$pypiIndexUrl = if ($env:APM_PYPI_INDEX_URL) { $env:APM_PYPI_INDEX_URL.Trim().Trim('"').TrimEnd('/') } else { $null }
+$noDirectFallback = $env:APM_NO_DIRECT_FALLBACK -match '^(?i:1|true|yes|on)$'
 
 $pinnedVersion = $null
 if ($env:VERSION) {
@@ -99,6 +112,53 @@ function Get-GitHubApiRoot {
         return "https://api.github.com"
     }
     return "$u/api/v3"
+}
+
+function Join-UrlPath {
+    param(
+        [string]$BaseUrl,
+        [string[]]$Parts
+    )
+    $result = $BaseUrl.TrimEnd('/')
+    foreach ($part in $Parts) {
+        if ($part) {
+            $result = "$result/$($part.Trim('/'))"
+        }
+    }
+    return $result
+}
+
+function Redact-UrlCredentials {
+    param([string]$Url)
+    if (-not $Url) {
+        return $Url
+    }
+    return ($Url -replace '([A-Za-z][A-Za-z0-9+.\-]*://)[^/@\s]+@', '$1***@')
+}
+
+function Get-ReleaseMetadataUri {
+    if ($releaseMetadataUrl) {
+        return $releaseMetadataUrl
+    }
+    return "$apiRoot/repos/$apmRepo/releases/latest"
+}
+
+function Get-ReleaseAssetUri {
+    param(
+        [string]$TagName,
+        [string]$AssetName
+    )
+    if ($releaseBaseUrl) {
+        return Join-UrlPath -BaseUrl $releaseBaseUrl -Parts @($TagName, $AssetName)
+    }
+    return "$githubUrl/$apmRepo/releases/download/$TagName/$AssetName"
+}
+
+function Get-PipIndexArgs {
+    if ($pypiIndexUrl) {
+        return @("--index-url", $pypiIndexUrl)
+    }
+    return @()
 }
 
 function Write-Info {
@@ -198,13 +258,19 @@ function Install-ViaPip {
     if (-not $pipCmd) {
         $pipCmd = "$pythonCmd -m pip"
     }
+    if ($noDirectFallback -and -not $pypiIndexUrl) {
+        Write-ErrorText "APM_NO_DIRECT_FALLBACK is set, but APM_PYPI_INDEX_URL is not configured."
+        Write-Host "Set APM_PYPI_INDEX_URL to your internal PyPI proxy before using pip fallback."
+        return $false
+    }
+    $pipIndexArgs = Get-PipIndexArgs
     try {
         if ($pipCmd -like "* -m pip") {
-            $output = & $pythonCmd -m pip install --user apm-cli 2>&1
+            $output = & $pythonCmd -m pip install --user @pipIndexArgs apm-cli 2>&1
             $pipExitCode = $LASTEXITCODE
             $output | Write-Host
         } else {
-            $output = & $pipCmd install --user apm-cli 2>&1
+            $output = & $pipCmd install --user @pipIndexArgs apm-cli 2>&1
             $pipExitCode = $LASTEXITCODE
             $output | Write-Host
         }
@@ -235,7 +301,13 @@ function Write-ManualInstallHelp {
     )
     Write-Host ""
     Write-Info "Manual installation options:"
-    Write-Host "  1. pip (recommended): pip install --user apm-cli"
+    if ($pypiIndexUrl) {
+        Write-Host "  1. pip (recommended): pip install --user --index-url $pypiIndexUrl apm-cli"
+    } elseif ($noDirectFallback) {
+        Write-Host "  1. pip (recommended): set APM_PYPI_INDEX_URL, then run pip install --user --index-url <mirror> apm-cli"
+    } else {
+        Write-Host "  1. pip (recommended): pip install --user apm-cli"
+    }
     Write-Host "  2. From source:"
     Write-Host "     git clone $GithubUrl/${ApmRepo}.git"
     Write-Host "     cd apm && uv sync && uv run pip install -e ."
@@ -401,10 +473,27 @@ if ($pinnedVersion) {
     Write-Success "Version: $tagName (pinned - skipping releases/latest API)"
 } else {
     Write-Info "Fetching latest release information..."
-    $latestUri = "$apiRoot/repos/$apmRepo/releases/latest"
+    if ($noDirectFallback -and -not $releaseMetadataUrl -and $githubUrl -match '(?i)^https://github\.com$') {
+        Write-ErrorText "APM_NO_DIRECT_FALLBACK is set, but APM_RELEASE_METADATA_URL is not configured."
+        Write-Host "Set APM_RELEASE_METADATA_URL to mirrored latest.json, or set VERSION to a pinned release."
+        exit 1
+    }
+    $latestUri = Get-ReleaseMetadataUri
+    # Mirror metadata URLs must never receive GitHub/GHES credentials.
+    $headers = if ($releaseMetadataUrl) { @{} } else { Get-AuthHeader }
+    $metadataError = $null
     try {
-        $release = Invoke-RestMethod -Uri $latestUri
+        $release = Invoke-GitHubJson -Uri $latestUri -Headers $headers
     } catch {
+        $metadataError = $_
+    }
+
+    if ($releaseMetadataUrl -and (-not $release -or -not $release.tag_name)) {
+        Write-ErrorText "Failed to fetch release metadata from APM_RELEASE_METADATA_URL."
+        Write-Host "Mirror URL: $(Redact-UrlCredentials -Url $releaseMetadataUrl)"
+        if ($metadataError) { Write-Host "Details: $(Redact-UrlCredentials -Url $metadataError)" }
+        Write-Host "Publish a GitHub-compatible latest.json document with a tag_name field."
+        exit 1
     }
 
     if (-not $release -or -not $release.tag_name) {
@@ -432,11 +521,13 @@ if ($pinnedVersion) {
     }
 
     $tagName = $release.tag_name
-    $asset = $release.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
-    if (-not $asset) {
-        Write-ErrorText "Release $tagName does not contain $assetName."
-        Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
-        exit 1
+    if (-not $releaseBaseUrl) {
+        $asset = $release.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+        if (-not $asset) {
+            Write-ErrorText "Release $tagName does not contain $assetName."
+            Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
+            exit 1
+        }
     }
     Write-Success "Latest version: $tagName"
 }
@@ -457,7 +548,12 @@ try {
     Write-Info "Downloading $assetName ($tagName)..."
 
     $downloadOk = $false
-    $directUrl = "$githubUrl/$apmRepo/releases/download/$tagName/$assetName"
+    if ($noDirectFallback -and -not $releaseBaseUrl -and $githubUrl -match '(?i)^https://github\.com$') {
+        Write-ErrorText "APM_NO_DIRECT_FALLBACK is set, but APM_RELEASE_BASE_URL is not configured."
+        Write-Host "Set APM_RELEASE_BASE_URL to a mirror containing $tagName/$assetName."
+        exit 1
+    }
+    $directUrl = Get-ReleaseAssetUri -TagName $tagName -AssetName $assetName
 
     if ($pinnedVersion) {
         $pinDownloadErr = $null
@@ -490,14 +586,15 @@ try {
         }
     } else {
         try {
-            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
+            $initialAssetUri = if ($releaseBaseUrl) { $directUrl } else { $asset.browser_download_url }
+            Invoke-WebRequest -Uri $initialAssetUri -OutFile $zipPath -UseBasicParsing
             $downloadOk = $true
             Write-Success "Download successful"
         } catch {
             Write-WarningText "Unauthenticated download failed, retrying with authentication..."
         }
 
-        if (-not $downloadOk) {
+        if (-not $downloadOk -and -not $releaseBaseUrl) {
             if ($headers.Count -eq 0) { $headers = Get-AuthHeader }
             if ($headers.Count -gt 0 -and $asset.url) {
                 try {
@@ -512,7 +609,10 @@ try {
             }
         }
 
-        if (-not $downloadOk) {
+        # Final auth fallback only for canonical GitHub / GHES hosts. In mirror mode
+        # ($releaseBaseUrl set) the GitHub token must never be sent to the operator
+        # mirror host, so skip auth and fail closed via the mirror error below.
+        if (-not $downloadOk -and -not $releaseBaseUrl) {
             if ($headers.Count -eq 0) { $headers = Get-AuthHeader }
             if ($headers.Count -gt 0) {
                 try {
@@ -525,9 +625,16 @@ try {
         }
     }
 
+    if (-not $downloadOk -and $releaseBaseUrl) {
+        Write-ErrorText "Failed to download APM CLI from APM_RELEASE_BASE_URL mirror."
+        Write-Host "Mirror URL was: $(Redact-UrlCredentials -Url $directUrl)"
+        Write-Host "Check that the mirror is reachable and contains $tagName/$assetName."
+        exit 1
+    }
+
     if (-not $downloadOk) {
         Write-ErrorText "All download attempts failed."
-        Write-Host "Direct URL was: $directUrl"
+        Write-Host "Direct URL was: $(Redact-UrlCredentials -Url $directUrl)"
         Write-Host "This might mean:"
         Write-Host "  - Network connectivity issues"
         Write-Host "  - Invalid GitHub token or insufficient permissions"
@@ -545,10 +652,10 @@ try {
     # ------------------------------------------------------------------
 
     $sha256AssetName = "$assetName.sha256"
-    $sha256Url = "$githubUrl/$apmRepo/releases/download/$tagName/$sha256AssetName"
+    $sha256Url = Get-ReleaseAssetUri -TagName $tagName -AssetName $sha256AssetName
 
     $sha256Source = $null
-    if (-not $pinnedVersion) {
+    if (-not $pinnedVersion -and -not $releaseBaseUrl) {
         $shaObj = $release.assets | Where-Object { $_.name -eq $sha256AssetName } | Select-Object -First 1
         if ($shaObj) { $sha256Source = $shaObj }
     }
@@ -586,8 +693,10 @@ try {
                     Invoke-WebRequest -Uri $sha256Url -OutFile $sha256Path -UseBasicParsing
                     $fetched = $true
                 } catch {
+                    # Mirror checksum URLs ($releaseBaseUrl set) stay unauthenticated:
+                    # never send the GitHub token to the operator mirror host.
                     if ($headers.Count -eq 0) { $headers = Get-AuthHeader }
-                    if ($headers.Count -gt 0) {
+                    if ($headers.Count -gt 0 -and -not $releaseBaseUrl) {
                         Invoke-WebRequest -Uri $sha256Url -Headers $headers -OutFile $sha256Path -UseBasicParsing
                         $fetched = $true
                     } else {

@@ -1,14 +1,22 @@
 """Bundle unpacker  -- extracts and verifies APM bundles."""
 
 import shutil
-import sys
-import tarfile
 import tempfile
+import zipfile
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 from ..deps.lockfile import LEGACY_LOCKFILE_NAME, LOCKFILE_NAME, LockFile
-from ..utils.path_security import PathTraversalError, validate_path_segments
+from ..utils.archive import (
+    MAX_ZIP_ENTRIES,
+    MAX_ZIP_UNCOMPRESSED,
+    ArchiveError,
+    _extract_tar_gz_file,
+    safe_extract_zip,
+)
+
+_MAX_ZIP_ENTRIES = MAX_ZIP_ENTRIES
+_MAX_ZIP_UNCOMPRESSED = MAX_ZIP_UNCOMPRESSED
 
 
 @dataclass
@@ -41,7 +49,7 @@ def unpack_bundle(
     file has the same name as a bundle file, the bundle file wins (overwrite).
 
     Args:
-        bundle_path: Path to a ``.tar.gz`` archive or an unpacked bundle directory.
+        bundle_path: Path to a ``.zip`` (or legacy ``.tar.gz``) archive, or an unpacked bundle directory.
         output_dir: Target project directory to copy files into.
         skip_verify: If *True*, skip completeness verification against the lockfile.
         dry_run: If *True*, resolve the file list but write nothing to disk.
@@ -61,35 +69,44 @@ def unpack_bundle(
     """
     # 1. If archive, extract to temp dir
     cleanup_temp = False
-    if bundle_path.is_file() and bundle_path.name.endswith(".tar.gz"):
+    if bundle_path.is_file() and bundle_path.name.endswith(".zip"):
         from ..config import get_apm_temp_dir
 
         temp_dir = Path(tempfile.mkdtemp(prefix="apm-unpack-", dir=get_apm_temp_dir()))
         cleanup_temp = True
         try:
-            with tarfile.open(bundle_path, "r:gz") as tar:
-                # Security: prevent path traversal and special entries
-                for member in tar.getmembers():
-                    name = member.name
-                    if (
-                        name.startswith("/")
-                        or PureWindowsPath(name).drive
-                        or PureWindowsPath(name).is_absolute()
-                    ):
-                        raise ValueError(f"Refusing to extract path-traversal entry: {name}")
-                    try:
-                        validate_path_segments(name, context="tar member")
-                    except PathTraversalError:
-                        raise ValueError(
-                            f"Refusing to extract path-traversal entry: {name}"
-                        ) from None
-                    if member.issym() or member.islnk():
-                        raise ValueError(f"Refusing to extract symlink/hardlink: {name}")
-                # filter="data" was added in Python 3.12; use it when available
-                if sys.version_info >= (3, 12):
-                    tar.extractall(temp_dir, filter="data")
-                else:
-                    tar.extractall(temp_dir)  # noqa: S202
+            with zipfile.ZipFile(bundle_path, "r") as zf:
+                safe_extract_zip(
+                    zf,
+                    temp_dir,
+                    max_entries=_MAX_ZIP_ENTRIES,
+                    max_uncompressed=_MAX_ZIP_UNCOMPRESSED,
+                    error_type=ValueError,
+                )
+        except Exception:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
+
+        # Locate inner directory (the archive wraps a single top-level dir)
+        children = list(temp_dir.iterdir())
+        if len(children) == 1 and children[0].is_dir():  # noqa: SIM108
+            source_dir = children[0]
+        else:
+            source_dir = temp_dir
+    elif bundle_path.is_file() and bundle_path.name.endswith(".tar.gz"):
+        # Legacy .tar.gz support (backward compat)
+        from ..config import get_apm_temp_dir
+
+        temp_dir = Path(tempfile.mkdtemp(prefix="apm-unpack-", dir=get_apm_temp_dir()))
+        cleanup_temp = True
+        try:
+            _extract_tar_gz_file(bundle_path, str(temp_dir))
+        except ArchiveError as exc:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            msg = str(exc)
+            if "path" in msg or "Symlinks" in msg or "links" in msg:
+                raise ValueError(f"Refusing to extract path-traversal entry: {msg}") from exc
+            raise ValueError(msg) from exc
         except Exception:
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise

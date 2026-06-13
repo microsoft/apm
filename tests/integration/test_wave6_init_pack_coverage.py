@@ -494,7 +494,7 @@ class TestPackBasic:
         assert result.exit_code == 0, result.output
 
     def test_pack_archive(self, runner, tmp_path, monkeypatch):
-        """--archive flag produces a .tar.gz artifact."""
+        """--archive flag produces a .zip artifact."""
         monkeypatch.chdir(tmp_path)
         clear_apm_yml_cache()
         _make_skill_project(tmp_path)

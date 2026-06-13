@@ -25,52 +25,25 @@ from ...utils.path_security import (
     validate_path_segments,
 )
 from ..validation import InvalidVirtualPackageExtensionError
+from .identity import (
+    _NON_ADO_PATH_SEGMENT_RE,
+    InvalidSemverRangeError,
+    _is_valid_registry_semver_range,
+    _looks_like_invalid_semver_range,
+    _path_segment_pattern,
+    build_canonical_dependency_string,
+    build_dependency_unique_key,
+)
 from .types import VirtualPackageType
 
+# Identity/semver helpers re-exported from .identity for back-compat imports.
 # Default ports per URI scheme -- used to normalise away redundant
 # explicit ports (e.g. https://host:443/...) so that lockfile keys
 # and error messages stay consistent regardless of how the user
 # spelled the URL.
 _DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
 
-# Allowed character set for a single repository path segment.
-#
-# ADO accepts spaces (project / repo names can contain them) but NOT tilde --
-# tilde has no meaning on Azure DevOps URLs and keeping it out preserves the
-# asymmetry that protects the ADO surface from inadvertent regressions.
-#
-# Non-ADO hosts accept tilde because Bitbucket Data Center / Server (and
-# Sourcehut) use ``~username`` path segments for personal repositories
-# (e.g. ``/scm/~jdoe/repo.git``). ``~`` is RFC 3986 unreserved, has no
-# POSIX path-traversal meaning, and all subprocess calls in APM use
-# list-form ``argv`` so there is no shell-expansion vector.
-_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._\- ]+$"
-_NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
 _REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
-
-
-def _path_segment_pattern(is_ado_host: bool) -> str:
-    """Return the allowed-character regex for a single repo path segment."""
-    return _ADO_PATH_SEGMENT_RE if is_ado_host else _NON_ADO_PATH_SEGMENT_RE
-
-
-def _is_valid_registry_semver_range(spec: str) -> bool:
-    """Defer importing ``deps.registry`` until call time (avoids import cycles)."""
-    from ...deps.registry.semver import is_semver_range
-
-    return is_semver_range(spec)
-
-
-_RANGE_PREFIX_RE = re.compile(r"^(>=|<=|>|<|\^|~|=)")
-
-
-class InvalidSemverRangeError(ValueError):
-    """Raised when a ref starts like a semver range but is invalid."""
-
-
-def _looks_like_invalid_semver_range(spec: str) -> bool:
-    """Return whether *spec* starts like a semver range but is invalid."""
-    return bool(_RANGE_PREFIX_RE.match(spec.strip()))
 
 
 @dataclass
@@ -79,6 +52,7 @@ class DependencyReference:
 
     repo_url: str  # e.g., "user/repo" for GitHub or "org/project/repo" for Azure DevOps
     host: str | None = None  # Optional host (github.com, dev.azure.com, or enterprise host)
+    host_type: str | None = None  # Explicit host kind override (currently: "gitlab")
     port: int | None = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
     explicit_scheme: str | None = (
         None  # User-stated transport: "ssh", "https", "http", or None for shorthand
@@ -198,6 +172,22 @@ class DependencyReference:
     # First path segment after host that often starts in-repo virtual layout (GitLab heuristic).
     _GITLAB_VIRTUAL_ROOT_SEGMENTS = frozenset({"prompts", "instructions", "collections"})
 
+    # Known APM primitive directory names. Used to detect a subpath accidentally
+    # embedded inside an explicit git URL form (SCP/ssh://https://), which git
+    # would later reject with a cryptic "not a valid repository name" error.
+    _APM_PRIMITIVE_DIRS: frozenset[str] = frozenset(
+        {
+            "skills",
+            "agents",
+            "prompts",
+            "instructions",
+            "chatmodes",
+            "collections",
+            "contexts",
+            "memory",
+        }
+    )
+
     def is_artifactory(self) -> bool:
         """Check if this reference points to a JFrog Artifactory VCS repository."""
         return self.artifactory_prefix is not None
@@ -301,11 +291,15 @@ class DependencyReference:
         Returns:
             str: Unique key for this dependency
         """
-        if self.is_local and self.local_path:
-            return self.local_path
-        if self.is_virtual and self.virtual_path:
-            return f"{self.repo_url}/{self.virtual_path}"
-        return self.repo_url
+        return build_dependency_unique_key(
+            self.repo_url,
+            host=self.host,
+            source="local" if self.is_local else self.source,
+            local_path=self.local_path,
+            is_virtual=self.is_virtual,
+            virtual_path=self.virtual_path,
+            registry_prefix=self.artifactory_prefix,
+        )
 
     def to_canonical(self) -> str:
         """Return the canonical scheme-free identity string for this dependency.
@@ -401,11 +395,18 @@ class DependencyReference:
 
         For identity-based matching that includes non-default hosts, use get_identity().
         For the transport-aware apm.yml entry, use to_apm_yml_entry().
+        For the lockfile dedup key (host-qualified for non-default hosts), use get_unique_key().
 
         Returns:
             str: Host-blind canonical string (e.g., "owner/repo")
         """
-        return self.get_unique_key()
+        return build_canonical_dependency_string(
+            self.repo_url,
+            is_local=self.is_local,
+            local_path=self.local_path,
+            is_virtual=self.is_virtual,
+            virtual_path=self.virtual_path,
+        )
 
     def get_install_path(self, apm_modules_dir: Path) -> Path:
         """Get the canonical filesystem path where this package should be installed.
@@ -630,6 +631,83 @@ class DependencyReference:
         validate_path_segments(normalized, context="path")
         return normalized
 
+    @staticmethod
+    def _check_no_embedded_subpath(url: str) -> None:
+        """Guard: reject a subpath embedded in an explicit git URL form (#872).
+
+        Detects when a user writes, e.g.:
+            git: git@github.com:org/repo/skills/hello-world.git
+
+        Such URLs cause git to fail later with a cryptic
+        ``fatal: '...' does not appear to be a git repository`` message.
+        This guard fires early and points at the supported ``path:`` key.
+
+        The heuristic: for SCP (``git@host:path``), ``ssh://``, or
+        ``https://``/``http://`` URL forms, if any non-last path segment
+        matches a known APM primitive directory name (skills, agents, prompts,
+        etc.), the URL encodes a subpath that belongs in the ``path:`` key.
+
+        GitLab subgroups and Azure DevOps org/project paths do not use APM
+        primitive names (skills, agents, prompts, ...) as segment labels, so
+        the check produces no false positives for those legitimate forms.
+
+        Scoping (issue #1014 follow-up): the embedded-subpath shape is
+        ``org/repo`` followed by ``<primitive>/<name>``, so a primitive
+        segment is only treated as an embedded subpath when it is preceded
+        by a complete ``org/repo`` prefix (segment index >= 2). This avoids
+        a false positive for a GitLab subgroup literally named after a
+        primitive, e.g. ``git@gitlab.com:group/skills/repo.git`` (here
+        ``skills`` is a subgroup at index 1 and ``repo`` is the real
+        repository). A residual ambiguity remains for deep subgroups that
+        embed a primitive name at index >= 2 (e.g.
+        ``group/sub/skills/repo``); that shape is genuinely undecidable
+        without probing the host, so it is still treated as malformed.
+        """
+        raw = url.strip()
+
+        if SCP_LIKE_RE.match(raw):
+            colon_idx = raw.index(":")
+            path_part = raw[colon_idx + 1 :]
+        elif raw.lower().startswith(("ssh://", "https://", "http://")):
+            path_part = urllib.parse.urlparse(raw).path
+        else:
+            return  # bare shorthand or other form -- not in scope
+
+        # Strip fragment and query string, then remove trailing .git suffix
+        path_part = path_part.split("#")[0].split("?")[0]
+        if path_part.endswith(".git"):
+            path_part = path_part[:-4]
+
+        segments = [s for s in path_part.replace("\\", "/").split("/") if s]
+        if len(segments) < 3:
+            return  # too few segments to contain an interior primitive name
+
+        # Azure DevOps repo URLs carry the repository under a `_git` segment
+        # and legitimately encode a virtual path after it (e.g.
+        # dev.azure.com/org/proj/_git/repo/instructions/x). That is the
+        # supported ADO shorthand, not an embedded subpath, so skip the guard
+        # for any URL containing the ADO-specific `_git` marker (no GitHub or
+        # GitLab repo path uses `_git`, so real detection is unaffected).
+        if "_git" in segments:
+            return
+
+        # An embedded subpath is `org/repo` + `<primitive>/<name>`, so the
+        # primitive directory must be preceded by a complete org/repo prefix
+        # (index >= 2). Restricting to index >= 2 keeps the real malformed-URL
+        # detection (org/repo/skills/<name>) while not false-positiving on a
+        # subgroup literally named after a primitive at index 1
+        # (group/skills/repo, where `repo` is the actual repository).
+        for idx, seg in enumerate(segments[:-1]):
+            if idx >= 2 and seg in DependencyReference._APM_PRIMITIVE_DIRS:
+                raise ValueError(
+                    "A subpath cannot be embedded in a git URL. "
+                    f"Got: `{raw}`. "
+                    "Use the `path:` key instead: "
+                    "`git: <repo-url>` + `path: <primitive>/<name>` "
+                    "(or the shorthand `org/repo/<primitive>/<name>`). "
+                    "See https://microsoft.github.io/apm/consumer/manage-dependencies/"
+                )
+
     @classmethod
     def parse_from_dict(cls, entry: dict) -> "DependencyReference":
         """Parse an object-style dependency entry from apm.yml.
@@ -747,9 +825,12 @@ class DependencyReference:
         git_url = entry["git"]
         if not isinstance(git_url, str) or not git_url.strip():
             raise ValueError("'git' field must be a non-empty string")
+        host_type = cls._parse_host_type(entry.get("type"))
 
         # Monorepo parent inheritance (literal ``git: parent`` only; resolver expands)
         if git_url == "parent":
+            if host_type is not None:
+                raise ValueError("'type' is only supported for remote git dependencies")
             path_raw = entry.get("path")
             if path_raw is None:
                 raise ValueError(
@@ -807,6 +888,7 @@ class DependencyReference:
 
         # Parse the git URL using the standard parser
         dep = cls.parse(git_url)
+        dep.host_type = host_type
         dep.allow_insecure = allow_insecure
         # Object-form ``- git:`` is an explicit Git resolver pin, even when
         # a top-level ``registries.default`` is set. Mark source so the
@@ -858,6 +940,27 @@ class DependencyReference:
             dep.skill_subset = sorted(validated)
 
         return dep
+
+    @staticmethod
+    def _parse_host_type(raw: object) -> str | None:
+        """Parse the optional object-form ``type`` host-kind hint.
+
+        Currently only ``gitlab`` is accepted; any other value fails closed with
+        a ``ValueError``. This is a deliberate gate, not an oversight: future
+        host kinds (e.g. ``gitea``, ``bitbucket``) would extend the accepted set
+        here and thread a matching branch through ``AuthResolver.classify_host``
+        and ``host_backends.backend_for``. Until those backends exist, rejecting
+        unknown hints keeps classification explicit rather than silently
+        mis-routing a bespoke host to the GitHub path.
+        """
+        if raw is None:
+            return None
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError("'type' field must be a non-empty string")
+        value = raw.strip().lower()
+        if value != "gitlab":
+            raise ValueError(f"'type' field only supports 'gitlab'; got {raw!r}")
+        return value
 
     @classmethod
     def virtual_suffix_is_installable_shape(cls, virtual_path: str) -> bool:
@@ -1829,6 +1932,11 @@ class DependencyReference:
         cls._reject_shorthand_alias(dependency_str)
 
         maybe_raise_bare_fqdn_github_gitlab_conflict(dependency_str)
+
+        # Guard: detect a subpath embedded in an explicit git URL form (#872).
+        # Fires before virtual-package detection so the user gets an actionable
+        # error rather than a cryptic downstream git failure.
+        cls._check_no_embedded_subpath(dependency_str)
 
         # Phase 1: detect virtual packages
         is_virtual_package, virtual_path, validated_host = cls._detect_virtual_package(

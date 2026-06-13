@@ -48,14 +48,14 @@ lockfile_version: "1"
 dependencies:
   - repo_url: owner/repo
     host: github.com
-    resolved_commit: a1b2c3d4e5f6...
+    resolved_commit: a1b2c3d4e5f6a7b8c9d0e1f234567890abcdef12
     resolved_ref: main
     depth: 1
     deployed_files:
       - .github/skills/example/skill.md
 ```
 
-The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated.
+The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated. For manifest entries that are themselves pinned to a full SHA, `apm update` resolves only annotated semver tags from the authoritative upstream; branches and lightweight tags are not accepted for this revision-pin update path. See [`apm update`](../reference/cli/update/) for the rewrite mechanics.
 
 ### Registry security model
 
@@ -189,7 +189,7 @@ APM computes a SHA-256 hash of each downloaded package's file tree and stores it
 # apm.lock.yaml
 dependencies:
   - repo_url: https://github.com/acme-corp/security-baseline
-    resolved_commit: a1b2c3d4e5f6...
+    resolved_commit: a1b2c3d4e5f6a7b8c9d0e1f234567890abcdef12
     content_hash: "sha256:9f86d081884c7d659a2feaa0c55ad015..."
 ```
 
@@ -208,14 +208,14 @@ APM deploys files only to controlled subdirectories within the project root.
 All deploy paths are validated before any file operation:
 
 1. **No `..` segments.** Any path containing `..` is rejected outright.
-2. **Allowed prefixes only.** Paths must start with an allowed target-integrator prefix (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`, `.agents/`). In addition, the local-bundle install path stages instructions for compile-only targets under `apm_modules/<slug>/.apm/instructions/` with its own containment check (the resolved path must remain within `apm_modules/`) and `<slug>` validation rejecting traversal sequences and characters outside `[A-Za-z0-9._-]`.
+2. **Allowed prefixes only.** Paths must start with an allowed target-integrator prefix (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`, `.agents/`). In addition, the local-bundle install path stages instructions for compile-only targets under `apm_modules/<slug>/.apm/instructions/` with its own containment check (the resolved path must remain within `apm_modules/`) and `<slug>` validation rejecting traversal sequences and characters outside `[A-Za-z0-9._-]`.
 3. **Resolution containment.** The fully resolved path must remain within the project root directory.
 
 A path must pass all three checks. Failure on any check prevents the file from being written.
 
 ### Local bundle install trust model
 
-`apm install <bundle>` accepts a directory or `.tar.gz` produced by `apm pack`. Bundles are imperative (no policy / dependency-resolver / network) and target-agnostic; the consumer's project drives where files land. Trust boundaries:
+`apm install <bundle>` accepts a directory or `.zip` (or legacy `.tar.gz`) produced by `apm pack`. Bundles are imperative (no policy / dependency-resolver / network) and target-agnostic; the consumer's project drives where files land. Trust boundaries:
 
 1. **`bundle_files` keys are untrusted.** They come from the bundle's own `apm.lock.yaml` and are validated for traversal sequences before any filesystem path is constructed; resolved destinations must remain within the deploy root. Unsafe entries are skipped with a warning.
 2. **`plugin.json` is bundle metadata, never deployed.** It is recognized case-insensitively and skipped in both the manifest-driven deploy loop and the lockfile-less fallback walk so case-folding filesystems (HFS+, NTFS) cannot smuggle a renamed file past the skip.

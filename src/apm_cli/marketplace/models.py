@@ -48,6 +48,28 @@ def _extract_host_from_url(url: str) -> str:
     return parsed.hostname or ""
 
 
+def url_names_remote_manifest(url: str) -> bool:
+    """Return True when *url* is a direct hosted ``marketplace.json`` document.
+
+    Single source of truth for the "is this a hosted marketplace.json URL"
+    decision, shared by the marketplace CLI (``_is_remote_marketplace_json_url``)
+    and ``MarketplaceSource.is_remote_manifest_url`` so the two predicates
+    cannot drift (see #692 forward-compat constraint 1: the source-kind
+    discriminator stays a derived, validated string). Matches Anthropic's
+    hosted ``marketplace.json`` shape: HTTPS scheme, a host, and a path that
+    ends in ``/marketplace.json``.
+    """
+    if not url:
+        return False
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        return False
+    return (parsed.path or "").rstrip("/").endswith("/marketplace.json")
+
+
 def _extract_owner_repo_from_url(url: str) -> tuple[str, str]:
     """Best-effort owner/repo extraction. Empty strings if not derivable."""
     if not url or _looks_like_local_path(url):
@@ -139,13 +161,13 @@ class MarketplaceSource:
             # that pass only name=... will fail later when something tries to use it.
 
         # Backfill legacy mirror fields from URL when caller used URL-only signature.
-        if self.url and not self.owner and not self.repo:
+        if self.url and self.path != "" and not self.owner and not self.repo:
             o, r = _extract_owner_repo_from_url(self.url)
             if o:
                 object.__setattr__(self, "owner", o)
             if r:
                 object.__setattr__(self, "repo", r)
-        if self.url and self.host == "github.com":
+        if self.url and self.path != "" and self.host == "github.com":
             h = _extract_host_from_url(self.url)
             if h:
                 object.__setattr__(self, "host", h)
@@ -153,17 +175,25 @@ class MarketplaceSource:
     # -- derived properties --------------------------------------------------
 
     @property
+    def is_remote_manifest_url(self) -> bool:
+        """Return True for direct remote marketplace.json URL sources."""
+        return self.path == "" and url_names_remote_manifest(self.url)
+
+    @property
     def kind(self) -> str:
-        """Derived source kind: ``local`` | ``github`` | ``gitlab`` | ``git``.
+        """Derived source kind: ``local`` | ``url`` | ``github`` | ``gitlab`` | ``git``.
 
         Classification:
         - Local filesystem path or ``file://`` URI -> ``local``
+        - Direct remote marketplace.json URL (``path == ""``) -> ``url``
         - Host classified by AuthResolver as github/ghe_cloud/ghes -> ``github``
         - Host classified as gitlab -> ``gitlab``
         - Anything else (ado, generic, ssh to non-classified host) -> ``git``
         """
         if not self.url or _looks_like_local_path(self.url):
             return "local"
+        if self.is_remote_manifest_url:
+            return "url"
         host = _extract_host_from_url(self.url)
         if not host:
             return "git"
@@ -193,6 +223,8 @@ class MarketplaceSource:
         k = self.kind
         if k in ("github", "gitlab") and self.owner and self.repo:
             return f"{self.owner}/{self.repo}"
+        if k == "url":
+            return self.url
         if k == "local":
             lp = self.local_path
             home = os.path.expanduser("~")
@@ -295,6 +327,8 @@ class MarketplaceManifest:
     owner_name: str = ""
     description: str = ""
     plugin_root: str = ""  # metadata.pluginRoot - base path for bare-name sources
+    source_url: str = ""
+    source_digest: str = ""
 
     def find_plugin(self, plugin_name: str) -> MarketplacePlugin | None:
         """Find a plugin by exact name (case-insensitive)."""
@@ -417,7 +451,13 @@ def _parse_plugin_entry(entry: dict[str, Any], source_name: str) -> MarketplaceP
     )
 
 
-def parse_marketplace_json(data: dict[str, Any], source_name: str = "") -> MarketplaceManifest:
+def parse_marketplace_json(
+    data: dict[str, Any],
+    source_name: str = "",
+    *,
+    source_url: str = "",
+    source_digest: str = "",
+) -> MarketplaceManifest:
     """Parse a marketplace.json dict into a ``MarketplaceManifest``.
 
     Accepts both Copilot CLI and Claude Code marketplace formats.
@@ -426,6 +466,8 @@ def parse_marketplace_json(data: dict[str, Any], source_name: str = "") -> Marke
     Args:
         data: Parsed JSON content of marketplace.json.
         source_name: Display name of the marketplace (for provenance).
+        source_url: Canonical marketplace source URL for lockfile provenance.
+        source_digest: SHA-256 digest of the fetched marketplace.json bytes.
 
     Returns:
         MarketplaceManifest: Parsed manifest with valid plugin entries.
@@ -468,4 +510,6 @@ def parse_marketplace_json(data: dict[str, Any], source_name: str = "") -> Marke
         owner_name=owner_name,
         description=description,
         plugin_root=plugin_root,
+        source_url=source_url,
+        source_digest=source_digest,
     )

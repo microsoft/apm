@@ -9,7 +9,7 @@ description: >-
 
 # OSS Growth Skill
 
-[OSS growth hacker persona](../../agents/oss-growth-hacker.agent.md)
+[OSS growth hacker persona](../../../.apm/agents/oss-growth-hacker.agent.md)
 
 ## When to activate
 

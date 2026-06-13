@@ -89,6 +89,7 @@ Each target is identified by a slug used in `apm.yml`'s `targets:` field and on 
 | `gemini` | `.gemini/` | gemini |
 | `opencode` | `.opencode/` (project), `~/.config/opencode/` (user) | agents |
 | `windsurf` | `.windsurf/` (project), `~/.codeium/windsurf/` (user) | agents |
+| `kiro` | `.kiro/` (project and user) | agents |
 
 Notes per target:
 
@@ -99,6 +100,7 @@ Notes per target:
 - **gemini** -- Gemini CLI. Commands are TOML. Hooks merge into `.gemini/settings.json`. No native agents or instructions primitives -- both arrive via compiled context files.
 - **opencode** -- OpenCode. No hooks support.
 - **windsurf** -- Windsurf / Cascade. No native agents primitive -- Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so personas ship as skills. Workflows are the harness's name for commands.
+- **kiro** -- Kiro IDE. Instructions become steering files, skills stay as `SKILL.md` folders, hooks are individual JSON files, and MCP lands in `.kiro/settings/mcp.json`.
 
 ## The compatibility matrix
 
@@ -109,17 +111,17 @@ Rows are primitives, columns are harnesses. Cell legend:
 - **unsupported** -- APM does not deliver this primitive to this harness.
 - **gated** -- delivered behind an explicit declaration or trust flag.
 
-| Primitive | Copilot | Claude | Cursor | Codex | Gemini | OpenCode | Windsurf |
-|---|---|---|---|---|---|---|---|
-| instructions | native | native | native | compiled | compiled | compiled | native |
-| prompts | native | compiled | compiled | unsupported | compiled | compiled | compiled |
-| agents | native | native | compiled | compiled | unsupported | native | unsupported |
-| skills | native | native | native | native | native | native | native |
-| hooks | native | native | native | native | native | unsupported | native |
-| commands | unsupported | native | compiled | unsupported | compiled | compiled | compiled |
-| plugins | compiled | compiled | compiled | compiled | compiled | compiled | compiled |
-| MCP servers | native | native | native | native | native | native | native |
-| canvas (experimental) | gated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| Primitive | Copilot | Claude | Cursor | Codex | Gemini | OpenCode | Windsurf | Kiro |
+|---|---|---|---|---|---|---|---|---|
+| instructions | native | native | native | compiled | compiled | compiled | native | native |
+| prompts | native | compiled | compiled | unsupported | compiled | compiled | compiled | unsupported |
+| agents | native | native | compiled | compiled | unsupported | native | unsupported | unsupported |
+| skills | native | native | native | native | native | native | native | native |
+| hooks | native | native | native | native | native | unsupported | native | native |
+| commands | unsupported | native | compiled | unsupported | compiled | compiled | compiled | unsupported |
+| plugins | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled |
+| MCP servers | native | native | native | native | native | native | native | native |
+| canvas (experimental) | gated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 
 How to read a cell:
 
@@ -168,7 +170,7 @@ Full pattern, the three pack-time gotchas, and verification steps: [Dev-only pri
 
 1. Explicit `--target <slug>` flag, when passed.
 2. The `targets:` field in `apm.yml`, when present.
-3. Auto-detection: any harness whose root directory (`.github/`, `.claude/`, `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`) already exists in the workspace is selected.
+3. Auto-detection: any harness whose root directory (`.github/`, `.claude/`, `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `.kiro/`) already exists in the workspace is selected.
 4. Fallback: `minimal` -- APM writes `AGENTS.md` only and skips folder
    integration. Create one of the harness folders above (or set
    `targets:` explicitly) for full integration.

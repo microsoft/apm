@@ -112,6 +112,24 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         "postToolUse": "AfterTool",
         "Stop": "SessionEnd",
     },
+    "kiro": {
+        # Copilot / Claude -> Kiro camelCase events
+        "PreToolUse": "preToolUse",
+        "preToolUse": "preToolUse",
+        "PostToolUse": "postToolUse",
+        "postToolUse": "postToolUse",
+        "UserPromptSubmit": "promptSubmit",
+        "userPromptSubmit": "promptSubmit",
+        "promptSubmit": "promptSubmit",
+        "Stop": "agentStop",
+        "stop": "agentStop",
+        "AgentStop": "agentStop",
+        "agentStop": "agentStop",
+        "PreTaskExecution": "preTaskExecution",
+        "preTaskExecution": "preTaskExecution",
+        "PostTaskExecution": "postTaskExecution",
+        "postTaskExecution": "postTaskExecution",
+    },
 }
 
 # Expected hook event naming convention per target.
@@ -125,6 +143,7 @@ _HOOK_EVENT_EXPECTED_CASING: dict[str, str] = {
     "codex": "PascalCase",
     "gemini": "PascalCase",
     "windsurf": "PascalCase",
+    "kiro": "camelCase",
 }
 
 
@@ -318,6 +337,7 @@ _HOOK_FILE_TARGET_SUFFIXES: dict[str, set[str]] = {
     "codex-hooks": {"codex"},
     "gemini-hooks": {"gemini"},
     "windsurf-hooks": {"windsurf"},
+    "kiro-hooks": {"kiro"},
 }
 
 
@@ -607,6 +627,9 @@ class HookIntegrator(BaseIntegrator):
         elif target == "windsurf":
             base_root = root_dir or ".windsurf"
             scripts_base = f"{base_root}/hooks/{package_name}"
+        elif target == "kiro":
+            base_root = root_dir or ".kiro"
+            scripts_base = f"{base_root}/hooks/{package_name}"
         else:
             base_root = root_dir or ".claude"
             scripts_base = f"{base_root}/hooks/{package_name}"
@@ -615,7 +638,8 @@ class HookIntegrator(BaseIntegrator):
         # Match both forward-slash and backslash separators (Windows hook JSON
         # may use backslashes: ${CLAUDE_PLUGIN_ROOT}\scripts\scan.ps1)
         plugin_root_pattern = (
-            r"\$\{(?:CLAUDE_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT|PLUGIN_ROOT)\}([\\/][^\s\"']+)"
+            r"\$\{(?:CLAUDE_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT|KIRO_PLUGIN_ROOT|PLUGIN_ROOT)\}"
+            r"([\\/][^\s\"']+)"
         )
         for match in re.finditer(plugin_root_pattern, command):
             full_var = match.group(0)
@@ -1662,6 +1686,20 @@ class HookIntegrator(BaseIntegrator):
                 managed_files=managed_files,
                 diagnostics=diagnostics,
                 target=target,
+            )
+
+        if target.name == "kiro":
+            from apm_cli.integration.kiro_hook_integrator import integrate_kiro_hooks
+
+            return integrate_kiro_hooks(
+                self,
+                package_info,
+                project_root,
+                force=force,
+                managed_files=managed_files,
+                diagnostics=diagnostics,
+                target=target,
+                user_scope=user_scope,
             )
 
         config = _MERGE_HOOK_TARGETS.get(target.name)

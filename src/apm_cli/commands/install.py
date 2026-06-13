@@ -431,10 +431,7 @@ def _resolve_package_references(
                         if logger:
                             logger.validation_fail(package, reason)
                         continue
-                    marketplace_provenance = {
-                        "discovered_via": marketplace_name,
-                        "marketplace_plugin_name": plugin_name,
-                    }
+                    marketplace_provenance = resolution.provenance(marketplace_name, plugin_name)
                     package = canonical_str
                     marketplace_dep_ref = getattr(resolution, "dependency_reference", None)
                 except Exception as mkt_err:
@@ -889,7 +886,7 @@ def _handle_mcp_install(
 @click.option(
     "--runtime",
     help=(
-        "Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude, windsurf, intellij)"
+        "Target specific runtime only (copilot, claude, codex, cursor, gemini, intellij, kiro, opencode, vscode, windsurf)"
     ),
 )
 @click.option("--exclude", help="Exclude specific runtime from installation")
@@ -944,7 +941,7 @@ def _handle_mcp_install(
     "target",
     type=TargetParamType(),
     default=None,
-    help="Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Repeating the flag (e.g. '-t a -t b') is NOT supported -- only the last value wins; use commas. Highest-priority entry in the resolution chain (--target > apm.yml targets: > auto-detect). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork'). 'copilot-app' is also accepted when the copilot-app experimental flag is enabled (run 'apm experimental enable copilot-app'). Note: '--target all' on 'apm compile' is deprecated; use 'apm compile --all' instead.",
+    help="Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Repeating the flag (e.g. '-t a -t b') is NOT supported -- only the last value wins; use commas. Highest-priority entry in the resolution chain (--target > apm.yml targets: > auto-detect). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, kiro, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro (excludes agent-skills); combine with 'agent-skills' for both. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork'). 'copilot-app' is also accepted when the copilot-app experimental flag is enabled (run 'apm experimental enable copilot-app'). Note: '--target all' on 'apm compile' is deprecated; use 'apm compile --all' instead.",
 )
 @click.option(
     "--allow-insecure",
@@ -967,7 +964,7 @@ def _handle_mcp_install(
     "global_",
     is_flag=True,
     default=False,
-    help="Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Codex CLI, JetBrains Copilot).",
+    help="Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Kiro, Windsurf, JetBrains Copilot).",
 )
 @click.option(
     "--ssh",
@@ -1103,7 +1100,7 @@ def _handle_mcp_install(
     metavar="ALIAS",
     help=(
         "Override the log/display label when installing a local bundle "
-        "(directory or .tar.gz produced by 'apm pack'). Only valid for "
+        "(directory, .zip, or .tar.gz produced by 'apm pack'). Only valid for "
         "local-bundle installs; passing --as without a local bundle path is rejected."
     ),
 )
@@ -1180,7 +1177,8 @@ def install(  # noqa: PLR0913
         apm install --mcp api --url https://example.com/mcp    # MCP remote
         apm install --mcp fetch -- npx -y @mcp/server-fetch    # MCP stdio
         apm install ./build/my-bundle           # Deploy a local bundle (directory)
-        apm install ./my-bundle.tar.gz          # Deploy a local bundle (archive)
+        apm install ./my-bundle.zip             # Deploy a local bundle (archive)
+        apm install ./my-bundle.tar.gz          # Deploy a local bundle (legacy archive)
         apm install ./bundle --as custom-name   # Local bundle with custom log label
 
     Environment variables:
@@ -1260,7 +1258,10 @@ def install(  # noqa: PLR0913
             from ..bundle.local_bundle import detect_local_bundle as _detect_lb
             from ..install.local_bundle_handler import install_local_bundle as _install_lb
 
-            _bundle_info = _detect_lb(_probe)
+            try:
+                _bundle_info = _detect_lb(_probe)
+            except ValueError as exc:
+                raise click.UsageError(f"Bundle security check failed: {exc}") from exc
             if _bundle_info is not None:
                 _install_lb(
                     bundle_info=_bundle_info,
@@ -1299,15 +1300,14 @@ def install(  # noqa: PLR0913
                 # success path.  See issue #1207 D3.
                 summary_rendered = True
                 return
-            # IM7: path exists but isn't a recognised bundle.  For tarball
-            # extensions (.tar.gz / .tgz) the user clearly meant a bundle
-            # artifact, so raise a targeted UsageError instead of falling
-            # through to the registry path (which would try to clone).
+            # IM7: path exists but isn't a recognised bundle.  For archive
+            # extensions (.zip / .tar.gz / .tgz) raise a targeted UsageError
+            # instead of falling through to the registry clone path.
             # For bare directories we still fall through, because
             # ``apm install ./packages/source-pkg`` is a supported local-path
             # install that goes through the dependency-resolver pipeline.
             _suffix = _probe.name.lower()
-            if _probe.is_file() and (_suffix.endswith(".tar.gz") or _suffix.endswith(".tgz")):
+            if _probe.is_file() and _suffix.endswith((".zip", ".tar.gz", ".tgz")):
                 # Distinguish legacy --format apm bundles (apm.lock.yaml
                 # present, plugin.json absent) from arbitrary tarballs so
                 # the error message guides the user to the right next step.
@@ -1331,7 +1331,7 @@ def install(  # noqa: PLR0913
         # silently ignoring it.
         if alias:
             raise click.UsageError(
-                "--as requires a local bundle path (directory or .tar.gz "
+                "--as requires a local bundle path (directory, .zip, or .tar.gz "
                 "produced by 'apm pack'). It has no effect on registry installs."
             )
         # HACK(#852): surface --verbose to deeper auth layers via env var until

@@ -17,11 +17,11 @@ apm unpack BUNDLE_PATH [OPTIONS]
 
 ## Description
 
-`apm unpack` extracts an APM bundle (a `.tar.gz` archive or an already-unpacked bundle directory) into a target project. It runs the built-in security scan against the bundle contents before writing any files, and -- unless `--skip-verify` is set -- checks that every entry in the bundle's `apm.lock.yaml` `deployed_files` list is actually present in the archive.
+`apm unpack` extracts an APM bundle (a `.zip` or legacy `.tar.gz` archive, or an already-unpacked bundle directory) into a target project. It runs the built-in security scan against the bundle contents before writing any files, and -- unless `--skip-verify` is set -- checks that every entry in the bundle's `apm.lock.yaml` `deployed_files` list is actually present in the archive.
 
 Extraction is **additive-only**: only files listed in the bundle's lockfile are written. Existing project files at colliding paths are overwritten by the bundle version. Files outside the bundle's manifest are never touched, and the bundle's `apm.lock.yaml` is treated as metadata -- it is not copied into the output directory.
 
-`BUNDLE_PATH` accepts either a `.tar.gz` archive produced by [`apm pack`](../pack/) or the directory form of an unpacked bundle.
+`BUNDLE_PATH` accepts a `.zip` archive (the default), a legacy `.tar.gz` archive, or the directory form of an unpacked bundle.
 
 ## Options
 
@@ -39,31 +39,31 @@ Extraction is **additive-only**: only files listed in the bundle's lockfile are 
 Unpack an archive into the current directory:
 
 ```bash
-apm unpack ./build/my-pkg-1.0.0.tar.gz
+apm unpack ./build/my-pkg-1.0.0.zip
 ```
 
 Unpack into a specific project directory:
 
 ```bash
-apm unpack bundle.tar.gz --output /path/to/project
+apm unpack bundle.zip --output /path/to/project
 ```
 
 Preview the extraction plan without writing files:
 
 ```bash
-apm unpack bundle.tar.gz --dry-run
+apm unpack bundle.zip --dry-run
 ```
 
 Skip verification when working with a partial bundle:
 
 ```bash
-apm unpack bundle.tar.gz --skip-verify
+apm unpack bundle.zip --skip-verify
 ```
 
 Override a critical hidden-character finding after manual review:
 
 ```bash
-apm unpack bundle.tar.gz --force
+apm unpack bundle.zip --force
 ```
 
 ## Behavior

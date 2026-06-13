@@ -327,12 +327,18 @@ function Test-HeroGuardrailing {
             return $false
         }
 
-        if (-not (Test-Path "AGENTS.md")) {
-            Write-ErrorText "AGENTS.md not created by compile"
+        # Copilot compile suppresses empty AGENTS.md shells when installed
+        # instructions already live under .github/instructions/ (the guardrail
+        # surface Copilot reads directly). Validate that compiled guardrails
+        # landed there rather than insisting on an AGENTS.md shell.
+        if (Test-Path "AGENTS.md") {
+            Write-Success "Compiled to AGENTS.md (guardrails active)"
+        } elseif (Get-ChildItem -Path ".github/instructions" -Filter "*.md" -ErrorAction SilentlyContinue) {
+            Write-Success "Compiled guardrails to .github/instructions/ (Copilot reads them directly)"
+        } else {
+            Write-ErrorText "compile produced no guardrail surface (neither AGENTS.md nor .github/instructions/)"
             return $false
         }
-
-        Write-Success "Compiled to AGENTS.md (guardrails active)"
 
         # Step 5: apm run design-review (from installed package)
         Write-Host "Running: $script:BINARY_PATH run design-review (with 10s timeout)"

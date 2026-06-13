@@ -297,7 +297,7 @@ dependencies:
             assert result.exit_code == 0, result.output
 
     def test_pack_with_archive_flag(self, runner: CliRunner, tmp_path: Path) -> None:
-        """Test pack with --archive to create .tar.gz."""
+        """Test pack with --archive to create .zip."""
         with runner.isolated_filesystem(temp_dir=str(tmp_path)):
             _write_minimal_project(Path.cwd())
             (Path.cwd() / "apm.yml").write_text(

@@ -49,9 +49,9 @@ Source: `src/apm_cli/commands/audit.py`.
 ### bundle
 
 A local-install artifact produced by `apm pack`. Either a directory or a
-`.tar.gz` containing `plugin.json` at the root and (in current versions)
-an embedded `apm.lock.yaml` with per-file SHA-256 hashes. Installed via
-`apm install <path-or-tarball>`.
+`.zip` (or legacy `.tar.gz`) containing `plugin.json` at the root and (in
+current versions) an embedded `apm.lock.yaml` with per-file SHA-256 hashes.
+Installed via `apm install <path-or-archive>`.
 
 NOT a package source repository. A bundle is the packed, hash-verified
 output of one; you ship bundles, you author packages.
@@ -252,7 +252,7 @@ Source: `src/apm_cli/models/apm_package.py`,
 
 The `targets:` field in `apm.yml` (or legacy `target:`). Names which harnesses the package
 compiles for (`copilot`, `claude`, `cursor`, `codex`, `gemini`,
-`opencode`, `windsurf`, or `all`). Drives which integrator runs and
+`opencode`, `windsurf`, `kiro`, or `all`). Drives which integrator runs and
 which directories receive output during `apm compile`.
 
 NOT the harness itself. Target is the declaration; the harness is the
