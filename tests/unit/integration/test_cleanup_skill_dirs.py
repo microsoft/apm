@@ -102,22 +102,25 @@ class TestSkillDirectoryCleanup:
         assert not any("Refused to remove directory entry" in m for m in msgs)
 
     def test_skill_dir_with_assets_removed_when_hashes_match(self, project_root, diagnostics):
-        """Skill dir with remaining APM-tracked files is rmtree'd."""
+        """Skill dir with remaining APM-tracked files is rmtree'd.
+
+        The asset file is NOT in the stale list, so it remains on disk
+        after the first pass. The second pass checks its hash and removes
+        the whole directory tree via rmtree.
+        """
         skill_md = _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
         asset = _make_file(project_root, ".agents/skills/my-skill/assets/data.json", '{"a":1}\n')
-        # Record hashes for the asset file
-        asset_hash = compute_file_hash(asset)
+        # Record hashes for both files
         recorded_hashes = {
             ".agents/skills/my-skill/SKILL.md": compute_file_hash(skill_md),
-            ".agents/skills/my-skill/assets/data.json": asset_hash,
+            ".agents/skills/my-skill/assets/data.json": compute_file_hash(asset),
         }
-        # Only the dir entry and SKILL.md are stale (asset is not in stale
-        # list but is tracked with hash -- this simulates the typical case
-        # where the whole package is being removed).
+        # Only the dir entry and SKILL.md are stale -- asset is NOT in the
+        # stale list, so it remains after the first pass and the second pass
+        # must exercise the rmtree + hash verification path.
         stale = [
             ".agents/skills/my-skill",
             ".agents/skills/my-skill/SKILL.md",
-            ".agents/skills/my-skill/assets/data.json",
         ]
         result = remove_stale_deployed_files(
             stale,
@@ -154,6 +157,8 @@ class TestSkillDirectoryCleanup:
         assert (project_root / ".agents/skills/my-skill/my-notes.txt").exists()
         msgs = [d.message for d in diagnostics._diagnostics]
         assert any("not owned by APM" in m for m in msgs)
+        # Diagnostic should list the blocking file path
+        assert any("my-notes.txt" in m for m in msgs)
 
     def test_skill_dir_not_removed_when_hash_mismatch(self, project_root, diagnostics):
         """Skill dir is NOT removed when a tracked file was user-edited."""
@@ -275,3 +280,28 @@ class TestSkillDirectoryCleanup:
         )
         assert result.deleted == []
         assert result.skipped_unmanaged == [".agents/skills/../../../etc"]
+
+    def test_symlink_inside_skill_dir_blocks_removal(self, project_root, diagnostics):
+        """Symlinks inside a skill directory are treated as user content."""
+        _make_file(project_root, ".agents/skills/my-skill/SKILL.md", "# Skill\n")
+        # Create a symlink inside the skill directory
+        link = project_root / ".agents/skills/my-skill/link.txt"
+        target = project_root / "some-other-file.txt"
+        target.write_text("target content\n", encoding="utf-8")
+        link.symlink_to(target)
+        stale = [
+            ".agents/skills/my-skill",
+            ".agents/skills/my-skill/SKILL.md",
+        ]
+        result = remove_stale_deployed_files(
+            stale,
+            project_root,
+            dep_key="pkg",
+            targets=None,
+            diagnostics=diagnostics,
+        )
+        assert ".agents/skills/my-skill/SKILL.md" in result.deleted
+        assert ".agents/skills/my-skill" in result.skipped_unmanaged
+        # Symlink and its target remain
+        assert link.is_symlink()
+        assert target.exists()

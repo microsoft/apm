@@ -148,6 +148,15 @@ def _safe_remove_skill_directory(
         project_root = project_root.parent
 
     for child in skill_dir.rglob("*"):
+        # Symlinks are treated as unmanaged -- APM does not deploy
+        # symlinks, so any symlink is user-created content.
+        if child.is_symlink():
+            try:
+                child_rel = child.relative_to(project_root).as_posix()
+            except ValueError:
+                child_rel = str(child.name)
+            blocking.append(child_rel)
+            continue
         if child.is_dir():
             continue
         try:
@@ -181,12 +190,17 @@ def _safe_remove_skill_directory(
             blocking.append(child_rel)
 
     if blocking:
+        # Show up to 5 blocking paths so the user knows which files
+        # prevented cleanup (reviewer feedback on PR #1767).
+        preview = blocking[:5]
+        suffix = f" (and {len(blocking) - 5} more)" if len(blocking) > 5 else ""
+        file_list = ", ".join(preview) + suffix
         diagnostics.warn(
             (
                 f"Skipped removing skill directory {rel_path}: "
                 f"{len(blocking)} file(s) not owned by APM or "
-                "modified since deployment. Remove manually if "
-                "no longer needed."
+                f"modified since deployment: {file_list}. "
+                "Remove manually if no longer needed."
             ),
             package=dep_key,
         )
@@ -304,7 +318,7 @@ def remove_stale_deployed_files(
     _cowork_resolve_errors: int = 0
 
     for stale_path in _stale_list:
-        # ── Cowork:// paths ──────────────────────────────────────────
+        # -- Cowork:// paths ---------------------------------------
         # Handled BEFORE validate_deploy_path because that method
         # hard-rejects cowork:// when the OneDrive root is unavailable
         # (returning False ⇒ skipped_unmanaged).  For cleanup we want
@@ -453,7 +467,7 @@ def remove_stale_deployed_files(
                     package=dep_key,
                 )
 
-    # ── Second pass: deferred skill directories ─────────────────────
+    # -- Second pass: deferred skill directories -------------------
     # Individual files have been deleted above. Now attempt safe removal
     # of skill directories that APM itself created.
     for _dir_path, _dir_target in _deferred_dirs:
