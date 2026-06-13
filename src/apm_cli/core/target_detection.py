@@ -1,7 +1,7 @@
 """Target detection for auto-selecting compilation and integration targets.
 
 This module implements the auto-detection pattern for determining which agent
-targets (Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Kiro) should be used
+targets (Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Antigravity, Kiro) should be used
 based on existing project structure and configuration.
 
 Detection priority (highest to lowest):
@@ -57,6 +57,7 @@ TargetType = Literal[
     "opencode",
     "codex",
     "gemini",
+    "antigravity",
     "windsurf",
     "kiro",
     "agent-skills",
@@ -97,6 +98,7 @@ UserTargetType = Literal[
     "opencode",
     "codex",
     "gemini",
+    "antigravity",
     "windsurf",
     "kiro",
     "agent-skills",
@@ -136,6 +138,8 @@ def detect_target(  # noqa: PLR0911
             return "codex", "explicit --target flag"
         elif explicit_target == "gemini":
             return "gemini", "explicit --target flag"
+        elif explicit_target == "antigravity":
+            return "antigravity", "explicit --target flag"
         elif explicit_target == "windsurf":
             return "windsurf", "explicit --target flag"
         elif explicit_target == "kiro":
@@ -159,6 +163,8 @@ def detect_target(  # noqa: PLR0911
             return "codex", "apm.yml target"
         elif config_target == "gemini":
             return "gemini", "apm.yml target"
+        elif config_target == "antigravity":
+            return "antigravity", "apm.yml target"
         elif config_target == "windsurf":
             return "windsurf", "apm.yml target"
         elif config_target == "kiro":
@@ -348,13 +354,14 @@ def get_target_description(target: UserTargetType) -> str:
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
+        "antigravity": "AGENTS.md + .agent/rules/ + .agent/commands/ + .agents/skills/ + .agent/settings.json (MCP/hooks)",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .windsurf/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
         "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
         "hermes": "AGENTS.md + .agents/skills/ (project) or ~/.hermes/skills/ + config.yaml MCP (--global) -- experimental",
-        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
-        "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
+        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .agent/ + .windsurf/ + .kiro/ + .agents/",
+        "minimal": "AGENTS.md only (create .github/, .claude/, or .agent/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
 
@@ -366,7 +373,7 @@ def get_target_description(target: UserTargetType) -> str:
 #: The complete set of real (non-pseudo) canonical targets.
 #: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
 ALL_CANONICAL_TARGETS = frozenset(
-    {"vscode", "claude", "cursor", "opencode", "codex", "gemini", "windsurf", "kiro"}
+    {"vscode", "claude", "cursor", "opencode", "codex", "gemini", "antigravity", "windsurf", "kiro"}
 )
 
 #: Targets that the parser must accept but that are gated at runtime by
@@ -685,6 +692,7 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("codex", "dir", ".codex"),
     ("gemini", "dir", ".gemini"),
     ("gemini", "file", "GEMINI.md"),
+    ("antigravity", "dir", ".agent"),
     ("opencode", "dir", ".opencode"),
     ("windsurf", "dir", ".windsurf"),
     ("kiro", "dir", ".kiro"),
@@ -692,6 +700,7 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
 
 # Ordered list of targets for display (excludes agent-skills meta-target).
 CANONICAL_TARGETS_ORDERED: list[str] = [
+    "antigravity",
     "claude",
     "copilot",
     "cursor",
@@ -704,6 +713,7 @@ CANONICAL_TARGETS_ORDERED: list[str] = [
 
 # Canonical deploy directories for each target.
 CANONICAL_DEPLOY_DIRS: dict[str, str] = {
+    "antigravity": ".agent/",
     "claude": ".claude/",
     "copilot": ".github/",
     "cursor": ".cursor/",
@@ -717,6 +727,7 @@ CANONICAL_DEPLOY_DIRS: dict[str, str] = {
 # The primary (lowest-friction) signal for each target, used in
 # "needs <path>" display for inactive targets.
 CANONICAL_SIGNAL: dict[str, str] = {
+    "antigravity": ".agent/",
     "claude": "CLAUDE.md",
     "copilot": ".github/copilot-instructions.md",
     "cursor": ".cursor/",

@@ -314,10 +314,12 @@ class TestExhaustivenessChecks:
             "commands",  # was commands_claude, aliased
             "commands_cursor",
             "commands_gemini",
+            "commands_antigravity",
             "commands_opencode",
             "commands_windsurf",
             "instructions",  # was instructions_copilot, aliased
             "instructions_windsurf",
+            "instructions_antigravity",
             "instructions_kiro",
             "rules_cursor",  # was instructions_cursor, aliased
             "rules_claude",  # was instructions_claude, aliased

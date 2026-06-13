@@ -639,6 +639,39 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         compile_family="gemini",
         hooks_config_display=".gemini/settings.json",
     ),
+    # Antigravity CLI (agy) -- Google's successor to Gemini CLI.
+    # Workspace config lives under .agent/ (not .gemini/).
+    # Skills use the cross-tool .agents/ standard.
+    # Rules are markdown files under .agent/rules/ (no format transform).
+    # Commands are TOML under .agent/commands/ (same format as Gemini).
+    # Hooks merge into .agent/settings.json (same schema as Gemini).
+    # MCP servers also live in .agent/settings.json under "mcpServers".
+    # User scope writes to ~/.antigravity/.
+    # Compile family is "agents" (emits AGENTS.md, not GEMINI.md).
+    # Ref: https://antigravity.google/docs/cli-overview
+    # Ref: https://antigravity.google/docs/skills
+    "antigravity": TargetProfile(
+        name="antigravity",
+        root_dir=".agent",
+        primitives={
+            "instructions": PrimitiveMapping("rules", ".md", "antigravity_rules"),
+            "commands": PrimitiveMapping("commands", ".toml", "antigravity_command"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
+            "hooks": PrimitiveMapping("hooks", ".json", "antigravity_hooks"),
+        },
+        auto_create=False,
+        detect_by_dir=True,
+        user_supported=True,
+        user_root_dir=".antigravity",
+        pack_prefixes=(".agent/", ".agents/"),
+        compile_family="agents",
+        hooks_config_display=".agent/settings.json",
+    ),
     # Codex CLI: skills use the cross-tool .agents/ dir (agent skills standard),
     # agents are TOML under .codex/agents/, hooks merge into .codex/hooks.json.
     # Instructions are compile-only (AGENTS.md) -- not installed.

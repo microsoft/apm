@@ -791,7 +791,7 @@ def _run_compilation(
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, kiro, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro (excludes agent-skills); combine with 'agent-skills' for both.",
+    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, antigravity, windsurf, kiro, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+antigravity+windsurf+kiro (excludes agent-skills); combine with 'agent-skills' for both.",
 )
 @click.option(
     "--dry-run",

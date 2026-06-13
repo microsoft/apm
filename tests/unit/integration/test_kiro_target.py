@@ -55,7 +55,7 @@ def test_kiro_is_discoverable_in_target_help() -> None:
     install = runner.invoke(cli, ["install", "--help"])
     compile_result = runner.invoke(cli, ["compile", "--help"])
 
-    expected_all_targets = "copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro"
+    expected_all_targets = "copilot+claude+cursor+opencode+codex+gemini+antigravity+windsurf+kiro"
     install_help = "".join(install.output.split())
     compile_help = "".join(compile_result.output.split())
 
