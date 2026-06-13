@@ -145,6 +145,7 @@ class InstallContext:
     total_hooks_integrated: int = 0  # integrate
     total_links_resolved: int = 0  # integrate
     direct_dep_failed: bool = False  # integrate -- set when any direct dep fails
+    blocked_executables: list[Any] = field(default_factory=list)  # integrate
 
     # ------------------------------------------------------------------
     # policy_gate
