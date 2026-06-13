@@ -21,7 +21,6 @@ from apm_cli.commands.marketplace import (
     _load_config_or_exit,
     _load_current_versions,
     _load_yml_or_exit,
-    _outcome_symbol,
     _OutdatedRow,
     _parse_marketplace_repo,
     _render_build_error,
@@ -29,9 +28,6 @@ from apm_cli.commands.marketplace import (
     _render_check_table,
     _render_doctor_table,
     _render_outdated_table,
-    _render_publish_footer,
-    _render_publish_plan,
-    _render_publish_summary,
     _warn_duplicate_names,
     marketplace,
     search,
@@ -45,7 +41,6 @@ from apm_cli.marketplace.errors import (
     OfflineMissError,
     RefNotFoundError,
 )
-from apm_cli.marketplace.publisher import ConsumerTarget, PublishOutcome, TargetResult
 
 # ---------------------------------------------------------------------------
 # MarketplaceGroup.format_commands -- lines 106-121
@@ -544,145 +539,10 @@ class TestRenderDoctorTable:
 
 
 # ---------------------------------------------------------------------------
-# _outcome_symbol -- lines 1243-1256
 # ---------------------------------------------------------------------------
 
 
-class TestOutcomeSymbol:
-    def test_updated_symbol(self):
-        assert _outcome_symbol(PublishOutcome.UPDATED) == "[+]"
-
-    def test_failed_symbol(self):
-        assert _outcome_symbol(PublishOutcome.FAILED) == "[x]"
-
-    def test_skipped_downgrade_symbol(self):
-        assert _outcome_symbol(PublishOutcome.SKIPPED_DOWNGRADE) == "[!]"
-
-    def test_no_change_symbol(self):
-        assert _outcome_symbol(PublishOutcome.NO_CHANGE) == "[*]"
-
-
 # ---------------------------------------------------------------------------
-# _render_publish_footer -- lines 1259-1271
-# ---------------------------------------------------------------------------
-
-
-class TestRenderPublishFooter:
-    def test_all_success_calls_logger_success(self):
-        logger = MagicMock()
-        _render_publish_footer(logger, updated=3, failed=0, total=3, dry_run=False)
-        logger.success.assert_called()
-        assert "3/3" in str(logger.success.call_args)
-
-    def test_failures_calls_logger_warning(self):
-        logger = MagicMock()
-        _render_publish_footer(logger, updated=2, failed=1, total=3, dry_run=False)
-        logger.warning.assert_called()
-        assert "failed" in str(logger.warning.call_args)
-
-    def test_dry_run_suffix_added(self):
-        logger = MagicMock()
-        _render_publish_footer(logger, updated=1, failed=0, total=1, dry_run=True)
-        call_str = str(logger.success.call_args)
-        assert "dry-run" in call_str
-
-
-# ---------------------------------------------------------------------------
-# _render_publish_plan -- lines 1120-1168
-# ---------------------------------------------------------------------------
-
-
-class TestRenderPublishPlan:
-    def _make_plan(self, target_repos: list[str]):
-        plan = MagicMock()
-        plan.marketplace_name = "my-market"
-        plan.marketplace_version = "1.0.0"
-        plan.new_ref = "v1.0.0"
-        plan.branch_name = "release/v1.0.0"
-        targets = []
-        for repo in target_repos:
-            t = MagicMock()
-            t.repo = repo
-            t.branch = "main"
-            t.path_in_repo = "apm.yml"
-            targets.append(t)
-        plan.targets = targets
-        return plan
-
-    def test_no_console_colorama_fallback(self):
-        logger = MagicMock()
-        plan = self._make_plan(["org/repo-a", "org/repo-b"])
-        with patch("apm_cli.commands.marketplace._get_console", return_value=None):
-            _render_publish_plan(logger, plan)
-        logger.progress.assert_called()
-        assert logger.tree_item.call_count >= 2
-
-    def test_with_console_rich_panel(self):
-        logger = MagicMock()
-        plan = self._make_plan(["org/repo-a"])
-        mock_console = MagicMock()
-        with patch("apm_cli.commands.marketplace._get_console", return_value=mock_console):
-            _render_publish_plan(logger, plan)
-        mock_console.print.assert_called()
-
-
-# ---------------------------------------------------------------------------
-# _render_publish_summary -- lines 1171-1240
-# ---------------------------------------------------------------------------
-
-
-class TestRenderPublishSummary:
-    def _make_result(self, repo: str, outcome: PublishOutcome, message: str = "ok"):
-        r = MagicMock(spec=TargetResult)
-        t = MagicMock(spec=ConsumerTarget)
-        t.repo = repo
-        r.target = t
-        r.outcome = outcome
-        r.message = message
-        return r
-
-    def _make_pr_result(self, repo: str, state_value: str = "open", pr_number: int = 42):
-        pr = MagicMock()
-        t = MagicMock()
-        t.repo = repo
-        pr.target = t
-        pr.state = MagicMock()
-        pr.state.value = state_value
-        pr.pr_number = pr_number
-        pr.pr_url = f"https://github.com/{repo}/pull/{pr_number}"
-        return pr
-
-    def test_no_console_colorama_fallback_no_pr(self):
-        logger = MagicMock()
-        results = [
-            self._make_result("org/repo-a", PublishOutcome.UPDATED),
-            self._make_result("org/repo-b", PublishOutcome.FAILED),
-        ]
-        with patch("apm_cli.commands.marketplace._get_console", return_value=None):
-            _render_publish_summary(logger, results, [], no_pr=True, dry_run=False)
-        logger.tree_item.assert_called()
-
-    def test_with_console_and_pr_results(self):
-        logger = MagicMock()
-        results = [self._make_result("org/repo-a", PublishOutcome.UPDATED)]
-        pr_results = [self._make_pr_result("org/repo-a")]
-        mock_console = MagicMock()
-        with patch("apm_cli.commands.marketplace._get_console", return_value=mock_console):
-            _render_publish_summary(logger, results, pr_results, no_pr=False, dry_run=False)
-        mock_console.print.assert_called()
-
-    def test_dry_run_suffix(self):
-        logger = MagicMock()
-        results = [self._make_result("org/repo-a", PublishOutcome.NO_CHANGE)]
-        with patch("apm_cli.commands.marketplace._get_console", return_value=None):
-            _render_publish_summary(logger, results, [], no_pr=True, dry_run=True)
-        # Should surface dry-run in footer
-        footer_calls = str(logger.success.call_args_list) + str(logger.warning.call_args_list)
-        assert "dry-run" in footer_calls
-
-
-# ---------------------------------------------------------------------------
-# marketplace list command -- lines 576-628
 # ---------------------------------------------------------------------------
 
 

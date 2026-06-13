@@ -1,6 +1,6 @@
 """Dataclasses, loader, and validation for marketplace authoring config.
 
-The marketplace publisher configuration may live in two places:
+The marketplace authoring configuration may live in two places:
 
 * (Preferred, current) inside ``apm.yml`` under a top-level
   ``marketplace:`` block.  Loaded via
