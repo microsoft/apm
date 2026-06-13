@@ -213,6 +213,23 @@ class BinDeployPolicy:
 
 
 @dataclass(frozen=True)
+class LifecycleHooksPolicy:
+    """Policy controls for lifecycle hooks.
+
+    ``require``: hooks that the org mandates on every project.  Stored as
+    the raw ``lifecycle_hooks`` dict shape (event -> list of hook defs)
+    and injected into the hook runner at fire time.
+
+    ``deny_types``: hook action types the org disallows.  Projects that
+    declare a denied type receive a policy warning/block depending on
+    ``enforcement``.
+    """
+
+    require: dict | None = None  # raw lifecycle_hooks shape
+    deny_types: tuple[str, ...] = ()  # e.g. ("command",) to block shell commands
+
+
+@dataclass(frozen=True)
 class ApmPolicy:
     """Top-level APM policy model."""
 
@@ -230,3 +247,4 @@ class ApmPolicy:
     registry_source: RegistrySourcePolicy = field(default_factory=RegistrySourcePolicy)
     security: SecurityPolicy = field(default_factory=SecurityPolicy)
     bin_deploy: BinDeployPolicy = field(default_factory=BinDeployPolicy)
+    lifecycle_hooks: LifecycleHooksPolicy = field(default_factory=LifecycleHooksPolicy)

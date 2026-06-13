@@ -527,6 +527,15 @@ def _run_dep_update(
         return _confirm_plan_application()
 
     try:
+        # Fire pre-update lifecycle hooks
+        _fire_update_hooks(
+            "pre-update",
+            apm_package=staged_apm_package,
+            scope=scope,
+            logger=logger,
+            verbose=verbose,
+        )
+
         result = _install_apm_dependencies(
             staged_apm_package,
             update_refs=True,
@@ -592,6 +601,63 @@ def _run_dep_update(
             _rich_success(f"Updated {count} revision {noun} in apm.yml.")
         else:
             _rich_success("No dependency changes were applied.")
+
+        # Fire post-update lifecycle hooks
+        _fire_update_hooks(
+            "post-update",
+            apm_package=staged_apm_package,
+            scope=scope,
+            logger=logger,
+            verbose=verbose,
+        )
+
+
+def _fire_update_hooks(
+    event_name: str,
+    *,
+    apm_package,
+    scope,
+    logger,
+    verbose: bool,
+) -> None:
+    """Build a hook runner and fire an update lifecycle event.
+
+    Best-effort: all exceptions are swallowed so hooks never block
+    the update flow.
+    """
+    import contextlib
+
+    with contextlib.suppress(Exception):
+        from apm_cli.core.lifecycle_hooks import (
+            LifecycleEvent,
+            PackageInfo,
+            build_runner_from_context,
+        )
+
+        project_root = None
+        pkg_path = getattr(apm_package, "package_path", None)
+        if pkg_path is not None:
+            project_root = str(pkg_path)
+
+        runner = build_runner_from_context(
+            project_hooks_raw=getattr(apm_package, "lifecycle_hooks", None),
+            logger=logger,
+            verbose=verbose,
+            project_root=project_root,
+        )
+
+        pkg_infos = []
+        for dep in apm_package.get_apm_dependencies():
+            pkg_infos.append(PackageInfo(name=dep.repo_url or str(dep), reference=dep.reference))
+
+        scope_name = scope.value if hasattr(scope, "value") else str(scope)
+        event = LifecycleEvent.create(
+            event=event_name,
+            packages=pkg_infos,
+            scope=scope_name,
+        )
+
+        runner.fire(event_name, event)
 
 
 __all__ = ["update"]

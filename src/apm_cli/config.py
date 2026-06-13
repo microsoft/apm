@@ -686,3 +686,31 @@ def unset_mcp_registry_url() -> None:
     No-op if the key is not present.
     """
     _unset_config_key(_MCP_REGISTRY_URL_KEY)
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle hooks (global level)
+# ---------------------------------------------------------------------------
+
+_LIFECYCLE_HOOKS_KEY = "lifecycle_hooks"
+
+
+def get_lifecycle_hooks() -> dict:
+    """Return the global ``lifecycle_hooks`` config (or empty dict).
+
+    The returned dict has the standard shape::
+
+        {"post-install": [{"type": "webhook", "url": "...", "token_env": "..."}]}
+    """
+    value = get_config().get(_LIFECYCLE_HOOKS_KEY)
+    return value if isinstance(value, dict) else {}
+
+
+def set_lifecycle_hooks(hooks: dict) -> None:
+    """Persist a ``lifecycle_hooks`` mapping in the global config."""
+    update_config({_LIFECYCLE_HOOKS_KEY: hooks})
+
+
+def unset_lifecycle_hooks() -> None:
+    """Remove the ``lifecycle_hooks`` key from the config file."""
+    _unset_config_key(_LIFECYCLE_HOOKS_KEY)

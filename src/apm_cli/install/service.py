@@ -46,6 +46,9 @@ class InstallService:
     def run(self, request: InstallRequest) -> InstallResult:
         """Execute the install pipeline and return the structured result.
 
+        Fires ``pre-install`` / ``post-install`` lifecycle hooks around
+        the pipeline when hooks are configured.
+
         Raises:
             InstallNotAvailableError: if the dependency subsystem failed
                 to import (e.g. missing optional extras).  Adapters are
@@ -62,6 +65,10 @@ class InstallService:
         if request.frozen:
             self._enforce_frozen(request)
 
+        runner = self._build_hook_runner(request)
+        event = self._build_event("pre-install", request)
+        runner.fire("pre-install", event)
+
         # Local import keeps service module import-cheap and matches the
         # existing pipeline's lazy-import discipline.
         try:
@@ -69,7 +76,7 @@ class InstallService:
         except ImportError as e:  # pragma: no cover -- defensive
             raise InstallNotAvailableError(f"APM dependency system not available: {e}") from e
 
-        return run_install_pipeline(
+        result = run_install_pipeline(
             request.apm_package,
             update_refs=request.update_refs,
             verbose=request.verbose,
@@ -93,6 +100,56 @@ class InstallService:
             plan_callback=request.plan_callback,
             refresh=request.refresh,
             lockfile_only=request.lockfile_only,
+        )
+
+        post_event = self._build_event("post-install", request)
+        runner.fire("post-install", post_event)
+
+        return result
+
+    # -- Lifecycle hook helpers ---------------------------------------------
+
+    @staticmethod
+    def _build_hook_runner(request: InstallRequest):
+        """Build a :class:`LifecycleHookRunner` from the request context."""
+        from apm_cli.core.lifecycle_hooks import build_runner_from_context
+
+        project_root = None
+        pkg_path = getattr(request.apm_package, "package_path", None)
+        if pkg_path is not None:
+            project_root = str(pkg_path)
+
+        return build_runner_from_context(
+            project_hooks_raw=getattr(request.apm_package, "lifecycle_hooks", None),
+            logger=request.logger,
+            verbose=request.verbose,
+            project_root=project_root,
+        )
+
+    @staticmethod
+    def _build_event(event_name: str, request: InstallRequest):
+        """Build a :class:`LifecycleEvent` from the request."""
+        from apm_cli.core.lifecycle_hooks import LifecycleEvent, PackageInfo
+
+        packages = []
+        for dep in request.apm_package.get_apm_dependencies():
+            packages.append(
+                PackageInfo(
+                    name=dep.repo_url or str(dep),
+                    reference=dep.reference,
+                )
+            )
+
+        scope_name = "project"
+        if request.scope is not None:
+            scope_name = (
+                request.scope.value if hasattr(request.scope, "value") else str(request.scope)
+            )
+
+        return LifecycleEvent.create(
+            event=event_name,
+            packages=packages,
+            scope=scope_name,
         )
 
     @staticmethod

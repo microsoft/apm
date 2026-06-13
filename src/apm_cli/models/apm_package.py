@@ -245,6 +245,10 @@ class APMPackage:
     )
     includes: str | list[str] | None = None  # Include-only manifest: 'auto' or list of repo paths
 
+    # Lifecycle hooks: maps event name -> list of hook action dicts.
+    # Parsed from ``lifecycle_hooks:`` in apm.yml.  None when absent.
+    lifecycle_hooks: dict[str, list[dict]] | None = None
+
     # Top-level ``registries:`` block per docs/proposals/registry-api.md §3.1.
     # Maps registry name -> base URL. None when no ``registries:`` block is present.
     registries: dict[str, str] | None = None
@@ -473,6 +477,7 @@ class APMPackage:
             dependencies=dependencies,
             dev_dependencies=dev_dependencies,
             scripts=data.get("scripts"),
+            lifecycle_hooks=data.get("lifecycle_hooks"),
             package_path=apm_yml_path.parent,
             source_path=resolved_source,
             target=target_value,
