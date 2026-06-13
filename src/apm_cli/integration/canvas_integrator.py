@@ -88,7 +88,7 @@ def is_canvas_bundle_path(rel: str) -> bool:
     """
     parts = [seg for seg in rel.replace("\\", "/").split("/") if seg]
     for idx, seg in enumerate(parts):
-        if seg != "extensions":
+        if seg.lower() != "extensions":
             continue
         if idx == 0:
             return True

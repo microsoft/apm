@@ -22,7 +22,8 @@ Copilot CLI discovers canvases in immediate subdirectories of
 under `.apm/extensions/<name>/` and deploys it to the matching location at
 install time so the canvas is available in your Copilot session.
 
-Canvases are typically produced by the `create-canvas` skill. This page covers
+Canvases are typically produced by the Copilot CLI `create-canvas` skill
+(scaffolds a working extension in `.github/extensions/`). This page covers
 how to ship one through an APM package.
 
 ## Enable the feature

@@ -86,6 +86,11 @@ def _deployed_rel(result, project_root: Path) -> set[str]:
         (".github/extensions/demo/extension.mjs", True),
         (".copilot/extensions/widget/a.js", True),
         ("extensions/demo", True),
+        # Case-insensitive matching: mixed-case 'Extensions' must also match
+        # to prevent trust gate bypass on macOS HFS+ and Windows NTFS.
+        ("Extensions/demo/extension.mjs", True),
+        (".github/Extensions/demo/extension.mjs", True),
+        ("EXTENSIONS/demo/extension.mjs", True),
         ("skills/foo/extensions/bar.md", False),
         ("agents/a.md", False),
         ("extensionsfoo/x.js", False),

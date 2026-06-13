@@ -899,7 +899,7 @@ def integrate_local_bundle(
                 # (e.g. ``.claude/extensions/``).  Skip silently for other
                 # targets; the trust filter above already removed these
                 # entries entirely when canvas was not trusted.
-                if _first_seg == "extensions" and target.name != "copilot":
+                if _first_seg.lower() == "extensions" and target.name != "copilot":
                     continue
                 # Route the file to the correct deploy root.  If the first
                 # path segment matches a primitive with an explicit
