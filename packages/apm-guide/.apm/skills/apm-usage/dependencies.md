@@ -351,6 +351,16 @@ dependencies:
       registry: false
       transport: http
       url: "https://mcp.internal.example.com"
+
+    # Self-defined remote with harness-specific extra keys
+    # (extra keys are preserved and round-tripped into the target manifest)
+    - name: slack
+      registry: false
+      transport: http
+      url: https://mcp.slack.com/mcp
+      oauth:
+        clientId: "<pre-registered-client-id>"
+        callbackPort: 3118
 ```
 
 ## LSP dependency formats

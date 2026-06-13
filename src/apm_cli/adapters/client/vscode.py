@@ -281,6 +281,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 input_vars.extend(
                     self._extract_input_variables(env_translated, server_info.get("name", ""))
                 )
+            self._merge_extra(server_config, server_info)
             return server_config, input_vars
 
         # Check for packages information
@@ -448,6 +449,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
                     f"Server: {server_info.get('name', 'unknown')}"
                 )
 
+        self._merge_extra(server_config, server_info)
         return server_config, input_vars
 
     @staticmethod

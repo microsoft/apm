@@ -219,6 +219,7 @@ class CodexClientAdapter(MCPClientAdapter):
                 return self.normalize_project_arg(arg)
 
             config["args"] = [_process_stdio_arg(arg) for arg in raw.get("args") or []]
+            self._merge_extra(config, server_info)
             return config
 
         # Remote MCP handling.
@@ -361,6 +362,7 @@ class CodexClientAdapter(MCPClientAdapter):
                         resolved_env,
                     )
 
+        self._merge_extra(config, server_info)
         return config
 
     def _process_arguments(  # pylint: disable=duplicate-code  # structural similarity with copilot adapter is intentional

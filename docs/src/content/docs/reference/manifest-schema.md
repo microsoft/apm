@@ -502,6 +502,8 @@ A plain registry reference: `io.github.github/github-mcp-server`.
 | `url` | `string` | Conditional | | Endpoint URL. REQUIRED when `registry: false` and `transport` is `http`, `sse`, or `streamable-http`. |
 | `command` | `string` | Conditional | Single binary path; no embedded whitespace unless `args` is also present | Binary path. REQUIRED when `registry: false` and `transport` is `stdio`. |
 
+Any additional keys not listed above are preserved as **extra passthrough fields** and round-tripped verbatim into the generated target manifest. This allows harness-specific configuration (e.g. Claude Code's `oauth` block for remote-MCP OAuth client config) to be declared in `apm.yml` and appear in the generated `.mcp.json` without modification. A warning is emitted at parse time naming each non-standard key. Extra keys never shadow the fields above; if a collision occurs the known field wins.
+
 #### 4.2.3. Validation Rules for Self-Defined Servers
 
 When `registry` is `false`, the following constraints apply:
@@ -531,6 +533,15 @@ dependencies:
       args: ["--port", "3000"]
       env:
         API_KEY: ${{ secrets.KEY }}
+
+    # Self-defined remote server with harness-specific extra keys
+    - name: slack
+      registry: false
+      transport: http
+      url: https://mcp.slack.com/mcp
+      oauth:
+        clientId: "<pre-registered-client-id>"
+        callbackPort: 3118
 ```
 
 #### 4.2.4. Variable References in `headers` and `env`

@@ -1,13 +1,15 @@
-"""Acceptance tests for warn-on-dropped-keys in MCPDependency.from_dict().
+"""Acceptance tests for extra passthrough in MCPDependency.from_dict().
 
-Addresses #1670 (warn-on-dropped-keys; passthrough escape-hatch tracked
-separately, remains needs-design).
+Addresses #1670 (unknown keys are preserved in 'extra' and round-tripped
+through to_dict and into generated target manifests).
 
 Coverage:
-1. from_dict with unknown key -> warning naming the dropped key
+1. from_dict with unknown key -> warning naming the preserved key
 2. from_dict with only known keys -> no warning
 3. known-key parsing and resulting values are unchanged
 4. robustness: non-string dict keys do not TypeError; non-ASCII output is escaped
+5. extra round-trips through from_dict/to_dict
+6. extra does not shadow known keys
 """
 
 from __future__ import annotations
@@ -38,7 +40,7 @@ class TestFromDictUnknownKeyWarning:
             )
         mock_warn.assert_called_once()
 
-    def test_unknown_key_warning_names_dropped_key(self):
+    def test_unknown_key_warning_names_preserved_key(self):
         """The warning message includes the name of the unknown key."""
         with patch(_WARN_PATH) as mock_warn:
             MCPDependency.from_dict(
@@ -198,8 +200,8 @@ class TestFromDictKnownKeyParsingUnchanged:
         assert dep.url == "https://mcp.slack.com/mcp"
         assert dep.env == {"TOKEN": "tok"}
 
-    def test_unknown_key_not_stored_on_instance(self):
-        """Unknown key must not appear as an attribute on the resulting instance."""
+    def test_unknown_key_stored_in_extra(self):
+        """Unknown key must appear in the 'extra' dict on the resulting instance."""
         with patch(_WARN_PATH):
             dep = MCPDependency.from_dict(
                 {
@@ -210,10 +212,10 @@ class TestFromDictKnownKeyParsingUnchanged:
                     "oauth": {"clientId": "abc"},
                 }
             )
-        assert not hasattr(dep, "oauth")
+        assert dep.extra == {"oauth": {"clientId": "abc"}}
 
-    def test_to_dict_round_trip_unaffected(self):
-        """to_dict() round-trip is unaffected by the presence of unknown keys on input."""
+    def test_to_dict_round_trips_extra_keys(self):
+        """to_dict() includes extra keys at the top level."""
         with patch(_WARN_PATH):
             dep = MCPDependency.from_dict(
                 {
@@ -225,7 +227,7 @@ class TestFromDictKnownKeyParsingUnchanged:
                 }
             )
         result = dep.to_dict()
-        assert "oauth" not in result
+        assert result["oauth"] == {"clientId": "abc"}
         assert result["name"] == "slack"
         assert result["transport"] == "http"
 
@@ -233,3 +235,115 @@ class TestFromDictKnownKeyParsingUnchanged:
         """ValueError for missing 'name' is unchanged."""
         with pytest.raises(ValueError, match="name"):
             MCPDependency.from_dict({"oauth": "value"})
+
+
+class TestExtraPassthrough:
+    """Acceptance criteria for the extra passthrough mechanism."""
+
+    def test_extra_does_not_shadow_known_keys(self):
+        """Extra keys cannot override known keys in to_dict output."""
+        dep = MCPDependency(
+            name="test",
+            transport="stdio",
+            extra={"transport": "http", "name": "evil"},
+        )
+        result = dep.to_dict()
+        assert result["transport"] == "stdio"
+        assert result["name"] == "test"
+
+    def test_extra_none_when_no_unknown_keys(self):
+        """extra is None when from_dict receives only known keys."""
+        with patch(_WARN_PATH) as mock_warn:
+            dep = MCPDependency.from_dict({"name": "server", "transport": "stdio"})
+        mock_warn.assert_not_called()
+        assert dep.extra is None
+
+    def test_extra_round_trip_multiple_keys(self):
+        """Multiple extra keys round-trip through from_dict/to_dict."""
+        with patch(_WARN_PATH):
+            dep = MCPDependency.from_dict(
+                {
+                    "name": "slack",
+                    "transport": "http",
+                    "registry": False,
+                    "url": "https://mcp.slack.com/mcp",
+                    "oauth": {"clientId": "abc", "callbackPort": 3118},
+                    "customSetting": "value",
+                }
+            )
+        result = dep.to_dict()
+        assert result["oauth"] == {"clientId": "abc", "callbackPort": 3118}
+        assert result["customSetting"] == "value"
+
+    def test_extra_in_repr(self):
+        """__repr__ includes extra key count when extra is present."""
+        dep = MCPDependency(name="test", extra={"oauth": {}, "custom": "val"})
+        assert "extra=<2 key(s)>" in repr(dep)
+
+    def test_no_extra_in_repr_when_none(self):
+        """__repr__ does not include extra when it is None."""
+        dep = MCPDependency(name="test")
+        assert "extra" not in repr(dep)
+
+
+class TestBuildSelfDefinedInfoExtra:
+    """_build_self_defined_info passes extra to adapters."""
+
+    def test_extra_flows_to_server_info(self):
+        """_build_self_defined_info includes _extra when dep has extra."""
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        dep = MCPDependency(
+            name="slack",
+            transport="http",
+            registry=False,
+            url="https://mcp.slack.com/mcp",
+            extra={"oauth": {"clientId": "abc"}},
+        )
+        info = MCPIntegrator._build_self_defined_info(dep)
+        assert info["_extra"] == {"oauth": {"clientId": "abc"}}
+
+    def test_no_extra_when_dep_has_none(self):
+        """_build_self_defined_info omits _extra when dep.extra is None."""
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        dep = MCPDependency(
+            name="slack",
+            transport="http",
+            registry=False,
+            url="https://mcp.slack.com/mcp",
+        )
+        info = MCPIntegrator._build_self_defined_info(dep)
+        assert "_extra" not in info
+
+
+class TestAdapterMergeExtra:
+    """_merge_extra correctly merges extra keys into adapter config."""
+
+    def test_merge_extra_adds_keys(self):
+        """Extra keys are added to the config dict."""
+        from apm_cli.adapters.client.base import MCPClientAdapter
+
+        config = {"type": "http", "url": "https://example.com"}
+        server_info = {"_extra": {"oauth": {"clientId": "abc"}}}
+        MCPClientAdapter._merge_extra(config, server_info)
+        assert config["oauth"] == {"clientId": "abc"}
+
+    def test_merge_extra_does_not_shadow(self):
+        """Extra keys do not override existing config keys."""
+        from apm_cli.adapters.client.base import MCPClientAdapter
+
+        config = {"type": "http", "url": "https://example.com"}
+        server_info = {"_extra": {"type": "stdio", "oauth": {"clientId": "abc"}}}
+        MCPClientAdapter._merge_extra(config, server_info)
+        assert config["type"] == "http"
+        assert config["oauth"] == {"clientId": "abc"}
+
+    def test_merge_extra_noop_when_absent(self):
+        """No-op when server_info has no _extra."""
+        from apm_cli.adapters.client.base import MCPClientAdapter
+
+        config = {"type": "http"}
+        server_info = {"name": "test"}
+        MCPClientAdapter._merge_extra(config, server_info)
+        assert config == {"type": "http"}

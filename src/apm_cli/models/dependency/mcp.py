@@ -53,6 +53,7 @@ class MCPDependency:
     tools: list[str] | None = None  # Restrict exposed tools (default is ["*"])
     url: str | None = None  # Required for self-defined http/sse transports
     command: str | None = None  # Required for self-defined stdio transports
+    extra: dict[str, Any] | None = None  # Harness-specific passthrough keys (e.g. oauth)
 
     @classmethod
     def from_string(cls, s: str) -> "MCPDependency":
@@ -72,11 +73,13 @@ class MCPDependency:
             raise ValueError("MCP dependency dict must contain 'name'")
 
         unknown = sorted(str(k) for k in d if k not in _KNOWN_DICT_KEYS)
+        extra: dict[str, Any] | None = None
         if unknown:
+            extra = {str(k): d[k] for k in d if str(k) in unknown}
             safe_name = ascii(str(d["name"]))[1:-1]
             safe_keys = ", ".join(ascii(k)[1:-1] for k in unknown)
             _rich_warning(
-                f"MCP dependency '{safe_name}': unknown key(s) dropped: {safe_keys}",
+                f"MCP dependency '{safe_name}': unknown key(s) preserved in extra: {safe_keys}",
                 symbol="warning",
             )
 
@@ -94,6 +97,7 @@ class MCPDependency:
             tools=d.get("tools"),
             url=d.get("url"),
             command=d.get("command"),
+            extra=extra,
         )
 
         if instance.registry is False:
@@ -114,7 +118,11 @@ class MCPDependency:
         return self.registry is False
 
     def to_dict(self) -> dict:
-        """Serialize to dict, including only non-None fields."""
+        """Serialize to dict, including only non-None fields.
+
+        ``extra`` keys are merged at the top level but cannot shadow
+        known fields (known fields always win).
+        """
         result: dict[str, Any] = {"name": self.name}
         for field_name in (
             "transport",
@@ -131,6 +139,10 @@ class MCPDependency:
             value = getattr(self, field_name)
             if value is not None or (field_name == "registry" and value is False):
                 result[field_name] = value
+        if self.extra:
+            for k, v in self.extra.items():
+                if k not in result:
+                    result[k] = v
         return result
 
     _VALID_TRANSPORTS = frozenset({"stdio", "sse", "http", "streamable-http"})
@@ -169,6 +181,8 @@ class MCPDependency:
                 parts.append(f"command={preview!r}")
             else:
                 parts.append(f"command=<{type(self.command).__name__}>")
+        if self.extra:
+            parts.append(f"extra=<{len(self.extra)} key(s)>")
         return f"MCPDependency({', '.join(parts)})"
 
     def validate(self, strict: bool = True) -> None:

@@ -346,6 +346,10 @@ class MCPIntegrator:
         if dep.tools:
             info["_apm_tools_override"] = dep.tools
 
+        # Pass through harness-specific extra keys for adapters to merge
+        if hasattr(dep, "extra") and dep.extra:
+            info["_extra"] = dict(dep.extra)
+
         return info
 
     @staticmethod
