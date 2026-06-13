@@ -351,6 +351,96 @@ class TestManagedSectionWriteIntegration:
         with pytest.raises(ManagedSectionError, match=r"(?i)does not exist|not exist|create it"):
             compiler._write_output_file_with_config(str(output_file), "New content.\n", config)
 
+
+class TestManagedSectionDistributed:
+    """Regression tests for managed_section in distributed compilation (issue #1764)."""
+
+    def test_distributed_root_agents_md_honours_managed_section(self, tmp_path):
+        """Root AGENTS.md preserves human content when managed_section is active."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
+        start = "<!-- apm:start -->"
+        end = "<!-- apm:end -->"
+        root_agents = tmp_path / "AGENTS.md"
+        root_agents.write_text(
+            "# Team guidance\n\n"
+            "Human-authored content.\n\n"
+            f"{start}\n"
+            "Old APM block.\n"
+            f"{end}\n\n"
+            "Footer stays.\n"
+        )
+
+        config = CompilationConfig(
+            agents_md_mode="managed_section",
+            agents_md_start_marker=start,
+            agents_md_end_marker=end,
+            dry_run=False,
+        )
+
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._write_distributed_file(root_agents, "New APM block.", config)
+
+        written = root_agents.read_text()
+        assert "Human-authored content." in written
+        assert "Footer stays." in written
+        assert "New APM block." in written
+        assert "Old APM block." not in written
+
+    def test_distributed_subdir_agents_md_ignores_managed_section(self, tmp_path):
+        """Sub-directory AGENTS.md is fully overwritten even with managed_section."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
+        start = "<!-- apm:start -->"
+        end = "<!-- apm:end -->"
+        subdir = tmp_path / "src"
+        subdir.mkdir()
+        subdir_agents = subdir / "AGENTS.md"
+        subdir_agents.write_text(
+            "# Old content\n\n"
+            f"{start}\n"
+            "Old APM block.\n"
+            f"{end}\n\n"
+            "Human content that will be overwritten.\n"
+        )
+
+        config = CompilationConfig(
+            agents_md_mode="managed_section",
+            agents_md_start_marker=start,
+            agents_md_end_marker=end,
+            dry_run=False,
+        )
+
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._write_distributed_file(subdir_agents, "Fully new content.", config)
+
+        written = subdir_agents.read_text()
+        assert written == "Fully new content."
+        assert "Human content that will be overwritten." not in written
+
+    def test_distributed_root_agents_md_full_mode_overwrites(self, tmp_path):
+        """Root AGENTS.md is fully overwritten when mode is 'full' (default)."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
+        root_agents = tmp_path / "AGENTS.md"
+        root_agents.write_text("Old content that should be replaced.\n")
+
+        config = CompilationConfig(
+            agents_md_mode="full",
+            dry_run=False,
+        )
+
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._write_distributed_file(root_agents, "Completely new content.", config)
+
+        written = root_agents.read_text()
+        assert written == "Completely new content."
+        assert "Old content" not in written
+
+
+class TestManagedSectionDirectoryAtPath:
+    """Regression: directory at target path produces clear error."""
+
     def test_write_output_file_managed_section_directory_at_path(self, tmp_path):
         """When mode=managed_section and a directory occupies the target path, raise ManagedSectionError.
 
