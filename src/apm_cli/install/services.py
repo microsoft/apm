@@ -174,19 +174,6 @@ def _log_hook_display_payloads(
                 logger.verbose_detail(f"  |     {_jline}")
 
 
-def _log_bin_status(
-    skill_result: Any,
-    suffix: str,
-    package_name: str,
-    package_info: Any,
-    log_fn,
-) -> None:
-    """Emit integration-tree lines for bin/ deployment or skip reasons."""
-    from apm_cli.install.exec_gate import log_bin_status
-
-    log_bin_status(skill_result, suffix, package_name, package_info, log_fn)
-
-
 def _check_executable_approval(
     package_name: str,
     package_info: Any,
@@ -584,7 +571,9 @@ def integrate_package_primitives(
                 f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_suffix}"
             )
     if skill_result.bin_deployed > 0 or skill_result.bin_skipped_reason:
-        _log_bin_status(skill_result, _skill_suffix, package_name, package_info, _log_integration)
+        from apm_cli.install.exec_gate import log_bin_status
+
+        log_bin_status(skill_result, _skill_suffix, package_name, package_info, _log_integration)
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
         # #1716: also record the bundle's contained files so per-file
