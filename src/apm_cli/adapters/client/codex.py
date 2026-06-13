@@ -274,6 +274,7 @@ class CodexClientAdapter(MCPClientAdapter):
             if http_headers:
                 remote_config["http_headers"] = http_headers
                 self._warn_input_variables(http_headers, server_name, "Codex CLI")
+            self._merge_extra(remote_config, server_info)
             return remote_config
 
         if not packages:

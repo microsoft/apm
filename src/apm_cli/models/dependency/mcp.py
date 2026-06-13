@@ -23,6 +23,7 @@ _KNOWN_DICT_KEYS = frozenset(
         "tools",
         "url",
         "command",
+        "extra",  # explicit extra block is also a known key
     }
 )
 
@@ -74,8 +75,13 @@ class MCPDependency:
 
         unknown = sorted(str(k) for k in d if k not in _KNOWN_DICT_KEYS)
         extra: dict[str, Any] | None = None
+        # Merge unknown top-level keys with an explicit 'extra:' block
         if unknown:
             extra = {str(k): d[k] for k in d if str(k) in unknown}
+        explicit_extra = d.get("extra")
+        if isinstance(explicit_extra, dict):
+            extra = {**(extra or {}), **explicit_extra}
+        if unknown:
             safe_name = ascii(str(d["name"]))[1:-1]
             safe_keys = ", ".join(ascii(k)[1:-1] for k in unknown)
             _rich_warning(

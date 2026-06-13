@@ -347,3 +347,72 @@ class TestAdapterMergeExtra:
         server_info = {"name": "test"}
         MCPClientAdapter._merge_extra(config, server_info)
         assert config == {"type": "http"}
+
+
+class TestExplicitExtraBlock:
+    """Explicit 'extra:' YAML key merges into the extra dict."""
+
+    def test_explicit_extra_block_captured(self):
+        """An explicit 'extra:' dict merges into dep.extra."""
+        with patch(_WARN_PATH) as mock_warn:
+            dep = MCPDependency.from_dict(
+                {
+                    "name": "server",
+                    "transport": "http",
+                    "extra": {"oauth": {"clientId": "abc"}},
+                }
+            )
+        mock_warn.assert_not_called()
+        assert dep.extra == {"oauth": {"clientId": "abc"}}
+
+    def test_explicit_extra_merged_with_unknown_keys(self):
+        """Explicit 'extra:' and unknown top-level keys both land in extra."""
+        with patch(_WARN_PATH):
+            dep = MCPDependency.from_dict(
+                {
+                    "name": "server",
+                    "transport": "http",
+                    "extra": {"oauth": {"clientId": "abc"}},
+                    "customSetting": "value",
+                }
+            )
+        assert dep.extra["oauth"] == {"clientId": "abc"}
+        assert dep.extra["customSetting"] == "value"
+
+    def test_explicit_extra_not_nested(self):
+        """The explicit 'extra:' key itself does not appear nested inside extra."""
+        with patch(_WARN_PATH) as mock_warn:
+            dep = MCPDependency.from_dict(
+                {
+                    "name": "server",
+                    "extra": {"key": "val"},
+                }
+            )
+        mock_warn.assert_not_called()
+        assert "extra" not in dep.extra
+        assert dep.extra == {"key": "val"}
+
+
+class TestApplyOverlayExtra:
+    """_apply_overlay propagates dep.extra for registry-resolved deps."""
+
+    def test_overlay_propagates_extra(self):
+        """_apply_overlay sets _extra on cached server_info when dep has extra."""
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        cache = {"my-server": {"name": "my-server", "packages": []}}
+        dep = MCPDependency(
+            name="my-server",
+            extra={"oauth": {"clientId": "abc"}},
+        )
+        MCPIntegrator._apply_overlay(cache, dep)
+        assert cache["my-server"]["_extra"] == {"oauth": {"clientId": "abc"}}
+
+    def test_overlay_no_extra_when_none(self):
+        """_apply_overlay does not set _extra when dep.extra is None."""
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        cache = {"my-server": {"name": "my-server", "packages": []}}
+        dep = MCPDependency(name="my-server")
+        MCPIntegrator._apply_overlay(cache, dep)
+        assert "_extra" not in cache["my-server"]
