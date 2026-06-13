@@ -24,13 +24,14 @@ see [Primitive types](./primitive-types/).
 | cursor          | `.cursor/`             |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
 | codex           | `.codex/` + `.agents/` |     [ ]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
+| antigravity     | `.agent/`              |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/`           |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | kiro            | `.kiro/`               |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
-Gemini, and Codex by default (see [Skills convergence](#skills-convergence)
+Gemini, Antigravity, and Codex by default (see [Skills convergence](#skills-convergence)
 below). Claude, Windsurf, and Kiro keep target-native skill directories.
 
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
@@ -60,6 +61,7 @@ list before `compile` or `install`.
 | cursor   | `.cursor/` directory, or `.cursorrules` file  |
 | codex    | `.codex/` directory                           |
 | gemini   | `.gemini/` directory, or `GEMINI.md` file     |
+| antigravity | `.agent/` directory                        |
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
 | kiro     | `.kiro/` directory                            |
@@ -145,6 +147,21 @@ Gemini CLI.
   - skills: `.agents/skills/<name>/SKILL.md`
   - hooks: merged into `.gemini/settings.json`
 - **Compile output.** `GEMINI.md`. Gemini CLI does not read per-file rules from `.gemini/rules/`, so `instructions` is compile-only.
+
+## antigravity
+
+Google Antigravity CLI (`agy`), successor to Gemini CLI.
+
+- **Detection.** `.agent/` directory.
+- **Deploy directory.** `.agent/` (project scope); `~/.antigravity/` (user scope).
+- **Supported primitives.** instructions, commands, skills, hooks, mcp.
+- **File conventions.**
+  - instructions: `.agent/rules/<name>.md`
+  - commands: `.agent/commands/<name>.toml` (same TOML format as Gemini)
+  - skills: `.agents/skills/<name>/SKILL.md`
+  - hooks: merged into `.agent/settings.json`
+  - mcp: `.agent/settings.json` (`mcpServers` key, same schema as Gemini)
+- **Compile output.** `AGENTS.md`.
 
 ## opencode
 

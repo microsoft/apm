@@ -79,6 +79,7 @@ Each target is identified by a slug used in `apm.yml`'s `targets:` field and on 
 | `cursor` | `.cursor/` | agents |
 | `codex` | `.codex/` plus `.agents/` for skills | agents |
 | `gemini` | `.gemini/` | gemini |
+| `antigravity` | `.agent/` (project), `~/.antigravity/` (user) | agents |
 | `opencode` | `.opencode/` (project), `~/.config/opencode/` (user) | agents |
 | `windsurf` | `.windsurf/` (project), `~/.codeium/windsurf/` (user) | agents |
 | `kiro` | `.kiro/` (project and user) | agents |
@@ -90,6 +91,7 @@ Notes per target:
 - **cursor** -- Cursor IDE. Rules use the `.mdc` extension. Instructions are not deployable at user scope (Cursor exposes them via the Settings UI only).
 - **codex** -- Codex CLI. Agents and hooks use TOML; skills use the cross-tool `.agents/` directory.
 - **gemini** -- Gemini CLI. Commands are TOML. Hooks merge into `.gemini/settings.json`. No native agents or instructions primitives -- both arrive via compiled context files.
+- **antigravity** -- Google Antigravity CLI (`agy`), successor to Gemini CLI. Commands are TOML. Instructions deploy as rules under `.agent/rules/`. Hooks merge into `.agent/settings.json`.
 - **opencode** -- OpenCode. No hooks support.
 - **windsurf** -- Windsurf / Cascade. No native agents primitive -- Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so personas ship as skills. Workflows are the harness's name for commands.
 - **kiro** -- Kiro IDE. Instructions become steering files, skills stay as `SKILL.md` folders, hooks are individual JSON files, and MCP lands in `.kiro/settings/mcp.json`.
@@ -160,7 +162,7 @@ Full pattern, the three pack-time gotchas, and verification steps: [Dev-only pri
 
 1. Explicit `--target <slug>` flag, when passed.
 2. The `targets:` field in `apm.yml`, when present.
-3. Auto-detection: any harness whose root directory (`.github/`, `.claude/`, `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `.kiro/`) already exists in the workspace is selected.
+3. Auto-detection: any harness whose root directory (`.github/`, `.claude/`, `.cursor/`, `.codex/`, `.gemini/`, `.agent/`, `.opencode/`, `.windsurf/`, `.kiro/`) already exists in the workspace is selected.
 4. Fallback: `minimal` -- APM writes `AGENTS.md` only and skips folder
    integration. Create one of the harness folders above (or set
    `targets:` explicitly) for full integration.
