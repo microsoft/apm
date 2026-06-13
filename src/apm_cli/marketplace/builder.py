@@ -28,6 +28,7 @@ import threading
 import urllib.error
 import urllib.request  # noqa: F401 -- patchable at apm_cli.marketplace.builder.urllib.request.urlopen
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -72,9 +73,30 @@ from .output_profiles import (
     MarketplaceOutputProfile,
 )
 from .ref_resolver import RefResolver
-from .yml_schema import MarketplaceYml, load_marketplace_yml
+from .yml_schema import (
+    MarketplaceYml,
+    load_marketplace_yml,
+    split_source_base,
+)
 
 logger = logging.getLogger(__name__)
+
+_LOCAL_METADATA_MAX_BYTES = 64 * 1024
+
+
+@dataclass(frozen=True)
+class _SourceBaseCoords:
+    """Parsed sourceBase coordinates cached for one marketplace build."""
+
+    host: str
+    path_prefix: str
+    source_base: str
+
+    @property
+    def org_hint(self) -> str:
+        """Return the leading path segment used for per-org auth lookup."""
+        return self.path_prefix.split("/", 1)[0]
+
 
 __all__ = [
     "BuildDiagnostic",
@@ -127,8 +149,13 @@ class MarketplaceBuilder(_BuilderResolveMixin):
         self._host: str = default_host() or "github.com"
         self._host_info: HostInfo | None = None
         self._auth_resolved: bool = False
-        self._host_resolvers: dict[str, RefResolver] = {}
+        # Per-host RefResolver cache, keyed by host and optional org hint.
+        # Pre-warmed on the main thread before workers spawn; lock guards
+        # against future refactors that allow worker-side cache misses.
+        self._host_resolvers: dict[tuple[str, str | None], RefResolver] = {}
         self._host_resolvers_lock = threading.Lock()
+        self._source_base_parts: _SourceBaseCoords | None = None
+        self._source_base_parts_loaded = False
 
     @classmethod
     def from_config(
@@ -159,6 +186,21 @@ class MarketplaceBuilder(_BuilderResolveMixin):
                 self._yml = load_marketplace_yml(self._yml_path)
         return self._yml
 
+    def _get_source_base_parts(self) -> _SourceBaseCoords | None:
+        """Return cached sourceBase coordinates for this builder."""
+        if not self._source_base_parts_loaded:
+            yml = self._load_yml()
+            source_base = getattr(yml, "source_base", None)
+            if isinstance(source_base, str) and source_base:
+                base_host, base_path = split_source_base(source_base)
+                self._source_base_parts = _SourceBaseCoords(
+                    host=base_host,
+                    path_prefix=base_path,
+                    source_base=source_base,
+                )
+            self._source_base_parts_loaded = True
+        return self._source_base_parts
+
     def _get_resolver(self) -> RefResolver:
         if self._resolver is None:
             self._ensure_auth()
@@ -179,31 +221,45 @@ class MarketplaceBuilder(_BuilderResolveMixin):
             return None
         return host
 
-    def _get_resolver_for_host(self, host: str | None) -> RefResolver:
-        """Return a RefResolver bound to *host* (default when ``None``)."""
-        if host is None or host == self._host:
+    def _get_resolver_for_host(self, host: str | None, *, org: str | None = None) -> RefResolver:
+        """Return a RefResolver bound to *host* and optional auth org hint.
+
+        Non-default hosts and sourceBase-derived org hints go through
+        ``AuthResolver.resolve(host, org=org)`` so per-org variables are
+        honored before ambient git credentials.  Existing default-host calls
+        without an org hint keep the legacy resolver path.
+        """
+        if org is None and (host is None or host == self._host):
             return self._get_resolver()
+        resolved_host = host or self._host
+        key = (resolved_host, org)
         with self._host_resolvers_lock:
-            cached = self._host_resolvers.get(host)
+            cached = self._host_resolvers.get(key)
             if cached is not None:
                 return cached
-            token = self._resolve_token_for_host(host)
+            token = self._resolve_token_for_host(resolved_host, org=org)
             logger.debug(
-                "Creating per-host RefResolver for %s (token=%s)",
-                host,
+                "Creating per-host RefResolver for %s (org=%s, token=%s)",
+                resolved_host,
+                org or "none",
                 "set" if token else "unset",
             )
             resolver = RefResolver(
                 timeout_seconds=self._options.timeout_seconds,
                 offline=self._options.offline,
-                host=host,
+                host=resolved_host,
                 token=token,
             )
-            self._host_resolvers[host] = resolver
+            self._host_resolvers[key] = resolver
             return resolver
 
-    def _resolve_token_for_host(self, host: str) -> str | None:
-        """Resolve an auth token for a non-default *host* via ``AuthResolver``."""
+    def _resolve_token_for_host(self, host: str, *, org: str | None = None) -> str | None:
+        """Resolve an auth token for *host* via ``AuthResolver``.
+
+        Returns ``None`` -- letting ``git`` fall back to ambient credentials
+        -- when offline, when no token is configured for the host, or when
+        ``AuthResolver`` raises.  Never raises.
+        """
         if self._options.offline:
             return None
         try:
@@ -213,7 +269,7 @@ class MarketplaceBuilder(_BuilderResolveMixin):
             if resolver is None:
                 resolver = AuthResolver()
                 self._auth_resolver = resolver
-            ctx = resolver.resolve(host)  # type: ignore[union-attr]
+            ctx = resolver.resolve(host) if org is None else resolver.resolve(host, org=org)
             if ctx.token:
                 logger.debug("Resolved token for host %s (source=%s)", host, ctx.source)
                 return ctx.token
@@ -293,17 +349,40 @@ class MarketplaceBuilder(_BuilderResolveMixin):
             logger.debug("Could not resolve GitHub token for metadata fetch", exc_info=True)
         return None
 
-    def _prefetch_metadata(
-        self, resolved: tuple[ResolvedPackage, ...] | list[ResolvedPackage]
-    ) -> dict[str, dict[str, str]]:
-        """Concurrently fetch remote metadata for all packages."""
+    def _prefetch_metadata(self, resolved: list[ResolvedPackage]) -> dict[str, dict[str, str]]:
+        """Fetch ``description``/``version`` metadata for resolved packages.
+
+        Returns a mapping of ``{package_name: {"description": ..., "version": ...}}``
+        for successful fetches.  Both local-path and remote packages are
+        read from each package's own ``apm.yml`` so the output mapper can
+        apply one fallback rule regardless of source kind.
+
+        Local reads always run (filesystem only).  Remote fetches are
+        skipped when ``--offline`` is set.  A GitHub token is resolved
+        once before spawning worker threads and stored on
+        ``self._github_token`` for the workers to read.
+        """
+        results: dict[str, dict[str, str]] = {}
+
+        # Local-path packages: read each apm.yml directly from disk.
+        # Cheap and serial -- no network, no thread pool needed.
+        for pkg in resolved:
+            if pkg.source_repo:
+                continue
+            meta = self._fetch_local_metadata(pkg)
+            if meta:
+                results[pkg.name] = meta
+
         if self._options.offline:
-            return {}
+            return results
+
         remote = [pkg for pkg in resolved if pkg.source_repo]
         if not remote:
-            return {}
+            return results
+
+        # Resolve token once -- threads read self._github_token (immutable).
         self._ensure_auth()
-        results: dict[str, dict[str, str]] = {}
+
         workers = min(self._options.concurrency, len(remote))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             future_to_name = {

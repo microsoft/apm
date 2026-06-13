@@ -26,7 +26,29 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.compilation.constitution import clear_constitution_cache
+
 CLI = [sys.executable, "-m", "apm_cli.cli"]
+
+
+# ---------------------------------------------------------------------------
+# Module-level cache isolation
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_constitution_cache():
+    """Clear the module-level constitution cache before and after every test.
+
+    The cache is global; without this fixture a test that populates it can
+    leak state into later tests and cause unexpected CLAUDE.md emission or
+    suppressed stale-removal paths (mirrors the unit-test isolation in
+    test_stale_claude_md_cleanup_1729.py).
+    """
+    clear_constitution_cache()
+    yield
+    clear_constitution_cache()
+
 
 APM_YML = """name: test-dedup
 version: 1.0.0
@@ -103,6 +125,42 @@ def test_install_then_compile_skips_duplicated_instructions(project_with_instruc
             "section after install populated .claude/rules/. "
             "Body was:\n" + body
         )
+
+
+@pytest.mark.integration
+def test_clean_flag_removes_stale_apm_generated_claude_md(project_with_instruction):
+    """apm compile --target claude --clean must remove a stale APM-generated
+    CLAUDE.md when .claude/rules/ is already populated.
+
+    Exercises the full CLI dispatch -> clean_orphaned=True -> _compile_claude_md
+    chain (unit tests bypass the CLI dispatch layer).
+    """
+    from apm_cli.compilation.claude_formatter import CLAUDE_HEADER
+
+    proj = project_with_instruction
+
+    # Populate .claude/rules/ manually so dedup fires without a full install.
+    rules_dir = proj / ".claude" / "rules"
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    (rules_dir / "style.md").write_text("Use type hints everywhere.\n", encoding="utf-8")
+
+    # Write a stale APM-generated CLAUDE.md with the marker.
+    (proj / "CLAUDE.md").write_text(
+        f"{CLAUDE_HEADER}\n\n# Project Standards\n\nUse type hints everywhere.\n",
+        encoding="utf-8",
+    )
+
+    compile_res = _run(proj, "compile", "--target", "claude", "--clean")
+    assert compile_res.returncode == 0, (
+        f"compile --clean stdout:\n{compile_res.stdout}\n"
+        f"compile --clean stderr:\n{compile_res.stderr}"
+    )
+
+    assert not (proj / "CLAUDE.md").exists(), (
+        "compile --target claude --clean must remove the stale APM-generated CLAUDE.md "
+        "when .claude/rules/ is already populated. "
+        f"stdout:\n{compile_res.stdout}\nstderr:\n{compile_res.stderr}"
+    )
 
 
 @pytest.mark.integration

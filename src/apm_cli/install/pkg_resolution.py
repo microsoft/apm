@@ -152,10 +152,7 @@ def _resolve_package_references(
                         if logger:
                             logger.validation_fail(package, reason)
                         continue
-                    marketplace_provenance = {
-                        "discovered_via": marketplace_name,
-                        "marketplace_plugin_name": plugin_name,
-                    }
+                    marketplace_provenance = resolution.provenance(marketplace_name, plugin_name)
                     package = canonical_str
                     marketplace_dep_ref = getattr(resolution, "dependency_reference", None)
                 except Exception as mkt_err:

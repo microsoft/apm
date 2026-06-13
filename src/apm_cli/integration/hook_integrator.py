@@ -46,7 +46,6 @@ Script path handling:
 import json
 import logging
 import shutil
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -73,8 +72,10 @@ from .hook_merge import (
 from .hook_transforms import (
     _APM_HOOKS_SIDECAR,
     _HOOK_EVENT_MAP,
+    _MERGE_HOOK_TARGETS,
     _emit_hook_event_diagnostics,
     _filter_hook_files_for_target,
+    _MergeHookConfig,
     _rewrite_command_for_target,
     _rewrite_hooks_data,
 )
@@ -119,46 +120,6 @@ class HookIntegrationResult(IntegrationResult):
     def hooks_integrated(self):
         """Alias for files_integrated (backward compat)."""
         return self.files_integrated
-
-
-@dataclass(frozen=True)
-class _MergeHookConfig:
-    """Configuration for targets that merge hooks into a single JSON file."""
-
-    config_filename: str  # e.g. "settings.json" or "hooks.json"
-    target_key: str  # target name passed to _rewrite_hooks_data
-    require_dir: bool  # True = skip if target dir doesn't exist
-    schema_strict: bool = False  # True = strip _apm_source before writing to disk
-
-
-_MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
-    "claude": _MergeHookConfig(
-        config_filename="settings.json",
-        target_key="claude",
-        require_dir=False,
-        schema_strict=True,
-    ),
-    "cursor": _MergeHookConfig(
-        config_filename="hooks.json",
-        target_key="cursor",
-        require_dir=True,
-    ),
-    "codex": _MergeHookConfig(
-        config_filename="hooks.json",
-        target_key="codex",
-        require_dir=True,
-    ),
-    "gemini": _MergeHookConfig(
-        config_filename="settings.json",
-        target_key="gemini",
-        require_dir=True,
-    ),
-    "windsurf": _MergeHookConfig(
-        config_filename="hooks.json",
-        target_key="windsurf",
-        require_dir=True,
-    ),
-}
 
 
 class HookIntegrator(BaseIntegrator):
@@ -702,6 +663,20 @@ class HookIntegrator(BaseIntegrator):
                 managed_files=managed_files,
                 diagnostics=diagnostics,
                 target=target,
+            )
+
+        if target.name == "kiro":
+            from apm_cli.integration.kiro_hook_integrator import integrate_kiro_hooks
+
+            return integrate_kiro_hooks(
+                self,
+                package_info,
+                project_root,
+                force=force,
+                managed_files=managed_files,
+                diagnostics=diagnostics,
+                target=target,
+                user_scope=user_scope,
             )
 
         config = _MERGE_HOOK_TARGETS.get(target.name)

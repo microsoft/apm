@@ -272,10 +272,13 @@ class TestConfigureMcpServerPassesRuntimeVars(unittest.TestCase):
                 "playwright-mcp",
                 runtime_vars=runtime_vars,
             )
-            mock_fmt.assert_called_once_with(
-                self.server_info,
-                runtime_vars=runtime_vars,
-            )
+            # Board #20 added env_overrides + existing_server_config kwargs for
+            # reinstall-preservation; assert runtime_vars is still threaded through
+            # without over-constraining the full call signature.
+            mock_fmt.assert_called_once()
+            args, kwargs = mock_fmt.call_args
+            self.assertEqual(args[0], self.server_info)
+            self.assertEqual(kwargs.get("runtime_vars"), runtime_vars)
 
 
 if __name__ == "__main__":

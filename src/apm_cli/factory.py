@@ -7,7 +7,9 @@ from .adapters.client.codex import CodexClientAdapter
 from .adapters.client.copilot import CopilotClientAdapter
 from .adapters.client.cursor import CursorClientAdapter
 from .adapters.client.gemini import GeminiClientAdapter
+from .adapters.client.hermes import HermesClientAdapter
 from .adapters.client.intellij import IntelliJClientAdapter
+from .adapters.client.kiro import KiroClientAdapter
 from .adapters.client.opencode import OpenCodeClientAdapter
 from .adapters.client.vscode import VSCodeClientAdapter
 from .adapters.client.windsurf import WindsurfClientAdapter
@@ -26,9 +28,11 @@ _MCP_CLIENT_REGISTRY: dict[str, type] = {
     "cursor": CursorClientAdapter,
     "gemini": GeminiClientAdapter,
     "intellij": IntelliJClientAdapter,
+    "kiro": KiroClientAdapter,
     "opencode": OpenCodeClientAdapter,
     "windsurf": WindsurfClientAdapter,
     "claude": ClaudeClientAdapter,
+    "hermes": HermesClientAdapter,
 }
 
 

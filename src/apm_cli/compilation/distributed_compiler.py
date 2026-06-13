@@ -6,6 +6,7 @@ for nested agent context files.
 """
 
 import builtins
+import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,13 +16,20 @@ from ..output.models import CompilationResults
 from ..primitives.models import Instruction, PrimitiveCollection
 from ..utils.paths import resolve_base_and_source_dirs
 from ..version import get_version
-from ._distributed_orphans import _DistributedOrphansMixin
+from ._distributed_orphans import AGENTS_MD_GENERATED_MARKER, _DistributedOrphansMixin
 from .constants import BUILD_ID_PLACEHOLDER
 from .context_optimizer import ContextOptimizer
 from .link_resolver import UnifiedLinkResolver
 from .template_builder import (
     build_attributed_instructions,
 )
+
+_logger = logging.getLogger(__name__)
+
+# AGENTS_MD_GENERATED_MARKER is defined in ._distributed_orphans (the orphan/
+# shell-detection mixin that consumes it) and re-exported here because it is a
+# stable contract surface that gates --clean deletion and is depended on by
+# tests. Mirrors the public CLAUDE_HEADER marker on the Claude path.
 
 # CRITICAL: Shadow Click commands to prevent namespace collision
 set = builtins.set
@@ -67,6 +75,15 @@ class CompilationResult:
     warnings: builtins.list[str] = field(default_factory=list)
     errors: builtins.list[str] = field(default_factory=list)
     stats: builtins.dict[str, float] = field(default_factory=dict)  # Support optimization metrics
+    # Paths suppressed because they would have been header/footer-only shells
+    # (skip_instructions=True, no constitution).  Exposed for callers that
+    # need to emit a user-visible INFO message or perform --clean removal.
+    suppressed_empty_paths: builtins.list[Path] = field(default_factory=list)
+
+    @property
+    def all_suppressed(self) -> bool:
+        """Return True when every planned AGENTS.md placement was suppressed."""
+        return bool(self.suppressed_empty_paths) and not self.content_map
 
 
 class DistributedAgentsCompiler(_DistributedOrphansMixin):
@@ -149,6 +166,9 @@ class DistributedAgentsCompiler(_DistributedOrphansMixin):
             # .github/instructions/; omitting them here avoids Copilot reading
             # duplicate content from both AGENTS.md and .github/instructions/.
             skip_instructions = config.get("skip_instructions", False)
+            # Mirrors CompilationConfig.with_constitution: when False, the writer
+            # skips constitution injection, so the emptiness predicate must agree.
+            with_constitution = config.get("with_constitution", True)
 
             # Phase 0: Context Link Resolution
             # Register all context files and compile referenced ones
@@ -191,9 +211,57 @@ class DistributedAgentsCompiler(_DistributedOrphansMixin):
                 placement_map, primitives, source_attribution=source_attribution
             )
 
-            # Phase 4: Handle orphaned file cleanup
+            # Phase 3b: Build content map, suppressing placements that would be
+            # header/footer-only shells when skip_instructions is True.
+            #
+            # Suppression fires only when ALL of these hold:
+            #   1. skip_instructions is True (instructions already in
+            #      .github/instructions/; dedup is active)
+            #   2. The placement's body would be empty -- i.e. there are no
+            #      instructions to include AND no constitution in the placement
+            #      directory that would be injected at write time.
+            #
+            # Placements carrying non-instruction content (constitution present,
+            # non-empty instructions list that somehow survives) are kept.
+            # Multi-target builds where skip_instructions=False are unaffected.
+            content_map: builtins.dict[Path, str] = {}
+            suppressed_paths: builtins.list[Path] = []
+            # Cache constitution-existence per directory for the duration of this
+            # compile so repeated placements under the same tree do not re-read the
+            # same constitution file from disk (O(placements) reads -> O(dirs)).
+            constitution_cache: builtins.dict[Path, bool] = {}
+
+            for p in placements:
+                # Decide suppression BEFORE generating content: a suppressed
+                # placement is never written, so generating + link-resolving its
+                # content would be wasted work.
+                if skip_instructions and self._is_placement_empty_shell(
+                    p,
+                    with_constitution=with_constitution,
+                    constitution_cache=constitution_cache,
+                ):
+                    suppressed_paths.append(p.agents_path)
+                    _logger.debug(
+                        "AGENTS.md suppressed (would-be-empty shell, instructions already"
+                        " in .github/instructions/): %s",
+                        p.agents_path,
+                    )
+                    continue
+                content_map[p.agents_path] = self._generate_agents_content(
+                    p, primitives, skip_instructions=skip_instructions
+                )
+
+            # Phase 4: Handle orphaned file cleanup.
+            # generated_paths = ALL placement paths (written + suppressed this run).
+            # suppressed_set (built inside _find_orphaned_agents_files) promotes
+            # suppressed paths to orphan candidates only under --clean, so stale
+            # empty shells from prior runs are removed.  Marker-gated: hand-authored
+            # files are never deleted.
             generated_paths = [p.agents_path for p in placements]
-            orphaned_files = self._find_orphaned_agents_files(generated_paths)
+            orphaned_files = self._find_orphaned_agents_files(
+                generated_paths,
+                suppressed_empty_paths=suppressed_paths if clean_orphaned else [],
+            )
 
             if orphaned_files:
                 # Always show warnings about orphaned files
@@ -213,17 +281,16 @@ class DistributedAgentsCompiler(_DistributedOrphansMixin):
                 self.warnings.extend(coverage_validation)
 
             # Compile statistics
-            stats = self._compile_distributed_stats(placements, primitives)
+            stats = self._compile_distributed_stats(placements, primitives, content_map=content_map)
 
             # Optional: Get referenced contexts for reporting (doesn't copy)
             try:
-                # Collect all files from placements for context reference scanning
+                # Collect all files from placements for context reference scanning.
+                # PlacementResult has no `agents` attr; the old loop was dead code.
                 all_files_to_scan = []
                 for placement in placements:
                     for instruction in placement.instructions:
                         all_files_to_scan.append(instruction.file_path)
-                    for agent in placement.agents:
-                        all_files_to_scan.append(agent.file_path)
 
                 referenced_contexts = self.link_resolver.get_referenced_contexts(all_files_to_scan)
                 stats["contexts_referenced"] = len(referenced_contexts)
@@ -233,15 +300,11 @@ class DistributedAgentsCompiler(_DistributedOrphansMixin):
             return CompilationResult(
                 success=len(self.errors) == 0,
                 placements=placements,
-                content_map={
-                    p.agents_path: self._generate_agents_content(
-                        p, primitives, skip_instructions=skip_instructions
-                    )
-                    for p in placements
-                },
+                content_map=content_map,
                 warnings=self.warnings.copy(),
                 errors=self.errors.copy(),
                 stats=stats,
+                suppressed_empty_paths=suppressed_paths,
             )
 
         except Exception as e:
@@ -568,7 +631,7 @@ class DistributedAgentsCompiler(_DistributedOrphansMixin):
 
         # Header with source attribution
         sections.append("# AGENTS.md")
-        sections.append("<!-- Generated by APM CLI from distributed .apm/ primitives -->")
+        sections.append(AGENTS_MD_GENERATED_MARKER)
         sections.append(BUILD_ID_PLACEHOLDER)
         sections.append(f"<!-- APM Version: {get_version()} -->")
 
@@ -612,13 +675,23 @@ class DistributedAgentsCompiler(_DistributedOrphansMixin):
         return content
 
     def _compile_distributed_stats(
-        self, placements: builtins.list[PlacementResult], primitives: PrimitiveCollection
+        self,
+        placements: builtins.list[PlacementResult],
+        primitives: PrimitiveCollection,
+        *,
+        content_map: builtins.dict[Path, str] | None = None,
     ) -> builtins.dict[str, float]:
         """Compile statistics about the distributed compilation with optimization metrics.
 
         Args:
-            placements (List[PlacementResult]): Generated placements.
+            placements (List[PlacementResult]): All placements analyzed (written + suppressed).
             primitives (PrimitiveCollection): Full primitive collection.
+            content_map: Mapping of agents_path -> content for placements that will actually
+                be written (i.e. excluding suppressed empty-shell placements).  When provided,
+                ``agents_files_generated`` reflects the number of files that will be written
+                rather than the number of placements analyzed (which overcounts under
+                skip_instructions deduplication).  Defaults to None for back-compat with
+                direct callers that do not pass the content map.
 
         Returns:
             Dict[str, float]: Compilation statistics including optimization metrics.
@@ -626,13 +699,22 @@ class DistributedAgentsCompiler(_DistributedOrphansMixin):
         total_instructions = sum(len(p.instructions) for p in placements)
         total_patterns = sum(len(p.coverage_patterns) for p in placements)
 
+        # agents_files_generated: number of files that will actually be written.
+        # When content_map is provided (normal compile_distributed() path), use its
+        # length so suppressed empty-shell placements are not counted.  Fall back to
+        # len(placements) for back-compat with callers that do not pass content_map.
+        files_generated = len(content_map) if content_map is not None else len(placements)
+
         # Get optimization metrics
         placement_map = {Path(p.agents_path.parent): p.instructions for p in placements}
         optimization_stats = self.context_optimizer.get_optimization_stats(placement_map)
 
         # Combine traditional stats with optimization metrics
         stats = {
-            "agents_files_generated": len(placements),
+            "agents_files_generated": files_generated,
+            # Total placements analyzed (includes suppressed empty-shell placements).
+            # Useful for audit/debug: agents_files_generated <= placements_analyzed.
+            "placements_analyzed": len(placements),
             "total_instructions_placed": total_instructions,
             "total_patterns_covered": total_patterns,
             "primitives_found": primitives.count(),

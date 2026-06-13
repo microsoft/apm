@@ -9,6 +9,7 @@ call time to avoid circular imports with client.py).
 """
 
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -78,6 +79,8 @@ def _sanitize_cache_name(name: str) -> str:
 def _cache_key(source) -> str:
     """Cache key that includes kind+host to avoid collisions across hosts."""
     kind = source.kind
+    if kind == "url":
+        return f"url__{hashlib.sha256(source.url.encode()).hexdigest()[:16]}"
     if kind == "local":
         return f"local__{_sanitize_cache_name(source.name)}"
     if kind == "git":
@@ -135,20 +138,43 @@ def _read_stale_cache(name: str) -> dict | None:
         return None
 
 
-def _write_cache(name: str, data: dict) -> None:
+def _write_cache(
+    name: str,
+    data: dict,
+    *,
+    index_digest: str = "",
+    etag: str = "",
+    last_modified: str = "",
+) -> None:
     """Write marketplace data and metadata to cache."""
     data_path = _cache_data_path(name)
     meta_path = _cache_meta_path(name)
     try:
         with open(data_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
+        meta: dict = {"fetched_at": time.time(), "ttl_seconds": _CACHE_TTL_SECONDS}
+        if index_digest:
+            meta["index_digest"] = index_digest
+        if etag:
+            meta["etag"] = etag
+        if last_modified:
+            meta["last_modified"] = last_modified
         with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(
-                {"fetched_at": time.time(), "ttl_seconds": _CACHE_TTL_SECONDS},
-                f,
-            )
+            json.dump(meta, f, indent=2)
     except OSError as exc:
         logger.debug("Cache write failed for '%s': %s", name, exc)
+
+
+def _read_stale_meta(name: str) -> dict | None:
+    """Read cache metadata even when the data cache is expired."""
+    meta_path = _cache_meta_path(name)
+    if not os.path.exists(meta_path):
+        return None
+    try:
+        with open(meta_path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def _clear_cache(name: str) -> None:

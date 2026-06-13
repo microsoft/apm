@@ -23,13 +23,29 @@ from ._yml_models import (
     MarketplaceVersioning,
     PackageEntry,
 )
+from ._yml_source import (
+    SOURCE_BASE_RE as SOURCE_BASE_RE,
+)
+from ._yml_source import (
+    parse_source_base as parse_source_base,
+)
+from ._yml_source import (
+    split_source_base as split_source_base,
+)
+from ._yml_source import (
+    validate_source_value as validate_source_value,
+)
 from .errors import MarketplaceYmlError
 from .output_profiles import MARKETPLACE_OUTPUTS, known_output_names
 
 __all__ = [
     "LOCAL_SOURCE_RE",
+    "SOURCE_BASE_RE",
     "SOURCE_RE",
+    "parse_source_base",
     "split_host_from_source",
+    "split_source_base",
+    "validate_source_value",
 ]
 
 # ---------------------------------------------------------------------------
@@ -53,7 +69,10 @@ _SEMVER_RE = re.compile(
 #   - ``https://host.tld/owner/repo.git`` (same, with optional ``.git`` suffix)
 #   - ``./...`` (local path within the same repo)
 _HOST_PAT = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-]*"
-_OWNER_REPO_PAT = r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+"
+# SECURITY: segment regexes are shape filters only. Traversal defence lives in
+# validate_path_segments(), which rejects empty, '.', and '..' path segments.
+_SEGMENT_PAT = r"[A-Za-z0-9._-]+"
+_OWNER_REPO_PAT = rf"{_SEGMENT_PAT}/{_SEGMENT_PAT}"
 
 SOURCE_RE = re.compile(
     r"^(?:"
@@ -64,7 +83,9 @@ SOURCE_RE = re.compile(
     r")$"
 )
 LOCAL_SOURCE_RE = re.compile(r"^\./")
+# Matches ``host.tld/owner/repo`` (3 segments, first is FQDN-ish).
 _HOST_PREFIXED_SOURCE_RE = re.compile(rf"^({_HOST_PAT})/({_OWNER_REPO_PAT})$")
+# Matches ``https://host.tld/owner/repo[.git]`` and captures host + owner/repo.
 _HTTPS_URL_SOURCE_RE = re.compile(rf"^https://({_HOST_PAT})/({_OWNER_REPO_PAT})(?:\.git)?$")
 
 # ---------------------------------------------------------------------------
@@ -76,6 +97,7 @@ _TAG_PLACEHOLDERS = ("{version}", "{name}")
 # ---------------------------------------------------------------------------
 # Permitted key sets (strict mode)
 # ---------------------------------------------------------------------------
+
 
 _BUILD_KEYS = frozenset({"tagPattern"})
 
@@ -112,6 +134,7 @@ _APM_MARKETPLACE_KEYS = frozenset(
         "description",
         "version",
         "owner",
+        "sourceBase",
         "output",
         "outputs",
         "claude",
@@ -129,7 +152,7 @@ _CLAUDE_KEYS = frozenset({"output"})
 _CODEX_KEYS = frozenset({"output"})
 
 # ---------------------------------------------------------------------------
-# Public: source field splitter
+# Public: source field splitters
 # ---------------------------------------------------------------------------
 
 
@@ -176,21 +199,13 @@ def _validate_semver(version: str, *, context: str = "version") -> None:
         )
 
 
-def _validate_source(source: str, *, index: int) -> None:
+def _validate_source(source: str, *, index: int, source_base: str | None = None) -> None:
     """Validate ``source`` field shape and path safety."""
-    ctx = f"packages[{index}].source"
-    if not SOURCE_RE.match(source):
-        raise MarketplaceYmlError(
-            f"'{ctx}' must be one of "
-            f"'<owner>/<repo>', '<host.tld>/<owner>/<repo>', "
-            f"'https://<host.tld>/<owner>/<repo>[.git]', or './<path>', "
-            f"got '{source}'"
-        )
-    is_local = bool(LOCAL_SOURCE_RE.match(source))
-    try:
-        validate_path_segments(source, context=ctx, allow_current_dir=is_local)
-    except PathTraversalError as exc:
-        raise MarketplaceYmlError(str(exc)) from exc
+    validate_source_value(
+        source,
+        context=f"packages[{index}].source",
+        source_base=source_base,
+    )
 
 
 def _validate_tag_pattern(pattern: str, *, context: str) -> None:
@@ -470,7 +485,7 @@ def _parse_outputs_map(
     return tuple(outputs), tuple(specs)
 
 
-def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
+def _parse_package_entry(raw: Any, index: int, source_base: str | None = None) -> PackageEntry:
     """Parse and validate a single ``packages`` entry."""
     if not isinstance(raw, dict):
         raise MarketplaceYmlError(f"packages[{index}] must be a mapping")
@@ -479,7 +494,7 @@ def _parse_package_entry(raw: Any, index: int) -> PackageEntry:
 
     name = _require_str(raw, "name", context=f"packages[{index}]")
     source = _require_str(raw, "source", context=f"packages[{index}]")
-    _validate_source(source, index=index)
+    _validate_source(source, index=index, source_base=source_base)
     is_local = bool(LOCAL_SOURCE_RE.match(source))
     host: str | None = None
     if not is_local:

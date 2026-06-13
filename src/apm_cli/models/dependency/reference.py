@@ -62,6 +62,12 @@ from ._reference_util import (
 from ._reference_util import (
     _path_segment_pattern as _path_segment_pattern,
 )
+from .identity import (
+    build_canonical_dependency_string as build_canonical_dependency_string,
+)
+from .identity import (
+    build_dependency_unique_key as build_dependency_unique_key,
+)
 from .types import VirtualPackageType
 
 
@@ -71,6 +77,7 @@ class DependencyReference(_ReferenceParseMixin, _ReferenceUrlMixin, _ReferenceSh
 
     repo_url: str  # e.g., "user/repo" for GitHub or "org/project/repo" for Azure DevOps
     host: str | None = None  # Optional host (github.com, dev.azure.com, or enterprise host)
+    host_type: str | None = None  # Explicit host kind override (currently: "gitlab")
     port: int | None = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
     explicit_scheme: str | None = (
         None  # User-stated transport: "ssh", "https", "http", or None for shorthand
@@ -89,7 +96,7 @@ class DependencyReference(_ReferenceParseMixin, _ReferenceUrlMixin, _ReferenceSh
     is_local: bool = False  # True if this is a local filesystem dependency
     local_path: str | None = None  # Original local path string (e.g., "./packages/my-pkg")
 
-    # Monorepo inheritance: { git: parent, path: ... } — expanded in resolver
+    # Monorepo inheritance: { git: parent, path: ... } -- expanded in resolver
     is_parent_repo_inheritance: bool = False
 
     artifactory_prefix: str | None = None  # e.g., "artifactory/github" (repo key path)
@@ -118,7 +125,7 @@ class DependencyReference(_ReferenceParseMixin, _ReferenceUrlMixin, _ReferenceSh
     # the lockfile (which records source="local") agree on a local dep's source.
     # registry_name: name of the registry from apm.yml's registries: block when
     # source == "registry". Carried in-memory only; never serialized into the
-    # lockfile (the lockfile uses URL-based identity per design §6.1).
+    # lockfile (the lockfile uses URL-based identity per design s6.1).
     source: str | None = None
     registry_name: str | None = None
 
@@ -189,6 +196,22 @@ class DependencyReference(_ReferenceParseMixin, _ReferenceUrlMixin, _ReferenceSh
 
     # First path segment after host that often starts in-repo virtual layout (GitLab heuristic).
     _GITLAB_VIRTUAL_ROOT_SEGMENTS = frozenset({"prompts", "instructions", "collections"})
+
+    # Known APM primitive directory names. Used to detect a subpath accidentally
+    # embedded inside an explicit git URL form (SCP/ssh://https://), which git
+    # would later reject with a cryptic "not a valid repository name" error.
+    _APM_PRIMITIVE_DIRS: frozenset[str] = frozenset(
+        {
+            "skills",
+            "agents",
+            "prompts",
+            "instructions",
+            "chatmodes",
+            "collections",
+            "contexts",
+            "memory",
+        }
+    )
 
     def is_artifactory(self) -> bool:
         """Check if this reference points to a JFrog Artifactory VCS repository."""
@@ -293,11 +316,15 @@ class DependencyReference(_ReferenceParseMixin, _ReferenceUrlMixin, _ReferenceSh
         Returns:
             str: Unique key for this dependency
         """
-        if self.is_local and self.local_path:
-            return self.local_path
-        if self.is_virtual and self.virtual_path:
-            return f"{self.repo_url}/{self.virtual_path}"
-        return self.repo_url
+        return build_dependency_unique_key(
+            self.repo_url,
+            host=self.host,
+            source="local" if self.is_local else self.source,
+            local_path=self.local_path,
+            is_virtual=self.is_virtual,
+            virtual_path=self.virtual_path,
+            registry_prefix=self.artifactory_prefix,
+        )
 
     def to_canonical(self) -> str:
         """Return the canonical scheme-free identity string for this dependency.
@@ -393,11 +420,18 @@ class DependencyReference(_ReferenceParseMixin, _ReferenceUrlMixin, _ReferenceSh
 
         For identity-based matching that includes non-default hosts, use get_identity().
         For the transport-aware apm.yml entry, use to_apm_yml_entry().
+        For the lockfile dedup key (host-qualified for non-default hosts), use get_unique_key().
 
         Returns:
             str: Host-blind canonical string (e.g., "owner/repo")
         """
-        return self.get_unique_key()
+        return build_canonical_dependency_string(
+            self.repo_url,
+            is_local=self.is_local,
+            local_path=self.local_path,
+            is_virtual=self.is_virtual,
+            virtual_path=self.virtual_path,
+        )
 
     def get_install_path(self, apm_modules_dir: Path) -> Path:
         """Get the canonical filesystem path where this package should be installed.

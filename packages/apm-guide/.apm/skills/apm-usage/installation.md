@@ -33,8 +33,8 @@ apm --version
 ## Update
 
 ```bash
-apm update          # update APM itself
-apm update --check  # check for updates without installing
+apm self-update          # update APM itself
+apm self-update --check  # check for updates without installing
 ```
 
 ## Installer options (macOS / Linux)
@@ -66,6 +66,22 @@ $env:APM_REPO = "my-org/apm"
 $env:VERSION = "v1.2.3"
 irm https://aka.ms/apm-windows | iex
 ```
+
+## Enterprise bootstrap mirrors
+
+Set `APM_INSTALLER_BASE_URL`, `APM_RELEASE_METADATA_URL`, `APM_RELEASE_BASE_URL`, `APM_PYPI_INDEX_URL`, and `APM_NO_DIRECT_FALLBACK=1` to install and update APM through an internal mirror while failing closed on public fallback. For verification, run the installer and `apm self-update --check` behind an egress proxy or wrappers that deny public GitHub, `aka.ms`, PyPI, Homebrew, and Scoop; only your mirror host should appear. The canonical setup, GHES scoping note, and full no-egress smoke recipe live in the [installation bootstrap mirror section](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md#enterprise-bootstrap-mirror-mode).
+
+```bash
+export APM_INSTALLER_BASE_URL="https://artifactory.mycorp.example/generic/apm-install"
+export APM_RELEASE_METADATA_URL="https://artifactory.mycorp.example/generic/apm-releases/latest.json"
+export APM_RELEASE_BASE_URL="https://artifactory.mycorp.example/generic/apm-releases"
+export APM_PYPI_INDEX_URL="https://artifactory.mycorp.example/api/pypi/python-proxy/simple"
+export APM_NO_DIRECT_FALLBACK=1
+curl -sSL "$APM_INSTALLER_BASE_URL/install.sh" | sh
+apm self-update --check
+```
+
+For dependency installs after bootstrap, keep using `PROXY_REGISTRY_URL` and `PROXY_REGISTRY_ONLY=1`. Homebrew and Scoop mirroring is package-manager documentation only in v0; these env vars do not rewrite Homebrew or Scoop internals.
 
 ## Troubleshooting
 

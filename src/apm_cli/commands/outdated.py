@@ -9,10 +9,19 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Iterable
 
 import click
 
 from ..deps.outdated_row import OutdatedRow
+from ..deps.revision_pins import (
+    RevisionPinResolutionError,
+    abbreviate_sha,
+    dependency_ref_from_locked,
+    find_latest_annotated_tag,
+    is_full_revision_pin,
+)
+from ..models.dependency.types import RemoteRef
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +201,37 @@ def _check_marketplace_ref(dep, verbose):
     )
 
 
+def _check_revision_pin_ref(
+    *,
+    current_ref: str,
+    package_name: str,
+    package_basename: str,
+    remote_refs: Iterable[RemoteRef],
+) -> OutdatedRow | None:
+    """Return an outdated row for full-SHA pins, or None for other refs."""
+    if not is_full_revision_pin(current_ref):
+        return None
+    try:
+        latest = find_latest_annotated_tag(remote_refs, package_name=package_basename)
+    except RevisionPinResolutionError:
+        return OutdatedRow(
+            package=package_name,
+            current=abbreviate_sha(current_ref),
+            latest="-",
+            status="unknown",
+            source="git tags",
+        )
+    latest_display = f"{latest.tag} ({abbreviate_sha(latest.commit_sha)})"
+    status = "up-to-date" if latest.commit_sha.lower() == current_ref.lower() else "outdated"
+    return OutdatedRow(
+        package=package_name,
+        current=abbreviate_sha(current_ref),
+        latest=latest_display,
+        status=status,
+        source="git tags",
+    )
+
+
 def _check_tag_result(
     package_name, current_ref, package_basename, tag_pattern, remote_refs, verbose
 ):
@@ -294,30 +334,41 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
     if marketplace_result is not None:
         return marketplace_result
 
-    from ..models.dependency.reference import DependencyReference
-
     current_ref = dep.resolved_ref or ""
     locked_sha = dep.resolved_commit or ""
     package_name = dep.get_unique_key()
 
     # Build a DependencyReference to query remote refs
     try:
-        full_url = f"{dep.host}/{dep.repo_url}" if dep.host else dep.repo_url
-        dep_ref = DependencyReference.parse(full_url)
+        # Use the lockfile rebuild path to preserve host, port, virtual path,
+        # and insecure-transport metadata for authoritative upstream checks.
+        dep_ref = dependency_ref_from_locked(dep)
     except Exception:
         return OutdatedRow(
             package=package_name, current=current_ref or "(none)", latest="-", status="unknown"
         )
 
-    # Fetch remote refs
+    # Fetch only the ref families this comparison needs.
     try:
-        remote_refs = downloader.list_remote_refs(dep_ref)
+        if is_full_revision_pin(current_ref):
+            remote_refs = downloader.list_remote_tag_refs(dep_ref)
+        else:
+            remote_refs = downloader.list_remote_refs(dep_ref)
     except Exception:
         return OutdatedRow(
             package=package_name, current=current_ref or "(none)", latest="-", status="unknown"
         )
 
     package_basename = _package_basename(dep)
+    revision_pin_row = _check_revision_pin_ref(
+        current_ref=current_ref,
+        package_name=package_name,
+        package_basename=package_basename,
+        remote_refs=remote_refs,
+    )
+    if revision_pin_row is not None:
+        return revision_pin_row
+
     tag_pattern = _resolve_tag_pattern(current_ref, package_basename)
 
     if tag_pattern is not None:

@@ -98,6 +98,7 @@ hooks:
 | `*-codex-hooks.json` | Codex CLI only |
 | `*-gemini-hooks.json` | Gemini CLI only |
 | `*-windsurf-hooks.json` | Windsurf only |
+| `*-kiro-hooks.json` | Kiro only |
 | Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets |
 
 Example directory tree for a multi-target hook package:
@@ -109,19 +110,21 @@ my-hooks-pkg/
     copilot-hooks.json      # Copilot only
     cursor-hooks.json       # Cursor only
     claude-hooks.json       # Claude Code only
+    kiro-hooks.json         # Kiro only
 ```
 
 APM automatically normalises event names per target (e.g. `postToolUse`
 becomes `PostToolUse` in Claude) and rewrites path variables
 (`${PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`) to
-the correct target-specific form.
+the correct target-specific form. Kiro materializes one JSON document per
+hook action under `.kiro/hooks/`.
 
 ### Hook command paths: project-scope stays repo-relative
 
 `apm install` (project-scope, no `-g`) keeps hook `command` paths
 **repo-relative** in checked-in configs (`<repo>/.claude/settings.json`,
 `<repo>/.codex/hooks.json`, the `<repo>/.claude/apm-hooks.json`
-sidecar, and equivalents for Cursor / Gemini / Windsurf) so clones,
+sidecar, and equivalents for Cursor / Gemini / Windsurf / Kiro) so clones,
 contributors, and CI runners do not see the installer's machine-local
 absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
@@ -149,11 +152,11 @@ Both `apm.yml`'s `targets:`/`target:` and the `--target` CLI flag share the same
 | Form | Behaviour |
 |------|-----------|
 | `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
-| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `all` |
+| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `all` |
 | `target: claude,copilot` | CSV-string sugar; parses identically to the list form (the shared validator splits on `,`) |
 | `targets:` and `target:` both set | **Parse error** -- pick one |
 | `targets: []` (empty list) | **Parse error** -- remove the line if you meant auto-detect |
-| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`) |
+| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`) |
 | `target: bogus` (unknown token) | **Parse error** -- fix the typo |
 | `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |
 
@@ -180,8 +183,8 @@ tags: [security, validation]
 accepted; when multiple sequence elements are given, the first is used.
 Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
 and are NOT separators -- only top-level commas split the list. On Copilot
-the value is preserved verbatim; on Claude/Cursor/Windsurf comma-lists are
-expanded to a YAML array under `paths:` / `globs:`.
+the value is preserved verbatim; on Claude/Cursor/Windsurf/Kiro comma-lists are
+expanded to a YAML array under `paths:` / `globs:` / `fileMatchPattern:`.
 
 ### 2. Chatmode (`*.chatmode.md`)
 
@@ -366,6 +369,29 @@ target is present. Authoring rules:
   keep them minimal.
 - Governance: a `bin_deploy` policy rule can deny deployment per package.
   See the [policy schema](../../../../../docs/src/content/docs/reference/policy-schema.md#bin_deploy).
+
+## Marketplace source bases
+
+Marketplace publishers can declare `marketplace.sourceBase` when package
+repositories share an enterprise git base path:
+
+```yaml
+marketplace:
+  sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace
+  packages:
+    - name: review
+      source: review
+      ref: v1.0.0
+    - name: pinned
+      source: team/pinned
+      ref: main
+```
+
+Relative `packages[].source` values compose onto the base, including
+`owner/repo` shapes like `team/pinned`. Host-prefixed sources, full HTTPS
+URLs, and local `./` paths remain per-entry overrides. Without `sourceBase`,
+existing `owner/repo` source behavior is unchanged. The manifest schema
+Section 7.5 is canonical for the full validation and override rules.
 
 ## Step-by-step: create and publish
 

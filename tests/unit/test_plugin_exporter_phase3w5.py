@@ -15,7 +15,7 @@ Covers missing lines/branches identified in coverage-unit.json:
 from __future__ import annotations
 
 import json
-import tarfile
+import zipfile
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -454,7 +454,7 @@ class TestExportPluginBundle:
         result = export_plugin_bundle(project, output_dir)
         assert result.bundle_path.exists()
 
-    def test_archive_creates_tarball(self, tmp_path):
+    def test_archive_creates_zip(self, tmp_path):
         from apm_cli.bundle.plugin_exporter import export_plugin_bundle
 
         project = self._make_project(tmp_path)
@@ -462,8 +462,8 @@ class TestExportPluginBundle:
         output_dir.mkdir()
 
         result = export_plugin_bundle(project, output_dir, archive=True)
-        assert result.bundle_path.suffix == ".gz"
-        assert tarfile.is_tarfile(str(result.bundle_path))
+        assert result.bundle_path.suffix == ".zip"
+        assert zipfile.is_zipfile(str(result.bundle_path))
 
     def test_collision_warning_emitted_no_logger(self, tmp_path):
         from apm_cli.bundle.plugin_exporter import export_plugin_bundle

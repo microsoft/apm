@@ -18,19 +18,90 @@ import so the mock installed by the test suite is picked up at call time:
 from __future__ import annotations
 
 import hashlib
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, NamedTuple
 
 from ..primitives.models import PrimitiveCollection
 from ..utils.paths import portable_relpath
 from ..version import get_version
+from .claude_formatter import CLAUDE_HEADER
 from .constants import BUILD_ID_PLACEHOLDER
 
 if TYPE_CHECKING:
     from .agents_compiler import CompilationConfig, CompilationResult
 
 
+class StaleClaudeDetection(NamedTuple):
+    """Result of _detect_stale_claude_md: describes a candidate stale CLAUDE.md.
+
+    Attributes:
+        path       -- absolute Path to the candidate CLAUDE.md
+        rel        -- portable relative path string (for user-facing messages)
+        exists     -- True if the file is present on disk
+        has_marker -- True if the file contains CLAUDE_HEADER (APM-generated)
+        read_error -- non-None error string if the file exists but could not be read
+    """
+
+    path: Path
+    rel: str
+    exists: bool
+    has_marker: bool
+    read_error: str | None
+
+    @property
+    def is_apm_managed(self) -> bool:
+        """Return True when the file is readable and carries APM's marker."""
+        return self.exists and self.has_marker and self.read_error is None
+
+
+def _hand_authored_claude_skip_message(
+    rel: str, *, dry_run: bool = False, preview: bool = False
+) -> str:
+    """Build consistent skip guidance for hand-authored CLAUDE.md files."""
+    prefix = "[dry-run] would skip removal" if preview or dry_run else "Skipped removal"
+    return (
+        f"{prefix} of {rel}: hand-authored file will not be deleted."
+        " Delete or rename it manually if duplicate context is unwanted."
+    )
+
+
 class _AgentsEmitMixin:
     """Mixin: CLAUDE.md / GEMINI.md / copilot-instructions.md emit methods."""
+
+    # ------------------------------------------------------------------ #
+    # Stale CLAUDE.md detection                                            #
+    # ------------------------------------------------------------------ #
+
+    def _detect_stale_claude_md(self) -> StaleClaudeDetection:
+        """Detect whether a stale APM-generated CLAUDE.md exists at the project root.
+
+        Returns a StaleClaudeDetection with fields:
+            path       -- absolute Path to the candidate CLAUDE.md
+            rel        -- portable relative path string (for user-facing messages)
+            exists     -- True if the file is present on disk
+            has_marker -- True if the file contains CLAUDE_HEADER (APM-generated)
+            read_error -- non-None error string if the file exists but could not be read
+
+        Both the dry-run preview block and the live removal block share this
+        helper so the read + marker-detect + rel computation lives in one place.
+        """
+        # Rule B: ensure_path_within is patched at agents_compiler.ensure_path_within in tests.
+        from apm_cli.compilation import agents_compiler as _ac_mod
+
+        root_claude_md = self.base_dir / "CLAUDE.md"
+        rel = portable_relpath(root_claude_md, self.base_dir)
+        if not root_claude_md.exists():
+            return StaleClaudeDetection(root_claude_md, rel, False, False, None)
+        try:
+            _ac_mod.ensure_path_within(root_claude_md, self.base_dir)
+            with root_claude_md.open("rb") as fh:
+                # CLAUDE_HEADER is emitted on the first line; 4 KiB is ample.
+                content = fh.read(4096).decode("utf-8")  # strict
+        except (OSError, _ac_mod.PathTraversalError, UnicodeDecodeError) as exc:
+            return StaleClaudeDetection(
+                root_claude_md, rel, True, False, f"Could not read {rel}: {exc!s}"
+            )
+        return StaleClaudeDetection(root_claude_md, rel, True, CLAUDE_HEADER in content, None)
 
     # ------------------------------------------------------------------ #
     # CLAUDE.md compilation                                                #
@@ -126,6 +197,12 @@ class _AgentsEmitMixin:
         all_warnings = self.warnings + claude_result.warnings
         all_errors = self.errors + claude_result.errors
 
+        # would_emit_no_claude_md is True when the formatter produced no CLAUDE.md
+        # files because skip_instructions fired (all content already in .claude/rules/).
+        # Used symmetrically in the dry-run preview block and the live-removal block so
+        # both paths share a single, precise emptiness signal.
+        would_emit_no_claude_md = len(claude_result.content_map) == 0 and skip_instructions
+
         # Handle dry-run mode
         if config.dry_run:
             # Generate preview summary
@@ -146,6 +223,33 @@ class _AgentsEmitMixin:
             for claude_path in claude_result.content_map.keys():  # noqa: SIM118
                 rel_path = portable_relpath(claude_path, self.base_dir)
                 preview_lines.append(f"  {rel_path}")
+            # Preview stale CLAUDE.md removal so --dry-run --clean is self-explanatory.
+            # Read the file here (safe in dry-run: we never mutate it) to check for
+            # the APM marker, mirroring the Copilot root-instructions convention.
+            # Only show the preview when no CLAUDE.md would be written -- a project
+            # WITH a constitution emits a CLAUDE.md and should NOT show a removal preview.
+            if would_emit_no_claude_md and config.clean_orphaned:
+                det = self._detect_stale_claude_md()
+                if det.exists:
+                    if det.read_error is not None:
+                        all_warnings.append(det.read_error)
+                        self._log("warning", det.read_error)
+                    elif det.is_apm_managed:
+                        removal_msg = (
+                            f"[dry-run] would remove stale {det.rel} -- instructions now"
+                            " live in .claude/rules/"
+                        )
+                        preview_lines.append(f"  {removal_msg}")
+                        self._log("progress", removal_msg, symbol="info")
+                    else:
+                        hand_authored_preview = _hand_authored_claude_skip_message(
+                            det.rel, preview=True
+                        )
+                        preview_lines.append(f"  {hand_authored_preview}")
+                        all_warnings.append(
+                            _hand_authored_claude_skip_message(det.rel, dry_run=True)
+                        )
+                        self._log("progress", hand_authored_preview, symbol="info")
 
             return CompilationResult(
                 success=len(all_errors) == 0,
@@ -193,7 +297,7 @@ class _AgentsEmitMixin:
                         critical_security_found = True
                     all_warnings.append(
                         f"CLAUDE.md contains {actionable} hidden character(s) "
-                        f"— run 'apm audit --file {claude_path}' to inspect"
+                        f"-- run 'apm audit --file {claude_path}' to inspect"
                     )
 
                 writer.write(claude_path, final_content)
@@ -205,13 +309,42 @@ class _AgentsEmitMixin:
         stats = claude_result.stats.copy()
         stats["claude_files_written"] = files_written
 
-        if files_written == 0 and skip_instructions:
+        if would_emit_no_claude_md:
             self._log(
                 "progress",
                 "CLAUDE.md not generated -- Claude Code reads .claude/rules/ directly,"
                 " no further action needed",
                 symbol="info",
             )
+            # Remove a stale APM-generated CLAUDE.md when --clean is set.
+            # A hand-authored file (no CLAUDE_HEADER marker) is never deleted;
+            # a warning is emitted instead to match the Copilot-root convention.
+            # Dry-run mode returns earlier in this method, so this live block is
+            # only reached when NOT in dry-run; no config.dry_run guard is needed.
+            # Gate on clean_orphaned so plain `apm compile` (no --clean) does NO
+            # extra disk I/O and emits NO stale-file warnings (non-destructive by design).
+            if config.clean_orphaned:
+                det = self._detect_stale_claude_md()
+                if det.exists:
+                    if det.read_error is not None:
+                        all_warnings.append(det.read_error)
+                        self._log("warning", det.read_error)
+                    elif det.is_apm_managed:
+                        try:
+                            _ac.ensure_path_within(det.path, self.base_dir)
+                            det.path.unlink()  # safe: containment + APM marker confirmed above
+                            self._log(
+                                "success",
+                                f"Removed stale {det.rel} -- instructions now live in .claude/rules/",
+                            )
+                        except (OSError, _ac.PathTraversalError) as exc:
+                            warning = f"Could not remove {det.rel}: {exc!s}"
+                            all_warnings.append(warning)
+                            self._log("warning", warning)
+                    else:
+                        warning = _hand_authored_claude_skip_message(det.rel)
+                        all_warnings.append(warning)
+                        self._log("warning", warning)
         elif distributed_compiler is None and files_written > 0 and not config.dry_run:
             # Single-file strategy bypasses the distributed display formatter
             # (which has no analysis to render). Emit a minimal progress line

@@ -15,6 +15,7 @@ from ._base_env import (
     _has_env_placeholder,
     _stringify_env_literal,
     _translate_env_placeholder,
+    registry_field_is_required,
 )
 
 # Re-export so existing ``from .base import _translate_env_placeholder`` etc.
@@ -28,6 +29,7 @@ __all__ = [
     "_has_env_placeholder",
     "_stringify_env_literal",
     "_translate_env_placeholder",
+    "registry_field_is_required",
 ]
 
 

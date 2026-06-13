@@ -89,6 +89,9 @@ from ._yml_parsers import (
     LOCAL_SOURCE_RE as LOCAL_SOURCE_RE,
 )
 from ._yml_parsers import (
+    SOURCE_BASE_RE as SOURCE_BASE_RE,
+)
+from ._yml_parsers import (
     SOURCE_RE as SOURCE_RE,
 )
 from ._yml_parsers import (
@@ -137,13 +140,23 @@ from ._yml_parsers import (
     _validate_tag_pattern as _validate_tag_pattern,
 )
 from ._yml_parsers import (
+    parse_source_base as parse_source_base,
+)
+from ._yml_parsers import (
     split_host_from_source as split_host_from_source,
+)
+from ._yml_parsers import (
+    split_source_base as split_source_base,
+)
+from ._yml_parsers import (
+    validate_source_value as validate_source_value,
 )
 from .errors import MarketplaceYmlError
 from .output_profiles import MARKETPLACE_OUTPUTS
 
 __all__ = [
     "LOCAL_SOURCE_RE",
+    "SOURCE_BASE_RE",
     "SOURCE_RE",
     "MarketplaceBuild",
     "MarketplaceClaudeConfig",
@@ -157,7 +170,10 @@ __all__ = [
     "load_marketplace_from_apm_yml",
     "load_marketplace_from_legacy_yml",
     "load_marketplace_yml",
+    "parse_source_base",
     "split_host_from_source",
+    "split_source_base",
+    "validate_source_value",
 ]
 
 # Backwards-compatibility alias for callers that still import ``MarketplaceYml``.
@@ -356,7 +372,12 @@ def _build_config(
         except PathTraversalError as exc:
             raise MarketplaceYmlError(str(exc)) from exc
 
-    # Sibling-vs-map conflict detection (A1: sibling wins).
+    # -- marketplace source base --
+    source_base = parse_source_base(marketplace_dict.get("sourceBase"))
+
+    # -- Sibling-vs-map conflict detection (A1: sibling wins) --
+    # Only fire when the user EXPLICITLY set a sibling block AND the map
+    # also has an explicit path. Default/absent sibling is not a conflict.
     has_explicit_claude = marketplace_dict.get("claude") is not None
     has_explicit_codex = marketplace_dict.get("codex") is not None
     output_specs = _resolve_output_spec_conflicts(
@@ -376,7 +397,7 @@ def _build_config(
     entries: list[PackageEntry] = []
     seen_names: dict[str, int] = {}
     for idx, raw_entry in enumerate(raw_packages):
-        entry = _parse_package_entry(raw_entry, idx)
+        entry = _parse_package_entry(raw_entry, idx, source_base=source_base)
         lower_name = entry.name.lower()
         if lower_name in seen_names:
             raise MarketplaceYmlError(
@@ -407,6 +428,7 @@ def _build_config(
         codex=codex,
         metadata=metadata,
         build=build,
+        source_base=source_base,
         versioning=versioning,
         packages=tuple(entries),
         output_specs=output_specs,

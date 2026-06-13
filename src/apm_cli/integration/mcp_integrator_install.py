@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.integration._shared import _hermes_runtime_opted_in, _runtime_opted_in
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.console import STATUS_SYMBOLS
 
@@ -25,6 +26,7 @@ _DIR_GATED_RUNTIMES: dict[str, str] = {
     "opencode": ".opencode",
     "gemini": ".gemini",
     "windsurf": ".windsurf",
+    "kiro": ".kiro",
 }
 
 
@@ -205,42 +207,15 @@ def _install_registry_group(
     return configured_count
 
 
-def _runtime_opted_in(
-    runtime_name: str,
-    project_root_path: Path,
-    is_vscode_available,
-    manager,
-) -> bool:
-    """Decide whether a single runtime should be targeted for this project.
-
-    Opt-in runtimes are gated on a project marker directory (or, for Claude,
-    a binary on PATH) so a host-wide install does not silently opt every
-    project into MCP writes.  Plain runtimes fall back to availability probing.
-    """
-    if runtime_name == "vscode":
-        return bool(is_vscode_available(project_root=project_root_path))
-    if runtime_name in _DIR_GATED_RUNTIMES:
-        return (project_root_path / _DIR_GATED_RUNTIMES[runtime_name]).is_dir()
-    if runtime_name == "claude":
-        # Project marker OR `claude` on PATH (user-scope writes).
-        return (project_root_path / ".claude").is_dir() or (
-            find_runtime_binary("claude") is not None
-        )
-    if runtime_name == "intellij":
-        # JetBrains Copilot: the user-scope config dir is created on first run.
-        from apm_cli.adapters.client.intellij import _intellij_config_dir
-
-        return _intellij_config_dir().is_dir()
-    return bool(manager.is_runtime_available(runtime_name))
-
-
-def _detect_installed_runtimes_fallback(project_root_path: Path, is_vscode_available) -> list[str]:
+def _discover_installed_runtimes_fallback(
+    project_root_path: Path, is_vscode_available, *, user_scope: bool = False
+) -> list[str]:
     """Binary/marker-probe runtime detection when the ClientFactory stack is absent."""
     installed_runtimes = [rt for rt in ["copilot", "codex"] if find_runtime_binary(rt) is not None]
     if is_vscode_available(project_root=project_root_path):
         installed_runtimes.append("vscode")
     for name, marker in _DIR_GATED_RUNTIMES.items():
-        if (project_root_path / marker).is_dir():
+        if (name == "kiro" and user_scope) or (project_root_path / marker).is_dir():
             installed_runtimes.append(name)
     if (project_root_path / ".claude").is_dir() or (find_runtime_binary("claude") is not None):
         installed_runtimes.append("claude")
@@ -253,10 +228,12 @@ def _detect_installed_runtimes_fallback(project_root_path: Path, is_vscode_avail
         # ValueError (PathTraversalError) when LOCALAPPDATA/XDG_DATA_HOME is
         # misconfigured -- treat as "not installed" rather than crash.
         pass
+    if _hermes_runtime_opted_in():
+        installed_runtimes.append("hermes")
     return installed_runtimes
 
 
-def _detect_installed_runtimes(project_root_path: Path) -> list[str]:
+def _discover_installed_runtimes(project_root_path: Path, *, user_scope: bool = False) -> list[str]:
     """Discover all MCP-capable runtimes installed for ``project_root_path``."""
     from apm_cli.integration.mcp_integrator import _is_vscode_available
 
@@ -266,7 +243,9 @@ def _detect_installed_runtimes(project_root_path: Path) -> list[str]:
 
         manager = RuntimeManager()
     except ImportError:
-        return _detect_installed_runtimes_fallback(project_root_path, _is_vscode_available)
+        return _discover_installed_runtimes_fallback(
+            project_root_path, _is_vscode_available, user_scope=user_scope
+        )
 
     installed_runtimes: list[str] = []
     for runtime_name in [
@@ -277,12 +256,21 @@ def _detect_installed_runtimes(project_root_path: Path) -> list[str]:
         "opencode",
         "gemini",
         "windsurf",
+        "kiro",
         "claude",
         "intellij",
+        "hermes",
     ]:
         try:
-            if _runtime_opted_in(runtime_name, project_root_path, _is_vscode_available, manager):
-                ClientFactory.create_client(runtime_name)
+            if _runtime_opted_in(
+                runtime_name,
+                project_root_path,
+                _is_vscode_available,
+                manager,
+                _DIR_GATED_RUNTIMES,
+                user_scope=user_scope,
+            ):
+                ClientFactory.create_client(runtime_name, project_root=project_root_path)
                 installed_runtimes.append(runtime_name)
         except (ValueError, ImportError):
             continue
@@ -369,7 +357,7 @@ def _apply_user_scope_filter(target_runtimes: list[str], scope, logger) -> list[
         logger.warning(msg)
     if not filtered_runtimes:
         logger.warning(
-            "No runtimes support user-scope MCP installation (supported: copilot, codex, gemini)"
+            "No runtimes support user-scope MCP installation (supported: Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Kiro, Windsurf, JetBrains Copilot)"
         )
         return None
     return filtered_runtimes
@@ -412,7 +400,7 @@ def _resolve_target_runtimes(
             except Exception:
                 apm_config = None
 
-        installed_runtimes = _detect_installed_runtimes(project_root_path)
+        installed_runtimes = _discover_installed_runtimes(project_root_path, user_scope=user_scope)
         target_runtimes = _intersect_script_runtimes(
             installed_runtimes, apm_config, verbose, logger, console
         )

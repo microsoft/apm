@@ -290,7 +290,14 @@ class GitHubPackageDownloader:
         dep_host = dep_ref.host
         if not dep_host or is_github_hostname(dep_host):
             return False
-        return self.auth_resolver.classify_host(dep_host, port=dep_ref.port).kind != "gitlab"
+        return (
+            self.auth_resolver.classify_host(
+                dep_host,
+                port=dep_ref.port,
+                host_type=dep_ref.host_type,
+            ).kind
+            != "gitlab"
+        )
 
     def _parse_artifactory_base_url(self) -> tuple | None:
         """Backward-compat stub -- delegates to ArtifactoryRouter."""
@@ -503,6 +510,10 @@ class GitHubPackageDownloader:
         """
         return self._refs.list_remote_refs(dep_ref)
 
+    def list_remote_tag_refs(self, dep_ref: DependencyReference) -> list[RemoteRef]:
+        """Enumerate remote tags only without cloning."""
+        return self._refs.list_remote_tag_refs(dep_ref)
+
     def resolve_git_reference(
         self, repo_ref: Union[str, "DependencyReference"]
     ) -> ResolvedReference:
@@ -565,7 +576,14 @@ class GitHubPackageDownloader:
     ) -> bytes:
         """Backward-compat stub -- delegates to backend-specific strategies."""
         host = dep_ref.host or default_host()
-        if self.auth_resolver.classify_host(host).kind == "gitlab":
+        if (
+            self.auth_resolver.classify_host(
+                host,
+                port=dep_ref.port,
+                host_type=dep_ref.host_type,
+            ).kind
+            == "gitlab"
+        ):
             return self._download_gitlab_file(
                 dep_ref, file_path, ref, verbose_callback=verbose_callback
             )

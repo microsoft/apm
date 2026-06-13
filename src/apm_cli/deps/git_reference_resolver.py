@@ -109,6 +109,19 @@ class GitReferenceResolver:
         Azure DevOps, GitLab, generic). Artifactory dependencies return
         an empty list (no git repo).
         """
+        return self._list_remote_refs(dep_ref, include_heads=True)
+
+    def list_remote_tag_refs(self, dep_ref: DependencyReference) -> list[RemoteRef]:
+        """Enumerate remote tags only, preserving annotated-tag metadata."""
+        return self._list_remote_refs(dep_ref, include_heads=False)
+
+    def _list_remote_refs(
+        self,
+        dep_ref: DependencyReference,
+        *,
+        include_heads: bool,
+    ) -> list[RemoteRef]:
+        """Enumerate remote tags, optionally including branch heads."""
         host = self._host
 
         if dep_ref.is_artifactory():
@@ -145,10 +158,11 @@ class GitReferenceResolver:
         from . import github_downloader as _gd
 
         g = _gd.git.cmd.Git()
+        ls_args = ("--tags", "--heads") if include_heads else ("--tags",)
 
         def _primary_op():
             try:
-                output = g.ls_remote("--tags", "--heads", remote_url, env=ls_env)
+                output = g.ls_remote(*ls_args, remote_url, env=ls_env)
                 return ("ok", output)
             except GitCommandError as exc:
                 return ("err", exc)
@@ -165,7 +179,7 @@ class GitReferenceResolver:
                 auth_scheme="bearer",
             )
             try:
-                output = g.ls_remote("--tags", "--heads", bearer_url, env=bearer_env)
+                output = g.ls_remote(*ls_args, bearer_url, env=bearer_env)
                 return ("ok", output)
             except GitCommandError as exc:
                 return ("err", exc)
@@ -196,7 +210,8 @@ class GitReferenceResolver:
         is_github = is_github_hostname(dep_host) if dep_host else True
         is_generic = not is_ado and not is_github
 
-        error_msg = f"Failed to list remote refs for {repo_url_base}. "
+        ref_kind = "remote refs" if include_heads else "remote tags"
+        error_msg = f"Failed to list {ref_kind} for {repo_url_base}. "
         if is_generic:
             if dep_host:
                 host_info = host.auth_resolver.classify_host(dep_host, port=dep_ref.port)

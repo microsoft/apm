@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, NamedTuple, TypeVar
 
 from apm_cli.core._auth_support import _AuthSupportMixin, _org_to_env_suffix
 from apm_cli.core.token_manager import GitHubTokenManager
-from apm_cli.utils.github_host import default_host
+from apm_cli.utils.github_host import default_host, is_gitlab_hostname
 
 if TYPE_CHECKING:
     from apm_cli.models.dependency.reference import DependencyReference
@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 # Patterns that indicate a secret value follows.  Covers:
 #   token=VALUE, Authorization: Bearer VALUE, Authorization: Basic VALUE,
-#   URL credentials (https://user:pass@host), and bare bearer strings.
+#   URL credentials (https://user:pass@host), and bare PAT-like strings.
 _SECRET_RE = re.compile(
     r"(?:"
     r"(?:token|password|secret|authorization|bearer)"  # keyword prefix
@@ -61,6 +61,8 @@ _SECRET_RE = re.compile(
     r"[\w.~!*\'();:@&=+$,/?#\[\]\-]{4,}"  # value (>= 4 chars)
     r"|"
     r"://[^:@/\s]+:[^:@/\s]+@"  # URL user:pass@
+    r"|"
+    r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[psour]_[A-Za-z0-9_]{20,})\b"  # bare PAT
     r")",
     re.IGNORECASE,
 )
@@ -170,6 +172,15 @@ class BearerFallbackOutcome(NamedTuple):
     bearer_attempted: bool
 
 
+class AuthCacheKey(NamedTuple):
+    """Stable cache key for AuthResolver lookups."""
+
+    host: str | None
+    port: int | None
+    host_type: str  # Empty string represents an absent or canonical host_type.
+    org: str
+
+
 class AuthResolver(_AuthSupportMixin):
     """Single source of truth for auth resolution.
 
@@ -181,9 +192,12 @@ class AuthResolver(_AuthSupportMixin):
         self,
         token_manager: GitHubTokenManager | None = None,
         logger: object | None = None,
+        *,
+        allow_external_fallback: bool = True,
     ):
         self._token_manager = token_manager or GitHubTokenManager()
-        self._cache: dict[tuple, AuthContext] = {}
+        self._allow_external_fallback = allow_external_fallback
+        self._cache: dict[AuthCacheKey, AuthContext] = {}
         self._lock = threading.Lock()
         # F2/F3 #852: optional logger lets the install command route the
         # verbose auth-source line through CommandLogger and the deferred
@@ -206,7 +220,20 @@ class AuthResolver(_AuthSupportMixin):
         the logger before it knows it needs an AuthResolver elsewhere."""
         self._logger = logger
 
+    def clear_cache(self) -> None:
+        """Clear resolved auth contexts when a caller needs fresh env state."""
+        with self._lock:
+            self._cache.clear()
+
     # -- core resolution ----------------------------------------------------
+
+    @staticmethod
+    def _cache_host_type(host: str, host_type: str | None) -> str:
+        """Return the cache-discriminating host_type value for a host."""
+        value = (host_type or "").strip().lower()
+        if value == "gitlab" and is_gitlab_hostname(host):
+            return ""
+        return value
 
     def resolve(
         self,
@@ -214,6 +241,7 @@ class AuthResolver(_AuthSupportMixin):
         org: str | None = None,
         *,
         port: int | None = None,
+        host_type: str | None = None,
     ) -> AuthContext:
         """Resolve auth for *(host, port, org)*.  Cached & thread-safe.
 
@@ -223,9 +251,10 @@ class AuthResolver(_AuthSupportMixin):
         ``AuthContext``. Also flows into ``git credential fill`` so git's
         helpers can return port-specific credentials.
         """
-        key = (
+        key = AuthCacheKey(
             host.lower() if host else host,
             port,
+            self._cache_host_type(host, host_type),
             org.lower() if org else "",
         )
         with self._lock:
@@ -239,7 +268,7 @@ class AuthResolver(_AuthSupportMixin):
             # all subsequent callers for the same key become O(1) cache hits.
             # Bounded by APM_GIT_CREDENTIAL_TIMEOUT (default 60s). No deadlock
             # risk: single lock, never nested.
-            host_info = self.classify_host(host, port=port)
+            host_info = self.classify_host(host, port=port, host_type=host_type)
             token, source, scheme = self._resolve_token(host_info, org)
             token_type = self.detect_token_type(token) if token else "unknown"
             git_env = self._build_git_env(token, scheme=scheme, host_kind=host_info.kind)
@@ -267,7 +296,12 @@ class AuthResolver(_AuthSupportMixin):
             parts = dep_ref.repo_url.split("/")
             if parts:
                 org = parts[0]
-        return self.resolve(host, org, port=dep_ref.port)
+        return self.resolve(
+            host,
+            org,
+            port=dep_ref.port,
+            host_type=dep_ref.host_type,
+        )
 
     # -- fallback strategy --------------------------------------------------
 
@@ -515,27 +549,7 @@ class AuthResolver(_AuthSupportMixin):
         All token-bearing requests use HTTPS.
         """
         if host_info.kind == "ado":
-            # ADO resolution chain: PAT env -> AAD bearer -> none
-            pat = os.environ.get("ADO_APM_PAT")
-            if pat:
-                return pat, "ADO_APM_PAT", "basic"
-            # Try AAD bearer via az cli (lazy import to avoid module-load cost on non-ADO paths)
-            from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
-
-            provider = get_bearer_provider()
-            if provider.is_available():
-                try:
-                    bearer = provider.get_bearer_token()
-                    return bearer, GitHubTokenManager.ADO_BEARER_SOURCE, "bearer"
-                except AzureCliBearerError as exc:
-                    # az is on PATH but token acquisition failed (e.g., not logged in).
-                    # Fall through to token=None; build_error_context will render Case 3.
-                    logger.debug(
-                        "ADO bearer token acquisition failed for %s: %s",
-                        host_info.display_name,
-                        exc,
-                    )
-            return None, "none", "basic"
+            return self._resolve_ado_token(host_info)
 
         # ADO uses ADO_APM_PAT (single var) + AAD bearer fallback;
         # per-org vars and credential fill are out of scope.
@@ -553,6 +567,9 @@ class AuthResolver(_AuthSupportMixin):
         if token:
             source = self._identify_env_source(purpose)
             return token, source, "basic"
+
+        if not self._allow_external_fallback:
+            return None, "none", "basic"
 
         # 3. gh CLI active account (eligibility gated inside the call;
         #    unsupported hosts return None instantly without a subprocess)
@@ -577,6 +594,29 @@ class AuthResolver(_AuthSupportMixin):
             if credential:
                 return credential, "git-credential-fill", "basic"
 
+        return None, "none", "basic"
+
+    def _resolve_ado_token(self, host_info: HostInfo) -> tuple[str | None, str, str]:
+        """Resolve the ADO token chain: ADO_APM_PAT -> AAD bearer -> none."""
+        pat = os.environ.get("ADO_APM_PAT")
+        if pat:
+            return pat, "ADO_APM_PAT", "basic"
+        # Try AAD bearer via az cli (lazy import to avoid module-load cost on non-ADO paths)
+        from apm_cli.core.azure_cli import AzureCliBearerError, get_bearer_provider
+
+        provider = get_bearer_provider()
+        if provider.is_available():
+            try:
+                bearer = provider.get_bearer_token()
+                return bearer, GitHubTokenManager.ADO_BEARER_SOURCE, "bearer"
+            except AzureCliBearerError as exc:
+                # az is on PATH but token acquisition failed (e.g., not logged in).
+                # Fall through to token=None; build_error_context will render Case 3.
+                logger.debug(
+                    "ADO bearer token acquisition failed for %s: %s",
+                    host_info.display_name,
+                    exc,
+                )
         return None, "none", "basic"
 
     def _ado_bearer_provider(self):

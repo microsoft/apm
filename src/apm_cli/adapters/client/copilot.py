@@ -543,7 +543,7 @@ class CopilotClientAdapter(_CopilotEnvMixin, MCPClientAdapter):
         Args:
             config: Mutable config dict; updated in place.
             package_name: Registry package identifier.
-            registry_name: Registry type (``"npm"``, ``"docker"``, ``"pypi"``, …).
+            registry_name: Registry type (``"npm"``, ``"docker"``, ``"pypi"``, etc.).
             runtime_hint: Optional runtime override from the package entry.
             processed_runtime_args: Pre-processed runtime argument list.
             processed_package_args: Pre-processed package argument list.

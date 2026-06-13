@@ -481,6 +481,24 @@ class MCPIntegrator:
                 use_rich=True,
             )
 
+        if "kiro" in target_runtimes:
+            from apm_cli.factory import ClientFactory
+
+            kiro_cfg = Path(
+                ClientFactory.create_client(
+                    "kiro",
+                    project_root=project_root_path,
+                    user_scope=user_scope or scope is InstallScope.USER,
+                ).get_config_path()
+            )
+            _clean_json_mcp_config(
+                kiro_cfg,
+                expanded_stale,
+                logger,
+                "Kiro MCP config",
+                use_rich=True,
+            )
+
         # Clean JetBrains Copilot user-scope mcp.json
         if "intellij" in target_runtimes:
             from apm_cli.adapters.client.intellij import _intellij_config_dir
@@ -616,6 +634,8 @@ class MCPIntegrator:
                 detected.add("llm")
             if re.search(r"\bwindsurf\b", command):
                 detected.add("windsurf")
+            if re.search(r"\bkiro\b", command):
+                detected.add("kiro")
 
         return builtins.list(detected)
 

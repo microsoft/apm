@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Protocol
 
 from ..models.apm_package import APMPackage, DependencyReference
+from ..utils.path_security import PathTraversalError
 from .apm_resolver_helpers import _DEFAULT_RESOLVE_PARALLEL as _DEFAULT_RESOLVE_PARALLEL
 from .apm_resolver_helpers import (
     _compute_dep_source_path as _compute_dep_source_path,
@@ -29,7 +30,25 @@ from .apm_resolver_helpers import (
     _effective_base_dir as _effective_base_dir,
 )
 from .apm_resolver_helpers import (
+    _expand_remote_parent_local_path as _expand_remote_parent_local_path_fn,
+)
+from .apm_resolver_helpers import (
+    _inherit_remote_parent_fields as _inherit_remote_parent_fields,
+)
+from .apm_resolver_helpers import (
+    _is_absolute_local_path as _is_absolute_local_path,
+)
+from .apm_resolver_helpers import (
     _is_remote_parent as _is_remote_parent,
+)
+from .apm_resolver_helpers import (
+    _remote_repo_root_for_parent as _remote_repo_root_for_parent_fn,
+)
+from .apm_resolver_helpers import (
+    _resolve_marketplace_dep as _resolve_marketplace_dep_fn,
+)
+from .apm_resolver_helpers import (
+    _resolve_marketplace_or_record_error as _resolve_marketplace_or_record_error_fn,
 )
 from .apm_resolver_helpers import (
     _resolve_max_parallel as _resolve_max_parallel,
@@ -220,39 +239,97 @@ class APMDependencyResolver:
         """Expand ``{ git: parent, path: ... }`` using the declaring package's coordinates."""
         return _expand_parent_repo_decl(parent_dep, child_dep)
 
-    def _resolve_marketplace_dep(self, dep_ref: DependencyReference) -> DependencyReference:
-        """Resolve a marketplace dependency to a concrete DependencyReference.
-
-        Uses :func:`resolve_marketplace_plugin` to look up the plugin in the
-        registered marketplace and returns a resolved git-backed reference.
-        Prefers the structured ``dependency_reference`` from the resolution
-        when available (GitLab-class hosts, in-marketplace subdirectory
-        plugins) over parsing the canonical string.
-
-        Args:
-            dep_ref: An unresolved marketplace DependencyReference.
-
-        Returns:
-            A concrete (non-marketplace) DependencyReference.
-
-        Raises:
-            MarketplaceNotFoundError: Marketplace is not registered.
-            PluginNotFoundError: Plugin not found in the marketplace.
-            MarketplaceFetchError: Network/auth error fetching marketplace data.
-            ValueError: Invalid marketplace or plugin configuration.
-        """
-        from apm_cli.marketplace.resolver import resolve_marketplace_plugin
-
-        resolution = resolve_marketplace_plugin(
-            dep_ref.marketplace_plugin_name,
-            dep_ref.marketplace_name,
-            version_spec=dep_ref.marketplace_version_spec,
-            auth_resolver=self._auth_resolver,
-            warning_handler=_logger.warning,
+    @staticmethod
+    def _inherit_remote_parent_fields(
+        parent_dep: DependencyReference,
+        child_dep: DependencyReference,
+        *,
+        virtual_path: str | None,
+        reference: str | None,
+        is_virtual: bool,
+    ) -> DependencyReference:
+        """Return *child_dep* with remote identity inherited from *parent_dep*."""
+        return _inherit_remote_parent_fields(
+            parent_dep,
+            child_dep,
+            virtual_path=virtual_path,
+            reference=reference,
+            is_virtual=is_virtual,
         )
-        if resolution.dependency_reference is not None:
-            return resolution.dependency_reference
-        return DependencyReference.parse(resolution.canonical)
+
+    @staticmethod
+    def _is_absolute_local_path(local_path: str) -> bool:
+        """Return True for POSIX, home-expanded, or Windows absolute paths."""
+        return _is_absolute_local_path(local_path)
+
+    def _remote_repo_root_for_parent(
+        self,
+        parent_dep: DependencyReference,
+        parent_pkg: APMPackage,
+    ) -> Path:
+        """Return the on-disk clone root for a remote parent package."""
+        if self._apm_modules_dir is None:
+            raise PathTraversalError(
+                "remote parent package has no source path to anchor local path"
+            )
+        return _remote_repo_root_for_parent_fn(parent_dep, parent_pkg, self._apm_modules_dir)
+
+    def _expand_remote_parent_local_path(
+        self,
+        parent_dep: DependencyReference,
+        parent_pkg: APMPackage,
+        child_dep: DependencyReference,
+    ) -> DependencyReference:
+        """Expand a remote package's relative ``path:`` dep to a same-repo virtual dep."""
+        if self._apm_modules_dir is None:
+            raise PathTraversalError(
+                "remote parent package has no source path to anchor local path"
+            )
+        return _expand_remote_parent_local_path_fn(
+            parent_dep, parent_pkg, child_dep, self._apm_modules_dir
+        )
+
+    def _reject_remote_parent_local_path(
+        self,
+        dep_ref: DependencyReference,
+        parent_pkg: APMPackage | None,
+        detail: str,
+    ) -> None:
+        """Record and report a rejected ``path:`` dep declared by a remote package."""
+        local_str = str(dep_ref.local_path or "")
+        package_name = parent_pkg.name if parent_pkg else "?"
+        try:
+            from apm_cli.utils.console import _rich_error
+
+            _rich_error(
+                f"Refusing to install local_path dependency '{local_str}' "
+                f"declared by remote package '{package_name}': {detail} "
+                "Use a relative path that stays inside the same remote repo, "
+                "or publish/reference the dependency as a standalone package."
+            )
+        except Exception:
+            _logger.debug("Could not emit remote-parent rejection notice", exc_info=True)
+        with self._download_lock:
+            self._rejected_remote_local_keys.add(dep_ref.get_unique_key())
+
+    def _expand_or_reject_remote_parent_local_path(
+        self,
+        parent_dep: DependencyReference,
+        parent_pkg: APMPackage,
+        child_dep: DependencyReference,
+    ) -> DependencyReference | None:
+        """Expand eligible remote ``path:`` deps, otherwise fail closed."""
+        if not (child_dep.is_local and child_dep.local_path and self._is_remote_parent(parent_pkg)):
+            return child_dep
+        try:
+            return self._expand_remote_parent_local_path(parent_dep, parent_pkg, child_dep)
+        except PathTraversalError as exc:
+            self._reject_remote_parent_local_path(child_dep, parent_pkg, str(exc))
+            return None
+
+    def _resolve_marketplace_dep(self, dep_ref: DependencyReference) -> DependencyReference:
+        """Resolve a marketplace dependency to a concrete DependencyReference."""
+        return _resolve_marketplace_dep_fn(dep_ref, self._auth_resolver, _logger.warning)
 
     def _resolve_marketplace_or_record_error(
         self,
@@ -260,50 +337,10 @@ class APMDependencyResolver:
         tree: DependencyTree,
         context: str,
     ) -> DependencyReference | None:
-        """Try to resolve a marketplace dep; record an error on the tree on failure.
-
-        Catches known marketplace exceptions and records them as resolution
-        errors.  Unknown exceptions propagate so programmer errors are not
-        silently swallowed.
-
-        Args:
-            dep_ref: Unresolved marketplace dependency.
-            tree: The dependency tree to record errors on.
-            context: Human-readable context for error messages
-                     (e.g. ``"required by owner/repo"``).
-
-        Returns:
-            Resolved DependencyReference on success, ``None`` on known failure.
-        """
-        from apm_cli.marketplace.errors import (
-            BuildError,
-            MarketplaceFetchError,
-            MarketplaceNotFoundError,
-            PluginNotFoundError,
+        """Try to resolve a marketplace dep; record an error on the tree on failure."""
+        return _resolve_marketplace_or_record_error_fn(
+            dep_ref, tree, context, self._auth_resolver, _logger.warning
         )
-
-        try:
-            return self._resolve_marketplace_dep(dep_ref)
-        except (
-            MarketplaceNotFoundError,
-            PluginNotFoundError,
-            MarketplaceFetchError,
-            BuildError,
-            ValueError,
-        ) as exc:
-            _logger.debug(
-                "Marketplace resolution failed for %s@%s: %s",
-                dep_ref.marketplace_plugin_name,
-                dep_ref.marketplace_name,
-                exc,
-            )
-            tree.resolution_errors.append(
-                f"Failed to resolve marketplace dependency "
-                f"'{dep_ref.marketplace_plugin_name}' from "
-                f"marketplace '{dep_ref.marketplace_name}'"
-                f"{f' ({context})' if context else ''}: {exc}"
-            )
-            return None
 
     def build_dependency_tree(self, root_apm_yml: Path) -> DependencyTree:
         """
@@ -381,7 +418,7 @@ class APMDependencyResolver:
             if key not in queued_keys:
                 processing_queue.append((dep_ref, 1, None, True))
                 queued_keys.add(key)
-            # If already queued as prod, prod wins — skip
+            # If already queued as prod, prod wins -- skip
 
         # Process dependencies breadth-first with level-batched parallelism.
         #
@@ -510,6 +547,13 @@ class APMDependencyResolver:
                     for sub_dep in sub_dependencies:
                         if sub_dep.is_parent_repo_inheritance:
                             sub_dep = self.expand_parent_repo_decl(node.dependency_ref, sub_dep)
+                        sub_dep = self._expand_or_reject_remote_parent_local_path(
+                            node.dependency_ref,
+                            node.package,
+                            sub_dep,
+                        )
+                        if sub_dep is None:
+                            continue
                         if sub_dep.is_marketplace:
                             resolved = self._resolve_marketplace_or_record_error(
                                 sub_dep, tree, f"required by {node.dependency_ref.repo_url}"
@@ -582,11 +626,11 @@ class APMDependencyResolver:
                 that led here (e.g. "root-pkg > mid-pkg").  Forwarded to the
                 download callback for contextual error messages.
             parent_pkg: APMPackage that declared *dep_ref*, or None if this is
-                a direct dep from the root project. Used to (a) anchor relative
+                a direct dep from the root project. Used to anchor relative
                 ``local_path`` resolution to the declaring package's source
-                directory (#857) and (b) reject ``local_path`` deps declared
-                inside REMOTE packages -- a remote package can't reasonably
-                refer to a path on the consumer's filesystem (#940).
+                directory (#857). Remote same-repo local paths are expanded
+                before this loader; any remaining remote local path is rejected
+                fail-closed (#940 / #1571).
 
         Returns:
             APMPackage: Loaded package if found, None otherwise
@@ -598,43 +642,17 @@ class APMDependencyResolver:
         if self._apm_modules_dir is None:
             return None
 
-        # Reject local_path deps declared by remote packages BEFORE asking the
-        # download callback to materialize them. A remote package referencing
-        # a local path on the consumer's filesystem is a path-confusion vector
-        # whether the path is relative (resolves against the parent's
-        # apm_modules clone) or absolute (presumes filesystem layout). Both
-        # branches reject at ERROR severity so the operator sees red, not the
-        # yellow of an advisory warning (#940 F3).
+        # Fallback fail-closed guard for local_path deps declared by remote
+        # packages. Normal BFS expansion converts eligible same-repo relative
+        # paths into remote virtual deps before they reach this loader. Anything
+        # still local here lacks trusted parent repo coordinates, so refuse it
+        # before the download callback can copy from the consumer filesystem.
         if dep_ref.is_local and dep_ref.local_path and self._is_remote_parent(parent_pkg):
-            local_str = str(dep_ref.local_path)
-            try:
-                from apm_cli.utils.console import _rich_error
-
-                if Path(local_str).expanduser().is_absolute():
-                    _rich_error(
-                        f"Refusing to install local_path dependency '{local_str}' "
-                        f"declared by remote package '{parent_pkg.name if parent_pkg else '?'}': "
-                        "absolute paths inside remote packages are a security risk. "
-                        "Publish the dependency as a standalone package and reference "
-                        "it via owner/repo or marketplace handle."
-                    )
-                else:
-                    _rich_error(
-                        f"Refusing to install local_path dependency '{local_str}' "
-                        f"declared by remote package '{parent_pkg.name if parent_pkg else '?'}': "
-                        "remote packages cannot reference paths on the consumer "
-                        "filesystem. Publish the dependency as a standalone package "
-                        "and reference it via owner/repo or marketplace handle."
-                    )
-            except Exception:
-                _logger.debug("Could not emit remote-parent rejection notice", exc_info=True)
-            # Mark the dep as failed at resolve time so the integrate phase
-            # skips it (PR #1111 review C2). Without this, the dep would
-            # remain in the dep tree -> ``deps_to_install`` -> the integrate
-            # loop would still call ``_copy_local_package`` and copy the
-            # very path we just refused.
-            with self._download_lock:
-                self._rejected_remote_local_keys.add(dep_ref.get_unique_key())
+            self._reject_remote_parent_local_path(
+                dep_ref,
+                parent_pkg,
+                "remote package path could not be tied to its authenticated repo root.",
+            )
             return None
 
         # Get the canonical install path for this dependency

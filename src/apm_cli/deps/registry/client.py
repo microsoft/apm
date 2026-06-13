@@ -287,30 +287,30 @@ class RegistryClient:
         owner: str,
         repo: str,
         version: str,
-        tarball_bytes: bytes,
+        archive_bytes: bytes,
     ) -> PublishResult:
         """``PUT /v1/packages/{owner}/{repo}/versions/{version}`` — publish.
 
-        Uploads *tarball_bytes* (an ``application/gzip`` tarball produced by
-        ``apm pack --archive``) and returns the registry's 201 response as a
+        Uploads *archive_bytes* (an ``application/zip`` archive produced by
+        ``apm publish``) and returns the registry's 201 response as a
         ``PublishResult``.
 
         Errors surface as ``RegistryError`` with the HTTP status set:
 
-        - 403 — caller lacks publish permission for this owner/repo
-        - 409 — version already exists (immutable; republish is rejected)
-        - 422 — server-side lint/validation failed
+        - 403 -- caller lacks publish permission for this owner/repo
+        - 409 -- version already exists (immutable; republish is rejected)
+        - 422 -- server-side lint/validation failed
         """
         path = f"/v1/packages/{_quote(owner)}/{_quote(repo)}/versions/{_quote(version)}"
         url = self._url(path)
         headers = self._headers(accept="application/json")
-        headers["Content-Type"] = "application/gzip"
+        headers["Content-Type"] = "application/zip"
         try:
             response = self._session.request(
                 "PUT",
                 url=url,
                 headers=headers,
-                data=tarball_bytes,
+                data=archive_bytes,
                 timeout=self._timeout,
             )
         except requests.RequestException as exc:
@@ -337,7 +337,7 @@ class RegistryClient:
             # Some registries (e.g. JFrog) return 201 with an empty body.
             import hashlib
 
-            digest = f"sha256:{hashlib.sha256(tarball_bytes).hexdigest()}"
+            digest = f"sha256:{hashlib.sha256(archive_bytes).hexdigest()}"
             return PublishResult(
                 package=f"{owner}/{repo}",
                 version=version,

@@ -1,6 +1,6 @@
 """Unit tests for apm_cli.bundle.unpacker."""
 
-import tarfile
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -34,10 +34,13 @@ def _build_bundle_dir(tmp_path: Path, deployed_files: list[str]) -> Path:
 
 
 def _archive_bundle(bundle_dir: Path, dest: Path) -> Path:
-    """Create a .tar.gz from a bundle directory."""
-    archive_path = dest / f"{bundle_dir.name}.tar.gz"
-    with tarfile.open(archive_path, "w:gz") as tar:
-        tar.add(bundle_dir, arcname=bundle_dir.name)
+    """Create a .zip from a bundle directory."""
+    archive_path = dest / f"{bundle_dir.name}.zip"
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for fp in sorted(bundle_dir.rglob("*")):
+            if fp.is_symlink() or not fp.is_file():
+                continue
+            zf.write(fp, arcname=f"{bundle_dir.name}/{fp.relative_to(bundle_dir).as_posix()}")
     return archive_path
 
 
@@ -530,3 +533,76 @@ class TestUnpackCmdLogging:
         assert ".github/agents/a.md" in result.output
         assert ".github/prompts/b.md" in result.output
         assert "Unpacked 2 file(s)" in result.output
+
+
+# ---------------------------------------------------------------------------
+# ZIP extraction security tests (mirrors the tar.gz equivalents in
+# tests/integration/test_wave4_pure_logic_coverage.py)
+# ---------------------------------------------------------------------------
+
+
+class TestUnpackZipSecurity:
+    """Verify the ZIP extraction path in unpack_bundle rejects malicious entries."""
+
+    def _make_zip_with_member(self, path, arcname: str, content: bytes = b"evil") -> None:
+        """Write a zip to *path* containing one entry named *arcname*."""
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr(arcname, content)
+
+    def test_zip_path_traversal_rejected(self, tmp_path):
+        """Zip entries with ``..`` path segments are rejected."""
+        zip_path = tmp_path / "evil.zip"
+        self._make_zip_with_member(zip_path, "../escaped.txt")
+        output = tmp_path / "output"
+        output.mkdir()
+        with pytest.raises((ValueError, FileNotFoundError)):
+            unpack_bundle(zip_path, output_dir=output)
+
+    def test_zip_absolute_path_rejected(self, tmp_path):
+        """Zip entries with absolute paths are rejected."""
+        zip_path = tmp_path / "evil.zip"
+        self._make_zip_with_member(zip_path, "/etc/passwd")
+        output = tmp_path / "output"
+        output.mkdir()
+        with pytest.raises((ValueError, FileNotFoundError)):
+            unpack_bundle(zip_path, output_dir=output)
+
+    def test_zip_symlink_entry_rejected(self, tmp_path):
+        """Zip entries with Unix symlink bit set in external_attr are rejected."""
+        zip_path = tmp_path / "symlink.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            info = zipfile.ZipInfo("link.txt")
+            # Set external_attr to Unix symlink mode (S_IFLNK = 0o120000)
+            info.external_attr = (0o120000 | 0o777) << 16
+            zf.writestr(info, "/etc/passwd")
+        output = tmp_path / "output"
+        output.mkdir()
+        with pytest.raises(ValueError, match="symlink"):
+            unpack_bundle(zip_path, output_dir=output)
+
+    def test_zip_bomb_too_many_entries_rejected(self, tmp_path, monkeypatch):
+        """ZIP with more entries than _MAX_ZIP_ENTRIES is rejected before extraction."""
+        from apm_cli.bundle import unpacker
+
+        monkeypatch.setattr(unpacker, "_MAX_ZIP_ENTRIES", 3)
+        zip_path = tmp_path / "bomb_entries.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            for i in range(4):
+                zf.writestr(f"file_{i}.txt", "x")
+        output = tmp_path / "output"
+        output.mkdir()
+        with pytest.raises(ValueError, match="entries"):
+            unpack_bundle(zip_path, output_dir=output)
+
+    def test_zip_bomb_uncompressed_size_rejected(self, tmp_path, monkeypatch):
+        """ZIP whose total uncompressed size exceeds _MAX_ZIP_UNCOMPRESSED is rejected."""
+        from apm_cli.bundle import unpacker
+
+        monkeypatch.setattr(unpacker, "_MAX_ZIP_UNCOMPRESSED", 50)
+        zip_path = tmp_path / "bomb_size.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("big.txt", "x" * 51)
+        output = tmp_path / "output"
+        output.mkdir()
+        with pytest.raises(ValueError, match="uncompressed size"):
+            unpack_bundle(zip_path, output_dir=output)

@@ -15,8 +15,10 @@ form) from :mod:`apm_resolver` to preserve patch targets.
 from __future__ import annotations
 
 import inspect
+import logging
 import os
-from pathlib import Path
+from dataclasses import replace
+from pathlib import Path, PureWindowsPath
 
 from ..models.apm_package import APMPackage, DependencyReference
 from .dependency_graph import (
@@ -134,7 +136,10 @@ def _expand_parent_repo_decl(
         artifactory_prefix=parent_dep.artifactory_prefix,
         is_insecure=parent_dep.is_insecure,
         allow_insecure=parent_dep.allow_insecure,
+        source=parent_dep.source,
+        registry_name=None,
         reference=merged_ref,
+        virtual_path=child_dep.virtual_path,
         is_virtual=True,
         is_parent_repo_inheritance=False,
         is_local=False,
@@ -365,6 +370,75 @@ def _create_resolution_summary(graph: DependencyGraph) -> str:
     return "\n".join(lines)
 
 
+def _remote_repo_root_for_parent(
+    parent_dep: DependencyReference,
+    parent_pkg: APMPackage,
+    apm_modules_dir: Path,
+) -> Path:
+    """Return the on-disk clone root for a remote parent package."""
+    from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
+
+    if parent_pkg.source_path is None:
+        raise PathTraversalError("remote parent package has no source path to anchor local path")
+    source_path = ensure_path_within(parent_pkg.source_path, apm_modules_dir)
+    repo_root = source_path
+    if parent_dep.virtual_path:
+        validate_path_segments(parent_dep.virtual_path, context="virtual_path")
+        for _segment in parent_dep.virtual_path.replace("\\", "/").split("/"):
+            if _segment:
+                repo_root = repo_root.parent
+    return ensure_path_within(repo_root, apm_modules_dir)
+
+
+def _expand_remote_parent_local_path(
+    parent_dep: DependencyReference,
+    parent_pkg: APMPackage,
+    child_dep: DependencyReference,
+    apm_modules_dir: Path,
+) -> DependencyReference:
+    """Expand a remote package's relative ``path:`` dep to a same-repo virtual dep.
+
+    The security boundary is the authenticated parent repository root: a
+    relative path must resolve inside that root. The returned dependency keeps
+    the parent's host/repo/ref fields so downstream download code reuses the
+    same origin and shared clone cache instead of treating the path as a
+    consumer-filesystem local dependency.
+    """
+    from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
+
+    if not child_dep.local_path:
+        raise PathTraversalError("remote local dependency has no path")
+    if child_dep.source == "registry" or parent_dep.source == "registry":
+        raise PathTraversalError("registry packages cannot declare same-repo local paths")
+    if not _remote_parent_eligible(parent_dep):
+        raise PathTraversalError("remote local dependency has no eligible git parent")
+    local_str = str(child_dep.local_path)
+    if _is_absolute_local_path(local_str):
+        raise PathTraversalError("absolute paths inside remote packages are not allowed")
+
+    repo_root = _remote_repo_root_for_parent(parent_dep, parent_pkg, apm_modules_dir)
+    parent_source = ensure_path_within(parent_pkg.source_path, repo_root)
+    local_path = Path(local_str.replace("\\", "/"))
+    resolved = ensure_path_within(parent_source / local_path, repo_root)
+    virtual_path = resolved.relative_to(repo_root).as_posix()
+    if virtual_path in ("", "."):
+        return _inherit_remote_parent_fields(
+            parent_dep,
+            child_dep,
+            virtual_path=None,
+            reference=parent_dep.reference,
+            is_virtual=False,
+        )
+    validate_path_segments(virtual_path, context="same-repo path")
+    return _inherit_remote_parent_fields(
+        parent_dep,
+        child_dep,
+        virtual_path=virtual_path,
+        reference=parent_dep.reference,
+        is_virtual=True,
+    )
+
+
 def _validate_dependency_reference(dep_ref: DependencyReference) -> bool:
     """Validate that *dep_ref* is well-formed (non-empty repo_url with a slash)."""
     if not dep_ref.repo_url:
@@ -372,3 +446,149 @@ def _validate_dependency_reference(dep_ref: DependencyReference) -> bool:
     if "/" not in dep_ref.repo_url:  # noqa: SIM103
         return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# Remote-parent identity inheritance
+# ---------------------------------------------------------------------------
+
+_logger = logging.getLogger(__name__)
+
+
+def _inherit_remote_parent_fields(
+    parent_dep: DependencyReference,
+    child_dep: DependencyReference,
+    *,
+    virtual_path: str | None,
+    reference: str | None,
+    is_virtual: bool,
+) -> DependencyReference:
+    """Return *child_dep* with remote identity inherited from *parent_dep*."""
+    return replace(
+        child_dep,
+        repo_url=parent_dep.repo_url,
+        host=parent_dep.host,
+        port=parent_dep.port,
+        explicit_scheme=parent_dep.explicit_scheme,
+        ado_organization=parent_dep.ado_organization,
+        ado_project=parent_dep.ado_project,
+        ado_repo=parent_dep.ado_repo,
+        artifactory_prefix=parent_dep.artifactory_prefix,
+        is_insecure=parent_dep.is_insecure,
+        allow_insecure=parent_dep.allow_insecure,
+        source=parent_dep.source,
+        registry_name=None,
+        reference=reference,
+        virtual_path=virtual_path,
+        is_virtual=is_virtual,
+        is_parent_repo_inheritance=False,
+        is_local=False,
+        local_path=None,
+    )
+
+
+def _is_absolute_local_path(local_path: str) -> bool:
+    """Return True for POSIX, home-expanded, or Windows absolute paths."""
+    raw = local_path.strip()
+    return Path(raw).expanduser().is_absolute() or PureWindowsPath(raw).is_absolute()
+
+
+# ---------------------------------------------------------------------------
+# Marketplace resolution helpers
+# ---------------------------------------------------------------------------
+
+
+def _resolve_marketplace_dep(
+    dep_ref: DependencyReference,
+    auth_resolver: object,
+    warning_handler,
+) -> DependencyReference:
+    """Resolve a marketplace dependency to a concrete DependencyReference.
+
+    Uses :func:`resolve_marketplace_plugin` to look up the plugin in the
+    registered marketplace and returns a resolved git-backed reference.
+    Prefers the structured ``dependency_reference`` from the resolution
+    when available (GitLab-class hosts, in-marketplace subdirectory
+    plugins) over parsing the canonical string.
+
+    Args:
+        dep_ref: An unresolved marketplace DependencyReference.
+        auth_resolver: AuthResolver instance for marketplace auth.
+        warning_handler: Callable used as warning log sink.
+
+    Returns:
+        A concrete (non-marketplace) DependencyReference.
+
+    Raises:
+        MarketplaceNotFoundError: Marketplace is not registered.
+        PluginNotFoundError: Plugin not found in the marketplace.
+        MarketplaceFetchError: Network/auth error fetching marketplace data.
+        ValueError: Invalid marketplace or plugin configuration.
+    """
+    from apm_cli.marketplace.resolver import resolve_marketplace_plugin
+
+    resolution = resolve_marketplace_plugin(
+        dep_ref.marketplace_plugin_name,
+        dep_ref.marketplace_name,
+        version_spec=dep_ref.marketplace_version_spec,
+        auth_resolver=auth_resolver,
+        warning_handler=warning_handler,
+    )
+    if resolution.dependency_reference is not None:
+        return resolution.dependency_reference
+    return DependencyReference.parse(resolution.canonical)
+
+
+def _resolve_marketplace_or_record_error(
+    dep_ref: DependencyReference,
+    tree: DependencyTree,
+    context: str,
+    auth_resolver: object,
+    warning_handler,
+) -> DependencyReference | None:
+    """Try to resolve a marketplace dep; record an error on the tree on failure.
+
+    Catches known marketplace exceptions and records them as resolution
+    errors.  Unknown exceptions propagate so programmer errors are not
+    silently swallowed.
+
+    Args:
+        dep_ref: Unresolved marketplace dependency.
+        tree: The dependency tree to record errors on.
+        context: Human-readable context for error messages
+                 (e.g. ``"required by owner/repo"``).
+        auth_resolver: AuthResolver instance for marketplace auth.
+        warning_handler: Callable used as warning log sink.
+
+    Returns:
+        Resolved DependencyReference on success, ``None`` on known failure.
+    """
+    from apm_cli.marketplace.errors import (
+        BuildError,
+        MarketplaceFetchError,
+        MarketplaceNotFoundError,
+        PluginNotFoundError,
+    )
+
+    try:
+        return _resolve_marketplace_dep(dep_ref, auth_resolver, warning_handler)
+    except (
+        MarketplaceNotFoundError,
+        PluginNotFoundError,
+        MarketplaceFetchError,
+        BuildError,
+        ValueError,
+    ) as exc:
+        _logger.debug(
+            "Marketplace resolution failed for %s@%s: %s",
+            dep_ref.marketplace_plugin_name,
+            dep_ref.marketplace_name,
+            exc,
+        )
+        tree.resolution_errors.append(
+            f"Failed to resolve marketplace dependency "
+            f"'{dep_ref.marketplace_plugin_name}' from "
+            f"marketplace '{dep_ref.marketplace_name}'"
+            f"{f' ({context})' if context else ''}: {exc}"
+        )
+        return None

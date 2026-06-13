@@ -7,8 +7,10 @@ Dispatches over a ``_FETCHERS`` table keyed by ``source.kind``:
 - ``git`` -> generic git URL (ADO, Gitea, self-hosted, etc.) via subprocess
   through ``GitCache``; ``git ls-remote`` is the freshness check, no JSON
   sidecar cache.
-- ``local`` -> bare repo (``git --git-dir=... show <ref>:<file>``) or working
-  directory (direct file read with symlink-escape guard); no cache.
+- ``local`` -> bare repo (``git --git-dir=... show <ref>:<file>``), working
+  directory, or direct manifest file (path-containment guard); no cache.
+- ``url`` -> direct hosted ``marketplace.json`` over HTTPS with digest and
+  ETag/Last-Modified cache metadata.
 
 When ``PROXY_REGISTRY_URL`` is set, GitHub/GHES fetches go through the
 Artifactory Archive Entry Download proxy first. Cache lives at
@@ -22,8 +24,6 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote
-
-import requests
 
 from ._client_cache import (
     _cache_data_path as _cache_data_path,
@@ -47,7 +47,37 @@ from ._client_cache import (
     _read_stale_cache as _read_stale_cache,
 )
 from ._client_cache import (
+    _read_stale_meta as _read_stale_meta,
+)
+from ._client_cache import (
     _write_cache as _write_cache,
+)
+from ._client_http import (
+    _HTTP_SESSION as _HTTP_SESSION,
+)
+from ._client_http import (
+    _MAX_MARKETPLACE_JSON_BYTES as _MAX_MARKETPLACE_JSON_BYTES,
+)
+from ._client_http import (
+    FetchResult as FetchResult,
+)
+from ._client_http import (
+    _fetch_url_direct as _fetch_url_direct,
+)
+from ._client_http import (
+    _http_get as _http_get,
+)
+from ._client_http import (
+    _parse_json_text as _parse_json_text,
+)
+from ._client_http import (
+    _read_bounded_response_bytes as _read_bounded_response_bytes,
+)
+from ._client_http import (
+    _try_proxy_fetch as _try_proxy_fetch,
+)
+from ._client_http import (
+    _try_proxy_fetch_raw as _try_proxy_fetch_raw,
 )
 from .errors import MarketplaceError, MarketplaceFetchError
 from .models import (
@@ -90,58 +120,6 @@ def _validate_ref(ref: str, source_name: str) -> str:
 # ---------------------------------------------------------------------------
 # Network fetch -- API path (GitHub / GitLab)
 # ---------------------------------------------------------------------------
-
-
-def _try_proxy_fetch_raw(
-    owner: str,
-    repo: str,
-    file_path: str,
-    ref: str,
-) -> bytes | None:
-    """Try to fetch a file as raw bytes via the registry proxy."""
-    from ..deps.registry_proxy import RegistryConfig
-
-    cfg = RegistryConfig.from_env()
-    if cfg is None:
-        return None
-
-    from ..deps.artifactory_entry import fetch_entry_from_archive
-
-    return fetch_entry_from_archive(
-        host=cfg.host,
-        prefix=cfg.prefix,
-        owner=owner,
-        repo=repo,
-        file_path=file_path,
-        ref=ref,
-        scheme=cfg.scheme,
-        headers=cfg.get_headers(),
-    )
-
-
-def _try_proxy_fetch(
-    source: MarketplaceSource,
-    file_path: str,
-) -> dict | None:
-    """Try to fetch marketplace JSON via the registry proxy.
-
-    Returns parsed JSON dict on success, ``None`` when no proxy is
-    configured or the entry download fails.
-    """
-    content = _try_proxy_fetch_raw(source.owner, source.repo, file_path, source.ref)
-    if content is None:
-        return None
-
-    try:
-        return json.loads(content)
-    except (json.JSONDecodeError, ValueError):
-        logger.debug(
-            "Proxy returned non-JSON for %s/%s %s",
-            source.owner,
-            source.repo,
-            file_path,
-        )
-        return None
 
 
 def _github_contents_url(source: MarketplaceSource, file_path: str, host_info) -> str:
@@ -199,7 +177,7 @@ def _fetch_via_api(
     url = url_builder(source, file_path, host_info)
 
     def _do_fetch(token, _git_env):
-        resp = requests.get(url, headers=header_builder(token), timeout=30)
+        resp = _http_get(url, headers=header_builder(token), timeout=30)
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
@@ -216,13 +194,6 @@ def _fetch_via_api(
     except Exception as exc:
         logger.debug("API fetch failed for '%s'", source.name, exc_info=True)
         raise MarketplaceFetchError(source.name, str(exc)) from exc
-
-
-def _parse_json_text(resp) -> dict:
-    try:
-        return json.loads(resp.text)
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise ValueError(f"Invalid JSON in marketplace file: {exc}") from exc
 
 
 def _fetch_github(
@@ -365,6 +336,9 @@ def _fetch_local(
             source.name, f"local marketplace path does not exist: {repo_path}"
         )
 
+    if repo_path.is_file():
+        return _fetch_local_file(source, repo_path)
+
     # Detect bare repo: it's either a directory with HEAD + objects/ (bare layout)
     # or it ends in .git, or it has a .git subdirectory (worktree).
     is_bare = (repo_path / "HEAD").is_file() and (repo_path / "objects").is_dir()
@@ -377,6 +351,29 @@ def _fetch_local(
 
     # Plain directory: read the file directly with symlink-escape guard.
     return _fetch_local_direct_read(source, file_path, repo_path)
+
+
+def _fetch_local_file(source: MarketplaceSource, manifest_file: Path) -> dict | None:
+    """Read an explicit local marketplace.json file.
+
+    The parent directory is the containment boundary by design: unlike a
+    directory source, a direct file source is a single user-selected file, so
+    there is no broader marketplace root to enforce.
+    """
+    from ..utils.path_security import PathTraversalError, ensure_path_within
+
+    try:
+        safe_file = ensure_path_within(manifest_file, manifest_file.parent)
+    except PathTraversalError as exc:
+        raise MarketplaceFetchError(
+            source.name, "local marketplace file escapes its parent"
+        ) from exc
+
+    try:
+        with open(safe_file, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        raise MarketplaceFetchError(source.name, f"failed to read {safe_file}: {exc}") from exc
 
 
 def _fetch_local_via_git_show(
@@ -513,7 +510,7 @@ def fetch_raw(
 
     def _do_fetch(token, _git_env):
         headers = _github_headers(token)
-        resp = requests.get(url, headers=headers, timeout=30)
+        resp = _http_get(url, headers=headers, timeout=30)
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
@@ -612,7 +609,7 @@ def fetch_marketplace(
 ) -> MarketplaceManifest:
     """Fetch and parse a marketplace manifest.
 
-    Uses the JSON sidecar cache for ``kind in ("github","gitlab")`` only.
+    Uses the JSON sidecar cache for ``kind in ("github", "gitlab", "url")``.
     Generic-git fetches rely on ``GitCache`` + ``git ls-remote`` for
     freshness; local fetches read directly without caching.
 
@@ -628,17 +625,63 @@ def fetch_marketplace(
         MarketplaceFetchError: If fetch fails and no cache is available.
     """
     cache_name = _cache_key(source)
-    use_sidecar_cache = source.kind in ("github", "gitlab")
+    use_sidecar_cache = source.kind in ("github", "gitlab", "url")
 
     # Try fresh cache first (API kinds only)
     if use_sidecar_cache and not force_refresh:
         cached = _read_cache(cache_name)
         if cached is not None:
             logger.debug("Using cached marketplace data for '%s'", source.name)
-            return parse_marketplace_json(cached, source.name)
+            meta = _read_stale_meta(cache_name) or {}
+            return parse_marketplace_json(
+                cached,
+                source.name,
+                source_url=source.url if source.kind == "url" else "",
+                source_digest=meta.get("index_digest", "") if source.kind == "url" else "",
+            )
 
     # Fetch from source
     try:
+        if source.kind == "url":
+            stale_meta = _read_stale_meta(cache_name) or {}
+            result = _fetch_url_direct(
+                source.url,
+                etag=stale_meta.get("etag", ""),
+                last_modified=stale_meta.get("last_modified", ""),
+            )
+            if result is None:
+                stale = _read_stale_cache(cache_name)
+                if stale is None:
+                    raise MarketplaceFetchError(
+                        source.name, "got 304 Not Modified but no cached data is available"
+                    )
+                _write_cache(
+                    cache_name,
+                    stale,
+                    index_digest=stale_meta.get("index_digest", ""),
+                    etag=stale_meta.get("etag", ""),
+                    last_modified=stale_meta.get("last_modified", ""),
+                )
+                return parse_marketplace_json(
+                    stale,
+                    source.name,
+                    source_url=source.url,
+                    source_digest=stale_meta.get("index_digest", ""),
+                )
+            _write_cache(
+                cache_name,
+                result.data,
+                index_digest=result.digest,
+                etag=result.etag,
+                last_modified=result.last_modified,
+            )
+            return parse_marketplace_json(
+                result.data,
+                source.name,
+                source_url=source.url,
+                source_digest=result.digest,
+            )
+
         data = _fetch_file(source, source.path, auth_resolver=auth_resolver)
         if data is None:
             raise MarketplaceFetchError(
@@ -654,7 +697,13 @@ def fetch_marketplace(
             stale = _read_stale_cache(cache_name)
             if stale is not None:
                 logger.warning("Network error fetching '%s'; using stale cache", source.name)
-                return parse_marketplace_json(stale, source.name)
+                meta = _read_stale_meta(cache_name) or {}
+                return parse_marketplace_json(
+                    stale,
+                    source.name,
+                    source_url=source.url if source.kind == "url" else "",
+                    source_digest=meta.get("index_digest", "") if source.kind == "url" else "",
+                )
         raise
 
 
@@ -700,18 +749,22 @@ def search_all_marketplaces(
 def clear_marketplace_cache(
     name: str | None = None,
     host: str = "github.com",
+    source: MarketplaceSource | None = None,
 ) -> int:
     """Clear cached data for one or all marketplaces.
 
     Returns the number of caches cleared.
     """
+    if source is not None:
+        _clear_cache(_cache_key(source))
+        return 1
     if name:
         # Build a minimal source to derive the cache key
         _src = MarketplaceSource(name=name, owner="", repo="", host=host)
         _clear_cache(_cache_key(_src))
         return 1
     count = 0
-    for source in get_registered_marketplaces():
-        _clear_cache(_cache_key(source))
+    for registered_source in get_registered_marketplaces():
+        _clear_cache(_cache_key(registered_source))
         count += 1
     return count

@@ -166,6 +166,7 @@ class MarketplaceConfig:
     metadata: dict[str, Any] = field(default_factory=dict)
     build: MarketplaceBuild = field(default_factory=MarketplaceBuild)
     versioning: MarketplaceVersioning = field(default_factory=MarketplaceVersioning)
+    source_base: str | None = None
     packages: tuple[PackageEntry, ...] = ()
     output_specs: tuple[MarketplaceOutputSpec, ...] = ()
     warnings: tuple[str, ...] = ()

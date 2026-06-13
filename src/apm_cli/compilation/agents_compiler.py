@@ -19,11 +19,17 @@ from ..core.target_detection import (
 )
 from ..primitives.discovery import discover_primitives
 from ..primitives.models import PrimitiveCollection
+from ..utils.path_security import (  # noqa: F401 -- patched by tests via agents_compiler namespace
+    PathTraversalError,
+    ensure_path_within,
+)
 from ..utils.paths import portable_relpath
 from ..version import get_version
 from ._agents_emit import _AgentsEmitMixin
 from ._agents_output import _AgentsOutputMixin
 from ._compiler_helpers import _detect_deployed_instructions as _detect_deployed_instructions
+from ._compiler_helpers import compile_agents_md as compile_agents_md
+from .constants import BUILD_ID_PLACEHOLDER  # noqa: F401 -- re-exported for consumers
 from .link_resolver import resolve_markdown_links, validate_link_targets
 from .template_builder import (
     TemplateData,
@@ -47,6 +53,7 @@ _KNOWN_TARGETS = (  # noqa: RUF005
     "agent-skills",
     "gemini",
     "windsurf",
+    "kiro",
     "all",
     "minimal",
 ) + _VSCODE_TARGET_ALIASES
@@ -462,6 +469,7 @@ class AgentsCompiler(_AgentsEmitMixin, _AgentsOutputMixin):
             "clean_orphaned": config.clean_orphaned,
             "dry_run": config.dry_run,
             "skip_instructions": skip_instructions,
+            "with_constitution": config.with_constitution,
         }
 
         # Compile distributed
@@ -469,11 +477,18 @@ class AgentsCompiler(_AgentsEmitMixin, _AgentsOutputMixin):
             primitives, distributed_config
         )
 
-        # Display professional compilation output (always show, not just in debug)
+        # Display professional compilation output (always show, not just in debug).
+        # Guard: when ALL placements were suppressed (skip_instructions active and
+        # content_map is empty), skip the placement-table formatter so the terminal
+        # does not print "placing N files" immediately before "AGENTS.md not generated
+        # (N files)" -- the two messages would be contradictory.  The INFO suppression
+        # message below still fires unconditionally.
+        # Mirrors the CLAUDE.md guard: `if compilation_results and not (skip_instructions
+        # and files_written == 0)`.
         compilation_results = distributed_compiler.get_compilation_results_for_display(
             config.dry_run
         )
-        if compilation_results:
+        if compilation_results and not distributed_result.all_suppressed:
             if config.debug or config.trace:
                 # Verbose mode with mathematical analysis
                 output = distributed_compiler.output_formatter.format_verbose(compilation_results)
@@ -498,6 +513,35 @@ class AgentsCompiler(_AgentsEmitMixin, _AgentsOutputMixin):
                 errors=self.errors.copy(),
                 stats=distributed_result.stats,
             )
+
+        # Emit the user-visible INFO message for suppressed empty-shell placements.
+        # Mirrors the CLAUDE.md analogue (agents_compiler.py:785-791).
+        # This fires for both normal and dry-run modes so the user understands
+        # why certain AGENTS.md files are absent.
+        # Under partial suppression (some placements written, some suppressed) the
+        # message clarifies that only the *suppressed* placements are absent so
+        # users are not confused by the AGENTS.md files that *were* written.
+        if distributed_result.suppressed_empty_paths:
+            suppressed_count = len(distributed_result.suppressed_empty_paths)
+            noun = "file" if suppressed_count == 1 else "files"
+            if distributed_result.content_map:
+                # Partial suppression: at least one AGENTS.md was written
+                self._log(
+                    "progress",
+                    f"Skipped {suppressed_count} empty AGENTS.md {noun} -- "
+                    ".github/instructions/ already covers Copilot; "
+                    "pass --no-dedup to write all AGENTS.md files",
+                    symbol="info",
+                )
+            else:
+                # Full suppression: no AGENTS.md written at all
+                self._log(
+                    "progress",
+                    f"AGENTS.md not generated ({suppressed_count} {noun}) -- "
+                    ".github/instructions/ already covers Copilot; "
+                    "pass --no-dedup to write AGENTS.md",
+                    symbol="info",
+                )
 
         # Handle dry-run mode (preview placement without writing files)
         if config.dry_run:
@@ -743,40 +787,3 @@ class AgentsCompiler(_AgentsEmitMixin, _AgentsOutputMixin):
             version=version,
             chatmode_content=chatmode_content,
         )
-
-
-def compile_agents_md(
-    primitives: PrimitiveCollection | None = None,
-    output_path: str = "AGENTS.md",
-    chatmode: str | None = None,
-    dry_run: bool = False,
-    base_dir: str = ".",
-) -> str:
-    """Generate AGENTS.md with conditional sections.
-
-    Args:
-        primitives (Optional[PrimitiveCollection]): Primitives to use, or None to discover.
-        output_path (str): Output file path. Defaults to "AGENTS.md".
-        chatmode (str): Specific chatmode to use, or None for default.
-        dry_run (bool): If True, don't write output file. Defaults to False.
-        base_dir (str): Base directory for compilation. Defaults to current directory.
-
-    Returns:
-        str: Generated AGENTS.md content.
-    """
-    # Create configuration - use single-file mode for backward compatibility
-    config = CompilationConfig(
-        output_path=output_path,
-        chatmode=chatmode,
-        dry_run=dry_run,
-        strategy="single-file",  # Force single-file mode for backward compatibility
-    )
-
-    # Create compiler and compile
-    compiler = AgentsCompiler(base_dir)
-    result = compiler.compile(config, primitives)
-
-    if not result.success:
-        raise RuntimeError(f"Compilation failed: {'; '.join(result.errors)}")
-
-    return result.content

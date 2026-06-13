@@ -87,6 +87,9 @@ def _make_host(
         api_base="https://api.github.com",
     )
     host.auth_resolver.build_error_context.return_value = "Use GITHUB_APM_PAT."
+    host._resolve_dep_auth_ctx = MagicMock(
+        side_effect=lambda *a, **k: host.auth_resolver.resolve.return_value
+    )
     return host
 
 
@@ -1443,7 +1446,8 @@ class TestResolveEnvironmentVariables:
         return adapter
 
     def test_list_form_produces_runtime_placeholders(self) -> None:
-        """List of env-var descriptors each become ${NAME} placeholders."""
+        """Required descriptors become ${NAME}; optional ones without an
+        observed value are omitted (honoring optional registry inputs, #1734)."""
         adapter = self._make_adapter()
         env_vars = [
             {"name": "GITHUB_TOKEN", "description": "GitHub token", "required": True},
@@ -1451,7 +1455,7 @@ class TestResolveEnvironmentVariables:
         ]
         result = adapter._resolve_environment_variables(env_vars)
         assert result["GITHUB_TOKEN"] == "${GITHUB_TOKEN}"
-        assert result["API_KEY"] == "${API_KEY}"
+        assert "API_KEY" not in result
 
     def test_github_toolsets_preserved_as_literal(self) -> None:
         """GITHUB_TOOLSETS default stays literal (non-secret)."""

@@ -68,6 +68,7 @@ _DEFAULT_GOVERNANCE_DIRS = [
     ".cursor/rules",
     ".claude",
     ".opencode",
+    ".kiro",
 ]
 
 _MAX_UNMANAGED_SCAN_FILES = 10_000

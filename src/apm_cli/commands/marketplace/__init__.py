@@ -423,9 +423,27 @@ from ._publish_ops import _render_publish_summary as _render_publish_summary  # 
 from ._registry_cmds import (  # noqa: E402
     _check_gitignore_for_marketplace_json as _check_gitignore_for_marketplace_json,
 )
+from ._registry_cmds import (  # noqa: E402
+    _default_alias_from_remote_url as _default_alias_from_remote_url,
+)
 from ._registry_cmds import _default_alias_from_url as _default_alias_from_url  # noqa: E402
 from ._registry_cmds import (  # noqa: E402
+    _display_source_kind as _display_source_kind,
+)
+from ._registry_cmds import (  # noqa: E402
+    _is_remote_marketplace_json_url as _is_remote_marketplace_json_url,
+)
+from ._registry_cmds import (  # noqa: E402
+    _local_source_points_to_file as _local_source_points_to_file,
+)
+from ._registry_cmds import (  # noqa: E402
     _marketplace_add_unsupported_host_error as _marketplace_add_unsupported_host_error,
+)
+from ._registry_cmds import (  # noqa: E402
+    _should_warn_unpinned_git_url as _should_warn_unpinned_git_url,
+)
+from ._registry_cmds import (  # noqa: E402
+    _split_source_fragment_ref as _split_source_fragment_ref,
 )
 from ._registry_cmds import add as add  # noqa: E402
 from ._registry_cmds import browse as browse  # noqa: E402

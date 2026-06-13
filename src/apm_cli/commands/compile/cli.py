@@ -464,7 +464,7 @@ def _run_watch_mode(
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both.",
+    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, kiro, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro (excludes agent-skills); combine with 'agent-skills' for both.",
 )
 @click.option(
     "--dry-run",
@@ -501,7 +501,10 @@ def _run_watch_mode(
 @click.option(
     "--clean",
     is_flag=True,
-    help="Remove orphaned AGENTS.md files that are no longer generated",
+    help=(
+        "Remove orphaned output files (AGENTS.md, CLAUDE.md) no longer generated. "
+        "Hand-authored files are never deleted; use --dry-run to preview removals."
+    ),
 )
 @click.option(
     "--legacy-skill-paths",
@@ -590,7 +593,12 @@ def compile(  # noqa: PLR0913 -- Click handler
     * --dry-run: Preview compilation without writing files (shows placement decisions)
     * --verbose: Show detailed source attribution and optimizer analysis
     * --local-only: Ignore dependencies, compile only local .apm/ primitives
-    * --clean: Remove orphaned AGENTS.md files that are no longer generated
+    * --clean: Remove orphaned AGENTS.md files no longer generated; for
+      --target claude, also removes a stale APM-generated CLAUDE.md when
+      deduplication suppresses CLAUDE.md generation entirely (instructions
+      already in .claude/rules/ with no constitution or other keep-alive).
+      Hand-authored files are never deleted. Combine with --dry-run to
+      preview removals before they happen.
     """
     logger = CommandLogger("compile", verbose=verbose, dry_run=dry_run)
 

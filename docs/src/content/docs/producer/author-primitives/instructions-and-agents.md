@@ -82,8 +82,8 @@ applyTo: "**/*.{css,scss},**/*.tsx"
 ```
 
 On Copilot the comma-list is preserved verbatim (Copilot splits it
-natively). On Claude, Cursor, and Windsurf the list is expanded to a
-YAML array under `paths:` / `globs:`.
+natively). On Claude, Cursor, Windsurf, and Kiro the list is expanded to a
+YAML array under `paths:` / `globs:` / `fileMatchPattern:`.
 
 ### Body conventions
 
@@ -103,6 +103,7 @@ YAML array under `paths:` / `globs:`.
 | claude | `.claude/rules/<name>.md` | `applyTo` -> `paths:` list (comma-lists expanded to YAML array) |
 | cursor | `.cursor/rules/<name>.mdc` | `applyTo` -> `globs:` (scalar for single glob, YAML array for comma-lists); description auto-derived if missing |
 | windsurf | `.windsurf/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> `trigger: always_on` |
+| kiro | `.kiro/steering/<name>.md` | `applyTo` -> `inclusion: fileMatch` + `fileMatchPattern:`; missing `applyTo` -> `inclusion: always` |
 | codex | folded into `AGENTS.md` | compile-only, no per-file deploy |
 | gemini | folded into `GEMINI.md` | compile-only, no per-file deploy |
 | opencode | folded into `AGENTS.md` | compile-only, no per-file deploy |
@@ -192,6 +193,7 @@ offending package and field so you can fix the source.
 | opencode | `.opencode/agents/<name>.md` | verbatim |
 | codex | `.codex/agents/<name>.toml` | YAML frontmatter -> TOML; body becomes `developer_instructions` |
 | windsurf | not deployed | Windsurf has no agents primitive -- author personas as skills (Cascade auto-invokes by description) |
+| kiro | not deployed | Kiro target v1 ships personas as skills, not `.agent.md` files |
 | gemini | not deployed | Gemini CLI has no agents primitive |
 
 :::caution[Migration]

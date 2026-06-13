@@ -415,7 +415,9 @@ class TestLockedDependencyHttpRoundTrip:
         )
 
         parsed = LockFile.from_yaml(lockfile.to_yaml())
-        dep = parsed.get_dependency("acme/rules")
+        # Non-default hosts are host-qualified in the lockfile dedup key (#773),
+        # so look the entry up by its host-qualified key.
+        dep = parsed.get_dependency("git.company.internal/acme/rules")
 
         assert dep is not None
         assert dep.is_insecure is True

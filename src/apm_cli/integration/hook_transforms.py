@@ -1,8 +1,7 @@
 """Pure transform and rewrite helpers for APM hook integration.
 
-This module holds stateless transform utilities that are shared by the
-hook integration, merge, and sync layers.  Nothing here depends on
-``HookIntegrator`` or ``_MergeHookConfig``.
+This module holds stateless transform utilities and config data structures
+that are shared by the hook integration, merge, and sync layers.
 """
 
 import copy
@@ -10,6 +9,7 @@ import json
 import logging
 import re
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +55,24 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         "postToolUse": "AfterTool",
         "Stop": "SessionEnd",
     },
+    "kiro": {
+        # Copilot / Claude -> Kiro camelCase events
+        "PreToolUse": "preToolUse",
+        "preToolUse": "preToolUse",
+        "PostToolUse": "postToolUse",
+        "postToolUse": "postToolUse",
+        "UserPromptSubmit": "promptSubmit",
+        "userPromptSubmit": "promptSubmit",
+        "promptSubmit": "promptSubmit",
+        "Stop": "agentStop",
+        "stop": "agentStop",
+        "AgentStop": "agentStop",
+        "agentStop": "agentStop",
+        "PreTaskExecution": "preTaskExecution",
+        "preTaskExecution": "preTaskExecution",
+        "PostTaskExecution": "postTaskExecution",
+        "postTaskExecution": "postTaskExecution",
+    },
 }
 
 # Expected hook event naming convention per target.
@@ -68,6 +86,7 @@ _HOOK_EVENT_EXPECTED_CASING: dict[str, str] = {
     "codex": "PascalCase",
     "gemini": "PascalCase",
     "windsurf": "PascalCase",
+    "kiro": "camelCase",
 }
 
 # Mapping from hook-file stem suffix to the set of target keys that
@@ -80,10 +99,51 @@ _HOOK_FILE_TARGET_SUFFIXES: dict[str, set[str]] = {
     "codex-hooks": {"codex"},
     "gemini-hooks": {"gemini"},
     "windsurf-hooks": {"windsurf"},
+    "kiro-hooks": {"kiro"},
 }
 
 # Filename used to persist _apm_source markers for schema-strict targets.
 _APM_HOOKS_SIDECAR = "apm-hooks.json"
+
+
+@dataclass(frozen=True)
+class _MergeHookConfig:
+    """Configuration for targets that merge hooks into a single JSON file."""
+
+    config_filename: str  # e.g. "settings.json" or "hooks.json"
+    target_key: str  # target name passed to _rewrite_hooks_data
+    require_dir: bool  # True = skip if target dir doesn't exist
+    schema_strict: bool = False  # True = strip _apm_source before writing to disk
+
+
+_MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
+    "claude": _MergeHookConfig(
+        config_filename="settings.json",
+        target_key="claude",
+        require_dir=False,
+        schema_strict=True,
+    ),
+    "cursor": _MergeHookConfig(
+        config_filename="hooks.json",
+        target_key="cursor",
+        require_dir=True,
+    ),
+    "codex": _MergeHookConfig(
+        config_filename="hooks.json",
+        target_key="codex",
+        require_dir=True,
+    ),
+    "gemini": _MergeHookConfig(
+        config_filename="settings.json",
+        target_key="gemini",
+        require_dir=True,
+    ),
+    "windsurf": _MergeHookConfig(
+        config_filename="hooks.json",
+        target_key="windsurf",
+        require_dir=True,
+    ),
+}
 
 # ---------------------------------------------------------------------------
 # Event name utilities
@@ -342,6 +402,9 @@ def _rewrite_command_for_target(
     elif target == "windsurf":
         base_root = root_dir or ".windsurf"
         scripts_base = f"{base_root}/hooks/{package_name}"
+    elif target == "kiro":
+        base_root = root_dir or ".kiro"
+        scripts_base = f"{base_root}/hooks/{package_name}"
     else:
         base_root = root_dir or ".claude"
         scripts_base = f"{base_root}/hooks/{package_name}"
@@ -350,7 +413,8 @@ def _rewrite_command_for_target(
     # Match both forward-slash and backslash separators (Windows hook JSON
     # may use backslashes: ${CLAUDE_PLUGIN_ROOT}\scripts\scan.ps1)
     plugin_root_pattern = (
-        r"\$\{(?:CLAUDE_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT|PLUGIN_ROOT)\}([\\/][^\s\"']+)"
+        r"\$\{(?:CLAUDE_PLUGIN_ROOT|CURSOR_PLUGIN_ROOT|KIRO_PLUGIN_ROOT|PLUGIN_ROOT)\}"
+        r"([\\/][^\s\"']+)"
     )
     for match in re.finditer(plugin_root_pattern, command):
         full_var = match.group(0)

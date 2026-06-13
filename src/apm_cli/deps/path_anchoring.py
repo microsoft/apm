@@ -23,10 +23,10 @@ Anchoring rules (mirroring ``install/phases/local_content.py`` and
 No project-root containment clamp is applied here: install deliberately
 permits out-of-tree local sources (``apm install ../pkg-a`` from a
 monorepo workspace; see ``local_content._copy_local_package``), and the
-untrusted-source boundary is the resolver-level dual-reject of
-``local_path`` deps declared by REMOTE parents (issue #940), enforced
-upstream before a dep ever reaches the lockfile. Drift simply mirrors
-install so audit and install never disagree.
+untrusted-source boundary is the resolver-level expansion/rejection of
+``local_path`` deps declared by REMOTE parents (issues #940 / #1571),
+enforced upstream before a dep ever reaches the lockfile. Drift simply
+mirrors install so audit and install never disagree.
 
 A genuinely corrupt lockfile -- a ``resolved_by`` parent that is missing,
 ambiguous, non-local, or part of a cycle -- raises

@@ -315,7 +315,7 @@ class TestOutdatedCommand:
         mock_dl_cls,
         mock_auth,
     ):
-        """Deps locked to a commit SHA show 'unknown' when ref is a raw SHA."""
+        """Deps locked to a commit SHA show 'unknown' without annotated tags."""
         with self._chdir_tmp() as tmp:
             mock_get_apm_dir.return_value = tmp
             mock_get_path.return_value = tmp / "apm.lock.yaml"
@@ -323,16 +323,16 @@ class TestOutdatedCommand:
             deps = {
                 "org/commit-pkg": _locked_dep(
                     "org/commit-pkg",
-                    resolved_ref="abc1234567890def1234567890abc1234567890de",
+                    resolved_ref="a" * 40,
                 ),
             }
             mock_lf_cls.read.return_value = _make_lockfile(deps)
 
             mock_downloader = MagicMock()
             mock_dl_cls.return_value = mock_downloader
-            # No branch matches the 40-char hex ref name
-            mock_downloader.list_remote_refs.return_value = [
-                _remote_branch("main", sha="xyz999"),
+            # Lightweight tags are not acceptable replacements for revision pins.
+            mock_downloader.list_remote_tag_refs.return_value = [
+                RemoteRef("v9.9.9", GitReferenceType.TAG, "f" * 40, annotated=False),
             ]
 
             result = self.runner.invoke(cli, ["outdated"])
@@ -340,6 +340,55 @@ class TestOutdatedCommand:
             assert result.exit_code == 0
             assert "unknown" in result.output.lower()
             assert "org/commit-pkg" in result.output
+            mock_downloader.list_remote_refs.assert_not_called()
+
+    @patch(_PATCH_AUTH)
+    @patch(_PATCH_DOWNLOADER)
+    @patch(_PATCH_MIGRATE)
+    @patch(_PATCH_GET_LOCKFILE_PATH)
+    @patch(_PATCH_GET_APM_DIR)
+    @patch(_PATCH_LOCKFILE)
+    def test_commit_ref_reports_latest_annotated_tag(
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
+    ):
+        """SHA-pinned deps compare against the latest annotated release tag."""
+        current_sha = "a" * 40
+        latest_sha = "b" * 40
+        with self._chdir_tmp() as tmp:
+            mock_get_apm_dir.return_value = tmp
+            mock_get_path.return_value = tmp / "apm.lock.yaml"
+
+            deps = {
+                "org/commit-pkg": _locked_dep(
+                    "org/commit-pkg",
+                    resolved_ref=current_sha,
+                    resolved_commit=current_sha,
+                ),
+            }
+            mock_lf_cls.read.return_value = _make_lockfile(deps)
+
+            mock_downloader = MagicMock()
+            mock_dl_cls.return_value = mock_downloader
+            mock_downloader.list_remote_tag_refs.return_value = [
+                RemoteRef("v2.0.0", GitReferenceType.TAG, latest_sha, annotated=True),
+            ]
+
+            result = self.runner.invoke(cli, ["outdated"])
+
+            assert result.exit_code == 0, result.output
+            mock_downloader.list_remote_refs.assert_not_called()
+            assert "org/commit-pkg" in result.output
+            assert "v2.0.0" in result.output
+            assert current_sha[:8] in result.output
+            assert current_sha not in result.output
+            assert latest_sha[:8] in result.output
+            assert "outdated" in result.output.lower()
 
     # --- Local dep skipped ---
 

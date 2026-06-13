@@ -11,8 +11,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-RULE_FORMATS: frozenset[str] = frozenset({"cursor_rules", "claude_rules", "windsurf_rules"})
+if TYPE_CHECKING:
+    from pathlib import Path
+
+RULE_FORMATS: frozenset[str] = frozenset(
+    {"cursor_rules", "claude_rules", "windsurf_rules", "kiro_steering"}
+)
 """Canonical set of format-transforming rule ``format_id``s.
 
 Single home for "which instruction formats transform their source on
@@ -55,7 +61,7 @@ class PrimitiveMapping:
     rendered *output* rather than the source bytes.
 
     This is the single source of truth for the rule-dir formats
-    (``cursor_rules``, ``claude_rules``, ``windsurf_rules``).  When ``True``:
+    (``cursor_rules``, ``claude_rules``, ``windsurf_rules``, ``kiro_steering``).  When ``True``:
 
     * The deployed file is never byte-identical to its source, so a
       source-based adopt always misses (apm#1662).  The integrator instead
@@ -160,7 +166,7 @@ class TargetProfile:
     (``~/.copilot/copilot-instructions.md``).
     """
 
-    user_root_resolver: Callable[[], Path | None] | None = None  # noqa: F821
+    user_root_resolver: Callable[[], Path | None] | None = None
     """Optional callable that resolves the deploy root at runtime.
 
     When set, ``for_scope(user_scope=True)`` calls this resolver instead of
@@ -172,7 +178,7 @@ class TargetProfile:
     staticmethod) so ``frozen=True`` is preserved.
     """
 
-    resolved_deploy_root: Path | None = None  # noqa: F821
+    resolved_deploy_root: Path | None = None
     """Absolute deploy root populated by ``for_scope()`` when
     ``user_root_resolver`` returns a concrete ``Path``.
 
@@ -288,7 +294,7 @@ class TargetProfile:
             return False
         return primitive in self.primitives
 
-    def deploy_path(self, project_root: Path, *parts: str) -> Path:  # noqa: F821
+    def deploy_path(self, project_root: Path, *parts: str) -> Path:
         """Return the filesystem path for deployment.
 
         When ``resolved_deploy_root`` is set (dynamic-root targets like
@@ -371,13 +377,15 @@ class TargetProfile:
 
         new_root = self.user_root_dir or self.root_dir
 
-        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude); mirror
-        # that at user scope so `apm install -g` lands where Claude reads.
-        if self.name == "claude":
+        # Claude Code honors CLAUDE_CONFIG_DIR (default ~/.claude) and Hermes
+        # honors HERMES_HOME (default ~/.hermes); mirror that at user scope so
+        # `apm install -g` lands where the tool reads.
+        if self.name in ("claude", "hermes"):
             import os
             from pathlib import Path
 
-            env = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+            env_var = "CLAUDE_CONFIG_DIR" if self.name == "claude" else "HERMES_HOME"
+            env = os.environ.get(env_var, "").strip()
             if env:
                 # ``resolve`` collapses ``..`` so traversal segments cannot
                 # leak into ``root_dir`` and escape ``project_root / root_dir``.

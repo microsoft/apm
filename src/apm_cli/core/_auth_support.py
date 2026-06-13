@@ -57,7 +57,11 @@ class _AuthSupportMixin:
     # -- host classification ------------------------------------------------
 
     @staticmethod
-    def classify_host(host: str, port: int | None = None) -> object:
+    def classify_host(
+        host: str,
+        port: int | None = None,
+        host_type: str | None = None,
+    ) -> object:
         """Return a ``HostInfo`` describing *host*.
 
         ``port`` is carried through onto the returned ``HostInfo`` so that
@@ -65,11 +69,14 @@ class _AuthSupportMixin:
         can discriminate between the same hostname on different ports.
         Host-kind classification itself is transport-agnostic -- the port
         never influences whether a host is GitHub/GHES/ADO/generic.
+        ``host_type`` is an explicit manifest hint for hosts whose names do
+        not reveal the backing service.
         """
         # Lazy import keeps this module free of an auth.py module-scope cycle.
         from apm_cli.core.auth import HostInfo
 
         h = host.lower()
+        host_type_value = (host_type or "").strip().lower()
 
         if h == "github.com":
             return HostInfo(
@@ -98,6 +105,20 @@ class _AuthSupportMixin:
                 port=port,
             )
 
+        if host_type_value == "gitlab":
+            api_base = "https://gitlab.com/api/v4" if h == "gitlab.com" else f"https://{h}/api/v4"
+            return HostInfo(
+                host=host,
+                kind="gitlab",
+                has_public_repos=True,
+                api_base=api_base,
+                port=port,
+            )
+        if host_type_value:
+            raise ValueError(
+                f"Unsupported dependency host type: {host_type_value}. Supported values: gitlab"
+            )
+
         # GHES: GITHUB_HOST is set to a non-github.com, non-ghe.com FQDN
         ghes_host = os.environ.get("GITHUB_HOST", "").lower()
         if (
@@ -115,12 +136,9 @@ class _AuthSupportMixin:
                     port=port,
                 )
 
-        # GitLab (SaaS + env-configured self-managed) — after GHES per spec (no silent GHES → GitLab)
+        # GitLab (SaaS + env-configured self-managed) -- after GHES per spec (no silent GHES -> GitLab)
         if is_gitlab_hostname(host):
-            if h == "gitlab.com":
-                api_base = "https://gitlab.com/api/v4"
-            else:
-                api_base = f"https://{host}/api/v4"
+            api_base = "https://gitlab.com/api/v4" if h == "gitlab.com" else f"https://{h}/api/v4"
             return HostInfo(
                 host=host,
                 kind="gitlab",

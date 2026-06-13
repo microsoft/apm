@@ -109,6 +109,7 @@ from ..utils.console import (  # noqa: F401
     _rich_info,
     _rich_success,
 )
+from ._helpers import _get_invocation_argv, _split_argv_at_double_dash  # noqa: F401 -- patched by tests
 
 
 # CRITICAL: Shadow Python builtins that share names with Click commands
@@ -122,22 +123,6 @@ dict = builtins.dict
 # Test seams; _split_argv_at_double_dash separates pre-``--`` packages from
 # the post-``--`` stdio-command argv.
 # ---------------------------------------------------------------------------
-
-
-def _get_invocation_argv():
-    """Return the process invocation argv. Wrapped for test injection."""
-    return sys.argv
-
-
-def _split_argv_at_double_dash(argv):
-    """Return ``(clean_argv, command_argv_tuple)``.
-
-    If ``--`` is not present, ``command_argv_tuple`` is ``()``.
-    """
-    if "--" not in argv:
-        return argv, ()
-    idx = argv.index("--")
-    return argv[:idx], builtins.tuple(argv[idx + 1 :])
 
 
 # APM Dependencies (conditional import for graceful degradation)
@@ -169,9 +154,6 @@ except ImportError as e:
     _ScopedInstallDependencyResolver = None  # type: ignore[misc,assignment]
 
 
-# MCP helpers and re-exports are in the imports section above.
-
-
 @click.command(
     help="Install APM and MCP dependencies (supports APM packages, Claude skills (SKILL.md), and plugin collections (plugin.json); auto-creates apm.yml; use --allow-insecure for http:// packages)"
 )
@@ -179,7 +161,7 @@ except ImportError as e:
 @click.option(
     "--runtime",
     help=(
-        "Target specific runtime only (copilot, codex, vscode, cursor, opencode, gemini, claude, windsurf, intellij)"
+        "Target specific runtime only (copilot, claude, codex, cursor, gemini, intellij, kiro, opencode, vscode, windsurf)"
     ),
 )
 @click.option("--exclude", help="Exclude specific runtime from installation")
@@ -229,7 +211,7 @@ except ImportError as e:
     "target",
     type=TargetParamType(),
     default=None,
-    help="Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Repeating the flag (e.g. '-t a -t b') is NOT supported -- only the last value wins; use commas. Highest-priority entry in the resolution chain (--target > apm.yml targets: > auto-detect). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork'). 'copilot-app' is also accepted when the copilot-app experimental flag is enabled (run 'apm experimental enable copilot-app'). Note: '--target all' on 'apm compile' is deprecated; use 'apm compile --all' instead.",
+    help="Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Repeating the flag (e.g. '-t a -t b') is NOT supported -- only the last value wins; use commas. Highest-priority entry in the resolution chain (--target > apm.yml targets: > auto-detect). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, kiro, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro (excludes agent-skills); combine with 'agent-skills' for both. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork'). 'copilot-app' is also accepted when the copilot-app experimental flag is enabled (run 'apm experimental enable copilot-app'). Note: '--target all' on 'apm compile' is deprecated; use 'apm compile --all' instead.",
 )
 @click.option(
     "--allow-insecure",
@@ -252,7 +234,7 @@ except ImportError as e:
     "global_",
     is_flag=True,
     default=False,
-    help="Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Codex CLI, JetBrains Copilot).",
+    help="Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Kiro, Windsurf, JetBrains Copilot).",
 )
 @click.option(
     "--ssh",
@@ -388,7 +370,7 @@ except ImportError as e:
     metavar="ALIAS",
     help=(
         "Override the log/display label when installing a local bundle "
-        "(directory or .tar.gz produced by 'apm pack'). Only valid for "
+        "(directory, .zip, or .tar.gz produced by 'apm pack'). Only valid for "
         "local-bundle installs; passing --as without a local bundle path is rejected."
     ),
 )
@@ -464,7 +446,8 @@ def install(  # noqa: PLR0913
         apm install --mcp api --url https://example.com/mcp    # MCP remote
         apm install --mcp fetch -- npx -y @mcp/server-fetch    # MCP stdio
         apm install ./build/my-bundle           # Deploy a local bundle (directory)
-        apm install ./my-bundle.tar.gz          # Deploy a local bundle (archive)
+        apm install ./my-bundle.zip             # Deploy a local bundle (archive)
+        apm install ./my-bundle.tar.gz          # Deploy a local bundle (legacy archive)
         apm install ./bundle --as custom-name   # Local bundle with custom log label
 
     Environment variables:
@@ -522,7 +505,9 @@ def install(  # noqa: PLR0913
         # argument is a filesystem path that detect_local_bundle() recognises
         # as an APM-pack bundle, we skip the dependency-resolution pipeline
         # entirely and deploy the bundle's files directly.  Local bundles
-        # are imperative deploys -- they do NOT mutate apm.yml.
+        # are imperative deploys -- they do NOT mutate apm.yml.  The detection
+        # + dispatch lives in _try_local_bundle_install(); it returns True when
+        # it fully handled the install (caller must return).
         # ----------------------------------------------------------------
         if _try_local_bundle_install(
             packages,
@@ -554,9 +539,9 @@ def install(  # noqa: PLR0913
             },
         ):
             # Local bundle install renders its own summary; mark
-            # ``summary_rendered = True`` so the finally-block does not emit a
-            # misleading "install interrupted" line on the success path
-            # (issue #1207 D3).
+            # ``summary_rendered = True`` so the finally-block (line ~1423)
+            # does not emit a misleading "install interrupted" line on the
+            # success path.  See issue #1207 D3.
             summary_rendered = True
             return
         # IM8: --as is only meaningful for local-bundle installs.  If we get
@@ -564,7 +549,7 @@ def install(  # noqa: PLR0913
         # silently ignoring it.
         if alias:
             raise click.UsageError(
-                "--as requires a local bundle path (directory or .tar.gz "
+                "--as requires a local bundle path (directory, .zip, or .tar.gz "
                 "produced by 'apm pack'). It has no effect on registry installs."
             )
         # HACK(#852): surface --verbose to deeper auth layers via env var until

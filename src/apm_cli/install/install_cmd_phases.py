@@ -32,7 +32,10 @@ def _try_local_bundle_install(
     from apm_cli.bundle.local_bundle import detect_local_bundle as _detect_lb
     from apm_cli.install.local_bundle_handler import install_local_bundle as _install_lb
 
-    _bundle_info = _detect_lb(_probe)
+    try:
+        _bundle_info = _detect_lb(_probe)
+    except ValueError as exc:
+        raise click.UsageError(f"Bundle security check failed: {exc}") from exc
     if _bundle_info is not None:
         _install_lb(
             bundle_info=_bundle_info,
@@ -48,10 +51,10 @@ def _try_local_bundle_install(
             rejected_flags=rejected_flags,
         )
         return True
-    # IM7: path exists but isn't a recognised bundle.  For tarball extensions
-    # (.tar.gz / .tgz) the user clearly meant a bundle artifact.
+    # IM7: path exists but isn't a recognised bundle.  For archive extensions
+    # (.zip / .tar.gz / .tgz) the user clearly meant a bundle artifact.
     _suffix = _probe.name.lower()
-    if _probe.is_file() and (_suffix.endswith(".tar.gz") or _suffix.endswith(".tgz")):
+    if _probe.is_file() and _suffix.endswith((".zip", ".tar.gz", ".tgz")):
         from apm_cli.bundle.local_bundle import _looks_like_legacy_apm_bundle
 
         if _looks_like_legacy_apm_bundle(_probe):

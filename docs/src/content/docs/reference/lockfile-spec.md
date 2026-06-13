@@ -118,8 +118,9 @@ Each item in `dependencies` describes one resolved package.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `repo_url` | string | yes | Canonical repo URL (e.g. `github.com/owner/repo`). Unique key for the entry, except for virtual and local entries (see below). |
+| `repo_url` | string | yes | Canonical repository path or URL. Entry identity is derived from `repo_url`, `host`, and virtual/local markers; see [lockfile identity keys](#lockfile-identity-keys). |
 | `host` | string | no | FQDN when not inferable from `repo_url` (e.g. for registry proxies or non-GitHub hosts). |
+| `host_type` | string | no | Explicit host-kind hint, currently `gitlab`, copied from object-form `type: gitlab`. |
 | `port` | int | no | Non-standard SSH/HTTPS port. Validated to `1..65535` on read. |
 | `registry_prefix` | string | no | URL path prefix when resolved through a registry proxy (e.g. `artifactory/github`). |
 | `resolved_ref` | string | no | The user-supplied ref from `apm.yml` (`main`, `v1.2.0`, a SHA). |
@@ -141,14 +142,27 @@ Each item in `dependencies` describes one resolved package.
 | `is_dev` | bool | no | `true` when the dep was declared under `devDependencies`. |
 | `discovered_via` | string | no | Marketplace name that surfaced this package (provenance). |
 | `marketplace_plugin_name` | string | no | Plugin name as listed in that marketplace. |
+| `source_url` | string | no | Canonical marketplace source URL when the package came from a hosted `marketplace.json` catalog. |
+| `source_digest` | string | no | `sha256:<hex>` digest of the hosted `marketplace.json` bytes used for resolution. |
 | `is_insecure` | bool | no | `true` when the source URL was `http://`. |
 | `allow_insecure` | bool | no | `true` when the manifest explicitly opted in to the insecure source. |
 | `constraint` | string | git-source semver only | The original semver range from `apm.yml` (`^1.2.0`, `~1.4`). Present when `ref:` was a range; used by drift detection so a manifest range vs. a locked tag (`v1.5.3`) is not a false positive, and by lockfile replay to pin the resolved tag deterministically across installs. |
-| `resolved_tag` | string | git-source semver only | The concrete git tag (`v1.5.3`, `widget--v1.5.3`) that satisfied `constraint`. |
+| `resolved_tag` | string | git-source semver or SHA-pin updates | The concrete annotated git tag (`v1.5.3`, `widget--v1.5.3`) that satisfied `constraint` or justified the latest full-SHA revision-pin update. |
 | `resolved_at` | string | git-source semver only | RFC 3339 timestamp of the resolution. Surfaces "how stale is this pin?" in `apm why`. |
 
 Fields are emitted only when set. A minimal entry is just `repo_url` plus
 `resolved_commit`.
+
+## Lockfile identity keys
+
+Lockfile dependency keys keep `github.com` implicit for migration stability:
+existing `github.com` entries remain keyed as `owner/repo`. Local dependencies
+use `local_path` directly. Virtual dependencies append `virtual_path` to the
+base repo key. Entries for non-default hosts prefix the key with the lowercased
+host (`host/owner/repo`), so `github.com/team/skills` and
+`gitea.myorg.com/team/skills` can coexist without overwriting each other, and
+host casing cannot create duplicate keys. Registry-proxy entries keep the bare
+logical key because the proxy host is transport, not package identity.
 
 ## Self entry
 

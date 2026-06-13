@@ -174,9 +174,9 @@ def try_sparse_checkout(
     try:
         temp_clone_path.mkdir(parents=True, exist_ok=True)
 
-        # Resolve per-dependency token via AuthResolver.
-        dep_token = downloader._resolve_dep_token(dep_ref)
+        # Resolve per-dependency auth via AuthResolver.
         dep_auth_ctx = downloader._resolve_dep_auth_ctx(dep_ref)
+        dep_token = dep_auth_ctx.token if dep_auth_ctx else downloader.github_token
         dep_auth_scheme = dep_auth_ctx.auth_scheme if dep_auth_ctx else "basic"
 
         # For ADO bearer, use the AuthContext git_env with header injection.

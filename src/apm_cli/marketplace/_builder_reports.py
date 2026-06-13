@@ -37,6 +37,7 @@ class ResolvedPackage:
     tags: tuple[str, ...]
     is_prerelease: bool  # True if the resolved ref was a prerelease semver
     host: str | None = None  # non-default git host parsed from apm.yml source
+    source_url: str | None = None  # canonical URL for sourceBase-composed entries
 
 
 @dataclass(frozen=True)
