@@ -68,14 +68,15 @@ def _deployed_path_entry(
 ) -> str:
     """Return the lockfile-safe path string for a deployed file."""
 
-    def _try_dynamic_root(tgts) -> str | None:
+    def _try_dynamic_root(tgts, *, strict: bool = False) -> str | None:
         for _t in tgts:
             if _t.resolved_deploy_root is None:
                 continue
-            try:
-                target_path.relative_to(_t.resolved_deploy_root)
-            except ValueError:
-                continue
+            if not strict:
+                try:
+                    target_path.relative_to(_t.resolved_deploy_root)
+                except ValueError:
+                    continue
             if _t.name == "copilot-app":
                 from apm_cli.integration.copilot_app_db import to_lockfile_uri
 
@@ -92,8 +93,10 @@ def _deployed_path_entry(
     try:
         return target_path.relative_to(project_root).as_posix()
     except ValueError:
+        # Fallback: let to_lockfile_path run its own security
+        # validation (PathTraversalError) without pre-filtering.
         if targets:
-            result = _try_dynamic_root(targets)
+            result = _try_dynamic_root(targets, strict=True)
             if result is not None:
                 return result
         raise RuntimeError(  # noqa: B904
