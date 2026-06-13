@@ -703,10 +703,16 @@ def _run_compilation(
                                     f"-- run 'apm audit --file {output_path}' to inspect"
                                 )
                         try:
-                            from ...compilation.output_writer import CompiledOutputWriter
+                            # Honour managed_section mode (issue #1764).
+                            if config.agents_md_mode == "managed_section":
+                                compiler._write_output_file_with_config(
+                                    str(output_path), final_content, config
+                                )
+                            else:
+                                from ...compilation.output_writer import CompiledOutputWriter
 
-                            CompiledOutputWriter().write(output_path, final_content)
-                        except OSError as e:
+                                CompiledOutputWriter().write(output_path, final_content)
+                        except (OSError, ValueError) as e:
                             logger.error(f"Failed to write final AGENTS.md: {e}")
                             sys.exit(1)
                     else:
