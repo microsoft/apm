@@ -497,7 +497,7 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
                 ctx.apm_package.allow_executables = updated
             if ctx.logger:
                 ctx.logger.info(
-                    "[i] Updated allowExecutables in apm.yml. "
+                    "Updated allowExecutables in apm.yml. "
                     "Run 'apm install' again to deploy approved executables.",
                     symbol="info",
                 )

@@ -25,9 +25,15 @@ from typing import Any
 
 # Executable type constants used as keys in the allowExecutables block.
 EXEC_TYPE_HOOKS = "hooks"
-EXEC_TYPE_MCP = "mcp"
+EXEC_TYPE_MCP = "mcp"  # Reserved for future enforcement.
 EXEC_TYPE_BIN = "bin"
 
+# Types with active enforcement in the install gate.  MCP is excluded
+# because MCPIntegrator does not yet honour the approval state --
+# surfacing it in the UI would create a false-assurance control.
+ENFORCED_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_BIN)
+
+# All recognised exec-type keys (for manifest validation).
 ALL_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_MCP, EXEC_TYPE_BIN)
 
 
@@ -63,28 +69,24 @@ class ExecutableDeclaration:
 
     @property
     def has_executables(self) -> bool:
-        """Return True if this package declares any executable primitives."""
-        return self.hook_count > 0 or self.mcp_count > 0 or self.bin_count > 0
+        """Return True if this package declares enforced executable primitives."""
+        return self.hook_count > 0 or self.bin_count > 0
 
     @property
     def exec_types(self) -> list[str]:
-        """Return the list of executable types this package declares."""
+        """Return the list of enforced executable types this package declares."""
         types: list[str] = []
         if self.hook_count > 0:
             types.append(EXEC_TYPE_HOOKS)
-        if self.mcp_count > 0:
-            types.append(EXEC_TYPE_MCP)
         if self.bin_count > 0:
             types.append(EXEC_TYPE_BIN)
         return types
 
     def summary_line(self) -> str:
-        """One-line summary for the interactive prompt."""
+        """One-line summary for the interactive prompt (enforced types only)."""
         parts: list[str] = []
         if self.hook_count:
             parts.append(f"{self.hook_count} hook(s)")
-        if self.mcp_count:
-            parts.append(f"{self.mcp_count} MCP server(s)")
         if self.bin_count:
             parts.append(f"{self.bin_count} bin executable(s)")
         return ", ".join(parts)
