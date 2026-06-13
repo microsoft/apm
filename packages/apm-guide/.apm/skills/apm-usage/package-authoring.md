@@ -97,6 +97,7 @@ hooks:
 | `*-claude-hooks.json` | Claude Code only |
 | `*-codex-hooks.json` | Codex CLI only |
 | `*-gemini-hooks.json` | Gemini CLI only |
+| `*-antigravity-hooks.json` | Antigravity CLI only |
 | `*-windsurf-hooks.json` | Windsurf only |
 | `*-kiro-hooks.json` | Kiro only |
 | Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets |
@@ -124,7 +125,7 @@ hook action under `.kiro/hooks/`.
 `apm install` (project-scope, no `-g`) keeps hook `command` paths
 **repo-relative** in checked-in configs (`<repo>/.claude/settings.json`,
 `<repo>/.codex/hooks.json`, the `<repo>/.claude/apm-hooks.json`
-sidecar, and equivalents for Cursor / Gemini / Windsurf / Kiro) so clones,
+sidecar, and equivalents for Cursor / Gemini / Antigravity / Windsurf / Kiro) so clones,
 contributors, and CI runners do not see the installer's machine-local
 absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
@@ -152,11 +153,11 @@ Both `apm.yml`'s `targets:`/`target:` and the `--target` CLI flag share the same
 | Form | Behaviour |
 |------|-----------|
 | `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
-| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `all` |
+| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `all` |
 | `target: claude,copilot` | CSV-string sugar; parses identically to the list form (the shared validator splits on `,`) |
 | `targets:` and `target:` both set | **Parse error** -- pick one |
 | `targets: []` (empty list) | **Parse error** -- remove the line if you meant auto-detect |
-| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`) |
+| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.agent/`, `.opencode/`, `.windsurf/`, `.kiro/`) |
 | `target: bogus` (unknown token) | **Parse error** -- fix the typo |
 | `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |
 
@@ -220,6 +221,7 @@ Deployed as slash commands to targets that support them:
 - Cursor: `.cursor/commands/*.md` (Cursor 1.6+; Cursor is de-emphasizing commands in favor of rules/skills)
 - OpenCode: `.opencode/commands/*.md` (normalized to supported command frontmatter)
 - Gemini CLI: `.gemini/commands/*.toml` (converted to TOML command format)
+- Antigravity CLI: `.agent/commands/*.toml` (same TOML format as Gemini)
 
 ```yaml
 ---

@@ -112,6 +112,14 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         "postToolUse": "AfterTool",
         "Stop": "SessionEnd",
     },
+    "antigravity": {
+        # Same event names as Gemini -- Antigravity inherited the hook schema
+        "PreToolUse": "BeforeTool",
+        "preToolUse": "BeforeTool",
+        "PostToolUse": "AfterTool",
+        "postToolUse": "AfterTool",
+        "Stop": "SessionEnd",
+    },
     "kiro": {
         # Copilot / Claude -> Kiro camelCase events
         "PreToolUse": "preToolUse",
@@ -142,6 +150,7 @@ _HOOK_EVENT_EXPECTED_CASING: dict[str, str] = {
     "cursor": "PascalCase",
     "codex": "PascalCase",
     "gemini": "PascalCase",
+    "antigravity": "PascalCase",
     "windsurf": "PascalCase",
     "kiro": "camelCase",
 }
@@ -273,6 +282,11 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         target_key="gemini",
         require_dir=True,
     ),
+    "antigravity": _MergeHookConfig(
+        config_filename="settings.json",
+        target_key="antigravity",
+        require_dir=True,
+    ),
     "windsurf": _MergeHookConfig(
         config_filename="hooks.json",
         target_key="windsurf",
@@ -336,6 +350,7 @@ _HOOK_FILE_TARGET_SUFFIXES: dict[str, set[str]] = {
     "claude-hooks": {"claude"},
     "codex-hooks": {"codex"},
     "gemini-hooks": {"gemini"},
+    "antigravity-hooks": {"antigravity"},
     "windsurf-hooks": {"windsurf"},
     "kiro-hooks": {"kiro"},
 }

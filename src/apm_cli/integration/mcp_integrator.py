@@ -730,6 +730,15 @@ class MCPIntegrator:
                 ".gemini/settings.json",
             )
 
+        # Clean .agent/settings.json (only if .agent/ directory exists)
+        if "antigravity" in target_runtimes:
+            _clean_json_mcp_config(
+                project_root_path / ".agent" / "settings.json",
+                expanded_stale,
+                logger,
+                ".agent/settings.json",
+            )
+
         # Clean Claude Code project .mcp.json (only if .claude/ directory exists)
         if clean_claude_project:
             if (project_root_path / ".claude").is_dir():
@@ -819,6 +828,8 @@ class MCPIntegrator:
                 detected.add("windsurf")
             if re.search(r"\bkiro\b", command):
                 detected.add("kiro")
+            if re.search(r"\bantigravity\b|\bagy\b", command):
+                detected.add("antigravity")
 
         return builtins.list(detected)
 

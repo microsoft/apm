@@ -711,7 +711,7 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
             "# Which agent platforms to deploy to.\n"
             "# Resolution order: --target flag > this field > auto-detect from filesystem.\n"
             "# Accepted values: copilot, claude, cursor, opencode, codex, gemini, "
-            "windsurf, all\n"
+            "antigravity, windsurf, kiro, all\n"
         )
         content = content.replace("targets:", targets_comment + "targets:", 1)
     else:

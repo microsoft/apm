@@ -267,7 +267,8 @@ class GeminiClientAdapter(CopilotClientAdapter):
 
         if not self.user_scope and not self._get_gemini_dir().is_dir():
             logger.debug(
-                "Gemini opt-in gate: %s absent, skipping configure_mcp_server",
+                "%s opt-in gate: %s absent, skipping configure_mcp_server",
+                self.target_name,
                 self._get_gemini_dir(),
             )
             return True
@@ -292,10 +293,16 @@ class GeminiClientAdapter(CopilotClientAdapter):
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             self.update_config({config_key: server_config})
 
-            _rich_success(f"Configured MCP server '{config_key}' for Gemini CLI", symbol="success")
+            _rich_success(
+                f"Configured MCP server '{config_key}' for {self.target_name}",
+                symbol="success",
+            )
             return True
 
         except Exception as e:
-            logger.debug("Gemini MCP configuration failed: %s", e)
-            _rich_error("Failed to configure MCP server for Gemini CLI", symbol="error")
+            logger.debug("%s MCP configuration failed: %s", self.target_name, e)
+            _rich_error(
+                f"Failed to configure MCP server for {self.target_name}",
+                symbol="error",
+            )
             return False
