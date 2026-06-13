@@ -2,32 +2,39 @@
 
 Each executor is fire-and-forget: it catches all exceptions internally
 and logs failures in verbose mode only (using ``[i]`` ASCII symbol).
-Webhook calls run in a daemon thread so the CLI never blocks.
+
+Two hook types (Copilot CLI aligned):
+
+- ``command`` -- shell command via subprocess, event JSON on **stdin**
+- ``http``    -- HTTPS POST with JSON body, env-var expansion in headers
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 import threading
-from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import CommandLogger
-    from apm_cli.core.lifecycle_hooks import HookDefinition, LifecycleEvent
+    from apm_cli.core.lifecycle_hooks import HookEntry, LifecycleEvent
 
 _logger = logging.getLogger(__name__)
 
-# Maximum time (seconds) for webhook HTTP calls and command/script execution.
-_WEBHOOK_TIMEOUT = 2
-_COMMAND_TIMEOUT = 30
+# Fallback timeouts when hook entry does not specify one.
+_DEFAULT_HTTP_TIMEOUT = 10
+_DEFAULT_COMMAND_TIMEOUT = 30
+
+# Pattern for $VAR or ${VAR} expansion in header values.
+_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def execute_hook(
-    hook: HookDefinition,
+    hook: HookEntry,
     event: LifecycleEvent,
     *,
     logger: CommandLogger | None = None,
@@ -35,75 +42,81 @@ def execute_hook(
     project_root: str | None = None,
 ) -> None:
     """Dispatch to the correct executor based on hook type."""
-    if hook.hook_type == "webhook":
-        _execute_webhook(hook, event, logger=logger, verbose=verbose)
+    if hook.hook_type == "http":
+        _execute_http(hook, event, logger=logger, verbose=verbose)
     elif hook.hook_type == "command":
-        _execute_command(hook, event, logger=logger, verbose=verbose)
-    elif hook.hook_type == "script":
-        _execute_script(hook, event, logger=logger, verbose=verbose, project_root=project_root)
+        _execute_command(hook, event, logger=logger, verbose=verbose, project_root=project_root)
 
 
-# -- Webhook executor -------------------------------------------------------
+# -- HTTP executor ----------------------------------------------------------
 
 
-def _execute_webhook(
-    hook: HookDefinition,
+def _expand_env_vars(value: str) -> str:
+    """Expand ``$VAR`` and ``${VAR}`` references in *value*."""
+
+    def _replace(match: re.Match) -> str:
+        var_name = match.group(1) or match.group(2)
+        return os.environ.get(var_name, "")
+
+    return _ENV_VAR_PATTERN.sub(_replace, value)
+
+
+def _execute_http(
+    hook: HookEntry,
     event: LifecycleEvent,
     *,
     logger: CommandLogger | None = None,
     verbose: bool = False,
 ) -> None:
-    """Send an HTTP POST to the webhook URL in a daemon thread.
+    """Send an HTTP POST to the hook URL in a daemon thread.
 
     Security hardening:
     - HTTPS-only (rejects ``http://``)
     - No redirect following
-    - Short timeout (2s)
-    - Bearer token via ``Authorization`` header
+    - Configurable timeout (default 10s)
+    - Header values support ``$ENV_VAR`` expansion
     """
     url = hook.url
     if not url:
-        _logger.debug("Webhook hook has no URL, skipping")
+        _logger.debug("HTTP hook has no URL, skipping")
         return
 
     parsed = urlparse(url)
     if parsed.scheme != "https":
         if verbose and logger:
             logger.verbose_detail(
-                f"[i] Webhook hook rejected: URL must use https (got {parsed.scheme}://)"
+                f"[i] HTTP hook rejected: URL must use https (got {parsed.scheme}://)"
             )
-        _logger.debug("Rejecting non-HTTPS webhook URL: %s", url)
+        _logger.debug("Rejecting non-HTTPS hook URL: %s", url)
         return
 
     if not parsed.hostname:
-        _logger.debug("Webhook URL has no hostname: %s", url)
+        _logger.debug("HTTP hook URL has no hostname: %s", url)
         return
 
-    # Read bearer token from the env var named by token_env.
-    token = None
-    if hook.token_env:
-        token = os.environ.get(hook.token_env)
+    # Build headers with env-var expansion.
+    request_headers: dict[str, str] = {"Content-Type": "application/json"}
+    if hook.headers:
+        for key, val in hook.headers.items():
+            request_headers[key] = _expand_env_vars(val)
 
     payload = event.to_json()
+    timeout = hook.effective_timeout
     hostname = parsed.hostname
 
     def _send() -> None:
         try:
             import requests
 
-            headers: dict[str, str] = {"Content-Type": "application/json"}
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-
             requests.post(
                 url,
                 data=payload,
-                headers=headers,
-                timeout=_WEBHOOK_TIMEOUT,
+                headers=request_headers,
+                timeout=timeout,
                 allow_redirects=False,
             )
         except Exception:
-            _logger.debug("Webhook POST failed for %s", url, exc_info=True)
+            _logger.debug("HTTP POST failed for %s", url, exc_info=True)
 
     thread = threading.Thread(target=_send, daemon=True)
     thread.start()
@@ -116,27 +129,33 @@ def _execute_webhook(
 
 
 def _execute_command(
-    hook: HookDefinition,
+    hook: HookEntry,
     event: LifecycleEvent,
     *,
     logger: CommandLogger | None = None,
     verbose: bool = False,
+    project_root: str | None = None,
 ) -> None:
-    """Execute a shell command with ``APM_HOOK_EVENT`` in the environment."""
-    cmd = hook.run
+    """Execute a shell command with the event payload on stdin."""
+    cmd = hook.effective_command
     if not cmd:
-        _logger.debug("Command hook has no run string, skipping")
+        _logger.debug("Command hook has no command string, skipping")
         return
 
-    env = _build_hook_env(event)
+    env = _build_hook_env(hook)
+    timeout = hook.effective_timeout
+    cwd = _resolve_cwd(hook, project_root)
 
     try:
         subprocess.run(
             cmd,
             shell=True,
             env=env,
-            timeout=_COMMAND_TIMEOUT,
+            input=event.to_json(),
+            timeout=timeout,
             capture_output=True,
+            text=True,
+            cwd=cwd,
         )
     except subprocess.TimeoutExpired:
         _logger.debug("Command hook timed out: %s", cmd)
@@ -148,73 +167,28 @@ def _execute_command(
             logger.verbose_detail(f"[i] Lifecycle command hook failed: {cmd}")
 
 
-# -- Script executor --------------------------------------------------------
-
-
-def _execute_script(
-    hook: HookDefinition,
-    event: LifecycleEvent,
-    *,
-    logger: CommandLogger | None = None,
-    verbose: bool = False,
-    project_root: str | None = None,
-) -> None:
-    """Execute a script file with ``APM_HOOK_EVENT`` in the environment.
-
-    The script path is validated to be within the project root to
-    prevent path traversal attacks.
-    """
-    script_path_str = hook.path
-    if not script_path_str:
-        _logger.debug("Script hook has no path, skipping")
-        return
-
-    root = Path(project_root) if project_root else Path.cwd()
-    script_path = (root / script_path_str).resolve()
-
-    # Path traversal guard.
-    try:
-        script_path.relative_to(root.resolve())
-    except ValueError:
-        _logger.debug("Script path traversal rejected: %s", script_path_str)
-        if verbose and logger:
-            logger.verbose_detail("[i] Lifecycle script hook rejected: path outside project root")
-        return
-
-    if not script_path.exists():
-        _logger.debug("Script hook file not found: %s", script_path)
-        if verbose and logger:
-            logger.verbose_detail(f"[i] Lifecycle script hook not found: {script_path_str}")
-        return
-
-    env = _build_hook_env(event)
-
-    try:
-        subprocess.run(
-            [str(script_path)],
-            env=env,
-            timeout=_COMMAND_TIMEOUT,
-            capture_output=True,
-        )
-    except subprocess.TimeoutExpired:
-        _logger.debug("Script hook timed out: %s", script_path_str)
-        if verbose and logger:
-            logger.verbose_detail(f"[i] Lifecycle script hook timed out: {script_path_str}")
-    except Exception:
-        _logger.debug("Script hook failed: %s", script_path_str, exc_info=True)
-        if verbose and logger:
-            logger.verbose_detail(f"[i] Lifecycle script hook failed: {script_path_str}")
-
-
 # -- Helpers ----------------------------------------------------------------
 
 
-def _build_hook_env(event: LifecycleEvent) -> dict[str, str]:
-    """Build the environment dict for command/script hooks.
+def _build_hook_env(hook: HookEntry) -> dict[str, str]:
+    """Build the environment dict for command hooks.
 
-    Inherits the current process environment and adds
-    ``APM_HOOK_EVENT`` with the JSON-serialised event data.
+    Inherits the current process environment and merges any extra
+    ``env`` entries from the hook definition.
     """
     env = dict(os.environ)
-    env["APM_HOOK_EVENT"] = event.to_json()
+    if hook.env:
+        env.update(hook.env)
     return env
+
+
+def _resolve_cwd(hook: HookEntry, project_root: str | None) -> str | None:
+    """Resolve the working directory for a command hook."""
+    if not hook.cwd:
+        return project_root
+    from pathlib import Path
+
+    if Path(hook.cwd).is_absolute():
+        return hook.cwd
+    root = Path(project_root) if project_root else Path.cwd()
+    return str(root / hook.cwd)

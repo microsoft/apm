@@ -640,7 +640,6 @@ def _fire_update_hooks(
             project_root = str(pkg_path)
 
         runner = build_runner_from_context(
-            project_hooks_raw=getattr(apm_package, "lifecycle_hooks", None),
             logger=logger,
             verbose=verbose,
             project_root=project_root,
@@ -655,6 +654,7 @@ def _fire_update_hooks(
             event=event_name,
             packages=pkg_infos,
             scope=scope_name,
+            working_directory=project_root,
         )
 
         runner.fire(event_name, event)

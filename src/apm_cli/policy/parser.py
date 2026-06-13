@@ -16,7 +16,6 @@ from .schema import (
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
     DependencyPolicy,
-    LifecycleHooksPolicy,
     ManifestPolicy,
     McpPolicy,
     McpTransportPolicy,
@@ -53,7 +52,6 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "unmanaged_files",
     "security",
     "bin_deploy",
-    "lifecycle_hooks",
 }
 
 
@@ -295,14 +293,6 @@ def _build_policy(data: dict) -> ApmPolicy:
         deny=_parse_tuple(bd_data.get("deny")) if bd_data.get("deny") is not None else (),
     )
 
-    lh_data = data.get("lifecycle_hooks") or {}
-    lifecycle_hooks_policy = LifecycleHooksPolicy(
-        require=lh_data.get("require") if isinstance(lh_data.get("require"), dict) else None,
-        deny_types=(
-            _parse_tuple(lh_data.get("deny_types")) if lh_data.get("deny_types") is not None else ()
-        ),
-    )
-
     return ApmPolicy(
         name=data.get("name", "") or "",
         version=data.get("version", "") or "",
@@ -318,7 +308,6 @@ def _build_policy(data: dict) -> ApmPolicy:
         registry_source=registry_source,
         security=security,
         bin_deploy=bin_deploy,
-        lifecycle_hooks=lifecycle_hooks_policy,
     )
 
 

@@ -1,6 +1,6 @@
 ---
 title: "Lifecycle Hooks"
-description: "Run custom actions (shell commands, HTTP webhooks, scripts) at install, update, and uninstall time."
+description: "Run custom actions (shell commands, HTTP webhooks) at install, update, and uninstall time."
 sidebar:
   order: 12
 ---
@@ -8,6 +8,9 @@ sidebar:
 APM supports **lifecycle hooks** -- custom actions that fire automatically
 at key moments during install, update, and uninstall operations. Hooks are
 fire-and-forget: a failing hook never blocks the CLI.
+
+Hooks are defined in standalone JSON files and discovered from well-known
+directories, following the same pattern as GitHub Copilot CLI hooks.
 
 ## Supported events
 
@@ -20,100 +23,96 @@ fire-and-forget: a failing hook never blocks the CLI.
 | `pre-uninstall`  | Before uninstall begins              |
 | `post-uninstall` | After a successful uninstall         |
 
-## Hook types
+## Hook file format
 
-### Shell command
-
-Run an inline shell command:
-
-```yaml
-lifecycle_hooks:
-  post-install:
-    - type: command
-      run: "echo 'installed' >> /tmp/apm.log"
-```
-
-### HTTP webhook
-
-Send a JSON payload to an HTTPS endpoint:
-
-```yaml
-lifecycle_hooks:
-  post-install:
-    - type: webhook
-      url: "https://analytics.internal.company.com/apm/events"
-      token_env: "ANALYTICS_TOKEN"
-```
-
-- **HTTPS only** -- `http://` URLs are rejected.
-- **No redirects** -- `allow_redirects=False`.
-- **2-second timeout** -- the call runs in a daemon thread.
-- **Bearer token** -- read from the env var named by `token_env`.
-
-### Script file
-
-Execute a script under the project root:
-
-```yaml
-lifecycle_hooks:
-  post-install:
-    - type: script
-      path: ".apm/hooks/post-install.sh"
-```
-
-Scripts must be within the project root (path traversal is rejected).
-
-## Configuration levels
-
-Hooks can be declared at three levels. They are merged at runtime --
-policy hooks run first and cannot be removed by the project.
-
-### 1. Project (`apm.yml`)
-
-```yaml
-# apm.yml
-lifecycle_hooks:
-  post-install:
-    - type: webhook
-      url: "https://analytics.corp.net/apm"
-      token_env: "APM_ANALYTICS_TOKEN"
-```
-
-### 2. Global (`~/.apm/config.json`)
+Hook files are JSON with a versioned schema:
 
 ```json
 {
-  "lifecycle_hooks": {
+  "version": 1,
+  "hooks": {
     "post-install": [
-      { "type": "command", "run": "echo installed" }
+      {
+        "type": "command",
+        "bash": "./scripts/notify.sh",
+        "timeoutSec": 10
+      },
+      {
+        "type": "http",
+        "url": "https://analytics.corp.net/apm/events",
+        "headers": { "Authorization": "Bearer $APM_ANALYTICS_TOKEN" },
+        "timeoutSec": 5
+      }
     ]
   }
 }
 ```
 
-### 3. Policy (`apm-policy.yml`)
+## Hook types
 
-Policy-level hooks are enforced organisation-wide:
+### Command
 
-```yaml
-# apm-policy.yml
-lifecycle_hooks:
-  require:
-    post-install:
-      - type: webhook
-        url: "https://analytics.internal.company.com/apm/events"
-        token_env: "ANALYTICS_TOKEN"
-  deny_types:
-    - script
+Run a shell command. The event payload is piped via **stdin** as JSON:
+
+```json
+{
+  "type": "command",
+  "bash": "./scripts/notify.sh",
+  "cwd": "./scripts",
+  "env": { "LOG_LEVEL": "INFO" },
+  "timeoutSec": 10
+}
 ```
 
-`deny_types` blocks specific hook types across the organisation.
+Fields:
+- `bash` -- command string for bash (use this on Linux/macOS)
+- `command` -- fallback command string (cross-platform)
+- `cwd` -- working directory (relative paths resolve against project root)
+- `env` -- extra environment variables merged into the process env
+- `timeoutSec` -- execution timeout (default: 30s)
+
+If both `bash` and `command` are present, `bash` takes priority.
+
+### HTTP
+
+Send a JSON POST to an HTTPS endpoint:
+
+```json
+{
+  "type": "http",
+  "url": "https://analytics.corp.net/apm/events",
+  "headers": { "Authorization": "Bearer $APM_ANALYTICS_TOKEN" },
+  "timeoutSec": 5
+}
+```
+
+Fields:
+- `url` -- HTTPS endpoint (**http:// is rejected**)
+- `headers` -- request headers; values support `$ENV_VAR` expansion
+- `timeoutSec` -- request timeout (default: 10s)
+
+Security:
+- **HTTPS only** -- `http://` URLs are rejected
+- **No redirects** -- redirect following is disabled
+- Headers support env-var expansion (`$VAR` or `${VAR}`)
+
+## Discovery locations
+
+Hook files are loaded from three directories. All files are **additive** --
+every hook from every file runs. Policy hooks cannot be disabled.
+
+| Priority     | Path                        | Who controls     |
+|--------------|-----------------------------|------------------|
+| 1 (highest)  | `/etc/apm/policy.d/*.json`  | Platform/IT team |
+| 2            | `~/.apm/hooks/*.json`       | Individual user  |
+| 3            | `.apm/hooks/*.json`         | Project          |
+
+Only `*.json` files are loaded. Non-JSON files are ignored.
 
 ## Event payload
 
-All hook types receive the same event data. Webhooks get it as a JSON
-body; commands and scripts receive it in the `APM_HOOK_EVENT` environment
-variable (JSON-encoded).
+Command hooks receive JSON on **stdin**. HTTP hooks receive it as the
+POST body.
 
 ```json
 {
@@ -124,28 +123,39 @@ variable (JSON-encoded).
   ],
   "scope": "project",
   "timestamp": "2026-06-13T14:50:15Z",
-  "cli_version": "0.14.1"
+  "cli_version": "0.14.1",
+  "working_directory": "/path/to/project"
 }
 ```
 
 ## Analytics use case
 
 The canonical use case for lifecycle hooks is installation analytics.
-An enterprise platform team can deploy an org-wide webhook via policy
-to track which packages are actively used:
+An enterprise platform team can deploy an org-wide webhook via the
+policy directory to track which packages are actively used:
 
-```yaml
-# apm-policy.yml
-lifecycle_hooks:
-  require:
-    post-install:
-      - type: webhook
-        url: "https://analytics.internal.company.com/apm/events"
-        token_env: "APM_ANALYTICS_TOKEN"
-    post-uninstall:
-      - type: webhook
-        url: "https://analytics.internal.company.com/apm/events"
-        token_env: "APM_ANALYTICS_TOKEN"
+Create `/etc/apm/policy.d/analytics.json`:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "post-install": [
+      {
+        "type": "http",
+        "url": "https://analytics.internal.company.com/apm/events",
+        "headers": { "Authorization": "Bearer $APM_ANALYTICS_TOKEN" }
+      }
+    ],
+    "post-uninstall": [
+      {
+        "type": "http",
+        "url": "https://analytics.internal.company.com/apm/events",
+        "headers": { "Authorization": "Bearer $APM_ANALYTICS_TOKEN" }
+      }
+    ]
+  }
+}
 ```
 
 Set the token in CI:
@@ -161,11 +171,9 @@ trends -- without any changes to individual project configurations.
 
 ## Security considerations
 
-- Webhook URLs must use `https://`.
-- Bearer tokens are never stored in config -- they are read from env
-  vars at runtime.
-- Script paths are validated to stay within the project root.
-- All hooks are fire-and-forget with a short timeout (2s for webhooks,
-  30s for commands/scripts).
+- HTTP hook URLs must use `https://`.
+- Tokens are never stored in hook files -- use env-var expansion in headers.
+- All hooks are fire-and-forget with configurable timeouts (10s for HTTP,
+  30s for commands by default).
 - Hook failures are logged in verbose mode (`--verbose`) and never
   block the CLI.

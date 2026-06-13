@@ -1,17 +1,19 @@
 """Lifecycle hook models, runner, and discovery.
 
 APM supports lifecycle hooks that fire at key moments during install,
-update, and uninstall operations.  Hooks are configured at three levels:
+update, and uninstall operations.  Hooks are configured via standalone
+JSON files discovered from three directories (Copilot CLI pattern):
 
-1. **Project** -- ``lifecycle_hooks:`` section in ``apm.yml``
-2. **Global** -- ``lifecycle_hooks`` key in ``~/.apm/config.json``
-3. **Policy** -- ``lifecycle_hooks:`` in ``apm-policy.yml`` (org-enforced)
+1. **Policy** -- ``/etc/apm/policy.d/*.json`` (admin-owned, cannot be disabled)
+2. **User**   -- ``~/.apm/hooks/*.json``
+3. **Project** -- ``.apm/hooks/*.json`` under the project root
 
-Three action types are supported:
+Each file uses ``{ "version": 1, "hooks": { "<event>": [...] } }``.
 
-- ``command`` -- shell command executed via subprocess
-- ``webhook`` -- HTTP POST to a URL with bearer-token auth
-- ``script``  -- executable script file under the project root
+Two hook types are supported:
+
+- ``command`` -- shell command (``bash`` / ``command`` fields)
+- ``http``    -- HTTPS POST to a URL with optional headers
 
 All hooks are **fire-and-forget**: failures are logged in verbose mode
 but never block the CLI.
@@ -21,8 +23,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import platform
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -40,8 +45,11 @@ LIFECYCLE_EVENTS = (
     "post-uninstall",
 )
 
-# Supported hook action types.
-HOOK_TYPES = ("command", "webhook", "script")
+# Supported hook action types (Copilot CLI aligned).
+HOOK_TYPES = ("command", "http")
+
+# Current hook-file schema version.
+HOOK_FILE_VERSION = 1
 
 
 # -- Event model -----------------------------------------------------------
@@ -59,8 +67,8 @@ class PackageInfo:
 class LifecycleEvent:
     """Data payload passed to every lifecycle hook.
 
-    Webhooks receive this as a JSON body.  Commands and scripts receive
-    it via the ``APM_HOOK_EVENT`` environment variable (JSON-encoded).
+    HTTP hooks receive this as a JSON POST body.  Command hooks
+    receive it via **stdin** (JSON-encoded).
     """
 
     schema_version: int = 1
@@ -69,6 +77,7 @@ class LifecycleEvent:
     scope: str = "project"
     timestamp: str = ""
     cli_version: str = ""
+    working_directory: str = ""
 
     def to_json(self) -> str:
         """Serialise the event to a compact JSON string."""
@@ -79,6 +88,7 @@ class LifecycleEvent:
         event: str,
         packages: list[PackageInfo] | None = None,
         scope: str = "project",
+        working_directory: str | None = None,
     ) -> LifecycleEvent:
         """Factory that auto-fills timestamp and CLI version."""
         from apm_cli.version import get_version
@@ -89,122 +99,170 @@ class LifecycleEvent:
             scope=scope,
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             cli_version=get_version(),
+            working_directory=working_directory or str(Path.cwd()),
         )
 
 
-# -- Hook definition -------------------------------------------------------
+# -- Hook entry (one action inside a hook file) ----------------------------
 
 
 @dataclass
-class HookDefinition:
-    """One configured lifecycle hook action.
+class HookEntry:
+    """One configured lifecycle hook action (Copilot CLI schema).
 
     Attributes:
-        hook_type: ``command``, ``webhook``, or ``script``.
-        event:     Lifecycle event name (e.g. ``post-install``).
-        run:       Shell command string (for ``command`` type).
-        url:       Webhook endpoint URL (for ``webhook`` type).
-        token_env: Name of the env var holding the bearer token
-                   (for ``webhook`` type).
-        path:      Script file path relative to project root
-                   (for ``script`` type).
-        source:    Where this hook was defined: ``project``, ``global``,
-                   or ``policy``.
+        hook_type:   ``command`` or ``http``.
+        event:       Lifecycle event name (e.g. ``post-install``).
+        bash:        Shell command for Unix (``command`` type).
+        command:     Cross-platform fallback command string.
+        url:         HTTP endpoint URL (``http`` type).
+        headers:     HTTP headers dict; values support ``$ENV_VAR`` expansion.
+        timeout_sec: Timeout in seconds (default 30 for commands, 10 for http).
+        cwd:         Working directory for the command (relative or absolute).
+        env:         Extra environment variables for the command.
+        source:      Where this hook was defined: ``policy``, ``user``,
+                     or ``project``.
+        source_file: Path of the JSON file that declared this hook.
     """
 
     hook_type: str
     event: str
-    run: str | None = None
+    bash: str | None = None
+    command: str | None = None
     url: str | None = None
-    token_env: str | None = None
-    path: str | None = None
+    headers: dict[str, str] | None = None
+    timeout_sec: int | None = None
+    cwd: str | None = None
+    env: dict[str, str] | None = None
     source: str = "project"
+    source_file: str | None = None
 
     @property
-    def identity_key(self) -> tuple[str, str, str]:
-        """Deduplication key: (event, type, identifier)."""
-        if self.hook_type == "command":
-            return (self.event, self.hook_type, self.run or "")
-        if self.hook_type == "webhook":
-            return (self.event, self.hook_type, self.url or "")
-        return (self.event, self.hook_type, self.path or "")
+    def effective_command(self) -> str | None:
+        """Resolve the command to run on the current platform."""
+        return self.bash or self.command
+
+    @property
+    def effective_timeout(self) -> int:
+        """Return timeout_sec with sensible defaults per type."""
+        if self.timeout_sec is not None:
+            return self.timeout_sec
+        return 10 if self.hook_type == "http" else 30
+
+
+# -- Hook file parsing -----------------------------------------------------
+
+
+def parse_hook_file(path: Path, source: str = "project") -> list[HookEntry]:
+    """Parse a single JSON hook file into a list of :class:`HookEntry`.
+
+    Returns an empty list if the file is malformed or uses an
+    unsupported version.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        _logger.debug("Failed to load hook file %s: %s", path, e)
+        return []
+
+    if not isinstance(data, dict):
+        return []
+
+    version = data.get("version")
+    if version != HOOK_FILE_VERSION:
+        _logger.debug("Skipping hook file %s: unsupported version %s", path, version)
+        return []
+
+    hooks_dict = data.get("hooks")
+    if not isinstance(hooks_dict, dict):
+        return []
+
+    entries: list[HookEntry] = []
+    for event_name, hook_list in hooks_dict.items():
+        if event_name not in LIFECYCLE_EVENTS:
+            _logger.debug("Ignoring unknown lifecycle event %s in %s", event_name, path)
+            continue
+        if not isinstance(hook_list, list):
+            continue
+        for raw in hook_list:
+            if not isinstance(raw, dict):
+                continue
+            hook_type = raw.get("type", "command")
+            if hook_type not in HOOK_TYPES:
+                _logger.debug("Ignoring unknown hook type %s in %s", hook_type, path)
+                continue
+            entries.append(
+                HookEntry(
+                    hook_type=hook_type,
+                    event=event_name,
+                    bash=raw.get("bash"),
+                    command=raw.get("command"),
+                    url=raw.get("url"),
+                    headers=raw.get("headers"),
+                    timeout_sec=raw.get("timeoutSec") or raw.get("timeout"),
+                    cwd=raw.get("cwd"),
+                    env=raw.get("env"),
+                    source=source,
+                    source_file=str(path),
+                )
+            )
+    return entries
 
 
 # -- Hook discovery ---------------------------------------------------------
 
 
-def parse_hooks_from_config(
-    raw: dict[str, Any],
-    source: str = "project",
-) -> list[HookDefinition]:
-    """Parse a ``lifecycle_hooks`` mapping into :class:`HookDefinition` list.
+def _get_policy_hooks_dir() -> Path:
+    """Return the platform-specific policy hooks directory."""
+    system = platform.system()
+    if system == "Windows":
+        return Path(r"C:\ProgramData\APM\policy.d")
+    return Path("/etc/apm/policy.d")
 
-    Accepts the shape used in both ``apm.yml`` and ``config.json``::
 
-        lifecycle_hooks:
-          post-install:
-            - type: webhook
-              url: https://...
-              token_env: MY_TOKEN
-            - type: command
-              run: echo done
+def _get_user_hooks_dir() -> Path:
+    """Return the user-level hooks directory (~/.apm/hooks/)."""
+    apm_home = os.environ.get("APM_HOME")
+    if apm_home:
+        return Path(apm_home) / "hooks"
+    return Path.home() / ".apm" / "hooks"
+
+
+def _get_project_hooks_dir(project_root: str | None = None) -> Path:
+    """Return the project-level hooks directory (.apm/hooks/)."""
+    root = Path(project_root) if project_root else Path.cwd()
+    return root / ".apm" / "hooks"
+
+
+def _load_hooks_from_dir(
+    directory: Path,
+    source: str,
+) -> list[HookEntry]:
+    """Load all ``*.json`` hook files from *directory*, sorted by name."""
+    if not directory.is_dir():
+        return []
+    entries: list[HookEntry] = []
+    for json_file in sorted(directory.glob("*.json")):
+        if json_file.is_file():
+            entries.extend(parse_hook_file(json_file, source=source))
+    return entries
+
+
+def discover_hooks(
+    project_root: str | None = None,
+) -> list[HookEntry]:
+    """Discover and merge hooks from all three directories.
+
+    Load order (all additive, policy first):
+      1. Policy  -- ``/etc/apm/policy.d/*.json``
+      2. User    -- ``~/.apm/hooks/*.json``
+      3. Project -- ``.apm/hooks/*.json``
     """
-    hooks: list[HookDefinition] = []
-    if not isinstance(raw, dict):
-        return hooks
-    for event_name, entries in raw.items():
-        if event_name not in LIFECYCLE_EVENTS:
-            _logger.debug("Ignoring unknown lifecycle event: %s", event_name)
-            continue
-        if not isinstance(entries, list):
-            continue
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            hook_type = entry.get("type", "")
-            if hook_type not in HOOK_TYPES:
-                _logger.debug("Ignoring unknown hook type: %s", hook_type)
-                continue
-            hooks.append(
-                HookDefinition(
-                    hook_type=hook_type,
-                    event=event_name,
-                    run=entry.get("run"),
-                    url=entry.get("url"),
-                    token_env=entry.get("token_env"),
-                    path=entry.get("path"),
-                    source=source,
-                )
-            )
-    return hooks
-
-
-def collect_hooks(
-    project_hooks_raw: dict[str, Any] | None = None,
-    global_hooks_raw: dict[str, Any] | None = None,
-    policy_hooks_raw: dict[str, Any] | None = None,
-) -> list[HookDefinition]:
-    """Merge hooks from all three levels with deduplication.
-
-    Merge order (policy first, then global, then project):
-    - Policy hooks run first and cannot be removed by project.
-    - Duplicates (same event + type + identifier) are skipped.
-    """
-    hooks: list[HookDefinition] = []
-    seen: set[tuple[str, str, str]] = set()
-
-    for raw, source in [
-        (policy_hooks_raw, "policy"),
-        (global_hooks_raw, "global"),
-        (project_hooks_raw, "project"),
-    ]:
-        if raw is None:
-            continue
-        for hook in parse_hooks_from_config(raw, source=source):
-            key = hook.identity_key
-            if key not in seen:
-                seen.add(key)
-                hooks.append(hook)
+    hooks: list[HookEntry] = []
+    hooks.extend(_load_hooks_from_dir(_get_policy_hooks_dir(), source="policy"))
+    hooks.extend(_load_hooks_from_dir(_get_user_hooks_dir(), source="user"))
+    hooks.extend(_load_hooks_from_dir(_get_project_hooks_dir(project_root), source="project"))
     return hooks
 
 
@@ -219,7 +277,7 @@ class LifecycleHookRunner:
 
     def __init__(
         self,
-        hooks: list[HookDefinition] | None = None,
+        hooks: list[HookEntry] | None = None,
         logger: CommandLogger | None = None,
         verbose: bool = False,
         project_root: str | None = None,
@@ -264,45 +322,20 @@ class LifecycleHookRunner:
                     )
 
 
-# -- Convenience: build runner from standard sources -----------------------
+# -- Convenience: build runner from file-based discovery -------------------
 
 
 def build_runner_from_context(
     *,
-    project_hooks_raw: dict[str, Any] | None = None,
     logger: Any = None,
     verbose: bool = False,
     project_root: str | None = None,
 ) -> LifecycleHookRunner:
-    """Create a :class:`LifecycleHookRunner` using the standard 3-source merge.
+    """Create a :class:`LifecycleHookRunner` via file-based discovery.
 
-    Collects hooks from:
-      1. *project_hooks_raw* (apm.yml ``lifecycle_hooks`` already parsed)
-      2. Global user config (``~/.apm/config.json``)
-      3. Cached policy (if loaded)
-
-    This is the single canonical path so that install, uninstall, and
-    update do not duplicate the collection + policy look-up logic.
+    Scans policy, user, and project hook directories for JSON files.
     """
-    import contextlib
-
-    from apm_cli.config import get_lifecycle_hooks
-
-    global_hooks_raw = get_lifecycle_hooks()
-
-    policy_hooks_raw = None
-    with contextlib.suppress(Exception):
-        from apm_cli.policy.discovery import get_cached_policy
-
-        policy = get_cached_policy()
-        if policy and hasattr(policy, "lifecycle_hooks"):
-            policy_hooks_raw = getattr(policy.lifecycle_hooks, "require", None)
-
-    hooks = collect_hooks(
-        project_hooks_raw=project_hooks_raw,
-        global_hooks_raw=global_hooks_raw,
-        policy_hooks_raw=policy_hooks_raw,
-    )
+    hooks = discover_hooks(project_root=project_root)
 
     return LifecycleHookRunner(
         hooks=hooks,

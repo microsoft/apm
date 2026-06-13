@@ -334,13 +334,7 @@ def _fire_uninstall_hooks(
             build_runner_from_context,
         )
 
-        project_hooks_raw = None
-        with contextlib.suppress(Exception):
-            apm_package = APMPackage.from_apm_yml(manifest_path)
-            project_hooks_raw = getattr(apm_package, "lifecycle_hooks", None)
-
         runner = build_runner_from_context(
-            project_hooks_raw=project_hooks_raw,
             logger=logger,
             verbose=verbose,
             project_root=str(deploy_root),
@@ -352,6 +346,7 @@ def _fire_uninstall_hooks(
             event=event_name,
             packages=pkg_infos,
             scope=scope_name,
+            working_directory=str(deploy_root),
         )
 
         runner.fire(event_name, event)

@@ -120,7 +120,6 @@ class InstallService:
             project_root = str(pkg_path)
 
         return build_runner_from_context(
-            project_hooks_raw=getattr(request.apm_package, "lifecycle_hooks", None),
             logger=request.logger,
             verbose=request.verbose,
             project_root=project_root,
@@ -146,10 +145,16 @@ class InstallService:
                 request.scope.value if hasattr(request.scope, "value") else str(request.scope)
             )
 
+        project_root = None
+        pkg_path = getattr(request.apm_package, "package_path", None)
+        if pkg_path is not None:
+            project_root = str(pkg_path)
+
         return LifecycleEvent.create(
             event=event_name,
             packages=packages,
             scope=scope_name,
+            working_directory=project_root,
         )
 
     @staticmethod
