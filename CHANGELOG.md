@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `apm marketplace publish` command and its consumer-repo fan-out workflow
+  (`publisher.py`, `pr_integration.py`, `consumer-targets.yml` support).
+  Consumers should run `apm install --update` on their own cadence. (#1134)
+- `apm marketplace doctor` subcommand alias (deprecated). Use the top-level
+  `apm doctor` command instead. (#1134)
+
 ## [0.20.0] - 2026-06-11
 
 ### Added

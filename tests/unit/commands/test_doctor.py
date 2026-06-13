@@ -8,7 +8,6 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.commands.marketplace import marketplace
 
 # Token env vars that AuthResolver inspects.  Cleared so the doctor's auth
 # check is deterministic regardless of the host environment.
@@ -57,27 +56,12 @@ def test_common_workflows_footer_present():
     assert "apm doctor" in result.output
 
 
-def test_marketplace_doctor_hidden_from_help():
-    """Legacy `apm marketplace doctor` must not appear in marketplace --help."""
+def test_marketplace_doctor_not_available():
+    """``apm marketplace doctor`` must not be a registered subcommand."""
     runner = CliRunner()
     result = runner.invoke(cli, ["marketplace", "--help"])
     assert result.exit_code == 0
-    # 'doctor' as a subcommand listing should be gone from the Authoring
-    # commands block now that it has been promoted to top-level.
     assert "doctor  " not in result.output  # column-aligned listing
-
-
-def test_marketplace_doctor_still_works_with_deprecation_hint(mock_subprocess_success):
-    """Legacy invocation must keep working and print the migration hint."""
-    runner = CliRunner()
-    result = runner.invoke(marketplace, ["doctor"])
-    # The deprecation hint is emitted with err=True. Click 8.2 separates
-    # stdout/stderr by default, so check both to stay version-agnostic.
-    combined = (result.output or "") + (getattr(result, "stderr", "") or "")
-    assert "deprecated" in combined.lower()
-    assert "apm doctor" in combined
-    # And the diagnostics still run.
-    assert result.exit_code in (0, 1)  # 1 if network unreachable in sandbox
 
 
 def test_apm_doctor_runs_diagnostics(mock_subprocess_success):

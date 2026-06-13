@@ -4,7 +4,6 @@ This test suite maximizes code coverage on five target modules:
 1. src/apm_cli/commands/marketplace/__init__.py (422 miss, 37%)
 2. src/apm_cli/commands/init.py (188 miss, 33%)
 3. src/apm_cli/commands/pack.py (188 miss, 41%)
-4. src/apm_cli/marketplace/publisher.py (217 miss, 25%)
 5. src/apm_cli/core/script_runner.py (254 miss, 39%)
 
 Strategy:
@@ -530,36 +529,6 @@ class TestScriptRunner:
 
 
 # ---------------------------------------------------------------------------
-# Marketplace Publisher Tests (src/apm_cli/marketplace/publisher.py)
-# ---------------------------------------------------------------------------
-
-
-class TestMarketplacePublisher:
-    """Test coverage for MarketplacePublisher class."""
-
-    def test_publisher_initialization(self, tmp_path: Path) -> None:
-        """Test MarketplacePublisher initializes with marketplace_root."""
-        from apm_cli.marketplace.publisher import MarketplacePublisher
-
-        # Create a marketplace root directory
-        mp_root = tmp_path / "marketplace"
-        mp_root.mkdir()
-        publisher = MarketplacePublisher(marketplace_root=mp_root)
-        assert publisher is not None
-
-    def test_publisher_sanitize_branch_name(self) -> None:
-        """Test publisher branch name sanitization."""
-        from apm_cli.marketplace.publisher import _sanitise_branch_segment
-
-        # Test special characters are replaced
-        result = _sanitise_branch_segment("test@azure#v1.0.0")
-        assert "@" not in result
-        assert "#" not in result
-        assert "-" in result
-
-
-# ---------------------------------------------------------------------------
-# Integration: Combined Command Tests
 # ---------------------------------------------------------------------------
 
 
