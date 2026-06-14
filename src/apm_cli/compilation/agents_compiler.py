@@ -27,6 +27,7 @@ from ..version import get_version
 from .claude_formatter import CLAUDE_HEADER, ClaudeFormatter
 from .constants import BUILD_ID_PLACEHOLDER
 from .link_resolver import resolve_markdown_links, validate_link_targets
+from .managed_section import ManagedSectionError
 from .template_builder import (
     TemplateData,
     build_conditional_sections,
@@ -624,7 +625,7 @@ class AgentsCompiler:
             try:
                 self._write_distributed_file(agents_path, content, config)
                 successful_writes += 1
-            except OSError as e:
+            except (OSError, ManagedSectionError) as e:
                 self.errors.append(f"Failed to write {agents_path}: {e!s}")
 
         # Update stats with actual files written
@@ -1460,7 +1461,12 @@ class AgentsCompiler:
             self.errors.append(f"Failed to write output file {output_path}: {e!s}")
 
     def _write_output_file_with_config(
-        self, output_path: str, content: str, config: "CompilationConfig"
+        self,
+        output_path: str,
+        content: str,
+        config: "CompilationConfig",
+        *,
+        raise_write_errors: bool = False,
     ) -> None:
         """Write generated content, honouring agents_md_mode from config.
 
@@ -1472,6 +1478,9 @@ class AgentsCompiler:
             output_path (str): Path to write the output.
             content (str): Generated content for this compilation.
             config (CompilationConfig): Compilation configuration.
+            raise_write_errors (bool): Raise write ``OSError`` instead of
+                recording it on ``self.errors``. Used by callers that need to
+                preserve their own write-failure accounting/exit semantics.
         """
         from .managed_section import ManagedSectionError, apply_managed_section
         from .output_writer import CompiledOutputWriter
@@ -1503,7 +1512,10 @@ class AgentsCompiler:
         try:
             CompiledOutputWriter().write(Path(output_path), content)
         except OSError as e:
-            self.errors.append(f"Failed to write output file {output_path}: {e!s}")
+            message = f"Failed to write output file {output_path}: {e!s}"
+            if raise_write_errors:
+                raise OSError(message) from e
+            self.errors.append(message)
 
     def _compile_stats(
         self, primitives: PrimitiveCollection, template_data: TemplateData
@@ -1532,6 +1544,11 @@ class AgentsCompiler:
     ) -> None:
         """Write a distributed AGENTS.md file with constitution injection support.
 
+        When ``config.agents_md_mode == 'managed_section'`` and ``agents_path``
+        is the project-root ``AGENTS.md``, writing is delegated to
+        ``_write_output_file_with_config`` so that hand-written content outside
+        the configured markers is preserved.
+
         Args:
             agents_path (Path): Path to write the AGENTS.md file.
             content (str): Content to write.
@@ -1552,6 +1569,13 @@ class AgentsCompiler:
                     )
                 except Exception as exc:
                     _logger.debug("Constitution injection failed for %s: %s", agents_path, exc)
+
+            is_root = agents_path.parent.resolve() == self.base_dir.resolve()
+            if is_root and config.agents_md_mode == "managed_section":
+                self._write_output_file_with_config(
+                    str(agents_path), final_content, config, raise_write_errors=True
+                )
+                return
 
             from .output_writer import CompiledOutputWriter
 

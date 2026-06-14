@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm compile` now preserves hand-written content outside the configured
+  managed-section markers when `compilation.agents_md.mode: managed_section`
+  is set, in both the default distributed strategy and the `--single-agents`
+  CLI path. Previously the project-root `AGENTS.md` was silently overwritten
+  because both write paths bypassed the managed-section helper. (closes #1764)
+
 ## [0.20.0] - 2026-06-11
 
 ### Added
