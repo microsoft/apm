@@ -376,3 +376,214 @@ class TestManagedSectionWriteIntegration:
         compiler = AgentsCompiler(str(tmp_path))
         with pytest.raises(ManagedSectionError, match=r"(?i)does not exist|not exist|create it"):
             compiler._write_output_file_with_config(str(output_file), "New content.\n", config)
+
+
+class TestManagedSectionDistributed:
+    """Regression tests for issue #1764: managed_section honoured on the
+    distributed (default) and --single-agents write paths, not just the
+    legacy single-file path."""
+
+    def test_distributed_root_agents_md_preserves_human_content(self, tmp_path):
+        """AC-1: root AGENTS.md in managed_section mode preserves surrounding content."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
+        intro = "Hand-written intro that must survive."
+        footer = "Hand-written footer that must survive."
+        agents_md = tmp_path / "AGENTS.md"
+        agents_md.write_text(
+            f"{intro}\n\n{DEFAULT_START}\nOld generated block.\n{DEFAULT_END}\n\n{footer}\n"
+        )
+        config = CompilationConfig(
+            agents_md_mode="managed_section", with_constitution=False, dry_run=False
+        )
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._write_distributed_file(agents_md, "New generated block.", config)
+
+        written = agents_md.read_text()
+        assert intro in written
+        assert footer in written
+        assert "New generated block." in written
+        assert "Old generated block." not in written
+        assert written.count(DEFAULT_START) == 1
+        assert written.count(DEFAULT_END) == 1
+
+    def test_distributed_subdir_agents_md_overwritten_in_managed_mode(self, tmp_path):
+        """AC-2: subdirectory AGENTS.md is fully overwritten even in managed_section mode."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
+        src = tmp_path / "src"
+        src.mkdir()
+        subdir_agents = src / "AGENTS.md"
+        subdir_agents.write_text("Arbitrary subdir content with no markers.\n")
+        config = CompilationConfig(
+            agents_md_mode="managed_section", with_constitution=False, dry_run=False
+        )
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._write_distributed_file(subdir_agents, "Fresh subdir content.", config)
+
+        written = subdir_agents.read_text()
+        assert "Arbitrary subdir content with no markers." not in written
+        assert "Fresh subdir content." in written
+
+    def test_distributed_root_agents_md_full_mode_still_overwrites(self, tmp_path):
+        """AC-3: in full mode the root AGENTS.md is byte-for-byte replaced."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
+        agents_md = tmp_path / "AGENTS.md"
+        agents_md.write_text("# Old content with no markers.\nSome prose.\n")
+        config = CompilationConfig(agents_md_mode="full", with_constitution=False, dry_run=False)
+        compiler = AgentsCompiler(str(tmp_path))
+        compiler._write_distributed_file(agents_md, "Brand new content.", config)
+
+        written = agents_md.read_text()
+        assert written == "Brand new content."
+        assert "# Old content with no markers." not in written
+
+    def test_distributed_root_managed_section_missing_file_errors(self, tmp_path):
+        """AC-4: missing root AGENTS.md in managed_section mode surfaces via errors, not a traceback."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
+        instr = tmp_path / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "example.instructions.md").write_text(
+            '---\ndescription: example\napplyTo: ["**/*.py"]\n---\nExample instruction body.\n'
+        )
+        config = CompilationConfig(
+            target="agents",
+            strategy="distributed",
+            agents_md_mode="managed_section",
+            with_constitution=False,
+            dry_run=False,
+            no_dedup=True,
+        )
+        compiler = AgentsCompiler(str(tmp_path))
+        result = compiler.compile(config)
+
+        assert not result.success
+        joined = " ".join(result.errors)
+        assert "Failed to write" in joined
+        assert "AGENTS.md" in joined
+
+    def test_distributed_managed_section_write_error_is_reported(self, tmp_path, monkeypatch):
+        """Managed-section root write OSError must fail distributed stats/result."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+        from apm_cli.compilation.output_writer import CompiledOutputWriter
+
+        agents_md = tmp_path / "AGENTS.md"
+        agents_md.write_text(f"Intro.\n{DEFAULT_START}\nOld.\n{DEFAULT_END}\nFooter.\n")
+        instr = tmp_path / ".apm" / "instructions"
+        instr.mkdir(parents=True)
+        (instr / "example.instructions.md").write_text(
+            '---\ndescription: example\napplyTo: ["**/*.py"]\n---\nExample instruction body.\n'
+        )
+
+        def fail_write(self, path, content):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(CompiledOutputWriter, "write", fail_write)
+        config = CompilationConfig(
+            target="agents",
+            strategy="distributed",
+            agents_md_mode="managed_section",
+            with_constitution=False,
+            dry_run=False,
+            no_dedup=True,
+        )
+        result = AgentsCompiler(str(tmp_path)).compile(config)
+
+        assert not result.success
+        assert result.stats["agents_files_generated"] == 0
+        joined = " ".join(result.errors)
+        assert "Failed to write" in joined
+        assert "disk full" in joined
+
+    def test_single_agents_cli_managed_section_write_error_exits_nonzero(self, monkeypatch):
+        """--single-agents managed-section write OSError must exit non-zero."""
+        from pathlib import Path
+
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+        from apm_cli.compilation.output_writer import CompiledOutputWriter
+
+        def fail_write(self, path, content):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(CompiledOutputWriter, "write", fail_write)
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text(
+                "name: test\nversion: 0.1.0\n"
+                "compilation:\n  agents_md:\n    mode: managed_section\n"
+            )
+            Path("AGENTS.md").write_text(f"Intro.\n{DEFAULT_START}\nOld.\n{DEFAULT_END}\nFooter.\n")
+            apm_dir = Path(".apm") / "instructions"
+            apm_dir.mkdir(parents=True)
+            (apm_dir / "test.instructions.md").write_text(
+                "---\ndescription: Test\napplyTo: '**/*.py'\n---\nNew generated instruction body.\n"
+            )
+            result = runner.invoke(cli, ["compile", "--single-agents", "--target", "agents"])
+
+        assert result.exit_code == 1
+        assert "Failed to write output file" in result.output
+        assert "disk full" in result.output
+
+    def test_single_agents_cli_managed_section_routes_through_config_writer(self):
+        """AC-5: --single-agents in managed_section mode preserves surrounding content."""
+        from pathlib import Path
+
+        from click.testing import CliRunner
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path("apm.yml").write_text(
+                "name: test\nversion: 0.1.0\n"
+                "compilation:\n  agents_md:\n    mode: managed_section\n"
+            )
+            Path("AGENTS.md").write_text(
+                "# Repo guidance\n\n"
+                "Hand-written intro that must survive.\n\n"
+                f"{DEFAULT_START}\n"
+                "Old generated block.\n"
+                f"{DEFAULT_END}\n\n"
+                "Hand-written footer that must survive.\n"
+            )
+            apm_dir = Path(".apm") / "instructions"
+            apm_dir.mkdir(parents=True)
+            (apm_dir / "test.instructions.md").write_text(
+                "---\ndescription: Test\napplyTo: '**/*.py'\n---\nNew generated instruction body.\n"
+            )
+            result = runner.invoke(cli, ["compile", "--single-agents", "--target", "agents"])
+
+            out = Path("AGENTS.md").read_text()
+            assert "Hand-written intro that must survive." in out
+            assert "Hand-written footer that must survive." in out
+            assert "New generated instruction body." in out
+            assert "Old generated block." not in out
+            assert result.exit_code == 0
+
+    def test_distributed_root_detection_normalizes_symlinks(self, tmp_path):
+        """NFR-3: root detection via Path.resolve() normalizes symlinks."""
+        from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
+        real_root = tmp_path / "real"
+        real_root.mkdir()
+        link = tmp_path / "link"
+        try:
+            link.symlink_to(real_root, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"symlinks unavailable in this environment: {exc}")
+        agents_md = link / "AGENTS.md"
+        agents_md.write_text(f"Intro.\n\n{DEFAULT_START}\nOld block.\n{DEFAULT_END}\n\nFooter.\n")
+        config = CompilationConfig(
+            agents_md_mode="managed_section", with_constitution=False, dry_run=False
+        )
+        compiler = AgentsCompiler(str(link))
+        compiler._write_distributed_file(agents_md, "New body.", config)
+
+        written = (real_root / "AGENTS.md").read_text()
+        assert "Intro." in written
+        assert "Footer." in written
+        assert "New body." in written
