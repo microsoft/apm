@@ -16,6 +16,7 @@ from apm_cli.utils.archive import (
     _extract_tar_gz,
     _extract_zip,
     download_and_extract_archive,
+    write_zip_archive,
 )
 
 
@@ -208,6 +209,19 @@ def test_extract_zip_writes_safe_members(tmp_path: Path) -> None:
 
     assert extracted == ["plugin/SKILL.md"]
     assert (out / "plugin" / "SKILL.md").read_text() == "content"
+
+
+def test_write_zip_archive_excludes_symlinks(tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "bundle"
+    bundle_dir.mkdir()
+    (bundle_dir / "plugin.json").write_text("{}", encoding="utf-8")
+    (bundle_dir / "link").symlink_to("plugin.json")
+    archive_path = tmp_path / "bundle.zip"
+
+    write_zip_archive(bundle_dir, archive_path)
+
+    with zipfile.ZipFile(archive_path, "r") as zf:
+        assert zf.namelist() == ["bundle/plugin.json"]
 
 
 def test_extract_tar_gz_writes_safe_members(tmp_path: Path) -> None:

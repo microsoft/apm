@@ -274,20 +274,27 @@ class ClaudeFormatter:
             placement (ClaudePlacement): Placement result with instructions.
             primitives (PrimitiveCollection): Full primitive collection.
             skip_instructions (bool): If True, omit the Project Standards section.
-            source_attribution (bool): If True, include cosmetic debug comments
-                (CLAUDE_HEADER, APM Version, footer). Defaults to False to reduce
-                token overhead. Build ID is always emitted (used for drift detection).
+            source_attribution (bool): Controls the opt-in cosmetic annotations
+                only: when True, the APM Version comment and the footer are
+                included; when False (default) they are omitted to reduce token
+                overhead. CLAUDE_HEADER and Build ID are always emitted
+                regardless of this flag: CLAUDE_HEADER is a functional marker
+                used by ``apm compile --clean`` to distinguish APM-generated
+                files from hand-authored ones (stale-file removal, issue #1729);
+                Build ID is always present for drift normalization.
 
         Returns:
             str: Generated CLAUDE.md content.
         """
         sections = []
 
-        # Header - Build ID is always present (drift normalization reads it).
-        # Cosmetic comments are opt-in via source_attribution.
+        # Header - Build ID and CLAUDE_HEADER are always present.
+        # CLAUDE_HEADER is a functional marker used by `apm compile --clean` to
+        # distinguish APM-generated files from hand-authored ones (stale-file
+        # removal for issue #1729). Build ID is always present for drift
+        # normalization. The APM version comment is cosmetic and opt-in.
         sections.append("# CLAUDE.md")
-        if source_attribution:
-            sections.append(CLAUDE_HEADER)
+        sections.append(CLAUDE_HEADER)
         sections.append(BUILD_ID_PLACEHOLDER)
         if source_attribution:
             sections.append(f"<!-- APM Version: {get_version()} -->")

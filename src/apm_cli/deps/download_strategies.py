@@ -12,7 +12,9 @@ import json
 import os
 import random
 import sys
+import threading
 import time
+import weakref
 from pathlib import Path
 from urllib.parse import quote
 
@@ -29,6 +31,12 @@ from ..utils.github_host import (
     default_host,
     is_github_hostname,
 )
+from ..utils.path_security import PathTraversalError
+from .git_file_transport import (
+    GitFileTransportError,
+    GitFileTransportSecurityError,
+    GitSparseFileTransport,
+)
 from .host_backends import backend_for
 
 # ---------------------------------------------------------------------------
@@ -41,6 +49,18 @@ def _debug(message: str) -> None:
     """Print debug message if APM_DEBUG environment variable is set."""
     if os.environ.get("APM_DEBUG"):
         print(f"[DEBUG] {message}", file=sys.stderr)
+
+
+def _close_git_file_transports(transports: dict[object, object]) -> None:
+    """Close cached git file transports owned by a DownloadDelegate."""
+    for transport in list(transports.values()):
+        close = getattr(transport, "close", None)
+        if close is not None:
+            try:
+                close()
+            except Exception as exc:
+                _debug(f"git file transport cleanup failed: {exc}")
+    transports.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +82,7 @@ class DownloadDelegate:
     preserves existing test ``patch.object`` points on the orchestrator.
     """
 
-    def __init__(self, host):
+    def __init__(self, host, git_file_transport_factory=None):
         """Initialize with a reference to the owning downloader.
 
         Args:
@@ -70,6 +90,16 @@ class DownloadDelegate:
                 this delegate.
         """
         self._host = host
+        self._git_file_transports: dict[
+            tuple[str, str, str, int | None], GitSparseFileTransport
+        ] = {}
+        self._git_file_transports_lock = threading.Lock()
+        self._git_file_transport_factory = git_file_transport_factory
+        self._git_file_transport_finalizer = weakref.finalize(
+            self,
+            _close_git_file_transports,
+            self._git_file_transports,
+        )
 
     # ------------------------------------------------------------------
     # HTTP resilient GET
@@ -619,6 +649,45 @@ class DownloadDelegate:
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Network error downloading {file_path}: {e}") from e
 
+    def _gitlab_file_transport_key(
+        self, dep_ref: DependencyReference, ref: str
+    ) -> tuple[str, str, str, int | None]:
+        """Return the cache key for one GitLab git-file checkout."""
+        return (dep_ref.host or default_host(), dep_ref.repo_url, ref, dep_ref.port)
+
+    def _discard_gitlab_file_transport(self, key: tuple[str, str, str, int | None]) -> None:
+        """Close and remove a failed cached git-file checkout."""
+        with self._git_file_transports_lock:
+            transport = self._git_file_transports.pop(key, None)
+        if transport is not None:
+            transport.close()
+
+    def _download_gitlab_file_via_git(
+        self,
+        dep_ref: DependencyReference,
+        file_path: str,
+        ref: str,
+    ) -> bytes:
+        """Fetch a GitLab path: file via a reusable sparse checkout."""
+        key = self._gitlab_file_transport_key(dep_ref, ref)
+        with self._git_file_transports_lock:
+            transport = self._git_file_transports.get(key)
+            if transport is None:
+                git_env = {**os.environ, **(self._host.git_env or {})}
+                transport_factory = self._git_file_transport_factory or GitSparseFileTransport
+                transport = transport_factory(
+                    dep_ref,
+                    ref,
+                    build_repo_url_fn=self.build_repo_url,
+                    git_env=git_env,
+                )
+                self._git_file_transports[key] = transport
+        try:
+            return transport.fetch_file(file_path)
+        except GitFileTransportError:
+            self._discard_gitlab_file_transport(key)
+            raise
+
     # ------------------------------------------------------------------
     # GitLab file download
     # ------------------------------------------------------------------
@@ -630,7 +699,17 @@ class DownloadDelegate:
         ref: str = "main",
         verbose_callback=None,
     ) -> bytes:
-        """Download a file via GitLab REST v4 ``repository/files/.../raw``."""
+        """Download a GitLab file: git-transport-first, REST API as fallback.
+
+        Primary path (the 410-killer): extracts the file via git sparse/
+        partial checkout (blob:none + file-level sparse paths) so SSH keys and
+        system git credentials are sufficient -- no REST API token needed.
+
+        Fallback (thin GITLAB_PAT path): if the git transport fails (e.g.
+        SSH not available, network restriction), the existing GitLab REST v4
+        ``repository/files/.../raw`` endpoint is tried with the GITLAB_APM_PAT
+        / GITLAB_TOKEN credential, mirroring the ADO_APM_PAT pattern.
+        """
         host = dep_ref.host or default_host()
         host_info = self._host.auth_resolver.classify_host(
             host,
@@ -641,6 +720,27 @@ class DownloadDelegate:
         if not project_path:
             raise RuntimeError("Missing repository path for GitLab file download")
 
+        # -- Primary: git sparse/partial checkout (works even when API is 410) --
+        try:
+            content = self._download_gitlab_file_via_git(dep_ref, file_path, ref)
+            if verbose_callback:
+                verbose_callback(
+                    f"Fetched file via git transport: {host}/{dep_ref.repo_url}/{file_path}"
+                )
+            return content
+        except (PathTraversalError, GitFileTransportSecurityError):
+            # A traversal / symlink-escape attempt must hard-fail. It must
+            # NOT be silently retried over the REST transport -- letting a
+            # rejected path fall through would hand an attacker a second
+            # transport to probe. Propagate the security failure unchanged.
+            raise
+        except (GitFileTransportError, RuntimeError, OSError) as exc:
+            fallback_target = f"{host}/{dep_ref.repo_url}"
+            _debug(
+                f"git transport unavailable for {fallback_target}; "
+                f"falling back to GitLab REST API ({type(exc).__name__})"
+            )
+        # -- Fallback: GitLab REST v4 API (requires GITLAB_APM_PAT / GITLAB_TOKEN) --
         org = project_path.split("/")[0]
         file_ctx = self._host.auth_resolver.resolve(
             host,

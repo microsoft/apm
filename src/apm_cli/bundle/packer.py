@@ -1,13 +1,18 @@
 """Bundle packer  -- creates self-contained APM bundles from the resolved dependency tree."""
 
 import shutil
-import tarfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..core.target_detection import detect_target
 from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
 from ..models.apm_package import APMPackage
+from ..utils.archive import (
+    projected_archive_path,
+    validate_archive_format,
+    write_tar_archive,
+    write_zip_archive,
+)
 from .lockfile_enrichment import _filter_files_by_target, enrich_lockfile_for_pack
 
 
@@ -28,6 +33,7 @@ def pack_bundle(
     fmt: str = "apm",
     target: str | list[str] | None = None,
     archive: bool = False,
+    archive_format: str = "zip",
     dry_run: bool = False,
     force: bool = False,
     logger=None,
@@ -41,7 +47,8 @@ def pack_bundle(
         target: Target filter  -- ``"copilot"``, ``"claude"``, ``"all"``, a list of
             target strings (e.g. ``["claude", "vscode"]``), or *None*
             (auto-detect from apm.yml / project structure).
-        archive: If *True*, produce a ``.tar.gz`` and remove the directory.
+        archive: If *True*, produce a ``.zip`` (or ``.tar.gz`` when *archive_format* is ``"tar.gz"``) and remove the directory.
+        archive_format: Archive format when *archive* is True -- ``"zip"`` (default) or ``"tar.gz"``.
         dry_run: If *True*, resolve the file list but write nothing to disk.
         force: On collision (plugin format), last writer wins.
 
@@ -64,6 +71,7 @@ def pack_bundle(
             output_dir=output_dir,
             target=target,
             archive=archive,
+            archive_format=archive_format,
             dry_run=dry_run,
             force=force,
             logger=logger,
@@ -188,9 +196,14 @@ def pack_bundle(
 
     # Dry-run: return file list without writing anything
     if dry_run:
-        bundle_dir = output_dir / f"{pkg_name}-{pkg_version}"
+        bundle_name = f"{pkg_name}-{pkg_version}"
+        bundle_path = (
+            projected_archive_path(output_dir, bundle_name, archive_format)
+            if archive
+            else output_dir / bundle_name
+        )
         return PackResult(
-            bundle_path=bundle_dir,
+            bundle_path=bundle_path,
             files=unique_files,
             lockfile_enriched=True,
             mapped_count=len(path_mappings),
@@ -270,9 +283,14 @@ def pack_bundle(
 
     # 10. Archive if requested
     if archive:
-        archive_path = output_dir / f"{pkg_name}-{pkg_version}.tar.gz"
-        with tarfile.open(archive_path, "w:gz") as tar:
-            tar.add(bundle_dir, arcname=bundle_dir.name)
+        validate_archive_format(archive_format)
+        archive_path = projected_archive_path(
+            output_dir, f"{pkg_name}-{pkg_version}", archive_format
+        )
+        if archive_format == "tar.gz":
+            write_tar_archive(bundle_dir, archive_path)
+        else:
+            write_zip_archive(bundle_dir, archive_path)
         shutil.rmtree(bundle_dir)
         result.bundle_path = archive_path
 

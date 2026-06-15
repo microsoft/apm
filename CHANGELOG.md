@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-06-11
+
 ### Added
 
+- `apm install --target kiro` deploys Kiro IDE steering, skills, hooks,
+  and MCP config to the documented `.kiro/` layout. (by @TibRib; closes #702) (#1741)
+- APM now catches accidental subpath embeds in git URLs (for example, `org/repo/skills/name.git`) and points at the supported `path:` key form. (#1740)
+- SHA-pinned dependencies now stay current automatically: `apm update` resolves the newest annotated release tag, rewrites the pin, and `apm outdated` reports drift. (#1738)
 - `apm install --target hermes` and `apm compile -t hermes` add the Hermes
   agent (Nous Research) as a new experimental target (opt in via
   `apm experimental enable hermes`). Skills deploy to `.agents/skills/<name>/SKILL.md`
@@ -16,17 +22,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   emits `AGENTS.md`, and MCP servers are written to the `mcp_servers:` block
   of `~/.hermes/config.yaml` (written atomically with `0o600` perms, preserving
   unrelated config keys and refusing to overwrite a malformed file). `HERMES_HOME`
-  overrides the Hermes home directory. See the [Hermes integration guide](https://microsoft.github.io/apm/integrations/hermes/).
+  overrides the Hermes home directory. See the [Hermes integration guide](https://microsoft.github.io/apm/integrations/hermes/). (#1726)
+- Enterprise marketplace authors can stop repeating shared git base paths by
+  setting `sourceBase` (one line replaces repeated URLs), while host-prefixed,
+  full-URL, and local entries remain per-entry overrides. (#1736)
 - `apm marketplace add` now accepts git URLs with `#ref`, local file paths,
   and hosted `marketplace.json` URLs -- so teams can consume private,
   offline, or hosted catalogs without publishing a GitHub repo (closes
   #676). (#1739)
 - Enterprise bootstrap mirror mode (`APM_RELEASE_METADATA_URL`, `APM_RELEASE_BASE_URL`, `APM_INSTALLER_BASE_URL`, `APM_PYPI_INDEX_URL`, `APM_NO_DIRECT_FALLBACK`) routes `install.sh`, `install.ps1`, and `apm self-update` through internal mirrors with fail-closed public fallback; closes #1680. (#1733)
+- `apm pack --archive-format [zip|tar.gz]` escape hatch (default `zip`) lets
+  CI pipelines that depended on the previous `.tar.gz` default opt back in without
+  changing the project default. Passing `--archive-format` without `--archive` is
+  now a `UsageError`. (#1720)
+
+### Changed
+
+- **BREAKING:** `apm pack --archive` now produces `.zip` by default instead of `.tar.gz`, matching the format produced by `apm publish` and expected by Claude Code and plugin hosts while staying natively extractable on Windows without WSL or a tar binary. Note: ZIP archives are typically 30-130% larger than `.tar.gz` for text-heavy skill bundles due to per-file compression; use `--archive-format tar.gz` if archive size is a priority. (#1720)
 
 ### Fixed
 
+- `apm pack` now fills local-path marketplace package `description` and `version` from each package's own `apm.yml` when the root `marketplace.packages[]` entry omits them, so monorepo marketplaces no longer show empty browse columns -- matching the existing remote-source fallback. (closes #1725) (#1755)
+- `apm install --target` with a comma-separated list containing `copilot` (or the `vscode`/`agents` aliases) no longer silently drops the Copilot target. (by @Addono, closes #1746, #1749)
 - `apm install` now resolves relative `path:` deps declared by remote monorepo packages when they stay inside the same remote repo, while still rejecting absolute, escaping, or cross-repo paths; closes #1571. (#1732)
+- Optional-auth MCP registry servers now install without token prompts when values are unset; `apm install` also omits empty runtime config entries and preserves user-edited optional values on reinstall; refs #20. (#1734)
 - Dependencies with the same path on different git hosts no longer collide in `apm.lock.yaml`; `apm install` keeps GitHub/GitLab PATs off generic-host file downloads, routes bespoke GitLab hosts through `type: gitlab`, and surfaces non-404 download failures with host and endpoint context. Reading private files from a generic non-default host now requires a whole-repo git dependency or explicit backend signal; see the dependency and lockfile docs (closes #773). (#1735)
+- GitLab `path:` files now just work on self-hosted instances where the REST API is disabled or restricted -- APM fetches via git transport automatically. `GITLAB_APM_PAT` / `GITLAB_TOKEN` remain available as a thin REST API fallback; closes #1014. (#1740)
+- `apm compile --clean --target claude` now removes a stale APM-generated
+  `CLAUDE.md` when instructions have already been deployed to `.claude/rules/`
+  (the dedup path introduced in #1138), so the duplicate-context problem #1138
+  set out to eliminate is fully resolved even for projects that compiled before
+  `.claude/rules/` existed. Hand-authored `CLAUDE.md` files (those lacking the
+  `<!-- Generated by APM CLI -->` marker) are never deleted; a warning is
+  emitted instead. Plain `apm compile` (without `--clean`) remains
+  non-destructive. (closes #1729, follow-up to #1138)
+- `apm compile --target copilot` no longer writes empty `AGENTS.md`
+  shell files when `.github/instructions/` already holds deployed
+  instructions; `--clean` also removes stale APM-generated shells while
+  preserving hand-authored files. Use `--no-dedup` / `--force-instructions`
+  to write full `AGENTS.md` files anyway. (by @tillig; closes #1730, related:
+  #1138, #1550) (#1742)
 
 ## [0.19.0] - 2026-06-09
 

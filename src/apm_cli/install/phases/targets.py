@@ -67,6 +67,24 @@ def _as_yaml_targets(value: str | list[str] | None) -> list[str] | None:
     return parts or None
 
 
+def _normalize_runtime_target_aliases(tokens: Iterable[str]) -> list[str]:
+    """Map runtime aliases to canonical target names in first-seen order."""
+    from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        raw = str(token).strip()
+        if not raw:
+            continue
+        canonical = RUNTIME_TO_CANONICAL_TARGET.get(raw, raw)
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        normalized.append(canonical)
+    return normalized
+
+
 def _read_yaml_targets(ctx) -> list[str] | None:
     """Read targets/target from raw apm.yml using v2 parser.
 
@@ -357,6 +375,8 @@ def _resolve_targets_by_scope(
             parts = [t.strip() for t in raw_override.split(",") if t.strip()]
         else:
             parts = list(raw_override)
+        # Multi-token CLI parsing returns runtime aliases; convert them before filtering.
+        parts = _normalize_runtime_target_aliases(parts)
         parts = [p for p in parts if p in _CANONICAL]
         if len(parts) == 1:
             _v2_flag = parts[0]
@@ -551,9 +571,10 @@ def run_targets_phase(ctx) -> None:
         if isinstance(ctx.target_override, str):
             # Handle CSV form
             parts = [t.strip() for t in ctx.target_override.split(",") if t.strip()]
-            flag = parts if len(parts) > 1 else parts[0] if parts else None
         else:
-            flag = ctx.target_override
+            parts = list(ctx.target_override)
+        parts = _normalize_runtime_target_aliases(parts)
+        flag = parts if len(parts) > 1 else parts[0] if parts else None
 
     # Get yaml_targets from apm_package.
     try:

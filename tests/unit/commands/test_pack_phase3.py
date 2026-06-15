@@ -216,7 +216,7 @@ class TestRenderBundleResult:
     def test_live_apm_format_no_plugin_message(self) -> None:
         """'apm' format does NOT emit the plugin-ready progress message."""
         logger = _RecordingLogger()
-        result = _pack_result(files=["bundle.tar.gz"])
+        result = _pack_result(files=["bundle.zip"])
         _render_bundle_result(logger, result, "apm", None, False)
         assert not any("Plugin bundle ready" in p for p in logger.progresses)
 
@@ -539,7 +539,7 @@ class TestPackCmdFlags:
 class TestUnpackCmd:
     def test_unpack_deprecation_warning(self, tmp_path: Path) -> None:
         """unpack always emits a deprecation warning."""
-        bundle = tmp_path / "bundle.tar.gz"
+        bundle = tmp_path / "bundle.zip"
         bundle.write_bytes(b"fake")
         result = CliRunner().invoke(
             unpack_cmd,
@@ -551,7 +551,7 @@ class TestUnpackCmd:
         """Passing a non-existent path exits non-zero."""
         result = CliRunner().invoke(
             unpack_cmd,
-            [str(tmp_path / "no-such-bundle.tar.gz"), "--dry-run"],
+            [str(tmp_path / "no-such-bundle.zip"), "--dry-run"],
         )
         assert result.exit_code != 0
 

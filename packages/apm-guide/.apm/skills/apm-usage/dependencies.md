@@ -56,6 +56,11 @@ parent's remote host/repo/ref and fetches the sibling from the same origin.
 Absolute paths, paths that escape the repo root, and cross-repo local paths
 are rejected.
 
+**GitLab `path:` fetch transport:** GitLab `path:` files are fetched over git
+transport, not the REST API, so self-hosted instances with the API disabled
+still install. Path containment is enforced on the materialized file to reject
+symlink or traversal escapes. For fallback token setup, see `authentication.md`.
+
 ### Custom git ports
 
 Non-default git ports are preserved on `https://`, `http://`, and `ssh://` URLs
@@ -260,8 +265,8 @@ active. Registry-routed deps add `source: registry`, `version`,
 `resolved_url`, and `resolved_hash` (sha256 of the archive bytes) to
 their lockfile entry, and the lockfile is promoted to
 `lockfile_version: "2"` when any dep is registry-sourced OR carries
-git-source semver resolution fields (`constraint` / `resolved_tag` /
-`resolved_at`).
+git-source semver resolution fields (`constraint` / `resolved_at`) or a
+revision-pin tag annotation (`resolved_tag`).
 
 The `acme/foo@registry-name#version` shorthand is **not supported** (deferred
 to v2) -- the `@` collides with npm/cargo/pip version syntax, with
@@ -322,10 +327,13 @@ dependencies:
         #                            from host env at server-start (no plaintext on disk).
         #                            VS Code and JetBrains: rewritten to ${env:VAR}
         #                            and resolved at runtime.
+        #                            Kiro: preserved as ${VAR} and resolved at runtime.
         #                            Cursor/Windsurf/OpenCode/Claude/Gemini: resolved at install time.
         #                            Codex: passed through unchanged.
         #   ${input:<id>}         -> VS Code prompts user at runtime
         #   <VAR>                 -> deprecated; auto-translated, emits a warning
+        # Registry-declared optional env/input fields are omitted when unset;
+        # see manifest-schema section 4.2.4 for reinstall preservation semantics.
         Authorization: "Bearer ${MY_TOKEN}"
       tools: ["repos", "issues"]
 
@@ -397,7 +405,7 @@ server map or a `{ "lspServers": { ... } }` envelope.
 | Tag | `owner/repo#v1.0.0` | Production -- immutable reference |
 | Semver range | `owner/repo#^1.2.0` | Track patch/minor updates within a range; APM lists remote tags and pins the highest match in the lockfile |
 | Branch | `owner/repo#main` | Development -- tracks latest |
-| Commit SHA | `owner/repo#abc123d` | Maximum reproducibility |
+| Commit SHA | `owner/repo#abc123d` | Maximum reproducibility; `apm update` can move full 40-character SHA pins to the latest annotated semver tag SHA and annotate the line with `# <tag>` |
 | No ref | `owner/repo` | Resolves default branch at install time |
 | Marketplace ref | `plugin@marketplace#ref` | Override marketplace source ref |
 

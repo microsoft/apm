@@ -1,9 +1,9 @@
-"""Download and safely extract archive packages (zip / tar.gz).
+"""Download, write, and safely extract archive packages (zip / tar.gz).
 
-Generic archive helper, decoupled from the marketplace layer: any
-URL-sourced package installer can reuse it without importing marketplace
-internals. Keeps the zip-slip / path-traversal / decompression-bomb guards
-here so they apply to every caller (see #692 forward-compat constraints)."""
+Generic archive helpers, decoupled from marketplace internals. URL-sourced
+installers and local bundle/archive paths reuse the same zip-slip,
+path-traversal, and decompression-bomb guards.
+"""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ import shutil
 import tarfile
 import uuid
 import zipfile
-from pathlib import Path
-from typing import IO
+from pathlib import Path, PureWindowsPath
+from typing import IO, TypeVar
 from urllib.parse import urlparse
 
 import requests
@@ -26,27 +26,72 @@ from apm_cli.utils.path_security import (
     validate_path_segments,
 )
 
-_MAX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+MAX_ZIP_ENTRIES = 10_000
+MAX_ZIP_UNCOMPRESSED = 512 * 1024 * 1024
+SUPPORTED_ARCHIVE_FORMATS = frozenset({"zip", "tar.gz"})
+
+_MAX_UNCOMPRESSED_BYTES = MAX_ZIP_UNCOMPRESSED
 _MAX_ARCHIVE_DOWNLOAD_BYTES = _MAX_UNCOMPRESSED_BYTES
 _COPY_CHUNK_BYTES = 1024 * 1024
 _DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 _ARCHIVE_SESSION = requests.Session()
 _ARCHIVE_SESSION.max_redirects = 5
 
+_ErrorT = TypeVar("_ErrorT", bound=Exception)
+
 
 class ArchiveError(Exception):
     """Raised when an archive cannot be downloaded or extracted safely."""
 
 
+def validate_archive_format(archive_format: str) -> None:
+    """Raise ValueError unless *archive_format* is supported."""
+    if archive_format not in SUPPORTED_ARCHIVE_FORMATS:
+        raise ValueError(f"Unknown archive_format: {archive_format!r}. Must be 'zip' or 'tar.gz'.")
+
+
+def projected_archive_path(output_dir: Path, bundle_name: str, archive_format: str) -> Path:
+    """Return the archive path that pack would write for *bundle_name*."""
+    validate_archive_format(archive_format)
+    suffix = ".tar.gz" if archive_format == "tar.gz" else ".zip"
+    return output_dir / f"{bundle_name}{suffix}"
+
+
+def write_tar_archive(bundle_dir: Path, archive_path: Path) -> None:
+    """Write *bundle_dir* to a gzipped tar archive, excluding symlinks."""
+    ensure_path_within(archive_path, archive_path.parent)
+    with tarfile.open(archive_path, "w:gz") as tf:
+        for fp in sorted(bundle_dir.rglob("*")):
+            if fp.is_symlink() or not fp.is_file():
+                continue
+            tf.add(fp, arcname=f"{bundle_dir.name}/{fp.relative_to(bundle_dir).as_posix()}")
+
+
+def write_zip_archive(bundle_dir: Path, archive_path: Path) -> None:
+    """Write *bundle_dir* to a compressed zip archive, excluding symlinks."""
+    ensure_path_within(archive_path, archive_path.parent)
+    with zipfile.ZipFile(
+        archive_path,
+        "w",
+        compression=zipfile.ZIP_DEFLATED,
+        compresslevel=9,
+    ) as zf:
+        for fp in sorted(bundle_dir.rglob("*")):
+            if fp.is_symlink() or not fp.is_file():
+                continue
+            zf.write(fp, arcname=f"{bundle_dir.name}/{fp.relative_to(bundle_dir).as_posix()}")
+
+
+def _raise(error_type: type[_ErrorT], message: str) -> None:
+    raise error_type(message)
+
+
 def _copy_member_within_limit(src: IO[bytes], dst: IO[bytes], running_total: int) -> int:
     """Stream *src* into *dst*, enforcing the cumulative uncompressed cap.
 
-    Counts the ACTUAL bytes read from the (decompressed) member stream and
-    aborts mid-stream once the running total exceeds the cap, rather than
-    trusting the archive's header-declared member sizes. A crafted archive
-    that under-declares its sizes therefore cannot slip past the
-    decompression-bomb guard, and a single huge member is never buffered
-    whole in memory.
+    Counts the actual bytes read from the decompressed member stream and aborts
+    mid-stream once the running total exceeds the cap, rather than trusting
+    archive header-declared member sizes.
     """
     total = running_total
     while True:
@@ -112,6 +157,85 @@ def _safe_destination(dest_dir: str, member_name: str) -> Path:
         ) from exc
 
 
+def _zip_member_target(
+    member_name: str,
+    dest_root: Path,
+    *,
+    error_type: type[_ErrorT],
+) -> Path | None:
+    """Return a safe extraction target for a zip member, or None for empty dirs."""
+    if not member_name or member_name in (".", "/"):
+        return None
+    if (
+        member_name.startswith(("/", "\\"))
+        or PureWindowsPath(member_name).drive
+        or PureWindowsPath(member_name).is_absolute()
+    ):
+        _raise(error_type, f"Refusing to extract path-traversal entry: {member_name}")
+    try:
+        validate_path_segments(member_name, context="zip member")
+    except PathTraversalError:
+        _raise(error_type, f"Refusing to extract path-traversal entry: {member_name}")
+    target = dest_root / member_name
+    try:
+        ensure_path_within(target, dest_root)
+    except PathTraversalError:
+        _raise(error_type, f"Refusing to extract path-traversal entry: {member_name}")
+    return target
+
+
+def safe_extract_zip(
+    zf: zipfile.ZipFile,
+    dest_root: Path,
+    *,
+    max_entries: int = MAX_ZIP_ENTRIES,
+    max_uncompressed: int = MAX_ZIP_UNCOMPRESSED,
+    error_type: type[_ErrorT] = ValueError,
+) -> list[str]:
+    """Safely stream-extract *zf* under *dest_root* with zip-bomb limits.
+
+    The uncompressed-size limit is enforced against bytes actually read from
+    each entry, not against attacker-controlled ZipInfo.file_size metadata.
+    """
+    dest_root.mkdir(parents=True, exist_ok=True)
+    members = zf.infolist()
+    if len(members) > max_entries:
+        _raise(error_type, f"ZIP archive has {len(members)} entries (limit {max_entries})")
+
+    extracted: list[str] = []
+    total_uncompressed = 0
+    for info in members:
+        unix_mode = (info.external_attr >> 16) & 0xFFFF
+        if unix_mode and (unix_mode & 0xF000) == 0xA000:
+            _raise(error_type, f"Refusing to extract symlink: {info.filename}")
+        target = _zip_member_target(info.filename, dest_root, error_type=error_type)
+        if target is None:
+            continue
+        if info.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(info, "r") as src, open(target, "wb") as fh:
+            while True:
+                chunk = src.read(_COPY_CHUNK_BYTES)
+                if not chunk:
+                    break
+                next_total = total_uncompressed + len(chunk)
+                if next_total > max_uncompressed:
+                    limit_mb = max_uncompressed // (1024 * 1024)
+                    actual_mb = next_total // (1024 * 1024)
+                    _raise(
+                        error_type,
+                        f"ZIP archive uncompressed size exceeds size limit: {actual_mb} MB > {limit_mb} MB",
+                    )
+                fh.write(chunk)
+                total_uncompressed = next_total
+        if unix_mode:
+            os.chmod(target, unix_mode & 0o755)
+        extracted.append(info.filename)
+    return extracted
+
+
 def _extract_tar_archive(archive: tarfile.TarFile, dest_dir: str) -> list[str]:
     """Extract an opened tar archive into *dest_dir* with safety checks."""
     extracted: list[str] = []
@@ -155,18 +279,13 @@ def _extract_tar_gz_file(path: Path, dest_dir: str) -> list[str]:
 
 def _extract_zip_archive(archive: zipfile.ZipFile, dest_dir: str) -> list[str]:
     """Extract an opened zip archive into *dest_dir* with safety checks."""
-    extracted: list[str] = []
-    total_size = 0
-    for info in archive.infolist():
-        if info.filename.endswith("/"):
-            continue
-        _check_archive_member(info.filename)
-        destination = _safe_destination(dest_dir, info.filename)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with archive.open(info) as src, open(destination, "wb") as dst:
-            total_size = _copy_member_within_limit(src, dst, total_size)
-        extracted.append(info.filename)
-    return extracted
+    return safe_extract_zip(
+        archive,
+        Path(dest_dir),
+        max_entries=MAX_ZIP_ENTRIES,
+        max_uncompressed=_MAX_UNCOMPRESSED_BYTES,
+        error_type=ArchiveError,
+    )
 
 
 def _extract_zip(data: bytes, dest_dir: str) -> list[str]:

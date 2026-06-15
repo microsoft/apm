@@ -11,7 +11,6 @@ import hashlib
 import json
 import re
 import shutil
-import tarfile
 from pathlib import Path, PurePosixPath
 
 import yaml
@@ -23,6 +22,12 @@ from ..deps.lockfile import (
     migrate_lockfile_if_needed,
 )
 from ..models.apm_package import APMPackage, DependencyReference
+from ..utils.archive import (
+    projected_archive_path,
+    validate_archive_format,
+    write_tar_archive,
+    write_zip_archive,
+)
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from .packer import PackResult
@@ -407,6 +412,7 @@ def export_plugin_bundle(
     output_dir: Path,
     target: str | None = None,
     archive: bool = False,
+    archive_format: str = "zip",
     dry_run: bool = False,
     force: bool = False,
     logger=None,
@@ -420,7 +426,8 @@ def export_plugin_bundle(
         project_root: Root of the project containing ``apm.yml``.
         output_dir: Parent directory for the generated bundle.
         target: Unused for plugin format (reserved for future use).
-        archive: If True, produce a ``.tar.gz`` and remove the directory.
+        archive: If True, produce a ``.zip`` (or ``.tar.gz`` when *archive_format* is ``"tar.gz"``) and remove the directory.
+        archive_format: Archive format when *archive* is True -- ``"zip"`` (default) or ``"tar.gz"``.
         dry_run: If True, resolve the file list without writing to disk.
         force: On collision, last writer wins instead of first.
 
@@ -545,7 +552,12 @@ def export_plugin_bundle(
     bundle_dir = output_dir / f"{safe_name}-{safe_version}"
     ensure_path_within(bundle_dir, output_dir)
     if dry_run:
-        return PackResult(bundle_path=bundle_dir, files=output_files)
+        bundle_path = (
+            projected_archive_path(output_dir, bundle_dir.name, archive_format)
+            if archive
+            else bundle_dir
+        )
+        return PackResult(bundle_path=bundle_path, files=output_files)
 
     # 10. Security scan (warn-only, never blocks)
     from ..security.gate import WARN_POLICY, SecurityGate
@@ -645,16 +657,12 @@ def export_plugin_bundle(
 
     # 15. Archive if requested
     if archive:
-        archive_path = output_dir / f"{bundle_dir.name}.tar.gz"
-        ensure_path_within(archive_path, output_dir)
-        with tarfile.open(archive_path, "w:gz") as tar:
-
-            def _tar_filter(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
-                if info.issym() or info.islnk():
-                    return None  # reject symlinks injected after write
-                return info
-
-            tar.add(bundle_dir, arcname=bundle_dir.name, filter=_tar_filter)
+        validate_archive_format(archive_format)
+        archive_path = projected_archive_path(output_dir, bundle_dir.name, archive_format)
+        if archive_format == "tar.gz":
+            write_tar_archive(bundle_dir, archive_path)
+        else:
+            write_zip_archive(bundle_dir, archive_path)
         shutil.rmtree(bundle_dir)
         result.bundle_path = archive_path
 

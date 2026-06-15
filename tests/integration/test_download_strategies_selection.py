@@ -42,6 +42,7 @@ def make_host(
     auth_resolver.classify_host.return_value = SimpleNamespace(kind="generic", api_base=api_base)
     auth_resolver.build_error_context.return_value = "Set a token."
     host.auth_resolver = auth_resolver
+    host._resolve_dep_auth_ctx = MagicMock(return_value=ctx)
     return host
 
 
@@ -536,10 +537,19 @@ class TestDownloadGitlabFile:
         host._resilient_get.return_value = fake_response(200, content=b"ok")
         callback = MagicMock()
 
-        result = delegate.download_gitlab_file(dep, "README.md", verbose_callback=callback)
+        with patch(
+            "apm_cli.deps.download_strategies.GitSparseFileTransport",
+            return_value=MagicMock(
+                fetch_file=MagicMock(side_effect=RuntimeError("git transport unavailable"))
+            ),
+        ):
+            result = delegate.download_gitlab_file(dep, "README.md", verbose_callback=callback)
 
         assert result == b"ok"
-        callback.assert_called_once_with("Downloaded file: gitlab.example.com/group/repo/README.md")
+        # The mocked git failure drives the REST fallback path without spawning
+        # subprocess/network work. The success note attributes the GitLab REST
+        # API as the transport that answered (410 triage).
+        callback.assert_any_call("Downloaded file: gitlab.example.com/group/repo/README.md")
 
     def test_non_default_ref_404_raises_specific_error(self) -> None:
         host = make_host(resolved_token=None, api_base="https://gitlab.example.com/api/v4")
@@ -562,7 +572,7 @@ class TestDownloadGitlabFile:
         )
 
         assert result == b"ok"
-        callback.assert_called_once_with("Downloaded file: gitlab.example.com/group/repo/README.md")
+        callback.assert_any_call("Downloaded file: gitlab.example.com/group/repo/README.md")
 
     def test_fallback_ref_404_reports_both_refs(self) -> None:
         host = make_host(resolved_token=None, api_base="https://gitlab.example.com/api/v4")
@@ -679,28 +689,19 @@ class TestDownloadGithubFile:
             "Downloaded file: gitea.example.com/owner/repo/README.md"
         )
 
-    def test_generic_host_raw_exception_falls_back_to_contents_api(self) -> None:
+    def test_generic_host_raw_exception_raises_network_error(self) -> None:
         host = make_host(resolved_token=None)
         delegate = DownloadDelegate(host)
         dep = make_dep("owner/repo", host="gitea.example.com")
         callback = MagicMock()
-        host._resilient_get.side_effect = [
-            requests.RequestException("raw failed"),
-            fake_response(
-                200,
-                content=json.dumps({"content": "aGVsbG8=", "encoding": "base64"}).encode(),
-                headers={"Content-Type": "application/json"},
-            ),
-        ]
+        host._resilient_get.side_effect = requests.RequestException("raw failed")
 
         with (
             patch("apm_cli.deps.download_strategies.is_github_hostname", return_value=False),
             patch.object(delegate, "_build_contents_api_urls", return_value=["api-url"]),
         ):
-            result = delegate.download_github_file(dep, "README.md", verbose_callback=callback)
-
-        assert result == b"hello"
-        assert "falling back to Contents API" in callback.call_args_list[1].args[0]
+            with pytest.raises(RuntimeError, match=r"Network error downloading README\.md"):
+                delegate.download_github_file(dep, "README.md", verbose_callback=callback)
 
     def test_generic_host_contents_headers_use_builder(self) -> None:
         host = make_host(resolved_token=None)

@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -130,6 +131,10 @@ def _run_unix_installer(extra_env: dict[str, str]) -> subprocess.CompletedProces
     )
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="install.sh is the Unix installer; its OS guard rejects MINGW/Windows before env-var checks",
+)
 def test_unix_installer_fail_closed_metadata_exit_code() -> None:
     """Fail-closed metadata path exits non-zero with actionable guidance.
 
@@ -147,6 +152,10 @@ def test_unix_installer_fail_closed_metadata_exit_code() -> None:
     assert "APM_RELEASE_METADATA_URL is not configured" in combined
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="install.sh is the Unix installer; its OS guard rejects MINGW/Windows before env-var checks",
+)
 def test_unix_installer_fail_closed_asset_exit_code() -> None:
     """Fail-closed asset path (pinned VERSION) exits non-zero, no public fallback."""
     if shutil.which("sh") is None:
