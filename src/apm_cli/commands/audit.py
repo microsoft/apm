@@ -233,6 +233,50 @@ def _render_findings_table(
         )
 
 
+def _deployed_canvas_bundles(project_root: Path, package_filter: str | None) -> list[str]:
+    """Return sorted canvas bundle roots deployed per apm.lock.yaml.
+
+    A canvas bundle is an executable Copilot extension (``extension.mjs``)
+    deployed under a client ``extensions/`` directory (``.github/extensions/``
+    project scope, ``.copilot/extensions/`` user scope). Surfacing them lets an
+    audit reader see at a glance that executable extension code is installed,
+    even when the content scan finds no hidden characters. Returns bundle roots
+    such as ``.copilot/extensions/widget`` (one entry per bundle).
+    """
+    from ..integration.canvas_integrator import is_canvas_bundle_path
+
+    lock = LockFile.read(get_lockfile_path(project_root))
+    if lock is None:
+        return []
+
+    roots: set[str] = set()
+    for dep_key, dep in lock.dependencies.items():
+        if package_filter and dep_key != package_filter:
+            continue
+        for rel in dep.deployed_files:
+            norm = rel.replace("\\", "/").strip("/")
+            if not norm or not is_canvas_bundle_path(norm):
+                continue
+            parts = norm.split("/")
+            for idx, seg in enumerate(parts):
+                if seg == "extensions" and idx + 1 < len(parts):
+                    roots.add("/".join(parts[: idx + 2]))
+                    break
+    return sorted(roots)
+
+
+def _render_canvas_note(project_root: Path, package_filter: str | None, logger) -> None:
+    """Emit an informational note listing deployed canvas extensions."""
+    bundles = _deployed_canvas_bundles(project_root, package_filter)
+    if not bundles:
+        return
+    logger.info(
+        f"{len(bundles)} executable canvas extension(s) deployed (experimental, trust-gated):"
+    )
+    for root in bundles:
+        logger.info(f"  {root}", symbol="info")
+
+
 def _render_summary(
     findings_by_file: dict[str, list[ScanFinding]],
     files_scanned: int,
@@ -916,6 +960,8 @@ def _audit_content_scan(
         if findings_by_file:
             _render_findings_table(findings_by_file, verbose=cfg.verbose)
         _render_summary(findings_by_file, files_scanned, logger)
+        if not file_path:
+            _render_canvas_note(cfg.project_root, package, logger)
         if drift_findings:
             from ..install.drift import render_drift_text
 

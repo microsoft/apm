@@ -220,11 +220,6 @@ apm marketplace audit my-marketplace
 apm marketplace audit my-marketplace --strict
 ```
 
-### `apm marketplace doctor`
-
-Run environment diagnostics for marketplace publishing: git binary,
-network reachability, auth (`gh`/PAT), and config sanity.
-
 ### `apm marketplace outdated`
 
 Show packages in the authoring config that have newer upstream
@@ -251,27 +246,6 @@ If no tags match the configured pattern, `apm marketplace outdated` tries common
 layouts (`v{version}`, `{name}_v{version}`, `{name}--v{version}`, etc.)
 automatically. Set `tag_pattern` explicitly when your producer uses a different
 layout.
-
-### `apm marketplace publish`
-
-Push marketplace updates to one or more **consumer** repositories,
-optionally opening pull requests.
-
-```bash
-apm marketplace publish --dry-run
-apm marketplace publish --targets ./consumer-targets.yml --draft
-```
-
-| Flag | Description |
-|---|---|
-| `--targets FILE` | Path to consumer-targets YAML. Default: `./consumer-targets.yml`. |
-| `--dry-run` | Preview without pushing or opening PRs. |
-| `--no-pr` | Push branches but skip PR creation. |
-| `--draft` | Open PRs as drafts. |
-| `--allow-downgrade` | Permit version downgrades. |
-| `--allow-ref-change` | Permit switching ref types (e.g. tag to SHA). |
-| `--parallel N` | Maximum concurrent target updates. Default: `4`. |
-| `--yes`, `-y` | Skip the confirmation prompt. |
 
 ### `apm marketplace package add SOURCE`
 

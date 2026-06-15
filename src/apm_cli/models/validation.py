@@ -144,6 +144,23 @@ def _has_hook_json(package_path: Path) -> bool:
     return False
 
 
+def _canvas_extension_names(package_path: Path) -> list[str]:
+    """Return sorted canvas bundle names declared under .apm/extensions/.
+
+    A canvas bundle is a directory carrying an executable ``extension.mjs``
+    marker (experimental, Copilot-only). Surfacing it lets validation treat a
+    canvas-only package as non-empty and warn that it ships gated executable
+    code. The scan is independent of the ``canvas`` experimental flag so an
+    author is always informed about what their package contains.
+    """
+    try:
+        from ..integration.canvas_integrator import CanvasIntegrator
+
+        return [bundle.name for bundle in CanvasIntegrator.find_canvas_bundles(package_path)]
+    except Exception:
+        return []
+
+
 @dataclass(frozen=True)
 class DetectionEvidence:
     """Snapshot of the file-system signals that drove classification.
@@ -764,6 +781,20 @@ def _validate_apm_package_with_yml(
     # Also check for hooks (JSON files in .apm/hooks/ or hooks/)
     if not has_primitives:
         has_primitives = _has_hook_json(package_path)
+
+    # Canvas extensions: experimental, Copilot-only bundles that ship an
+    # executable extension.mjs. They count as primitives (so a canvas-only
+    # package is not mis-flagged as empty) and earn an explicit warning that
+    # they are gated executable code.
+    canvas_names = _canvas_extension_names(package_path)
+    if canvas_names:
+        has_primitives = True
+        result.add_warning(
+            "Canvas extension(s) found (experimental, Copilot-only): "
+            f"{', '.join(canvas_names)}. These ship executable extension.mjs "
+            "code; consumers must enable the 'canvas' experimental flag, and "
+            "dependents must pass --trust-canvas-extensions to install them."
+        )
 
     if not has_primitives:
         result.add_warning(f"No primitive files found in {APM_DIR}/ directory")

@@ -225,6 +225,7 @@ export default defineConfig({
 						{ label: 'GitHub Agentic Workflows', slug: 'integrations/gh-aw' },
 						{ label: 'Microsoft 365 Copilot Cowork (Experimental)', slug: 'integrations/copilot-cowork' },
 						{ label: 'GitHub Copilot App workflows (Experimental)', slug: 'integrations/copilot-app' },
+						{ label: 'Canvas extensions (Experimental)', slug: 'integrations/canvas' },
 						{ label: 'Hermes Agent (Experimental)', slug: 'integrations/hermes' },
 						{ label: 'AI runtime compatibility', slug: 'integrations/runtime-compatibility' },
 						{ label: 'GitHub rulesets', slug: 'integrations/github-rulesets' },
