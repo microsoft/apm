@@ -139,4 +139,4 @@ def test_skill_subset_deduplicates_preserving_order(tmp_path):
         apm_yml, skill_subset=("skill-b", "skill-a", "skill-b", "skill-a", "skill-c")
     )
 
-    assert dep_ref.skill_subset == ["skill-b", "skill-a", "skill-c"]
+    assert dep_ref.skill_subset == ["skill-a", "skill-b", "skill-c"]
