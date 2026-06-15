@@ -21,9 +21,6 @@ import pytest
 import toml
 import yaml
 
-# ---------------------------------------------------------------------------
-# adapters/client base helpers
-# ---------------------------------------------------------------------------
 from apm_cli.adapters.client.base import (
     _extract_legacy_angle_vars,
     _has_env_placeholder,
@@ -31,17 +28,9 @@ from apm_cli.adapters.client.base import (
     _translate_env_placeholder,
     registry_field_is_required,
 )
-
-# ---------------------------------------------------------------------------
-# adapters/client concrete adapters
-# ---------------------------------------------------------------------------
 from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.hermes import HermesClientAdapter
 from apm_cli.adapters.client.kiro import KiroClientAdapter
-
-# ---------------------------------------------------------------------------
-# marketplace.audit
-# ---------------------------------------------------------------------------
 from apm_cli.marketplace.audit import (
     DepClassification,
     FetchStatus,
@@ -52,10 +41,6 @@ from apm_cli.marketplace.audit import (
     classify_dependency,
     run_audit,
 )
-
-# ---------------------------------------------------------------------------
-# marketplace.client
-# ---------------------------------------------------------------------------
 from apm_cli.marketplace.client import (
     _cache_key,
     _read_cache,
@@ -71,10 +56,6 @@ from apm_cli.marketplace.models import (
     MarketplacePlugin,
     MarketplaceSource,
 )
-
-# ---------------------------------------------------------------------------
-# marketplace.pr_integration
-# ---------------------------------------------------------------------------
 from apm_cli.marketplace.pr_integration import (
     PrIntegrator,
     PrState,
@@ -88,10 +69,6 @@ from apm_cli.marketplace.publisher import (
     PublishPlan,
     TargetResult,
 )
-
-# ---------------------------------------------------------------------------
-# utils.archive
-# ---------------------------------------------------------------------------
 from apm_cli.utils.archive import (
     ArchiveError,
     _check_archive_member,
