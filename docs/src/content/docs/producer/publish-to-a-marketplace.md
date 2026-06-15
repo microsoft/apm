@@ -201,45 +201,12 @@ no `dependencies:` block produce only `marketplace.json`. See
 
 ```bash
 apm marketplace check        # every package's ref/range resolves
-apm marketplace doctor       # local environment diagnostics
+apm doctor                   # local environment diagnostics
 apm marketplace outdated     # packages with newer matching tags
 ```
 
 `check` is the gate to run in CI: a missing tag or unresolvable
 range exits non-zero before you push the release commit.
-
-## Publish updates to pinned consumers
-
-`apm marketplace publish` is the optional fan-out: it opens PRs
-against a list of consumer repos that pin the previous marketplace
-version, bumping each one to the version you just released.
-
-```yaml
-# consumer-targets.yml
-targets:
-  - repo: acme-org/service-a
-    branch: main
-  - repo: acme-org/service-b
-    branch: develop
-    path_in_repo: apm.yml      # default
-```
-
-```bash
-apm marketplace publish --dry-run    # preview
-apm marketplace publish --yes        # push branches and open PRs
-apm marketplace publish --no-pr      # push branches, skip gh PR creation
-```
-
-It clones each target, edits its `apm.yml` to point at the new
-marketplace ref, pushes a feature branch, and opens a PR via `gh`.
-State is journaled to `.apm/publish-state.json`. Failures in one
-target do not abort the others; the exit code is non-zero if any
-target failed.
-
-This flow assumes `gh` is authenticated and the runner has push
-access to every target -- it is targeted at internal/org marketplaces
-where you control both sides. Public marketplaces should rely on
-consumers running `apm install --update` on their own cadence.
 
 ## Pitfalls
 

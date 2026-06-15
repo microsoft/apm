@@ -5,7 +5,7 @@ Pure helper: reads each local-path package's apm.yml top-level
 ``marketplace.versioning.strategy``. No git, no network.
 
 Returns a :class:`VersionAlignmentReport` that both ``pack`` and
-``marketplace doctor`` consume.
+``apm doctor`` consume.
 
 See ``.apm/skills/wave-4-design.md`` section 4.2 for the algorithm.
 """
