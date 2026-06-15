@@ -24,6 +24,7 @@ import json
 import os
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -3739,7 +3740,16 @@ class TestMarketplaceErrors:
         from apm_cli.marketplace.errors import MarketplaceNotFoundError
 
         err = MarketplaceNotFoundError("my-market", host="ghes.corp.com")
-        assert "ghes.corp.com" in str(err)
+        msg = str(err)
+        # Extract URLs from error message and verify host via parsed component
+        urls = [tok for tok in msg.split() if "://" in tok]
+        if urls:
+            assert any(
+                urllib.parse.urlparse(u).hostname == "ghes.corp.com" for u in urls
+            )
+        else:
+            # Host appears as a plain token -- verify exact word presence
+            assert any(word == "ghes.corp.com" for word in msg.split())
 
     def test_plugin_not_found_error(self) -> None:
         """PluginNotFoundError message includes plugin and marketplace names."""

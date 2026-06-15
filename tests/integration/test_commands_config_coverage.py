@@ -13,6 +13,7 @@ No live network calls -- all HTTP is mocked via ``unittest.mock.patch``.
 from __future__ import annotations
 
 import json
+import urllib.parse
 from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -1401,7 +1402,10 @@ class TestConfigCommandExtended:
         with patch("apm_cli.core.experimental.is_enabled", return_value=True):
             result = runner.invoke(cli, ["config", "get", "registry.corp.url"])
         assert result.exit_code == 0
-        assert "https://corp.example.com" in result.output
+        urls = [tok for tok in result.output.split() if "://" in tok]
+        assert any(
+            urllib.parse.urlparse(u).hostname == "corp.example.com" for u in urls
+        )
 
     def test_config_unset_unknown_key_shows_error(
         self, runner: CliRunner, isolated_config: Path
@@ -1450,7 +1454,10 @@ class TestSelfUpdateHelpers:
             ),
         ):
             cmd = su._get_manual_update_command()
-        assert "curl" in cmd or "https://aka.ms/apm-unix" in cmd
+        urls = [tok for tok in cmd.split() if "://" in tok]
+        assert "curl" in cmd or any(
+            urllib.parse.urlparse(u).hostname == "aka.ms" for u in urls
+        )
 
     def test_get_installer_run_command_unix(self) -> None:
         """_get_installer_run_command() returns [shell, script] on Unix."""
@@ -1484,7 +1491,7 @@ class TestSelfUpdateHelpers:
             url = su._get_update_installer_url()
         parsed = urlparse(url)
         assert parsed.scheme == "https"
-        assert "mirror.example.com" in parsed.netloc
+        assert parsed.hostname == "mirror.example.com"
 
 
 # ---------------------------------------------------------------------------
@@ -1817,7 +1824,11 @@ class TestSelfUpdateRemainingPaths:
             ),
         ):
             cmd = su._get_manual_update_command()
-        assert "mirror.example.com" in cmd or "install.sh" in cmd
+        urls = [tok for tok in cmd.split() if "://" in tok]
+        has_mirror = any(
+            urllib.parse.urlparse(u).hostname == "mirror.example.com" for u in urls
+        )
+        assert has_mirror or "install.sh" in cmd
 
 
 # ---------------------------------------------------------------------------
@@ -1988,7 +1999,10 @@ class TestConfigCommandMorePaths:
         _conf.set_mcp_registry_url("https://mcp.example.com")
         result = runner.invoke(cli, ["config", "get", "mcp-registry-url"])
         assert result.exit_code == 0
-        assert "https://mcp.example.com" in result.output
+        urls = [tok for tok in result.output.split() if "://" in tok]
+        assert any(
+            urllib.parse.urlparse(u).hostname == "mcp.example.com" for u in urls
+        )
 
     def test_config_get_copilot_cowork_skills_dir(
         self, runner: CliRunner, isolated_config: Path
