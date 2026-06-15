@@ -2,7 +2,7 @@
 
 Exercises RegistryClient, RegistryAuthContext, RegistryPackageResolver,
 check_registry_locked_dep, RevisionPinUpdate helpers, extract_archive, and
-the bare_cache scrub utility — all with hermetic mocking (no live network).
+the bare_cache scrub utility -- all with hermetic mocking (no live network).
 
 Run with::
 
@@ -154,7 +154,7 @@ class TestRegistryAuthContext:
         assert decoded == "user:pass"
 
     def test_anonymous_header_is_none(self) -> None:
-        """No credentials → auth_header() returns None."""
+        """No credentials --> auth_header() returns None."""
         ctx = _anon_auth()
         assert ctx.auth_header() is None
 
@@ -169,7 +169,7 @@ class TestRegistryAuthContext:
         assert ctx.auth_header() == "Bearer tok"
 
     def test_basic_requires_both_user_and_pass(self) -> None:
-        """Only username without password → anonymous (None)."""
+        """Only username without password --> anonymous (None)."""
         ctx = RegistryAuthContext(registry_name="corp", token=None, username="alice", password=None)
         assert ctx.auth_header() is None
 
@@ -209,7 +209,7 @@ class TestMakeAuthContext:
         assert ctx.password == "s3cr3t"
 
     def test_anonymous_when_no_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """No env vars → anonymous context."""
+        """No env vars --> anonymous context."""
         # Ensure no stray env vars leak in.
         for key in (
             "APM_REGISTRY_TOKEN_TESTPKG",
@@ -263,7 +263,7 @@ class TestResolveForUrl:
         assert ctx.token == "mytoken"
 
     def test_unmatched_url_returns_anonymous(self) -> None:
-        """No registry prefix match → anonymous context."""
+        """No registry prefix match --> anonymous context."""
         registries = {"corp": "https://registry.corp.com/apm"}
         ctx = resolve_for_url("https://other.host.com/packages", registries)
         assert ctx.token is None
@@ -726,14 +726,14 @@ class TestRaiseForHttp:
         )
 
     def test_401_includes_remediation(self) -> None:
-        """401 error includes the §6.2 remediation message."""
+        """401 error includes the S6.2 remediation message."""
         resolver = self._make_resolver()
         exc = RegistryError("unauthorized", status=401, url="https://registry.example.com")
         with pytest.raises(RegistryResolutionError, match="no credentials"):
             resolver._raise_for_http(exc, self._dep_ref(), "https://registry.example.com")
 
     def test_403_includes_remediation(self) -> None:
-        """403 error includes the §6.2 remediation message."""
+        """403 error includes the S6.2 remediation message."""
         resolver = self._make_resolver()
         exc = RegistryError("forbidden", status=403, url="https://registry.example.com")
         with pytest.raises(RegistryResolutionError, match="no credentials"):
@@ -1252,7 +1252,7 @@ class TestRenderRevisionPinUpdatePlan:
 
 
 # ---------------------------------------------------------------------------
-# outdated.py — additional coverage for _highest_semver / _semver_lt /
+# outdated.py -- additional coverage for _highest_semver / _semver_lt /
 # load_registry_outdated_context / _add_registry_manifest_deps
 # ---------------------------------------------------------------------------
 
@@ -1364,7 +1364,7 @@ class TestAddRegistryManifestDeps:
 
 
 # ---------------------------------------------------------------------------
-# resolver.py — additional coverage for _clear_install_target and
+# resolver.py -- additional coverage for _clear_install_target and
 # download_package / download_from_lockfile (mocked end-to-end)
 # ---------------------------------------------------------------------------
 
@@ -1564,7 +1564,7 @@ class TestRegistryPackageResolverDownloadFromLockfile:
         assert pkg_info is not None
 
     def test_download_from_lockfile_401_raises_with_remediation(self, tmp_path: Path) -> None:
-        """401 during lockfile replay surfaces the §6.2 remediation message."""
+        """401 during lockfile replay surfaces the S6.2 remediation message."""
         from apm_cli.deps.registry.resolver import RegistryPackageResolver
 
         fake_client = MagicMock()
@@ -1598,7 +1598,7 @@ class TestRegistryPackageResolverDownloadFromLockfile:
 
 
 # ---------------------------------------------------------------------------
-# auth.py — dependency_ref_with_registry_name_from_lockfile
+# auth.py -- dependency_ref_with_registry_name_from_lockfile
 # ---------------------------------------------------------------------------
 
 

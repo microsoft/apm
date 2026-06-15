@@ -65,7 +65,7 @@ class TestSafeHookSlug:
         from apm_cli.integration.kiro_hook_integrator import _safe_hook_slug
 
         result = _safe_hook_slug("---___---")
-        # after stripping leading/trailing .-_ we get empty → fallback
+        # after stripping leading/trailing .-_ we get empty --> fallback
         assert result == "hook"
 
     def test_dots_and_dashes_preserved(self) -> None:
@@ -760,14 +760,14 @@ class TestWsAvailable:
     """Tests for ws_available()."""
 
     def test_returns_false_when_no_creds(self, tmp_path: Path) -> None:
-        """No run-dir files → ws_available returns False."""
+        """No run-dir files --> ws_available returns False."""
         from apm_cli.integration.copilot_app_ws import _RUN_DIR_ENV, ws_available
 
         with patch.dict(os.environ, {_RUN_DIR_ENV: str(tmp_path)}):
             assert ws_available() is False
 
     def test_returns_false_when_tcp_refused(self, tmp_path: Path) -> None:
-        """Port present but TCP refused → ws_available returns False."""
+        """Port present but TCP refused --> ws_available returns False."""
         from apm_cli.integration.copilot_app_ws import (
             _PORT_FILE,
             _RUN_DIR_ENV,
