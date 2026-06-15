@@ -182,7 +182,52 @@ def _emit_integration_hints(prim_name: str, info: dict, log_integration) -> None
         log_integration("  |-- reload the Copilot session (/clear) or restart to load the canvas")
 
 
-def integrate_package_primitives(
+def _check_executable_approval(
+    package_name: str,
+    package_info: Any,
+    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
+    *,
+    ctx: InstallContext | None = None,
+) -> tuple[bool, bool]:
+    """Delegate to ``exec_gate.check_executable_approval``."""
+    from apm_cli.install.exec_gate import check_executable_approval
+
+    return check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
+
+
+def _resolve_package_key(package_info: Any, package_name: str) -> str:
+    """Delegate to ``exec_gate.resolve_package_key``."""
+    from apm_cli.install.exec_gate import resolve_package_key
+
+    return resolve_package_key(package_info, package_name)
+
+
+def _log_hooks_skip(
+    package_name: str, package_info: Any, targets: Any, logger: InstallLogger | None
+) -> None:
+    """Warn about skipped hooks only when the package actually ships them.
+
+    Aligned with :meth:`HookIntegrator.find_hook_files`: checks for
+    ``*.json`` in ``.apm/hooks/`` and ``hooks/``.
+    """
+    _install = Path(package_info.install_path)
+    has_hooks = False
+    for hook_dir in [_install / ".apm" / "hooks", _install / "hooks"]:
+        if hook_dir.is_dir() and any(hook_dir.glob("*.json")):
+            has_hooks = True
+            break
+    if not has_hooks:
+        return
+    _pkg_label = package_name or getattr(package_info, "name", "unknown")
+    if logger:
+        logger.warning(
+            f"{_pkg_label}: hooks skipped (not approved in allowExecutables). "
+            f"Run 'apm approve {_pkg_label}' to approve.",
+            symbol="warning",
+        )
+
+
+def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
     *,
@@ -199,11 +244,28 @@ def integrate_package_primitives(
     scratch_root: Path | None = None,
     policy: Any = None,
     is_first_party: bool = False,
+    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
-    Iterates over *targets* and dispatches each primitive to the
-    appropriate integrator. Returns integration counters and deployed paths.
+    Iterates over *targets* (``TargetProfile`` list) and dispatches each
+    primitive to the appropriate integrator via the target-driven API.
+    Skills are handled separately because ``SkillIntegrator`` already
+    routes across all targets internally.
+
+    When *scope* is ``InstallScope.USER``, targets and primitives that
+    do not support user-scope deployment are silently skipped.
+
+    When *ctx* is provided, the cowork non-skill primitive warning
+    (Amendment 6) is emitted once per install run for packages that
+    contain non-skill primitives when the cowork target is active.
+
+    When *allow_executables* is provided, executable primitives (hooks,
+    bin/) are only deployed for packages whose key appears in the dict
+    with the matching type set to ``True``.  Local project content
+    (``package_name == "_local"``) is always trusted.
+
+    Returns a dict with integration counters and the list of deployed file paths.
     """
     from apm_cli.integration.dispatch import get_dispatch_table
 
@@ -244,6 +306,11 @@ def integrate_package_primitives(
         # ``project_root`` is the redirect target; it must equal scratch_root
         # OR sit inside it.  ensure_path_within(child, parent) raises if not.
         ensure_path_within(Path(project_root).resolve(), scratch_root)
+
+    # Executable approval gate (npm v12-style default-deny).
+    _hooks_approved, _bin_approved = _check_executable_approval(
+        package_name, package_info, allow_executables, ctx=ctx
+    )
 
     # --- Amendment 6: cowork non-skill primitive warning (once per run) ---
     _cowork_active = any(t.name == "copilot-cowork" for t in targets)
@@ -332,6 +399,10 @@ def integrate_package_primitives(
     for _prim_name, _entry in _dispatch.items():
         if _entry.multi_target:
             continue  # skills handled separately
+        # Executable approval gate: skip hooks if not approved.
+        if _prim_name == "hooks" and not _hooks_approved:
+            _log_hooks_skip(package_name, package_info, targets, logger)
+            continue
         _integrator = _INTEGRATOR_KWARGS[_prim_name]
         # A primitive can be statically present on a target (e.g. the
         # copilot canvas mapping) while a given IntegratorBundle omits its
@@ -474,6 +545,7 @@ def integrate_package_primitives(
         skill_subset=skill_subset,
         scope=scope,
         policy=policy,
+        skip_bin=not _bin_approved,
     )
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:
@@ -506,20 +578,10 @@ def integrate_package_primitives(
             _log_integration(
                 f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_suffix}"
             )
-    if skill_result.bin_deployed > 0:
-        _log_integration(
-            f"  |-- {skill_result.bin_deployed} executable(s) deployed to "
-            f"Claude Code's PATH -> {_skill_suffix} (invoked without confirmation)"
-        )
-        _log_integration("  |-- run /reload-plugins or restart Claude Code to activate")
-    elif skill_result.bin_skipped_reason == "project_scope":
-        _log_integration(
-            "  |-- plugin ships executables; re-run with -g (global) to deploy them to Claude Code"
-        )
-    elif skill_result.bin_skipped_reason == "no_claude_target":
-        _log_integration(
-            "  |-- plugin ships executables; no active Claude Code skills target to receive them"
-        )
+    if skill_result.bin_deployed > 0 or skill_result.bin_skipped_reason:
+        from apm_cli.install.exec_gate import log_bin_status
+
+        log_bin_status(skill_result, _skill_suffix, package_name, package_info, _log_integration)
     for tp in skill_result.target_paths:
         deployed.append(_deployed_path_entry(tp, project_root, targets))
         # #1716: also record the bundle's contained files so per-file

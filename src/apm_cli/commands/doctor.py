@@ -1,11 +1,9 @@
 """``apm doctor`` top-level command.
 
 Thin Click wrapper around :func:`apm_cli.commands.marketplace.doctor.run_doctor`.
-The diagnostics are owned by the marketplace doctor module today because that
-is where the existing implementation lives; promoting the entry point to the
-top level is a discoverability fix without scope expansion. Future PRs may
-add additional domains (lockfile, cache, runtime, config) by extending
-``run_doctor`` -- each behind its own scope justification.
+Thin Click wrapper around the marketplace doctor module where the existing
+implementation lives. Future PRs may add additional domains (lockfile,
+cache, runtime, config) by extending ``run_doctor``.
 """
 
 from __future__ import annotations

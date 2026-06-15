@@ -651,7 +651,7 @@ is a hard error -- run `migrate` to consolidate.
 
 See [docs/guides/marketplace-authoring](../../../../../docs/src/content/docs/guides/marketplace-authoring.md)
 for the complete maintainer workflow (quickstart, version ranges, `check`,
-`doctor`, `outdated`, and `publish`).
+`doctor`, and `outdated`).
 
 ## Org-wide packages
 

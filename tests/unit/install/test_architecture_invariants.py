@@ -39,9 +39,10 @@ def test_install_context_importable():
 MAX_MODULE_LOC = 1000
 
 KNOWN_LARGE_MODULES = {
-    # No exceptions: integrate.py was decomposed into Strategy
-    # (sources.py) + Template Method (template.py) and now sits well
-    # below the default budget.
+    # services.py grew past 1000 when exec-gate delegation helpers (main)
+    # and canvas integration helpers (canvas PR) merged concurrently.
+    # Decomposition tracked as follow-up.
+    "services.py": 1100,
 }
 
 

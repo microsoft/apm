@@ -1,7 +1,7 @@
 """Marketplace manifest validation.
 
 Provides validation functions for marketplace.json integrity checking.
-Used by ``apm marketplace validate`` and potentially by ``apm marketplace publish``.
+Used by ``apm marketplace validate``.
 
 All validators operate on parsed ``MarketplaceManifest`` / ``MarketplacePlugin``
 objects. The JSON parser (``models.py``) already drops entries that are
