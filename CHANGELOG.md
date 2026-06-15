@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm compile` now honors `managed_section` mode on distributed root
+  `AGENTS.md` and `--single-agents` writes, preserving hand-authored
+  content outside the APM markers. (closes #1764) (#1768)
+
 ## [0.20.0] - 2026-06-11
 
 ### Added

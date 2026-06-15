@@ -438,6 +438,58 @@ class TestManagedSectionDistributed:
         assert "Old content" not in written
 
 
+class TestManagedSectionSingleAgents:
+    """Regression tests for managed_section in single-agents compilation (issue #1764)."""
+
+    def test_single_agents_honours_managed_section(self, tmp_path, monkeypatch):
+        """--single-agents preserves human content when managed_section is active."""
+        from click.testing import CliRunner
+
+        from apm_cli.commands.compile.cli import compile as compile_command
+
+        start = "<!-- apm:start -->"
+        end = "<!-- apm:end -->"
+        agents_md = tmp_path / "AGENTS.md"
+        agents_md.write_text(
+            "# Team guidance\n\n"
+            "Human-authored content.\n\n"
+            f"{start}\n"
+            "Old APM block.\n"
+            f"{end}\n\n"
+            "Footer stays.\n"
+        )
+        (tmp_path / "apm.yml").write_text(
+            "name: test-project\n"
+            "version: 0.1.0\n"
+            "compilation:\n"
+            "  agents_md:\n"
+            "    mode: managed_section\n"
+            f'    start_marker: "{start}"\n'
+            f'    end_marker: "{end}"\n'
+        )
+        instructions_dir = tmp_path / ".apm" / "instructions"
+        instructions_dir.mkdir(parents=True)
+        (instructions_dir / "coding.instructions.md").write_text(
+            "---\n"
+            "description: Test instructions\n"
+            'applyTo: "**/*.py"\n'
+            "---\n\n"
+            "# Test instructions\n\n"
+            "Use the project style.\n"
+        )
+
+        monkeypatch.chdir(tmp_path)
+
+        result = CliRunner().invoke(compile_command, ["--single-agents", "--local-only"])
+
+        assert result.exit_code == 0, result.output
+        written = agents_md.read_text()
+        assert "Human-authored content." in written
+        assert "Footer stays." in written
+        assert "Use the project style." in written
+        assert "Old APM block." not in written
+
+
 class TestManagedSectionDirectoryAtPath:
     """Regression: directory at target path produces clear error."""
 
