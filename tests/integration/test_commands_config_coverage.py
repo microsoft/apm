@@ -1439,7 +1439,8 @@ class TestSelfUpdateHelpers:
             ),
         ):
             url = su._get_update_installer_url()
-        assert "apm-unix" in url or "aka.ms" in url
+        parsed = urllib.parse.urlparse(url)
+        assert "apm-unix" in parsed.path or parsed.hostname == "aka.ms"
 
     def test_get_manual_update_command_unix(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """_get_manual_update_command() returns a curl command on Unix."""
