@@ -168,20 +168,15 @@ def normalize_and_merge_skill_subset(
     Returns a sorted, deduplicated list ready for ``dep_ref.skill_subset``.
     """
     seen: builtins.set[str] = builtins.set()
-    normalized: builtins.list[str] = []
     for s in cli_subset:
         s = s.strip()
-        if s and s not in seen:
+        if s:
             seen.add(s)
-            normalized.append(s)
     existing = get_existing_skill_subset(
         current_deps, identity, dependency_reference_cls=dependency_reference_cls
     )
     if existing:
-        for e in existing:
-            if e not in seen:
-                seen.add(e)
-                normalized.append(e)
+        seen.update(existing)
     return sorted(seen)
 
 
