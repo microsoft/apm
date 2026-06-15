@@ -243,7 +243,7 @@ ETag: "sha256:abc123..."
 
 **Body.** Raw archive bytes. The same bytes that hash to the `digest` advertised in `/versions`.
 
-**Format selection at publish time.** APM publishes via `apm pack` (tar.gz). Anthropic skills publish via standard zip. Servers store and return whatever was uploaded; format conversion is NOT a server responsibility.
+**Format selection at publish time.** APM publishes via `apm publish` (zip). Servers store and return whatever was uploaded; format conversion is NOT a server responsibility. Both `application/zip` and `application/gzip` (tar.gz) are accepted for backwards compatibility.
 
 **Errors**
 
