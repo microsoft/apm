@@ -378,6 +378,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     plan_callback=None,
     refresh: bool = False,
     lockfile_only: bool = False,
+    trust_canvas: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -507,6 +508,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         legacy_skill_paths=legacy_skill_paths,
         refresh=refresh,
         lockfile_only=lockfile_only,
+        trust_canvas=trust_canvas,
     )
 
     # ------------------------------------------------------------------
@@ -571,7 +573,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
 
         # Populate direct MCP deps from the manifest so the policy gate
         # can enforce MCP allow/deny rules on them (S2 fix).
-        ctx.direct_mcp_deps = apm_package.get_mcp_dependencies()
+        ctx.direct_mcp_deps = apm_package.get_all_mcp_dependencies()
 
         # Populate direct LSP deps from the manifest for LSP integration.
         ctx.direct_lsp_deps = apm_package.get_lsp_dependencies()

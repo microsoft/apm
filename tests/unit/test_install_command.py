@@ -577,6 +577,45 @@ class TestTransitiveDepParentChain:
         assert ">" in chain, f"Expected '>' separator in chain, got: '{chain}'"
 
 
+class TestDevMcpDependenciesInstall:
+    """Tests for restoring MCP servers declared as dev dependencies."""
+
+    def test_install_processes_dev_mcp_dependencies(self, tmp_path, monkeypatch):
+        """apm install restores MCP servers declared under devDependencies.mcp."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "name": "test-project",
+                    "version": "0.0.1",
+                    "dependencies": {"apm": [], "mcp": []},
+                    "devDependencies": {
+                        "mcp": [
+                            {
+                                "name": "test-server",
+                                "registry": False,
+                                "transport": "stdio",
+                                "command": "echo",
+                                "args": ["test"],
+                            }
+                        ]
+                    },
+                }
+            )
+        )
+
+        with (
+            patch("apm_cli.commands.install.MCPIntegrator.install", return_value=1) as install,
+            patch("apm_cli.commands.install.MCPIntegrator.update_lockfile"),
+        ):
+            result = CliRunner().invoke(cli, ["install"])
+
+        assert result.exit_code == 0, result.output
+        assert install.call_count == 1
+        installed_deps = install.call_args.args[0]
+        assert [dep.name for dep in installed_deps] == ["test-server"]
+
+
 class TestDownloadCallbackErrorMessages:
     """Tests for direct vs transitive dep error message differentiation."""
 

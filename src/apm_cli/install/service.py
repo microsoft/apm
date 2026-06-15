@@ -93,6 +93,7 @@ class InstallService:
             plan_callback=request.plan_callback,
             refresh=request.refresh,
             lockfile_only=request.lockfile_only,
+            trust_canvas=request.trust_canvas,
         )
 
     @staticmethod
