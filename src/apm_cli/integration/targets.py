@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 RULE_FORMATS: frozenset[str] = frozenset(
-    {"cursor_rules", "claude_rules", "windsurf_rules", "kiro_steering"}
+    {"cursor_rules", "claude_rules", "windsurf_rules", "kiro_steering", "antigravity_rules"}
 )
 """Canonical set of format-transforming rule ``format_id``s.
 
@@ -654,7 +654,9 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         name="antigravity",
         root_dir=".agent",
         primitives={
-            "instructions": PrimitiveMapping("rules", ".md", "antigravity_rules"),
+            "instructions": PrimitiveMapping(
+                "rules", ".md", "antigravity_rules", output_compare=True
+            ),
             "commands": PrimitiveMapping("commands", ".toml", "antigravity_command"),
             "skills": PrimitiveMapping(
                 "skills",

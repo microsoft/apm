@@ -710,8 +710,8 @@ def _create_minimal_apm_yml(config, plugin=False, target_path=None):
         targets_comment = (
             "# Which agent platforms to deploy to.\n"
             "# Resolution order: --target flag > this field > auto-detect from filesystem.\n"
-            "# Accepted values: copilot, claude, cursor, opencode, codex, gemini, "
-            "antigravity, windsurf, kiro, all\n"
+            "# Accepted values: vscode, agents, copilot, claude, cursor, opencode, codex,\n"
+            "# gemini, antigravity, windsurf, kiro, agent-skills, all\n"
         )
         content = content.replace("targets:", targets_comment + "targets:", 1)
     else:
