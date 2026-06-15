@@ -14,10 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm marketplace check` now resolves entries against their effective host
-  with proper auth, matching `apm pack`; local `./` packages skip the network.
-  Previously, non-default-host entries failed with exit 128. (closes #1762,
-  follows up #1736)
+- `apm marketplace check` no longer fails with exit 128 for entries hosted on
+  non-default hosts. It now resolves entries against their effective host with
+  proper auth, matching `apm pack`; local `./` packages skip the network.
+  (closes #1762, follows up #1736)
 - `apm install` now removes orphaned skill directories when a package is uninstalled or its skills are renamed. Previously, individual files were deleted but the skill folder remained with a "Refused to remove directory entry" warning. (closes #1483) (#1767)
 
 ## [0.20.0] - 2026-06-11

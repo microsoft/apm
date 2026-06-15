@@ -112,8 +112,9 @@ def check(offline, verbose):
             try:
                 # Resolve each entry against its effective host + composed path.
                 host, owner_repo = _entry_coordinates(entry, source_base)
+                remote_label = f"https://{host}/{owner_repo}.git" if host else owner_repo
                 logger.verbose_detail(
-                    f"Resolving {entry.name} via {host or 'default host'}: {owner_repo}"
+                    f"Resolving {entry.name} via {host or 'default host'}: {remote_label}"
                 )
                 refs = _resolver_for(host).list_remote_refs(owner_repo)
 
