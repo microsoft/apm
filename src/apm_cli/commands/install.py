@@ -1673,13 +1673,20 @@ def _install_apm_packages(ctx, outcome):
             if apm_package.get_dev_apm_dependencies()
             else ""
         )
+        + (
+            f", {len(apm_package.get_dev_mcp_dependencies())} dev MCP deps"
+            if apm_package.get_dev_mcp_dependencies()
+            else ""
+        )
     )
 
     # Get APM and MCP dependencies
     apm_deps = apm_package.get_apm_dependencies()
     dev_apm_deps = apm_package.get_dev_apm_dependencies()
     has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
-    mcp_deps = apm_package.get_mcp_dependencies()
+    mcp_deps = list(apm_package.get_mcp_dependencies()) + list(
+        apm_package.get_dev_mcp_dependencies()
+    )
 
     all_apm_deps = list(apm_deps) + list(dev_apm_deps)
     _check_insecure_dependencies(all_apm_deps, ctx.allow_insecure, logger)

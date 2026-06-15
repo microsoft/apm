@@ -573,7 +573,9 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
 
         # Populate direct MCP deps from the manifest so the policy gate
         # can enforce MCP allow/deny rules on them (S2 fix).
-        ctx.direct_mcp_deps = apm_package.get_mcp_dependencies()
+        ctx.direct_mcp_deps = list(apm_package.get_mcp_dependencies()) + list(
+            apm_package.get_dev_mcp_dependencies()
+        )
 
         # Populate direct LSP deps from the manifest for LSP integration.
         ctx.direct_lsp_deps = apm_package.get_lsp_dependencies()
