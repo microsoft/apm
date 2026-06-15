@@ -7,11 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `apm marketplace publish` command and consumer-repo fan-out workflow; consumers should run `apm install --update` instead. (#1134)
+- `apm marketplace doctor` subcommand alias (deprecated); use `apm doctor` instead. (#1134)
+
 ### Fixed
 
 - `apm compile` now honors `managed_section` mode on distributed root
   `AGENTS.md` and `--single-agents` writes, preserving hand-authored
   content outside the APM markers. (closes #1764) (#1768)
+- `apm install` now removes orphaned skill directories when a package is uninstalled or its skills are renamed. Previously, individual files were deleted but the skill folder remained with a "Refused to remove directory entry" warning. (closes #1483) (#1767)
 
 ## [0.20.0] - 2026-06-11
 
@@ -85,6 +91,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   faithfully reflects on-disk content across Copilot, Claude, and Gemini
   targets (including OS-specific `windows`/`linux`/`osx` hook keys). (by
   @harshitlarl, closes #316, #1700)
+- Experimental, Copilot-only `canvas` primitive: `.apm/extensions/<name>/extension.mjs` deploys to `.github/extensions/<name>/` on `apm install`/`apm pack`, gated by `apm experimental enable canvas` + `--trust-canvas-extensions` for dependencies. (by @sergio-sisternes-epam, #1689)
+- Experimental canvas: `apm install --global --trust-canvas-extensions` deploys dependency canvases to `~/.copilot/extensions/<name>/`; `apm uninstall --global` prunes them. (by @sergio-sisternes-epam, #1689)
+- Experimental canvas: package validation recognises canvas extensions (canvas-only packages valid, gated-executable warning); `apm audit` (text) lists deployed canvas bundles. (by @sergio-sisternes-epam, #1689)
 
 ### Changed
 

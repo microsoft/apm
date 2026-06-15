@@ -795,3 +795,35 @@ class TestValidateApmPackageWithYml:
         (instructions_dir / "empty.md").write_text("")
         result: ValidationResult = validate_apm_package(tmp_path)
         assert any("Empty primitive" in w for w in result.warnings)
+
+    def test_canvas_only_package_is_valid(self, tmp_path: Path) -> None:
+        """A package whose only primitive is a canvas is not flagged empty."""
+        (tmp_path / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        bundle: Path = tmp_path / ".apm" / "extensions" / "widget"
+        bundle.mkdir(parents=True)
+        (bundle / "extension.mjs").write_text("export default {}\n")
+        result: ValidationResult = validate_apm_package(tmp_path)
+        assert result.is_valid
+        assert not any("No primitive files" in w for w in result.warnings)
+
+    def test_canvas_emits_gated_executable_warning(self, tmp_path: Path) -> None:
+        """A canvas bundle earns an explicit executable/gated warning."""
+        (tmp_path / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        bundle: Path = tmp_path / ".apm" / "extensions" / "widget"
+        bundle.mkdir(parents=True)
+        (bundle / "extension.mjs").write_text("export default {}\n")
+        result: ValidationResult = validate_apm_package(tmp_path)
+        canvas_warns = [w for w in result.warnings if "Canvas extension" in w]
+        assert len(canvas_warns) == 1
+        assert "widget" in canvas_warns[0]
+        assert "--trust-canvas-extensions" in canvas_warns[0]
+
+    def test_directory_without_marker_is_not_canvas(self, tmp_path: Path) -> None:
+        """An extensions/ subdir lacking extension.mjs is not a canvas bundle."""
+        (tmp_path / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        bundle: Path = tmp_path / ".apm" / "extensions" / "notcanvas"
+        bundle.mkdir(parents=True)
+        (bundle / "readme.txt").write_text("not a canvas")
+        result: ValidationResult = validate_apm_package(tmp_path)
+        assert not any("Canvas extension" in w for w in result.warnings)
+        assert any("No primitive files" in w for w in result.warnings)

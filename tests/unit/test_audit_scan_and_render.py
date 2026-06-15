@@ -666,3 +666,88 @@ class TestFindingSourceHelpers:
         assert "Audit Findings" in title
         assert "apm: 1" in title
         assert "skillspector: 1" in title
+
+
+class TestDeployedCanvasBundles:
+    """_deployed_canvas_bundles derives canvas roots from lockfile entries."""
+
+    def _lock(self, deployed):
+        lock = MagicMock()
+        dep = MagicMock()
+        dep.deployed_files = deployed
+        lock.dependencies = {"owner/repo": dep}
+        return lock
+
+    def test_user_scope_bundle_root(self, tmp_path):
+        from apm_cli.commands import audit as audit_mod
+
+        lock = self._lock([".copilot/extensions/widget/extension.mjs"])
+        with (
+            patch.object(audit_mod, "get_lockfile_path", return_value=tmp_path / "x"),
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=lock),
+        ):
+            roots = audit_mod._deployed_canvas_bundles(tmp_path, None)
+        assert roots == [".copilot/extensions/widget"]
+
+    def test_project_scope_and_extra_files_dedupe(self, tmp_path):
+        from apm_cli.commands import audit as audit_mod
+
+        lock = self._lock(
+            [
+                ".github/extensions/widget/extension.mjs",
+                ".github/extensions/widget/assets/app.js",
+                ".github/instructions/foo.md",
+            ]
+        )
+        with (
+            patch.object(audit_mod, "get_lockfile_path", return_value=tmp_path / "x"),
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=lock),
+        ):
+            roots = audit_mod._deployed_canvas_bundles(tmp_path, None)
+        assert roots == [".github/extensions/widget"]
+
+    def test_no_lockfile_returns_empty(self, tmp_path):
+        from apm_cli.commands import audit as audit_mod
+
+        with (
+            patch.object(audit_mod, "get_lockfile_path", return_value=tmp_path / "x"),
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
+        ):
+            assert audit_mod._deployed_canvas_bundles(tmp_path, None) == []
+
+    def test_package_filter_excludes_other_dep(self, tmp_path):
+        from apm_cli.commands import audit as audit_mod
+
+        lock = self._lock([".copilot/extensions/widget/extension.mjs"])
+        with (
+            patch.object(audit_mod, "get_lockfile_path", return_value=tmp_path / "x"),
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=lock),
+        ):
+            roots = audit_mod._deployed_canvas_bundles(tmp_path, "other/dep")
+        assert roots == []
+
+
+class TestRenderCanvasNote:
+    """_render_canvas_note surfaces an info line per deployed canvas."""
+
+    def test_emits_info_when_bundles_present(self, tmp_path, logger):
+        from apm_cli.commands import audit as audit_mod
+
+        with patch.object(
+            audit_mod,
+            "_deployed_canvas_bundles",
+            return_value=[".copilot/extensions/widget"],
+        ):
+            log = MagicMock()
+            audit_mod._render_canvas_note(tmp_path, None, log)
+        joined = " ".join(str(c.args[0]) for c in log.info.call_args_list)
+        assert "executable canvas extension" in joined
+        assert ".copilot/extensions/widget" in joined
+
+    def test_silent_when_no_bundles(self, tmp_path):
+        from apm_cli.commands import audit as audit_mod
+
+        with patch.object(audit_mod, "_deployed_canvas_bundles", return_value=[]):
+            log = MagicMock()
+            audit_mod._render_canvas_note(tmp_path, None, log)
+        log.info.assert_not_called()
