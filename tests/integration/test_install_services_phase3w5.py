@@ -305,6 +305,7 @@ class TestIntegratePackagePrimitives:
             "instructions": 0,
             "commands": 0,
             "hooks": 0,
+            "canvases": 0,
             "links_resolved": 0,
             "deployed_files": [],
         }

@@ -144,9 +144,7 @@ def _build_summary(kind: GitErrorKind, operation: str, exit_code: int | None) ->
 def _build_hint(kind: GitErrorKind, operation: str, remote: str | None) -> str:
     """Build a one-line actionable ASCII hint."""
     if kind == GitErrorKind.AUTH:
-        return (
-            "Check your GITHUB_TOKEN / gh auth / SSH key. Run 'apm marketplace doctor' to diagnose."
-        )
+        return "Check your GITHUB_TOKEN / gh auth / SSH key. Run 'apm doctor' to diagnose."
     if kind == GitErrorKind.NOT_FOUND:
         remote_label = f"'{remote}'" if remote else "the remote"
         return f"Verify the remote {remote_label} exists and the ref is spelled correctly."

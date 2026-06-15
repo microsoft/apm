@@ -74,6 +74,7 @@ def _has_local_apm_content(project_root):
         "prompts",
         "hooks",
         "commands",
+        "extensions",
     )
     for subdir_name in _PRIMITIVE_DIRS:
         subdir = apm_dir / subdir_name

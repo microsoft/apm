@@ -515,3 +515,79 @@ class TestAsFlagRequiresLocalBundle:
         result = _invoke(project, monkeypatch, "owner/pkg", "--as", "alias")
         assert result.exit_code != 0
         assert "--as requires a local bundle" in result.output
+
+
+class TestLocalBundleCanvasTrust:
+    """A vendored bundle must not smuggle an executable canvas past the gates.
+
+    Both gates must hold: the ``canvas`` experimental flag (feature
+    availability) and ``--trust-canvas-extensions`` (executable-code trust).
+    """
+
+    def test_canvas_blocked_without_trust(self, tmp_path, monkeypatch):
+        bundle = _make_bundle(
+            tmp_path,
+            files={
+                "agents/a.md": "# Agent\n",
+                "extensions/widget/extension.mjs": "export default {};\n",
+            },
+        )
+        project = _make_project(tmp_path)
+        result = _invoke(project, monkeypatch, str(bundle), "--target", "copilot")
+        assert result.exit_code == 0, result.output
+        # Agent deploys; canvas is blocked.
+        assert (project / ".github" / "agents" / "a.md").exists()
+        assert not (project / ".github" / "extensions" / "widget").exists()
+
+    def test_canvas_deployed_with_trust_and_flag(self, tmp_path, monkeypatch):
+        import apm_cli.config as _conf
+
+        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"canvas": True}})
+        bundle = _make_bundle(
+            tmp_path,
+            files={
+                "agents/a.md": "# Agent\n",
+                "extensions/widget/extension.mjs": "export default {};\n",
+            },
+        )
+        project = _make_project(tmp_path)
+        result = _invoke(
+            project,
+            monkeypatch,
+            str(bundle),
+            "--target",
+            "copilot",
+            "--trust-canvas-extensions",
+        )
+        assert result.exit_code == 0, result.output
+        assert (project / ".github" / "extensions" / "widget" / "extension.mjs").exists()
+
+    def test_canvas_blocked_when_trusted_but_flag_off(self, tmp_path, monkeypatch):
+        """Trust alone is not enough: the experimental flag must also be on."""
+        import apm_cli.config as _conf
+
+        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {}})
+        bundle = _make_bundle(
+            tmp_path,
+            files={
+                "agents/a.md": "# Agent\n",
+                "extensions/widget/extension.mjs": "export default {};\n",
+            },
+        )
+        project = _make_project(tmp_path)
+        result = _invoke(
+            project,
+            monkeypatch,
+            str(bundle),
+            "--target",
+            "copilot",
+            "--trust-canvas-extensions",
+        )
+        assert result.exit_code == 0, result.output
+        assert (project / ".github" / "agents" / "a.md").exists()
+        assert not (project / ".github" / "extensions" / "widget").exists()
+        # Flag OFF mirrors the silent CanvasIntegrator no-op: the canvas type
+        # does not exist yet, so the bundle path must not surface a
+        # trust-specific warning telling the operator to pass a flag they
+        # already passed.
+        assert "trust-canvas-extensions" not in result.output
