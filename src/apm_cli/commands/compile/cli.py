@@ -708,6 +708,8 @@ def _run_compilation(
                                 compiler._write_output_file_with_config(
                                     str(output_path), final_content, config
                                 )
+                                if compiler.errors:
+                                    raise OSError(compiler.errors[-1])
                             else:
                                 from ...compilation.output_writer import CompiledOutputWriter
 

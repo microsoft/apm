@@ -441,12 +441,8 @@ class TestManagedSectionDistributed:
 class TestManagedSectionSingleAgents:
     """Regression tests for managed_section in single-agents compilation (issue #1764)."""
 
-    def test_single_agents_honours_managed_section(self, tmp_path, monkeypatch):
-        """--single-agents preserves human content when managed_section is active."""
-        from click.testing import CliRunner
-
-        from apm_cli.commands.compile.cli import compile as compile_command
-
+    def _create_project(self, tmp_path):
+        """Create a minimal project with managed-section AGENTS.md."""
         start = "<!-- apm:start -->"
         end = "<!-- apm:end -->"
         agents_md = tmp_path / "AGENTS.md"
@@ -477,7 +473,15 @@ class TestManagedSectionSingleAgents:
             "# Test instructions\n\n"
             "Use the project style.\n"
         )
+        return agents_md
 
+    def test_single_agents_honours_managed_section(self, tmp_path, monkeypatch):
+        """--single-agents preserves human content when managed_section is active."""
+        from click.testing import CliRunner
+
+        from apm_cli.commands.compile.cli import compile as compile_command
+
+        agents_md = self._create_project(tmp_path)
         monkeypatch.chdir(tmp_path)
 
         result = CliRunner().invoke(compile_command, ["--single-agents", "--local-only"])
@@ -488,6 +492,33 @@ class TestManagedSectionSingleAgents:
         assert "Footer stays." in written
         assert "Use the project style." in written
         assert "Old APM block." not in written
+
+    def test_single_agents_managed_section_reports_writer_failure(self, tmp_path, monkeypatch):
+        """--single-agents reports managed-section filesystem write failures cleanly."""
+        from click.testing import CliRunner
+
+        from apm_cli.commands.compile.cli import compile as compile_command
+        from apm_cli.compilation.output_writer import CompiledOutputWriter
+
+        self._create_project(tmp_path)
+
+        writes = {"count": 0}
+
+        def fail_second_write(self, output_path, content):
+            writes["count"] += 1
+            if writes["count"] == 2:
+                raise OSError("disk full")
+            output_path.write_text(content, encoding="utf-8")
+
+        monkeypatch.setattr(CompiledOutputWriter, "write", fail_second_write)
+        monkeypatch.chdir(tmp_path)
+
+        result = CliRunner().invoke(compile_command, ["--single-agents", "--local-only"])
+
+        assert result.exit_code == 1
+        assert "Failed to write final AGENTS.md" in result.output
+        assert "disk" in result.output
+        assert "full" in result.output
 
 
 class TestManagedSectionDirectoryAtPath:
