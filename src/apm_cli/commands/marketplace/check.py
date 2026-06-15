@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import traceback
+from typing import TYPE_CHECKING
 
 import click
 
@@ -12,7 +13,7 @@ from ...marketplace.auth_helpers import resolve_token_for_host
 from ...marketplace.errors import GitLsRemoteError, OfflineMissError
 from ...marketplace.ref_resolver import RefResolver
 from ...marketplace.semver import satisfies_range
-from ...marketplace.yml_schema import split_source_base
+from ...marketplace.yml_schema import PackageEntry, split_source_base
 from . import (
     _CheckResult,
     _extract_tag_versions,
@@ -22,8 +23,11 @@ from . import (
     marketplace,
 )
 
+if TYPE_CHECKING:
+    from ...core.auth import AuthResolver
 
-def _entry_coordinates(entry, source_base):
+
+def _entry_coordinates(entry: PackageEntry, source_base: str | None) -> tuple[str | None, str]:
     """Return ``(host, owner_repo)`` for *entry*, mirroring the build-time
     routing in ``MarketplaceBuilder._remote_source_coordinates`` so that
     ``check`` and ``pack`` resolve every entry against the same host.
@@ -67,13 +71,23 @@ def check(offline, verbose):
     # Default-host entries keep the bare ambient-credential path.
     source_base = getattr(yml, "source_base", None)
     resolvers: dict[str | None, RefResolver] = {}
+    auth_resolver: AuthResolver | None = None
 
     def _resolver_for(host: str | None) -> RefResolver:
+        nonlocal auth_resolver
         if host not in resolvers:
             if host is None:
                 resolvers[host] = RefResolver(offline=offline)
             else:
-                token = resolve_token_for_host(host, offline=offline)
+                if auth_resolver is None and not offline:
+                    from ...core.auth import AuthResolver
+
+                    auth_resolver = AuthResolver()
+                token = resolve_token_for_host(
+                    host,
+                    offline=offline,
+                    auth_resolver=auth_resolver,
+                )
                 resolvers[host] = RefResolver(offline=offline, host=host, token=token)
         return resolvers[host]
 
@@ -84,6 +98,7 @@ def check(offline, verbose):
         for entry in yml.packages:
             # Local-path packages skip git resolution entirely.
             if entry.is_local:
+                logger.verbose_detail(f"Skipping {entry.name} -- local path, no network check")
                 results.append(
                     _CheckResult(
                         name=entry.name,
@@ -97,6 +112,9 @@ def check(offline, verbose):
             try:
                 # Resolve each entry against its effective host + composed path.
                 host, owner_repo = _entry_coordinates(entry, source_base)
+                logger.verbose_detail(
+                    f"Resolving {entry.name} via {host or 'default host'}: {owner_repo}"
+                )
                 refs = _resolver_for(host).list_remote_refs(owner_repo)
 
                 # Check version/ref resolution

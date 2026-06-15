@@ -38,9 +38,12 @@ def resolve_token_for_host(
     if offline:
         return None
     try:
-        from ..core.auth import AuthResolver  # lazy import to avoid cycles
+        if auth_resolver is None:
+            from ..core.auth import AuthResolver  # lazy import to avoid cycles
 
-        resolver = auth_resolver if auth_resolver is not None else AuthResolver()
+            resolver = AuthResolver()
+        else:
+            resolver = auth_resolver
         ctx = resolver.resolve(host) if org is None else resolver.resolve(host, org=org)
         if ctx.token:
             logger.debug("Resolved token for host %s (source=%s)", host, ctx.source)

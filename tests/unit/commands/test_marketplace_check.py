@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path  # noqa: F401
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -582,7 +582,7 @@ class TestCheckPerHostResolution:
 
         assert result.exit_code == 0
         # token resolved for the GitLab base host, not github.com
-        mock_token.assert_called_once_with("gitlab.example.com", offline=False)
+        mock_token.assert_called_once_with("gitlab.example.com", offline=False, auth_resolver=ANY)
         # resolver bound to that host with that token
         MockResolver.assert_called_once_with(
             offline=False, host="gitlab.example.com", token="glpat-xyz"
@@ -623,7 +623,7 @@ class TestCheckPerHostResolution:
         result = runner.invoke(marketplace, ["check"])
 
         assert result.exit_code == 0
-        mock_token.assert_called_once_with("github.com", offline=False)
+        mock_token.assert_called_once_with("github.com", offline=False, auth_resolver=ANY)
         MockResolver.assert_called_once_with(offline=False, host="github.com", token="ghp-tok")
         mock_inst.list_remote_refs.assert_called_once_with("owner/repo")
 
