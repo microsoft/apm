@@ -94,6 +94,18 @@ FLAGS: dict[str, ExperimentalFlag] = {
         default=False,
         hint=("Use registries: in apm.yml. See https://microsoft.github.io/apm/guides/registries/"),
     ),
+    "canvas": ExperimentalFlag(
+        name="canvas",
+        description="Ship Copilot CLI canvas extensions via .apm/extensions/ bundles.",
+        default=False,
+        hint=(
+            "Author a canvas under .apm/extensions/<name>/extension.mjs, then "
+            "'apm install' deploys it to .github/extensions/. Dependency-provided "
+            "canvases are executable and blocked unless you pass "
+            "'--trust-canvas-extensions'. See "
+            "https://microsoft.github.io/apm/integrations/canvas/"
+        ),
+    ),
     "external_scanners": ExperimentalFlag(
         name="external_scanners",
         description="External SARIF scanner ingestion + optional audit at install time.",

@@ -372,6 +372,24 @@ target is present. Authoring rules:
 - Governance: a `bin_deploy` policy rule can deny deployment per package.
   See the [policy schema](../../../../../docs/src/content/docs/reference/policy-schema.md#bin_deploy).
 
+## Canvas extensions (experimental, Copilot-only)
+
+Behind the `canvas` experimental flag (`apm experimental enable canvas`), a
+package may ship a GitHub Copilot CLI canvas extension. Place a directory bundle
+under `.apm/extensions/<name>/` with an `extension.mjs` entry file (executable
+Node.js) plus any sibling assets; a directory without `extension.mjs` is ignored.
+
+On `apm install --target copilot`, APM deploys it verbatim to
+`.github/extensions/<name>/`. The `<name>` segment is validated strictly
+(`[A-Za-z0-9._-]+`, no leading/trailing dot, no `..`, no separators, no reserved
+names). It is **Copilot-only**. Dependency-provided canvases are executable code
+and are blocked unless the consumer passes `--trust-canvas-extensions`; a
+first-party canvas in the root package deploys once the flag is on. With
+`--global`, a dependency canvas deploys to `~/.copilot/extensions/<name>/`
+(always requiring the trust flag; default `~/.copilot` only; first-party root
+canvases are project-scope only). `apm pack` preserves `.apm/extensions/`. See
+the [canvas integration guide](../../../../../docs/src/content/docs/integrations/canvas.md).
+
 ## Marketplace source bases
 
 Marketplace publishers can declare `marketplace.sourceBase` when package
@@ -635,7 +653,7 @@ is a hard error -- run `migrate` to consolidate.
 
 See [docs/guides/marketplace-authoring](../../../../../docs/src/content/docs/guides/marketplace-authoring.md)
 for the complete maintainer workflow (quickstart, version ranges, `check`,
-`doctor`, `outdated`, and `publish`).
+`doctor`, and `outdated`).
 
 ## Org-wide packages
 

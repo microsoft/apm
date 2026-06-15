@@ -63,6 +63,10 @@ class InstallContext:
     verbose: bool = False
     refresh: bool = False
     dev: bool = False
+    # --trust-canvas-extensions: opt in to deploying dependency-provided
+    # canvas extensions (executable Node code). First-party (root project .apm/)
+    # canvases deploy without this; only dependency canvases are gated.
+    trust_canvas: bool = False
     only_packages: list[str] | None = None
     protocol_pref: Any = None  # ProtocolPreference (NONE/SSH/HTTPS) for shorthand transport
     allow_protocol_fallback: bool | None = None  # None => read APM_ALLOW_PROTOCOL_FALLBACK env
@@ -145,6 +149,7 @@ class InstallContext:
     total_hooks_integrated: int = 0  # integrate
     total_links_resolved: int = 0  # integrate
     direct_dep_failed: bool = False  # integrate -- set when any direct dep fails
+    blocked_executables: list[Any] = field(default_factory=list)  # integrate
 
     # ------------------------------------------------------------------
     # policy_gate

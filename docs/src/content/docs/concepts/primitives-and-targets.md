@@ -68,6 +68,14 @@ Model Context Protocol servers declared as dependencies. APM writes the per-harn
 - Source: `apm.yml` -> `dependencies.mcp:`
 - Deep dive: [MCP servers](/apm/consumer/install-mcp-servers/)
 
+### Canvas extensions (experimental)
+
+GitHub Copilot CLI canvas extensions: a directory bundle whose entry file is `extension.mjs` (executable Node.js). Copilot-only. Behind the `canvas` experimental flag; dependency-provided canvases are blocked unless `--trust-canvas-extensions` is passed, because they are arbitrary executable code. Project scope deploys to `.github/extensions/`; `--global` deploys a dependency canvas to `~/.copilot/extensions/` (always requiring the trust flag).
+
+- Source: `.apm/extensions/<name>/extension.mjs`
+- Deploys to: `.github/extensions/<name>/` (project) or `~/.copilot/extensions/<name>/` (`--global`)
+- Deep dive: [Canvas extensions](/apm/integrations/canvas/)
+
 ## Target catalogue
 
 Each target is identified by a slug used in `apm.yml`'s `targets:` field and on the `--target` flag. The output directory is where APM writes deployed primitives. The "agent-skills" and "copilot-cowork" targets exist in the registry but are not end-user runtimes; they are covered separately in the experimental reference.
@@ -115,6 +123,7 @@ Rows are primitives, columns are harnesses. Cell legend:
 | commands | unsupported | native | compiled | unsupported | compiled | compiled | compiled | unsupported |
 | plugins | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled |
 | MCP servers | native | native | native | native | native | native | native | native |
+| canvas (experimental) | gated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 
 How to read a cell:
 
@@ -124,6 +133,7 @@ How to read a cell:
 - `commands / copilot = unsupported` -- Copilot has no commands primitive; the same source `.prompt.md` reaches Copilot as a native prompt instead.
 - `plugins / *` -- APM unpacks the plugin at install time into the primitives in the rows above; routing then follows those rows.
 - `MCP servers / *` -- APM writes the harness's standard MCP config. Transitive MCP servers brought in by deep dependencies must be explicitly declared or trusted with `--trust-transitive-mcp` -- effectively `gated` for those, `native` for direct dependencies.
+- `canvas / copilot = gated` -- requires the `canvas` experimental flag; a canvas shipped by a dependency is executable code, so it stays blocked until you pass `--trust-canvas-extensions`. First-party canvases in your own package deploy at project scope once the flag is on. With `--global`, a dependency canvas deploys to `~/.copilot/extensions/` and always requires the trust flag (first-party global install is not supported). Every other harness is `unsupported`: a canvas is a Copilot CLI construct only.
 
 ## Where compiled context files land
 

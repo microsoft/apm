@@ -7,7 +7,6 @@ This module exercises real code paths from:
   - src/apm_cli/integration/hook_integrator.py (263 miss, 45%)
   - src/apm_cli/adapters/client/codex.py (189 miss, 10%)
   - src/apm_cli/output/formatters.py (215 miss, 55%)
-  - src/apm_cli/marketplace/publisher.py (217 miss, 25%)
 
 CRITICAL: We exercise REAL adapters and integrators with realistic file
 structures, NOT mocked ones. Only I/O with external systems (HTTP, subprocess)

@@ -143,6 +143,51 @@ class TestRunInstallPipelineShortCircuit:
         logger.nothing_to_install.assert_called_once()
 
 
+class TestRunInstallPipelineDirectMcpDeps:
+    """MCP policy preflight sees the same root MCP set that install restores."""
+
+    def test_policy_gate_receives_dev_mcp_dependencies(self, tmp_path):
+        from apm_cli.install.pipeline import run_install_pipeline
+
+        apm_dep = MagicMock()
+        prod_mcp = MagicMock()
+        dev_mcp = MagicMock()
+        pkg = MagicMock()
+        pkg.get_apm_dependencies.return_value = [apm_dep]
+        pkg.get_dev_apm_dependencies.return_value = []
+        pkg.get_mcp_dependencies.return_value = [prod_mcp]
+        pkg.get_dev_mcp_dependencies.return_value = [dev_mcp]
+        pkg.get_all_mcp_dependencies.return_value = [prod_mcp, dev_mcp]
+        pkg.get_lsp_dependencies.return_value = []
+        seen_direct_mcp_deps = []
+
+        def _phase_runner(name, _phase, ctx):
+            if name == "resolve":
+                ctx.deps_to_install = [apm_dep]
+                ctx.transitive_failures = []
+                return None
+            if name == "policy_gate":
+                seen_direct_mcp_deps.extend(ctx.direct_mcp_deps)
+                raise RuntimeError("stop after policy gate")
+            return None
+
+        with (
+            patch("apm_cli.core.scope.get_deploy_root", return_value=tmp_path),
+            patch("apm_cli.core.scope.get_source_root", return_value=tmp_path),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=tmp_path),
+            patch(
+                "apm_cli.install.phases.local_content._project_has_root_primitives",
+                return_value=False,
+            ),
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
+            patch("apm_cli.install.pipeline._run_phase", side_effect=_phase_runner),
+        ):
+            with pytest.raises(RuntimeError, match="stop after policy gate"):
+                run_install_pipeline(pkg)
+
+        assert seen_direct_mcp_deps == [prod_mcp, dev_mcp]
+
+
 # ---------------------------------------------------------------------------
 # run_install_pipeline -- plan_callback
 # ---------------------------------------------------------------------------

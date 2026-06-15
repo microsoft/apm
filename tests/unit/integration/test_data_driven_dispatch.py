@@ -266,8 +266,8 @@ class TestTargetGatingRegression:
         # Verify every non-skills primitive in each target was dispatched
         for target in all_targets:
             for prim_name in target.primitives:
-                if prim_name == "skills":
-                    continue  # skills handled separately
+                if prim_name in ("skills", "canvas"):
+                    continue  # skills + canvas (copilot-only, experimental) handled separately
                 assert (target.name, prim_name) in dispatched, (
                     f"Expected ({target.name}, {prim_name}) to be dispatched"
                 )
@@ -326,6 +326,7 @@ class TestExhaustivenessChecks:
             "skills",  # cross-target bucket
             "hooks",  # cross-target bucket
             "prompts_copilot-app",  # copilot-app uses dedicated prompts bucket
+            "canvas_copilot",  # canvas extensions (copilot-only, experimental)
         }
 
         assert expected_keys == set(buckets.keys()), (
@@ -860,6 +861,7 @@ class TestPrimitiveCoverage:
             "agents",
             "commands",
             "instructions",
+            "canvas",
         }
         # skills and hooks are special-cased
         check_primitive_coverage(
@@ -913,7 +915,15 @@ class TestDispatchTable:
         from apm_cli.integration.dispatch import get_dispatch_table
 
         dispatch = get_dispatch_table()
-        expected_counters = {"prompts", "agents", "commands", "instructions", "hooks", "skills"}
+        expected_counters = {
+            "prompts",
+            "agents",
+            "commands",
+            "instructions",
+            "hooks",
+            "skills",
+            "canvases",
+        }
         actual_counters = {entry.counter_key for entry in dispatch.values()}
         assert actual_counters == expected_counters
 
@@ -948,6 +958,7 @@ class TestCoverageReverse:
             "instructions": None,
             "hooks": None,
             "skills": None,
+            "canvas": None,
             "phantoms": None,  # not in any KNOWN_TARGETS
         }
         with pytest.raises(RuntimeError, match="phantoms"):

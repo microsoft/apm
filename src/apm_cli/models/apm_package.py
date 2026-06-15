@@ -248,8 +248,15 @@ class APMPackage:
     # Top-level ``registries:`` block per docs/proposals/registry-api.md §3.1.
     # Maps registry name -> base URL. None when no ``registries:`` block is present.
     registries: dict[str, str] | None = None
-    # Value of ``registries.default:`` — routes unscoped deps to this registry.
+    # Value of ``registries.default:`` -- routes unscoped deps to this registry.
     default_registry: str | None = None
+
+    # Top-level ``allowExecutables:`` block -- per-package approval for
+    # executable primitives (hooks, MCP servers, bin/ executables).
+    # Mirrors npm v12's ``allowScripts`` in ``package.json``.
+    # Keys are package handles with pinned version; values map exec type
+    # to boolean (e.g. ``{"owner/repo#v1.0": {"hooks": true}}``).
+    allow_executables: dict[str, dict[str, bool]] | None = None
 
     @classmethod
     def _parse_dependency_dict(cls, raw_deps: dict, label: str = "") -> dict:
@@ -412,6 +419,11 @@ class APMPackage:
             for dep_list in _iter_apm_dependency_lists(dependencies, dev_dependencies):
                 _route_unscoped_to_default_registry(dep_list, default_registry)
 
+        # Parse allowExecutables block (npm v12-style approval gate).
+        from ..security.executables import parse_allow_executables
+
+        allow_executables = parse_allow_executables(data)
+
         # Parse package content type
         pkg_type = None
         if "type" in data and data["type"] is not None:
@@ -481,6 +493,7 @@ class APMPackage:
             includes=includes,
             registries=registries,
             default_registry=default_registry,
+            allow_executables=allow_executables,
         )
         _apm_yml_cache[cache_key] = result
         return result
@@ -519,6 +532,10 @@ class APMPackage:
             for dep in (self.dev_dependencies.get("mcp") or [])
             if isinstance(dep, MCPDependency)
         ]
+
+    def get_all_mcp_dependencies(self) -> list["MCPDependency"]:
+        """Get production and dev MCP dependencies in manifest order."""
+        return self.get_mcp_dependencies() + self.get_dev_mcp_dependencies()
 
     def get_lsp_dependencies(self) -> list["LSPDependency"]:
         """Get list of LSP dependencies."""

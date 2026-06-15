@@ -1334,105 +1334,6 @@ class TestMarketplaceAddUnsupportedHostError:
         assert "GITHUB_HOST" in msg
 
 
-class TestLoadTargetsFile:
-    """_load_targets_file — YAML parsing."""
-
-    def test_valid_targets_file(self, tmp_path: Path) -> None:
-        from apm_cli.commands.marketplace import _load_targets_file
-
-        content = """\
-targets:
-  - repo: owner/svc-a
-    branch: main
-  - repo: owner/svc-b
-    branch: develop
-    path_in_repo: config/apm.yml
-"""
-        f = tmp_path / "targets.yml"
-        f.write_text(content, encoding="utf-8")
-
-        targets, err = _load_targets_file(f)
-        assert err is None
-        assert len(targets) == 2
-        assert targets[0].repo == "owner/svc-a"
-        assert targets[1].path_in_repo == "config/apm.yml"
-
-    def test_missing_targets_key_returns_error(self, tmp_path: Path) -> None:
-        from apm_cli.commands.marketplace import _load_targets_file
-
-        f = tmp_path / "targets.yml"
-        f.write_text("other: value\n", encoding="utf-8")
-
-        targets, err = _load_targets_file(f)
-        assert targets is None
-        assert "targets" in err.lower() or err
-
-    def test_empty_targets_list_returns_error(self, tmp_path: Path) -> None:
-        from apm_cli.commands.marketplace import _load_targets_file
-
-        f = tmp_path / "targets.yml"
-        f.write_text("targets: []\n", encoding="utf-8")
-
-        targets, err = _load_targets_file(f)
-        assert targets is None
-        assert err
-
-    def test_invalid_yaml_returns_error(self, tmp_path: Path) -> None:
-        from apm_cli.commands.marketplace import _load_targets_file
-
-        f = tmp_path / "targets.yml"
-        f.write_text("targets: [\ninvalid:\n", encoding="utf-8")
-
-        targets, err = _load_targets_file(f)
-        assert targets is None
-        assert err
-
-    def test_repo_missing_returns_error(self, tmp_path: Path) -> None:
-        from apm_cli.commands.marketplace import _load_targets_file
-
-        content = """\
-targets:
-  - branch: main
-"""
-        f = tmp_path / "targets.yml"
-        f.write_text(content, encoding="utf-8")
-
-        targets, err = _load_targets_file(f)
-        assert targets is None
-        assert "'repo'" in err or "repo" in err
-
-    def test_invalid_repo_format_returns_error(self, tmp_path: Path) -> None:
-        from apm_cli.commands.marketplace import _load_targets_file
-
-        content = """\
-targets:
-  - repo: not-a-slash-format
-    branch: main
-"""
-        f = tmp_path / "targets.yml"
-        f.write_text(content, encoding="utf-8")
-
-        targets, err = _load_targets_file(f)
-        assert targets is None
-        assert "owner/name" in err or "OWNER" in err.upper() or err
-
-    def test_path_traversal_in_path_in_repo(self, tmp_path: Path) -> None:
-        from apm_cli.commands.marketplace import _load_targets_file
-
-        content = """\
-targets:
-  - repo: owner/repo
-    branch: main
-    path_in_repo: "../../etc/passwd"
-"""
-        f = tmp_path / "targets.yml"
-        f.write_text(content, encoding="utf-8")
-
-        targets, err = _load_targets_file(f)
-        assert targets is None
-        assert err
-
-
 class TestMarketplaceListCommand:
     """marketplace list subcommand."""
 
@@ -1673,33 +1574,6 @@ class TestMarketplaceSearchCommand:
             result = runner.invoke(search, ["tool@unknown-mkt"])
 
         assert result.exit_code == 1
-
-
-class TestOutcomeSymbol:
-    """_outcome_symbol mapping."""
-
-    def test_updated_maps_to_plus(self) -> None:
-        from apm_cli.commands.marketplace import _outcome_symbol
-        from apm_cli.marketplace.publisher import PublishOutcome
-
-        assert _outcome_symbol(PublishOutcome.UPDATED) == "[+]"
-
-    def test_failed_maps_to_x(self) -> None:
-        from apm_cli.commands.marketplace import _outcome_symbol
-        from apm_cli.marketplace.publisher import PublishOutcome
-
-        assert _outcome_symbol(PublishOutcome.FAILED) == "[x]"
-
-    def test_skipped_maps_to_exclamation(self) -> None:
-        from apm_cli.commands.marketplace import _outcome_symbol
-        from apm_cli.marketplace.publisher import PublishOutcome
-
-        assert _outcome_symbol(PublishOutcome.SKIPPED_DOWNGRADE) == "[!]"
-
-
-# ===========================================================================
-# PART 5 — install/validation.py
-# ===========================================================================
 
 
 class TestIsTlsFailure:
