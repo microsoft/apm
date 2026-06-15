@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `apm marketplace publish` command and consumer-repo fan-out workflow; consumers should run `apm install --update` instead. (#1134)
+- `apm marketplace doctor` subcommand alias (deprecated); use `apm doctor` instead. (#1134)
+
 ### Fixed
 
 - `apm compile` now preserves hand-written content outside the configured
@@ -14,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is set, in both the default distributed strategy and the `--single-agents`
   CLI path. Previously the project-root `AGENTS.md` was silently overwritten
   because both write paths bypassed the managed-section helper. (closes #1764)
+- `apm install` now removes orphaned skill directories when a package is uninstalled or its skills are renamed. Previously, individual files were deleted but the skill folder remained with a "Refused to remove directory entry" warning. (closes #1483) (#1767)
 
 ## [0.20.0] - 2026-06-11
 

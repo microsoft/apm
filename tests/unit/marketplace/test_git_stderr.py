@@ -81,7 +81,7 @@ class TestAuthClassification:
     def test_auth_hint(self) -> None:
         result = translate_git_stderr("fatal: Authentication failed", operation="push")
         assert "GITHUB_TOKEN" in result.hint
-        assert "apm marketplace doctor" in result.hint
+        assert "apm doctor" in result.hint
 
     def test_auth_case_insensitive(self) -> None:
         result = translate_git_stderr("FATAL: AUTHENTICATION FAILED")
