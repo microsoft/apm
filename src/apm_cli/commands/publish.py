@@ -1,4 +1,4 @@
-"""``apm publish`` command — upload a packed tarball to a registry.
+"""``apm publish`` command -- upload a packed zip archive to a registry.
 
 Implements docs/proposals/registry-api.md §5.3:
 ``PUT /v1/packages/{owner}/{repo}/versions/{version}``

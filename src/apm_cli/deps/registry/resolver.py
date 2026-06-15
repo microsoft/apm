@@ -290,8 +290,8 @@ class RegistryPackageResolver:
         _clear_install_target(target_path)
 
         # extract_archive dispatches on Content-Type (with magic-bytes
-        # fallback) — supports both tar.gz (default) and zip (Anthropic
-        # skills format). Hash check happens before any extraction.
+        # fallback) -- supports both zip (default) and legacy tar.gz.
+        # Hash check happens before any extraction.
         actual_hash = extract_archive(
             archive_bytes,
             chosen.digest,
