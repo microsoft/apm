@@ -220,6 +220,23 @@ jobs:
           uv run ./scripts/test-integration.sh
         timeout-minutes: 30
 
+      - name: Run live generic GitLab smoke
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          APM_E2E_TESTS: "1"
+          APM_RUN_INTEGRATION_TESTS: "1"
+          APM_LIVE_GENERIC_HOST: gitlab.com
+          APM_LIVE_GENERIC_PACKAGE: ${{ vars.APM_LIVE_GENERIC_PACKAGE }}
+        run: |
+          uv run pytest tests/integration/test_live_generic_gitlab_install.py \
+            -m live_generic \
+            -o addopts='' \
+            -v \
+            --tb=short
+        # The test's install subprocess timeout is 240s; keep the step
+        # larger so pytest can report fixture, network, or lockfile failures.
+        timeout-minutes: 10
+
       # ── PHASE 3: RELEASE VALIDATION (tag/schedule/dispatch only) ──
       - name: Prepare isolated release-validation environment
         if: github.ref_type == 'tag' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

@@ -153,6 +153,7 @@ addopts = "-m 'not benchmark and not live'"
 markers = [
     "integration: marks tests as integration tests that may require network access",
     "live: marks tests that hit real GitHub repos (requires network + optional GITHUB_TOKEN)",
+    "live_generic: marks tests that hit a live generic git host fixture",
     "slow: marks tests as slow running tests",
     "benchmark: marks performance benchmark tests (deselected by default, run with -m benchmark)",
     "requires_e2e_mode: requires APM_E2E_TESTS=1",
@@ -167,4 +168,3 @@ markers = [
     "requires_inference: requires APM_RUN_INFERENCE_TESTS=1 + model API access",
     "req: binds a test to one or more OpenAPM req-XXX ids (spec-conformance suite)",
 ]
-
