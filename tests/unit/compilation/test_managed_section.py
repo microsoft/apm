@@ -391,11 +391,7 @@ class TestManagedSectionDistributed:
         footer = "Hand-written footer that must survive."
         agents_md = tmp_path / "AGENTS.md"
         agents_md.write_text(
-            f"{intro}\n\n"
-            f"{DEFAULT_START}\n"
-            "Old generated block.\n"
-            f"{DEFAULT_END}\n\n"
-            f"{footer}\n"
+            f"{intro}\n\n{DEFAULT_START}\nOld generated block.\n{DEFAULT_END}\n\n{footer}\n"
         )
         config = CompilationConfig(
             agents_md_mode="managed_section", with_constitution=False, dry_run=False
@@ -435,9 +431,7 @@ class TestManagedSectionDistributed:
 
         agents_md = tmp_path / "AGENTS.md"
         agents_md.write_text("# Old content with no markers.\nSome prose.\n")
-        config = CompilationConfig(
-            agents_md_mode="full", with_constitution=False, dry_run=False
-        )
+        config = CompilationConfig(agents_md_mode="full", with_constitution=False, dry_run=False)
         compiler = AgentsCompiler(str(tmp_path))
         compiler._write_distributed_file(agents_md, "Brand new content.", config)
 
@@ -452,7 +446,7 @@ class TestManagedSectionDistributed:
         instr = tmp_path / ".apm" / "instructions"
         instr.mkdir(parents=True)
         (instr / "example.instructions.md").write_text(
-            "---\ndescription: example\napplyTo: [\"**/*.py\"]\n---\nExample instruction body.\n"
+            '---\ndescription: example\napplyTo: ["**/*.py"]\n---\nExample instruction body.\n'
         )
         config = CompilationConfig(
             target="agents",
@@ -480,7 +474,7 @@ class TestManagedSectionDistributed:
         instr = tmp_path / ".apm" / "instructions"
         instr.mkdir(parents=True)
         (instr / "example.instructions.md").write_text(
-            "---\ndescription: example\napplyTo: [\"**/*.py\"]\n---\nExample instruction body.\n"
+            '---\ndescription: example\napplyTo: ["**/*.py"]\n---\nExample instruction body.\n'
         )
 
         def fail_write(self, path, content):
@@ -582,13 +576,7 @@ class TestManagedSectionDistributed:
         except (OSError, NotImplementedError) as exc:
             pytest.skip(f"symlinks unavailable in this environment: {exc}")
         agents_md = link / "AGENTS.md"
-        agents_md.write_text(
-            "Intro.\n\n"
-            f"{DEFAULT_START}\n"
-            "Old block.\n"
-            f"{DEFAULT_END}\n\n"
-            "Footer.\n"
-        )
+        agents_md.write_text(f"Intro.\n\n{DEFAULT_START}\nOld block.\n{DEFAULT_END}\n\nFooter.\n")
         config = CompilationConfig(
             agents_md_mode="managed_section", with_constitution=False, dry_run=False
         )
