@@ -1478,14 +1478,12 @@ class AgentsCompiler:
 
         if config.agents_md_mode == "managed_section":
             target = Path(output_path)
-            if not target.is_file():
-                raise ManagedSectionError(
-                    f"{target} does not exist yet. "
-                    "Create it with the managed-section markers first, "
-                    "or set agents_md.mode: full in apm.yml for initial generation."
-                )
-            existing = target.read_text(encoding="utf-8")
             try:
+                if not target.exists():
+                    raise ManagedSectionError(
+                        f"[{target.name}] does not exist yet. Create it with markers first, or use mode: full for initial generation."
+                    )
+                existing = target.read_text(encoding="utf-8")
                 content = apply_managed_section(
                     existing,
                     content,
@@ -1493,7 +1491,7 @@ class AgentsCompiler:
                     config.agents_md_end_marker,
                 )
             except ManagedSectionError as exc:
-                raise ManagedSectionError(f"[{target}] {exc}") from exc
+                raise ManagedSectionError(f"[{target.name}] {exc}") from exc
         elif config.agents_md_mode != "full":
             raise ValueError(
                 f"Unknown agents_md.mode {config.agents_md_mode!r}. "

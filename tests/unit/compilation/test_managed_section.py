@@ -374,5 +374,11 @@ class TestManagedSectionWriteIntegration:
         )
 
         compiler = AgentsCompiler(str(tmp_path))
+        with pytest.raises(ManagedSectionError) as exc_info:
+            compiler._write_output_file_with_config(str(output_file), "New content.\n", config)
+        
+        msg = str(exc_info.value)
+        assert "AGENTS.md does not exist yet. Create it with markers first, or use mode: full for initial generation." in msg
+        assert msg.startswith("[")
         with pytest.raises(ManagedSectionError, match=r"(?i)does not exist|not exist|create it"):
             compiler._write_output_file_with_config(str(output_file), "New content.\n", config)
