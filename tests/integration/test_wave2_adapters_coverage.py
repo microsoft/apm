@@ -3744,9 +3744,7 @@ class TestMarketplaceErrors:
         # Extract URLs from error message and verify host via parsed component
         urls = [tok for tok in msg.split() if "://" in tok]
         if urls:
-            assert any(
-                urllib.parse.urlparse(u).hostname == "ghes.corp.com" for u in urls
-            )
+            assert any(urllib.parse.urlparse(u).hostname == "ghes.corp.com" for u in urls)
         else:
             # Host appears as a plain token -- verify exact word presence
             assert any(word == "ghes.corp.com" for word in msg.split())

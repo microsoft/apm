@@ -1403,9 +1403,7 @@ class TestConfigCommandExtended:
             result = runner.invoke(cli, ["config", "get", "registry.corp.url"])
         assert result.exit_code == 0
         urls = [tok for tok in result.output.split() if "://" in tok]
-        assert any(
-            urllib.parse.urlparse(u).hostname == "corp.example.com" for u in urls
-        )
+        assert any(urllib.parse.urlparse(u).hostname == "corp.example.com" for u in urls)
 
     def test_config_unset_unknown_key_shows_error(
         self, runner: CliRunner, isolated_config: Path
@@ -1456,9 +1454,7 @@ class TestSelfUpdateHelpers:
         ):
             cmd = su._get_manual_update_command()
         urls = [tok for tok in cmd.split() if "://" in tok]
-        assert "curl" in cmd or any(
-            urllib.parse.urlparse(u).hostname == "aka.ms" for u in urls
-        )
+        assert "curl" in cmd or any(urllib.parse.urlparse(u).hostname == "aka.ms" for u in urls)
 
     def test_get_installer_run_command_unix(self) -> None:
         """_get_installer_run_command() returns [shell, script] on Unix."""
@@ -1826,9 +1822,7 @@ class TestSelfUpdateRemainingPaths:
         ):
             cmd = su._get_manual_update_command()
         urls = [tok for tok in cmd.split() if "://" in tok]
-        has_mirror = any(
-            urllib.parse.urlparse(u).hostname == "mirror.example.com" for u in urls
-        )
+        has_mirror = any(urllib.parse.urlparse(u).hostname == "mirror.example.com" for u in urls)
         assert has_mirror or "install.sh" in cmd
 
 
@@ -2001,9 +1995,7 @@ class TestConfigCommandMorePaths:
         result = runner.invoke(cli, ["config", "get", "mcp-registry-url"])
         assert result.exit_code == 0
         urls = [tok for tok in result.output.split() if "://" in tok]
-        assert any(
-            urllib.parse.urlparse(u).hostname == "mcp.example.com" for u in urls
-        )
+        assert any(urllib.parse.urlparse(u).hostname == "mcp.example.com" for u in urls)
 
     def test_config_get_copilot_cowork_skills_dir(
         self, runner: CliRunner, isolated_config: Path
