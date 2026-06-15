@@ -157,6 +157,7 @@ class TestRunInstallPipelineDirectMcpDeps:
         pkg.get_dev_apm_dependencies.return_value = []
         pkg.get_mcp_dependencies.return_value = [prod_mcp]
         pkg.get_dev_mcp_dependencies.return_value = [dev_mcp]
+        pkg.get_all_mcp_dependencies.return_value = [prod_mcp, dev_mcp]
         pkg.get_lsp_dependencies.return_value = []
         seen_direct_mcp_deps = []
 
