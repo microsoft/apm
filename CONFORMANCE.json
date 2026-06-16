@@ -621,6 +621,17 @@
       ]
     },
     {
+      "conformance_class": "governance",
+      "id": "req-pl-015",
+      "keyword": "MUST",
+      "section": "6.3.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_policy_reqs.py::test_unmanaged_files_surfacing_completeness"
+      ]
+    },
+    {
       "conformance_class": "consumer",
       "id": "req-pr-001",
       "keyword": "MUST",
@@ -997,7 +1008,7 @@
       "xfail": 0
     },
     "governance": {
-      "active": 12,
+      "active": 13,
       "skipped": 0,
       "unbound": 0,
       "xfail": 0
@@ -1015,5 +1026,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 87
+  "total_requirements": 88
 }
