@@ -84,6 +84,10 @@ Three execution surfaces, by environment:
 
 [i] APM enforces in the CLI and in CI. It is not a runtime sandbox. The model assumes branch protection on `<org>/.github/apm-policy.yml`, branch protection requiring `apm audit --ci` to pass, and either a registry proxy or the lockfile content-hash check covering download integrity. Take any one of those three away and the contract weakens.
 
+:::note[Does my harness's managed configuration replace APM?]
+No. `apm-policy.yml` controls what gets installed and whether it passes integrity checks. Your harness controls what runs -- permissions, sandboxing, tool access. They address different planes and do not overlap.
+:::
+
 ## Read this chapter in order
 
 1. [APM policy: getting started](./apm-policy-getting-started/) -- the smallest useful `apm-policy.yml` you can write today; what each top-level key does.
