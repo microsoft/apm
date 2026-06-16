@@ -1221,26 +1221,40 @@ The `unmanaged_files` block governs files in primitive target
 directories that are not recorded in `apm.lock.yaml`. `directories`
 names the managed primitive target trees to scan, `action` selects
 the response (`ignore` | `warn` | `deny`), and `exclude` is a glob
-allow-list of workspace paths to suppress from the report.
+allow-list of workspace paths to suppress from the report. Its glob
+patterns are matched with the same pattern semantics as the policy
+allow-list and deny-list fields (see
+[Section 6.5](#65-allow-list--deny-list-tri-state-semantics)).
 
 <a id="req-pl-015"></a>
 **[req-pl-015]** A conforming **governance** implementation MUST,
 when it evaluates policy over a populated primitive target tree (for
-example during an audit), surface every file under a managed
-primitive target directory that is neither recorded in
-`apm.lock.yaml` nor matched by a configured `unmanaged_files.exclude`
-glob. Each surfaced path MUST be reported with the reason it is
+example during an audit), report unmanaged artifacts with the
+following completeness guarantees:
+
+(a) It MUST surface every file under a managed primitive target
+directory that is neither recorded in `apm.lock.yaml` nor matched by
+a configured `unmanaged_files.exclude` glob.
+
+(b) Each surfaced path MUST be reported with the reason it is
 unmanaged -- that it is
-not tracked in `apm.lock.yaml` -- together with a conflict note where
-the path also matches a configured dependency or MCP deny pattern,
-and, where determinable, its
-inferred primitive type. A path matched by a configured
-`unmanaged_files.exclude` glob MUST NOT be surfaced. This statement
-governs the **completeness** of unmanaged-artifact reporting only:
-whether a surfaced artifact yields a non-passing audit result remains
-governed by `unmanaged_files.action` per the merge table in
-[Section 6.4](#64-inheritance-and-merge-rules), so req-pl-015 is not
-an enforcement claim.
+not tracked in `apm.lock.yaml`. Where the path also matches a
+configured dependency or MCP deny pattern, the report MUST
+additionally carry a supplemental conflict note naming that pattern;
+this note is enrichment only and never itself causes a tracked path
+to be surfaced. Where the primitive type is determinable, the
+surfaced entry MUST carry its
+inferred primitive type; where it is not determinable, the type
+annotation MUST be omitted.
+
+(c) A path matched by a configured `unmanaged_files.exclude` glob
+MUST NOT be surfaced, even when it also matches a deny pattern.
+
+This requirement governs the **completeness** of unmanaged-artifact
+reporting only: whether a surfaced artifact yields a non-passing
+audit result remains governed by `unmanaged_files.action` per the
+merge table in [Section 6.4](#64-inheritance-and-merge-rules), so
+req-pl-015 is not an enforcement claim.
 
 ### 6.4 Inheritance and merge rules
 
@@ -1277,7 +1291,7 @@ merge a policy chain per the following table:
 | `mcp.trust_transitive`                | Logical AND.                                                           |
 | `manifest.scripts`                    | Stricter wins (`deny` > `allow`).                                      |
 | `unmanaged_files.action`              | Stricter wins (`deny` > `warn` > `ignore`).                            |
-| `unmanaged_files.exclude`             | Union, deduplicated, parent order preserved.                           |
+| `unmanaged_files.exclude`             | Union, deduplicated, parent order preserved (additive: a child adds exclusions and cannot clear a parent's; `null` and `[]` both preserve the parent list). |
 
 ### 6.5 Allow-list / deny-list tri-state semantics
 
@@ -2728,7 +2742,7 @@ renumbering of conformance classes.
 | 0.1-r2  | 2026-05-17 | Round-2 adversarial revision. Closed mandatory FOLDs F1-F10: pinned semver dialect (node-semver + semver 2.0.0); tri-modal transitive conflict resolution; vendor-host neutrality (default_host, pluggable policy discovery, host class via PSL+aliases); hash envelope on every stored hash; canonical git tree-hash definition; mirror-tolerant fetch; producer release contract (tag-version alignment, SHOULD-sign); update operation semantics; lockfile_version monotonicity; reserved-slot prose for 11 deferrals (workspaces, x-* extensions, machine-readable conformance, update --aggressive, frozen-default flip, target registry companion, version yank, attestations, registry HTTP, mirror-tolerance, .agents/ partition); inline JSON Schemas in Appendix A; YAML safe subset; archive container binding; credential redaction. Conformance-statement count: 56 -> 83. Companion seed fixture tree shipped under `tests/fixtures/spec-conformance/`. |
 | 0.1.1   | 2026-05-24 | v1.1 editorial+defensive fold. Closed convergent round-2 followups: Section 12.3 CI-binding MUST-for-claim (req-cf-002); req-mf-019 class reclassification (producer -> consumer); three stale heading labels in req-cf-001 and Appendix E.4; depEntry oneOf source-key requirement plus new fixture `manifest/invalid-no-source-key.yml`; normative-count reconciliation across Section 1.3, Appendix C trailer, and this row; bare-hex pattern anchored to exactly 64 hex characters; req-sc-007 redaction scope extended to packed bundles, lockfiles, and audit records, plus producer secret-pattern refuse-to-pack rule; workspaces MUST-NOT-use in v0.1 (req-mf-021); nest-mode reject-in-v0.1 (req-rs-013); tag-name regex tightened to the semver.org 2.0.0 reference grammar; build-metadata tie-break rule (req-rs-014); mirror-tolerance editorial note (replicate-verbatim); req-rg-001 cross-references added in Section 7.5.1 and Section 10.5; bare-hex reader-tolerance deprecation horizon; interoperability informative note Section 6.1.2; conformance-summary precedence rule in Section 11.1; wildcard typo `x.y.x` -> `x.y.z`; resolved_by worked-example fragment in Section 7.4. Statement count: 83 -> 87. Drift-detection scaffolding lands in-spec and in-tree (informative machine-readable manifest at `docs/public/specs/manifests/openapm-v0.1.requirements.yml`; 4-way orphan_check + spec-conformance pytest suite + generated `CONFORMANCE.{md,json}` at repo root); Section 12.3 language updated to identify HTML anchors as the canonical source. No normative count change. |
 | 0.1.2   | 2026-05-28 | Round-3 spec-guardian editorial fold (no new normative statements; statement count remains 87). Section 11.3.2 Consumer enumeration appended `[req-rs-014]` and `[req-cf-002]` (closing drift vs Appendix C). req-lk-005 extended: writers MUST canonicalise the `dependencies` list in ascending lexicographic order of (`repo_url`, `virtual_path`) so frozen-install diffs are stable across implementations. req-sc-003 extended: consumers MUST drop the originating Authorization header before issuing a cross-host-class redirect (closes the mirror-redirect token-leak surface in Section 10.3). req-rg-001 extended with publish-side idempotency clause: a Registry MUST either reject a republish or accept ONLY if bytes are byte-identical to the previously-served bytes. Section 6.2 + Section 6.3.1 defaults pinned: `fetch_failure` defaults to `warn` and `dependencies.require_resolution` defaults to `project-wins` (mirrored as advisory `"default"` annotations in `policy-v0.1.schema.json`). Manifest schema `conflict_resolution` enum aligned to prose: renamed `intersect` -> `intersection-pick`, dropped `nest` from the v0.1 enum (`nest` remains reserved-for-v0.2 per req-rs-013, now noted via schema `$comment`). Mode B silent-extension detector landed in `.github/workflows/spec-conformance.yml` and `tests/spec_conformance/mode_b_detector.sh`; closes the named sole-implementer rot risk by gating PRs that add substantive code under critical paths (`primitives/`, `deps/`, `policy/`, `registry/`, `runtime/`, `install/`, `integration/`) without a spec citation, with auditable `apm-spec-waiver:` opt-out. |
-| 0.1.3   | 2026-06-16 | Erratum (v0.1.1-informative): added `[req-pl-015]` (Section 6.3.5, governance MUST) codifying unmanaged-artifact surfacing completeness -- a governance implementation evaluating policy over a populated primitive target tree MUST surface every file under a managed primitive target directory that is neither recorded in `apm.lock.yaml` nor matched by a configured `unmanaged_files.exclude` glob, each with its unmanaged reason, a dependency/MCP deny-conflict note where applicable, and a determinable inferred primitive type; an excluded path MUST NOT be surfaced. Added the `unmanaged_files.exclude` row to the Section 6.4 merge table (union, deduplicated, parent order preserved). The requirement governs reporting COMPLETENESS only; enforcement stays governed by `unmanaged_files.action`. Statement count: 87 -> 88 (83 MUST). |
+| 0.1.3   | 2026-06-16 | Normative addition (semver-zero `0.x` minor): added `[req-pl-015]` (Section 6.3.5, governance MUST) codifying unmanaged-artifact surfacing completeness -- a governance implementation evaluating policy over a populated primitive target tree MUST surface every file under a managed primitive target directory that is neither recorded in `apm.lock.yaml` nor matched by a configured `unmanaged_files.exclude` glob, each with its unmanaged reason and a supplemental dependency/MCP deny-conflict note where applicable; the inferred primitive type is carried where determinable and omitted otherwise; an excluded path MUST NOT be surfaced even when it also matches a deny pattern. The requirement body is structured as sub-clauses (a)/(b)/(c) so each obligation is individually citable. Added the `unmanaged_files.exclude` row to the Section 6.4 merge table (additive union, deduplicated, parent order preserved). The requirement governs reporting COMPLETENESS only; enforcement stays governed by `unmanaged_files.action`. Statement count: 87 -> 88 (83 MUST). |
 
 Errata (none at publication).
 

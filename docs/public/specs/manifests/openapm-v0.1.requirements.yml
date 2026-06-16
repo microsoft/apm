@@ -235,6 +235,8 @@ requirements:
     keyword: MUST
     section: "6.1.1"
     conformance_class: governance
+  # req-pl-013, req-pl-014: reserved (allocated to concurrent in-flight
+  # requirements); intentionally not assigned in this manifest.
   - id: req-pl-015
     keyword: MUST
     section: "6.3.5"
