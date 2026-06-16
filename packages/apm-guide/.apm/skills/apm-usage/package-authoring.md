@@ -157,7 +157,7 @@ Both `apm.yml`'s `targets:`/`target:` and the `--target` CLI flag share the same
 | `target: claude,copilot` | CSV-string sugar; parses identically to the list form (the shared validator splits on `,`) |
 | `targets:` and `target:` both set | **Parse error** -- pick one |
 | `targets: []` (empty list) | **Parse error** -- remove the line if you meant auto-detect |
-| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.agent/`, `.opencode/`, `.windsurf/`, `.kiro/`) |
+| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`) |
 | `target: bogus` (unknown token) | **Parse error** -- fix the typo |
 | `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |
 
@@ -221,7 +221,6 @@ Deployed as slash commands to targets that support them:
 - Cursor: `.cursor/commands/*.md` (Cursor 1.6+; Cursor is de-emphasizing commands in favor of rules/skills)
 - OpenCode: `.opencode/commands/*.md` (normalized to supported command frontmatter)
 - Gemini CLI: `.gemini/commands/*.toml` (converted to TOML command format)
-- Antigravity CLI: `.agent/commands/*.toml` (same TOML format as Gemini)
 
 ```yaml
 ---

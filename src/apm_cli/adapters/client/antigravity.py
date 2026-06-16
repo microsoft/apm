@@ -1,8 +1,9 @@
 """Antigravity CLI (agy) implementation of MCP client adapter.
 
-Antigravity CLI is Google's successor to Gemini CLI.  It reads
-``.agent/settings.json`` with an ``mcpServers`` key -- the same JSON
-schema as Gemini CLI's ``settings.json``.
+Antigravity CLI is Google's Gemini-derived agentic CLI.  Unlike Gemini
+CLI (which stores MCP servers in ``settings.json``), Antigravity reads a
+dedicated ``mcp_config.json`` with an ``mcpServers`` key -- the same JSON
+schema, a different file:
 
 .. code-block:: json
 
@@ -17,8 +18,8 @@ schema as Gemini CLI's ``settings.json``.
    }
 
 Scope resolution: project scope writes to
-``<project_root>/.agent/settings.json`` (opt-in -- the directory must
-already exist).  User scope writes to ``~/.antigravity/settings.json``
+``<project_root>/.agents/mcp_config.json`` (opt-in -- the directory must
+already exist).  User scope writes to ``~/.gemini/config/mcp_config.json``
 unconditionally, creating the directory if needed.
 
 Ref: https://antigravity.google/docs/mcp
@@ -33,19 +34,21 @@ class AntigravityClientAdapter(GeminiClientAdapter):
     """Antigravity CLI MCP client adapter.
 
     Reuses GeminiClientAdapter's ``_format_server_config`` and
-    ``configure_mcp_server`` (identical ``mcpServers`` JSON schema)
-    and overrides only the directory and display-name logic.
+    ``configure_mcp_server`` (identical ``mcpServers`` JSON schema) and
+    overrides only the config directory, the config filename, and the
+    display name.  Antigravity writes MCP servers to a dedicated
+    ``mcp_config.json`` rather than ``settings.json``.
     """
 
     supports_user_scope: bool = True
     target_name: str = "antigravity"
 
     def _get_config_dir(self) -> Path:
-        """Return the ``.agent`` or ``~/.antigravity`` directory."""
+        """Return the ``.agents`` or ``~/.gemini/config`` directory."""
         if self.user_scope:
-            return Path.home() / ".antigravity"
-        return self.project_root / ".agent"
+            return Path.home() / ".gemini" / "config"
+        return self.project_root / ".agents"
 
     def get_config_path(self):
-        """Return the path to ``settings.json`` for the active scope."""
-        return str(self._get_config_dir() / "settings.json")
+        """Return the path to ``mcp_config.json`` for the active scope."""
+        return str(self._get_config_dir() / "mcp_config.json")

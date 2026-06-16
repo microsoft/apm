@@ -20,7 +20,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../reference/ta
 | Cursor               | `.cursor/`                           | Rules, commands, MCP                   |
 | Codex CLI            | `.codex/`                            | Skills, MCP                            |
 | Gemini CLI           | `.gemini/` or `GEMINI.md`            | Single-file or distributed             |
-| Antigravity CLI      | `.agent/`                            | Rules, commands, skills, hooks, MCP    |
+| Antigravity CLI      | `.agents/`                           | Rules, skills, hooks, MCP              |
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
 | Kiro                 | `.kiro/`                             | Steering + Skills + Hooks + MCP        |

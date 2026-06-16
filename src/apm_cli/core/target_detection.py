@@ -183,7 +183,6 @@ def detect_target(  # noqa: PLR0911
     gemini_exists = (project_root / ".gemini").is_dir()
     windsurf_exists = (project_root / ".windsurf").is_dir()
     kiro_exists = (project_root / ".kiro").is_dir()
-    antigravity_exists = (project_root / ".agent").is_dir()
     detected = []
     if github_exists:
         detected.append(".github/")
@@ -201,8 +200,6 @@ def detect_target(  # noqa: PLR0911
         detected.append(".windsurf/")
     if kiro_exists:
         detected.append(".kiro/")
-    if antigravity_exists:
-        detected.append(".agent/")
 
     if len(detected) >= 2:
         return "all", f"detected {' and '.join(detected)} folders"
@@ -222,8 +219,6 @@ def detect_target(  # noqa: PLR0911
         return "windsurf", "detected .windsurf/ folder"
     elif kiro_exists:
         return "kiro", "detected .kiro/ folder"
-    elif antigravity_exists:
-        return "antigravity", "detected .agent/ folder"
     else:
         return "minimal", REASON_NO_TARGET_FOLDER
 
@@ -360,14 +355,14 @@ def get_target_description(target: UserTargetType) -> str:
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
-        "antigravity": "AGENTS.md + .agent/rules/ + .agent/commands/ + .agents/skills/ + .agent/settings.json (MCP/hooks)",
+        "antigravity": "AGENTS.md + .agents/rules/ + .agents/skills/ + .agents/hooks.json + .agents/mcp_config.json (explicit --target only)",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .windsurf/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
         "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
         "hermes": "AGENTS.md + .agents/skills/ (project) or ~/.hermes/skills/ + config.yaml MCP (--global) -- experimental",
-        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .agent/ + .windsurf/ + .kiro/ + .agents/",
-        "minimal": "AGENTS.md only (create .github/, .claude/, or .agent/ for full integration)",
+        "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
+        "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
     return descriptions.get(normalized, "unknown target")
 
@@ -379,7 +374,7 @@ def get_target_description(target: UserTargetType) -> str:
 #: The complete set of real (non-pseudo) canonical targets.
 #: "minimal" is intentionally excluded -- it is a fallback pseudo-target.
 ALL_CANONICAL_TARGETS = frozenset(
-    {"vscode", "claude", "cursor", "opencode", "codex", "gemini", "antigravity", "windsurf", "kiro"}
+    {"vscode", "claude", "cursor", "opencode", "codex", "gemini", "windsurf", "kiro"}
 )
 
 #: Targets that the parser must accept but that are gated at runtime by
@@ -392,8 +387,10 @@ EXPERIMENTAL_TARGETS: frozenset[str] = frozenset(
 
 #: Stable targets excluded from "all" expansion (cross-client deploy
 #: locations). Unlike EXPERIMENTAL_TARGETS, these are GA -- they just do
-#: not represent a single client tool.
-EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset({"agent-skills"})
+#: not represent a single client tool.  Antigravity is explicit-only
+#: because its workspace config lives under the SHARED ``.agents/`` root,
+#: so there is no Antigravity-unique signal to auto-detect on.
+EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset({"agent-skills", "antigravity"})
 
 #: Alias mapping: user-facing name -> canonical internal name.
 TARGET_ALIASES: dict[str, str] = {
@@ -699,7 +696,6 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
     ("codex", "dir", ".codex"),
     ("gemini", "dir", ".gemini"),
     ("gemini", "file", "GEMINI.md"),
-    ("antigravity", "dir", ".agent"),
     ("opencode", "dir", ".opencode"),
     ("windsurf", "dir", ".windsurf"),
     ("kiro", "dir", ".kiro"),
@@ -707,7 +703,6 @@ SIGNAL_WHITELIST: list[tuple[str, str, str]] = [
 
 # Ordered list of targets for display (excludes agent-skills meta-target).
 CANONICAL_TARGETS_ORDERED: list[str] = [
-    "antigravity",
     "claude",
     "copilot",
     "cursor",
@@ -720,7 +715,6 @@ CANONICAL_TARGETS_ORDERED: list[str] = [
 
 # Canonical deploy directories for each target.
 CANONICAL_DEPLOY_DIRS: dict[str, str] = {
-    "antigravity": ".agent/",
     "claude": ".claude/",
     "copilot": ".github/",
     "cursor": ".cursor/",
@@ -734,7 +728,6 @@ CANONICAL_DEPLOY_DIRS: dict[str, str] = {
 # The primary (lowest-friction) signal for each target, used in
 # "needs <path>" display for inactive targets.
 CANONICAL_SIGNAL: dict[str, str] = {
-    "antigravity": ".agent/",
     "claude": "CLAUDE.md",
     "copilot": ".github/copilot-instructions.md",
     "cursor": ".cursor/",

@@ -578,7 +578,7 @@ class CommandIntegrator(BaseIntegrator):
                     files_skipped += 1
                 continue
 
-            if mapping.format_id in ("gemini_command", "antigravity_command"):
+            if mapping.format_id == "gemini_command":
                 self._write_gemini_command(prompt_file, target_path)
                 links_resolved = 0
                 written = True

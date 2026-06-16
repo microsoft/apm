@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm install --target antigravity` and `apm compile -t antigravity` add
+  Google Antigravity CLI (`agy`, successor to Gemini CLI) as a new target.
+  Instructions deploy as rules to `.agents/rules/<name>.md`, skills to
+  `.agents/skills/<name>/SKILL.md`, hooks merge into a single
+  `.agents/hooks.json` using Antigravity's native schema
+  (`PreToolUse`/`PostToolUse`/`PreInvocation`/`PostInvocation`/`Stop`), and
+  MCP servers write to a dedicated `.agents/mcp_config.json` (project) or
+  `~/.gemini/config/mcp_config.json` (`--global`). `compile` emits `AGENTS.md`.
+  Antigravity shares the cross-tool `.agents/` root, so it is explicit-only:
+  select it with `--target antigravity` or in `apm.yml` `targets:`; it is
+  never auto-detected and is not part of `--target all`. (by @sergio-sisternes-epam;
+  closes #1650) (#1770)
+
 ### Removed
 
 - `apm marketplace publish` command and consumer-repo fan-out workflow; consumers should run `apm install --update` instead. (#1134)

@@ -314,7 +314,6 @@ class TestExhaustivenessChecks:
             "commands",  # was commands_claude, aliased
             "commands_cursor",
             "commands_gemini",
-            "commands_antigravity",
             "commands_opencode",
             "commands_windsurf",
             "instructions",  # was instructions_copilot, aliased

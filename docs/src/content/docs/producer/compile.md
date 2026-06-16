@@ -110,7 +110,7 @@ order:
 1. Explicit `--target <slug>` flag.
 2. The `targets:` field in your `apm.yml`.
 3. Auto-detect: any harness root directory (`.github/`, `.claude/`,
-   `.cursor/`, `.codex/`, `.gemini/`, `.agent/`, `.opencode/`, `.windsurf/`, `.kiro/`) that
+   `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `.kiro/`) that
    already exists.
 4. Fallback: `minimal` -- writes a single `AGENTS.md` and skips per-
    harness rules folders.
@@ -130,7 +130,7 @@ Per target, with the rules shape on disk after compile:
 | `cursor` | -- | `.cursor/rules/<name>.mdc` | Yes -- `.mdc` is Cursor's rules format |
 | `codex` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `GEMINI.md` |
-| `antigravity` | `AGENTS.md` (folded) | `.agent/rules/<name>.md` | Yes -- folded into `AGENTS.md` |
+| `antigravity` | `AGENTS.md` (folded) | `.agents/rules/<name>.md` | Yes -- folded into `AGENTS.md` |
 | `opencode` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `windsurf` | -- | `.windsurf/rules/<name>.md` | Yes -- compiled to Windsurf rules |
 | `kiro` | `AGENTS.md` (fallback) | `.kiro/steering/<name>.md` | Yes -- compiled to Kiro steering |

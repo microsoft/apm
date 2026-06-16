@@ -64,7 +64,7 @@ _SIGNAL_LIST = (
     ".github/copilot-instructions.md, .github/instructions/, "
     ".github/agents/, .github/prompts/, .github/hooks/, "
     ".codex/, .gemini/, GEMINI.md, "
-    ".agent/, .opencode/, .windsurf/, .kiro/"
+    ".opencode/, .windsurf/, .kiro/"
 )
 
 

@@ -15,7 +15,7 @@ APM borrows the manifest-plus-lockfile shape from `npm`, `pip`, and `cargo` and 
 
 `apm.yml` is the manifest. It lists agentic dependencies (skills, prompts, agents, plugins, full APM packages) and MCP servers. `apm.lock.yaml` is the lockfile. It pins every resolved package to an exact source ref and content hash, so two developers running `apm install` against the same lockfile get byte-identical context. Source authoring lives in `.apm/` inside your repo.
 
-The compiled output lives in the directories each harness already reads: `.github/` for Copilot, `.claude/` for Claude Code, `.cursor/` for Cursor, `.codex/` and `AGENTS.md` for Codex, `.gemini/` for Gemini, `.agent/` for Antigravity, `.opencode/` for OpenCode, `.windsurf/` for Windsurf, and `.kiro/` for Kiro. APM does not invent a runtime format. It writes the files each tool already understands and stays out of the way at agent runtime.
+The compiled output lives in the directories each harness already reads: `.github/` for Copilot, `.claude/` for Claude Code, `.cursor/` for Cursor, `.codex/` and `AGENTS.md` for Codex, `.gemini/` for Gemini, `.agents/` for Antigravity, `.opencode/` for OpenCode, `.windsurf/` for Windsurf, and `.kiro/` for Kiro. APM does not invent a runtime format. It writes the files each tool already understands and stays out of the way at agent runtime.
 
 ## What APM manages
 
