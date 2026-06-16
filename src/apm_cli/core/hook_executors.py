@@ -7,6 +7,9 @@ Two hook types (Copilot CLI aligned):
 
 - ``command`` -- shell command via subprocess, event JSON on **stdin**
 - ``http``    -- HTTPS POST with JSON body, env-var expansion in headers
+
+Hook output is appended to ``~/.apm/logs/hooks.log`` so administrators
+can audit what hooks produce without enabling verbose CLI output.
 """
 
 from __future__ import annotations
@@ -16,6 +19,8 @@ import os
 import re
 import subprocess
 import threading
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -31,6 +36,51 @@ _DEFAULT_COMMAND_TIMEOUT = 30
 
 # Pattern for $VAR or ${VAR} expansion in header values.
 _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+
+
+# -- Hook output log -------------------------------------------------------
+
+
+def _get_hooks_log_path() -> Path:
+    """Return the path to the hooks output log file."""
+    apm_home = os.environ.get("APM_HOME")
+    base = Path(apm_home) if apm_home else Path.home() / ".apm"
+    return base / "logs" / "hooks.log"
+
+
+def _append_to_hook_log(
+    event_name: str,
+    hook_type: str,
+    target: str,
+    *,
+    stdout: str = "",
+    stderr: str = "",
+    status: str = "ok",
+    exit_code: int | None = None,
+) -> None:
+    """Append a timestamped entry to the hooks log file.
+
+    Creates ``~/.apm/logs/`` on first write.  Errors are silently
+    swallowed -- logging must never break the CLI.
+    """
+    try:
+        log_path = _get_hooks_log_path()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        lines = [f"[{ts}] event={event_name} type={hook_type} target={target} status={status}"]
+        if exit_code is not None:
+            lines[0] += f" exit_code={exit_code}"
+        if stdout and stdout.strip():
+            lines.append(f"  stdout: {stdout.strip()}")
+        if stderr and stderr.strip():
+            lines.append(f"  stderr: {stderr.strip()}")
+        lines.append("")  # blank line separator
+
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception:
+        _logger.debug("Failed to write to hooks log", exc_info=True)
 
 
 def execute_hook(
@@ -104,19 +154,29 @@ def _execute_http(
     timeout = hook.effective_timeout
     hostname = parsed.hostname
 
+    event_name = event.event
+
     def _send() -> None:
         try:
             import requests
 
-            requests.post(
+            resp = requests.post(
                 url,
                 data=payload,
                 headers=request_headers,
                 timeout=timeout,
                 allow_redirects=False,
             )
-        except Exception:
+            _append_to_hook_log(
+                event_name,
+                "http",
+                url,
+                stdout=f"HTTP {resp.status_code}",
+                status="ok" if resp.ok else "error",
+            )
+        except Exception as exc:
             _logger.debug("HTTP POST failed for %s", url, exc_info=True)
+            _append_to_hook_log(event_name, "http", url, stderr=str(exc), status="error")
 
     thread = threading.Thread(target=_send, daemon=True)
     thread.start()
@@ -147,7 +207,7 @@ def _execute_command(
     cwd = _resolve_cwd(hook, project_root)
 
     try:
-        subprocess.run(
+        result = subprocess.run(
             cmd,
             shell=True,
             env=env,
@@ -157,12 +217,23 @@ def _execute_command(
             text=True,
             cwd=cwd,
         )
+        _append_to_hook_log(
+            event.event,
+            "command",
+            cmd,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            exit_code=result.returncode,
+            status="ok" if result.returncode == 0 else "error",
+        )
     except subprocess.TimeoutExpired:
         _logger.debug("Command hook timed out: %s", cmd)
+        _append_to_hook_log(event.event, "command", cmd, status="timeout")
         if verbose and logger:
             logger.verbose_detail(f"[i] Lifecycle command hook timed out: {cmd}")
-    except Exception:
+    except Exception as exc:
         _logger.debug("Command hook failed: %s", cmd, exc_info=True)
+        _append_to_hook_log(event.event, "command", cmd, stderr=str(exc), status="error")
         if verbose and logger:
             logger.verbose_detail(f"[i] Lifecycle command hook failed: {cmd}")
 

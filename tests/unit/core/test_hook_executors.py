@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
 
 from apm_cli.core.hook_executors import (
+    _append_to_hook_log,
     _build_hook_env,
     _execute_command,
     _execute_http,
     _expand_env_vars,
+    _get_hooks_log_path,
     _resolve_cwd,
     execute_hook,
 )
@@ -235,3 +238,103 @@ class TestResolveCwd:
         hook = HookEntry(hook_type="command", event="post-install", cwd="scripts")
         result = _resolve_cwd(hook, "/my/project")
         assert result == "/my/project/scripts"
+
+
+# -- Hook output log -------------------------------------------------------
+
+
+class TestGetHooksLogPath:
+    def test_default_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("APM_HOME", raising=False)
+        path = _get_hooks_log_path()
+        assert path.name == "hooks.log"
+        assert "logs" in path.parts
+
+    def test_respects_apm_home(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("APM_HOME", "/custom/apm")
+        path = _get_hooks_log_path()
+        assert str(path) == "/custom/apm/logs/hooks.log"
+
+
+class TestAppendToHookLog:
+    def test_creates_log_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("APM_HOME", str(tmp_path))
+        _append_to_hook_log("post-install", "command", "echo hi", stdout="hello world")
+        log = tmp_path / "logs" / "hooks.log"
+        assert log.exists()
+        content = log.read_text()
+        assert "post-install" in content
+        assert "command" in content
+        assert "echo hi" in content
+        assert "hello world" in content
+
+    def test_includes_exit_code(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("APM_HOME", str(tmp_path))
+        _append_to_hook_log("pre-install", "command", "false", exit_code=1, status="error")
+        content = (tmp_path / "logs" / "hooks.log").read_text()
+        assert "exit_code=1" in content
+        assert "status=error" in content
+
+    def test_includes_stderr(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("APM_HOME", str(tmp_path))
+        _append_to_hook_log("post-install", "command", "bad", stderr="not found")
+        content = (tmp_path / "logs" / "hooks.log").read_text()
+        assert "stderr: not found" in content
+
+    def test_appends_multiple_entries(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("APM_HOME", str(tmp_path))
+        _append_to_hook_log("pre-install", "command", "echo 1")
+        _append_to_hook_log("post-install", "command", "echo 2")
+        content = (tmp_path / "logs" / "hooks.log").read_text()
+        assert "pre-install" in content
+        assert "post-install" in content
+
+    def test_swallows_write_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("APM_HOME", "/nonexistent/readonly/path")
+        # Should not raise
+        _append_to_hook_log("post-install", "command", "echo", stdout="hi")
+
+
+class TestCommandExecutorLogging:
+    def test_logs_successful_command_output(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("APM_HOME", str(tmp_path))
+        hook = HookEntry(hook_type="command", event="post-install", bash="echo done")
+        mock_result = MagicMock()
+        mock_result.stdout = "hook output line"
+        mock_result.stderr = ""
+        mock_result.returncode = 0
+        with patch("apm_cli.core.hook_executors.subprocess.run", return_value=mock_result):
+            _execute_command(hook, _make_event())
+        content = (tmp_path / "logs" / "hooks.log").read_text()
+        assert "hook output line" in content
+        assert "exit_code=0" in content
+        assert "status=ok" in content
+
+    def test_logs_failed_command(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("APM_HOME", str(tmp_path))
+        hook = HookEntry(hook_type="command", event="post-install", bash="false")
+        mock_result = MagicMock()
+        mock_result.stdout = ""
+        mock_result.stderr = "something broke"
+        mock_result.returncode = 1
+        with patch("apm_cli.core.hook_executors.subprocess.run", return_value=mock_result):
+            _execute_command(hook, _make_event())
+        content = (tmp_path / "logs" / "hooks.log").read_text()
+        assert "something broke" in content
+        assert "exit_code=1" in content
+        assert "status=error" in content
+
+    def test_logs_timeout(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("APM_HOME", str(tmp_path))
+        hook = HookEntry(hook_type="command", event="post-install", bash="sleep 999")
+        with patch(
+            "apm_cli.core.hook_executors.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("sleep", 30),
+        ):
+            _execute_command(hook, _make_event())
+        content = (tmp_path / "logs" / "hooks.log").read_text()
+        assert "status=timeout" in content

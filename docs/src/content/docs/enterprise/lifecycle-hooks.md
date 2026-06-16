@@ -177,3 +177,22 @@ trends -- without any changes to individual project configurations.
   30s for commands by default).
 - Hook failures are logged in verbose mode (`--verbose`) and never
   block the CLI.
+
+## Hook output log
+
+Hook stdout, stderr, and execution status are appended to a log file at
+`~/.apm/logs/hooks.log` (or `$APM_HOME/logs/hooks.log`). This lets
+administrators audit hook behaviour without enabling verbose CLI output.
+
+Each entry includes a UTC timestamp, event name, hook type, target
+command or URL, status, exit code (for commands), and any captured output:
+
+```
+[2026-06-16T08:25:43Z] event=pre-install type=command target=echo 'Check passed' status=ok exit_code=0
+  stdout: Check passed
+
+[2026-06-16T08:25:44Z] event=post-install type=http target=https://analytics.corp.net/events status=ok
+  stdout: HTTP 200
+```
+
+The log file is created automatically on first hook execution.
