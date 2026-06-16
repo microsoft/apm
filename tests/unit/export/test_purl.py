@@ -97,6 +97,33 @@ def test_purl_is_deterministic():
     assert build_purl(dep) == build_purl(dep)
 
 
+def test_purl_percent_encodes_crafted_name_segments():
+    # A crafted dependency name must not be able to inject purl-structural
+    # characters (separators, '@', '#', '?', spaces) into the component
+    # identity. Namespace/name segments are percent-encoded per the purl spec
+    # so identity cannot be spoofed. Supply-chain hard line.
+    dep = LockedDependency(
+        repo_url="github.com/acme/git utils@evil",
+        host_type="github",
+        resolved_commit="def789ghi012",
+    )
+    purl = build_purl(dep)
+    assert purl == "pkg:github/acme/git%20utils%40evil@def789ghi012"
+    # The commit (after the LAST '@') stays the real version, not the injected one.
+    assert purl.rsplit("@", 1)[1] == "def789ghi012"
+
+
+def test_purl_encoding_is_noop_for_clean_slugs():
+    # Normal forge slugs are already purl-safe; encoding must not alter them
+    # (keeps existing identities and golden fixtures byte-stable).
+    dep = LockedDependency(
+        repo_url="github.com/acme/git-utils",
+        host_type="github",
+        resolved_commit="def789ghi012",
+    )
+    assert build_purl(dep) == "pkg:github/acme/git-utils@def789ghi012"
+
+
 def test_scrub_url_removes_userinfo():
     scrubbed = scrub_url("https://user:secret@registry.example.com/path/x.tgz")
     parts = urlsplit(scrubbed)
@@ -113,8 +140,10 @@ def test_scrub_url_passes_through_clean_url():
 
 def test_scrub_url_handles_oci_scheme():
     scrubbed = scrub_url("oci://user:tok@registry.example.com/acme/oci-tools@sha256:abc")
+    parts = urlsplit(scrubbed)
     assert "tok" not in scrubbed
-    assert "registry.example.com" in scrubbed
+    assert "user" not in parts.netloc
+    assert parts.hostname == "registry.example.com"
 
 
 def test_scrub_url_strips_query_string_token():

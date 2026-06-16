@@ -175,4 +175,4 @@ def export_sbom(lockfile: LockFile, fmt: str, *, timestamp: str) -> str:
     return json.dumps(doc, indent=2, sort_keys=True) + "\n"
 
 
-__all__ = ["FORMAT_CYCLONEDX", "FORMAT_SPDX", "SUPPORTED_FORMATS", "export_sbom"]
+__all__ = ["export_sbom"]

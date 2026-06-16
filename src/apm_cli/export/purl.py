@@ -17,7 +17,7 @@ SBOM output -- a token must never leak through provenance metadata.
 
 from __future__ import annotations
 
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from apm_cli.deps.lockfile import LockedDependency
 
@@ -111,22 +111,41 @@ def _is_local(dep: LockedDependency) -> bool:
     return dep.source == "local"
 
 
+def _encode_segment(segment: str) -> str:
+    """Percent-encode a single purl namespace/name segment.
+
+    Guarantees a crafted dependency name cannot inject purl-structural
+    characters (``/``, ``@``, ``#``, ``?``, whitespace) into the component
+    identity. Clean forge slugs (alphanumerics, ``-``, ``_``, ``.``) are
+    already safe and pass through unchanged, keeping existing identities and
+    golden fixtures byte-stable.
+    """
+    return quote(segment, safe="")
+
+
+def _encode_path(owner_repo: str) -> str:
+    """Percent-encode each ``/``-separated segment of an owner/repo path."""
+    return "/".join(_encode_segment(p) for p in owner_repo.split("/"))
+
+
 def build_purl(dep: LockedDependency) -> str:
     """Build the Package URL identity for *dep* from lockfile fields only."""
     if _is_oci(dep):
-        name = _basename(dep.repo_url)
+        name = _encode_segment(_basename(dep.repo_url))
         digest = dep.resolved_hash or dep.content_hash
         return f"pkg:oci/{name}@{digest}" if digest else f"pkg:oci/{name}"
 
     if not _is_local(dep) and dep.resolved_commit:
         purl_type = _purl_type_for(dep)
         if purl_type:
-            return f"pkg:{purl_type}/{_owner_repo(dep.repo_url)}@{dep.resolved_commit}"
+            return (
+                f"pkg:{purl_type}/{_encode_path(_owner_repo(dep.repo_url))}@{dep.resolved_commit}"
+            )
         # Unknown forge: stay honest with a generic identity keyed on the commit.
-        return f"pkg:generic/{_basename(dep.repo_url)}@{dep.resolved_commit}"
+        return f"pkg:generic/{_encode_segment(_basename(dep.repo_url))}@{dep.resolved_commit}"
 
     # Local / primitive / hash-only identity.
-    name = _basename(dep.repo_url)
+    name = _encode_segment(_basename(dep.repo_url))
     version = dep.content_hash
     return f"pkg:generic/{name}@{version}" if version else f"pkg:generic/{name}"
 

@@ -176,11 +176,11 @@ version: 1.0.0
 license: MIT                 # or "(MIT OR Apache-2.0)", "Apache-2.0", ...
 ```
 
-This mirrors how npm treats `package.json`'s `license`: it is an author
-**claim**, not a conclusion drawn from the `LICENSE` file text. APM records
-the declared value into the consumer's `apm.lock.yaml` (`declared_license`)
-at resolve time and passes it through to `apm lock export` SBOMs. APM never
-reads or interprets the `LICENSE` file -- declared is not concluded.
+This records the package's own license **claim** -- an author assertion, not a
+conclusion drawn from the `LICENSE` file text. APM records the declared value
+into the consumer's `apm.lock.yaml` (`declared_license`) at resolve time and
+passes it through to `apm lock export` SBOMs. APM never reads or interprets the
+`LICENSE` file -- declared is not concluded.
 
 The value is syntax-validated **offline** against the bundled SPDX id set.
 An unrecognized string (or a special token like `UNLICENSED` or

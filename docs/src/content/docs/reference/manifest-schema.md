@@ -125,8 +125,9 @@ offline against the bundled SPDX id set, and surfaced by
 and recorded as a named license -- a declaration is never rejected and never
 blocks packing or publishing. APM records what the manifest *declares*; it
 never reads or concludes a license from `LICENSE` file text. When omitted, the
-SBOM records `NOASSERTION` and `apm pack` / `apm publish` print an actionable
-nudge (the authoring path only).
+SBOM marks the component unknown -- CycloneDX omits the license entry and SPDX
+writes the literal `NOASSERTION` -- and `apm pack` / `apm publish` print an
+actionable nudge (the authoring path only).
 
 ### 3.6. `target`
 

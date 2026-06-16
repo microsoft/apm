@@ -103,7 +103,7 @@ def test_export_to_output_file(runner, tmp_path):
         assert result.exit_code == 0, result.output
         written = Path("sbom.json").read_text(encoding="utf-8")
         assert json.loads(written)["bomFormat"] == "CycloneDX"
-        assert "SBOM written to sbom.json" in result.output
+        assert "SBOM written to sbom.json" in result.stderr
 
 
 def test_export_missing_lockfile_errors(runner, tmp_path):
@@ -111,7 +111,7 @@ def test_export_missing_lockfile_errors(runner, tmp_path):
         (Path.cwd() / "apm.yml").write_text("name: test\nversion: 1.0.0\n")
         result = runner.invoke(cli, ["lock", "export"])
         assert result.exit_code == 1
-        assert "No lockfile" in result.output
+        assert "No lockfile" in result.stderr
 
 
 def test_export_does_not_resolve(runner, tmp_path, monkeypatch):
