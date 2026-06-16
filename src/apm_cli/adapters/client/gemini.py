@@ -61,7 +61,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
     # revisit in a follow-up.
     _supports_runtime_env_substitution: bool = False
 
-    def _get_gemini_dir(self) -> Path:
+    def _get_config_dir(self) -> Path:
         """Return the ``.gemini`` directory for the active scope."""
         if self.user_scope:
             return Path.home() / ".gemini"
@@ -69,22 +69,24 @@ class GeminiClientAdapter(CopilotClientAdapter):
 
     def get_config_path(self):
         """Return the path to ``settings.json`` for the active scope."""
-        return str(self._get_gemini_dir() / "settings.json")
+        return str(self._get_config_dir() / "settings.json")
 
     def update_config(self, config_updates):
         """Merge *config_updates* into the ``mcpServers`` section of settings.json.
 
-        Project scope is opt-in: if ``<project_root>/.gemini/`` does not
+        Project scope is opt-in: if the target config directory does not
         exist, this method returns silently. User scope always writes,
-        creating ``~/.gemini/`` if needed.
+        creating the directory if needed.
 
         Preserves all other top-level keys in settings.json (theme, tools,
         hooks, etc.).
         """
-        gemini_dir = self._get_gemini_dir()
-        if not self.user_scope and not gemini_dir.is_dir():
+        config_dir = self._get_config_dir()
+        if not self.user_scope and not config_dir.is_dir():
             logger.debug(
-                "Skipping Gemini project-scope write -- %s does not exist (opt-in)", gemini_dir
+                "Skipping %s project-scope write -- %s does not exist (opt-in)",
+                self.target_name,
+                config_dir,
             )
             return
 
@@ -97,7 +99,9 @@ class GeminiClientAdapter(CopilotClientAdapter):
             current_config["mcpServers"][name] = entry
 
         if not config_path.parent.is_dir():
-            logger.debug("Creating %s for Gemini CLI user configuration", config_path.parent)
+            logger.debug(
+                "Creating %s for %s user configuration", config_path.parent, self.target_name
+            )
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(current_config, f, indent=2)
@@ -151,7 +155,9 @@ class GeminiClientAdapter(CopilotClientAdapter):
                     raw["env"], env_overrides=env_overrides
                 )
                 config["env"] = resolved_env_for_args
-                self._warn_input_variables(raw["env"], server_info.get("name", ""), "Gemini CLI")
+                self._warn_input_variables(
+                    raw["env"], server_info.get("name", ""), self.target_name
+                )
             config["args"] = [
                 self._resolve_variable_placeholders(arg, resolved_env_for_args, runtime_vars)
                 if isinstance(arg, str)
@@ -171,7 +177,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
                 transport = "http"
             elif transport not in ("sse", "http", "streamable-http"):
                 raise ValueError(
-                    f"Unsupported remote transport '{transport}' for Gemini. "
+                    f"Unsupported remote transport '{transport}' for {self.target_name}. "
                     f"Server: {server_info.get('name', 'unknown')}. "
                     f"Supported transports: http, sse, streamable-http."
                 )
@@ -193,7 +199,7 @@ class GeminiClientAdapter(CopilotClientAdapter):
 
             if config.get("headers"):
                 self._warn_input_variables(
-                    config["headers"], server_info.get("name", ""), "Gemini CLI"
+                    config["headers"], server_info.get("name", ""), self.target_name
                 )
 
             self._merge_extra(config, server_info)
@@ -260,19 +266,20 @@ class GeminiClientAdapter(CopilotClientAdapter):
         server_info_cache=None,
         runtime_vars=None,
     ):
-        """Configure an MCP server in ``.gemini/settings.json``.
+        """Configure an MCP server in the target's ``settings.json``.
 
         Delegates to the parent for config formatting, then writes to
-        the Gemini CLI settings file.
+        the target CLI settings file.
         """
         if not server_url:
             _rich_error("server_url cannot be empty", symbol="error")
             return False
 
-        if not self.user_scope and not self._get_gemini_dir().is_dir():
+        if not self.user_scope and not self._get_config_dir().is_dir():
             logger.debug(
-                "Gemini opt-in gate: %s absent, skipping configure_mcp_server",
-                self._get_gemini_dir(),
+                "%s opt-in gate: %s absent, skipping configure_mcp_server",
+                self.target_name,
+                self._get_config_dir(),
             )
             return True
 
@@ -296,10 +303,16 @@ class GeminiClientAdapter(CopilotClientAdapter):
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             self.update_config({config_key: server_config})
 
-            _rich_success(f"Configured MCP server '{config_key}' for Gemini CLI", symbol="success")
+            _rich_success(
+                f"Configured MCP server '{config_key}' for {self.target_name}",
+                symbol="success",
+            )
             return True
 
         except Exception as e:
-            logger.debug("Gemini MCP configuration failed: %s", e)
-            _rich_error("Failed to configure MCP server for Gemini CLI", symbol="error")
+            logger.debug("%s MCP configuration failed: %s", self.target_name, e)
+            _rich_error(
+                f"Failed to configure MCP server for {self.target_name}",
+                symbol="error",
+            )
             return False

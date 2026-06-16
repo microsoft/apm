@@ -1,0 +1,9 @@
+# Fixture: require_hashes enforced (fail-closed on missing lockfile hash)
+# Tests: security.integrity.require_hashes parses true; default-off elsewhere
+name: require-hashes-on-policy
+version: "1.0.0"
+enforcement: block
+
+security:
+  integrity:
+    require_hashes: true

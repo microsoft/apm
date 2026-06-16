@@ -164,6 +164,7 @@ class TestTargetProfileUserScope:
             "opencode",
             "codex",
             "gemini",
+            "antigravity",
             "windsurf",
             "kiro",
             "copilot-cowork",
