@@ -37,7 +37,7 @@ class TestHooksList:
     def test_shows_discovered_hooks(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_hook_file(
-            tmp_path / ".apm" / "hooks" / "test.json",
+            tmp_path / ".apm" / "hooks.json",
             {
                 "version": 1,
                 "hooks": {
@@ -64,7 +64,7 @@ class TestHooksTest:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
         _write_hook_file(
-            tmp_path / ".apm" / "hooks" / "test.json",
+            tmp_path / ".apm" / "hooks.json",
             {
                 "version": 1,
                 "hooks": {
@@ -113,22 +113,16 @@ class TestHooksInit:
         result = cli_runner.invoke(hooks, ["init"])
         assert result.exit_code == 0
         assert "Created hook file" in result.output
-        hook_file = tmp_path / ".apm" / "hooks" / "hooks.json"
+        hook_file = tmp_path / ".apm" / "hooks.json"
         assert hook_file.exists()
         data = json.loads(hook_file.read_text())
         assert data["version"] == 1
         assert "post-install" in data["hooks"]
 
-    def test_custom_name(self, cli_runner, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        result = cli_runner.invoke(hooks, ["init", "--name", "analytics"])
-        assert result.exit_code == 0
-        assert (tmp_path / ".apm" / "hooks" / "analytics.json").exists()
-
     def test_refuses_overwrite_without_force(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_hook_file(
-            tmp_path / ".apm" / "hooks" / "hooks.json",
+            tmp_path / ".apm" / "hooks.json",
             {"version": 1, "hooks": {}},
         )
         result = cli_runner.invoke(hooks, ["init"])
@@ -138,13 +132,13 @@ class TestHooksInit:
     def test_force_overwrites(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_hook_file(
-            tmp_path / ".apm" / "hooks" / "hooks.json",
+            tmp_path / ".apm" / "hooks.json",
             {"version": 1, "hooks": {}},
         )
         result = cli_runner.invoke(hooks, ["init", "--force"])
         assert result.exit_code == 0
         assert "Created hook file" in result.output
-        data = json.loads((tmp_path / ".apm" / "hooks" / "hooks.json").read_text())
+        data = json.loads((tmp_path / ".apm" / "hooks.json").read_text())
         assert "post-install" in data["hooks"]
 
 
@@ -161,7 +155,7 @@ class TestHooksValidate:
     def test_valid_file_passes(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_hook_file(
-            tmp_path / ".apm" / "hooks" / "good.json",
+            tmp_path / ".apm" / "hooks.json",
             {
                 "version": 1,
                 "hooks": {
@@ -175,9 +169,9 @@ class TestHooksValidate:
 
     def test_invalid_json_fails(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        hooks_dir = tmp_path / ".apm" / "hooks"
-        hooks_dir.mkdir(parents=True)
-        (hooks_dir / "bad.json").write_text("{not valid json", encoding="utf-8")
+        apm_dir = tmp_path / ".apm"
+        apm_dir.mkdir(parents=True)
+        (apm_dir / "hooks.json").write_text("{not valid json", encoding="utf-8")
         result = cli_runner.invoke(hooks, ["validate"])
         assert result.exit_code != 0
         assert "Invalid JSON" in result.output
@@ -185,7 +179,7 @@ class TestHooksValidate:
     def test_wrong_version_fails(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_hook_file(
-            tmp_path / ".apm" / "hooks" / "bad.json",
+            tmp_path / ".apm" / "hooks.json",
             {"version": 99, "hooks": {}},
         )
         result = cli_runner.invoke(hooks, ["validate"])
@@ -195,7 +189,7 @@ class TestHooksValidate:
     def test_unknown_event_fails(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_hook_file(
-            tmp_path / ".apm" / "hooks" / "bad.json",
+            tmp_path / ".apm" / "hooks.json",
             {
                 "version": 1,
                 "hooks": {"on-banana": [{"type": "command", "bash": "echo"}]},
@@ -208,7 +202,7 @@ class TestHooksValidate:
     def test_command_without_bash_or_command_fails(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_hook_file(
-            tmp_path / ".apm" / "hooks" / "bad.json",
+            tmp_path / ".apm" / "hooks.json",
             {
                 "version": 1,
                 "hooks": {"post-install": [{"type": "command"}]},
@@ -221,7 +215,7 @@ class TestHooksValidate:
     def test_http_without_url_fails(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_hook_file(
-            tmp_path / ".apm" / "hooks" / "bad.json",
+            tmp_path / ".apm" / "hooks.json",
             {
                 "version": 1,
                 "hooks": {"post-install": [{"type": "http"}]},
@@ -234,7 +228,7 @@ class TestHooksValidate:
     def test_http_url_rejects_plain_http(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_hook_file(
-            tmp_path / ".apm" / "hooks" / "bad.json",
+            tmp_path / ".apm" / "hooks.json",
             {
                 "version": 1,
                 "hooks": {"post-install": [{"type": "http", "url": "http://insecure.com/hook"}]},
@@ -247,7 +241,7 @@ class TestHooksValidate:
     def test_multiple_errors_reported(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _write_hook_file(
-            tmp_path / ".apm" / "hooks" / "bad.json",
+            tmp_path / ".apm" / "hooks.json",
             {
                 "version": 1,
                 "hooks": {

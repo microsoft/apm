@@ -105,9 +105,10 @@ every hook from every file runs. Policy hooks cannot be disabled.
 |--------------|-----------------------------|------------------|
 | 1 (highest)  | `/etc/apm/policy.d/*.json`  | Platform/IT team |
 | 2            | `~/.apm/hooks/*.json`       | Individual user  |
-| 3            | `.apm/hooks/*.json`         | Project          |
+| 3            | `.apm/hooks.json`           | Project          |
 
-Only `*.json` files are loaded. Non-JSON files are ignored.
+Policy and user sources are directories (all `*.json` files are loaded).
+The project source is a single file.
 
 ## Event payload
 
@@ -212,12 +213,11 @@ apm hooks
 
 ### ``apm hooks init`` -- scaffold a starter hook file
 
-Generate a starter JSON hook file in ``.apm/hooks/``:
+Generate a starter JSON hook file at ``.apm/hooks.json``:
 
 ```bash
-apm hooks init                    # creates .apm/hooks/hooks.json
-apm hooks init --name analytics   # creates .apm/hooks/analytics.json
-apm hooks init --force            # overwrite existing file
+apm hooks init            # creates .apm/hooks.json
+apm hooks init --force    # overwrite existing file
 ```
 
 ### ``apm hooks validate`` -- check hook files for errors

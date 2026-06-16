@@ -156,18 +156,13 @@ def hooks_test(event: str, verbose: bool) -> None:
 
 @hooks.command(
     name="init",
-    help="Scaffold a starter hook JSON file in .apm/hooks/.",
-)
-@click.option(
-    "--name",
-    default="hooks",
-    help="Name for the hook file (without .json extension).",
+    help="Scaffold a starter hook JSON file at .apm/hooks.json.",
 )
 @click.option("--force", is_flag=True, help="Overwrite if file already exists.")
-def hooks_init(name: str, force: bool) -> None:
+def hooks_init(force: bool) -> None:
     """Create a starter hook JSON file in the project."""
-    hooks_dir = Path.cwd() / ".apm" / "hooks"
-    target_file = hooks_dir / f"{name}.json"
+    apm_dir = Path.cwd() / ".apm"
+    target_file = apm_dir / "hooks.json"
 
     if target_file.exists() and not force:
         _rich_warning(
@@ -177,7 +172,7 @@ def hooks_init(name: str, force: bool) -> None:
         _rich_echo("  Use --force to overwrite.", style="dim")
         return
 
-    hooks_dir.mkdir(parents=True, exist_ok=True)
+    apm_dir.mkdir(parents=True, exist_ok=True)
 
     content = json.dumps(_INIT_TEMPLATE, indent=2) + "\n"
     target_file.write_text(content, encoding="utf-8")
@@ -216,10 +211,10 @@ def hooks_init(name: str, force: bool) -> None:
     help="Validate all discovered hook files for errors.",
 )
 def hooks_validate() -> None:
-    """Check all hook JSON files across discovery directories for errors."""
+    """Check all hook JSON files across discovery sources for errors."""
     from apm_cli.core.lifecycle_hooks import (
         _get_policy_hooks_dir,
-        _get_project_hooks_dir,
+        _get_project_hooks_file,
         _get_user_hooks_dir,
     )
 
@@ -227,40 +222,44 @@ def hooks_validate() -> None:
     dirs = [
         ("policy", _get_policy_hooks_dir()),
         ("user", _get_user_hooks_dir()),
-        ("project", _get_project_hooks_dir(project_root)),
     ]
 
     total_files = 0
     total_errors = 0
     total_hooks = 0
 
+    def _process_file(json_file: Path, source: str) -> None:
+        nonlocal total_files, total_errors, total_hooks
+        total_files += 1
+        errors = _validate_hook_file(json_file, source)
+        if errors:
+            total_errors += len(errors)
+            rel = json_file.relative_to(Path.cwd()) if source == "project" else json_file
+            _rich_error(f"{rel}:", symbol="error")
+            for err in errors:
+                _rich_echo(f"    {err}", style="red")
+        else:
+            try:
+                data = json.loads(json_file.read_text(encoding="utf-8"))
+                hook_count = sum(
+                    len(v) for v in data.get("hooks", {}).values() if isinstance(v, list)
+                )
+                total_hooks += hook_count
+            except Exception:
+                pass
+
+    # Check directory-based sources (policy, user).
     for source, directory in dirs:
         if not directory.is_dir():
             continue
         for json_file in sorted(directory.glob("*.json")):
-            if not json_file.is_file():
-                continue
-            total_files += 1
-            errors = _validate_hook_file(json_file, source)
-            if errors:
-                total_errors += len(errors)
-                rel = (
-                    json_file.relative_to(directory.parent.parent)
-                    if source == "project"
-                    else json_file
-                )
-                _rich_error(f"{rel}:", symbol="error")
-                for err in errors:
-                    _rich_echo(f"    {err}", style="red")
-            else:
-                try:
-                    data = json.loads(json_file.read_text(encoding="utf-8"))
-                    hook_count = sum(
-                        len(v) for v in data.get("hooks", {}).values() if isinstance(v, list)
-                    )
-                    total_hooks += hook_count
-                except Exception:
-                    pass
+            if json_file.is_file():
+                _process_file(json_file, source)
+
+    # Check project-level single file.
+    project_file = _get_project_hooks_file(project_root)
+    if project_file.is_file():
+        _process_file(project_file, "project")
 
     if total_files == 0:
         _rich_info("No hook files found.", symbol="info")

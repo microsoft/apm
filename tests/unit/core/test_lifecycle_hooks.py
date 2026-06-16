@@ -223,10 +223,10 @@ class TestParseHookFile:
 
 
 class TestDiscoverHooks:
-    def test_discovers_from_project_dir(self, tmp_path: Path) -> None:
-        hooks_dir = tmp_path / ".apm" / "hooks"
-        hooks_dir.mkdir(parents=True)
-        (hooks_dir / "analytics.json").write_text(
+    def test_discovers_from_project_file(self, tmp_path: Path) -> None:
+        apm_dir = tmp_path / ".apm"
+        apm_dir.mkdir(parents=True)
+        (apm_dir / "hooks.json").write_text(
             json.dumps(
                 {
                     "version": 1,
@@ -253,7 +253,7 @@ class TestDiscoverHooks:
             hooks = discover_hooks()
         assert any(h.bash == "echo user" for h in hooks)
 
-    def test_additive_across_dirs(self, tmp_path: Path) -> None:
+    def test_additive_across_sources(self, tmp_path: Path) -> None:
         user_hooks = tmp_path / "user"
         user_hooks.mkdir()
         (user_hooks / "a.json").write_text(
@@ -265,9 +265,9 @@ class TestDiscoverHooks:
             )
         )
         project_dir = tmp_path / "project"
-        project_hooks = project_dir / ".apm" / "hooks"
-        project_hooks.mkdir(parents=True)
-        (project_hooks / "b.json").write_text(
+        project_apm = project_dir / ".apm"
+        project_apm.mkdir(parents=True)
+        (project_apm / "hooks.json").write_text(
             json.dumps(
                 {
                     "version": 1,
@@ -279,11 +279,9 @@ class TestDiscoverHooks:
             hooks = discover_hooks(project_root=str(project_dir))
         assert len(hooks) == 2
 
-    def test_skips_non_json_files(self, tmp_path: Path) -> None:
-        hooks_dir = tmp_path / ".apm" / "hooks"
-        hooks_dir.mkdir(parents=True)
-        (hooks_dir / "readme.txt").write_text("not a hook file")
+    def test_missing_project_file_returns_empty(self, tmp_path: Path) -> None:
         hooks = discover_hooks(project_root=str(tmp_path))
+        # No policy or user hooks either in a clean tmp_path
         assert hooks == []
 
     def test_no_dirs_returns_empty(self) -> None:

@@ -6,7 +6,7 @@ JSON files discovered from three directories (Copilot CLI pattern):
 
 1. **Policy** -- ``/etc/apm/policy.d/*.json`` (admin-owned, cannot be disabled)
 2. **User**   -- ``~/.apm/hooks/*.json``
-3. **Project** -- ``.apm/hooks/*.json`` under the project root
+3. **Project** -- ``.apm/hooks.json`` (single file)
 
 Each file uses ``{ "version": 1, "hooks": { "<event>": [...] } }``.
 
@@ -229,10 +229,10 @@ def _get_user_hooks_dir() -> Path:
     return Path.home() / ".apm" / "hooks"
 
 
-def _get_project_hooks_dir(project_root: str | None = None) -> Path:
-    """Return the project-level hooks directory (.apm/hooks/)."""
+def _get_project_hooks_file(project_root: str | None = None) -> Path:
+    """Return the project-level hooks file (``.apm/hooks.json``)."""
     root = Path(project_root) if project_root else Path.cwd()
-    return root / ".apm" / "hooks"
+    return root / ".apm" / "hooks.json"
 
 
 def _load_hooks_from_dir(
@@ -252,17 +252,21 @@ def _load_hooks_from_dir(
 def discover_hooks(
     project_root: str | None = None,
 ) -> list[HookEntry]:
-    """Discover and merge hooks from all three directories.
+    """Discover and merge hooks from all three sources.
 
     Load order (all additive, policy first):
-      1. Policy  -- ``/etc/apm/policy.d/*.json``
-      2. User    -- ``~/.apm/hooks/*.json``
-      3. Project -- ``.apm/hooks/*.json``
+      1. Policy  -- ``/etc/apm/policy.d/*.json`` (directory)
+      2. User    -- ``~/.apm/hooks/*.json`` (directory)
+      3. Project -- ``.apm/hooks.json`` (single file)
     """
     hooks: list[HookEntry] = []
     hooks.extend(_load_hooks_from_dir(_get_policy_hooks_dir(), source="policy"))
     hooks.extend(_load_hooks_from_dir(_get_user_hooks_dir(), source="user"))
-    hooks.extend(_load_hooks_from_dir(_get_project_hooks_dir(project_root), source="project"))
+
+    project_file = _get_project_hooks_file(project_root)
+    if project_file.is_file():
+        hooks.extend(parse_hook_file(project_file, source="project"))
+
     return hooks
 
 
