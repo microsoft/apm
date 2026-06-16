@@ -581,8 +581,11 @@ class TestCheckPerHostResolution:
         result = runner.invoke(marketplace, ["check"])
 
         assert result.exit_code == 0
-        # token resolved for the GitLab base host, not github.com
-        mock_token.assert_called_once_with("gitlab.example.com", offline=False, auth_resolver=ANY)
+        # token resolved for the GitLab base host, with the sourceBase org hint
+        # (leading path segment) -- identical to what ``apm pack`` resolves
+        mock_token.assert_called_once_with(
+            "gitlab.example.com", offline=False, org="group", auth_resolver=ANY
+        )
         # resolver bound to that host with that token
         MockResolver.assert_called_once_with(
             offline=False, host="gitlab.example.com", token="glpat-xyz"
@@ -623,7 +626,9 @@ class TestCheckPerHostResolution:
         result = runner.invoke(marketplace, ["check"])
 
         assert result.exit_code == 0
-        mock_token.assert_called_once_with("github.com", offline=False, auth_resolver=ANY)
+        # host-prefixed override carries no sourceBase org hint (org=None),
+        # matching the builder's _remote_source_coordinates
+        mock_token.assert_called_once_with("github.com", offline=False, org=None, auth_resolver=ANY)
         MockResolver.assert_called_once_with(offline=False, host="github.com", token="ghp-tok")
         mock_inst.list_remote_refs.assert_called_once_with("owner/repo")
 
