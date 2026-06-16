@@ -1,0 +1,10 @@
+# Fixture: audit fails (non-zero) when workspace drifts from the lockfile
+# Tests: security.audit.fail_on_drift parses true alongside on_install
+name: fail-on-drift-on-policy
+version: "1.0.0"
+enforcement: block
+
+security:
+  audit:
+    on_install: warn
+    fail_on_drift: true
