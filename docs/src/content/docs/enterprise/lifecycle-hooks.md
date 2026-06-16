@@ -196,3 +196,50 @@ command or URL, status, exit code (for commands), and any captured output:
 ```
 
 The log file is created automatically on first hook execution.
+
+## CLI commands
+
+APM provides three commands to work with lifecycle hooks:
+
+### ``apm hooks`` -- list discovered hooks
+
+Run without a sub-command to see all hooks discovered from policy, user,
+and project directories:
+
+```bash
+apm hooks
+```
+
+### ``apm hooks init`` -- scaffold a starter hook file
+
+Generate a starter JSON hook file in ``.apm/hooks/``:
+
+```bash
+apm hooks init                    # creates .apm/hooks/hooks.json
+apm hooks init --name analytics   # creates .apm/hooks/analytics.json
+apm hooks init --force            # overwrite existing file
+```
+
+### ``apm hooks validate`` -- check hook files for errors
+
+Validate all discovered hook files across policy, user, and project
+directories. Reports schema errors, unknown events, missing fields, and
+non-HTTPS URLs:
+
+```bash
+apm hooks validate
+```
+
+Exits with a non-zero code if any errors are found.
+
+### ``apm hooks test`` -- dry-run a synthetic event
+
+Fire a synthetic event through all discovered hooks to verify wiring
+without performing a real install/update/uninstall:
+
+```bash
+apm hooks test                    # fires post-install (default)
+apm hooks test pre-uninstall      # fires a specific event
+```
+
+Hook output is written to ``~/.apm/logs/hooks.log`` as usual.

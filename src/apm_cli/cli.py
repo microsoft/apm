@@ -26,6 +26,7 @@ from apm_cli.commands.deps import deps
 from apm_cli.commands.doctor import doctor
 from apm_cli.commands.experimental import experimental
 from apm_cli.commands.find import find as find_cmd
+from apm_cli.commands.hooks import hooks
 from apm_cli.commands.init import init
 from apm_cli.commands.install import install
 from apm_cli.commands.list_cmd import list as list_cmd
@@ -184,6 +185,7 @@ cli.add_command(mcp)
 cli.add_command(policy)
 cli.add_command(outdated_cmd, name="outdated")
 cli.add_command(doctor)
+cli.add_command(hooks)
 cli.add_command(marketplace)
 cli.add_command(find_cmd)
 cli.add_command(marketplace_search, name="search")
