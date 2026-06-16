@@ -941,7 +941,18 @@ class TestUnmanagedEnrichment:
         policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
         result = _check_unmanaged_files(tmp_path, lock, policy)
         detail = _detail_for(result, ".github/agents/rogue.agent.md")
-        assert "agent" in detail
+        assert "[type: agent]" in detail
+
+    def test_next_action_hint_present(self, tmp_path):
+        # A non-empty report must carry exactly one actionable next-step hint
+        # (track vs suppress) so a flagged file is self-resolving.
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+        (tmp_path / ".github" / "agents" / "rogue.agent.md").write_text("x", encoding="utf-8")
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        result = _check_unmanaged_files(tmp_path, lock, policy)
+        hints = [d for d in result.details if "unmanaged_files.exclude" in d and "apm install" in d]
+        assert len(hints) == 1, f"expected one next-action hint, got: {result.details}"
 
 
 class TestUnmanagedDenyConflict:

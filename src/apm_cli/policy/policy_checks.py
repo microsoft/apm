@@ -686,6 +686,13 @@ _DEFAULT_GOVERNANCE_DIRS = [
 
 _MAX_UNMANAGED_SCAN_FILES = 10_000
 
+# Appended once to a non-empty unmanaged-files report so a flagged file is
+# self-resolving: the reader learns how to track it or how to suppress it.
+_UNMANAGED_NEXT_ACTION = (
+    "Next: run 'apm install <ref>' to track a flagged file, "
+    "or add a glob to unmanaged_files.exclude to suppress it."
+)
+
 
 def _classify_primitive_type(rel_path: str) -> str | None:
     """Lazily classify an already-flagged unmanaged file by APM convention.
@@ -727,9 +734,11 @@ def _unmanaged_deny_conflict(
 ) -> str | None:
     """Return the deny pattern an unmanaged file conflicts with, or ``None``.
 
-    Surfaces APM's OWN policy (``dependencies.deny`` / ``mcp.deny``) as a
-    human-resolve conflict. Routes through the same ``first_matching_pattern``
-    matcher the deny-list checks use -- never a second matcher.
+    Surfaces APM's OWN deny policy as a human-resolve conflict: the dependency
+    side is defaults-inclusive (``dependencies.effective_deny``) and the MCP
+    side is the raw ``mcp.deny`` -- mirroring the deny-list checks exactly.
+    Routes through the same ``first_matching_pattern`` matcher the deny-list
+    checks use -- never a second matcher.
     """
     from .matcher import first_matching_pattern
 
@@ -737,6 +746,8 @@ def _unmanaged_deny_conflict(
     for patterns in (dependency_deny, mcp_deny):
         hit = first_matching_pattern(rel_path, patterns)
         if hit is None:
+            # Fall back to the basename so a deny glob written against a bare
+            # filename (e.g. 'mcp.json') still surfaces the conflict.
             hit = first_matching_pattern(name, patterns)
         if hit is not None:
             return hit
@@ -871,6 +882,9 @@ def _check_unmanaged_files(
             passed=True,
             message="No unmanaged files in governance directories",
         )
+
+    # One report carries a single next-action hint after the per-file lines.
+    details.append(_UNMANAGED_NEXT_ACTION)
 
     if policy.effective_action == "warn":
         return CheckResult(

@@ -330,6 +330,7 @@ unmanaged_files:
     - .cursor/rules
     - .claude
     - .opencode
+    - .kiro
 ```
 
 ### `exclude`
@@ -355,13 +356,14 @@ hand-editable YAML -- not supply-chain-attack prevention:
 
 - a factual reason: `not tracked in apm.lock.yaml`;
 - a lazy primitive-type tag (`[type: skill|agent|instruction|mcp]`), computed
-  only for already-flagged files;
+  only for already-flagged files (a directory merely named `mcp` is not treated
+  as MCP config -- only a `.mcp/` root or an `mcp.json` file is);
 - a deny-conflict note `matches deny rule (<pattern>)` when the path matches
   this policy's own `dependencies.deny` or `mcp.deny`, surfaced for a human to
   resolve. APM reports only -- it never removes or blocks the file.
 
 ```text
-[!] .claude/skills/rogue/SKILL.md [type: skill] -- not tracked in apm.lock.yaml; matches deny rule (rogue*)
+[!] .claude/skills/rogue/SKILL.md [type: skill] -- not tracked in apm.lock.yaml; matches deny rule (**/rogue/**)
 ```
 
 ---

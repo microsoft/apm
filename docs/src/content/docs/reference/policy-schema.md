@@ -152,7 +152,7 @@ Files in primitive target directories that are not recorded in `apm.lock.yaml`.
 |---------------|----------------|----------|----------------------------------------------------------------------------------|
 | `action`      | enum           | `ignore` | `ignore` / `warn` / `deny`. `deny` blocks installs that would leave drift.      |
 | `directories` | list of paths  | `[]`     | Subset of target directories to check. Empty = all known target directories.     |
-| `exclude`     | list of globs  | `[]`     | Workspace path globs to suppress from the report. Use to silence known harness-managed artifacts. Excluded paths are never reported. |
+| `exclude`     | list of globs  | `null`   | Workspace path globs to suppress from the report. Use to silence known harness-managed artifacts. Excluded paths are never reported. `null` = no opinion (transparent in the `extends:` merge); merges as a union down the chain. |
 
 Each reported file is a divergence-visibility finding, not a security verdict
 -- `apm.lock.yaml` is hand-editable YAML, so this surfaces drift rather than
