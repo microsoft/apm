@@ -93,6 +93,12 @@ def publish_cmd(ctx, registry_name, package_id, zip_path, dry_run, verbose):
     if not version:
         raise click.ClickException("apm.yml must declare a 'version:' field to publish.")
 
+    # Authoring-path nudge (#1777): warn when the author's own package declares
+    # no license. Silent on the consuming path; never blocks publish.
+    from ..export.authoring import warn_if_license_undeclared
+
+    warn_if_license_undeclared(apm_yml_path, logger.warning)
+
     # ----------------------------------------------------------- owner/repo
     owner, repo = _resolve_package_id(package_id)
 
