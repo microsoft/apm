@@ -68,8 +68,7 @@ class TestWindsurfPartitionRouting:
         buckets = BaseIntegrator.partition_managed_files(managed)
 
         assert ".agents/skills/code-review" in buckets["skills"], (
-            "windsurf's converged skill path must be in the cross-target "
-            "'skills' bucket"
+            "windsurf's converged skill path must be in the cross-target 'skills' bucket"
         )
         assert ".agents/skills/grill-me" in buckets["skills"]
 
