@@ -11,6 +11,27 @@ The `apm-policy.yml` schema. One file per org or repo. Loaded by `apm install`, 
 
 For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../enterprise/apm-policy-getting-started/). For CLI usage of `apm policy status`, see [apm policy](./cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance overview](../enterprise/governance-overview/).
 
+## What apm-policy.yml governs
+
+`apm-policy.yml` is the **install policy** for agent primitives. In plain terms it decides:
+
+- **Which sources are trusted** -- which dependencies and MCP servers `apm install` will accept (the `allow` / `deny` / `registry_source` rules).
+- **Which versions install** -- whether refs must be pinned to bounded constraints, and how version conflicts on required packages resolve.
+- **What the lockfile records and verifies** -- which artifacts are written, and what install-time audit checks run before they land on disk.
+
+Every rule on this page is evaluated by `apm install` and `apm audit --ci`. They govern what gets installed -- not what a running agent is later allowed to do.
+
+## What apm-policy.yml does NOT govern
+
+`apm-policy.yml` is not a runtime permission system. It does not control:
+
+- **Runtime permissions** -- what an agent may read, write, or call once it is running.
+- **Sandboxing** -- process isolation or resource limits for a running agent.
+- **Agent behavior** -- what a running agent actually does with the primitives it was given.
+- **Marketplace enablement** -- which tools or extensions a harness exposes to the agent.
+
+Those controls are owned by the **agent harness** that runs your agents, not by APM. APM stops at install: it decides what reaches disk, and the harness decides what runs.
+
 ## File location
 
 Discovery order, in priority:
@@ -68,6 +89,8 @@ Unknown top-level keys produce a warning, never an error -- so newer policy file
 ## dependencies
 
 Rules over the `dependencies:` and `mcp:` blocks declared in consumer `apm.yml` files.
+
+When a dependency matches `deny`, `apm install` will **not install that artifact** -- with `enforcement: block` the install aborts before the package is written to disk. `deny` is an install-time decision, not a runtime block: it stops a denied artifact from being installed, and does not constrain what an already-installed or otherwise-present artifact does at runtime.
 
 | Field                | Type                  | Default          | Notes                                                                                       |
 |----------------------|-----------------------|------------------|---------------------------------------------------------------------------------------------|
@@ -366,6 +389,12 @@ bin_deploy:
   deny:
     - myorg/untrusted-plugin
 ```
+
+## FAQ
+
+**Does my harness's managed configuration replace APM?**
+
+No. apm-policy.yml controls what gets installed; your harness controls what runs; they do not overlap.
 
 ## See also
 
