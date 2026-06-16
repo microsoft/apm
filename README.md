@@ -88,6 +88,8 @@ Agent context is executable in effect — a prompt is a program for an LLM. APM 
 
 `apm-policy.yml` lets a security team say *"these are the only sources, scopes, and primitives this org will allow"* and have every `apm install` enforce it — with tighten-only inheritance from enterprise to org to repo, a published bypass contract, and audit-mode CI gates.
 
+apm-policy.yml governs what gets installed; your agent harness governs what runs. The two planes do not overlap.
+
 - **[Governance Guide](https://microsoft.github.io/apm/enterprise/governance-guide/)** — the canonical enterprise reference: enforcement points, bypass contract, air-gapped story, failure semantics, rollout playbook
 - **[Policy reference](https://microsoft.github.io/apm/enterprise/policy-reference/)** — every check, every field, every default
 - **[Adoption playbook](https://microsoft.github.io/apm/enterprise/adoption-playbook/)** — staged rollout from warn to block across hundreds of repos
