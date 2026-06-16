@@ -126,4 +126,42 @@ def test_policy_provides_default_deny_list_shape():
     assert "deny" in deps and deps["deny"]["oneOf"][0]["type"] == "array"
 
 
+@pytest.mark.req("req-pl-013")
+def test_policy_require_hashes_parses_and_is_specified():
+    """req-pl-013: security.integrity.require_hashes fail-closed install.
+
+    Binds the parsed boolean to the spec MUST. The install enforcement
+    itself is exercised by tests/unit/install/test_require_hashes.py;
+    here we assert the parser surfaces the key and the spec language
+    that mandates the fail-closed behaviour is intact.
+    """
+    from apm_cli.policy.parser import load_policy
+
+    policy, _ = load_policy(fixture_path("policy", "security-integrity.yml"))
+    assert policy.security.integrity.require_hashes is True
+    assert_spec_contains(
+        "`security.integrity.require_hashes: true`",
+        "fail-closed diagnostic",
+    )
+
+
+@pytest.mark.req("req-pl-014")
+def test_policy_fail_on_drift_parses_and_is_specified():
+    """req-pl-014: security.audit.fail_on_drift non-zero audit exit.
+
+    Binds the parsed boolean to the spec MUST. The audit exit-code
+    path is exercised by tests/unit/test_audit_fail_on_drift.py; here
+    we assert the parser surfaces the key and the spec language that
+    mandates the non-zero exit is intact.
+    """
+    from apm_cli.policy.parser import load_policy
+
+    policy, _ = load_policy(fixture_path("policy", "security-integrity.yml"))
+    assert policy.security.audit.fail_on_drift is True
+    assert_spec_contains(
+        "`security.audit.fail_on_drift: true`",
+        "non-zero exit status when lockfile",
+    )
+
+
 _ = waive  # keep import for any future structural waiver

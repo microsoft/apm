@@ -1,0 +1,1516 @@
+{
+  "apm-policy-allow.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": [
+        "DevExpGbb/*",
+        "microsoft/*"
+      ],
+      "deny": null,
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "warn",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "allow-list-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-block.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "block",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "block-mode-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-deny.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": [
+        "test-blocked/*"
+      ],
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "block",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "deny-list-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-extends-404-parent.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "warn",
+    "extends": "nonexistent-org/nonexistent-policy-repo",
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "extends-missing-parent-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-extends-cycle-parent.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "block",
+    "extends": "cycle-policy-a",
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "cycle-policy-b",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-extends-cycle.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": [
+        "test-blocked/*"
+      ],
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "warn",
+    "extends": "cycle-policy-b",
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "cycle-policy-a",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-extends-depth.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": [
+        "untrusted/*"
+      ],
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "warn",
+    "extends": "contoso-depth-5/policy",
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "depth-leaf-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-fail-on-drift-off.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "warn",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "fail-on-drift-off-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-fail-on-drift-on.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "block",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "fail-on-drift-on-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": true,
+        "on_install": "warn",
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-integrity-combined.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "block",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "integrity-combined-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": true,
+        "on_install": "block",
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": true
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-mcp.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "block",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": [
+        "io.github.github/*",
+        "io.github.modelcontextprotocol/*"
+      ],
+      "deny": [
+        "io.github.untrusted/*"
+      ],
+      "self_defined": "warn",
+      "transport": {
+        "allow": [
+          "stdio",
+          "http"
+        ]
+      },
+      "trust_transitive": false
+    },
+    "name": "mcp-enforcement-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-off.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "off",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "enforcement-off-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-require-hashes-off.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "warn",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "require-hashes-off-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-require-hashes-on.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "block",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "require-hashes-on-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": true
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-required-version.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": [
+        "DevExpGbb/required-standards#v2.0.0"
+      ],
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "block",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "required-version-pin-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-required.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": [
+        "DevExpGbb/required-standards"
+      ],
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "block",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "required-deps-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-target-allow.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": [
+          "vscode"
+        ],
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "block",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "target-restriction-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "apm-policy-warn.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "warn",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "warn-mode-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "enterprise-hub-policy.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": [
+        "contoso-*/*",
+        "microsoft/*",
+        "github/*"
+      ],
+      "deny": [
+        "untrusted-vendor/*"
+      ],
+      "max_depth": 50,
+      "require": [
+        "contoso-governance/coding-standards",
+        "contoso-governance/security-hooks#v2.0.0"
+      ],
+      "require_pinned_constraint": false,
+      "require_resolution": "policy-wins"
+    },
+    "enforcement": "block",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "contoso-enterprise-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": "deny",
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "minimal-policy.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": null,
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "warn",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "minimal",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  },
+  "org-policy.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": true,
+      "strategy": {
+        "enforce": "distributed"
+      },
+      "target": {
+        "allow": [
+          "vscode",
+          "claude",
+          "all"
+        ],
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": [
+        "DevExpGbb/*",
+        "microsoft/*",
+        "github/*"
+      ],
+      "deny": [
+        "test-blocked/*"
+      ],
+      "max_depth": 50,
+      "require": [
+        "DevExpGbb/required-standards"
+      ],
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "warn",
+    "extends": null,
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": {
+        "allow": [
+          "instructions",
+          "skill",
+          "hybrid",
+          "prompts"
+        ]
+      },
+      "require_explicit_includes": false,
+      "required_fields": [
+        "version",
+        "description"
+      ],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": [
+        "io.github.github/*",
+        "io.github.modelcontextprotocol/*"
+      ],
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": [
+          "stdio",
+          "http"
+        ]
+      },
+      "trust_transitive": false
+    },
+    "name": "devexpgbb-test-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": "warn",
+      "directories": []
+    },
+    "version": "1.0.0"
+  },
+  "repo-override-policy.yml": {
+    "bin_deploy": {
+      "deny": [],
+      "deny_all": false
+    },
+    "cache": {
+      "ttl": 3600
+    },
+    "compilation": {
+      "source_attribution": false,
+      "strategy": {
+        "enforce": null
+      },
+      "target": {
+        "allow": null,
+        "enforce": null
+      }
+    },
+    "dependencies": {
+      "allow": null,
+      "deny": [
+        "experimental/*"
+      ],
+      "max_depth": 50,
+      "require": null,
+      "require_pinned_constraint": false,
+      "require_resolution": "project-wins"
+    },
+    "enforcement": "warn",
+    "extends": "org",
+    "fetch_failure": "warn",
+    "manifest": {
+      "content_types": null,
+      "require_explicit_includes": false,
+      "required_fields": [],
+      "scripts": "allow"
+    },
+    "mcp": {
+      "allow": null,
+      "deny": [],
+      "self_defined": "warn",
+      "transport": {
+        "allow": null
+      },
+      "trust_transitive": false
+    },
+    "name": "repo-specific-policy",
+    "registry_source": {
+      "allow_non_registry": true,
+      "require": []
+    },
+    "security": {
+      "audit": {
+        "external": null,
+        "fail_on_drift": false,
+        "on_install": null,
+        "scanners": null
+      },
+      "integrity": {
+        "require_hashes": false
+      }
+    },
+    "unmanaged_files": {
+      "action": null,
+      "directories": null
+    },
+    "version": "1.0.0"
+  }
+}

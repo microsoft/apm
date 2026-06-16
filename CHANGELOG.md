@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   select it with `--target antigravity` or in `apm.yml` `targets:`; it is
   never auto-detected and is not part of `--target all`. (by @sergio-sisternes-epam;
   closes #1650) (#1770)
+- Two additive, default-off policy keys under the existing `security:` namespace: `security.integrity.require_hashes` makes `apm install` fail closed when any non-local lockfile entry lacks a content hash, and `security.audit.fail_on_drift` makes `apm audit` exit non-zero when the workspace drifts from the lockfile. Both only tighten through policy inheritance. (#1794)
 
 ### Removed
 
@@ -29,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm marketplace check` no longer fails with exit 128 for entries on
+  non-default hosts, including relative entries composed onto
+  `marketplace.sourceBase` (self-managed GitLab / GHES / Azure DevOps). It now
+  resolves each entry against its effective host and per-org token, matching
+  `apm pack`; local `./` packages skip the network.
+  (closes #1762, follows up #1736)
 - Policy inheritance no longer drops `fetch_failure`, `registry_source`, and `bin_deploy` when a policy `extends` another; these fields now carry and tighten through the merge like sibling sections. (closes #1778) (#1791)
 - `apm install` no longer silently ignores MCP servers declared in `devDependencies.mcp`; dev MCP configs and lockfile entries now stay in sync on fresh installs. (closes #1780) (#1787)
 - `apm compile` now honors `managed_section` mode on distributed root

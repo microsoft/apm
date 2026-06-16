@@ -1,0 +1,9 @@
+# Fixture: require_hashes explicitly disabled (matches default)
+# Tests: security.integrity.require_hashes parses false without warning
+name: require-hashes-off-policy
+version: "1.0.0"
+enforcement: warn
+
+security:
+  integrity:
+    require_hashes: false
