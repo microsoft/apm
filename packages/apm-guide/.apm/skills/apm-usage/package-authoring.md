@@ -411,6 +411,20 @@ URLs, and local `./` paths remain per-entry overrides. Without `sourceBase`,
 existing `owner/repo` source behavior is unchanged. The manifest schema
 Section 7.5 is canonical for the full validation and override rules.
 
+The base may target any supported host -- GitHub.com, GitHub Enterprise,
+self-hosted GitLab, or Azure DevOps. For Azure DevOps, use a
+`https://dev.azure.com/{org}/{project}/_git` base; the `dev.azure.com` host is
+preserved through to the consumer and authenticated with `ADO_APM_PAT`:
+
+```yaml
+marketplace:
+  sourceBase: https://dev.azure.com/contoso/platform/_git
+  packages:
+    - name: agent-skills
+      source: agent-skills          # -> contoso/platform/_git/agent-skills
+      ref: 3f2a9b1c
+```
+
 ## Step-by-step: create and publish
 
 ```bash

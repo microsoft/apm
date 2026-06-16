@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Azure DevOps is now documented as a first-class marketplace authoring host: a `marketplace.sourceBase` of `https://dev.azure.com/{org}/{project}/_git` composes relative package sources and preserves the `dev.azure.com` host through to the consumer (authenticated with `ADO_APM_PAT`). The end-to-end authoring -> consume path is pinned by a hermetic test. (closes #1010)
+
 ### Removed
 
 - `apm marketplace publish` command and consumer-repo fan-out workflow; consumers should run `apm install --update` instead. (#1134)

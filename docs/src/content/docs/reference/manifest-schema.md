@@ -819,11 +819,13 @@ The first three `source` forms target a remote git host; the second and third na
 
 When `sourceBase` is set, relative package sources compose onto that base. For example, `sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace` plus `source: review` emits `https://gitlab.corp.example.com/platform/agent-marketplace/review`. This includes two-segment `owner/repo` values and deeper relative paths; only host-prefixed sources, full HTTPS URLs, and local `./` sources are overrides that ignore `sourceBase`. Without `sourceBase`, existing `owner/repo` behavior is unchanged and single-segment relative sources are rejected.
 
+`sourceBase` works with any supported host. An Azure DevOps base such as `sourceBase: https://dev.azure.com/contoso/platform/_git` plus `source: agent-skills` emits `https://dev.azure.com/contoso/platform/_git/agent-skills`; the `dev.azure.com` host is preserved through to the consumer, which resolves it as an Azure DevOps dependency rather than rewriting it onto the default host.
+
 A relative `source` may use arbitrary path depth. A value whose leading segments form a host-prefixed shape (`<host.tld>/<owner>/<repo>`) or a full `https://` URL is always treated as a per-entry override and ignores `sourceBase`. A value that looks like it is trying to name a host (a dotted, FQDN-like first segment) but does **not** form a valid override shape is rejected at parse time rather than silently composed onto the base -- this avoids a confused-deputy footgun. To target a different host, use an explicit host-prefixed override or a full `https://` URL instead of a relative source.
 
 `sourceBase` must start with `https://`, use a FQDN host, include at least one path segment, and omit userinfo, ports, query strings, fragments, and a trailing `.git`. Each path segment uses letters, digits, `.`, `_`, or `-`; empty, `.` and `..` segments are refused.
 
-Non-default hosts authenticate via the standard APM token chain -- see the [authentication guide](../getting-started/authentication/) for the per-host-class lookup order. A token resolved for the default host is never forwarded to a non-default host.
+Non-default hosts -- GitHub Enterprise, self-hosted GitLab, and Azure DevOps -- authenticate via the standard APM token chain -- see the [authentication guide](../getting-started/authentication/) for the per-host-class lookup order. A token resolved for the default host is never forwarded to a non-default host (an Azure DevOps `ADO_APM_PAT`, for example, is only ever offered to `dev.azure.com`).
 
 ### 7.6. Complete Marketplace Block
 
