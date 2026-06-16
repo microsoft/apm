@@ -969,11 +969,14 @@ def _audit_content_scan(
 
     # Bare `apm audit` is advisory for drift by default: drift findings are
     # rendered (text/json/sarif) but DO NOT escalate the exit code. When
-    # `security.audit.fail_on_drift` is enabled, actual drift escalates a clean
-    # run to exit 1 (matching the `apm audit --ci` gate). Policy is discovered
-    # only when drift was detected, so the no-drift common case is unchanged.
-    _ = drift_failed  # retained for symmetry; --ci gate lives in _audit_ci_gate.
-    if drift_findings and exit_code == 0 and _resolve_fail_on_drift(project_root):
+    # `security.audit.fail_on_drift` is enabled, any drift-check FAILURE
+    # escalates a clean run to exit 1 -- matching the `apm audit --ci` gate,
+    # which fails on the same `drift_check.passed is False` signal. That covers
+    # both detected drift AND a drift check that could not run (corrupt local
+    # graph, unsupported replay); an advisory cache-miss SKIP stays passed=True
+    # and does NOT gate. Policy is discovered only when a drift failure
+    # occurred, so the clean common case is unchanged.
+    if drift_failed and exit_code == 0 and _resolve_fail_on_drift(project_root):
         exit_code = 1
 
     if effective_format == "text":

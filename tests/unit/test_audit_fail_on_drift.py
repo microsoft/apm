@@ -36,7 +36,15 @@ def _drift_return():
     return drift_check, [MagicMock()]
 
 
-def _run(tmp_path, fail_on_drift):
+def _drift_could_not_run():
+    """A drift check that FAILED to run: passed=False with zero findings."""
+    drift_check = MagicMock()
+    drift_check.passed = False
+    drift_check.message = "drift replay unsupported: scheme not yet handled"
+    return drift_check, []
+
+
+def _run(tmp_path, fail_on_drift, drift_ret=None):
     (tmp_path / "apm.yml").write_text("name: demo\n", encoding="utf-8")
     (tmp_path / "apm.lock.yaml").write_text("{}", encoding="utf-8")
     cfg = _make_cfg(tmp_path)
@@ -44,7 +52,10 @@ def _run(tmp_path, fail_on_drift):
     from apm_cli.commands import audit as audit_mod
 
     with (
-        patch("apm_cli.policy.ci_checks._check_drift", return_value=_drift_return()),
+        patch(
+            "apm_cli.policy.ci_checks._check_drift",
+            return_value=drift_ret if drift_ret is not None else _drift_return(),
+        ),
         patch.object(audit_mod.LockFile, "read", return_value=MagicMock()),
         patch.object(audit_mod, "scan_lockfile_packages", return_value=({}, 1)),
         patch.object(audit_mod, "_resolve_fail_on_drift", return_value=fail_on_drift),
@@ -61,3 +72,15 @@ def test_drift_with_fail_on_drift_exits_nonzero(tmp_path):
 
 def test_drift_default_off_exits_zero(tmp_path):
     assert _run(tmp_path, fail_on_drift=False) == 0
+
+
+def test_drift_check_could_not_run_with_fail_on_drift_exits_nonzero(tmp_path):
+    # A drift check that fails to RUN (passed=False, no findings) must still
+    # gate when fail_on_drift is on -- matching `apm audit --ci`, which fails
+    # on the same drift_check.passed signal. Otherwise the gate silently
+    # fails open on a broken drift replay.
+    assert _run(tmp_path, fail_on_drift=True, drift_ret=_drift_could_not_run()) != 0
+
+
+def test_drift_check_could_not_run_default_off_exits_zero(tmp_path):
+    assert _run(tmp_path, fail_on_drift=False, drift_ret=_drift_could_not_run()) == 0

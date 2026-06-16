@@ -339,9 +339,17 @@ def _enforce_require_hashes(ctx) -> None:
     from .phases.policy_gate import PolicyViolationError
 
     apm_dir = getattr(ctx, "apm_dir", None) or ctx.project_root
-    lockfile = LockFile.read(get_lockfile_path(apm_dir))
+    lockfile_path = get_lockfile_path(apm_dir)
+    lockfile = LockFile.read(lockfile_path)
     if lockfile is None:
-        return
+        # Fail closed: require_hashes is on but the freshly-written lockfile is
+        # missing or unreadable. Returning here would silently defeat the gate,
+        # so surface it as a policy violation instead of letting install pass.
+        raise PolicyViolationError(
+            "security.integrity.require_hashes is enabled but the lockfile at "
+            f"{lockfile_path} could not be read (missing or corrupt); "
+            "failing closed. Re-run 'apm install' to regenerate it."
+        )
     try:
         enforce_require_hashes(lockfile.get_package_dependencies(), enabled=True)
     except RuntimeError as exc:

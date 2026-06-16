@@ -12,7 +12,12 @@ than a package ``content_hash``, mirroring the existing
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+from urllib.parse import urlparse
 
 from apm_cli.deps.lockfile import LockedDependency
 from apm_cli.install.integrity import enforce_require_hashes, unhashed_dependencies
@@ -80,6 +85,64 @@ class TestEnforceRequireHashes(unittest.TestCase):
 
     def test_enabled_ignores_local_only(self):
         enforce_require_hashes([_dep("a", None, source="local")], enabled=True)
+
+    def test_enabled_redacts_credentials_in_message(self):
+        # A repo_url may carry inline ``user:token@host`` credentials. The
+        # fail-closed error names offenders, so it MUST redact the secret
+        # before formatting -- otherwise the token leaks into terminal/CI logs.
+        dep = LockedDependency(
+            repo_url="https://alice:s3cr3t-token@git.example.com/x.git",
+            resolved_commit="a" * 40,
+            content_hash=None,
+            source=None,
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            enforce_require_hashes([dep], enabled=True)
+        msg = str(ctx.exception)
+        urls = [tok.strip("(),.;'\"") for tok in msg.split() if "://" in tok]
+        self.assertEqual(len(urls), 1)
+        parsed = urlparse(urls[0])
+        self.assertEqual(parsed.hostname, "git.example.com")
+        self.assertNotEqual(parsed.password, "s3cr3t-token")
+        self.assertNotIn("s3cr3t-token", msg)
+
+
+def _gate_ctx(apm_dir: Path, require_hashes: bool):
+    """Minimal install-context stub for ``_enforce_require_hashes``."""
+    integrity = SimpleNamespace(require_hashes=require_hashes)
+    security = SimpleNamespace(integrity=integrity)
+    policy = SimpleNamespace(security=security)
+    policy_fetch = SimpleNamespace(policy=policy)
+    return SimpleNamespace(
+        no_policy=False,
+        policy_fetch=policy_fetch,
+        apm_dir=apm_dir,
+        project_root=apm_dir,
+    )
+
+
+class TestPipelineEnforceRequireHashes(unittest.TestCase):
+    """The pipeline gate must fail closed on an unreadable lockfile."""
+
+    def test_unreadable_lockfile_fails_closed_when_enabled(self):
+        from apm_cli.install.phases.policy_gate import PolicyViolationError
+        from apm_cli.install.pipeline import _enforce_require_hashes
+
+        with tempfile.TemporaryDirectory() as d:
+            ctx = _gate_ctx(Path(d), require_hashes=True)
+            with patch("apm_cli.deps.lockfile.LockFile.read", return_value=None):
+                with self.assertRaises(PolicyViolationError) as exc:
+                    _enforce_require_hashes(ctx)
+        self.assertIn("require_hashes", str(exc.exception))
+
+    def test_unreadable_lockfile_noop_when_disabled(self):
+        from apm_cli.install.pipeline import _enforce_require_hashes
+
+        with tempfile.TemporaryDirectory() as d:
+            ctx = _gate_ctx(Path(d), require_hashes=False)
+            with patch("apm_cli.deps.lockfile.LockFile.read", return_value=None):
+                # Default-off must not raise even if the lockfile is unreadable.
+                _enforce_require_hashes(ctx)
 
 
 if __name__ == "__main__":

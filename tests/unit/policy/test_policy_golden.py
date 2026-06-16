@@ -60,6 +60,18 @@ class TestPolicyGoldenParseEquivalence(unittest.TestCase):
 
         golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
 
+        # Exactness guard: the fixture set on disk and the golden set must
+        # match 1:1. Without this, adding a new *.yml fixture WITHOUT
+        # regenerating the snapshot would still pass -- the new fixture is
+        # simply absent from `golden` and never asserted, silently skipping
+        # coverage. Compare the key sets directly.
+        self.assertEqual(
+            set(snapshot.keys()),
+            set(golden.keys()),
+            "fixture set and golden snapshot set diverged; regenerate with "
+            "APM_REGEN_POLICY_GOLDEN=1 after adding or removing a policy fixture",
+        )
+
         # Every previously-snapshotted fixture must parse identically.
         for name, canonical in golden.items():
             with self.subTest(fixture=name):

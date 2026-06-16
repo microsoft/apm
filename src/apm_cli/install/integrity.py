@@ -49,7 +49,9 @@ def enforce_require_hashes(deps: list[LockedDependency], *, enabled: bool) -> No
     missing = unhashed_dependencies(deps)
     if not missing:
         return
-    names = ", ".join(sorted(d.repo_url for d in missing))
+    from .mcp.registry import _redact_url_credentials
+
+    names = ", ".join(sorted(_redact_url_credentials(d.repo_url) for d in missing))
     raise RuntimeError(
         "security.integrity.require_hashes is enabled but these locked "
         f"dependencies have no content hash (fail-closed): {names}. "
