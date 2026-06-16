@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, ClassVar
 
+from ...models.dependency.mcp import _RESERVED_EXTRA_KEYS
 from ...utils.console import _rich_error, _rich_warning
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
@@ -27,6 +28,15 @@ _ENV_PLACEHOLDER_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>|" + _ENV_VAR_RE.pattern)
 # Detects the legacy ``<VAR>`` placeholder syntax only. Used to aggregate
 # deprecation warnings across all servers in a single install run.
 _LEGACY_ANGLE_VAR_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>")
+
+# Config keys that ``_extra`` passthrough must NEVER set on a rendered harness
+# config. Covers the modeled MCP fields (imported single-source from the model)
+# plus harness-specific aliases that mirror a modeled field under a different
+# name -- e.g. Codex emits ``http_headers`` for remote auth headers, which must
+# not be injectable via passthrough. Enforced unconditionally per adapter path
+# (NOT guarded by "key absent from config"), so it also closes paths that do not
+# pre-set the key. Security boundary for PR #1765 / issue #1670.
+_EXTRA_DENYLIST = _RESERVED_EXTRA_KEYS | frozenset({"http_headers"})
 
 
 def registry_field_is_required(field: dict[str, Any]) -> bool:
@@ -122,12 +132,21 @@ class MCPClientAdapter(ABC):
     def _merge_extra(config: dict, server_info: dict) -> dict:
         """Merge harness-specific ``_extra`` keys from server_info into config.
 
-        Extra keys never shadow adapter-set keys; they are appended only
-        when absent from the config dict.
+        Two guards apply:
+
+        * Denylist (unconditional): a key naming a modeled MCP field -- or a
+          harness alias of one (see ``_EXTRA_DENYLIST``) -- is dropped on EVERY
+          path, even when the config does not already carry it. This stops a
+          passthrough value from shadowing/redirecting a modeled field on
+          adapter paths that start empty or set only a subset of keys.
+        * Shadow guard: a non-reserved key is appended only when absent, so it
+          never overwrites a value the adapter set itself.
         """
         extra = server_info.get("_extra")
         if extra and isinstance(extra, dict):
             for k, v in extra.items():
+                if k in _EXTRA_DENYLIST:
+                    continue
                 if k not in config:
                     config[k] = v
         return config

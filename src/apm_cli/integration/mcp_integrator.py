@@ -347,7 +347,7 @@ class MCPIntegrator:
             info["_apm_tools_override"] = dep.tools
 
         # Pass through harness-specific extra keys for adapters to merge
-        if hasattr(dep, "extra") and dep.extra:
+        if dep.extra:
             info["_extra"] = dict(dep.extra)
 
         return info
@@ -412,7 +412,7 @@ class MCPIntegrator:
             info["_apm_tools_override"] = dep.tools
 
         # Pass through harness-specific extra keys for adapters to merge
-        if hasattr(dep, "extra") and dep.extra:
+        if dep.extra:
             info["_extra"] = dict(dep.extra)
 
         # Warn about overlay fields not yet applied at install time

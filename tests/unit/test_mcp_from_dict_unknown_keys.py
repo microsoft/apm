@@ -416,3 +416,186 @@ class TestApplyOverlayExtra:
         dep = MCPDependency(name="my-server")
         MCPIntegrator._apply_overlay(cache, dep)
         assert "_extra" not in cache["my-server"]
+
+
+class TestAdapterRealPathExtraRender:
+    """End-to-end: extra reaches the FINAL rendered config via a real adapter path.
+
+    These drive the actual ``_format_server_config`` render (not the isolated
+    ``_merge_extra`` helper) so the per-adapter call sites are not mutation-blind.
+    Covers stdio + remote on two adapters (Codex, Copilot).
+    """
+
+    def test_codex_stdio_renders_extra(self, tmp_path):
+        from apm_cli.adapters.client.codex import CodexClientAdapter
+
+        adapter = CodexClientAdapter(project_root=tmp_path)
+        server_info = {
+            "name": "slack",
+            "_raw_stdio": {"command": "my-cmd", "args": ["--flag"], "env": {}},
+            "_extra": {"oauth": {"clientId": "abc", "callbackPort": 3118}},
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert cfg["oauth"] == {"clientId": "abc", "callbackPort": 3118}
+
+    def test_codex_remote_renders_extra(self, tmp_path):
+        from apm_cli.adapters.client.codex import CodexClientAdapter
+
+        adapter = CodexClientAdapter(project_root=tmp_path)
+        server_info = {
+            "name": "slack",
+            "id": "uuid-1",
+            "remotes": [{"transport_type": "streamable-http", "url": "https://mcp.slack.com/mcp"}],
+            "packages": [],
+            "_extra": {"oauth": {"clientId": "abc", "callbackPort": 3118}},
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert cfg["url"] == "https://mcp.slack.com/mcp"
+        assert cfg["oauth"] == {"clientId": "abc", "callbackPort": 3118}
+
+    def test_copilot_stdio_renders_extra(self):
+        from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
+        adapter = CopilotClientAdapter()
+        server_info = {
+            "name": "slack",
+            "_raw_stdio": {"command": "my-cmd", "args": ["--flag"], "env": {}},
+            "_extra": {"oauth": {"clientId": "abc"}},
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert cfg["oauth"] == {"clientId": "abc"}
+
+    def test_copilot_remote_renders_extra(self):
+        from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
+        adapter = CopilotClientAdapter()
+        server_info = {
+            "name": "slack",
+            "id": "uuid-2",
+            "remotes": [{"transport_type": "http", "url": "https://mcp.slack.com/mcp"}],
+            "_extra": {"oauth": {"clientId": "abc"}},
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert cfg["url"] == "https://mcp.slack.com/mcp"
+        assert cfg["oauth"] == {"clientId": "abc"}
+
+
+class TestAdapterRealPathShadowGuard:
+    """End-to-end: extra cannot shadow/redirect adapter-set fields on a real path."""
+
+    def test_codex_remote_extra_cannot_redirect_url(self, tmp_path):
+        """A denylisted ``url`` in extra must not overwrite the real remote URL."""
+        from apm_cli.adapters.client.codex import CodexClientAdapter
+
+        adapter = CodexClientAdapter(project_root=tmp_path)
+        server_info = {
+            "name": "slack",
+            "id": "uuid-1",
+            "remotes": [{"transport_type": "streamable-http", "url": "https://mcp.slack.com/mcp"}],
+            "packages": [],
+            "_extra": {"url": "https://evil.example.com/mcp", "oauth": {"clientId": "abc"}},
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert cfg["url"] == "https://mcp.slack.com/mcp"
+        assert cfg["oauth"] == {"clientId": "abc"}
+
+    def test_codex_remote_extra_cannot_inject_http_headers(self, tmp_path):
+        """``http_headers`` is a denylisted harness alias and must not be injectable."""
+        from apm_cli.adapters.client.codex import CodexClientAdapter
+
+        adapter = CodexClientAdapter(project_root=tmp_path)
+        server_info = {
+            "name": "slack",
+            "id": "uuid-1",
+            "remotes": [{"transport_type": "streamable-http", "url": "https://mcp.slack.com/mcp"}],
+            "packages": [],
+            "_extra": {"http_headers": {"Authorization": "Bearer evil"}},
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert "http_headers" not in cfg
+
+    def test_copilot_stdio_extra_cannot_redirect_command(self):
+        """A denylisted ``command`` in extra must not overwrite the real command."""
+        from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
+        adapter = CopilotClientAdapter()
+        server_info = {
+            "name": "slack",
+            "_raw_stdio": {"command": "real-cmd", "args": [], "env": {}},
+            "_extra": {"command": "/bin/evil", "oauth": {"clientId": "abc"}},
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert cfg["command"] == "real-cmd"
+        assert cfg["oauth"] == {"clientId": "abc"}
+
+    def test_codex_remote_extra_cannot_inject_command_on_empty_path(self, tmp_path):
+        """The denylist is unconditional: ``command`` is blocked even on the remote
+        path that never pre-sets ``command`` (the ``if k not in config`` guard would
+        otherwise let it through)."""
+        from apm_cli.adapters.client.codex import CodexClientAdapter
+
+        adapter = CodexClientAdapter(project_root=tmp_path)
+        server_info = {
+            "name": "slack",
+            "id": "uuid-1",
+            "remotes": [{"transport_type": "streamable-http", "url": "https://mcp.slack.com/mcp"}],
+            "packages": [],
+            "_extra": {"command": "/bin/evil", "oauth": {"clientId": "abc"}},
+        }
+        cfg = adapter._format_server_config(server_info)
+        assert "command" not in cfg
+        assert cfg["oauth"] == {"clientId": "abc"}
+
+
+class TestExtraReservedKeyDenylist:
+    """Reserved modeled-field names cannot pass through 'extra' at either layer."""
+
+    def test_explicit_extra_reserved_key_stripped(self):
+        """An explicit 'extra:' block carrying a modeled-field name drops it."""
+        with patch(_WARN_PATH) as mock_warn:
+            dep = MCPDependency.from_dict(
+                {
+                    "name": "server",
+                    "transport": "http",
+                    "registry": False,
+                    "url": "https://example.com/mcp",
+                    "extra": {"command": "/bin/evil", "oauth": {"clientId": "abc"}},
+                }
+            )
+        assert dep.extra == {"oauth": {"clientId": "abc"}}
+        msg = mock_warn.call_args[0][0]
+        assert "command" in msg
+
+    def test_explicit_extra_reserved_alias_type_stripped(self):
+        """The legacy alias 'type' is reserved and stripped from an explicit extra block."""
+        with patch(_WARN_PATH):
+            dep = MCPDependency.from_dict(
+                {
+                    "name": "server",
+                    "transport": "http",
+                    "registry": False,
+                    "url": "https://example.com/mcp",
+                    "extra": {"type": "stdio", "oauth": {}},
+                }
+            )
+        assert "type" not in dep.extra
+        assert dep.extra == {"oauth": {}}
+
+    def test_merge_extra_blocks_reserved_keys_unconditionally(self):
+        """_merge_extra drops modeled-field names even when absent from config."""
+        from apm_cli.adapters.client.base import MCPClientAdapter
+
+        config = {"url": "https://example.com", "id": "uuid"}
+        server_info = {
+            "_extra": {
+                "command": "/bin/evil",
+                "env": {"X": "1"},
+                "http_headers": {"Authorization": "Bearer evil"},
+                "oauth": {"clientId": "abc"},
+            }
+        }
+        MCPClientAdapter._merge_extra(config, server_info)
+        assert "command" not in config
+        assert "env" not in config
+        assert "http_headers" not in config
+        assert config["oauth"] == {"clientId": "abc"}

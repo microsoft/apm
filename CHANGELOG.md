@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- MCP dependencies can now carry harness-specific passthrough keys (for example Claude Code's remote-MCP `oauth` block with `clientId`/`callbackPort`); previously any key outside the modeled set was silently dropped on render. Passthrough keys round-trip into the generated config for every installed harness and cannot shadow a modeled field (`command`/`url`/`headers`/`env`/...), which are rejected with a warning. A future fail-closed tightening to an explicit `extra:` block is tracked in #1806. (closes #1670) (#1765)
+
 ### Removed
 
 - `apm marketplace publish` command and consumer-repo fan-out workflow; consumers should run `apm install --update` instead. (#1134)

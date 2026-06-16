@@ -353,7 +353,9 @@ dependencies:
       url: "https://mcp.internal.example.com"
 
     # Self-defined remote with harness-specific extra keys
-    # (extra keys are preserved and round-tripped into the target manifest)
+    # Unknown keys (e.g. oauth) are passthrough: preserved and written into
+    # the generated config for EVERY installed harness. Keys that collide with
+    # a modeled field (command/url/headers/env/...) are rejected with a warning.
     - name: slack
       registry: false
       transport: http
