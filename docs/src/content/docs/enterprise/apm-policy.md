@@ -33,6 +33,8 @@ It declares:
 
 It does **not** scan code semantics or behave like an antivirus. It enforces declarations against an allow/deny list before APM writes any file.
 
+The policy schema addresses install-time gates exclusively. It has no fields for runtime permissions or agent sandboxing. See [Governance overview](/apm/enterprise/governance-overview/#boundary-statement) for how APM policy coexists with harness configuration.
+
 ---
 
 ## Where it lives
