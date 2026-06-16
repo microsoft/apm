@@ -165,6 +165,37 @@ Error messages always name the `apm.yml` path and the offending token, so the fi
 
 The package-authored `targets:`/`target:` field overrides auto-detect but is itself overridden by an explicit `--target` flag at install/compile time. Run `apm targets` in the consumer's directory to see what the resolution chain produces.
 
+## Manifest fields: `license:` (declared license for SBOM)
+
+`apm.yml` accepts an optional top-level `license:` field -- an SPDX
+expression that *declares* the package's license:
+
+```yaml
+name: my-package
+version: 1.0.0
+license: MIT                 # or "(MIT OR Apache-2.0)", "Apache-2.0", ...
+```
+
+This mirrors how npm treats `package.json`'s `license`: it is an author
+**claim**, not a conclusion drawn from the `LICENSE` file text. APM records
+the declared value into the consumer's `apm.lock.yaml` (`declared_license`)
+at resolve time and passes it through to `apm lock export` SBOMs. APM never
+reads or interprets the `LICENSE` file -- declared is not concluded.
+
+The value is syntax-validated **offline** against the bundled SPDX id set.
+An unrecognized string (or a special token like `UNLICENSED` or
+`SEE LICENSE IN <file>`) is **never** rejected -- it is recorded verbatim
+and emitted in the SBOM as a named license. Authoring never blocks on a
+license value.
+
+If you omit `license:`, `apm pack` and `apm publish` print an actionable
+warning (`No 'license:' field in apm.yml; the SBOM will record NOASSERTION
+for this package. Add a 'license:' field ...`). The SBOM still exports
+correctly -- the component just records NOASSERTION (genuinely unknown).
+This warning fires only on the **authoring** path (your own `apm.yml`);
+installing or exporting other people's dependencies is silent.
+
+
 ## The 7 primitive types
 
 ### 1. Instruction (`*.instructions.md`)

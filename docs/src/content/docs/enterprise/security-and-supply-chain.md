@@ -73,6 +73,46 @@ path" assertions, not as "APM made this safe".
 For the registry-proxy / air-gap story see
 [Registry proxy](./registry-proxy/).
 
+## Inventory export (SBOM)
+
+`apm lock export --format cyclonedx|spdx` serializes the lockfile into a
+CycloneDX 1.5 or SPDX 2.3 document. This is an **inventory** export, not a
+security attestation: it reflects exactly what `apm.lock.yaml` already
+recorded -- component identity (purl), recorded hashes, and the declared
+license -- and never re-resolves, re-hashes, or touches the network or the
+filesystem. Source: `src/apm_cli/export/`.
+
+Component identity is a Package URL: `pkg:github/<owner>/<repo>@<commit>`
+for git deps (the forge is read from the lockfile, falling back to
+`pkg:generic/` for an unrecognized host), `pkg:oci/<name>@<digest>` for
+registry deps, and `pkg:generic/<name>@<content_hash>` for local
+primitives. Output is deterministic -- components sorted by purl, a pinned
+timestamp (`--timestamp`, then `SOURCE_DATE_EPOCH`, then the lockfile's
+`generated_at`), stable key order -- so two runs are byte-identical. Any
+credentials embedded in a recorded URL are scrubbed before they reach the
+document.
+
+**Declared license, npm-faithful.** APM records the license the package
+*manifest declares* (`license:` in `apm.yml`, or `license` in a
+`plugin.json`) into the lockfile's `declared_license` field at resolve
+time, syntax-validates it offline against the bundled SPDX id set, and
+passes it through to the SBOM. APM never reads or interprets the text of a
+`LICENSE` file -- declared is not concluded. Three states, never collapsed:
+
+| State | Lockfile | CycloneDX | SPDX |
+|---|---|---|---|
+| Declared, valid SPDX (`MIT`, `(MIT OR Apache-2.0)`) | verbatim | `license.id` / `expression` | the value |
+| Declared special token (`UNLICENSED`, `SEE LICENSE IN <f>`) | verbatim | `license.name` (a named assertion) | the value |
+| Not declared | field omitted | `licenses[]` omitted | `NOASSERTION` |
+
+The not-declared state is genuinely unknown, never silently upgraded to a
+license just because a `LICENSE` file exists on disk. On the **authoring**
+path (`apm pack` / `apm publish` on your own `apm.yml`) a missing `license:`
+prints an actionable warning; on the **consuming** path (install/export of
+other people's deps) APM stays silent -- it never nags about transitive
+licenses it cannot fix. Source: `src/apm_cli/export/authoring.py`.
+
+
 ## Secret handling
 
 APM has no secret store. The contract is:
@@ -184,7 +224,12 @@ State this plainly to your security reviewers:
   from the host (GitHub / ADO / GitLab), the pinned commit SHA, and
   the content hash -- not from a cryptographic identity attached to
   the package itself. (`src/apm_cli/install/cache_pin.py:24` notes
-  signatures as deferred.)
+  signatures as deferred.) The SBOM export (above) is an inventory of
+  what the lockfile recorded, not a signed attestation.
+- **Not a license compliance tool.** APM records the *declared*
+  license and emits it in the SBOM. It does not scan `LICENSE` text,
+  conclude a license, check compatibility, or gate install on a
+  license -- that is the compliance plane, downstream of APM.
 - **Not transport security on `http://` deps.** See "Provenance"
   above.
 - **Not protection against visible prompt injection.** The Unicode
