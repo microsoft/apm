@@ -152,7 +152,7 @@ Gemini CLI.
 
 Google Antigravity CLI (`agy`), successor to Gemini CLI.
 
-- **Detection.** `.agent/` directory.
+- **Detection.** `.agent/` directory. Project-scope writes are opt-in: `.agent/` must already exist (APM does not create it automatically).
 - **Deploy directory.** `.agent/` (project scope); `~/.antigravity/` (user scope).
 - **Supported primitives.** instructions, commands, skills, hooks, mcp.
 - **File conventions.**

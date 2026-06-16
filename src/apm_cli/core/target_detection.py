@@ -183,6 +183,7 @@ def detect_target(  # noqa: PLR0911
     gemini_exists = (project_root / ".gemini").is_dir()
     windsurf_exists = (project_root / ".windsurf").is_dir()
     kiro_exists = (project_root / ".kiro").is_dir()
+    antigravity_exists = (project_root / ".agent").is_dir()
     detected = []
     if github_exists:
         detected.append(".github/")
@@ -200,6 +201,8 @@ def detect_target(  # noqa: PLR0911
         detected.append(".windsurf/")
     if kiro_exists:
         detected.append(".kiro/")
+    if antigravity_exists:
+        detected.append(".agent/")
 
     if len(detected) >= 2:
         return "all", f"detected {' and '.join(detected)} folders"
@@ -219,6 +222,8 @@ def detect_target(  # noqa: PLR0911
         return "windsurf", "detected .windsurf/ folder"
     elif kiro_exists:
         return "kiro", "detected .kiro/ folder"
+    elif antigravity_exists:
+        return "antigravity", "detected .agent/ folder"
     else:
         return "minimal", REASON_NO_TARGET_FOLDER
 
@@ -243,6 +248,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
         "opencode",
         "codex",
         "gemini",
+        "antigravity",
         "windsurf",
         "kiro",
         "hermes",
@@ -394,6 +400,7 @@ TARGET_ALIASES: dict[str, str] = {
     "copilot": "vscode",
     "agents": "vscode",
     "vscode": "vscode",
+    "agy": "antigravity",
 }
 
 

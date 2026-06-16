@@ -964,7 +964,7 @@ def _handle_mcp_install(
     "global_",
     is_flag=True,
     default=False,
-    help="Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Kiro, Windsurf, JetBrains Copilot).",
+    help="Install to user scope (~/.apm/) instead of the current project. MCP servers target global-capable runtimes only (Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Kiro, Windsurf, JetBrains Copilot).",
 )
 @click.option(
     "--ssh",

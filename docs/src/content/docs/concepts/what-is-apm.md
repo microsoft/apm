@@ -47,7 +47,7 @@ APM commits to three things. Each gets a one-paragraph summary here; the deep di
 
 ### Portable by manifest
 
-One `apm.yml`. Seven harnesses. Reproducible AI agent setup. Every developer who clones the repo runs `apm install` and gets the same skills, prompts, instructions, hooks, and MCP servers wired into Copilot, Claude, Cursor, OpenCode, Codex, Gemini, and Windsurf. The lockfile pins exact versions and content hashes.
+One `apm.yml`. Eight harnesses. Reproducible AI agent setup. Every developer who clones the repo runs `apm install` and gets the same skills, prompts, instructions, hooks, and MCP servers wired into Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Antigravity, and Windsurf. The lockfile pins exact versions and content hashes.
 
 ### Secure by default
 

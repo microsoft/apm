@@ -40,7 +40,7 @@ class AntigravityClientAdapter(GeminiClientAdapter):
     supports_user_scope: bool = True
     target_name: str = "antigravity"
 
-    def _get_gemini_dir(self) -> Path:
+    def _get_config_dir(self) -> Path:
         """Return the ``.agent`` or ``~/.antigravity`` directory."""
         if self.user_scope:
             return Path.home() / ".antigravity"
@@ -48,4 +48,4 @@ class AntigravityClientAdapter(GeminiClientAdapter):
 
     def get_config_path(self):
         """Return the path to ``settings.json`` for the active scope."""
-        return str(self._get_gemini_dir() / "settings.json")
+        return str(self._get_config_dir() / "settings.json")

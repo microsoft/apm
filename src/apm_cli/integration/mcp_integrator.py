@@ -732,12 +732,13 @@ class MCPIntegrator:
 
         # Clean .agent/settings.json (only if .agent/ directory exists)
         if "antigravity" in target_runtimes:
-            _clean_json_mcp_config(
-                project_root_path / ".agent" / "settings.json",
-                expanded_stale,
-                logger,
-                ".agent/settings.json",
-            )
+            if (project_root_path / ".agent").is_dir():
+                _clean_json_mcp_config(
+                    project_root_path / ".agent" / "settings.json",
+                    expanded_stale,
+                    logger,
+                    ".agent/settings.json",
+                )
 
         # Clean Claude Code project .mcp.json (only if .claude/ directory exists)
         if clean_claude_project:
