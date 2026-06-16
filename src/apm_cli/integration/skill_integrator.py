@@ -136,24 +136,37 @@ class SkillIntegrator(BaseIntegrator):
         shutil.copytree(source_path, skill_dir, ignore=ignore_non_content)
 
     @staticmethod
-    def _copy_native_skill_tree(package_path: Path, target_skill_dir: Path) -> None:
+    def _copy_native_skill_tree(
+        package_path: Path,
+        target_skill_dir: Path,
+        *,
+        skip_bin: bool = False,
+    ) -> None:
         """Copy a native skill tree while excluding non-content files and .apm."""
-        from apm_cli.security.gate import ignore_non_content
+        base_ignore = _skill_deploy._build_copy_ignore(skip_bin=skip_bin)
+        apm_filter = shutil.ignore_patterns(".apm")
 
         def ignore_non_content_and_apm(directory: str, contents: list[str]) -> list[str]:
-            ignored = set(ignore_non_content(directory, contents))
-            if ".apm" in contents:
-                ignored.add(".apm")
-            return list(ignored)
+            return list(
+                set(base_ignore(directory, contents)) | set(apm_filter(directory, contents))
+            )
 
         shutil.copytree(package_path, target_skill_dir, ignore=ignore_non_content_and_apm)
 
     @staticmethod
-    def _copy_promoted_skill_tree(sub_skill_path: Path, target: Path) -> None:
+    def _copy_promoted_skill_tree(
+        sub_skill_path: Path,
+        target: Path,
+        *,
+        skip_bin: bool = False,
+    ) -> None:
         """Copy a promoted sub-skill tree while excluding non-content files."""
-        from apm_cli.security.gate import ignore_non_content
-
-        shutil.copytree(sub_skill_path, target, dirs_exist_ok=True, ignore=ignore_non_content)
+        shutil.copytree(
+            sub_skill_path,
+            target,
+            dirs_exist_ok=True,
+            ignore=_skill_deploy._build_copy_ignore(skip_bin=skip_bin),
+        )
 
     @staticmethod
     def _skill_subset_name_filter(skill_subset: tuple[str, ...] | None) -> set[str] | None:
@@ -161,7 +174,7 @@ class SkillIntegrator(BaseIntegrator):
         return _skill_deploy._skill_subset_name_filter(skill_subset)
 
     @staticmethod
-    def _promote_sub_skills(
+    def _promote_sub_skills(  # noqa: PLR0913
         sub_skills_dir: Path,
         target_skills_root: Path,
         parent_name: str,
@@ -175,6 +188,7 @@ class SkillIntegrator(BaseIntegrator):
         logger: Any = None,
         name_filter: set[str] | None = None,
         link_rewriter: Any = None,
+        skip_bin: bool = False,
     ) -> tuple[int, list[Path]]:
         """Promote sub-skills from a package skill directory."""
         return _skill_deploy._promote_sub_skills(
@@ -190,6 +204,7 @@ class SkillIntegrator(BaseIntegrator):
             logger=logger,
             name_filter=name_filter,
             link_rewriter=link_rewriter,
+            skip_bin=skip_bin,
         )
 
     @staticmethod
@@ -219,6 +234,7 @@ class SkillIntegrator(BaseIntegrator):
         logger: Any = None,
         targets: Any = None,
         skill_subset: Any = None,
+        skip_bin: bool = False,
     ) -> tuple[int, list[Path]]:
         """Promote sub-skills from a package that is not itself a skill."""
         return _skill_deploy._promote_sub_skills_standalone(
@@ -231,6 +247,7 @@ class SkillIntegrator(BaseIntegrator):
             logger=logger,
             targets=targets,
             skill_subset=skill_subset,
+            skip_bin=skip_bin,
         )
 
     def _integrate_native_skill(
@@ -243,6 +260,7 @@ class SkillIntegrator(BaseIntegrator):
         force: bool = False,
         logger: Any = None,
         targets: Any = None,
+        skip_bin: bool = False,
     ) -> SkillIntegrationResult:
         """Copy a native skill to all active targets."""
         fields = _skill_deploy._integrate_native_skill(
@@ -255,6 +273,7 @@ class SkillIntegrator(BaseIntegrator):
             force=force,
             logger=logger,
             targets=targets,
+            skip_bin=skip_bin,
         )
         return SkillIntegrationResult(
             skill_created=fields["skill_created"],
@@ -278,6 +297,7 @@ class SkillIntegrator(BaseIntegrator):
         logger: Any = None,
         targets: Any = None,
         skill_subset: Any = None,
+        skip_bin: bool = False,
     ) -> SkillIntegrationResult:
         """Promote every skill in a skill bundle's top-level skills directory."""
         fields = _skill_deploy._integrate_skill_bundle(
@@ -291,6 +311,7 @@ class SkillIntegrator(BaseIntegrator):
             logger=logger,
             targets=targets,
             skill_subset=skill_subset,
+            skip_bin=skip_bin,
         )
         return SkillIntegrationResult(**fields)
 
@@ -306,6 +327,7 @@ class SkillIntegrator(BaseIntegrator):
         skill_subset: Any = None,
         scope: Any = None,
         policy: Any = None,
+        skip_bin: bool = False,
     ) -> SkillIntegrationResult:
         """Integrate a package's skill into all active target directories."""
         context = _skill_deploy.PackageSkillContext(
@@ -317,6 +339,7 @@ class SkillIntegrator(BaseIntegrator):
             skill_subset=skill_subset,
             scope=scope,
             policy=policy,
+            skip_bin=skip_bin,
             should_install_fn=should_install_skill,
             result_cls=SkillIntegrationResult,
         )

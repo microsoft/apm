@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from ..integration.base_integrator import BaseIntegrator
     from ..utils.diagnostics import DiagnosticCollector
 
+from ._services_helpers import _deployed_path_entry, _label_and_deploy_dir, _log_hooks_skip
 from .services_integrate import _log_hook_display_payloads as _log_hook_display_payloads
 from .services_integrate import (
     _log_per_kind_results,
@@ -62,6 +63,30 @@ class IntegratorBundle:
     instruction: BaseIntegrator
     command: BaseIntegrator
     hook: BaseIntegrator
+    # Optional so the ~16 existing test/prod construction sites that omit it
+    # keep working. Production sites (template.py, integrate_local_content,
+    # drift.py) pass a real CanvasIntegrator; when None the loop skips canvas.
+    canvas: BaseIntegrator | None = None
+
+    @classmethod
+    def from_mapping(cls, integrators: dict[str, BaseIntegrator]) -> IntegratorBundle:
+        """Build a bundle from a ``ctx.integrators`` mapping.
+
+        Centralises the six required integrators plus the optional canvas
+        so call sites (template.py, phases/integrate.py, drift.py) share a
+        single construction path instead of duplicating the kwargs block.
+        The ``canvas`` key is optional; when absent the field defaults to
+        ``None`` and the integration loop skips canvas deployment.
+        """
+        return cls(
+            prompt=integrators["prompt"],
+            agent=integrators["agent"],
+            skill=integrators["skill"],
+            instruction=integrators["instruction"],
+            command=integrators["command"],
+            hook=integrators["hook"],
+            canvas=integrators.get("canvas"),
+        )
 
 
 @dataclass(frozen=True)
@@ -88,98 +113,20 @@ class IntegrationOptions:
     policy: Any = field(default=None, compare=False)
 
 
-def _deployed_path_entry(
-    target_path: Path,
-    project_root: Path,
-    targets: Any,
-) -> str:
-    """Return the lockfile-safe path string for a deployed file.
+def _check_executable_approval(
+    package_name: str,
+    package_info: Any,
+    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
+    *,
+    ctx: InstallContext | None = None,
+) -> tuple[bool, bool]:
+    """Delegate to ``exec_gate.check_executable_approval``."""
+    from apm_cli.install.exec_gate import check_executable_approval
 
-    For standard targets the entry is ``project_root``-relative.  For
-    cowork (dynamic-root) targets the entry uses the synthetic
-    ``cowork://`` URI scheme so the lockfile pipeline does not attempt
-    a ``Path.relative_to(project_root)`` that would crash.
-
-    Raises
-    ------
-    RuntimeError
-        If the path is outside the project tree and cannot be
-        translated to a ``cowork://`` URI via any available target.
-    """
-    if targets:
-        for _t in targets:
-            if _t.resolved_deploy_root is None:
-                continue
-            try:
-                target_path.relative_to(_t.resolved_deploy_root)
-            except ValueError:
-                continue
-            if _t.name == "copilot-app":
-                from apm_cli.integration.copilot_app_db import to_lockfile_uri
-
-                return to_lockfile_uri(target_path.name)
-            from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
-
-            return to_lockfile_path(target_path, _t.resolved_deploy_root)
-    try:
-        return target_path.relative_to(project_root).as_posix()
-    except ValueError:
-        # Path is outside the project tree and no dynamic-root target
-        # contained it. Fall through to the legacy cowork translation
-        # which security-validates against deploy_root and raises
-        # PathTraversalError when out of bounds.
-        if targets:
-            for _t in targets:
-                if _t.resolved_deploy_root is None:
-                    continue
-                if _t.name == "copilot-app":
-                    from apm_cli.integration.copilot_app_db import to_lockfile_uri
-
-                    return to_lockfile_uri(target_path.name)
-                from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
-
-                return to_lockfile_path(target_path, _t.resolved_deploy_root)
-        raise RuntimeError(  # noqa: B904
-            f"Cannot translate {target_path!r} to a lockfile path: "
-            f"path is outside the project tree and no dynamic-root "
-            f"target matched. This is a bug — please report it."
-        )
+    return check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
 
 
-def _skill_bundle_file_entries(
-    skill_dir: Path,
-    project_root: Path,
-    targets: Any,
-) -> list[str]:
-    """Return per-file lockfile entries for a deployed skill bundle directory.
-
-    A skill is deployed as a directory (e.g. ``.agents/skills/<s>``). Recording
-    only the directory leaves its contents unhashed, so skill content drift
-    escapes ``content-integrity`` (the ``apm audit --ci --no-drift`` gate).
-    This expands the bundle into per-file entries (``SKILL.md``, ``assets/``,
-    ``scripts/``) so ``compute_deployed_hashes`` hashes them. The directory
-    entry itself is recorded by the caller and intentionally excluded here.
-
-    Mocked or file-shaped ``target_paths`` (used in unit tests) are not real
-    directories on disk and yield an empty list, so callers pass them through
-    unchanged.
-    """
-    try:
-        if not (skill_dir.is_dir() and not skill_dir.is_symlink()):
-            return []
-    except OSError:
-        return []
-    entries: list[str] = []
-    for bundle_file in sorted(skill_dir.rglob("*")):
-        try:
-            if bundle_file.is_file() and not bundle_file.is_symlink():
-                entries.append(_deployed_path_entry(bundle_file, project_root, targets))
-        except OSError:
-            continue
-    return entries
-
-
-def integrate_package_primitives(
+def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
     *,
@@ -193,6 +140,8 @@ def integrate_package_primitives(
     scope: InstallScope | None = None,
     ctx: InstallContext | None = None,
     options: IntegrationOptions | None = None,
+    is_first_party: bool = False,
+    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -210,6 +159,11 @@ def integrate_package_primitives(
 
     Advanced options (skill filtering, drift-replay scratch root, policy)
     are grouped in the optional *options* parameter.
+
+    When *allow_executables* is provided, executable primitives (hooks,
+    bin/) are only deployed for packages whose key appears in the dict
+    with the matching type set to ``True``.  Local project content
+    (``package_name == "_local"``) is always trusted.
 
     Returns a dict with integration counters and the list of deployed file paths.
     """
@@ -231,6 +185,7 @@ def integrate_package_primitives(
         "instructions": 0,
         "commands": 0,
         "hooks": 0,
+        "canvases": 0,
         "links_resolved": 0,
         "deployed_files": [],
     }
@@ -252,8 +207,17 @@ def integrate_package_primitives(
         scratch_root = Path(scratch_root).resolve()
         ensure_path_within(Path(project_root).resolve(), scratch_root)
 
+    # Executable approval gate (npm v12-style default-deny).
+    _hooks_approved, _bin_approved = _check_executable_approval(
+        package_name, package_info, allow_executables, ctx=ctx
+    )
+
     # Amendment 6: cowork non-skill primitive warning (once per run).
     _warn_cowork_nonsupported(targets, ctx, package_info, package_name, logger, diagnostics)
+
+    def _log_integration(msg: str) -> None:
+        if logger:
+            logger.tree_item(msg)
 
     _verbose = bool(getattr(ctx, "verbose", False)) if ctx is not None else False
 
@@ -263,6 +227,7 @@ def integrate_package_primitives(
         "commands": integrators.command,
         "instructions": integrators.instruction,
         "hooks": integrators.hook,
+        "canvas": integrators.canvas,
         "skills": integrators.skill,
     }
 
@@ -274,7 +239,17 @@ def integrate_package_primitives(
     for _prim_name, _entry in _dispatch.items():
         if _entry.multi_target:
             continue  # skills handled separately
+        # Executable approval gate: skip hooks if not approved.
+        if _prim_name == "hooks" and not _hooks_approved:
+            _log_hooks_skip(package_name, package_info, targets, logger)
+            continue
         _integrator = _INTEGRATOR_KWARGS[_prim_name]
+        # A primitive can be statically present on a target (e.g. the
+        # copilot canvas mapping) while a given IntegratorBundle omits its
+        # integrator (None). Skip rather than crash so test/replay bundles
+        # that don't wire the integrator simply no-op that primitive.
+        if _integrator is None:
+            continue
         _agg_files = 0
         _agg_adopted = 0
         _agg_paths: list[str] = []
@@ -296,6 +271,17 @@ def integrate_package_primitives(
             # don't accept this kwarg, so include it only for hooks.
             if _prim_name == "hooks":
                 _call_kwargs["user_scope"] = scope is InstallScope.USER
+            # Canvas alone needs the trust signal: dependency-provided
+            # canvases are executable code blocked unless the operator
+            # passed --trust-canvas-extensions. First-party (root/local)
+            # status is decided by the CALL PATH, not by a package-name
+            # string a dependency could spoof: only integrate_local_content
+            # passes is_first_party=True. Every dependency call defaults to
+            # False, so a dependency canvas always requires the trust flag.
+            if _prim_name == "canvas":
+                _call_kwargs["trust_canvas"] = bool(getattr(ctx, "trust_canvas", False))
+                _call_kwargs["is_first_party"] = is_first_party
+                _call_kwargs["package_name"] = package_name
             _int_result = getattr(_integrator, _entry.integrate_method)(
                 _target,
                 package_info,
@@ -324,19 +310,11 @@ def integrate_package_primitives(
                 if _mapping.subdir
                 else f"{_effective_root}/"
             )
-            if _prim_name == "instructions" and _mapping.output_compare:
-                _label = "rule(s)"
-            elif _prim_name == "instructions":
-                _label = "instruction(s)"
-            elif _prim_name == "hooks":
-                if _target.hooks_config_display:
-                    _deploy_dir = _target.hooks_config_display
-                _label = "hook(s)"
+            _label, _deploy_dir = _label_and_deploy_dir(_prim_name, _mapping, _target, _deploy_dir)
+            if _prim_name == "hooks":
                 _agg_hook_payloads.extend(
                     p for p in getattr(_int_result, "display_payloads", []) or []
                 )
-            else:
-                _label = _prim_name
             _agg_paths.append(_deploy_dir)
 
         if _agg_files > 0 or _agg_adopted > 0:
@@ -348,7 +326,13 @@ def integrate_package_primitives(
                 "hook_payloads": _agg_hook_payloads,
             }
 
-    _log_per_kind_results(_per_kind, _dispatch, _verbose, logger)
+    _log_per_kind_results(
+        _per_kind,
+        _dispatch,
+        _verbose,
+        logger,
+        log_integration=_log_integration,
+    )
 
     skill_result = integrators.skill.integrate_package_skill(
         package_info,
@@ -360,8 +344,19 @@ def integrate_package_primitives(
         skill_subset=skill_subset,
         scope=scope,
         policy=policy,
+        skip_bin=not _bin_approved,
     )
-    _log_skill_result(skill_result, result, project_root, targets, _verbose, logger)
+    _log_skill_result(
+        skill_result,
+        result,
+        project_root,
+        targets,
+        _verbose,
+        logger,
+        package_name=package_name,
+        package_info=package_info,
+        log_integration=_log_integration,
+    )
 
     # A3: warm-cache visibility.
     _total_integrated = sum(_info["files"] for _info in _per_kind.values())
@@ -411,6 +406,7 @@ def integrate_local_content(
     Returns a dict with integration counters and deployed file paths,
     same shape as ``integrate_package_primitives()``.
     """
+    from ..integration.canvas_integrator import CanvasIntegrator
     from ..models.apm_package import APMPackage, PackageInfo, PackageType
 
     if source_root is None:
@@ -428,6 +424,17 @@ def integrate_local_content(
         package_type=PackageType.APM_PACKAGE,
     )
 
+    if integrators.canvas is None:
+        integrators = IntegratorBundle(
+            prompt=integrators.prompt,
+            agent=integrators.agent,
+            skill=integrators.skill,
+            instruction=integrators.instruction,
+            command=integrators.command,
+            hook=integrators.hook,
+            canvas=CanvasIntegrator(),
+        )
+
     return integrate_package_primitives(
         local_info,
         project_root,
@@ -440,6 +447,7 @@ def integrate_local_content(
         logger=logger,
         scope=scope,
         ctx=ctx,
+        is_first_party=True,
     )
 
 
@@ -454,7 +462,7 @@ _integrate_local_content = integrate_local_content
 # ---------------------------------------------------------------------------
 
 
-def integrate_local_bundle(
+def integrate_local_bundle(  # noqa: C901, PLR0912, PLR0915
     bundle_info: Any,
     project_root: Path,
     *,
@@ -465,6 +473,7 @@ def integrate_local_bundle(
     logger: InstallLogger | None = None,
     scope: InstallScope | None = None,
     alias: str | None = None,
+    trust_canvas: bool = False,
 ) -> dict:
     """Integrate a detected local bundle into project / user scope.
 
@@ -494,6 +503,11 @@ def integrate_local_bundle(
         logger: Install-flow logger.
         scope: ``InstallScope`` (project vs user) for downstream consumers.
         alias: Slug override from ``--as``.
+        trust_canvas: When ``True``, allow executable canvas extension
+            bundles (``extensions/<name>/extension.mjs``) to deploy from the
+            offline bundle.  Defaults to ``False`` (fail closed) so a
+            vendored bundle cannot smuggle executable canvas code past the
+            dependency trust gate.
 
     Returns:
         Dict with keys ``deployed_files`` (list[str]),
@@ -555,6 +569,42 @@ def integrate_local_bundle(
     pack_files = _filtered_pack_files
 
     slug = alias or bundle_info.package_id
+
+    # Security + feature gate: canvas extensions are executable Node bundles
+    # (``extension.mjs``).  A local / offline bundle copies its files
+    # verbatim WITHOUT routing through ``CanvasIntegrator``, so neither the
+    # experimental feature flag nor its trust gate would otherwise apply
+    # here.  Require BOTH gates: the ``canvas`` experimental flag must be ON
+    # (feature availability) AND ``--trust-canvas-extensions`` must be set
+    # (executable-code trust).  Fail closed -- drop canvas paths when either
+    # gate is missing.
+    from ..core.experimental import is_enabled
+    from ..integration.canvas_integrator import is_canvas_bundle_path
+
+    _canvas_enabled = is_enabled("canvas")
+    if not (_canvas_enabled and trust_canvas):
+        _blocked = sorted(r for r in pack_files if is_canvas_bundle_path(r))
+        if _blocked:
+            for _r in _blocked:
+                pack_files.pop(_r, None)
+            # Flag ON but untrusted: this is a genuine blocked deploy, so
+            # count it as skipped and surface the trust opt-in.  Flag OFF:
+            # the canvas type does not exist yet, so drop the paths silently
+            # WITHOUT inflating the skip count -- mirroring the silent no-op
+            # of the normal CanvasIntegrator path when the flag is off.
+            if _canvas_enabled:
+                skipped += len(_blocked)
+                _msg = (
+                    f"Blocked {len(_blocked)} canvas extension file(s) from bundle "
+                    f"'{slug}': canvas extensions are executable extension.mjs code "
+                    "and are not deployed from bundles by default. Re-run with "
+                    "'--trust-canvas-extensions' to deploy them to .github/extensions/."
+                )
+                if diagnostics is not None:
+                    diagnostics.warn(message=_msg, package=str(slug))
+                elif logger is not None:
+                    logger.warning(_msg)
+
     if logger:
         logger.verbose_detail(
             f"Integrating local bundle '{slug}' "
@@ -611,7 +661,8 @@ def integrate_local_bundle(
             # can merge them into the target's AGENTS.md / GEMINI.md /
             # equivalent.  Deploying them verbatim to ``<root>/instructions/``
             # is a no-op for these clients.
-            _first_seg = rel.split("/", 1)[0] if "/" in rel else ""
+            _rel_norm = rel.replace("\\", "/")
+            _first_seg = _rel_norm.split("/", 1)[0] if "/" in _rel_norm else ""
             if _first_seg == "instructions" and "instructions" not in (target.primitives or {}):
                 # Slug must be safe for filesystem path construction.
                 # CR1.5 (#1217 review): _validate_bundle_slug enforces the
@@ -633,6 +684,14 @@ def integrate_local_bundle(
                 dest = stage_root / _rel_under_instructions
                 deploy_root = stage_root
             else:
+                # Canvas extensions are Copilot-only.  A plugin bundle is
+                # target-agnostic, so guard against depositing an
+                # ``extensions/`` tree into a non-Copilot client root
+                # (e.g. ``.claude/extensions/``).  Skip silently for other
+                # targets; the trust filter above already removed these
+                # entries entirely when canvas was not trusted.
+                if _first_seg.lower() == "extensions" and target.name != "copilot":
+                    continue
                 # Route the file to the correct deploy root.  If the first
                 # path segment matches a primitive with an explicit
                 # ``deploy_root`` (e.g. ``skills/`` -> ``.agents/``), use

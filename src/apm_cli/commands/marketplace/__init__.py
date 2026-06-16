@@ -32,14 +32,6 @@ from ...marketplace.migration import (
     load_marketplace_config,
     migrate_marketplace_yml,
 )
-from ...marketplace.pr_integration import PrIntegrator, PrResult, PrState
-from ...marketplace.publisher import (
-    ConsumerTarget,
-    MarketplacePublisher,
-    PublishOutcome,
-    PublishPlan,
-    TargetResult,
-)
 from ...marketplace.ref_resolver import RefResolver, RemoteRef
 from ...marketplace.semver import SemVer, parse_semver, satisfies_range
 from ...marketplace.yml_schema import load_marketplace_yml
@@ -84,8 +76,6 @@ class MarketplaceGroup(click.Group):
         "check",
         "outdated",
         "audit",
-        "doctor",
-        "publish",
         "package",
         "migrate",
     ]
@@ -415,11 +405,6 @@ def _expand_local_path(raw: str) -> str:
 # Re-exports from siblings (Rule A: keep names patchable on this module)
 # ---------------------------------------------------------------------------
 
-from ._publish_ops import _load_targets_file as _load_targets_file  # noqa: E402
-from ._publish_ops import _outcome_symbol as _outcome_symbol  # noqa: E402
-from ._publish_ops import _render_publish_footer as _render_publish_footer  # noqa: E402
-from ._publish_ops import _render_publish_plan as _render_publish_plan  # noqa: E402
-from ._publish_ops import _render_publish_summary as _render_publish_summary  # noqa: E402
 from ._registry_cmds import (  # noqa: E402
     _check_gitignore_for_marketplace_json as _check_gitignore_for_marketplace_json,
 )
@@ -463,11 +448,9 @@ from ._table_ops import _render_doctor_table as _render_doctor_table  # noqa: E4
 from ._table_ops import _render_outdated_table as _render_outdated_table  # noqa: E402
 from .audit import audit  # noqa: E402
 from .check import check  # noqa: E402
-from .doctor import doctor  # noqa: E402
 from .init import init  # noqa: E402
 from .migrate import migrate  # noqa: E402
 from .outdated import outdated  # noqa: E402
-from .publish import publish  # noqa: E402
 from .validate import validate  # noqa: E402
 
 # Public surface: the click group + per-command callables. Domain types are
@@ -479,28 +462,20 @@ __all__ = [
     "BuildOptions",
     "BuildReport",
     "ConfigSource",
-    "ConsumerTarget",
     "GitLsRemoteError",
     "HeadNotAllowedError",
     "MarketplaceBuilder",
     "MarketplaceGroup",
     "MarketplaceNotFoundError",
-    "MarketplacePublisher",
     "MarketplaceYmlError",
     "NoMatchingVersionError",
     "OfflineMissError",
     "PathTraversalError",
-    "PrIntegrator",
-    "PrResult",
-    "PrState",
-    "PublishOutcome",
-    "PublishPlan",
     "RefNotFoundError",
     "RefResolver",
     "RemoteRef",
     "ResolvedPackage",
     "SemVer",
-    "TargetResult",
     "_CheckResult",
     "_DoctorCheck",
     "_OutdatedRow",
@@ -511,10 +486,8 @@ __all__ = [
     "_is_valid_alias",
     "_load_config_or_exit",
     "_load_current_versions",
-    "_load_targets_file",
     "_load_yml_or_exit",
     "_marketplace_add_unsupported_host_error",
-    "_outcome_symbol",
     "_parse_marketplace_repo",
     "_parse_marketplace_source",
     "_render_build_error",
@@ -522,16 +495,12 @@ __all__ = [
     "_render_check_table",
     "_render_doctor_table",
     "_render_outdated_table",
-    "_render_publish_footer",
-    "_render_publish_plan",
-    "_render_publish_summary",
     "_warn_duplicate_names",
     "add",
     "audit",
     "browse",
     "check",
     "detect_config_source",
-    "doctor",
     "init",
     "list_cmd",
     "load_marketplace_config",
@@ -542,7 +511,6 @@ __all__ = [
     "outdated",
     "package",
     "parse_semver",
-    "publish",
     "remove",
     "satisfies_range",
     "search",

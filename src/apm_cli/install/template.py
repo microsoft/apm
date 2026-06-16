@@ -79,14 +79,7 @@ def _integrate_materialization(
             m.package_info,
             ctx.project_root,
             targets=ctx.targets,
-            integrators=IntegratorBundle(
-                prompt=ctx.integrators["prompt"],
-                agent=ctx.integrators["agent"],
-                skill=ctx.integrators["skill"],
-                instruction=ctx.integrators["instruction"],
-                command=ctx.integrators["command"],
-                hook=ctx.integrators["hook"],
-            ),
+            integrators=IntegratorBundle.from_mapping(ctx.integrators),
             force=ctx.force,
             managed_files=ctx.managed_files,
             diagnostics=diagnostics,
@@ -101,6 +94,7 @@ def _integrate_materialization(
                     else (tuple(dep_ref.skill_subset) if dep_ref.skill_subset else None)
                 ),
             ),
+            allow_executables=getattr(getattr(ctx, "apm_package", None), "allow_executables", None),
         )
         mutation_keys = (
             "prompts",
@@ -110,6 +104,7 @@ def _integrate_materialization(
             "instructions",
             "commands",
             "hooks",
+            "canvases",
         )
         for k in (*mutation_keys, "links_resolved"):
             deltas[k] = int_result[k]

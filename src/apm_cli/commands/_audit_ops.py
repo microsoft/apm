@@ -333,6 +333,8 @@ def _audit_content_scan(
         if findings_by_file:
             _a._render_findings_table(findings_by_file, verbose=cfg.verbose)
         _a._render_summary(findings_by_file, files_scanned, logger)
+        if not file_path:
+            _a._render_canvas_note(cfg.project_root, package, logger)
         if drift_findings:
             from ..install.drift import render_drift_text
 

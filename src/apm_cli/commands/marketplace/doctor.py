@@ -1,12 +1,9 @@
-"""``apm doctor`` (and legacy ``apm marketplace doctor``) command implementation."""
+"""``apm doctor`` command implementation."""
 
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
-
-import click
 
 from ...core.command_logger import CommandLogger
 from ...marketplace.errors import MarketplaceYmlError
@@ -21,7 +18,6 @@ from . import (
     _DoctorCheck,
     _find_duplicate_names,
     _render_doctor_table,
-    marketplace,
 )
 
 # ---------------------------------------------------------------------------
@@ -104,38 +100,8 @@ def _check_auth() -> _DoctorCheck:
     )
 
 
-def _check_gh_cli() -> _DoctorCheck:
-    """Check 4: gh CLI availability (informational; only needed for publish)."""
-    gh_ok = False
-    gh_detail = ""
-    try:
-        result = subprocess.run(
-            ["gh", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            gh_ok = True
-            gh_detail = result.stdout.strip().split("\n")[0]
-        else:
-            gh_detail = "gh CLI returned non-zero exit code"
-    except FileNotFoundError:
-        gh_detail = "gh CLI not found (install: https://cli.github.com/)"
-    except subprocess.TimeoutExpired:
-        gh_detail = "gh --version timed out"
-    except (subprocess.SubprocessError, OSError) as exc:
-        gh_detail = str(exc)[:60]
-    return _DoctorCheck(
-        name="gh CLI",
-        passed=gh_ok,
-        detail=gh_detail,
-        informational=True,
-    )
-
-
 def _check_marketplace_config(project_root: Path) -> tuple[_DoctorCheck, object]:
-    """Check 5: marketplace config presence + parsability.
+    """Check 4: marketplace config presence + parsability.
 
     Returns ``(_DoctorCheck, yml_obj)``; ``yml_obj`` is ``None`` when no
     config is found or on parse errors.
@@ -181,7 +147,7 @@ def _check_marketplace_config(project_root: Path) -> tuple[_DoctorCheck, object]
 
 
 def _check_format_coverage(yml_obj: object) -> _DoctorCheck:
-    """Check 6: format coverage (informational)."""
+    """Check 5: format coverage (informational)."""
     configured = frozenset(getattr(yml_obj, "outputs", ()) or ())
     supported = known_output_names()
     missing = sorted(supported - configured)
@@ -206,7 +172,7 @@ def _check_format_coverage(yml_obj: object) -> _DoctorCheck:
 
 
 def _check_duplicate_names(yml_obj: object) -> _DoctorCheck:
-    """Check 7: duplicate package names (informational)."""
+    """Check 6: duplicate package names (informational)."""
     dup_detail = _find_duplicate_names(yml_obj)
     if dup_detail:
         return _DoctorCheck(
@@ -224,7 +190,7 @@ def _check_duplicate_names(yml_obj: object) -> _DoctorCheck:
 
 
 def _check_version_alignment(yml_obj: object) -> _DoctorCheck:
-    """Check 8: version alignment (informational)."""
+    """Check 7: version alignment (informational)."""
     from ...marketplace.version_check import check_version_alignment
 
     va_report = check_version_alignment(yml_obj, Path.cwd())
@@ -261,9 +227,8 @@ def _check_version_alignment(yml_obj: object) -> _DoctorCheck:
 def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
     """Execute the doctor diagnostics and return an exit code.
 
-    Shared between the top-level ``apm doctor`` command and the legacy
-    ``apm marketplace doctor`` alias so both surfaces produce identical
-    output. Returns ``0`` if all critical checks pass, ``1`` otherwise.
+    Called by the top-level ``apm doctor`` command.
+    Returns ``0`` if all critical checks pass, ``1`` otherwise.
     """
     logger = CommandLogger(logger_name, verbose=verbose)
     checks = []
@@ -271,7 +236,6 @@ def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
     checks.append(_check_git())
     checks.append(_check_network())
     checks.append(_check_auth())
-    checks.append(_check_gh_cli())
 
     project_root = Path.cwd()
     config_check, yml_obj = _check_marketplace_config(project_root)
@@ -290,26 +254,3 @@ def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
     if any(not c.passed for c in critical_checks):
         return 1
     return 0
-
-
-@marketplace.command(
-    name="doctor",
-    help="DEPRECATED: use 'apm doctor' instead. Run environment diagnostics.",
-    hidden=True,
-)
-@click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def doctor(verbose):
-    """Deprecated alias for ``apm doctor``.
-
-    Prints a one-line deprecation hint and forwards to :func:`run_doctor`.
-    The command stays functional for one release to give CI pipelines and
-    scripts time to migrate; it is hidden from ``apm marketplace --help``
-    so new users discover the top-level form.
-    """
-    click.echo(
-        "[!] 'apm marketplace doctor' is deprecated; use 'apm doctor' instead.",
-        err=True,
-    )
-    exit_code = run_doctor(verbose, logger_name="marketplace-doctor")
-    if exit_code != 0:
-        sys.exit(exit_code)

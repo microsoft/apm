@@ -573,7 +573,7 @@ class AgentsCompiler(_AgentsEmitMixin, _AgentsOutputMixin):
             try:
                 self._write_distributed_file(agents_path, content, config)
                 successful_writes += 1
-            except OSError as e:
+            except (OSError, ValueError) as e:
                 self.errors.append(f"Failed to write {agents_path}: {e!s}")
 
         # Update stats with actual files written

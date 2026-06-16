@@ -27,6 +27,22 @@ from .skill_sync import sync_integration as sync_integration
 _log = logging.getLogger("apm_cli.integration.skill_integrator")
 
 
+def _build_copy_ignore(*, skip_bin: bool = False) -> Callable[[str, list[str]], list[str]]:
+    """Build the copytree ignore function for skill content."""
+    from apm_cli.security.gate import ignore_non_content
+
+    if not skip_bin:
+        return ignore_non_content
+    bin_filter = shutil.ignore_patterns("bin")
+
+    def _combined(directory: str, contents: list[str]) -> list[str]:
+        return list(
+            set(ignore_non_content(directory, contents)) | set(bin_filter(directory, contents))
+        )
+
+    return _combined
+
+
 @dataclass
 class CopySkillContext:
     """Dependencies used by the standalone skill-copy helper."""
@@ -54,6 +70,7 @@ class NativeSkillTargetContext:
     force: bool
     logger: Any
     link_rewriter: Any
+    skip_bin: bool = False
 
 
 @dataclass
@@ -71,6 +88,7 @@ class SkillBundleTargetContext:
     name_filter: set[str] | None
     link_rewriter: Any
     seen_skill_dirs: set[Path]
+    skip_bin: bool = False
 
 
 def _validate_skill_name(name: str) -> tuple[bool, str]:
@@ -80,45 +98,12 @@ def _validate_skill_name(name: str) -> tuple[bool, str]:
     return validate_skill_name(name)
 
 
-def find_instruction_files(package_path: Path) -> list[Path]:
-    """Find all instruction files in a package."""
-    instruction_files: list[Path] = []
-    apm_instructions = package_path / ".apm" / "instructions"
-    if apm_instructions.exists():
-        instruction_files.extend(apm_instructions.glob("*.instructions.md"))
-    return instruction_files
-
-
-def find_agent_files(package_path: Path) -> list[Path]:
-    """Find all agent files in a package."""
-    agent_files: list[Path] = []
-    apm_agents = package_path / ".apm" / "agents"
-    if apm_agents.exists():
-        agent_files.extend(apm_agents.glob("*.agent.md"))
-    return agent_files
-
-
-def find_prompt_files(package_path: Path) -> list[Path]:
-    """Find all prompt files in a package."""
-    prompt_files: list[Path] = []
-    if package_path.exists():
-        prompt_files.extend(package_path.glob("*.prompt.md"))
-    apm_prompts = package_path / ".apm" / "prompts"
-    if apm_prompts.exists():
-        prompt_files.extend(apm_prompts.glob("*.prompt.md"))
-    return prompt_files
-
-
-def find_context_files(package_path: Path) -> list[Path]:
-    """Find all context and memory files in a package."""
-    context_files: list[Path] = []
-    apm_context = package_path / ".apm" / "context"
-    if apm_context.exists():
-        context_files.extend(apm_context.glob("*.context.md"))
-    apm_memory = package_path / ".apm" / "memory"
-    if apm_memory.exists():
-        context_files.extend(apm_memory.glob("*.memory.md"))
-    return context_files
+from ._skill_finders import _emit_sub_skill_overwrite as _emit_sub_skill_overwrite  # noqa: E402
+from ._skill_finders import _emit_unmanaged_skill_skip as _emit_unmanaged_skill_skip  # noqa: E402
+from ._skill_finders import find_agent_files as find_agent_files  # noqa: E402
+from ._skill_finders import find_context_files as find_context_files  # noqa: E402
+from ._skill_finders import find_instruction_files as find_instruction_files  # noqa: E402
+from ._skill_finders import find_prompt_files as find_prompt_files  # noqa: E402
 
 
 def _copy_skill_to_target(
@@ -240,60 +225,6 @@ def _resolve_markdown_links_in_skill_bundle(
     return links_resolved
 
 
-def _emit_unmanaged_skill_skip(
-    sub_name: str,
-    rel_path: str,
-    parent_name: str,
-    diagnostics: Any,
-    logger: Any,
-) -> None:
-    """Emit the existing unmanaged-skill skip warning."""
-    message = (
-        f"Skipping skill '{sub_name}' -- local skill exists (not managed by APM). "
-        "Use 'apm install --force' to overwrite."
-    )
-    if diagnostics is not None:
-        diagnostics.skip(rel_path, package=parent_name)
-    elif logger:
-        logger.warning(message)
-    else:
-        try:
-            from apm_cli.utils.console import _rich_warning
-
-            _rich_warning(message)
-        except ImportError:
-            pass
-
-
-def _emit_sub_skill_overwrite(
-    sub_name: str,
-    rel_path: str,
-    parent_name: str,
-    diagnostics: Any,
-    logger: Any,
-) -> None:
-    """Emit the existing sub-skill overwrite warning."""
-    if diagnostics is not None:
-        diagnostics.overwrite(
-            path=rel_path,
-            package=parent_name,
-            detail=f"Skill '{sub_name}' replaced -- previously from another package",
-        )
-    elif logger:
-        logger.warning(
-            f"Sub-skill '{sub_name}' from '{parent_name}' overwrites existing skill at {rel_path}"
-        )
-    else:
-        try:
-            from apm_cli.utils.console import _rich_warning
-
-            _rich_warning(
-                f"Sub-skill '{sub_name}' from '{parent_name}' overwrites existing skill at {rel_path}"
-            )
-        except ImportError:
-            pass
-
-
 def _target_rel_prefix(target_skills_root: Path, project_root: Path | None) -> str:
     """Return a project-relative target prefix when possible."""
     if project_root is None:
@@ -304,12 +235,13 @@ def _target_rel_prefix(target_skills_root: Path, project_root: Path | None) -> s
         return target_skills_root.name
 
 
-def _promote_sub_skills(
+def _promote_sub_skills(  # noqa: PLR0913
     sub_skills_dir: Path,
     target_skills_root: Path,
     parent_name: str,
     *,
     warn: bool = True,
+    skip_bin: bool = False,
     owned_by: dict[str, str] | None = None,
     diagnostics: Any = None,
     managed_files: set[str] | None = None,
@@ -353,12 +285,15 @@ def _promote_sub_skills(
             shutil.rmtree(target)
         target.mkdir(parents=True, exist_ok=True)
         if link_rewriter is not None:
-            link_rewriter._copy_promoted_skill_tree(sub_skill_path, target)
+            link_rewriter._copy_promoted_skill_tree(sub_skill_path, target, skip_bin=skip_bin)
             link_rewriter._resolve_markdown_links_in_skill_bundle(sub_skill_path, target)
         else:
-            from apm_cli.security.gate import ignore_non_content
-
-            shutil.copytree(sub_skill_path, target, dirs_exist_ok=True, ignore=ignore_non_content)
+            shutil.copytree(
+                sub_skill_path,
+                target,
+                dirs_exist_ok=True,
+                ignore=_build_copy_ignore(skip_bin=skip_bin),
+            )
         promoted += 1
         deployed.append(target)
     return promoted, deployed
@@ -423,6 +358,7 @@ def _promote_sub_skills_standalone(
     logger: Any = None,
     targets: Any = None,
     skill_subset: Any = None,
+    skip_bin: bool = False,
 ) -> tuple[int, list[Path]]:
     """Promote sub-skills from a package that is not itself a skill."""
     link_rewriter.init_link_resolver(package_info, project_root)
@@ -468,6 +404,7 @@ def _promote_sub_skills_standalone(
             project_root=project_root,
             name_filter=name_filter,
             link_rewriter=link_rewriter,
+            skip_bin=skip_bin,
         )
         if is_primary:
             count = n
@@ -585,7 +522,11 @@ def _integrate_native_skill_to_target(
         shutil.rmtree(target_skill_dir)
 
     target_skill_dir.parent.mkdir(parents=True, exist_ok=True)
-    context.link_rewriter._copy_native_skill_tree(context.package_path, target_skill_dir)
+    context.link_rewriter._copy_native_skill_tree(
+        context.package_path,
+        target_skill_dir,
+        skip_bin=context.skip_bin,
+    )
     context.link_rewriter._resolve_markdown_links_in_skill_bundle(
         context.package_path, target_skill_dir
     )
@@ -606,6 +547,7 @@ def _integrate_native_skill_to_target(
         project_root=context.project_root,
         logger=context.logger if is_primary else None,
         link_rewriter=context.link_rewriter,
+        skip_bin=context.skip_bin,
     )
     result["target_paths"].extend(sub_deployed)
     return result
@@ -622,6 +564,7 @@ def _integrate_native_skill(
     force: bool = False,
     logger: Any = None,
     targets: Any = None,
+    skip_bin: bool = False,
 ) -> dict[str, Any]:
     """Copy a native skill to all active targets and return result fields."""
     link_rewriter.init_link_resolver(package_info, project_root)
@@ -656,6 +599,7 @@ def _integrate_native_skill(
         force=force,
         logger=logger,
         link_rewriter=link_rewriter,
+        skip_bin=skip_bin,
     )
 
     result: dict[str, Any] = {
@@ -726,6 +670,7 @@ def _integrate_skill_bundle_target(
         logger=context.logger if is_primary else None,
         name_filter=context.name_filter,
         link_rewriter=context.link_rewriter,
+        skip_bin=context.skip_bin,
     )
     return {"deployed": deployed, "promoted": promoted, "created": is_primary and promoted > 0}
 
@@ -742,6 +687,7 @@ def _integrate_skill_bundle(
     logger: Any = None,
     targets: Any = None,
     skill_subset: Any = None,
+    skip_bin: bool = False,
 ) -> dict[str, Any]:
     """Promote every skill in a skill bundle's top-level skills directory."""
     link_rewriter.init_link_resolver(package_info, project_root)
@@ -763,6 +709,7 @@ def _integrate_skill_bundle(
         name_filter=_skill_subset_name_filter(skill_subset),
         link_rewriter=link_rewriter,
         seen_skill_dirs=set(),
+        skip_bin=skip_bin,
     )
     total_promoted = 0
     all_deployed: list[Path] = []

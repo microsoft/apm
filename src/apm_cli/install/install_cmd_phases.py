@@ -19,6 +19,7 @@ def _try_local_bundle_install(
     alias,
     logger,
     legacy_skill_paths,
+    trust_canvas,
     rejected_flags,
 ):
     """Detect and install a local bundle; return True if handled (caller should return).
@@ -49,6 +50,7 @@ def _try_local_bundle_install(
             logger=logger,
             legacy_skill_paths=legacy_skill_paths,
             rejected_flags=rejected_flags,
+            trust_canvas=trust_canvas,
         )
         return True
     # IM7: path exists but isn't a recognised bundle.  For archive extensions

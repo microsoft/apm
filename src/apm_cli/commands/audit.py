@@ -18,7 +18,7 @@ from pathlib import Path
 import click
 
 from ..core.command_logger import CommandLogger
-from ..deps.lockfile import get_lockfile_path  # noqa: F401 -- re-exported for test patching
+from ..deps.lockfile import get_lockfile_path
 from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
 from ..security.content_scanner import ContentScanner, ScanFinding
 from ..security.file_scanner import (
@@ -236,6 +236,51 @@ def _render_findings_table(
             f"{f.description}",
             color=color,
         )
+
+
+def _deployed_canvas_bundles(project_root: Path, package_filter: str | None) -> list[str]:
+    """Return sorted canvas bundle roots deployed per apm.lock.yaml.
+
+    A canvas bundle is an executable Copilot extension (``extension.mjs``)
+    deployed under a client ``extensions/`` directory (``.github/extensions/``
+    project scope, ``.copilot/extensions/`` user scope). Surfacing them lets an
+    audit reader see at a glance that executable extension code is installed,
+    even when the content scan finds no hidden characters. Returns bundle roots
+    such as ``.copilot/extensions/widget`` (one entry per bundle).
+    """
+    from ..deps.lockfile import LockFile
+    from ..integration.canvas_integrator import is_canvas_bundle_path
+
+    lock = LockFile.read(get_lockfile_path(project_root))
+    if lock is None:
+        return []
+
+    roots: set[str] = set()
+    for dep_key, dep in lock.dependencies.items():
+        if package_filter and dep_key != package_filter:
+            continue
+        for rel in dep.deployed_files:
+            norm = rel.replace("\\", "/").strip("/")
+            if not norm or not is_canvas_bundle_path(norm):
+                continue
+            parts = norm.split("/")
+            for idx, seg in enumerate(parts):
+                if seg == "extensions" and idx + 1 < len(parts):
+                    roots.add("/".join(parts[: idx + 2]))
+                    break
+    return sorted(roots)
+
+
+def _render_canvas_note(project_root: Path, package_filter: str | None, logger) -> None:
+    """Emit an informational note listing deployed canvas extensions."""
+    bundles = _deployed_canvas_bundles(project_root, package_filter)
+    if not bundles:
+        return
+    logger.info(
+        f"{len(bundles)} executable canvas extension(s) deployed (experimental, trust-gated):"
+    )
+    for root in bundles:
+        logger.info(f"  {root}", symbol="info")
 
 
 def _render_summary(

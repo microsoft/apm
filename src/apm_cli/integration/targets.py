@@ -71,12 +71,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
                 deploy_root=".agents",
             ),
             "hooks": PrimitiveMapping("hooks", ".json", "github_hooks"),
+            "canvas": PrimitiveMapping("extensions", "", "copilot_canvas"),
         },
         auto_create=True,
         detect_by_dir=True,
         user_supported="partial",
         user_root_dir=".copilot",
-        unsupported_user_primitives=(),
         user_primitive_overrides={
             "instructions": PrimitiveMapping("", ".md", "copilot_user_instructions"),
         },

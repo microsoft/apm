@@ -133,7 +133,7 @@ def _show_compile_strategy_progress(logger, run_config, config, effective_target
         logger.progress("Using single-file compilation (legacy mode)", symbol="page")
 
 
-def _check_and_write_output(logger, output_path, final_content):
+def _check_and_write_output(logger, compiler, config, output_path, final_content):
     """Security-scan and write the final compiled content.
 
     Returns ``True`` if critical security findings were detected.
@@ -152,10 +152,16 @@ def _check_and_write_output(logger, output_path, final_content):
                 f"-- run 'apm audit --file {output_path}' to inspect"
             )
     try:
-        from ...compilation.output_writer import CompiledOutputWriter
+        # Honour managed_section mode (issue #1764).
+        if config.agents_md_mode == "managed_section":
+            compiler._write_output_file_with_config(str(output_path), final_content, config)
+            if compiler.errors:
+                raise OSError(compiler.errors[-1])
+        else:
+            from ...compilation.output_writer import CompiledOutputWriter
 
-        CompiledOutputWriter().write(output_path, final_content)
-    except OSError as e:
+            CompiledOutputWriter().write(output_path, final_content)
+    except (OSError, ValueError) as e:
         logger.error(f"Failed to write final AGENTS.md: {e}")
         sys.exit(1)
     return has_critical
@@ -188,7 +194,9 @@ def _handle_single_file_success(logger, compiler, config, dry_run, output_str):
 
     if not dry_run:
         if c_status in ("CREATED", "UPDATED", "MISSING"):
-            has_critical = _check_and_write_output(logger, output_path, final_content)
+            has_critical = _check_and_write_output(
+                logger, compiler, config, output_path, final_content
+            )
         else:
             logger.progress("No changes detected; preserving existing AGENTS.md for idempotency")
 

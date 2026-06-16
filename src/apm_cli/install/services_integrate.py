@@ -152,6 +152,8 @@ def _log_per_kind_results(
     dispatch: dict,
     verbose: bool,
     logger: InstallLogger | None,
+    *,
+    log_integration: Any | None = None,
 ) -> None:
     """Emit one aggregated log line per primitive kind in dispatch order.
 
@@ -159,6 +161,10 @@ def _log_per_kind_results(
     ``files``, ``adopted``, ``label``, and ``paths``.  Kinds absent from
     ``per_kind`` are silently skipped.
     """
+    log_fn = log_integration
+    if log_fn is None and logger is not None:
+        log_fn = logger.tree_item
+
     for _prim_name in dispatch:
         if _prim_name not in per_kind:
             continue
@@ -172,26 +178,25 @@ def _log_per_kind_results(
                 _verb_phrase = f"{_verb_phrase} ({_adopted} adopted)"
         else:
             _verb_phrase = f"{_adopted} {_info['label']} adopted"
-        if logger is None:
+        if log_fn is None:
             continue
         if _expansion:
-            logger.tree_item(f"  |-- {_verb_phrase}:")
+            log_fn(f"  |-- {_verb_phrase}:")
             for line in _expansion:
-                logger.tree_item(line)
+                log_fn(line)
         else:
-            logger.tree_item(f"  |-- {_verb_phrase} -> {_suffix}")
-        if any(p.startswith("copilot-app/") for p in _info["paths"]) and _files > 0:
-            logger.tree_item(
-                "  |-- workflows arrive disabled; enable from the Copilot App's Workflows tab"
-            )
+            log_fn(f"  |-- {_verb_phrase} -> {_suffix}")
         if _prim_name == "hooks" and _files > 0:
             _hook_verbose = verbose or bool(getattr(logger, "verbose", False))
             _log_hook_display_payloads(
                 _info.get("hook_payloads", []),
                 _hook_verbose,
-                logger.tree_item,
+                log_fn,
                 logger,
             )
+        from apm_cli.install._services_helpers import _emit_integration_hints
+
+        _emit_integration_hints(_prim_name, _info, log_fn)
 
 
 # ---------------------------------------------------------------------------
@@ -206,13 +211,21 @@ def _log_skill_result(
     targets: Any,
     verbose: bool,
     logger: InstallLogger | None,
+    *,
+    package_name: str = "",
+    package_info: Any = None,
+    log_integration: Any | None = None,
 ) -> None:
     """Process skill integration result: update counters and emit log lines.
 
     Mutates *result* in-place (``skills``, ``sub_skills``, ``deployed_files``
     keys) and emits tree-item log lines via *logger*.
     """
-    from apm_cli.install.services import _deployed_path_entry, _skill_bundle_file_entries
+    from apm_cli.install._services_helpers import _deployed_path_entry, _skill_bundle_file_entries
+
+    log_fn = log_integration
+    if log_fn is None and logger is not None:
+        log_fn = logger.tree_item
 
     _skill_target_dirs: set = builtins.set()
     for tp in skill_result.target_paths:
@@ -250,20 +263,10 @@ def _log_skill_result(
                     f" -> {_skill_suffix}"
                 )
 
-    if skill_result.bin_deployed > 0 and logger:
-        logger.tree_item(
-            f"  |-- {skill_result.bin_deployed} executable(s) deployed to "
-            f"Claude Code's PATH -> {_skill_suffix} (invoked without confirmation)"
-        )
-        logger.tree_item("  |-- run /reload-plugins or restart Claude Code to activate")
-    elif skill_result.bin_skipped_reason == "project_scope" and logger:
-        logger.tree_item(
-            "  |-- plugin ships executables; re-run with -g (global) to deploy them to Claude Code"
-        )
-    elif skill_result.bin_skipped_reason == "no_claude_target" and logger:
-        logger.tree_item(
-            "  |-- plugin ships executables; no active Claude Code skills target to receive them"
-        )
+    if (skill_result.bin_deployed > 0 or skill_result.bin_skipped_reason) and log_fn is not None:
+        from apm_cli.install.exec_gate import log_bin_status
+
+        log_bin_status(skill_result, _skill_suffix, package_name, package_info, log_fn)
 
     for tp in skill_result.target_paths:
         result["deployed_files"].append(_deployed_path_entry(tp, project_root, targets))

@@ -46,21 +46,24 @@ def _install_apm_packages(ctx, outcome):
         logger.error(f"Failed to parse {ctx.manifest_display}: {e}")
         sys.exit(1)
 
-    logger.verbose_detail(
-        f"Parsed {APM_YML_FILENAME}: {len(apm_package.get_apm_dependencies())} APM deps, "
-        f"{len(apm_package.get_mcp_dependencies())} MCP deps"
-        + (
-            f", {len(apm_package.get_dev_apm_dependencies())} dev deps"
-            if apm_package.get_dev_apm_dependencies()
-            else ""
-        )
+    apm_deps, dev_apm_deps = (
+        apm_package.get_apm_dependencies(),
+        apm_package.get_dev_apm_dependencies(),
+    )
+    prod_mcp_deps, dev_mcp_deps, mcp_deps = (
+        apm_package.get_mcp_dependencies(),
+        apm_package.get_dev_mcp_dependencies(),
+        apm_package.get_all_mcp_dependencies(),
     )
 
-    # Get APM and MCP dependencies
-    apm_deps = apm_package.get_apm_dependencies()
-    dev_apm_deps = apm_package.get_dev_apm_dependencies()
+    logger.verbose_detail(
+        f"Parsed {APM_YML_FILENAME}: {len(apm_deps)} APM deps, "
+        f"{len(prod_mcp_deps)} MCP deps"
+        + (f", {len(dev_apm_deps)} dev APM deps" if dev_apm_deps else "")
+        + (f", {len(dev_mcp_deps)} dev MCP deps" if dev_mcp_deps else "")
+    )
+
     has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
-    mcp_deps = apm_package.get_mcp_dependencies()
 
     all_apm_deps = builtins.list(apm_deps) + builtins.list(dev_apm_deps)
     _m._check_insecure_dependencies(all_apm_deps, ctx.allow_insecure, logger)
@@ -176,6 +179,7 @@ def _install_apm_packages(ctx, outcome):
                 skill_subset=ctx.skill_subset,
                 skill_subset_from_cli=ctx.skill_subset_from_cli,
                 refresh=ctx.refresh,
+                trust_canvas=ctx.trust_canvas,
             )
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics
@@ -413,6 +417,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
     plan_callback=None,
     refresh: bool = False,
     lockfile_only: bool = False,
+    trust_canvas: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -456,5 +461,6 @@ def _install_apm_dependencies(  # noqa: PLR0913
         plan_callback=plan_callback,
         refresh=refresh,
         lockfile_only=lockfile_only,
+        trust_canvas=trust_canvas,
     )
     return InstallService().run(request)

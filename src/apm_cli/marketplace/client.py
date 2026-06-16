@@ -50,6 +50,9 @@ from ._client_cache import (
     _read_stale_meta as _read_stale_meta,
 )
 from ._client_cache import (
+    _sanitize_cache_name as _sanitize_cache_name,
+)
+from ._client_cache import (
     _write_cache as _write_cache,
 )
 from ._client_http import (

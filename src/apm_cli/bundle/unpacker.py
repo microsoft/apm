@@ -19,49 +19,12 @@ _MAX_ZIP_ENTRIES = MAX_ZIP_ENTRIES
 _MAX_ZIP_UNCOMPRESSED = MAX_ZIP_UNCOMPRESSED
 
 
-@dataclass
-class UnpackResult:
-    """Result of an unpack operation."""
+def _resolve_bundle_source(bundle_path: Path) -> tuple[Path, Path | None, bool]:
+    """Extract an archive bundle to a temp dir, or return the dir as-is.
 
-    extracted_dir: Path
-    files: list[str] = field(default_factory=list)
-    verified: bool = False
-    dependency_files: dict[str, list[str]] = field(default_factory=dict)
-    skipped_count: int = 0
-    security_warnings: int = 0
-    security_critical: int = 0
-    pack_meta: dict = field(default_factory=dict)
-
-
-def unpack_bundle(
-    bundle_path: Path,
-    output_dir: Path = Path("."),
-    skip_verify: bool = False,
-    dry_run: bool = False,
-    force: bool = False,
-) -> UnpackResult:
-    """Extract and apply an APM bundle to a project directory.
-
-    Additive-only semantics (v1): only writes files listed in the bundle's
-    lockfile ``deployed_files``.  Never deletes existing files.  If a local
-    file has the same name as a bundle file, the bundle file wins (overwrite).
-
-    Args:
-        bundle_path: Path to a ``.zip`` (or legacy ``.tar.gz``) archive, or an unpacked bundle directory.
-        output_dir: Target project directory to copy files into.
-        skip_verify: If *True*, skip completeness verification against the lockfile.
-        dry_run: If *True*, resolve the file list but write nothing to disk.
-        force: If *True*, deploy even when critical hidden characters are found.
-
-    Returns:
-        :class:`UnpackResult` describing what was (or would be) extracted.
-
-    Raises:
-        FileNotFoundError: If the bundle's ``apm.lock.yaml`` is missing.
-        ValueError: If verification finds files listed in the lockfile but
-            absent from the bundle.
+    Returns ``(source_dir, temp_dir, cleanup_temp)``.  The caller is
+    responsible for ``shutil.rmtree(temp_dir)`` when ``cleanup_temp`` is True.
     """
-    # 1. If archive, extract to temp dir
     cleanup_temp = False
     if bundle_path.is_file() and bundle_path.name.endswith(".zip"):
         from ..config import get_apm_temp_dir
@@ -116,6 +79,93 @@ def unpack_bundle(
         temp_dir = None
     else:
         raise FileNotFoundError(f"Bundle not found or unsupported format: {bundle_path}")
+    return source_dir, temp_dir, cleanup_temp
+
+
+def _copy_deployed_files(unique_files: list[str], source_dir: Path, output_dir: Path) -> int:
+    """Copy bundle files to *output_dir* (additive, no deletes).
+
+    Returns the count of skipped files (symlinks or already-missing sources).
+    """
+    output_dir = Path(output_dir)
+    output_dir_resolved = output_dir.resolve()
+    skipped = 0
+    for rel_path in unique_files:
+        # Guard against absolute paths or path-traversal entries in deployed_files
+        p = Path(rel_path)
+        if p.is_absolute() or rel_path.startswith("/") or ".." in p.parts:
+            raise ValueError(f"Refusing to unpack unsafe path from bundle lockfile: {rel_path!r}")
+        dest = output_dir / rel_path
+        if not dest.resolve().is_relative_to(output_dir_resolved):
+            raise ValueError(f"Refusing to unpack path that escapes output directory: {rel_path!r}")
+        src = source_dir / rel_path
+        if src.is_symlink():
+            # Security: skip symlinks to prevent scanning bypass
+            skipped += 1
+            continue
+        if not src.exists():
+            skipped += 1
+            continue  # skip_verify may allow missing files
+        if src.is_dir():
+            from ..security.gate import ignore_non_content
+
+            shutil.copytree(src, dest, dirs_exist_ok=True, ignore=ignore_non_content)
+        else:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest, follow_symlinks=False)
+    return skipped
+
+
+@dataclass
+class UnpackResult:
+    """Result of an unpack operation."""
+
+    extracted_dir: Path
+    files: list[str] = field(default_factory=list)
+    verified: bool = False
+    dependency_files: dict[str, list[str]] = field(default_factory=dict)
+    skipped_count: int = 0
+    security_warnings: int = 0
+    security_critical: int = 0
+    canvas_blocked: int = 0
+    pack_meta: dict = field(default_factory=dict)
+
+
+def unpack_bundle(
+    bundle_path: Path,
+    output_dir: Path = Path("."),
+    skip_verify: bool = False,
+    dry_run: bool = False,
+    force: bool = False,
+    trust_canvas: bool = False,
+) -> UnpackResult:
+    """Extract and apply an APM bundle to a project directory.
+
+    Additive-only semantics (v1): only writes files listed in the bundle's
+    lockfile ``deployed_files``.  Never deletes existing files.  If a local
+    file has the same name as a bundle file, the bundle file wins (overwrite).
+
+    Args:
+        bundle_path: Path to a ``.zip`` (or legacy ``.tar.gz``) archive, or an unpacked bundle directory.
+        output_dir: Target project directory to copy files into.
+        skip_verify: If *True*, skip completeness verification against the lockfile.
+        dry_run: If *True*, resolve the file list but write nothing to disk.
+        force: If *True*, deploy even when critical hidden characters are found.
+        trust_canvas: If *True*, allow executable canvas extension files
+            (``.github/extensions/<name>/extension.mjs``) to be unpacked.
+            Defaults to *False* (fail closed) so a vendored bundle cannot
+            smuggle executable canvas code past the trust gate.
+
+    Returns:
+        :class:`UnpackResult` describing what was (or would be) extracted.
+
+    Raises:
+        FileNotFoundError: If the bundle's ``apm.lock.yaml`` is missing.
+        ValueError: If verification finds files listed in the lockfile but
+            absent from the bundle.
+    """
+    # 1. If archive, extract to temp dir
+    source_dir, temp_dir, cleanup_temp = _resolve_bundle_source(bundle_path)
 
     try:
         # 2. Read apm.lock.yaml (or legacy apm.lock) from bundle
@@ -162,6 +212,28 @@ def unpack_bundle(
                     unique_files.append(f)
             if dep_files:
                 dep_file_map[dep_key] = dep_files
+
+        # Security + feature gate: canvas extensions are executable Node
+        # bundles (``extension.mjs``).  ``apm unpack`` copies deployed files
+        # verbatim WITHOUT routing through ``CanvasIntegrator``, so neither
+        # the experimental feature flag nor its trust gate would otherwise
+        # apply.  Require BOTH gates -- the ``canvas`` experimental flag ON
+        # (feature availability) AND ``trust_canvas`` (executable-code trust)
+        # -- before unpacking canvas paths.  Fail closed: drop them when
+        # either gate is missing.
+        canvas_blocked = 0
+        from ..core.experimental import is_enabled
+        from ..integration.canvas_integrator import is_canvas_bundle_path
+
+        if not (is_enabled("canvas") and trust_canvas):
+            _blocked = {f for f in unique_files if is_canvas_bundle_path(f)}
+            if _blocked:
+                canvas_blocked = len(_blocked)
+                unique_files = [f for f in unique_files if f not in _blocked]
+                for _k in list(dep_file_map):
+                    dep_file_map[_k] = [f for f in dep_file_map[_k] if f not in _blocked]
+                    if not dep_file_map[_k]:
+                        del dep_file_map[_k]
 
         # 3. Verify completeness
         verified = True
@@ -211,40 +283,12 @@ def unpack_bundle(
                 dependency_files=dep_file_map,
                 security_warnings=security_warnings,
                 security_critical=security_critical,
+                canvas_blocked=canvas_blocked,
                 pack_meta=pack_meta,
             )
 
         # 4. Copy target files to output_dir (additive, no deletes)
-        output_dir = Path(output_dir)
-        output_dir_resolved = output_dir.resolve()
-        skipped = 0
-        for rel_path in unique_files:
-            # Guard against absolute paths or path-traversal entries in deployed_files
-            p = Path(rel_path)
-            if p.is_absolute() or rel_path.startswith("/") or ".." in p.parts:
-                raise ValueError(
-                    f"Refusing to unpack unsafe path from bundle lockfile: {rel_path!r}"
-                )
-            dest = output_dir / rel_path
-            if not dest.resolve().is_relative_to(output_dir_resolved):
-                raise ValueError(
-                    f"Refusing to unpack path that escapes output directory: {rel_path!r}"
-                )
-            src = source_dir / rel_path
-            if src.is_symlink():
-                # Security: skip symlinks to prevent scanning bypass
-                skipped += 1
-                continue
-            if not src.exists():
-                skipped += 1
-                continue  # skip_verify may allow missing files
-            if src.is_dir():
-                from ..security.gate import ignore_non_content
-
-                shutil.copytree(src, dest, dirs_exist_ok=True, ignore=ignore_non_content)
-            else:
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, dest, follow_symlinks=False)
+        skipped = _copy_deployed_files(unique_files, source_dir, output_dir)
 
         return UnpackResult(
             extracted_dir=bundle_path,
@@ -254,6 +298,7 @@ def unpack_bundle(
             skipped_count=skipped,
             security_warnings=security_warnings,
             security_critical=security_critical,
+            canvas_blocked=canvas_blocked,
             pack_meta=pack_meta,
         )
     finally:

@@ -193,6 +193,11 @@ except ImportError as e:
     help="Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)",
 )
 @click.option(
+    "--trust-canvas-extensions",
+    is_flag=True,
+    help="[experimental] Deploy canvas extensions provided by dependencies. Canvas extensions are executable Node code and are blocked by default; this flag opts in. With --global the canvas deploys to ~/.copilot/extensions and the flag is always required. Requires the 'canvas' experimental feature.",
+)
+@click.option(
     "--parallel-downloads",
     type=int,
     default=4,
@@ -401,6 +406,7 @@ def install(  # noqa: PLR0913
     frozen,
     verbose,
     trust_transitive_mcp,
+    trust_canvas_extensions,
     parallel_downloads,
     dev,
     target,
@@ -520,6 +526,7 @@ def install(  # noqa: PLR0913
             alias,
             logger,
             legacy_skill_paths,
+            trust_canvas_extensions,
             rejected_flags={
                 "--update": update,
                 "--only": only,
@@ -689,6 +696,7 @@ def install(  # noqa: PLR0913
             protocol_pref=protocol_pref,
             allow_protocol_fallback=allow_protocol_fallback,
             trust_transitive_mcp=trust_transitive_mcp,
+            trust_canvas=trust_canvas_extensions,
             no_policy=no_policy,
             audit_override=audit_override,
             install_mode=InstallMode(only) if only else InstallMode.ALL,

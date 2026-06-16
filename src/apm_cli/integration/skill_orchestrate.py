@@ -20,6 +20,7 @@ class PackageSkillContext:
     skill_subset: Any = None
     scope: Any = None
     policy: Any = None
+    skip_bin: bool = False
     should_install_fn: Callable[[Any], bool] | None = None
     result_cls: Any = None
 
@@ -60,6 +61,7 @@ def integrate_package_skill(
             logger=context.logger,
             targets=context.targets,
             skill_subset=context.skill_subset,
+            skip_bin=context.skip_bin,
         )
         return _skipped_result(context.result_cls, sub_count, sub_deployed)
 
@@ -73,15 +75,18 @@ def integrate_package_skill(
     from apm_cli.models.apm_package import PackageType as _PackageType
 
     if package_info.package_type == _PackageType.MARKETPLACE_PLUGIN:
-        bin_paths, bin_skip_reason = link_rewriter._deploy_plugin_bin(
-            package_info,
-            project_root,
-            context.targets,
-            scope=context.scope,
-            policy=context.policy,
-            force=context.force,
-            logger=context.logger,
-        )
+        if context.skip_bin:
+            bin_skip_reason = "not_approved"
+        else:
+            bin_paths, bin_skip_reason = link_rewriter._deploy_plugin_bin(
+                package_info,
+                project_root,
+                context.targets,
+                scope=context.scope,
+                policy=context.policy,
+                force=context.force,
+                logger=context.logger,
+            )
 
     source_skill_md = package_path / "SKILL.md"
     if source_skill_md.exists():
@@ -101,6 +106,7 @@ def integrate_package_skill(
             force=context.force,
             logger=context.logger,
             targets=context.targets,
+            skip_bin=context.skip_bin,
         )
         return link_rewriter._merge_bin_paths(result, bin_paths, bin_skip_reason)
 
@@ -120,6 +126,7 @@ def integrate_package_skill(
             logger=context.logger,
             targets=context.targets,
             skill_subset=context.skill_subset,
+            skip_bin=context.skip_bin,
         )
         return link_rewriter._merge_bin_paths(result, bin_paths, bin_skip_reason)
 
@@ -132,6 +139,7 @@ def integrate_package_skill(
         logger=context.logger,
         targets=context.targets,
         skill_subset=context.skill_subset,
+        skip_bin=context.skip_bin,
     )
     result = _skipped_result(context.result_cls, sub_count, sub_deployed)
     return link_rewriter._merge_bin_paths(result, bin_paths, bin_skip_reason)

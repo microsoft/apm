@@ -147,6 +147,13 @@ class _AgentsOutputMixin:
 
                     _ac._logger.debug("Constitution injection failed for %s: %s", agents_path, exc)
 
+            # Honour managed_section mode for the root AGENTS.md (issue #1764).
+            # Sub-directory files are fully APM-generated and always overwritten.
+            is_root = agents_path.parent.resolve() == self.base_dir.resolve()
+            if is_root and config.agents_md_mode == "managed_section":
+                self._write_output_file_with_config(str(agents_path), final_content, config)
+                return
+
             from .output_writer import CompiledOutputWriter
 
             CompiledOutputWriter().write(agents_path, final_content)
