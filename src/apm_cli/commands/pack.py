@@ -324,6 +324,12 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     marketplace_formats = _parse_marketplace_filter(marketplace_filter, ctx, json_output)
     # _parse_marketplace_filter raises/exits on error via _emit_json_error_or_raise
     project_root = Path(".").resolve()
+    # Authoring-path nudge (#1777): warn when the author's own package declares
+    # no license. Suppressed under --json (machine output). Never blocks pack.
+    if not json_output:
+        from ..export.authoring import warn_if_license_undeclared
+
+        warn_if_license_undeclared(project_root / "apm.yml", logger.warning)
     # Issue #1207 D1: when --target is not given, detect the project's
     # actual target so the embedded ``pack.target`` reflects what was
     # tested rather than a hardcoded "copilot".  ``pack.target`` is now

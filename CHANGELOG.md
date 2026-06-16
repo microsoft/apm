@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm audit` now surfaces unmanaged files in governance directories as a single enriched report: each finding states a factual reason (`not tracked in apm.lock.yaml`), a lazy primitive-type tag (`[type: skill|agent|instruction|mcp]`), and a deny-conflict note (`matches deny rule (<pattern>)`) when the path matches the policy's own `dependencies.deny` / `mcp.deny`. A new `unmanaged_files.exclude` policy key suppresses known harness-managed paths, and a symlink guard prevents following links out of the workspace. This is drift / divergence visibility, not supply-chain-attack prevention. (closes #1775) (#1793)
+- Azure DevOps is now documented as a first-class marketplace authoring host: a `marketplace.sourceBase` of `https://dev.azure.com/{org}/{project}/_git` composes relative package sources and preserves the `dev.azure.com` host through to the consumer (authenticated with `ADO_APM_PAT`). The end-to-end authoring -> consume path is pinned by a hermetic test. (closes #1010) (#1810)
+- `apm install --target antigravity` and `apm compile -t antigravity` add
+  Google Antigravity CLI (`agy`, successor to Gemini CLI) as a new target.
+  Instructions deploy as rules to `.agents/rules/<name>.md`, skills to
+  `.agents/skills/<name>/SKILL.md`, hooks merge into a single
+  `.agents/hooks.json` using Antigravity's native schema
+  (`PreToolUse`/`PostToolUse`/`PreInvocation`/`PostInvocation`/`Stop`), and
+  MCP servers write to a dedicated `.agents/mcp_config.json` (project) or
+  `~/.gemini/config/mcp_config.json` (`--global`). `compile` emits `AGENTS.md`.
+  Antigravity shares the cross-tool `.agents/` root, so it is explicit-only:
+  select it with `--target antigravity` or in `apm.yml` `targets:`; it is
+  never auto-detected and is not part of `--target all`. (by @sergio-sisternes-epam;
+  closes #1650) (#1770)
+- Two additive, default-off policy keys under the existing `security:` namespace: `security.integrity.require_hashes` makes `apm install` fail closed when any non-local lockfile entry lacks a content hash, and `security.audit.fail_on_drift` makes `apm audit` exit non-zero when the workspace drifts from the lockfile. Both only tighten through policy inheritance. (#1794)
 - MCP dependencies can now carry harness-specific passthrough keys (for example Claude Code's remote-MCP `oauth` block with `clientId`/`callbackPort`); previously any key outside the modeled set was silently dropped on render. Passthrough keys round-trip into the generated config for every installed harness and cannot shadow a modeled field (`command`/`url`/`headers`/`env`/...), which are rejected with a warning. A future fail-closed tightening to an explicit `extra:` block is tracked in #1806. (closes #1670) (#1765)
 
 ### Removed
@@ -18,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm marketplace check` no longer fails with exit 128 for entries on
+  non-default hosts, including relative entries composed onto
+  `marketplace.sourceBase` (self-managed GitLab / GHES / Azure DevOps). It now
+  resolves each entry against its effective host and per-org token, matching
+  `apm pack`; local `./` packages skip the network.
+  (closes #1762, follows up #1736)
 - Policy inheritance no longer drops `fetch_failure`, `registry_source`, and `bin_deploy` when a policy `extends` another; these fields now carry and tighten through the merge like sibling sections. (closes #1778) (#1791)
 - `apm install` no longer silently ignores MCP servers declared in `devDependencies.mcp`; dev MCP configs and lockfile entries now stay in sync on fresh installs. (closes #1780) (#1787)
 - `apm compile` now honors `managed_section` mode on distributed root

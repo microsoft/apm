@@ -623,3 +623,36 @@ class TestUnpackCmd:
         result = CliRunner().invoke(unpack_cmd, ["--help"])
         assert result.exit_code == 0
         assert "install" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# Authoring-path license warning asymmetry (#1777, U6)
+# WARN on `apm pack` (author's own manifest); SILENT on the consuming path.
+# ---------------------------------------------------------------------------
+
+
+def test_pack_warns_when_no_license_declared(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("apm.yml").write_text("name: demo\nversion: 1.0.0\n")
+        result = runner.invoke(pack_cmd, ["--dry-run"])
+        combined = result.output + (result.stderr or "")
+        assert "license:" in combined, combined
+
+
+def test_pack_silent_when_license_declared(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("apm.yml").write_text("name: demo\nversion: 1.0.0\nlicense: MIT\n")
+        result = runner.invoke(pack_cmd, ["--dry-run"])
+        combined = result.output + (result.stderr or "")
+        assert "the SBOM will record NOASSERTION" not in combined
+
+
+def test_pack_silent_under_json(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("apm.yml").write_text("name: demo\nversion: 1.0.0\n")
+        result = runner.invoke(pack_cmd, ["--dry-run", "--json"])
+        combined = result.output + (result.stderr or "")
+        assert "the SBOM will record NOASSERTION" not in combined

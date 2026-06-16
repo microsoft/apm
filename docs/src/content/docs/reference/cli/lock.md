@@ -11,6 +11,7 @@ Resolve all dependencies declared in `apm.yml` and write `apm.lock.yaml` with pi
 
 ```bash
 apm lock [OPTIONS]
+apm lock export [OPTIONS]
 ```
 
 ## Description
@@ -69,6 +70,35 @@ apm lock --verbose
 - **No files deployed.** The targets, cleanup, post-deps-local, and audit phases are skipped. The integrate phase runs but deploys nothing because the target set is empty. Running `apm lock` is safe to run before you are ready to install.
 - **Idempotent.** If the lockfile already matches the resolution result, it is overwritten with the same content.
 
+## Export (SBOM inventory)
+
+`apm lock export` serializes the existing lockfile into an SBOM document. It is an **inventory** export, not a security attestation: it reads `apm.lock.yaml` only and never re-resolves, re-hashes, or touches the network or filesystem.
+
+```bash
+apm lock export [OPTIONS]
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--format FORMAT`, `-f FORMAT` | `cyclonedx` | SBOM output format: `cyclonedx` (1.5) or `spdx` (2.3). |
+| `--output FILE`, `-o FILE` | stdout | Write the SBOM to a file instead of stdout. |
+| `--global`, `-g` | off | Read the user-scope (`~/.apm/`) lockfile instead of the current project. |
+| `--timestamp TS` | auto | Pin the SBOM timestamp (ISO 8601, e.g. `2024-06-01T00:00:00+00:00`) for reproducible output. Defaults to `SOURCE_DATE_EPOCH`, then the lockfile's `generated_at`. |
+
+Component identity is a Package URL (`pkg:github/<owner>/<repo>@<commit>` for git deps, `pkg:oci/<name>@<digest>` for registry deps, `pkg:generic/<name>@<content_hash>` for local primitives), and the declared license is passed through verbatim (or `NOASSERTION` when undeclared). Output is deterministic -- components sorted by purl with a pinned timestamp -- so two runs are byte-identical. Credentials in recorded URLs are scrubbed. The diagnostic line routes to stderr, so `apm lock export | jq` stays clean. See [Inventory export (SBOM)](../../enterprise/security-and-supply-chain/#inventory-export-sbom) for the full model.
+
+Export a CycloneDX SBOM to a file:
+
+```bash
+apm lock export --format cyclonedx -o sbom.json
+```
+
+Stream an SPDX SBOM to a tool:
+
+```bash
+apm lock export --format spdx | jq '.packages | length'
+```
+
 ## CI integration
 
 Add `apm lock` to your CI workflow to keep the lockfile in sync with `apm.yml`:
@@ -95,3 +125,4 @@ To verify the lockfile is up to date in a PR check (and fail if it drifts), use 
 - [`apm install --frozen`](../install/) -- reproduce the lockfile exactly; fails on drift. Use this in CI.
 - [`apm update`](../update/) -- re-resolve, show a plan, prompt for consent, then install.
 - [`apm outdated`](../outdated/) -- report which dependencies have newer refs available.
+- [Inventory export (SBOM)](../../enterprise/security-and-supply-chain/#inventory-export-sbom) -- the SBOM/declared-license model behind `apm lock export`.

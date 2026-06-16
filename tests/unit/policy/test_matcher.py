@@ -5,9 +5,41 @@ import unittest
 from apm_cli.policy.matcher import (
     check_dependency_allowed,
     check_mcp_allowed,
+    first_matching_pattern,
     matches_pattern,
 )
 from apm_cli.policy.schema import DependencyPolicy, McpPolicy
+
+
+class TestFirstMatchingPattern(unittest.TestCase):
+    """The single glob matcher reused by deny-list and unmanaged-files checks."""
+
+    def test_returns_first_matching_pattern(self):
+        self.assertEqual(
+            first_matching_pattern("contoso/evil", ("contoso/good", "contoso/*")),
+            "contoso/*",
+        )
+
+    def test_returns_none_when_no_match(self):
+        self.assertIsNone(first_matching_pattern("contoso/repo", ("other/*",)))
+
+    def test_none_patterns_is_safe(self):
+        self.assertIsNone(first_matching_pattern("contoso/repo", None))
+
+    def test_empty_patterns_is_safe(self):
+        self.assertIsNone(first_matching_pattern("contoso/repo", ()))
+
+    def test_deny_check_uses_same_matcher(self):
+        # Deny enforcement and unmanaged-files deny-conflict must agree:
+        # both route through first_matching_pattern.
+        policy = DependencyPolicy(deny=("contoso/*",))
+        allowed, reason = check_dependency_allowed("contoso/evil", policy)
+        self.assertFalse(allowed)
+        self.assertIn("contoso/*", reason)
+        self.assertEqual(
+            first_matching_pattern("contoso/evil", policy.effective_deny),
+            "contoso/*",
+        )
 
 
 class TestMatchesPattern(unittest.TestCase):

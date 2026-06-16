@@ -120,14 +120,32 @@ compiled `marketplace.json` -- that rename is the only structural
 transform `apm pack` performs. Strict schema: unknown keys raise an
 error, never silently ignored.
 
-Use `sourceBase` when packages live under the same enterprise git base,
-such as a GitLab group with nested subgroups. Any relative source composes
-onto the base, including two-segment values like `acme-org/pinned-package`.
-Host-prefixed sources like `github.com/acme/tool`, full HTTPS URLs, and
-local `./` paths remain per-entry overrides. If `sourceBase` is absent,
-existing `owner/repo` source behavior is unchanged. See the
-[manifest schema](../reference/manifest-schema/#75-marketplacepackages)
+Use `sourceBase` when packages live under the same enterprise git base.
+The base may target any supported host -- GitHub.com, GitHub Enterprise,
+self-hosted GitLab, or Azure DevOps. The host is preserved end to end, so a
+consumer installs from the same host you authored on. Any relative source
+composes onto the base, including two-segment values like
+`acme-org/pinned-package`. Host-prefixed sources like `github.com/acme/tool`,
+full HTTPS URLs, and local `./` paths remain per-entry overrides. If
+`sourceBase` is absent, existing `owner/repo` source behavior is unchanged.
+See the [manifest schema](../reference/manifest-schema/#75-marketplacepackages)
 for the full validation and override rules.
+
+For an Azure DevOps marketplace, point `sourceBase` at the
+`https://dev.azure.com/{org}/{project}/_git` base; relative sources compose
+onto it and the `dev.azure.com` host is kept on the consumer side:
+
+```yaml
+marketplace:
+  sourceBase: https://dev.azure.com/contoso/platform/_git
+  packages:
+    - name: agent-skills
+      source: agent-skills          # -> .../contoso/platform/_git/agent-skills
+      ref: 3f2a9b1c
+```
+
+Azure DevOps authentication uses `ADO_APM_PAT` (with an `az` CLI bearer
+fallback); see [authentication](../getting-started/authentication/#azure-devops).
 
 Before:
 

@@ -32,6 +32,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so the Mode B detector can deterministically
+          # resolve the merge-base against origin/main. Without this the
+          # gate's unresolvable-merge-base branch becomes reachable in CI.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
 
       - name: Orphan check (anchors == manifest == Appendix C == markers)

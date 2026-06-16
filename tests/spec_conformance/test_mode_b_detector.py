@@ -162,6 +162,55 @@ def test_detector_rejects_short_waiver(tmp_path):
     assert out.returncode == 1, "detector MUST reject waivers below the 16-char minimum"
 
 
+def test_detector_fails_closed_in_ci_on_unresolvable_merge_base(tmp_path):
+    """Under CI (GITHUB_ACTIONS=true), an unresolvable merge-base MUST
+    fail closed (exit non-zero) instead of skipping. A governance gate
+    that cannot evaluate must never pass by luck of the checkout.
+    Locally (no GITHUB_ACTIONS), the ergonomic skip (exit 0) is kept."""
+    repo = _make_repo(tmp_path)
+    target = repo / "src" / "apm_cli" / "deps" / "new_behaviour.py"
+    target.write_text(
+        "def new_resolver_branch(x):\n"
+        + "\n".join(f"    y_{i} = x + {i}" for i in range(40))
+        + "\n    return y_0\n"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "silent extension under deps/")
+
+    # Point BASE at a ref that does not exist so merge-base cannot
+    # resolve (the on-demand fetch/unshallow fail against a local repo
+    # with no real remote, leaving MB empty).
+    base = "origin/does-not-exist"
+
+    ci = _run_detector_with_env(repo, BASE_REF=base, GITHUB_ACTIONS="true")
+    assert ci.returncode != 0, (
+        "detector MUST fail closed in CI when the merge-base is "
+        f"unresolvable; got exit {ci.returncode}\nstdout: {ci.stdout}\n"
+        f"stderr: {ci.stderr}"
+    )
+    assert "cannot resolve merge-base" in ci.stderr, ci.stderr
+
+    local = _run_detector_with_env(repo, BASE_REF=base)
+    assert local.returncode == 0, (
+        "detector MUST keep the ergonomic skip locally (no "
+        f"GITHUB_ACTIONS); got exit {local.returncode}\n"
+        f"stdout: {local.stdout}\nstderr: {local.stderr}"
+    )
+    assert "skipping" in local.stdout, local.stdout
+
+
+def test_workflow_checkout_uses_full_history():
+    """The CI workflow MUST check out full history (fetch-depth: 0) so
+    the Mode B detector can deterministically resolve the merge-base.
+    Without this, the detector's unresolvable-merge-base branch becomes
+    reachable in CI -- the root-cause fail-open hole this gate closes."""
+    body = WORKFLOW.read_text()
+    assert "fetch-depth: 0" in body, (
+        ".github/workflows/spec-conformance.yml MUST set fetch-depth: 0 "
+        "on actions/checkout so origin/main is reachable for merge-base"
+    )
+
+
 def test_workflow_invokes_detector_after_orphan_check():
     """The CI workflow MUST wire the detector as a step."""
     body = WORKFLOW.read_text()
@@ -239,6 +288,24 @@ def _run_detector(repo: Path) -> subprocess.CompletedProcess:
     # Disable the env-var waiver path; we test commit-trailer waivers
     # by leaving GH_PR_BODY unset.
     env.pop("GH_PR_BODY", None)
+    return subprocess.run(
+        ["bash", "tests/spec_conformance/mode_b_detector.sh"],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _run_detector_with_env(repo: Path, **overrides: str) -> subprocess.CompletedProcess:
+    """Run the detector with explicit env overrides. GH_PR_BODY is
+    cleared so only the supplied vars drive behaviour."""
+    env = {**os.environ}
+    env.pop("GH_PR_BODY", None)
+    # Strip any ambient GITHUB_ACTIONS so callers control it explicitly.
+    env.pop("GITHUB_ACTIONS", None)
+    env.update(overrides)
     return subprocess.run(
         ["bash", "tests/spec_conformance/mode_b_detector.sh"],
         cwd=repo,

@@ -42,6 +42,7 @@ class InstructionIntegrator(BaseIntegrator):
         "claude_rules": "_convert_to_claude_rules",
         "windsurf_rules": "_convert_to_windsurf_rules",
         "kiro_steering": "_convert_to_kiro_steering",
+        "antigravity_rules": "_convert_to_antigravity_rules",
     }
 
     def find_instruction_files(self, package_path: Path) -> list[Path]:
@@ -700,6 +701,18 @@ class InstructionIntegrator(BaseIntegrator):
 
         # No applyTo -> unconditional rule, return body without frontmatter
         return body.lstrip("\n")
+
+    @staticmethod
+    def _convert_to_antigravity_rules(content: str) -> str:
+        """Convert APM instruction content to Antigravity CLI rules format.
+
+        Strips YAML frontmatter (Antigravity rules are plain markdown with
+        no frontmatter) and returns the body as-is.
+        """
+        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
+        if fm_match:
+            return fm_match.string[fm_match.end() :].lstrip("\n")
+        return content
 
     def copy_instruction_claude(self, source: Path, target: Path) -> int:
         """Copy instruction file converted to Claude Code rules format.
