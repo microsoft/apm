@@ -17,9 +17,9 @@ For the workflow (where to put the file, how to roll it out), see [Govern with a
 
 - **Which sources are trusted** -- which dependencies and MCP servers `apm install` will accept (the `allow` / `deny` / `registry_source` rules).
 - **Which versions install** -- whether refs must be pinned to bounded constraints, and how version conflicts on required packages resolve.
-- **What the lockfile records and verifies** -- which artifacts are written, and what install-time audit checks run before they land on disk.
+- **What the lockfile records and verifies** -- which artifacts the lockfile records, and what the install-time audit pass checks over them once written.
 
-Every rule on this page is evaluated by `apm install` and `apm audit --ci`. They govern what gets installed -- not what a running agent is later allowed to do.
+`apm install` enforces the dependency and MCP source rules during install; `apm audit --ci` evaluates every rule on this page. Together they govern what gets installed -- not what a running agent is later allowed to do.
 
 ## What apm-policy.yml does NOT govern
 
@@ -90,7 +90,7 @@ Unknown top-level keys produce a warning, never an error -- so newer policy file
 
 Rules over the `dependencies:` and `mcp:` blocks declared in consumer `apm.yml` files.
 
-When a dependency matches `deny`, `apm install` will **not download or deploy that artifact**. With `enforcement: block`, the install aborts before any new files for the denied package are written. `deny` is an install-time decision, not a runtime block: it stops a denied artifact from being installed, and does not constrain what an already-installed or otherwise-present artifact does at runtime.
+When a dependency matches `deny`, `apm install` will **not download or deploy that artifact**. With `enforcement: block`, the install aborts before the denied package is downloaded or deployed. `deny` is an install-time decision, not a runtime block: it stops a denied artifact from being installed, and does not constrain what an already-installed or otherwise-present artifact does at runtime.
 
 | Field                | Type                  | Default          | Notes                                                                                       |
 |----------------------|-----------------------|------------------|---------------------------------------------------------------------------------------------|
