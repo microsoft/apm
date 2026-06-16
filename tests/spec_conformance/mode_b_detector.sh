@@ -57,6 +57,14 @@ if ! MB="$(git merge-base "$BASE" HEAD 2>/dev/null)"; then
   MB="$(git merge-base "$BASE" HEAD 2>/dev/null || true)"
 fi
 if [ -z "${MB:-}" ]; then
+  # Fail closed under CI: a governance gate must never pass by failing to
+  # evaluate. Locally (shallow clones), keep the ergonomic skip.
+  if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    echo "::error::mode_b: cannot resolve merge-base against $BASE in CI;" >&2
+    echo "::error::refusing to pass without evaluating (fail closed). Ensure" >&2
+    echo "::error::actions/checkout uses fetch-depth: 0 so origin/main is reachable." >&2
+    exit 1
+  fi
   echo "[!] mode_b: cannot resolve merge-base against $BASE; skipping"
   exit 0
 fi
