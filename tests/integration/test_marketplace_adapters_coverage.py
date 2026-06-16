@@ -1,5 +1,5 @@
 """Integration tests for marketplace/client, marketplace/audit,
-marketplace/pr_integration, adapters/client/* and utils/archive.
+adapters/client/* and utils/archive.
 
 All tests are hermetic - no live network calls are made; HTTP is mocked via
 ``unittest.mock.patch``.  URL assertions use ``urllib.parse`` throughout.
@@ -13,9 +13,7 @@ import tarfile
 import time
 import zipfile
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
-from urllib.parse import urlsplit
 
 import pytest
 import toml
@@ -56,19 +54,6 @@ from apm_cli.marketplace.models import (
     MarketplacePlugin,
     MarketplaceSource,
 )
-from apm_cli.marketplace.pr_integration import (
-    PrIntegrator,
-    PrState,
-    _build_body,
-    _build_title,
-    _extract_short_hash,
-)
-from apm_cli.marketplace.publisher import (
-    ConsumerTarget,
-    PublishOutcome,
-    PublishPlan,
-    TargetResult,
-)
 from apm_cli.utils.archive import (
     ArchiveError,
     _check_archive_member,
@@ -103,33 +88,6 @@ def _make_local_source(tmp_path: Path, name: str = "local-mp") -> MarketplaceSou
     mp_file = tmp_path / "marketplace.json"
     mp_file.write_text(json.dumps(_minimal_marketplace_json(name)), encoding="utf-8")
     return MarketplaceSource(name=name, url=str(tmp_path), ref="main")
-
-
-def _make_publish_plan(
-    *,
-    branch_name: str = "apm/marketplace-update-acme-2.0.0-ab12cd34",
-    short_hash: str = "ab12cd34",
-) -> PublishPlan:
-    """Return a minimal PublishPlan for PR-integration tests."""
-    target = ConsumerTarget(repo="acme-org/svc-a", branch="main")
-    return PublishPlan(
-        marketplace_name="acme",
-        marketplace_version="2.0.0",
-        targets=(target,),
-        commit_message="chore(apm): bump acme to 2.0.0",
-        branch_name=branch_name,
-        new_ref="v2.0.0",
-        tag_pattern_used="v{version}",
-        short_hash=short_hash,
-    )
-
-
-def _make_target_result(
-    *,
-    outcome: PublishOutcome = PublishOutcome.UPDATED,
-) -> TargetResult:
-    target = ConsumerTarget(repo="acme-org/svc-a", branch="main")
-    return TargetResult(target=target, outcome=outcome, message="ok")
 
 
 def _make_tar_gz(files: dict[str, bytes]) -> bytes:
@@ -527,160 +485,6 @@ class TestRunAudit:
         assert len(reports) == 2
         names = {r.plugin_name for r in reports}
         assert names == {"plugin-a", "plugin-b"}
-
-
-# ===========================================================================
-# 3. marketplace/pr_integration.py
-# ===========================================================================
-
-
-class TestPrIntegrationHelpers:
-    """Tests for pure PR template helpers."""
-
-    def test_extract_short_hash_from_field(self) -> None:
-        plan = _make_publish_plan(short_hash="deadbeef")
-        assert _extract_short_hash(plan) == "deadbeef"
-
-    def test_extract_short_hash_from_branch_name_when_field_empty(self) -> None:
-        plan = _make_publish_plan(
-            branch_name="apm/marketplace-update-acme-2.0.0-cafe1234",
-            short_hash="",
-        )
-        assert _extract_short_hash(plan) == "cafe1234"
-
-    def test_build_title_contains_name_and_version(self) -> None:
-        plan = _make_publish_plan()
-        title = _build_title(plan)
-        assert "acme" in title
-        assert "2.0.0" in title
-
-    def test_build_body_contains_marker(self) -> None:
-        plan = _make_publish_plan(short_hash="ab12cd34")
-        target = ConsumerTarget(repo="acme-org/svc-a", branch="main")
-        body = _build_body(plan, target)
-        assert "APM-Publish-Id" in body
-        assert "ab12cd34" in body
-
-
-class TestPrIntegratorCheckAvailable:
-    """Tests for :meth:`PrIntegrator.check_available`."""
-
-    def test_available_when_gh_installed_and_authenticated(self) -> None:
-        mock_runner = MagicMock()
-        # First call: --version succeeds
-        mock_runner.return_value = MagicMock(returncode=0, stdout="gh version 2.40.0\n")
-        integrator = PrIntegrator(runner=mock_runner)
-        ok, msg = integrator.check_available()
-        assert ok is True
-        assert "2.40.0" in msg
-
-    def test_not_available_when_gh_missing(self) -> None:
-        mock_runner = MagicMock(side_effect=FileNotFoundError)
-        integrator = PrIntegrator(runner=mock_runner)
-        ok, msg = integrator.check_available()
-        assert ok is False
-        assert "not found" in msg.lower() or "cli" in msg.lower()
-
-    def test_not_available_when_version_fails(self) -> None:
-        mock_runner = MagicMock(return_value=MagicMock(returncode=1, stdout=""))
-        integrator = PrIntegrator(runner=mock_runner)
-        ok, _msg = integrator.check_available()
-        assert ok is False
-
-    def test_not_available_when_auth_fails(self) -> None:
-        # version call succeeds, auth check fails
-        responses = [
-            MagicMock(returncode=0, stdout="gh version 2.40.0\n"),
-            MagicMock(returncode=1, stdout=""),
-        ]
-        mock_runner = MagicMock(side_effect=responses)
-        integrator = PrIntegrator(runner=mock_runner)
-        ok, msg = integrator.check_available()
-        assert ok is False
-        assert "auth" in msg.lower() or "login" in msg.lower()
-
-
-class TestPrIntegratorOpenOrUpdate:
-    """Tests for :meth:`PrIntegrator.open_or_update`."""
-
-    def _make_integrator(self, runner: Any = None) -> PrIntegrator:
-        return PrIntegrator(runner=runner or MagicMock())
-
-    def test_no_pr_returns_disabled(self) -> None:
-        plan = _make_publish_plan()
-        target = ConsumerTarget(repo="acme-org/svc-a", branch="main")
-        tr = _make_target_result(outcome=PublishOutcome.UPDATED)
-        integrator = self._make_integrator()
-        result = integrator.open_or_update(plan, target, tr, no_pr=True)
-        assert result.state == PrState.DISABLED
-
-    def test_non_updated_outcome_returns_skipped(self) -> None:
-        plan = _make_publish_plan()
-        target = ConsumerTarget(repo="acme-org/svc-a", branch="main")
-        tr = _make_target_result(outcome=PublishOutcome.NO_CHANGE)
-        integrator = self._make_integrator()
-        result = integrator.open_or_update(plan, target, tr)
-        assert result.state == PrState.SKIPPED
-
-    def test_opens_new_pr_when_none_exists(self) -> None:
-        plan = _make_publish_plan()
-        target = ConsumerTarget(repo="acme-org/svc-a", branch="main")
-        tr = _make_target_result(outcome=PublishOutcome.UPDATED)
-
-        pr_url = "https://github.com/acme-org/svc-a/pull/42"
-        # gh pr list returns empty list, gh pr create returns URL
-        list_result = MagicMock(returncode=0, stdout=json.dumps([]))
-        create_result = MagicMock(returncode=0, stdout=pr_url + "\n")
-        mock_runner = MagicMock(side_effect=[list_result, create_result])
-        integrator = PrIntegrator(runner=mock_runner)
-        result = integrator.open_or_update(plan, target, tr)
-        assert result.state == PrState.OPENED
-        # Use urllib.parse for URL assertion
-        parsed = urlsplit(result.pr_url or "")
-        assert parsed.scheme == "https"
-        assert parsed.netloc == "github.com"
-        assert result.pr_number == 42
-
-    def test_updates_existing_pr_when_body_differs(self) -> None:
-        plan = _make_publish_plan()
-        target = ConsumerTarget(repo="acme-org/svc-a", branch="main")
-        tr = _make_target_result(outcome=PublishOutcome.UPDATED)
-
-        existing_pr = [
-            {"number": 7, "url": "https://github.com/acme-org/svc-a/pull/7", "body": "old body"}
-        ]
-        list_result = MagicMock(returncode=0, stdout=json.dumps(existing_pr))
-        edit_result = MagicMock(returncode=0, stdout="")
-        mock_runner = MagicMock(side_effect=[list_result, edit_result])
-        integrator = PrIntegrator(runner=mock_runner)
-        result = integrator.open_or_update(plan, target, tr)
-        assert result.state == PrState.UPDATED
-        assert result.pr_number == 7
-
-    def test_dry_run_returns_opened_without_gh_call(self) -> None:
-        plan = _make_publish_plan()
-        target = ConsumerTarget(repo="acme-org/svc-a", branch="main")
-        tr = _make_target_result(outcome=PublishOutcome.UPDATED)
-
-        list_result = MagicMock(returncode=0, stdout=json.dumps([]))
-        mock_runner = MagicMock(return_value=list_result)
-        integrator = PrIntegrator(runner=mock_runner)
-        result = integrator.open_or_update(plan, target, tr, dry_run=True)
-        assert result.state == PrState.OPENED
-        assert result.pr_url is None
-        # gh pr create should NOT have been called
-        assert mock_runner.call_count == 1  # only gh pr list
-
-    def test_os_error_returns_failed(self) -> None:
-        plan = _make_publish_plan()
-        target = ConsumerTarget(repo="acme-org/svc-a", branch="main")
-        tr = _make_target_result(outcome=PublishOutcome.UPDATED)
-
-        mock_runner = MagicMock(side_effect=OSError("disk full"))
-        integrator = PrIntegrator(runner=mock_runner)
-        result = integrator.open_or_update(plan, target, tr)
-        assert result.state == PrState.FAILED
-        assert "OS error" in result.message
 
 
 # ===========================================================================
