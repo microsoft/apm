@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Policy inheritance no longer drops `fetch_failure`, `registry_source`, and `bin_deploy` when a policy `extends` another; these fields now carry and tighten through the merge like sibling sections. (closes #1778)
 - `apm install` no longer silently ignores MCP servers declared in `devDependencies.mcp`; dev MCP configs and lockfile entries now stay in sync on fresh installs. (closes #1780) (#1787)
 - `apm compile` now honors `managed_section` mode on distributed root
   `AGENTS.md` and `--single-agents` writes, preserving hand-authored
