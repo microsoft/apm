@@ -175,6 +175,22 @@ Files in primitive target directories that are not recorded in `apm.lock.yaml`.
 |---------------|----------------|----------|----------------------------------------------------------------------------------|
 | `action`      | enum           | `ignore` | `ignore` / `warn` / `deny`. `deny` blocks installs that would leave drift.      |
 | `directories` | list of paths  | `[]`     | Subset of target directories to check. Empty = all known target directories.     |
+| `exclude`     | list of globs  | `null`   | Workspace path globs to suppress from the report. Use to silence known harness-managed artifacts. Excluded paths are never reported. `null` = no opinion (transparent in the `extends:` merge); merges as a union down the chain. |
+
+Each reported file is a divergence-visibility finding, not a security verdict
+-- `apm.lock.yaml` is hand-editable YAML, so this surfaces drift rather than
+proving a supply-chain attack. Every finding is enriched in place:
+
+- a factual reason -- `not tracked in apm.lock.yaml`;
+- a lazy primitive-type tag (`[type: skill|agent|instruction|mcp]`) classified
+  only for the already-flagged file, never the whole tree;
+- a deny-conflict note -- `matches deny rule (<pattern>)` -- when the path
+  matches this policy's own `dependencies.deny` or `mcp.deny`. This is surfaced
+  for a human to resolve; APM never removes or blocks the file on this basis.
+
+```text
+[!] .github/agents/rogue.agent.md [type: agent] -- not tracked in apm.lock.yaml; matches deny rule (**/rogue*)
+```
 
 ## security
 
@@ -186,6 +202,8 @@ experimental flag to take effect; ignored otherwise.
 | `audit.on_install`   | enum or null    | `null`  | `off` / `warn` / `block`. Minimum install-time audit mode (a **floor**). `null` = no opinion. `warn` records findings; `block` halts installs on critical findings. |
 | `audit.external`     | list of strings | `null`  | External SARIF scanner names (e.g. `skillspector`) that MUST run during the install audit. A required scanner that is unavailable fails the install closed. |
 | `audit.scanners`     | mapping or null | `null`  | Per-scanner governance, keyed by scanner name. Each value accepts `allow_args` (boolean). **Restrict-only**: see below. Unknown scanner names are a warning, not an error (forward-compat). |
+| `audit.fail_on_drift` | boolean        | `false` | When `true`, a bare `apm audit` exits non-zero if the workspace content has drifted from the lockfile. Default-off keeps drift advisory (rendered, exit 0). Only changes the exit code -- the drift scan itself is unchanged. `apm audit --ci` already gates on drift regardless of this key. |
+| `integrity.require_hashes` | boolean   | `false` | When `true`, every non-local lockfile entry MUST carry a content hash; a missing or empty hash **fails the install closed**. Default-off preserves current behavior. Asserts hash-presence on the lockfile entry (no second hashing pass). Local dependencies are exempt (verified via deployed-file hashes). |
 
 ### Per-scanner governance (`audit.scanners`)
 
@@ -217,6 +235,23 @@ allowlist validation for arg safety.
 `apm install --audit` / `apm config audit-on-install`, never relax it. `apm
 install --force` downgrades a `block` to `warn` for that invocation; `apm
 install --no-policy` skips the policy floor entirely.
+
+### Integrity and drift enforcement
+
+```yaml
+security:
+  integrity:
+    require_hashes: true    # fail the install if any locked entry lacks a hash
+  audit:
+    fail_on_drift: true     # `apm audit` exits non-zero on workspace drift
+```
+
+Both keys are additive, optional, and default off. `require_hashes` is
+enforced during `apm install` (the lockfile must record a content hash for
+every non-local entry, or the install fails closed). `fail_on_drift` is
+enforced by `apm audit`: when drift is detected it escalates the exit code to
+`1`. Both keys only ever tighten -- a child policy cannot relax a parent that
+turned them on.
 
 ## Inheritance
 
@@ -250,9 +285,12 @@ inherited list (see the tri-state table below).
 | `mcp.trust_transitive`      | Logical AND (`true` only if both sides true).                                    |
 | `manifest.scripts`          | Stricter wins (`deny` > `allow`).                                                |
 | `unmanaged_files.action`    | Stricter wins (`deny` > `warn` > `ignore`).                                      |
+| `unmanaged_files.exclude`   | Union, deduplicated; additive-only. `null` and `[]` both preserve the parent list  --  unlike `deny`/`require`, a child cannot clear an inherited `exclude`. |
 | `security.audit.on_install` | Stricter wins (`block` > `warn` > `off`). `null` is transparent.                 |
 | `security.audit.external`   | Union, deduplicated. `null` is transparent.                                      |
 | `security.audit.scanners`   | Union of scanner names; per scanner `allow_args` is AND-merged (any ancestor `false` wins -- tightening). `null` is transparent.                  |
+| `security.audit.fail_on_drift` | Logical OR -- once a parent enables it, a child cannot relax.                  |
+| `security.integrity.require_hashes` | Logical OR -- once a parent enables it, a child cannot relax.             |
 | `compilation.*.enforce`     | First non-null wins (parent precedence).                                         |
 | `compilation.source_attribution` | Logical OR.                                                                 |
 
@@ -338,6 +376,8 @@ unmanaged_files:
   directories:
     - .github/instructions
     - .github/prompts
+  exclude:
+    - .github/copilot-instructions.md
 ```
 
 ## registry_source

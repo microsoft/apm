@@ -782,6 +782,28 @@ def _run_external_scanners(
         sys.exit(3)
 
 
+def _resolve_fail_on_drift(project_root: Path) -> bool:
+    """Return True when ``security.audit.fail_on_drift`` is enabled.
+
+    Respects ``APM_POLICY_DISABLE`` and fails open on any discovery error so a
+    transient policy-resolution failure never converts advisory drift into a
+    hard failure. Discovery is invoked by the caller only when drift was
+    actually detected, keeping the no-drift common path free of extra work.
+    """
+    if os.environ.get("APM_POLICY_DISABLE"):
+        return False
+    try:
+        from ..policy.discovery import discover_policy_with_chain
+
+        fetch_result = discover_policy_with_chain(project_root)
+    except Exception:
+        return False
+    policy = getattr(fetch_result, "policy", None)
+    if policy is None:
+        return False
+    return bool(policy.security.audit.fail_on_drift)
+
+
 def _audit_content_scan(
     cfg: _AuditConfig,
     package: str | None,
@@ -945,10 +967,17 @@ def _audit_content_scan(
         all_findings = [f for ff in findings_by_file.values() for f in ff]
         exit_code = 1 if ContentScanner.has_critical(all_findings) else 2
 
-    # Note: bare `apm audit` is advisory for drift; drift findings are
-    # rendered (text/json/sarif) but DO NOT escalate the exit code. Use
-    # `apm audit --ci` (handled in _audit_ci_gate) to gate on drift.
-    _ = drift_failed  # retained for symmetry; gate path lives in --ci.
+    # Bare `apm audit` is advisory for drift by default: drift findings are
+    # rendered (text/json/sarif) but DO NOT escalate the exit code. When
+    # `security.audit.fail_on_drift` is enabled, any drift-check FAILURE
+    # escalates a clean run to exit 1 -- matching the `apm audit --ci` gate,
+    # which fails on the same `drift_check.passed is False` signal. That covers
+    # both detected drift AND a drift check that could not run (corrupt local
+    # graph, unsupported replay); an advisory cache-miss SKIP stays passed=True
+    # and does NOT gate. Policy is discovered only when a drift failure
+    # occurred, so the clean common case is unchanged.
+    if drift_failed and exit_code == 0 and _resolve_fail_on_drift(project_root):
+        exit_code = 1
 
     if effective_format == "text":
         if cfg.output_path:

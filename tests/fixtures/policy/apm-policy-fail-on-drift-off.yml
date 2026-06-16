@@ -1,0 +1,9 @@
+# Fixture: drift stays advisory (matches default)
+# Tests: security.audit.fail_on_drift parses false without warning
+name: fail-on-drift-off-policy
+version: "1.0.0"
+enforcement: warn
+
+security:
+  audit:
+    fail_on_drift: false

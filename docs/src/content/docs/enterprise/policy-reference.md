@@ -330,6 +330,40 @@ unmanaged_files:
     - .cursor/rules
     - .claude
     - .opencode
+    - .kiro
+```
+
+### `exclude`
+
+Glob allow-list of workspace paths to suppress from the report. Use it to
+silence known harness-managed artifacts that legitimately live in a governance
+directory but are not APM-tracked. Excluded paths are never reported. Merges as
+a union down an `extends:` chain.
+
+```yaml
+unmanaged_files:
+  action: warn
+  exclude:
+    - .github/copilot-instructions.md
+    - .claude/settings.local.json
+```
+
+### Enriched findings
+
+Each reported file is annotated in place within the single unmanaged-files
+report. This is drift / divergence visibility -- `apm.lock.yaml` is
+hand-editable YAML -- not supply-chain-attack prevention:
+
+- a factual reason: `not tracked in apm.lock.yaml`;
+- a lazy primitive-type tag (`[type: skill|agent|instruction|mcp]`), computed
+  only for already-flagged files (a directory merely named `mcp` is not treated
+  as MCP config -- only a `.mcp/` root or an `mcp.json` file is);
+- a deny-conflict note `matches deny rule (<pattern>)` when the path matches
+  this policy's own `dependencies.deny` or `mcp.deny`, surfaced for a human to
+  resolve. APM reports only -- it never removes or blocks the file.
+
+```text
+[!] .claude/skills/rogue/SKILL.md [type: skill] -- not tracked in apm.lock.yaml; matches deny rule (**/rogue/**)
 ```
 
 ---
@@ -445,6 +479,7 @@ A child policy can only tighten constraints — never relax them:
 | `mcp.self_defined` | Escalates: `allow` < `warn` < `deny` |
 | `manifest.scripts` | Escalates: `allow` < `deny` |
 | `unmanaged_files.action` | Escalates: `ignore` < `warn` < `deny` |
+| `unmanaged_files.exclude` | Union, additive-only -- child adds suppression globs to the parent set; `null` and `[]` both preserve the parent list (a child cannot clear it) |
 | `source_attribution` | `parent OR child` — either enables it |
 | `trust_transitive` | `parent AND child` — both must allow it |
 

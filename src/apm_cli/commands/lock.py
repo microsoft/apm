@@ -44,12 +44,19 @@ import click
 
 from ..core.command_logger import InstallLogger
 from ..core.target_detection import TargetParamType
+from ..export.formats import FORMAT_CYCLONEDX, SUPPORTED_FORMATS
 from ..install.errors import (
     AuthenticationError,
     DirectDependencyError,
     PolicyViolationError,
 )
-from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success
+from ..utils.console import (
+    _rich_echo,
+    _rich_error,
+    _rich_info,
+    _rich_success,
+    set_console_stderr,
+)
 from ._helpers import _find_apm_yml
 
 
@@ -74,8 +81,9 @@ def _handle_lock_error(e: Exception, verbose: bool) -> None:
     sys.exit(1)
 
 
-@click.command(
+@click.group(
     name="lock",
+    invoke_without_command=True,
     help="Resolve dependencies and write apm.lock.yaml without deploying files",
 )
 @click.option(
@@ -124,7 +132,9 @@ def _handle_lock_error(e: Exception, verbose: bool) -> None:
     show_default=True,
     help="Max concurrent package downloads (0 to disable parallelism)",
 )
+@click.pass_context
 def lock(
+    ctx: click.Context,
     verbose: bool,
     global_: bool,
     update_refs: bool,
@@ -134,12 +144,40 @@ def lock(
 ) -> None:
     """Resolve dependencies and write apm.lock.yaml without deploying files.
 
+    Run bare to (re)generate the lockfile, or use a subcommand such as
+    ``apm lock export`` to derive an artifact from the existing lockfile.
+
     Examples:
         apm lock                 # Resolve from apm.yml, write apm.lock.yaml
         apm lock --update        # Re-resolve to latest SHAs, write lockfile
         apm lock -g              # Operate on the user-scope (~/.apm/) manifest
         apm lock --verbose       # Show resolution details
+        apm lock export --format cyclonedx > sbom.json
     """
+    # Subcommands (e.g. ``export``) own their own behavior; only the bare
+    # ``apm lock`` invocation runs the resolve-and-write flow.
+    if ctx.invoked_subcommand is not None:
+        return
+    _run_lock(
+        verbose=verbose,
+        global_=global_,
+        update_refs=update_refs,
+        no_policy=no_policy,
+        target=target,
+        parallel_downloads=parallel_downloads,
+    )
+
+
+def _run_lock(
+    *,
+    verbose: bool,
+    global_: bool,
+    update_refs: bool,
+    no_policy: bool,
+    target: str | list[str] | None,
+    parallel_downloads: int,
+) -> None:
+    """Resolve dependencies and write apm.lock.yaml (bare ``apm lock``)."""
     import os
 
     from apm_cli.core.scope import InstallScope, get_apm_dir
@@ -201,6 +239,106 @@ def lock(
         _handle_lock_error(e, verbose)
 
     _rich_success("Lockfile written to apm.lock.yaml", symbol="check")
+
+
+@lock.command(
+    name="export",
+    help="Export an SBOM/inventory from the existing lockfile (reads apm.lock.yaml only)",
+)
+@click.option(
+    "--format",
+    "-f",
+    "fmt",
+    type=click.Choice(list(SUPPORTED_FORMATS), case_sensitive=False),
+    default=FORMAT_CYCLONEDX,
+    show_default=True,
+    help="SBOM output format",
+)
+@click.option(
+    "--output",
+    "-o",
+    "output",
+    type=click.Path(dir_okay=False, writable=True),
+    default=None,
+    help="Write the SBOM to a file instead of stdout",
+)
+@click.option(
+    "--global",
+    "-g",
+    "global_",
+    is_flag=True,
+    default=False,
+    help="Read the user-scope (~/.apm/) lockfile instead of the current project",
+)
+@click.option(
+    "--timestamp",
+    "timestamp",
+    default=None,
+    help=(
+        "Pin the SBOM timestamp (ISO 8601, e.g. 2024-06-01T00:00:00+00:00) for "
+        "reproducible output. Defaults to SOURCE_DATE_EPOCH, then the lockfile's "
+        "generated_at."
+    ),
+)
+def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | None) -> None:
+    """Serialize the recorded lockfile into a CycloneDX or SPDX inventory.
+
+    This is an INVENTORY export, not a security attestation: it reflects what
+    the lockfile recorded (purls, hashes, declared licenses) and never
+    re-resolves, re-hashes, or touches the network.
+    """
+    from apm_cli.core.scope import InstallScope, get_apm_dir
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+    from apm_cli.export.sbom import export_sbom
+
+    # The SBOM streams to stdout (for `apm lock export | jq`); route every
+    # diagnostic to stderr so it can never corrupt the machine-readable payload.
+    set_console_stderr(True)
+
+    if global_:
+        project_root = get_apm_dir(InstallScope.USER)
+    else:
+        manifest_path = _find_apm_yml()
+        project_root = manifest_path.parent if manifest_path else Path.cwd().resolve()
+
+    lockfile_path = get_lockfile_path(project_root)
+    if not lockfile_path.is_file():
+        _rich_error(f"No lockfile found at {lockfile_path}. Run 'apm lock' to generate one first.")
+        sys.exit(1)
+
+    lockfile = LockFile.from_yaml(lockfile_path.read_text(encoding="utf-8"))
+    resolved_timestamp = _resolve_export_timestamp(timestamp, lockfile.generated_at)
+
+    document = export_sbom(lockfile, fmt, timestamp=resolved_timestamp)
+
+    if output:
+        Path(output).write_text(document, encoding="utf-8")
+        _rich_success(f"SBOM written to {output} (format={fmt.lower()})", symbol="check")
+    else:
+        click.echo(document, nl=False)
+
+
+def _resolve_export_timestamp(explicit: str | None, lockfile_generated_at: str | None) -> str:
+    """Resolve the SBOM timestamp for reproducible output.
+
+    Precedence: explicit ``--timestamp`` > ``SOURCE_DATE_EPOCH`` env >
+    the lockfile's ``generated_at`` > a fixed epoch. Pinning keeps export
+    byte-deterministic across runs.
+    """
+    import os
+    from datetime import datetime, timezone
+
+    if explicit:
+        return explicit
+    epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    if epoch:
+        try:
+            return datetime.fromtimestamp(int(epoch), tz=timezone.utc).isoformat()
+        except (ValueError, OverflowError, OSError):
+            pass
+    if lockfile_generated_at:
+        return lockfile_generated_at
+    return "1970-01-01T00:00:00+00:00"
 
 
 __all__ = ["lock"]

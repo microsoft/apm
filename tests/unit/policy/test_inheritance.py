@@ -834,6 +834,39 @@ class TestBinDeployMerge(unittest.TestCase):
         self.assertEqual(set(result.bin_deploy.deny), {"a/b", "c/d"})
 
 
+class TestMergeUnmanagedExclude(unittest.TestCase):
+    """The unmanaged-files ``exclude`` list is union-merged across a chain."""
+
+    def test_child_exclude_unions_with_parent(self):
+        parent = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(action="deny", exclude=(".github/copilot",))
+        )
+        child = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(action=None, exclude=(".vscode/mcp.json",))
+        )
+        merged = merge_policies(parent, child)
+        self.assertEqual(
+            set(merged.unmanaged_files.exclude),
+            {".github/copilot", ".vscode/mcp.json"},
+        )
+
+    def test_parent_exclude_inherited_when_child_silent(self):
+        parent = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(action="deny", exclude=(".github/copilot",))
+        )
+        child = ApmPolicy()  # no unmanaged_files block at all
+        merged = merge_policies(parent, child)
+        self.assertEqual(merged.unmanaged_files.exclude, (".github/copilot",))
+
+    def test_child_only_exclude_is_not_transparent(self):
+        # A child that sets only exclude must still carry it through, even
+        # though action and directories are None.
+        parent = ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="deny"))
+        child = ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(exclude=(".cursor/rules/local.md",)))
+        merged = merge_policies(parent, child)
+        self.assertIn(".cursor/rules/local.md", merged.unmanaged_files.exclude)
+
+
 class TestMergeFieldCoverageGuard(unittest.TestCase):
     """Regression trap for the whole class of "forgotten field" bugs.
 

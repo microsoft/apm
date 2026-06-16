@@ -117,10 +117,15 @@ class UnmanagedFilesPolicy:
     When either field is set (including ``directories=()`` with a declared
     ``directories`` key), the merge applies escalation / union rules.
     ``action`` is then one of ``ignore`` | ``warn`` | ``deny``.
+
+    ``exclude`` is a glob allow-list of workspace paths to suppress from the
+    report -- used to silence known harness-managed artifacts. ``None`` means
+    "no opinion" (transparent during merge); a set list is union-merged.
     """
 
     action: str | None = None  # None | ignore | warn | deny
     directories: tuple[str, ...] | None = None  # None -> no opinion; () explicit
+    exclude: tuple[str, ...] | None = None  # None -> no opinion; globs to suppress
 
     @property
     def effective_action(self) -> str:
@@ -188,6 +193,25 @@ class AuditPolicy:
     on_install: str | None = None  # None | off | warn | block
     external: tuple[str, ...] | None = None  # required external scanners at install
     scanners: tuple[tuple[str, ScannerGovernance], ...] | None = None
+    # When True, ``apm audit`` exits non-zero if the workspace content drifts
+    # from the lockfile. Default off preserves today's advisory behavior (bare
+    # ``apm audit`` renders drift but exits 0). Tighten-not-relax on merge.
+    fail_on_drift: bool = False
+
+
+@dataclass(frozen=True)
+class IntegrityPolicy:
+    """Rules governing supply-chain integrity of locked dependencies.
+
+    ``require_hashes``: when ``True``, every non-local lockfile entry MUST carry
+    a content hash. A missing or empty hash is a FAILURE (fail-closed), never a
+    silent pass -- an unhashed entry could let a tampered lockfile redirect a
+    download without detection. Default off preserves today's behavior. The key
+    only asserts hash-presence on the lockfile entry; it does not add a second
+    filesystem hash pass (the install pipeline already computes+records hashes).
+    """
+
+    require_hashes: bool = False
 
 
 @dataclass(frozen=True)
@@ -195,6 +219,7 @@ class SecurityPolicy:
     """Rules governing APM's security checks (content audit and scanners)."""
 
     audit: AuditPolicy = field(default_factory=AuditPolicy)
+    integrity: IntegrityPolicy = field(default_factory=IntegrityPolicy)
 
 
 @dataclass(frozen=True)
