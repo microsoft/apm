@@ -90,7 +90,7 @@ Unknown top-level keys produce a warning, never an error -- so newer policy file
 
 Rules over the `dependencies:` and `mcp:` blocks declared in consumer `apm.yml` files.
 
-When a dependency matches `deny`, `apm install` will **not install that artifact** -- with `enforcement: block` the install aborts before the package is written to disk. `deny` is an install-time decision, not a runtime block: it stops a denied artifact from being installed, and does not constrain what an already-installed or otherwise-present artifact does at runtime.
+When a dependency matches `deny`, `apm install` will **not download or deploy that artifact**. With `enforcement: block`, the install aborts before any new files for the denied package are written. `deny` is an install-time decision, not a runtime block: it stops a denied artifact from being installed, and does not constrain what an already-installed or otherwise-present artifact does at runtime.
 
 | Field                | Type                  | Default          | Notes                                                                                       |
 |----------------------|-----------------------|------------------|---------------------------------------------------------------------------------------------|
