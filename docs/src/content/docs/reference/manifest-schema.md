@@ -115,7 +115,18 @@ Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm ini
 |---|---|
 | **Type** | `string` |
 | **Required** | OPTIONAL |
-| **Description** | SPDX license identifier (e.g. `MIT`, `Apache-2.0`). |
+| **Description** | SPDX license expression (e.g. `MIT`, `Apache-2.0`, `(MIT OR Apache-2.0)`) declaring the package license. |
+
+The value is recorded verbatim into a consumer's lockfile as
+[`declared_license`](../lockfile-spec/) at resolve time, syntax-validated
+offline against the bundled SPDX id set, and surfaced by
+[`apm lock export`](../cli/lock/#export-sbom-inventory). Special tokens
+(`UNLICENSED`, `SEE LICENSE IN <file>`) and unrecognized strings are accepted
+and recorded as a named license -- a declaration is never rejected and never
+blocks packing or publishing. APM records what the manifest *declares*; it
+never reads or concludes a license from `LICENSE` file text. When omitted, the
+SBOM records `NOASSERTION` and `apm pack` / `apm publish` print an actionable
+nudge (the authoring path only).
 
 ### 3.6. `target`
 

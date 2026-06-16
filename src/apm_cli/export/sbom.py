@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from .formats import FORMAT_CYCLONEDX, FORMAT_SPDX, SUPPORTED_FORMATS
 from .purl import build_purl, scrub_url
 from .spdx import KIND_EXPRESSION, KIND_ID, classify_declared_license
 
@@ -29,10 +30,6 @@ if TYPE_CHECKING:
 
 CYCLONEDX_SPEC_VERSION = "1.5"
 SPDX_VERSION = "SPDX-2.3"
-
-FORMAT_CYCLONEDX = "cyclonedx"
-FORMAT_SPDX = "spdx"
-SUPPORTED_FORMATS = (FORMAT_CYCLONEDX, FORMAT_SPDX)
 
 _NOASSERTION = "NOASSERTION"
 

@@ -37,6 +37,37 @@ def _seed(project_dir: Path) -> None:
     (project_dir / "apm.lock.yaml").write_text(_LOCKFILE)
 
 
+def test_export_does_not_warn_about_undeclared_dep_licenses(runner, tmp_path):
+    # Consuming-path silence (#1777 asymmetry): export must NOT nag about
+    # transitive deps that lack a declared license -- it records NOASSERTION in
+    # the SBOM silently. The authoring nudge fires only on apm pack/publish.
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        _seed(Path.cwd())  # _LOCKFILE includes acme/undeclared (no license)
+        result = runner.invoke(cli, ["lock", "export", "--format", "spdx"])
+        assert result.exit_code == 0, result.stderr
+        combined = result.stdout + (result.stderr or "")
+        assert "Add a 'license:' field" not in combined
+        assert "the SBOM will record NOASSERTION for this package" not in combined
+    # `apm lock export | jq` must not be corrupted by a diagnostic on stdout:
+    # when no lockfile exists the error must land on stderr, leaving stdout clean.
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(cli, ["lock", "export"])
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "No lockfile found" in result.stderr
+
+
+def test_export_success_message_goes_to_stderr(runner, tmp_path):
+    # With --output the SBOM goes to a file; the success diagnostic must route to
+    # stderr so a piped stdout stays empty/clean.
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        _seed(Path.cwd())
+        result = runner.invoke(cli, ["lock", "export", "-o", "sbom.json"])
+        assert result.exit_code == 0, result.stderr
+        assert result.stdout == ""
+        assert "SBOM written to" in result.stderr
+
+
 def test_export_cyclonedx_to_stdout(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         _seed(Path.cwd())

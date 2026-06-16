@@ -44,13 +44,19 @@ import click
 
 from ..core.command_logger import InstallLogger
 from ..core.target_detection import TargetParamType
-from ..export.sbom import FORMAT_CYCLONEDX, SUPPORTED_FORMATS
+from ..export.formats import FORMAT_CYCLONEDX, SUPPORTED_FORMATS
 from ..install.errors import (
     AuthenticationError,
     DirectDependencyError,
     PolicyViolationError,
 )
-from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success
+from ..utils.console import (
+    _rich_echo,
+    _rich_error,
+    _rich_info,
+    _rich_success,
+    set_console_stderr,
+)
 from ._helpers import _find_apm_yml
 
 
@@ -269,8 +275,9 @@ def _run_lock(
     "timestamp",
     default=None,
     help=(
-        "Pin the SBOM timestamp (ISO 8601) for reproducible output. "
-        "Defaults to SOURCE_DATE_EPOCH, then the lockfile's generated_at."
+        "Pin the SBOM timestamp (ISO 8601, e.g. 2024-06-01T00:00:00+00:00) for "
+        "reproducible output. Defaults to SOURCE_DATE_EPOCH, then the lockfile's "
+        "generated_at."
     ),
 )
 def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | None) -> None:
@@ -283,6 +290,10 @@ def lock_export(fmt: str, output: str | None, global_: bool, timestamp: str | No
     from apm_cli.core.scope import InstallScope, get_apm_dir
     from apm_cli.deps.lockfile import LockFile, get_lockfile_path
     from apm_cli.export.sbom import export_sbom
+
+    # The SBOM streams to stdout (for `apm lock export | jq`); route every
+    # diagnostic to stderr so it can never corrupt the machine-readable payload.
+    set_console_stderr(True)
 
     if global_:
         project_root = get_apm_dir(InstallScope.USER)

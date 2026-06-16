@@ -115,3 +115,22 @@ def test_scrub_url_handles_oci_scheme():
     scrubbed = scrub_url("oci://user:tok@registry.example.com/acme/oci-tools@sha256:abc")
     assert "tok" not in scrubbed
     assert "registry.example.com" in scrubbed
+
+
+def test_scrub_url_strips_query_string_token():
+    # Query-string credentials (deploy tokens, SAS signatures) must never reach
+    # SBOM output, even when no userinfo is present. Supply-chain hard line.
+    scrubbed = scrub_url("https://gitlab.example.com/acme/git-utils.git?access_token=DEADBEEF")
+    parts = urlsplit(scrubbed)
+    assert "DEADBEEF" not in scrubbed
+    assert "access_token" not in scrubbed
+    assert parts.query == ""
+    assert parts.hostname == "gitlab.example.com"
+    assert parts.path == "/acme/git-utils.git"
+
+
+def test_scrub_url_strips_sas_signature_params():
+    scrubbed = scrub_url("https://acct.blob.core.windows.net/c/x.tgz?se=2025&sp=r&sig=SECRETSIG")
+    assert "SECRETSIG" not in scrubbed
+    assert "sig=" not in scrubbed
+    assert urlsplit(scrubbed).query == ""

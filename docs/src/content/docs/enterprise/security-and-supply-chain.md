@@ -89,13 +89,14 @@ registry deps, and `pkg:generic/<name>@<content_hash>` for local
 primitives. Output is deterministic -- components sorted by purl, a pinned
 timestamp (`--timestamp`, then `SOURCE_DATE_EPOCH`, then the lockfile's
 `generated_at`), stable key order -- so two runs are byte-identical. Any
-credentials embedded in a recorded URL are scrubbed before they reach the
-document.
+credentials embedded in a recorded URL -- userinfo (`user:pass@`) or
+query-string tokens (`?access_token=`, SAS `?sig=`) -- are scrubbed before
+they reach the document.
 
-**Declared license, npm-faithful.** APM records the license the package
-*manifest declares* (`license:` in `apm.yml`, or `license` in a
-`plugin.json`) into the lockfile's `declared_license` field at resolve
-time, syntax-validates it offline against the bundled SPDX id set, and
+**Declared license (manifest-declared, never concluded).** APM records the
+license the package *manifest declares* (`license:` in `apm.yml`, or
+`license` in a `plugin.json`) into the lockfile's `declared_license` field at
+resolve time, syntax-validates it offline against the bundled SPDX id set, and
 passes it through to the SBOM. APM never reads or interprets the text of a
 `LICENSE` file -- declared is not concluded. Three states, never collapsed:
 
@@ -112,6 +113,9 @@ prints an actionable warning; on the **consuming** path (install/export of
 other people's deps) APM stays silent -- it never nags about transitive
 licenses it cannot fix. Source: `src/apm_cli/export/authoring.py`.
 
+See [`apm lock export`](../../reference/cli/lock/#export-sbom-inventory) and
+the [`license` manifest field](../../reference/manifest-schema/#35-license)
+for the per-command reference.
 
 ## Secret handling
 

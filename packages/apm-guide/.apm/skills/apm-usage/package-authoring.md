@@ -195,7 +195,6 @@ correctly -- the component just records NOASSERTION (genuinely unknown).
 This warning fires only on the **authoring** path (your own `apm.yml`);
 installing or exporting other people's dependencies is silent.
 
-
 ## The 7 primitive types
 
 ### 1. Instruction (`*.instructions.md`)

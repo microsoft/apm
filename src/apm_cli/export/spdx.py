@@ -48,7 +48,14 @@ def _is_license_ref(token: str) -> bool:
 
 
 def _is_valid_license_id(token: str) -> bool:
-    """Whether *token* is a recognized SPDX id (allowing a trailing ``+``)."""
+    """Whether *token* is a recognized SPDX id (allowing a trailing ``+``).
+
+    Lookup is case-SENSITIVE by design: SPDX ids have canonical casing (``MIT``,
+    ``Apache-2.0``), and the SBOM id field must carry a canonical identifier.
+    A non-canonical casing (``mit``) therefore falls through to ``KIND_NAMED``
+    and is recorded verbatim -- honest about what was declared rather than
+    asserting a canonical id we cannot vouch for.
+    """
     bare = token[:-1] if token.endswith("+") else token
     return bool(bare) and (bare in SPDX_LICENSE_IDS or _is_license_ref(token))
 

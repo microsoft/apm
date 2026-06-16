@@ -79,20 +79,28 @@ def _basename(repo_url: str) -> str:
 
 
 def scrub_url(url: str) -> str:
-    """Remove any embedded userinfo (``user:pass@``) from *url*.
+    """Remove embedded credentials from *url* before it appears in SBOM output.
 
-    Returns the URL unchanged when it carries no credentials. Scheme, host,
-    port, path, query, and fragment are preserved verbatim.
+    Strips BOTH userinfo (``user:pass@``) and the entire query string. Query
+    parameters carry no provenance value for an inventory export and are a known
+    credential-leak vector (``?access_token=``, ``?token=``, SAS ``?sig=``...),
+    so they are dropped wholesale rather than allow-listed. Scheme, host, port,
+    path, and fragment are preserved verbatim. Returns the URL unchanged when it
+    carries neither userinfo nor a query string.
     """
     if not url:
         return url
     parts = urlsplit(url)
-    if "@" not in parts.netloc:
+    has_userinfo = "@" in parts.netloc
+    if not has_userinfo and not parts.query:
         return url
-    host = parts.hostname or ""
-    if parts.port is not None:
-        host = f"{host}:{parts.port}"
-    return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
+    if has_userinfo:
+        netloc = parts.hostname or ""
+        if parts.port is not None:
+            netloc = f"{netloc}:{parts.port}"
+    else:
+        netloc = parts.netloc
+    return urlunsplit((parts.scheme, netloc, parts.path, "", parts.fragment))
 
 
 def _is_oci(dep: LockedDependency) -> bool:
