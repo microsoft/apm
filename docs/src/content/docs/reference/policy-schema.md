@@ -152,6 +152,22 @@ Files in primitive target directories that are not recorded in `apm.lock.yaml`.
 |---------------|----------------|----------|----------------------------------------------------------------------------------|
 | `action`      | enum           | `ignore` | `ignore` / `warn` / `deny`. `deny` blocks installs that would leave drift.      |
 | `directories` | list of paths  | `[]`     | Subset of target directories to check. Empty = all known target directories.     |
+| `exclude`     | list of globs  | `[]`     | Workspace path globs to suppress from the report. Use to silence known harness-managed artifacts. Excluded paths are never reported. |
+
+Each reported file is a divergence-visibility finding, not a security verdict
+-- `apm.lock.yaml` is hand-editable YAML, so this surfaces drift rather than
+proving a supply-chain attack. Every finding is enriched in place:
+
+- a factual reason -- `not tracked in apm.lock.yaml`;
+- a lazy primitive-type tag (`[type: skill|agent|instruction|mcp]`) classified
+  only for the already-flagged file, never the whole tree;
+- a deny-conflict note -- `matches deny rule (<pattern>)` -- when the path
+  matches this policy's own `dependencies.deny` or `mcp.deny`. This is surfaced
+  for a human to resolve; APM never removes or blocks the file on this basis.
+
+```text
+[!] .github/agents/rogue.agent.md [type: agent] -- not tracked in apm.lock.yaml; matches deny rule (**/rogue*)
+```
 
 ## security
 
@@ -227,6 +243,7 @@ inherited list (see the tri-state table below).
 | `mcp.trust_transitive`      | Logical AND (`true` only if both sides true).                                    |
 | `manifest.scripts`          | Stricter wins (`deny` > `allow`).                                                |
 | `unmanaged_files.action`    | Stricter wins (`deny` > `warn` > `ignore`).                                      |
+| `unmanaged_files.exclude`   | Union, deduplicated. `null` is transparent (parent passes through).              |
 | `security.audit.on_install` | Stricter wins (`block` > `warn` > `off`). `null` is transparent.                 |
 | `security.audit.external`   | Union, deduplicated. `null` is transparent.                                      |
 | `security.audit.scanners`   | Union of scanner names; per scanner `allow_args` is AND-merged (any ancestor `false` wins -- tightening). `null` is transparent.                  |
@@ -315,6 +332,8 @@ unmanaged_files:
   directories:
     - .github/instructions
     - .github/prompts
+  exclude:
+    - .github/copilot-instructions.md
 ```
 
 ## registry_source

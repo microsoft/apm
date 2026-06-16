@@ -117,10 +117,15 @@ class UnmanagedFilesPolicy:
     When either field is set (including ``directories=()`` with a declared
     ``directories`` key), the merge applies escalation / union rules.
     ``action`` is then one of ``ignore`` | ``warn`` | ``deny``.
+
+    ``exclude`` is a glob allow-list of workspace paths to suppress from the
+    report -- used to silence known harness-managed artifacts. ``None`` means
+    "no opinion" (transparent during merge); a set list is union-merged.
     """
 
     action: str | None = None  # None | ignore | warn | deny
     directories: tuple[str, ...] | None = None  # None -> no opinion; () explicit
+    exclude: tuple[str, ...] | None = None  # None -> no opinion; globs to suppress
 
     @property
     def effective_action(self) -> str:

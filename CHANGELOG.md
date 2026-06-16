@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm audit` now surfaces unmanaged files in governance directories as a single enriched report: each finding states a factual reason (`not tracked in apm.lock.yaml`), a lazy primitive-type tag (`[type: skill|agent|instruction|mcp]`), and a deny-conflict note (`matches deny rule (<pattern>)`) when the path matches the policy's own `dependencies.deny` / `mcp.deny`. A new `unmanaged_files.exclude` policy key suppresses known harness-managed paths, and a symlink guard prevents following links out of the workspace. This is drift / divergence visibility, not supply-chain-attack prevention. (closes #1775) (#PR_NUMBER)
+
 ### Removed
 
 - `apm marketplace publish` command and consumer-repo fan-out workflow; consumers should run `apm install --update` instead. (#1134)

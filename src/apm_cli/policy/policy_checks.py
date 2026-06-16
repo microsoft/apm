@@ -686,12 +686,97 @@ _DEFAULT_GOVERNANCE_DIRS = [
 _MAX_UNMANAGED_SCAN_FILES = 10_000
 
 
+def _classify_primitive_type(rel_path: str) -> str | None:
+    """Lazily classify an already-flagged unmanaged file by APM convention.
+
+    Called ONLY on files already flagged as unmanaged -- never on the whole
+    tree -- so a user can triage skill / agent / instruction / mcp artifacts.
+    Returns ``None`` when the path matches no known primitive convention.
+    """
+    posix = rel_path.replace("\\", "/").lower()
+    name = posix.rsplit("/", 1)[-1]
+    segments = posix.split("/")
+    if name == "mcp.json" or name.endswith(".mcp.json") or "mcp" in segments or ".mcp" in segments:
+        return "mcp"
+    if name.endswith(".instructions.md") or "instructions" in segments:
+        return "instruction"
+    if name.endswith(".agent.md") or "agents" in segments:
+        return "agent"
+    if name == "skill.md" or "skills" in segments:
+        return "skill"
+    return None
+
+
+def _unmanaged_deny_conflict(
+    rel_path: str,
+    dependency_deny: tuple[str, ...] | None,
+    mcp_deny: tuple[str, ...] | None,
+) -> str | None:
+    """Return the deny pattern an unmanaged file conflicts with, or ``None``.
+
+    Surfaces APM's OWN policy (``dependencies.deny`` / ``mcp.deny``) as a
+    human-resolve conflict. Routes through the same ``first_matching_pattern``
+    matcher the deny-list checks use -- never a second matcher.
+    """
+    from .matcher import first_matching_pattern
+
+    name = rel_path.rsplit("/", 1)[-1]
+    for patterns in (dependency_deny, mcp_deny):
+        hit = first_matching_pattern(rel_path, patterns)
+        if hit is None:
+            hit = first_matching_pattern(name, patterns)
+        if hit is not None:
+            return hit
+    return None
+
+
+def _format_unmanaged_detail(
+    rel_path: str,
+    primitive_type: str | None,
+    deny_hit: str | None,
+) -> str:
+    """Render one enriched, ASCII-only finding line for an unmanaged file."""
+    label = f"{rel_path} [type: {primitive_type}]" if primitive_type else rel_path
+    reasons = ["not tracked in apm.lock.yaml"]
+    if deny_hit:
+        reasons.append(f"matches deny rule ({deny_hit})")
+    return f"{label} -- {'; '.join(reasons)}"
+
+
+def _symlink_escapes_workspace(path: Path, project_root: Path) -> bool:
+    """Return True if *path* is a symlink resolving outside *project_root*.
+
+    Guards the traversal so a symlink pointing out of the workspace is never
+    followed (no traversal bomb); broken or looping links also count as
+    escaping and are skipped.
+    """
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(project_root.resolve())
+        return False
+    except (OSError, RuntimeError, ValueError):
+        return True
+
+
 def _check_unmanaged_files(
     project_root: Path,
     lock: LockFile | None,
     policy: UnmanagedFilesPolicy,
+    *,
+    dependency_deny: tuple[str, ...] | None = None,
+    mcp_deny: tuple[str, ...] | None = None,
 ) -> CheckResult:
-    """Check 16: no untracked files in governance directories."""
+    """Check 16: surface files in governance dirs not tracked in apm.lock.yaml.
+
+    This is the ONE unified unmanaged-files report. Each flagged file is
+    enriched in-place (within this single scan) with a factual reason, a lazy
+    primitive-type classification, and -- where it matches APM's own
+    ``dependencies.deny`` / ``mcp.deny`` -- a deny-conflict note for a human to
+    resolve. Paths matching ``policy.exclude`` are suppressed. This is drift /
+    divergence visibility, not supply-chain-attack prevention.
+    """
+    from .matcher import first_matching_pattern
+
     if policy.effective_action == "ignore":
         return CheckResult(
             name="unmanaged-files",
@@ -700,6 +785,7 @@ def _check_unmanaged_files(
         )
 
     dirs = policy.directories if policy.directories else _DEFAULT_GOVERNANCE_DIRS
+    exclude = policy.exclude or ()
 
     # Build set of deployed files AND directory prefixes from lockfile
     deployed: set = set()
@@ -714,7 +800,8 @@ def _check_unmanaged_files(
 
     dir_prefix_tuple = tuple(deployed_dir_prefixes)
 
-    unmanaged: list[str] = []
+    details: list[str] = []
+    unmanaged_count = 0
     files_scanned = 0
     cap_hit = False
     for gov_dir in dirs:
@@ -722,16 +809,24 @@ def _check_unmanaged_files(
         if not dir_path.exists() or not dir_path.is_dir():
             continue
         for file_path in dir_path.rglob("*"):
-            if file_path.is_file():
-                files_scanned += 1
-                if files_scanned > _MAX_UNMANAGED_SCAN_FILES:
-                    cap_hit = True
-                    break
-                rel = file_path.relative_to(project_root).as_posix()
-                if rel not in deployed and not (
-                    dir_prefix_tuple and rel.startswith(dir_prefix_tuple)
-                ):
-                    unmanaged.append(rel)
+            # Symlink guard: never follow a link out of the workspace.
+            if file_path.is_symlink() and _symlink_escapes_workspace(file_path, project_root):
+                continue
+            if not file_path.is_file():
+                continue
+            files_scanned += 1
+            if files_scanned > _MAX_UNMANAGED_SCAN_FILES:
+                cap_hit = True
+                break
+            rel = file_path.relative_to(project_root).as_posix()
+            if rel in deployed or (dir_prefix_tuple and rel.startswith(dir_prefix_tuple)):
+                continue
+            if first_matching_pattern(rel, exclude) is not None:
+                continue
+            primitive_type = _classify_primitive_type(rel)
+            deny_hit = _unmanaged_deny_conflict(rel, dependency_deny, mcp_deny)
+            details.append(_format_unmanaged_detail(rel, primitive_type, deny_hit))
+            unmanaged_count += 1
         if cap_hit:
             break
 
@@ -745,11 +840,11 @@ def _check_unmanaged_files(
             ),
             details=[
                 f"Governance directories contain > {_MAX_UNMANAGED_SCAN_FILES:,} files; "
-                "consider adding exclude patterns in a future policy version"
+                "consider adding exclude patterns in the unmanaged_files policy"
             ],
         )
 
-    if not unmanaged:
+    if not details:
         return CheckResult(
             name="unmanaged-files",
             passed=True,
@@ -760,16 +855,16 @@ def _check_unmanaged_files(
         return CheckResult(
             name="unmanaged-files",
             passed=True,
-            message=f"{len(unmanaged)} unmanaged file(s) found (warn)",
-            details=unmanaged,
+            message=f"{unmanaged_count} unmanaged file(s) found (warn)",
+            details=details,
         )
 
     # action == "deny"
     return CheckResult(
         name="unmanaged-files",
         passed=False,
-        message=f"{len(unmanaged)} unmanaged file(s) in governance directories",
-        details=unmanaged,
+        message=f"{unmanaged_count} unmanaged file(s) in governance directories",
+        details=details,
     )
 
 
@@ -1130,6 +1225,14 @@ def run_policy_checks(
         return result
 
     # Unmanaged files check (16)
-    _run(_check_unmanaged_files(project_root, lock, policy.unmanaged_files))
+    _run(
+        _check_unmanaged_files(
+            project_root,
+            lock,
+            policy.unmanaged_files,
+            dependency_deny=policy.dependencies.effective_deny,
+            mcp_deny=policy.mcp.deny,
+        )
+    )
 
     return result

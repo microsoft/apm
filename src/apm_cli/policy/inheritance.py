@@ -253,7 +253,7 @@ def _merge_unmanaged_files(
     parent: UnmanagedFilesPolicy, child: UnmanagedFilesPolicy
 ) -> UnmanagedFilesPolicy:
     """Merge unmanaged-files policy; omitted child block is transparent (#1198)."""
-    if child.action is None and child.directories is None:
+    if child.action is None and child.directories is None and child.exclude is None:
         return parent
 
     if child.action is None:
@@ -273,10 +273,15 @@ def _merge_unmanaged_files(
             child.directories,
         )
 
+    if child.exclude is None:
+        eff_exclude = parent.exclude
+    else:
+        eff_exclude = _union(parent.exclude or (), child.exclude)
+
     eff_action = eff_action_raw if eff_action_raw is not None else "ignore"
     eff_dirs_out: tuple[str, ...] = () if eff_dirs is None else eff_dirs
 
-    return UnmanagedFilesPolicy(action=eff_action, directories=eff_dirs_out)
+    return UnmanagedFilesPolicy(action=eff_action, directories=eff_dirs_out, exclude=eff_exclude)
 
 
 def _merge_security(parent: SecurityPolicy, child: SecurityPolicy) -> SecurityPolicy:
