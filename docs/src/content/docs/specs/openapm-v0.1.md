@@ -1229,8 +1229,9 @@ behaves exactly as it did before these keys existed.
 - `security.integrity.require_hashes` (boolean, default `false`):
   when `true`, the install operation fails closed if any resolved
   non-local dependency selected for installation lacks a recorded
-  integrity hash in `apm.lock.yaml`. Local dependencies are exempt
-  (they are anchored by deployed-file hashes, not a package digest).
+  content hash (the `content_hash` lockfile field) in `apm.lock.yaml`.
+  Local dependencies are exempt (they are anchored by deployed-file
+  hashes, not a package digest).
 - `security.audit.fail_on_drift` (boolean, default `false`): when
   `true`, a bare `apm audit` exits non-zero if lockfile drift is
   detected or the drift check cannot complete.
@@ -1342,7 +1343,8 @@ is unaffected.
 honours `security.integrity.require_hashes: true` MUST fail the
 install operation with a fail-closed diagnostic when any resolved
 non-local dependency selected for installation lacks a recorded
-integrity hash in `apm.lock.yaml`. The same fail-closed behaviour
+content hash (the `content_hash` lockfile field) in `apm.lock.yaml`.
+The same fail-closed behaviour
 MUST hold when the lockfile is absent or unreadable at the point of
 the check. Local dependencies are exempt; they are anchored by
 deployed-file hashes rather than a package content hash.
