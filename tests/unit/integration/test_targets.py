@@ -219,6 +219,16 @@ class TestActiveTargets:
         names = {t.name for t in targets}
         assert names == {"windsurf", "copilot"}
 
+    def test_windsurf_not_detected_when_only_agents_dir_exists(self):
+        """apm#1520: windsurf skills converge on .agents/, but auto-detection
+        must still key off .windsurf/ (NOT the shared .agents/ dir). A workspace
+        with only .agents/ must not auto-select windsurf -- otherwise any tool
+        that creates .agents/ would silently pull in windsurf deploys."""
+        (self.root / ".agents").mkdir()
+        targets = active_targets(self.root)
+        # .agents/ alone matches no target root_dir -> copilot fallback only.
+        assert [t.name for t in targets] == ["copilot"]
+
     # -- explicit list of targets --
 
     def test_explicit_list_single_target(self):
@@ -310,16 +320,18 @@ class TestActiveTargets:
 
 
 class TestDefaultSkillRouting:
-    """Assert that the 4 documented clients route skills to .agents/ by default."""
+    """Assert that the documented clients route skills to .agents/ by default."""
 
     def test_default_skill_routing_uses_agents_dir_for_documented_clients(self):
-        """copilot, cursor, opencode, codex, gemini all have deploy_root='.agents' on skills."""
+        """copilot, cursor, opencode, codex, gemini, windsurf all have
+        deploy_root='.agents' on skills."""
         expected = {
             "copilot": ".agents",
             "cursor": ".agents",
             "opencode": ".agents",
             "codex": ".agents",
             "gemini": ".agents",
+            "windsurf": ".agents",
             "claude": None,  # not documented as .agents/-aware
         }
         for name, want_root in expected.items():
@@ -335,11 +347,12 @@ class TestDefaultSkillRouting:
         from apm_cli.integration.targets import apply_legacy_skill_paths
 
         profiles = [
-            KNOWN_TARGETS[n] for n in ("copilot", "cursor", "opencode", "codex", "claude", "gemini")
+            KNOWN_TARGETS[n]
+            for n in ("copilot", "cursor", "opencode", "codex", "claude", "gemini", "windsurf")
         ]
         restored = apply_legacy_skill_paths(profiles)
 
-        # All 6 should have deploy_root=None after legacy restore
+        # All 7 should have deploy_root=None after legacy restore
         for profile in restored:
             skills_pm = profile.primitives.get("skills")
             assert skills_pm is not None, f"{profile.name} should have skills"
@@ -373,6 +386,33 @@ class TestDefaultSkillRouting:
         assert skills_pm.deploy_root is None, (
             f"gemini: expected deploy_root=None (legacy), got {skills_pm.deploy_root!r}"
         )
+
+    def test_windsurf_skill_routing_uses_agents_dir_by_default(self):
+        """Cascade natively discovers .agents/skills/; windsurf converges there
+        (apm#1520) instead of keeping a .windsurf/skills/ copy."""
+        profile = KNOWN_TARGETS["windsurf"]
+        skills_pm = profile.primitives["skills"]
+        assert skills_pm.deploy_root == ".agents", (
+            f"windsurf: expected deploy_root='.agents', got {skills_pm.deploy_root!r}"
+        )
+
+    def test_windsurf_legacy_skill_paths_restores_per_client_routing(self):
+        """With apply_legacy_skill_paths(), windsurf deploy_root is reset to None
+        so skills fall back to the pre-convergence .windsurf/skills/ layout."""
+        from apm_cli.integration.targets import apply_legacy_skill_paths
+
+        profiles = [KNOWN_TARGETS["windsurf"]]
+        restored = apply_legacy_skill_paths(profiles)
+        skills_pm = restored[0].primitives["skills"]
+        assert skills_pm.deploy_root is None, (
+            f"windsurf: expected deploy_root=None (legacy), got {skills_pm.deploy_root!r}"
+        )
+
+    def test_windsurf_pack_prefixes_cover_both_roots(self):
+        """windsurf deploys skills to .agents/ and rules/workflows/hooks to
+        .windsurf/, so pack must include both roots (mirrors codex)."""
+        profile = KNOWN_TARGETS["windsurf"]
+        assert set(profile.effective_pack_prefixes) == {".windsurf/", ".agents/"}
 
     def test_apply_legacy_does_not_mutate_known_targets(self):
         """apply_legacy_skill_paths must not mutate the global KNOWN_TARGETS."""

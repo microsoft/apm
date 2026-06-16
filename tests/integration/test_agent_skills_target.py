@@ -811,3 +811,91 @@ def test_auto_migration_collision_skips_gracefully(
     out = r2.output or ""
     assert "Skill path migration skipped" in out or "already exist" in out
     assert "--legacy-skill-paths" in out
+
+
+# ---------------------------------------------------------------------------
+# Windsurf convergence (apm#1520)
+# ---------------------------------------------------------------------------
+
+
+def _make_windsurf_project(tmp_path: Path) -> Path:
+    """Project with ``.windsurf/`` present so the windsurf target deploys.
+
+    windsurf has ``auto_create=False`` and ``detect_by_dir=True`` keyed off
+    ``.windsurf/`` (NOT ``.agents/``), so skills only deploy when the
+    workspace already has a ``.windsurf/`` directory -- even for the
+    converged ``.agents/skills/`` path.
+    """
+    project = _make_project(tmp_path / "dst", with_github=False)
+    (project / ".windsurf").mkdir()
+    return project
+
+
+def test_windsurf_install_deploys_to_agents_skills(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """apm#1520: ``apm install --target windsurf`` deploys skills to the
+    converged ``.agents/skills/<name>/SKILL.md`` path, NOT ``.windsurf/skills/``."""
+    bundle = _make_plugin_bundle(tmp_path / "src", pack_target="windsurf")
+    project = _make_windsurf_project(tmp_path)
+
+    monkeypatch.delenv("APM_LEGACY_SKILL_PATHS", raising=False)
+    result = _invoke(project, ["install", str(bundle), "--target", "windsurf"], monkeypatch)
+    assert result.exit_code == 0, f"output={result.output!r}"
+
+    assert (project / ".agents/skills" / SKILL_NAME / "SKILL.md").is_file(), (
+        "windsurf skills must converge on .agents/skills/"
+    )
+    assert not (project / ".windsurf/skills" / SKILL_NAME / "SKILL.md").exists(), (
+        "windsurf must no longer write the per-client .windsurf/skills/ copy"
+    )
+
+
+def test_windsurf_legacy_flag_produces_windsurf_skills(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--legacy-skill-paths`` restores the pre-convergence ``.windsurf/skills/``
+    layout for the windsurf target."""
+    bundle = _make_plugin_bundle(tmp_path / "src", pack_target="windsurf")
+    project = _make_windsurf_project(tmp_path)
+
+    result = _invoke(
+        project,
+        ["install", str(bundle), "--target", "windsurf", "--legacy-skill-paths"],
+        monkeypatch,
+    )
+    assert result.exit_code == 0, f"output={result.output!r}"
+
+    assert (project / ".windsurf/skills" / SKILL_NAME / "SKILL.md").is_file(), (
+        "--legacy-skill-paths must restore .windsurf/skills/ for windsurf"
+    )
+    assert not (project / ".agents/skills" / SKILL_NAME / "SKILL.md").exists(), (
+        "legacy mode must not also write the converged .agents/skills/ copy"
+    )
+
+
+def test_windsurf_auto_migration_from_windsurf_skills(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A legacy ``.windsurf/skills/`` install auto-migrates to ``.agents/skills/``
+    on the next converged ``apm install`` (apm#1520)."""
+    bundle = _make_plugin_bundle(tmp_path / "src", pack_target="windsurf")
+    project = _make_windsurf_project(tmp_path)
+
+    # --- First install: legacy mode -> .windsurf/skills/ ---
+    monkeypatch.setenv("APM_LEGACY_SKILL_PATHS", "1")
+    r1 = _invoke(project, ["install", str(bundle), "--target", "windsurf"], monkeypatch)
+    assert r1.exit_code == 0, f"legacy install failed: {r1.output!r}"
+    assert (project / ".windsurf/skills" / SKILL_NAME / "SKILL.md").is_file()
+
+    # --- Second install: converged mode -> migrate ---
+    monkeypatch.delenv("APM_LEGACY_SKILL_PATHS", raising=False)
+    r2 = _invoke(project, ["install", str(bundle), "--target", "windsurf"], monkeypatch)
+    assert r2.exit_code == 0, f"migration install failed: {r2.output!r}"
+
+    assert (project / ".agents/skills" / SKILL_NAME / "SKILL.md").is_file(), (
+        "converged path must exist after migration"
+    )
+    assert not (project / ".windsurf/skills" / SKILL_NAME / "SKILL.md").exists(), (
+        "legacy .windsurf/skills/ copy must be removed by the migration"
+    )

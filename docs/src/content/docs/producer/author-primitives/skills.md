@@ -99,22 +99,23 @@ in `references/`; keep `SKILL.md` to the always-relevant flow.
 | Target            | Deploy directory                             |
 |-------------------|----------------------------------------------|
 | `claude`          | `.claude/skills/<name>/SKILL.md`             |
-| `windsurf`        | `.windsurf/skills/<name>/SKILL.md`           |
 | `kiro`            | `.kiro/skills/<name>/SKILL.md`               |
 | `copilot`         | `.agents/skills/<name>/SKILL.md`             |
 | `cursor`          | `.agents/skills/<name>/SKILL.md`             |
 | `codex`           | `.agents/skills/<name>/SKILL.md`             |
 | `gemini`          | `.agents/skills/<name>/SKILL.md`             |
 | `opencode`        | `.agents/skills/<name>/SKILL.md`             |
+| `windsurf`        | `.agents/skills/<name>/SKILL.md`             |
 | `agent-skills`    | `.agents/skills/<name>/SKILL.md` (explicit)  |
 
-Five harnesses converge on the cross-tool `.agents/skills/`
+Six harnesses converge on the cross-tool `.agents/skills/`
 directory. Claude keeps its harness-native path because Claude Code's
-default scan is `.claude/skills/`; Windsurf and Kiro currently use
-`.windsurf/skills/` and `.kiro/skills/` for the same reason. Windsurf's Cascade also
-[discovers `.agents/skills/`](https://docs.windsurf.com/windsurf/cascade/skills#skill-scopes)
-natively for cross-agent compatibility (convergence tracked in
-[#1520](https://github.com/microsoft/apm/issues/1520)). The whole
+default scan is `.claude/skills/`; Kiro likewise keeps `.kiro/skills/`.
+Windsurf joined the convergence in
+[#1520](https://github.com/microsoft/apm/issues/1520): Cascade
+[natively discovers `.agents/skills/`](https://docs.windsurf.com/windsurf/cascade/skills#skill-scopes)
+at both workspace and user scope, so APM no longer ships a separate
+`.windsurf/skills/` copy. The whole
 skill folder is copied (`shutil.copytree`), so `scripts/`,
 `references/`, `assets/`, and `examples/` ride along. Symlinks and
 the `.apm-pin` cache marker are filtered out

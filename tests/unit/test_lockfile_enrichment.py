@@ -443,32 +443,50 @@ class TestWindsurfTargetParity:
         return lf
 
     def test_windsurf_target_includes_windsurf_prefix(self):
+        """``.windsurf/`` (rules/workflows/hooks, plus legacy skills) is one of
+        windsurf's two pack roots and must survive filtering."""
         lf = self._lockfile_with(
             [
-                ".windsurf/skills/x/SKILL.md",
+                ".windsurf/rules/r.md",
                 ".unrelated/foo",
             ]
         )
         result = enrich_lockfile_for_pack(lf, fmt="apm", target="windsurf")
         deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
-        assert ".windsurf/skills/x/SKILL.md" in deployed
+        assert ".windsurf/rules/r.md" in deployed
+        assert ".unrelated/foo" not in deployed
+
+    def test_windsurf_target_includes_agents_skills_prefix(self):
+        """apm#1520: windsurf skills converge on ``.agents/skills/``, so that
+        prefix must be one of windsurf's pack roots (was ``.windsurf/skills/``)."""
+        lf = self._lockfile_with(
+            [
+                ".agents/skills/x/SKILL.md",
+                ".unrelated/foo",
+            ]
+        )
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target="windsurf")
+        deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
+        assert ".agents/skills/x/SKILL.md" in deployed
         assert ".unrelated/foo" not in deployed
 
     def test_windsurf_cross_map_skills_from_github(self):
-        """``.github/skills/`` files are remapped under ``.windsurf/skills/``."""
+        """``.github/skills/`` files are remapped under ``.agents/skills/``
+        (apm#1520 convergence)."""
         lf = self._lockfile_with([".github/skills/x/SKILL.md"])
         result = enrich_lockfile_for_pack(lf, fmt="apm", target="windsurf")
         deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
-        assert ".windsurf/skills/x/SKILL.md" in deployed
+        assert ".agents/skills/x/SKILL.md" in deployed
 
     def test_windsurf_cross_map_agents_collapse_to_skills(self):
-        """``.github/agents/`` is intentionally remapped to ``.windsurf/skills/``
-        because windsurf has no native agent surface (lossy conversion).
+        """``.github/agents/`` is intentionally remapped to ``.agents/skills/``
+        because windsurf has no native agent surface (lossy conversion), and
+        windsurf skills now live under ``.agents/skills/`` (apm#1520).
         """
         lf = self._lockfile_with([".github/agents/a.md"])
         result = enrich_lockfile_for_pack(lf, fmt="apm", target="windsurf")
         deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
-        assert ".windsurf/skills/a.md" in deployed
+        assert ".agents/skills/a.md" in deployed
 
     def test_target_all_includes_windsurf_files(self):
         """``--target all`` must include ``.windsurf/`` files (was missing pre-refactor)."""

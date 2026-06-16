@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: Windsurf skills now deploy to `.agents/skills/<name>/SKILL.md`
+  instead of `.windsurf/skills/<name>/SKILL.md` (skill routing convergence).**
+  Cascade
+  [natively discovers `.agents/skills/`](https://docs.windsurf.com/windsurf/cascade/skills#skill-scopes)
+  at both workspace and user scope, so Windsurf joins the existing convergence
+  with Copilot, Cursor, Codex, Gemini, and OpenCode (6 clients total) and APM
+  no longer writes a separate `.windsurf/skills/` copy. Claude remains on its
+  native `.claude/skills/` routing. **Migration:** the first `apm install`
+  after upgrading auto-migrates any `.windsurf/skills/<pkg>/` recorded in
+  `apm.lock.yaml` to `.agents/skills/` and deletes the stale copy (idempotent;
+  foreign/hand-authored skills are untouched; aborts with a clear error on a
+  content collision). If you never re-run `apm install`, delete the stale
+  directories by hand: `rm -rf .windsurf/skills/<pkg>/`. Pass
+  `--legacy-skill-paths` (or set `APM_LEGACY_SKILL_PATHS=1`) to keep the
+  pre-convergence `.windsurf/skills/` layout. (closes #1520)
+
 ### Removed
 
 - `apm marketplace publish` command and consumer-repo fan-out workflow; consumers should run `apm install --update` instead. (#1134)

@@ -25,13 +25,13 @@ see [Primitive types](./primitive-types/).
 | codex           | `.codex/` + `.agents/` |     [ ]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
-| windsurf        | `.windsurf/`           |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
+| windsurf        | `.windsurf/` + `.agents/` |  [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | kiro            | `.kiro/`               |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
-Gemini, and Codex by default (see [Skills convergence](#skills-convergence)
-below). Claude, Windsurf, and Kiro keep target-native skill directories.
+Gemini, Codex, and Windsurf by default (see [Skills convergence](#skills-convergence)
+below). Claude and Kiro keep target-native skill directories.
 
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
 Copilot desktop App), and `openclaw` (OpenClaw agent runtime) are
@@ -164,11 +164,11 @@ OpenCode.
 Windsurf / Cascade.
 
 - **Detection.** `.windsurf/` directory.
-- **Deploy directory.** `.windsurf/` at project scope; `~/.codeium/windsurf/` at user scope.
+- **Deploy directory.** `.windsurf/` at project scope (`~/.codeium/windsurf/` at user scope), plus `.agents/` for skills.
 - **Supported primitives.** instructions, skills, commands, hooks, mcp.
 - **File conventions.**
   - instructions: `.windsurf/rules/<name>.md`
-  - skills: `.windsurf/skills/<name>/SKILL.md`
+  - skills: `.agents/skills/<name>/SKILL.md` (Cascade natively discovers `.agents/skills/`; [#1520](https://github.com/microsoft/apm/issues/1520))
   - commands: `.windsurf/workflows/<name>.md`
   - hooks: `.windsurf/hooks.json`
 - **Agents.** Not deployed. Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so a separate agents primitive would collide with skills on the same path. Ship personas as skills under `.apm/skills/<name>/SKILL.md` instead.

@@ -16,9 +16,10 @@ from ..integration.targets import KNOWN_TARGETS
 # for Copilot.  Cursor/opencode sources are niche; if someone publishes
 # skills exclusively under .cursor/, they must pack with --target cursor.
 #
-# Windsurf converts agents -> skills (lossy: AGENTS.md format is collapsed
-# into the windsurf skill envelope), so .github/agents/ maps to
-# .windsurf/skills/.
+# Windsurf converges skills onto the cross-tool .agents/skills/ directory
+# (apm#1520), so .github/skills/ maps there.  It also converts agents ->
+# skills (lossy: AGENTS.md format is collapsed into the windsurf skill
+# envelope), so .github/agents/ maps to .agents/skills/ as well.
 _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
     "claude": {
         ".github/skills/": ".claude/skills/",
@@ -45,8 +46,8 @@ _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
         ".github/agents/": ".codex/agents/",
     },
     "windsurf": {
-        ".github/skills/": ".windsurf/skills/",
-        ".github/agents/": ".windsurf/skills/",
+        ".github/skills/": ".agents/skills/",
+        ".github/agents/": ".agents/skills/",
     },
     "agent-skills": {
         ".github/skills/": ".agents/skills/",

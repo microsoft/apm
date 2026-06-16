@@ -104,7 +104,9 @@ skill collection layout reference.
 ## Skill routing convergence
 
 :::caution[Behavior change]
-Skills for **Copilot, Cursor, OpenCode, Codex, and Gemini** now deploy to `.agents/skills/` by default instead of per-client directories (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, etc.). This matches the `.agents/` discovery path documented by all five clients and eliminates redundant copies when targeting multiple clients.
+Skills for **Copilot, Cursor, OpenCode, Codex, Gemini, and Windsurf** now deploy to `.agents/skills/` by default instead of per-client directories (`.github/skills/`, `.cursor/skills/`, `.gemini/skills/`, `.windsurf/skills/`, etc.). This matches the `.agents/` discovery path documented by all six clients and eliminates redundant copies when targeting multiple clients.
+
+**Windsurf joined the convergence in [#1520](https://github.com/microsoft/apm/issues/1520).** Cascade [natively discovers `.agents/skills/`](https://docs.windsurf.com/windsurf/cascade/skills#skill-scopes) at both workspace and user scope, so APM no longer writes a separate `.windsurf/skills/` copy. The next `apm install` after upgrading auto-migrates any `.windsurf/skills/<pkg>/` recorded in `apm.lock.yaml` to `.agents/skills/` and deletes the stale copy (see below). If you never re-run `apm install`, remove the stale directories by hand with `rm -rf .windsurf/skills/<pkg>/`.
 
 **Claude is unchanged** - its skills continue to deploy to `.claude/skills/`.
 
@@ -113,7 +115,7 @@ To restore the previous per-client layout, pass `--legacy-skill-paths` to any co
 
 ### Auto-migration of legacy lockfile state
 
-When you upgrade APM and run `apm install`, the tool automatically detects legacy per-client skill paths (`.github/skills/`, `.cursor/skills/`, `.opencode/skills/`, `.gemini/skills/`) recorded in your `apm.lock.yaml` and migrates them to `.agents/skills/`.
+When you upgrade APM and run `apm install`, the tool automatically detects legacy per-client skill paths (`.github/skills/`, `.cursor/skills/`, `.opencode/skills/`, `.gemini/skills/`, `.windsurf/skills/`) recorded in your `apm.lock.yaml` and migrates them to `.agents/skills/`.
 
 **What happens:**
 - Old per-client skill files are deleted after the new `.agents/skills/` files are written
@@ -135,7 +137,7 @@ per-client skill paths to `.agents/skills/` and update `apm.lock.yaml`. In
 CI pipelines, this means the working tree will show:
 
 - Deletions under `.github/skills/`, `.cursor/skills/`, `.opencode/skills/`,
-  and/or `.gemini/skills/`
+  `.gemini/skills/`, and/or `.windsurf/skills/`
 - Additions under `.agents/skills/`
 - An updated `apm.lock.yaml`
 

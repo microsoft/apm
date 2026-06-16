@@ -157,7 +157,7 @@ A plural alias `targets:` (YAML list only) is also accepted and takes precedence
 | `opencode` | Emits to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/`. |
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/`. |
 | `gemini` | Emits `GEMINI.md` and deploys to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json`. |
-| `windsurf` | Emits `AGENTS.md` and deploys to `.windsurf/rules/`, `.windsurf/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json`. |
+| `windsurf` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, plus `.windsurf/rules/`, `.windsurf/workflows/`, `.windsurf/hooks.json`. |
 | `kiro` | Emits `AGENTS.md` and deploys to `.kiro/steering/`, `.kiro/skills/`, `.kiro/hooks/`, `.kiro/settings/mcp.json`. |
 | `all` | All targets. Cannot be combined with other values in a list. |
 | `minimal` | `AGENTS.md` only at project root. **Auto-detected only**: this value MUST NOT be set explicitly in manifests; it is an internal fallback when no target folder is detected. |

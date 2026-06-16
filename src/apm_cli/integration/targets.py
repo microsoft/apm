@@ -664,8 +664,16 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     ),
     # Windsurf/Cascade -- .windsurf/ is the workspace config directory.
     # Rules are markdown files with trigger/globs frontmatter under .windsurf/rules/.
-    # Skills use the standard SKILL.md format under .windsurf/skills/.
-    # Cascade auto-invokes them when the description frontmatter matches the
+    # Skills converge on the cross-tool ``.agents/skills/<name>/SKILL.md`` path
+    # (deploy_root=".agents"): Cascade natively discovers ``.agents/skills/`` at
+    # both workspace and user scope, so windsurf joins the same convergence as
+    # copilot/cursor/codex/gemini/opencode instead of keeping a windsurf-native
+    # ``.windsurf/skills/`` copy (apm#1520).  Pass ``--legacy-skill-paths`` (or
+    # ``APM_LEGACY_SKILL_PATHS=1``) to restore the pre-convergence
+    # ``.windsurf/skills/`` layout; ``apply_legacy_skill_paths`` resets
+    # ``deploy_root`` to ``None``.
+    # Ref: https://docs.windsurf.com/windsurf/cascade/skills#skill-scopes
+    # Cascade auto-invokes a skill when its description frontmatter matches the
     # task -- this is the universal invocation mechanism, so windsurf does
     # NOT expose a separate ``agents`` primitive.  Package authors who want
     # their content to deploy to windsurf must declare it under
@@ -688,7 +696,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
                 "windsurf_rules",
                 output_compare=True,
             ),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
             "commands": PrimitiveMapping("workflows", ".md", "windsurf_workflow"),
             "hooks": PrimitiveMapping("", "hooks.json", "windsurf_hooks"),
         },
@@ -697,6 +710,9 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported="partial",
         user_root_dir=".codeium/windsurf",
         unsupported_user_primitives=("instructions",),
+        # Skills deploy to .agents/ while rules/workflows/hooks stay under
+        # .windsurf/, so pack must include both roots (mirrors codex).
+        pack_prefixes=(".windsurf/", ".agents/"),
         compile_family="agents",
         hooks_config_display=".windsurf/hooks.json",
     ),

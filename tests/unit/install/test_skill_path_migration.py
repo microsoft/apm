@@ -58,6 +58,7 @@ class TestLegacySkillPattern:
             ".cursor/skills/review/SKILL.md",
             ".opencode/skills/deep/nested/file.md",
             ".gemini/skills/lint/SKILL.md",
+            ".windsurf/skills/my-skill/SKILL.md",
         ],
     )
     def test_matches_legacy_clients(self, path: str) -> None:
@@ -132,14 +133,34 @@ class TestDetectLegacySkillDeployments:
                         ".cursor/skills/s1/SKILL.md",
                         ".opencode/skills/s1/SKILL.md",
                         ".gemini/skills/s1/SKILL.md",
+                        ".windsurf/skills/s1/SKILL.md",
                     ]
                 ),
             }
         )
         plans = detect_legacy_skill_deployments(lf, tmp_path)
-        assert len(plans) == 4
+        assert len(plans) == 5
         for plan in plans:
             assert plan.dst_path == ".agents/skills/s1/SKILL.md"
+
+    def test_detects_windsurf_legacy(self, tmp_path: Path) -> None:
+        """apm#1520: windsurf joined the convergence, so prior-version
+        .windsurf/skills/ deployments must be migrated to .agents/skills/."""
+        lf = _StubLockFile(
+            dependencies={
+                "pkg-a": _StubDep(
+                    deployed_files=[
+                        ".windsurf/skills/my-skill/SKILL.md",
+                        ".agents/skills/my-skill/SKILL.md",  # new path -- ignored
+                    ]
+                ),
+            }
+        )
+        plans = detect_legacy_skill_deployments(lf, tmp_path)
+        assert len(plans) == 1
+        assert plans[0].src_path == ".windsurf/skills/my-skill/SKILL.md"
+        assert plans[0].dst_path == ".agents/skills/my-skill/SKILL.md"
+        assert plans[0].dep_name == "pkg-a"
 
     def test_ignores_claude_and_codex(self, tmp_path: Path) -> None:
         lf = _StubLockFile(
