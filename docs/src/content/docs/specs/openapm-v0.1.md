@@ -1237,13 +1237,12 @@ directory that is neither recorded in `apm.lock.yaml` nor matched by
 a configured `unmanaged_files.exclude` glob.
 
 (b) Each surfaced path MUST be reported with the reason it is
-unmanaged -- that it is
-not tracked in `apm.lock.yaml`. Where the path also matches a
-configured dependency or MCP deny pattern, the report MUST
-additionally carry a supplemental conflict note naming that pattern;
-this note is enrichment only and never itself causes a tracked path
-to be surfaced. Where the primitive type is determinable, the
-surfaced entry MUST carry its
+unmanaged (that it is not tracked in `apm.lock.yaml`). Where the path
+also matches a configured dependency or MCP deny pattern, the report
+MUST additionally carry a supplemental conflict note naming that
+pattern; this note is enrichment only and never itself causes a
+tracked path to be surfaced. Where the primitive type is
+determinable, the surfaced entry MUST carry its
 inferred primitive type; where it is not determinable, the type
 annotation MUST be omitted.
 
@@ -1291,7 +1290,7 @@ merge a policy chain per the following table:
 | `mcp.trust_transitive`                | Logical AND.                                                           |
 | `manifest.scripts`                    | Stricter wins (`deny` > `allow`).                                      |
 | `unmanaged_files.action`              | Stricter wins (`deny` > `warn` > `ignore`).                            |
-| `unmanaged_files.exclude`             | Union, deduplicated, parent order preserved (additive: a child adds exclusions and cannot clear a parent's; `null` and `[]` both preserve the parent list). |
+| `unmanaged_files.exclude`             | Union, deduplicated (byte-exact on each pattern's UTF-8 string), parent order preserved (additive: a child adds exclusions and cannot clear a parent's; `null` and `[]` both preserve the parent list). |
 
 ### 6.5 Allow-list / deny-list tri-state semantics
 
