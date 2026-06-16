@@ -898,6 +898,24 @@ class TestUnmanagedClassification:
 
         assert _classify_primitive_type(".vscode/mcp.json") == "mcp"
 
+    def test_classify_agent_in_mcp_named_dir(self):
+        # A path segment literally named "mcp" must NOT override an explicit
+        # .agent.md filename convention.
+        from apm_cli.policy.policy_checks import _classify_primitive_type
+
+        assert _classify_primitive_type(".github/agents/mcp/rogue.agent.md") == "agent"
+
+    def test_classify_dot_mcp_root_config(self):
+        from apm_cli.policy.policy_checks import _classify_primitive_type
+
+        assert _classify_primitive_type(".mcp/servers.json") == "mcp"
+
+    def test_classify_plain_mcp_segment_not_mcp(self):
+        # A non-config file under a dir merely named "mcp" is not an MCP config.
+        from apm_cli.policy.policy_checks import _classify_primitive_type
+
+        assert _classify_primitive_type(".github/mcp/notes.txt") is None
+
     def test_classify_unknown_returns_none(self):
         from apm_cli.policy.policy_checks import _classify_primitive_type
 
@@ -1023,6 +1041,26 @@ class TestUnmanagedSymlinkGuard:
         result = _check_unmanaged_files(tmp_path, lock, policy)
         # The traversal must not follow the symlink out of the workspace.
         assert not any("escape.agent.md" in d for d in result.details)
+
+    def test_symlinked_directory_outside_not_recursed(self, tmp_path):
+        # A symlinked *directory* resolving outside the workspace must not be
+        # recursed into -- its contents must never surface. rglob() follows
+        # directory symlinks, so the scan must use a non-following walk.
+        outside = tmp_path.parent / "outside_tree"
+        outside.mkdir()
+        (outside / "secret.agent.md").write_text("secret", encoding="utf-8")
+        agents = tmp_path / ".github" / "agents"
+        agents.mkdir(parents=True)
+        link = agents / "linked"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks not supported on this platform")
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        result = _check_unmanaged_files(tmp_path, lock, policy)
+        assert not any("secret.agent.md" in d for d in result.details)
+        assert not any("linked" in d for d in result.details)
 
 
 class TestUnmanagedNonDuplication:

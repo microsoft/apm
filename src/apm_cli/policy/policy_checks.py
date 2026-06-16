@@ -8,6 +8,7 @@ They are always run in addition to the baseline checks in ``ci_checks``.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from .models import CheckResult, CIAuditResult
@@ -696,14 +697,26 @@ def _classify_primitive_type(rel_path: str) -> str | None:
     posix = rel_path.replace("\\", "/").lower()
     name = posix.rsplit("/", 1)[-1]
     segments = posix.split("/")
-    if name == "mcp.json" or name.endswith(".mcp.json") or "mcp" in segments or ".mcp" in segments:
-        return "mcp"
-    if name.endswith(".instructions.md") or "instructions" in segments:
+    # Explicit filename conventions win first (most specific signal).
+    if name.endswith(".instructions.md"):
         return "instruction"
-    if name.endswith(".agent.md") or "agents" in segments:
+    if name.endswith(".agent.md"):
         return "agent"
-    if name == "skill.md" or "skills" in segments:
+    if name == "mcp.json" or name.endswith(".mcp.json"):
+        return "mcp"
+    if name == "skill.md":
         return "skill"
+    # Directory-segment hints next (less specific). MCP is narrowed to a
+    # dedicated ``.mcp/`` root -- a directory merely named ``mcp`` is not an
+    # MCP config and must not mislabel files under it.
+    if "instructions" in segments:
+        return "instruction"
+    if "agents" in segments:
+        return "agent"
+    if "skills" in segments:
+        return "skill"
+    if ".mcp" in segments:
+        return "mcp"
     return None
 
 
@@ -808,25 +821,33 @@ def _check_unmanaged_files(
         dir_path = project_root / gov_dir
         if not dir_path.exists() or not dir_path.is_dir():
             continue
-        for file_path in dir_path.rglob("*"):
-            # Symlink guard: never follow a link out of the workspace.
-            if file_path.is_symlink() and _symlink_escapes_workspace(file_path, project_root):
-                continue
-            if not file_path.is_file():
-                continue
-            files_scanned += 1
-            if files_scanned > _MAX_UNMANAGED_SCAN_FILES:
-                cap_hit = True
+        # os.walk(followlinks=False) never recurses INTO a directory symlink, so
+        # a symlinked dir resolving outside the workspace is never traversed
+        # (the house pattern from security/gate.py). File symlinks still appear
+        # in the listing and are guarded individually below.
+        for dirpath, _subdirs, filenames in os.walk(dir_path, followlinks=False):
+            for fname in filenames:
+                file_path = Path(dirpath) / fname
+                # File-symlink guard: never follow a link out of the workspace.
+                if file_path.is_symlink() and _symlink_escapes_workspace(file_path, project_root):
+                    continue
+                if not file_path.is_file():
+                    continue
+                files_scanned += 1
+                if files_scanned > _MAX_UNMANAGED_SCAN_FILES:
+                    cap_hit = True
+                    break
+                rel = file_path.relative_to(project_root).as_posix()
+                if rel in deployed or (dir_prefix_tuple and rel.startswith(dir_prefix_tuple)):
+                    continue
+                if first_matching_pattern(rel, exclude) is not None:
+                    continue
+                primitive_type = _classify_primitive_type(rel)
+                deny_hit = _unmanaged_deny_conflict(rel, dependency_deny, mcp_deny)
+                details.append(_format_unmanaged_detail(rel, primitive_type, deny_hit))
+                unmanaged_count += 1
+            if cap_hit:
                 break
-            rel = file_path.relative_to(project_root).as_posix()
-            if rel in deployed or (dir_prefix_tuple and rel.startswith(dir_prefix_tuple)):
-                continue
-            if first_matching_pattern(rel, exclude) is not None:
-                continue
-            primitive_type = _classify_primitive_type(rel)
-            deny_hit = _unmanaged_deny_conflict(rel, dependency_deny, mcp_deny)
-            details.append(_format_unmanaged_detail(rel, primitive_type, deny_hit))
-            unmanaged_count += 1
         if cap_hit:
             break
 
