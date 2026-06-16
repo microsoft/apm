@@ -533,6 +533,10 @@ class APMPackage:
             if isinstance(dep, MCPDependency)
         ]
 
+    def get_all_mcp_dependencies(self) -> list["MCPDependency"]:
+        """Get production and dev MCP dependencies in manifest order."""
+        return self.get_mcp_dependencies() + self.get_dev_mcp_dependencies()
+
     def get_lsp_dependencies(self) -> list["LSPDependency"]:
         """Get list of LSP dependencies."""
         if not self.dependencies or "lsp" not in self.dependencies:

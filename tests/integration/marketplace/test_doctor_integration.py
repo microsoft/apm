@@ -23,7 +23,7 @@ from unittest.mock import MagicMock, patch
 import pytest  # noqa: F401
 from click.testing import CliRunner
 
-from apm_cli.commands.marketplace import doctor
+from apm_cli.commands.doctor import doctor
 
 # ---------------------------------------------------------------------------
 # Helpers

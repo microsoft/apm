@@ -1665,21 +1665,20 @@ def _install_apm_packages(ctx, outcome):
         logger.error(f"Failed to parse {ctx.manifest_display}: {e}")
         sys.exit(1)
 
-    logger.verbose_detail(
-        f"Parsed {APM_YML_FILENAME}: {len(apm_package.get_apm_dependencies())} APM deps, "
-        f"{len(apm_package.get_mcp_dependencies())} MCP deps"
-        + (
-            f", {len(apm_package.get_dev_apm_dependencies())} dev deps"
-            if apm_package.get_dev_apm_dependencies()
-            else ""
-        )
-    )
-
-    # Get APM and MCP dependencies
     apm_deps = apm_package.get_apm_dependencies()
     dev_apm_deps = apm_package.get_dev_apm_dependencies()
+    prod_mcp_deps = apm_package.get_mcp_dependencies()
+    dev_mcp_deps = apm_package.get_dev_mcp_dependencies()
+    mcp_deps = apm_package.get_all_mcp_dependencies()
+
+    logger.verbose_detail(
+        f"Parsed {APM_YML_FILENAME}: {len(apm_deps)} APM deps, "
+        f"{len(prod_mcp_deps)} MCP deps"
+        + (f", {len(dev_apm_deps)} dev APM deps" if dev_apm_deps else "")
+        + (f", {len(dev_mcp_deps)} dev MCP deps" if dev_mcp_deps else "")
+    )
+
     has_any_apm_deps = bool(apm_deps) or bool(dev_apm_deps)
-    mcp_deps = apm_package.get_mcp_dependencies()
 
     all_apm_deps = list(apm_deps) + list(dev_apm_deps)
     _check_insecure_dependencies(all_apm_deps, ctx.allow_insecure, logger)
@@ -1893,7 +1892,6 @@ def _install_apm_packages(ctx, outcome):
             logger.render_summary()
             sys.exit(1)
 
-    # Continue with MCP installation (existing logic)
     mcp_count = 0
     new_mcp_servers: builtins.set = builtins.set()
     # Forward only the targets-key the user actually declared so parse_targets_field
