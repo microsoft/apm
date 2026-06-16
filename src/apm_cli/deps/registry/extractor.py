@@ -121,7 +121,7 @@ def verify_sha256(data: bytes, expected_digest: str) -> str:
     actual = hashlib.sha256(data).hexdigest()
     expected = _normalize_digest(expected_digest)
     if actual != expected:
-        raise HashMismatchError(f"tarball sha256 mismatch: expected {expected}, got {actual}")
+        raise HashMismatchError(f"archive sha256 mismatch: expected {expected}, got {actual}")
     return actual
 
 
