@@ -97,6 +97,7 @@ hooks:
 | `*-claude-hooks.json` | Claude Code only |
 | `*-codex-hooks.json` | Codex CLI only |
 | `*-gemini-hooks.json` | Gemini CLI only |
+| `*-antigravity-hooks.json` | Antigravity CLI only |
 | `*-windsurf-hooks.json` | Windsurf only |
 | `*-kiro-hooks.json` | Kiro only |
 | Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets |
@@ -124,7 +125,7 @@ hook action under `.kiro/hooks/`.
 `apm install` (project-scope, no `-g`) keeps hook `command` paths
 **repo-relative** in checked-in configs (`<repo>/.claude/settings.json`,
 `<repo>/.codex/hooks.json`, the `<repo>/.claude/apm-hooks.json`
-sidecar, and equivalents for Cursor / Gemini / Windsurf / Kiro) so clones,
+sidecar, and equivalents for Cursor / Gemini / Antigravity / Windsurf / Kiro) so clones,
 contributors, and CI runners do not see the installer's machine-local
 absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
@@ -152,7 +153,7 @@ Both `apm.yml`'s `targets:`/`target:` and the `--target` CLI flag share the same
 | Form | Behaviour |
 |------|-----------|
 | `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
-| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `all` |
+| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `all` |
 | `target: claude,copilot` | CSV-string sugar; parses identically to the list form (the shared validator splits on `,`) |
 | `targets:` and `target:` both set | **Parse error** -- pick one |
 | `targets: []` (empty list) | **Parse error** -- remove the line if you meant auto-detect |
