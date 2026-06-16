@@ -164,7 +164,7 @@ OpenCode.
 Windsurf / Cascade.
 
 - **Detection.** `.windsurf/` directory.
-- **Deploy directory.** `.windsurf/` plus `.agents/` for skills at project scope; `~/.codeium/windsurf/` at user scope.
+- **Deploy directory.** Native primitives deploy under `.windsurf/` at project scope and `~/.codeium/windsurf/` at user scope; skills converge on `.agents/skills/` at both scopes (`~/.agents/skills/` at user scope).
 - **Supported primitives.** instructions, skills, commands, hooks, mcp.
 - **File conventions.**
   - instructions: `.windsurf/rules/<name>.md`
