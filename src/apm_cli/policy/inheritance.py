@@ -19,6 +19,7 @@ from .schema import (
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
     DependencyPolicy,
+    IntegrityPolicy,
     ManifestPolicy,
     McpPolicy,
     McpTransportPolicy,
@@ -304,6 +305,12 @@ def _merge_security(parent: SecurityPolicy, child: SecurityPolicy) -> SecurityPo
             on_install=on_install,
             external=_merge_list_field(p.external, c.external),
             scanners=_merge_scanners(p.scanners, c.scanners),
+            # Tighten-not-relax: OR-merge keeps a parent True even when a child
+            # is silent (False default), and lets a child tighten an off parent.
+            fail_on_drift=p.fail_on_drift or c.fail_on_drift,
+        ),
+        integrity=IntegrityPolicy(
+            require_hashes=parent.integrity.require_hashes or child.integrity.require_hashes,
         ),
     )
 
