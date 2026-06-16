@@ -479,7 +479,7 @@ A child policy can only tighten constraints — never relax them:
 | `mcp.self_defined` | Escalates: `allow` < `warn` < `deny` |
 | `manifest.scripts` | Escalates: `allow` < `deny` |
 | `unmanaged_files.action` | Escalates: `ignore` < `warn` < `deny` |
-| `unmanaged_files.exclude` | Union — child adds suppression globs to parent's set |
+| `unmanaged_files.exclude` | Union, additive-only -- child adds suppression globs to the parent set; `null` and `[]` both preserve the parent list (a child cannot clear it) |
 | `source_attribution` | `parent OR child` — either enables it |
 | `trust_transitive` | `parent AND child` — both must allow it |
 

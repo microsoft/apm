@@ -812,8 +812,8 @@ def _check_unmanaged_files(
     exclude = policy.exclude or ()
 
     # Build set of deployed files AND directory prefixes from lockfile
-    deployed: set = set()
-    deployed_dir_prefixes: list = []
+    deployed: set[str] = set()
+    deployed_dir_prefixes: list[str] = []
     if lock:
         for _key, dep in lock.dependencies.items():
             for f in dep.deployed_files:

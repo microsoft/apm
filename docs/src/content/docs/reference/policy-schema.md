@@ -266,7 +266,7 @@ inherited list (see the tri-state table below).
 | `mcp.trust_transitive`      | Logical AND (`true` only if both sides true).                                    |
 | `manifest.scripts`          | Stricter wins (`deny` > `allow`).                                                |
 | `unmanaged_files.action`    | Stricter wins (`deny` > `warn` > `ignore`).                                      |
-| `unmanaged_files.exclude`   | Union, deduplicated. `null` is transparent (parent passes through).              |
+| `unmanaged_files.exclude`   | Union, deduplicated; additive-only. `null` and `[]` both preserve the parent list  --  unlike `deny`/`require`, a child cannot clear an inherited `exclude`. |
 | `security.audit.on_install` | Stricter wins (`block` > `warn` > `off`). `null` is transparent.                 |
 | `security.audit.external`   | Union, deduplicated. `null` is transparent.                                      |
 | `security.audit.scanners`   | Union of scanner names; per scanner `allow_args` is AND-merged (any ancestor `false` wins -- tightening). `null` is transparent.                  |
