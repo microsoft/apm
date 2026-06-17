@@ -221,3 +221,49 @@ export function classifyPrForTable(raw) {
         branch: raw.headRefName || "",
     };
 }
+
+/**
+ * Extract follow-up items from a panel review for issue creation.
+ * Parses deferred items and unresolved recommended/blocking findings from personas.
+ * Returns array of { title, body, labels } objects.
+ */
+export function extractFollowUpItems(panelReview, prNumber) {
+    const items = [];
+    if (!panelReview) return items;
+
+    // Parse deferred section -- each list item becomes a follow-up
+    if (panelReview.deferred) {
+        const lines = panelReview.deferred.split("\n");
+        for (const line of lines) {
+            const m = line.match(/^[-*]\s+(.+)/);
+            if (m) {
+                const text = m[1].trim();
+                items.push({
+                    title: `[FOLLOW-UP] ${text.slice(0, 80)}`,
+                    body: `## Origin\n\nPanel review follow-up from PR #${prNumber}.\n\n## Description\n\n${text}\n\n## Category\n\nDeferred (out-of-scope for the original PR).`,
+                    labels: ["follow-up"],
+                });
+            }
+        }
+    }
+
+    // Parse recommendation section for action items
+    if (panelReview.recommendation) {
+        const lines = panelReview.recommendation.split("\n");
+        for (const line of lines) {
+            const m = line.match(/^[-*]\s+(.+)/);
+            if (m) {
+                const text = m[1].trim();
+                // Skip items that look like already-addressed ("done", "fixed", "resolved")
+                if (/\b(done|fixed|resolved|addressed|merged|shipped)\b/i.test(text)) continue;
+                items.push({
+                    title: `[FOLLOW-UP] ${text.slice(0, 80)}`,
+                    body: `## Origin\n\nPanel review recommendation from PR #${prNumber}.\n\n## Description\n\n${text}\n\n## Category\n\nRecommended improvement from panel review.`,
+                    labels: ["follow-up"],
+                });
+            }
+        }
+    }
+
+    return items;
+}

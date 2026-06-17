@@ -8,7 +8,7 @@
 
 import { readFileSync } from "node:fs";
 import { join, resolve, normalize } from "node:path";
-import { parsePanelReview } from "./logic.mjs";
+import { parsePanelReview, extractFollowUpItems } from "./logic.mjs";
 
 const MIME_TYPES = {
     ".html": "text/html",
@@ -351,6 +351,38 @@ export function createHandler(deps) {
             }
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify(handler._permissionsCache));
+            return;
+        }
+
+        // POST /create-follow-up-issues -- create GitHub issues from panel review deferred/recommended items
+        if (req.method === "POST" && req.url === "/create-follow-up-issues") {
+            const raw = await readBody(req);
+            res.setHeader("Content-Type", "application/json");
+            try {
+                const { number, panelReview } = JSON.parse(raw);
+                const followUps = extractFollowUpItems(panelReview, number);
+                if (followUps.length === 0) {
+                    res.end(JSON.stringify({ ok: true, created: [], message: "No follow-up items found in the panel review" }));
+                    return;
+                }
+                const created = [];
+                for (const item of followUps) {
+                    try {
+                        const args = ["issue", "create", "--repo", repo, "--title", item.title, "--body", item.body];
+                        for (const label of item.labels) {
+                            args.push("--label", label);
+                        }
+                        const out = await ghExec(args);
+                        const urlMatch = (out || "").match(/https:\/\/github\.com\/[^\s]+/);
+                        created.push({ title: item.title, url: urlMatch ? urlMatch[0] : "" });
+                    } catch (e) {
+                        created.push({ title: item.title, error: String(e.message || e) });
+                    }
+                }
+                res.end(JSON.stringify({ ok: true, created }));
+            } catch (e) {
+                res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+            }
             return;
         }
 

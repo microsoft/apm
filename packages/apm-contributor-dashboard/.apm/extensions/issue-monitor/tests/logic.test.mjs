@@ -13,6 +13,7 @@ import {
     classifyPrForTable,
     parsePanelCounts,
     parsePanelReview,
+    extractFollowUpItems,
 } from "../logic.mjs";
 
 // -- classifyIssue --
@@ -874,5 +875,70 @@ describe("parsePanelReview", () => {
         const result = parsePanelReview([{ body: shipComment }]);
         assert.equal(result.verdict, "ship");
         assert.deepEqual(result.totals, { b: 0, r: 0, n: 0 });
+    });
+});
+
+// -- extractFollowUpItems --
+
+describe("extractFollowUpItems", () => {
+    it("returns empty array for null input", () => {
+        assert.deepEqual(extractFollowUpItems(null, 100), []);
+    });
+
+    it("extracts deferred items as follow-ups", () => {
+        const review = {
+            deferred: "- Add retry logic to the HTTP client\n- Improve error messages for auth failures",
+        };
+        const items = extractFollowUpItems(review, 42);
+        assert.equal(items.length, 2);
+        assert.ok(items[0].title.includes("Add retry logic"));
+        assert.ok(items[0].body.includes("PR #42"));
+        assert.ok(items[0].body.includes("Deferred"));
+        assert.deepEqual(items[0].labels, ["follow-up"]);
+        assert.ok(items[1].title.includes("Improve error messages"));
+    });
+
+    it("extracts recommendation items as follow-ups", () => {
+        const review = {
+            recommendation: "- Consider adding input validation\n- Add telemetry for cache hits",
+        };
+        const items = extractFollowUpItems(review, 99);
+        assert.equal(items.length, 2);
+        assert.ok(items[0].title.includes("Consider adding input validation"));
+        assert.ok(items[0].body.includes("Recommended improvement"));
+    });
+
+    it("skips already-addressed recommendation items", () => {
+        const review = {
+            recommendation: "- This was already fixed in the PR\n- Add caching -- done\n- Need better logging",
+        };
+        const items = extractFollowUpItems(review, 10);
+        assert.equal(items.length, 1);
+        assert.ok(items[0].title.includes("Need better logging"));
+    });
+
+    it("combines deferred and recommendation items", () => {
+        const review = {
+            deferred: "- Future work item",
+            recommendation: "- Active recommendation",
+        };
+        const items = extractFollowUpItems(review, 5);
+        assert.equal(items.length, 2);
+    });
+
+    it("returns empty for review with no list items", () => {
+        const review = {
+            deferred: "Nothing to defer.",
+            recommendation: "All good.",
+        };
+        const items = extractFollowUpItems(review, 1);
+        assert.equal(items.length, 0);
+    });
+
+    it("truncates long titles to 80 chars", () => {
+        const longText = "A".repeat(120);
+        const review = { deferred: `- ${longText}` };
+        const items = extractFollowUpItems(review, 1);
+        assert.ok(items[0].title.length <= 93); // "[FOLLOW-UP] " prefix (13) + 80 chars
     });
 });
