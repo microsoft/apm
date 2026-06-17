@@ -8,6 +8,7 @@
 
 import { readFileSync } from "node:fs";
 import { join, resolve, normalize } from "node:path";
+import { randomBytes } from "node:crypto";
 import { parsePanelReview, extractFollowUpItems } from "./logic.mjs";
 
 const MIME_TYPES = {
@@ -21,6 +22,13 @@ const MIME_TYPES = {
     ".woff": "font/woff",
     ".ttf": "font/ttf",
 };
+
+// Write endpoints that perform state-changing operations
+const WRITE_ENDPOINTS = new Set([
+    "/start-session", "/open-session", "/run-panel", "/approve-pipeline",
+    "/approve-pr", "/approve-workflow-runs", "/merge-when-ready",
+    "/submit-comment", "/refine-comment", "/create-follow-up-issues",
+]);
 
 function serveStatic(res, filePath) {
     try {
@@ -62,10 +70,32 @@ function readBody(req) {
 export function createHandler(deps) {
     const { ghExec, session, startedSessions, saveSessions, getIssueData, getPrData, getLastUpdated, getLastError, repo, distDir } = deps;
 
+    // CSRF token -- generated once per server lifetime, embedded in index.html
+    const csrfToken = deps.csrfToken || randomBytes(32).toString("hex");
+
     // In-memory draft store for agent-refined comment text (keyed by "issue-123" / "pr-456")
     const drafts = new Map();
 
     const handler = async function handler(req, res) {
+        // CSRF protection for write endpoints
+        if (req.method === "POST" && WRITE_ENDPOINTS.has(req.url)) {
+            const origin = req.headers.origin || "";
+            const host = req.headers.host || "";
+            // Reject cross-origin requests (only allow localhost)
+            if (origin && !origin.match(/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/)) {
+                res.writeHead(403, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ ok: false, error: "Forbidden: cross-origin request" }));
+                return;
+            }
+            // Validate CSRF token
+            const token = req.headers["x-canvas-token"];
+            if (token !== csrfToken) {
+                res.writeHead(403, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ ok: false, error: "Forbidden: invalid or missing CSRF token" }));
+                return;
+            }
+        }
+
         // POST /start-session
         if (req.method === "POST" && req.url === "/start-session") {
             const raw = await readBody(req);
@@ -239,11 +269,12 @@ export function createHandler(deps) {
                     const m = (c.link || "").match(/\/runs\/(\d+)/);
                     if (m) runIds.add(m[1]);
                 }
+                let reran = 0;
                 for (const runId of runIds) {
-                    try { await ghExec(["run", "rerun", runId, "--repo", repo, "--failed"]); } catch (_) {}
+                    try { await ghExec(["run", "rerun", runId, "--repo", repo, "--failed"]); reran++; } catch (_) {}
                 }
                 res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ ok: true, reran: runIds.size }));
+                res.end(JSON.stringify({ ok: true, reran }));
             } catch (e) {
                 res.setHeader("Content-Type", "application/json");
                 res.end(JSON.stringify({ ok: false, error: String(e) }));
@@ -398,9 +429,19 @@ export function createHandler(deps) {
         }
 
         // Static file serving from dist/
-        const urlPath = req.url.split("?")[0];
+        const urlPath = decodeURIComponent(req.url.split("?")[0]);
         if (urlPath === "/" || urlPath === "/index.html") {
-            serveStatic(res, join(distDir, "index.html"));
+            // Inject CSRF token into HTML so the client can send it with write requests
+            try {
+                let html = readFileSync(join(distDir, "index.html"), "utf-8");
+                const tokenScript = `<script>window.__CANVAS_TOKEN__="${csrfToken}";</script>`;
+                html = html.replace("</head>", `${tokenScript}</head>`);
+                res.writeHead(200, { "Content-Type": "text/html", "Cache-Control": "no-cache" });
+                res.end(html);
+            } catch {
+                res.writeHead(404);
+                res.end("Not found");
+            }
         } else if (urlPath.startsWith("/assets/")) {
             const resolved = resolve(distDir, normalize(urlPath.slice(1)));
             if (!resolved.startsWith(resolve(distDir))) {
@@ -413,6 +454,7 @@ export function createHandler(deps) {
     };
 
     handler.setDraft = (type, number, text) => { drafts.set(`${type}-${number}`, text); };
+    handler.csrfToken = csrfToken;
 
     return handler;
 }

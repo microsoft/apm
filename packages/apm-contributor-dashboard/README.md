@@ -1,7 +1,11 @@
 # APM Contributor Dashboard
 
 A live GitHub Copilot CLI canvas extension that provides an interactive
-contributor dashboard for any GitHub repository.
+contributor dashboard for the microsoft/apm repository. It monitors
+issues, pull requests, CI pipelines, and panel reviews in real time.
+
+> **Note:** This dashboard is currently scoped to `microsoft/apm`. It
+> reads issues and PRs from that repository only.
 
 ## Features
 
@@ -29,6 +33,16 @@ apm install microsoft/apm/packages/apm-contributor-dashboard --trust-canvas-exte
 The deployed `.github/extensions/` directory is auto-generated and should
 be git-ignored. Do not edit files there -- they are overwritten on every
 `apm install`.
+
+After installing, open the dashboard in Copilot CLI by asking:
+
+> "Open the APM Contributor Dashboard"
+
+The canvas registers as `issue-monitor` and appears as
+"APM Contributor Dashboard" in the canvas list. The `--trust-canvas-extensions`
+flag grants the extension permission to execute `gh` CLI commands on your
+behalf (e.g. posting comments, approving PRs). Only install extensions you
+trust.
 
 ## How it works
 
@@ -95,7 +109,7 @@ cd client && npm install && cd ..
 cd client && npm run build && cd ..
 
 # 4. Run the tests
-cd client && npx vitest run && cd ..
+node --test tests/logic.test.mjs tests/server.test.mjs
 
 # 5. Commit BOTH source changes and the updated dist/
 git add .

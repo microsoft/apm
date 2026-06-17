@@ -16,6 +16,8 @@ const DIST_DIR = join(__dir, "..", "dist");
 // Test infrastructure
 // ---------------------------------------------------------------------------
 
+const TEST_CSRF_TOKEN = "test-csrf-token-for-unit-tests";
+
 function createMockDeps(overrides = {}) {
     const ghCalls = [];
     const sessionCalls = [];
@@ -40,6 +42,7 @@ function createMockDeps(overrides = {}) {
         getLastError: () => null,
         repo: "test/repo",
         distDir: DIST_DIR,
+        csrfToken: TEST_CSRF_TOKEN,
     };
 
     const deps = { ...defaults, ...overrides };
@@ -79,7 +82,10 @@ async function getJSON(path) {
 async function postJSON(path, body) {
     const res = await fetch(`${baseUrl}${path}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+            "Content-Type": "application/json",
+            "X-Canvas-Token": TEST_CSRF_TOKEN,
+        },
         body: JSON.stringify(body),
     });
     const json = await res.json();
@@ -479,7 +485,10 @@ describe("POST /create-follow-up-issues", () => {
         };
         const res = await fetch(`${baseUrl}/create-follow-up-issues`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                "X-Canvas-Token": TEST_CSRF_TOKEN,
+            },
             body: JSON.stringify({ number: 42, panelReview }),
         });
         assert.equal(res.status, 200);
@@ -496,7 +505,10 @@ describe("POST /create-follow-up-issues", () => {
 
         const res = await fetch(`${baseUrl}/create-follow-up-issues`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                "X-Canvas-Token": TEST_CSRF_TOKEN,
+            },
             body: JSON.stringify({ number: 1, panelReview: { recommendation: "All good." } }),
         });
         const data = await res.json();
@@ -504,5 +516,105 @@ describe("POST /create-follow-up-issues", () => {
         assert.equal(data.created.length, 0);
 
         await teardownServer();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// CSRF protection tests
+// ---------------------------------------------------------------------------
+
+describe("CSRF protection", () => {
+    before(() => setupServer({ ghExec: async () => "" }));
+    after(teardownServer);
+
+    it("rejects POST without X-Canvas-Token header", async () => {
+        const res = await fetch(`${baseUrl}/start-session`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ number: 1, title: "test" }),
+        });
+        assert.equal(res.status, 403);
+        const json = await res.json();
+        assert.ok(json.error.includes("CSRF"));
+    });
+
+    it("rejects POST with wrong CSRF token", async () => {
+        const res = await fetch(`${baseUrl}/approve-pr`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Canvas-Token": "wrong-token",
+            },
+            body: JSON.stringify({ number: 1 }),
+        });
+        assert.equal(res.status, 403);
+        const json = await res.json();
+        assert.ok(json.error.includes("CSRF"));
+    });
+
+    it("rejects POST with cross-origin Origin header", async () => {
+        const res = await fetch(`${baseUrl}/approve-pr`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Canvas-Token": TEST_CSRF_TOKEN,
+                "Origin": "https://evil.com",
+            },
+            body: JSON.stringify({ number: 1 }),
+        });
+        assert.equal(res.status, 403);
+        const json = await res.json();
+        assert.ok(json.error.includes("cross-origin"));
+    });
+
+    it("allows POST with correct token and localhost origin", async () => {
+        const res = await fetch(`${baseUrl}/approve-pr`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Canvas-Token": TEST_CSRF_TOKEN,
+                "Origin": "http://127.0.0.1:3000",
+            },
+            body: JSON.stringify({ number: 1 }),
+        });
+        // Should succeed (or fail with gh error, but not 403)
+        assert.notEqual(res.status, 403);
+    });
+
+    it("does not require CSRF token for GET endpoints", async () => {
+        const res = await fetch(`${baseUrl}/api/issues`);
+        assert.equal(res.status, 200);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Path traversal protection
+// ---------------------------------------------------------------------------
+
+describe("Path traversal protection", () => {
+    before(() => setupServer());
+    after(teardownServer);
+
+    it("blocks path traversal attempts via encoded dots in /assets/", async () => {
+        // Use raw HTTP to send encoded path traversal that bypasses fetch URL normalization
+        const url = new URL(`${baseUrl}/assets/%2e%2e/package.json`);
+        const http = await import("node:http");
+        const res = await new Promise((resolve) => {
+            const req = http.request({
+                hostname: url.hostname,
+                port: url.port,
+                path: "/assets/%2e%2e/package.json",
+                method: "GET",
+            }, resolve);
+            req.end();
+        });
+        // The containment guard blocks paths that resolve outside dist/
+        assert.ok(res.statusCode === 403 || res.statusCode === 404,
+            `Expected 403 or 404, got ${res.statusCode}`);
+    });
+
+    it("returns 404 for nonexistent assets", async () => {
+        const res = await fetch(`${baseUrl}/assets/nonexistent.js`);
+        assert.equal(res.status, 404);
     });
 });

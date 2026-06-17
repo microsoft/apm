@@ -14,6 +14,7 @@ import { createHandler } from "./server-handler.mjs";
 const REPO = "microsoft/apm";
 const POLL_INTERVAL_MS = 30_000;
 const MAX_ISSUES = 100;
+const MAX_CONCURRENT_GH = 8;
 
 const servers = new Map();
 
@@ -23,6 +24,7 @@ let lastUpdated = null;
 let lastError = null;
 let pollTimer = null;
 let openInstanceCount = 0;
+let lastPrFingerprint = null;
 
 // Persist started sessions to disk so they survive extension reloads
 const __extensionDir = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +45,22 @@ function saveSessions() {
 }
 
 const startedSessions = loadSessions();
+
+// -- Concurrency semaphore for gh CLI calls --
+
+function createSemaphore(max) {
+    let active = 0;
+    const queue = [];
+    return function acquire() {
+        return new Promise((resolve) => {
+            const run = () => { active++; resolve(() => { active--; if (queue.length > 0) queue.shift()(); }); };
+            if (active < max) run();
+            else queue.push(run);
+        });
+    };
+}
+
+const acquireSlot = createSemaphore(MAX_CONCURRENT_GH);
 
 // -- GitHub fetching via gh CLI --
 
@@ -95,10 +113,21 @@ async function fetchAndMatchPRs() {
             "--json", "number,title,url,body,state,isDraft,reviewDecision,statusCheckRollup,author,labels,headRefName",
         ]);
         const prs = JSON.parse(prOut);
-        // Fetch workflow runs for each PR branch to detect action_required
-        // Batch all branches in parallel for speed
+
+        // Change-detection: skip expensive per-PR fetches when PR list is stable
+        const fingerprint = prs.map(p => `${p.number}:${p.headRefName}`).sort().join("|");
+        const listChanged = fingerprint !== lastPrFingerprint;
+        lastPrFingerprint = fingerprint;
+
+        // Fetch workflow runs for each PR branch with semaphore-limited concurrency
         const branchRunPromises = prs.map(async (pr) => {
             if (!pr.headRefName) return;
+            // Skip per-PR fetches if the list has not changed (use cached data)
+            if (!listChanged) {
+                const cached = prData.find(p => p.number === pr.number);
+                if (cached) { pr.workflowRuns = cached._rawWorkflowRuns || []; return; }
+            }
+            const release = await acquireSlot();
             try {
                 const runsOut = await ghExec([
                     "run", "list",
@@ -110,11 +139,18 @@ async function fetchAndMatchPRs() {
                 pr.workflowRuns = JSON.parse(runsOut);
             } catch (_) {
                 pr.workflowRuns = [];
+            } finally {
+                release();
             }
         });
         await Promise.all(branchRunPromises);
-        // Fetch panel review comments for all PRs (label may be removed after panel runs)
+        // Fetch panel review comments for all PRs with semaphore
         const panelPromises = prs.map(async (pr) => {
+            if (!listChanged) {
+                const cached = prData.find(p => p.number === pr.number);
+                if (cached && cached.panelCounts) { pr.panelCounts = cached.panelCounts; return; }
+            }
+            const release = await acquireSlot();
             try {
                 const cOut = await ghExec([
                     "pr", "view", String(pr.number),
@@ -125,10 +161,14 @@ async function fetchAndMatchPRs() {
                 pr.panelCounts = parsePanelCounts(parsed.comments || []);
             } catch (_) {
                 pr.panelCounts = null;
+            } finally {
+                release();
             }
         });
         await Promise.all(panelPromises);
         matchPrsToIssues(issueData, prs);
+        // Store raw workflow runs for change-detection cache
+        for (const pr of prs) { pr._rawWorkflowRuns = pr.workflowRuns || []; }
         prData = prs.map(pr => classifyPrForTable(pr));
     } catch (_) {
         // PR fetch is best-effort; ignore failures

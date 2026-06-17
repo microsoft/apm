@@ -1,9 +1,24 @@
 const BASE = "";
 
+function getCanvasToken() {
+  return (typeof window !== "undefined" && window.__CANVAS_TOKEN__) || "";
+}
+
 async function fetchJson(url, opts) {
   const res = await fetch(BASE + url, opts);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
+}
+
+function postJson(url, body) {
+  return fetchJson(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Canvas-Token": getCanvasToken(),
+    },
+    body: JSON.stringify(body),
+  });
 }
 
 export async function getIssues() {
@@ -23,75 +38,39 @@ export async function getPrDetail(number) {
 }
 
 export async function startSession(number, title) {
-  return fetchJson("/start-session", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ number, title }),
-  });
+  return postJson("/start-session", { number, title });
 }
 
 export async function openSession(number, title) {
-  return fetchJson("/open-session", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ number, title }),
-  });
+  return postJson("/open-session", { number, title });
 }
 
 export async function runPanel(number) {
-  return fetchJson("/run-panel", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ number }),
-  });
+  return postJson("/run-panel", { number });
 }
 
 export async function rerunCi(number) {
-  return fetchJson("/approve-pipeline", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ number }),
-  });
+  return postJson("/approve-pipeline", { number });
 }
 
 export async function approvePr(number) {
-  return fetchJson("/approve-pr", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ number }),
-  });
+  return postJson("/approve-pr", { number });
 }
 
 export async function approveWorkflowRuns(branch) {
-  return fetchJson("/approve-workflow-runs", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ branch }),
-  });
+  return postJson("/approve-workflow-runs", { branch });
 }
 
 export async function mergeWhenReady(number) {
-  return fetchJson("/merge-when-ready", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ number }),
-  });
+  return postJson("/merge-when-ready", { number });
 }
 
 export async function submitComment(type, number, body) {
-  return fetchJson("/submit-comment", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type, number, body }),
-  });
+  return postJson("/submit-comment", { type, number, body });
 }
 
 export async function refineComment(type, number, draft, title) {
-  return fetchJson("/refine-comment", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type, number, draft, title }),
-  });
+  return postJson("/refine-comment", { type, number, draft, title });
 }
 
 export async function getDraft(type, number) {
@@ -103,9 +82,5 @@ export async function getPermissions() {
 }
 
 export async function createFollowUpIssues(prNumber, panelReview) {
-  return fetchJson("/create-follow-up-issues", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ number: prNumber, panelReview }),
-  });
+  return postJson("/create-follow-up-issues", { number: prNumber, panelReview });
 }
