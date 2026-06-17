@@ -94,11 +94,13 @@ export default function PrPanelReview(props) {
                   )}
                 </For>
               </Show>
-              <div class="panel-actions-row">
-                <button class="btn-follow-up" onClick={handleCreateFollowUps}>
-                  Create follow-up issues
-                </button>
-              </div>
+              <Show when={r().verdict === "ship_with_followups" && (r().deferred || r().totals?.r > 0 || r().totals?.n > 0)}>
+                <div class="panel-actions-row">
+                  <button class="btn-follow-up" onClick={handleCreateFollowUps}>
+                    Create follow-up issues
+                  </button>
+                </div>
+              </Show>
             </>
           );
         }}
