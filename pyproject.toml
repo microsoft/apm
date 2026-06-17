@@ -106,6 +106,9 @@ max-returns = 12       # Stage 1 (was 18)
 # Stage 1 (was 100). Stage 2 target: <=20 (McCabe industry standard).
 max-complexity = 50
 
+[tool.ruff.lint.isort]
+known-first-party = ["apm_cli"]
+
 [tool.ruff.lint.per-file-ignores]
 # Subprocess calls are intentional in a CLI tool
 "src/apm_cli/**" = ["S603", "S607"]

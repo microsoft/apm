@@ -63,6 +63,10 @@ class InstallContext:
     verbose: bool = False
     refresh: bool = False
     dev: bool = False
+    # --trust-canvas-extensions: opt in to deploying dependency-provided
+    # canvas extensions (executable Node code). First-party (root project .apm/)
+    # canvases deploy without this; only dependency canvases are gated.
+    trust_canvas: bool = False
     only_packages: list[str] | None = None
     protocol_pref: Any = None  # ProtocolPreference (NONE/SSH/HTTPS) for shorthand transport
     allow_protocol_fallback: bool | None = None  # None => read APM_ALLOW_PROTOCOL_FALLBACK env
@@ -122,6 +126,14 @@ class InstallContext:
     package_deployed_files: dict[str, list[str]] = field(default_factory=dict)
     package_types: dict[str, str] = field(default_factory=dict)
     package_hashes: dict[str, str] = field(default_factory=dict)
+    # Declared-license provenance (issue #1777, U6): maps dep_key -> the SPDX
+    # expression the dependency's manifest DECLARED at resolve time (apm.yml
+    # ``license:`` or plugin.json ``license``). Populated next to
+    # ``package_types`` at acquire sites in install/sources.py and attached to
+    # the lockfile by LockfileBuilder._attach_declared_licenses. Keys absent
+    # from this map mean "not declared" (NOASSERTION) -- a missing entry is
+    # never backfilled with a sentinel.
+    package_declared_licenses: dict[str, str] = field(default_factory=dict)
     content_hash_verified_deps: set[str] = field(default_factory=set)
     # Deps whose content hash is expected to change legitimately:
     # populated by _resolve_download_strategy in phases/integrate.py
@@ -145,6 +157,7 @@ class InstallContext:
     total_hooks_integrated: int = 0  # integrate
     total_links_resolved: int = 0  # integrate
     direct_dep_failed: bool = False  # integrate -- set when any direct dep fails
+    blocked_executables: list[Any] = field(default_factory=list)  # integrate
 
     # ------------------------------------------------------------------
     # policy_gate

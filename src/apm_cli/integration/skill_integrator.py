@@ -4,10 +4,35 @@ import filecmp
 import hashlib
 import re
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from apm_cli.integration.base_integrator import BaseIntegrator
+
+
+def _build_copy_ignore(
+    *,
+    skip_bin: bool = False,
+) -> Callable[[str, list[str]], list[str]]:
+    """Build a ``shutil.copytree`` ignore function.
+
+    When *skip_bin* is True the returned function also excludes ``bin/``
+    directories so that unapproved executables are not deployed during
+    skill promotion.
+    """
+    from apm_cli.security.gate import ignore_non_content
+
+    if not skip_bin:
+        return ignore_non_content
+    _bin_filter = shutil.ignore_patterns("bin")
+
+    def _combined(directory: str, contents: list[str]) -> list[str]:
+        return list(
+            set(ignore_non_content(directory, contents)) | set(_bin_filter(directory, contents))
+        )
+
+    return _combined
 
 
 # DEPRECATED -- use IntegrationResult directly for new code.
@@ -581,6 +606,7 @@ class SkillIntegrator(BaseIntegrator):
         parent_name: str,
         *,
         warn: bool = True,
+        skip_bin: bool = False,
         owned_by: dict[str, str] | None = None,
         diagnostics=None,
         managed_files=None,
@@ -692,9 +718,12 @@ class SkillIntegrator(BaseIntegrator):
                             pass
                 shutil.rmtree(target)
             target.mkdir(parents=True, exist_ok=True)
-            from apm_cli.security.gate import ignore_non_content
-
-            shutil.copytree(sub_skill_path, target, dirs_exist_ok=True, ignore=ignore_non_content)
+            shutil.copytree(
+                sub_skill_path,
+                target,
+                dirs_exist_ok=True,
+                ignore=_build_copy_ignore(skip_bin=skip_bin),
+            )
             if link_rewriter is not None:
                 link_rewriter._resolve_markdown_links_in_skill_bundle(sub_skill_path, target)
             promoted += 1
@@ -761,6 +790,7 @@ class SkillIntegrator(BaseIntegrator):
         logger=None,
         targets=None,
         skill_subset=None,
+        skip_bin: bool = False,
     ) -> tuple[int, list[Path]]:
         """Promote sub-skills from a package that is NOT itself a skill.
 
@@ -834,6 +864,7 @@ class SkillIntegrator(BaseIntegrator):
                 project_root=project_root,
                 name_filter=name_filter,
                 link_rewriter=self,
+                skip_bin=skip_bin,
             )
             if is_primary:
                 count = n
@@ -851,6 +882,7 @@ class SkillIntegrator(BaseIntegrator):
         force: bool = False,
         logger=None,
         targets=None,
+        skip_bin: bool = False,
     ) -> SkillIntegrationResult:
         """Copy a native Skill (with existing SKILL.md) to all active targets.
 
@@ -1022,13 +1054,13 @@ class SkillIntegrator(BaseIntegrator):
                 shutil.rmtree(target_skill_dir)
 
             target_skill_dir.parent.mkdir(parents=True, exist_ok=True)
-            from apm_cli.security.gate import ignore_non_content
+            _base_ignore = _build_copy_ignore(skip_bin=skip_bin)
 
             _apm_filter = shutil.ignore_patterns(".apm")
 
             def _ignore_non_content_and_apm(directory, contents):
                 return list(
-                    set(ignore_non_content(directory, contents))
+                    set(_base_ignore(directory, contents))  # noqa: B023
                     | set(_apm_filter(directory, contents))  # noqa: B023
                 )
 
@@ -1056,6 +1088,7 @@ class SkillIntegrator(BaseIntegrator):
                 project_root=project_root,
                 logger=logger if is_primary else None,
                 link_rewriter=self,
+                skip_bin=skip_bin,
             )
             all_target_paths.extend(sub_deployed)
 
@@ -1092,6 +1125,7 @@ class SkillIntegrator(BaseIntegrator):
         logger=None,
         targets=None,
         skill_subset=None,
+        skip_bin: bool = False,
     ) -> SkillIntegrationResult:
         """Promote every skill in a SKILL_BUNDLE's top-level skills/ directory.
 
@@ -1165,6 +1199,7 @@ class SkillIntegrator(BaseIntegrator):
                 logger=logger if is_primary else None,
                 name_filter=_name_filter,
                 link_rewriter=self,
+                skip_bin=skip_bin,
             )
             if is_primary:
                 total_promoted = n
@@ -1195,6 +1230,7 @@ class SkillIntegrator(BaseIntegrator):
         skill_subset=None,
         scope=None,
         policy=None,
+        skip_bin: bool = False,
     ) -> SkillIntegrationResult:
         """Integrate a package's skill into all active target directories.
 
@@ -1213,6 +1249,10 @@ class SkillIntegrator(BaseIntegrator):
             project_root: Root directory of the project
             targets: Optional explicit list of TargetProfile objects.
             skill_subset: Optional tuple of skill names or paths to install (None = all).
+            skip_bin: When True, skip bin/ executable deployment even if the
+                package ships one.  Used by the executable approval gate to
+                block unapproved bin/ executables while still deploying text
+                primitives (skills, sub-skills).
 
         Returns:
             SkillIntegrationResult: Results of the integration operation
@@ -1232,6 +1272,7 @@ class SkillIntegrator(BaseIntegrator):
                 logger=logger,
                 targets=targets,
                 skill_subset=skill_subset,
+                skip_bin=skip_bin,
             )
             return SkillIntegrationResult(
                 skill_created=False,
@@ -1270,15 +1311,18 @@ class SkillIntegrator(BaseIntegrator):
         from apm_cli.models.apm_package import PackageType as _PackageType
 
         if package_info.package_type == _PackageType.MARKETPLACE_PLUGIN:
-            bin_paths, bin_skip_reason = self._deploy_plugin_bin(
-                package_info,
-                project_root,
-                targets,
-                scope=scope,
-                policy=policy,
-                force=force,
-                logger=logger,
-            )
+            if skip_bin:
+                bin_skip_reason = "not_approved"
+            else:
+                bin_paths, bin_skip_reason = self._deploy_plugin_bin(
+                    package_info,
+                    project_root,
+                    targets,
+                    scope=scope,
+                    policy=policy,
+                    force=force,
+                    logger=logger,
+                )
 
         # Check if this is a native Skill (already has SKILL.md at root)
         source_skill_md = package_path / "SKILL.md"
@@ -1300,6 +1344,7 @@ class SkillIntegrator(BaseIntegrator):
                     force=force,
                     logger=logger,
                     targets=targets,
+                    skip_bin=skip_bin,
                 ),
                 bin_paths,
                 bin_skip_reason,
@@ -1321,6 +1366,7 @@ class SkillIntegrator(BaseIntegrator):
                     logger=logger,
                     targets=targets,
                     skill_subset=skill_subset,
+                    skip_bin=skip_bin,
                 ),
                 bin_paths,
                 bin_skip_reason,
@@ -1337,6 +1383,7 @@ class SkillIntegrator(BaseIntegrator):
             logger=logger,
             targets=targets,
             skill_subset=skill_subset,
+            skip_bin=skip_bin,
         )
         return self._merge_bin_paths(
             SkillIntegrationResult(

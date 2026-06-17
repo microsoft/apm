@@ -17,7 +17,7 @@ aggregated `AGENTS.md` / `copilot-instructions.md` it produces are a
 nice-to-have, not a requirement.
 
 Compile is **recommended for every other target** (`claude`,
-`cursor`, `codex`, `gemini`, `opencode`, `windsurf`, `kiro`) -- those
+`cursor`, `codex`, `gemini`, `antigravity`, `opencode`, `windsurf`, `kiro`) -- those
 harnesses load instructions through the root context file
 (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`) or a harness-specific rules
 folder that compile generates. Kiro receives `.kiro/steering/` files;
@@ -90,7 +90,7 @@ apm compile --all                            # every canonical target
 ```
 
 Accepted values: `copilot`, `claude`, `cursor`, `opencode`, `codex`,
-`gemini`, `windsurf`, `kiro`, `agent-skills`, `all`. The `agent-skills` slug
+`gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `all`. The `agent-skills` slug
 is a no-op for compile (skills are deployed by `apm install`); it is
 accepted in target lists for symmetry only. Unknown slugs are
 rejected before any work runs.
@@ -130,6 +130,7 @@ Per target, with the rules shape on disk after compile:
 | `cursor` | -- | `.cursor/rules/<name>.mdc` | Yes -- `.mdc` is Cursor's rules format |
 | `codex` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `gemini` | `GEMINI.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `GEMINI.md` |
+| `antigravity` | `AGENTS.md` (folded) | `.agents/rules/<name>.md` | Yes -- folded into `AGENTS.md` |
 | `opencode` | `AGENTS.md` (folded) | none -- compile-only, no per-file deploy | Yes -- folded into `AGENTS.md` |
 | `windsurf` | -- | `.windsurf/rules/<name>.md` | Yes -- compiled to Windsurf rules |
 | `kiro` | `AGENTS.md` (fallback) | `.kiro/steering/<name>.md` | Yes -- compiled to Kiro steering |
@@ -238,7 +239,10 @@ you can omit `start_marker` and `end_marker` if you use those verbatim.
 - The start marker must appear before the end marker; reversed order raises a loud error.
 - `start_marker` and `end_marker` must be distinct non-empty strings.
 - Content outside the markers is preserved verbatim across every compile
-  run; only the block between the markers is replaced.
+  run for the root `AGENTS.md`; only the block between the markers is
+  replaced.
+- In distributed compile mode, subdirectory `AGENTS.md` files remain fully
+  APM-owned and are overwritten on each run.
 
 ## Pitfalls
 

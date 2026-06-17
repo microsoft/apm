@@ -535,6 +535,80 @@ class TestUnpackCmdLogging:
         assert "Unpacked 2 file(s)" in result.output
 
 
+class TestUnpackCanvasTrust:
+    """Canvas extensions are executable code: unpack must enforce both gates.
+
+    Two independent gates must BOTH hold before a canvas unpacks: the
+    ``canvas`` experimental flag (feature availability) and ``trust_canvas``
+    (executable-code trust).  Missing either one blocks the canvas.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_config_cache(self):
+        from apm_cli.config import _invalidate_config_cache
+
+        _invalidate_config_cache()
+        yield
+        _invalidate_config_cache()
+
+    @pytest.fixture
+    def enable_canvas(self, monkeypatch):
+        import apm_cli.config as _conf
+
+        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"canvas": True}})
+
+    def test_canvas_blocked_by_default(self, tmp_path):
+        deployed = [".github/agents/a.md", ".github/extensions/widget/extension.mjs"]
+        bundle = _build_bundle_dir(tmp_path, deployed)
+        output = tmp_path / "target"
+        output.mkdir()
+
+        result = unpack_bundle(bundle, output)
+
+        assert result.canvas_blocked == 1
+        assert ".github/extensions/widget/extension.mjs" not in result.files
+        assert ".github/agents/a.md" in result.files
+        assert not (output / ".github" / "extensions" / "widget").exists()
+        assert (output / ".github" / "agents" / "a.md").exists()
+
+    def test_canvas_deployed_with_trust_and_flag(self, tmp_path, enable_canvas):
+        deployed = [".github/agents/a.md", ".github/extensions/widget/extension.mjs"]
+        bundle = _build_bundle_dir(tmp_path, deployed)
+        output = tmp_path / "target"
+        output.mkdir()
+
+        result = unpack_bundle(bundle, output, trust_canvas=True)
+
+        assert result.canvas_blocked == 0
+        assert ".github/extensions/widget/extension.mjs" in result.files
+        assert (output / ".github" / "extensions" / "widget" / "extension.mjs").exists()
+
+    def test_canvas_blocked_when_trusted_but_flag_off(self, tmp_path):
+        """Trust alone is not enough: the experimental flag must also be on."""
+        deployed = [".github/extensions/widget/extension.mjs"]
+        bundle = _build_bundle_dir(tmp_path, deployed)
+        output = tmp_path / "target"
+        output.mkdir()
+
+        result = unpack_bundle(bundle, output, trust_canvas=True)
+
+        assert result.canvas_blocked == 1
+        assert ".github/extensions/widget/extension.mjs" not in result.files
+        assert not (output / ".github" / "extensions").exists()
+
+    def test_canvas_block_is_dry_run_visible(self, tmp_path):
+        deployed = [".github/extensions/widget/extension.mjs"]
+        bundle = _build_bundle_dir(tmp_path, deployed)
+        output = tmp_path / "target"
+        output.mkdir()
+
+        result = unpack_bundle(bundle, output, dry_run=True)
+
+        assert result.canvas_blocked == 1
+        assert result.files == []
+        assert not (output / ".github" / "extensions").exists()
+
+
 # ---------------------------------------------------------------------------
 # ZIP extraction security tests (mirrors the tar.gz equivalents in
 # tests/integration/test_wave4_pure_logic_coverage.py)

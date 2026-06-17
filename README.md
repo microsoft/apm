@@ -81,12 +81,15 @@ Agent context is executable in effect — a prompt is a program for an LLM. APM 
 
 - **[Content security](https://microsoft.github.io/apm/enterprise/security/)** — `apm install` blocks compromised packages before agents read them; `apm audit` runs the same checks on demand
 - **[Lockfile integrity](https://microsoft.github.io/apm/enterprise/governance/)** — `apm.lock` records resolved sources and content hashes for full provenance
+- **[SBOM export](https://microsoft.github.io/apm/reference/cli/lock/)** — `apm lock export --format cyclonedx|spdx` emits a standard inventory of what reached disk, straight from the lockfile — provenance for procurement, not a compliance attestation
 - **[Drift detection](https://microsoft.github.io/apm/guides/drift-detection/)** — `apm audit` rebuilds your agent context in scratch and diffs it against your working tree to catch hand-edits before they ship
 - **[MCP trust boundaries](https://microsoft.github.io/apm/guides/mcp-servers/)** — transitive MCP servers require explicit consent
 
 ### 3. Governed by policy
 
 `apm-policy.yml` lets a security team say *"these are the only sources, scopes, and primitives this org will allow"* and have every `apm install` enforce it — with tighten-only inheritance from enterprise to org to repo, a published bypass contract, and audit-mode CI gates.
+
+apm-policy.yml governs what gets installed; your agent harness governs what runs. The two planes do not overlap.
 
 - **[Governance Guide](https://microsoft.github.io/apm/enterprise/governance-guide/)** — the canonical enterprise reference: enforcement points, bypass contract, air-gapped story, failure semantics, rollout playbook
 - **[Policy reference](https://microsoft.github.io/apm/enterprise/policy-reference/)** — every check, every field, every default

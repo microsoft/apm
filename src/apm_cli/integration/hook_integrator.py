@@ -93,6 +93,12 @@ class _MergeHookConfig:
     target_key: str  # target name passed to _rewrite_hooks_data
     require_dir: bool  # True = skip if target dir doesn't exist
     schema_strict: bool = False  # True = strip _apm_source before writing to disk
+    # Top-level JSON key the merged event map lives under.  Defaults to
+    # "hooks" (Claude/Cursor/Codex/Gemini/Windsurf).  Antigravity's native
+    # schema keys hooks by an arbitrary hook *name*, so APM reserves the
+    # single name "apm" as its container and leaves sibling user hook-names
+    # untouched.
+    event_container_key: str = "hooks"
 
 
 # Per-target hook event name mapping.  Packages are authored with
@@ -142,6 +148,7 @@ _HOOK_EVENT_EXPECTED_CASING: dict[str, str] = {
     "cursor": "PascalCase",
     "codex": "PascalCase",
     "gemini": "PascalCase",
+    "antigravity": "PascalCase",
     "windsurf": "PascalCase",
     "kiro": "camelCase",
 }
@@ -207,13 +214,13 @@ def _emit_hook_event_diagnostics(
         )
 
 
-def _to_gemini_hook_entries(entries: list) -> list:
-    """Transform hook entries into Gemini CLI format.
+def _to_nested_hook_entries(entries: list, key_fixer) -> list:
+    """Wrap flat Copilot hook entries in the ``{"hooks": [...]}`` nesting.
 
-    Gemini requires ``{"hooks": [...]}`` nesting, uses ``command`` (not
-    ``bash``), and ``timeout`` in milliseconds (not ``timeoutSec`` in
-    seconds).  Entries already in Claude/Gemini nested format are left
-    unchanged.
+    Shared by the Gemini and Antigravity transforms (both use the Claude
+    nested matcher shape for tool events).  *key_fixer* renames the inner
+    command/timeout keys in place for the specific target.  Entries already
+    in nested form have only their inner keys fixed.
     """
     result = []
     for entry in entries:
@@ -223,19 +230,29 @@ def _to_gemini_hook_entries(entries: list) -> list:
         # Already nested (Claude / Gemini format) -- just fix inner keys
         if "hooks" in entry and isinstance(entry["hooks"], list):
             for hook in entry["hooks"]:
-                _copilot_keys_to_gemini(hook)
+                key_fixer(hook)
             result.append(entry)
             continue
         # Flat Copilot entry -- wrap in nested format
         inner = dict(entry)
-        _copilot_keys_to_gemini(inner)
-        # Pull _apm_source to outer level (set later, but keep if present)
+        key_fixer(inner)
         apm_source = inner.pop("_apm_source", None)
         outer: dict = {"hooks": [inner]}
         if apm_source:
             outer["_apm_source"] = apm_source
         result.append(outer)
     return result
+
+
+def _to_gemini_hook_entries(entries: list) -> list:
+    """Transform hook entries into Gemini CLI format.
+
+    Gemini requires ``{"hooks": [...]}`` nesting, uses ``command`` (not
+    ``bash``), and ``timeout`` in milliseconds (not ``timeoutSec`` in
+    seconds).  Entries already in Claude/Gemini nested format are left
+    unchanged.
+    """
+    return _to_nested_hook_entries(entries, _copilot_keys_to_gemini)
 
 
 def _copilot_keys_to_gemini(hook: dict) -> None:
@@ -249,6 +266,62 @@ def _copilot_keys_to_gemini(hook: dict) -> None:
     # timeoutSec (seconds) -> timeout (milliseconds)
     if "timeoutSec" in hook:
         hook["timeout"] = hook.pop("timeoutSec") * 1000
+
+
+# Antigravity events that use the nested ``{matcher, hooks:[...]}`` matcher
+# shape.  All other events (PreInvocation/PostInvocation/Stop) take a flat
+# list of handler dicts; matcher has no meaning there.
+_ANTIGRAVITY_NESTED_EVENTS: frozenset[str] = frozenset({"PreToolUse", "PostToolUse"})
+
+
+def _to_antigravity_hook_entries(entries: list, event_name: str) -> list:
+    """Transform hook entries into Antigravity CLI native format.
+
+    Antigravity's ``hooks.json`` uses TWO entry shapes:
+
+    * ``PreToolUse`` / ``PostToolUse`` -- nested
+      ``[{"matcher": "*", "hooks": [handler, ...]}]``.
+    * ``PreInvocation`` / ``PostInvocation`` / ``Stop`` -- a flat list of
+      handler dicts (``matcher`` is ignored).
+
+    A handler is ``{"type": "command", "command": ..., "timeout": <sec>}``.
+    Unlike Gemini, ``timeout`` stays in SECONDS (no ms conversion).
+    """
+    if event_name in _ANTIGRAVITY_NESTED_EVENTS:
+        return _to_nested_hook_entries(entries, _copilot_keys_to_antigravity)
+    # Flat handler list -- fix inner keys without wrapping.
+    result = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            result.append(entry)
+            continue
+        # A pre-nested entry (matcher + hooks[]) is flattened to its handlers.
+        if "hooks" in entry and isinstance(entry["hooks"], list):
+            apm_source = entry.get("_apm_source")
+            for hook in entry["hooks"]:
+                if isinstance(hook, dict):
+                    _copilot_keys_to_antigravity(hook)
+                    if apm_source and "_apm_source" not in hook:
+                        hook["_apm_source"] = apm_source
+                result.append(hook)
+            continue
+        handler = dict(entry)
+        _copilot_keys_to_antigravity(handler)
+        result.append(handler)
+    return result
+
+
+def _copilot_keys_to_antigravity(hook: dict) -> None:
+    """Rename Copilot hook keys to Antigravity equivalents in-place."""
+    # bash / powershell -> command
+    if "command" not in hook:
+        for key in ("bash", "powershell", "windows"):
+            if key in hook:
+                hook["command"] = hook.pop(key)
+                break
+    # timeoutSec (seconds) -> timeout (SECONDS -- Antigravity uses seconds)
+    if "timeoutSec" in hook:
+        hook["timeout"] = hook.pop("timeoutSec")
 
 
 _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
@@ -272,6 +345,12 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         config_filename="settings.json",
         target_key="gemini",
         require_dir=True,
+    ),
+    "antigravity": _MergeHookConfig(
+        config_filename="hooks.json",
+        target_key="antigravity",
+        require_dir=True,
+        event_container_key="apm",
     ),
     "windsurf": _MergeHookConfig(
         config_filename="hooks.json",
@@ -336,6 +415,7 @@ _HOOK_FILE_TARGET_SUFFIXES: dict[str, set[str]] = {
     "claude-hooks": {"claude"},
     "codex-hooks": {"codex"},
     "gemini-hooks": {"gemini"},
+    "antigravity-hooks": {"antigravity"},
     "windsurf-hooks": {"windsurf"},
     "kiro-hooks": {"kiro"},
 }
@@ -1314,8 +1394,14 @@ class HookIntegrator(BaseIntegrator):
             if sidecar_data and "hooks" in json_config:
                 _reinject_apm_source_from_sidecar(json_config["hooks"], sidecar_data)
 
-        if "hooks" not in json_config:
-            json_config["hooks"] = {}
+        # Top-level container key for the merged event map.  Most targets
+        # use "hooks"; Antigravity nests its events under the reserved
+        # hook-name "apm" so sibling user hook-names are preserved.  Only
+        # the container key is created so non-"hooks" targets never gain a
+        # stray empty "hooks" object in their native file.
+        container = config.event_container_key
+        if container not in json_config:
+            json_config[container] = {}
 
         for hook_file in hook_files:
             data = self._parse_hook_json(hook_file)
@@ -1350,12 +1436,15 @@ class HookIntegrator(BaseIntegrator):
                 if not isinstance(entries, list) or not entries:
                     continue
                 event_name = event_map.get(raw_event_name, raw_event_name)
-                if event_name not in json_config["hooks"]:
-                    json_config["hooks"][event_name] = []
+                if event_name not in json_config[container]:
+                    json_config[container][event_name] = []
 
-                # Transform flat Copilot entries to Gemini nested format
+                # Transform flat Copilot entries to the target's nested /
+                # native hook shape.
                 if config.target_key == "gemini":
                     entries = _to_gemini_hook_entries(entries)
+                elif config.target_key == "antigravity":
+                    entries = _to_antigravity_hook_entries(entries, event_name)
 
                 # Mark each entry with APM source for sync/cleanup
                 for entry in entries:
@@ -1378,7 +1467,7 @@ class HookIntegrator(BaseIntegrator):
                 remove_current_source = event_name not in cleared_events
                 if remove_current_source or heal_stale_root_source:
                     # Clear from the normalised event
-                    prior_entries = json_config["hooks"][event_name]
+                    prior_entries = json_config[container][event_name]
                     kept_entries = [
                         e
                         for e in prior_entries
@@ -1410,15 +1499,15 @@ class HookIntegrator(BaseIntegrator):
                                 source_marker,
                                 event_name,
                             )
-                    json_config["hooks"][event_name] = kept_entries
+                    json_config[container][event_name] = kept_entries
                     # Also clear from any alias events that map to
                     # this normalised name (handles migration from
                     # corrupted installs with mixed-case event keys).
                     for alias in reverse_map.get(event_name, set()):
-                        if alias != event_name and alias in json_config["hooks"]:
-                            json_config["hooks"][alias] = [
+                        if alias != event_name and alias in json_config[container]:
+                            json_config[container][alias] = [
                                 e
-                                for e in json_config["hooks"][alias]
+                                for e in json_config[container][alias]
                                 if not self._should_remove_prior_merged_entry(
                                     e,
                                     source_marker=source_marker,
@@ -1429,10 +1518,10 @@ class HookIntegrator(BaseIntegrator):
                                 )
                             ]
                             # Remove the alias key entirely if now empty
-                            if not json_config["hooks"][alias]:
-                                del json_config["hooks"][alias]
+                            if not json_config[container][alias]:
+                                del json_config[container][alias]
                     cleared_events.add(event_name)
-                json_config["hooks"][event_name].extend(entries)
+                json_config[container][event_name].extend(entries)
 
                 # Deduplicate same-package entries by content.
                 # Safety net for edge cases where multiple source files
@@ -1441,7 +1530,7 @@ class HookIntegrator(BaseIntegrator):
 
                 seen_keys: set[str] = set()
                 deduped: list = []
-                for entry in json_config["hooks"][event_name]:
+                for entry in json_config[container][event_name]:
                     if not isinstance(entry, dict):
                         deduped.append(entry)
                         continue
@@ -1451,7 +1540,7 @@ class HookIntegrator(BaseIntegrator):
                     if dedup_key not in seen_keys:
                         seen_keys.add(dedup_key)
                         deduped.append(entry)
-                json_config["hooks"][event_name] = deduped
+                json_config[container][event_name] = deduped
                 entries_appended_for_file = True
                 # Capture the actual entry objects this file contributed to
                 # the merged config. They are the same dict references that
@@ -1858,16 +1947,22 @@ class HookIntegrator(BaseIntegrator):
                         except (json.JSONDecodeError, OSError):
                             stats["errors"] += 1
                 else:
-                    self._clean_apm_entries_from_json(json_path, stats)
+                    self._clean_apm_entries_from_json(
+                        json_path, stats, container=config.event_container_key
+                    )
 
         return stats
 
     @staticmethod
-    def _clean_apm_entries_from_json(json_path: Path, stats: dict[str, int]) -> None:
+    def _clean_apm_entries_from_json(
+        json_path: Path, stats: dict[str, int], container: str = "hooks"
+    ) -> None:
         """Remove APM-tagged entries from a hooks JSON file.
 
         Filters out entries with ``_apm_source`` markers and cleans up
-        empty event arrays and the ``hooks`` key itself.
+        empty event arrays and the *container* key itself.  *container*
+        defaults to ``"hooks"``; Antigravity passes ``"apm"`` (its reserved
+        hook-name container) so sibling user hook-names are left intact.
         """
         if not json_path.exists():
             return
@@ -1875,24 +1970,24 @@ class HookIntegrator(BaseIntegrator):
             with open(json_path, encoding="utf-8") as f:
                 data = json.load(f)
 
-            if "hooks" not in data:
+            if container not in data:
                 return
 
             modified = False
-            for event_name in list(data["hooks"].keys()):
-                entries = data["hooks"][event_name]
+            for event_name in list(data[container].keys()):
+                entries = data[container][event_name]
                 if isinstance(entries, list):
                     filtered = [
                         e for e in entries if not (isinstance(e, dict) and "_apm_source" in e)
                     ]
                     if len(filtered) != len(entries):
                         modified = True
-                    data["hooks"][event_name] = filtered
+                    data[container][event_name] = filtered
                     if not filtered:
-                        del data["hooks"][event_name]
+                        del data[container][event_name]
 
-            if not data["hooks"]:
-                del data["hooks"]
+            if not data[container]:
+                del data[container]
 
             if modified:
                 with open(json_path, "w", encoding="utf-8") as f:
