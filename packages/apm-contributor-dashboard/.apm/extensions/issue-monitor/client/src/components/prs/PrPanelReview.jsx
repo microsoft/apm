@@ -1,4 +1,7 @@
 import { Show, For } from "solid-js";
+import { renderMarkdown } from "../../utils/markdown";
+import { createFollowUpIssues } from "../../services/api";
+import { showToast } from "../Toast";
 
 const verdictLabels = { ship: "Ship It", ship_with_followups: "Ship with Follow-ups", do_not_ship: "Do Not Ship" };
 const verdictIcons = { ship: "[+]", ship_with_followups: "[!]", do_not_ship: "[x]" };
@@ -15,6 +18,22 @@ function buildSections(r) {
 
 export default function PrPanelReview(props) {
   const review = () => props.panelReview;
+
+  async function handleCreateFollowUps() {
+    const r = review();
+    if (!r || !props.prNumber) return;
+    showToast("Creating follow-up issues...");
+    try {
+      const result = await createFollowUpIssues(props.prNumber, r);
+      if (result.created && result.created.length > 0) {
+        showToast(`Created ${result.created.length} follow-up issue(s)`);
+      } else {
+        showToast(result.message || "No follow-up items found");
+      }
+    } catch (e) {
+      showToast("Failed to create issues: " + (e.message || e));
+    }
+  }
 
   return (
     <div class="panel-review-container">
@@ -34,7 +53,7 @@ export default function PrPanelReview(props) {
                 <div class="panel-verdict-text">
                   <div class="panel-verdict-label">{verdictLabels[r().verdict] || r().verdict}</div>
                   <Show when={r().summary}>
-                    <div class="panel-verdict-summary">{r().summary}</div>
+                    <div class="panel-verdict-summary" innerHTML={renderMarkdown(r().summary)} />
                   </Show>
                 </div>
                 <Show when={r().author}>
@@ -55,7 +74,7 @@ export default function PrPanelReview(props) {
                       {(p) => (
                         <tr>
                           <td class="panel-persona-name">{p.name}</td>
-                          <td class="panel-persona-takeaway">{p.takeaway || "--"}</td>
+                          <td class="panel-persona-takeaway" innerHTML={renderMarkdown(p.takeaway || "--")} />
                           <td class={`panel-brn-cell ${p.b > 0 ? "has-findings" : "clean"}`}>{p.b}</td>
                           <td class="panel-brn-cell">{p.r}</td>
                           <td class="panel-brn-cell">{p.n}</td>
@@ -70,11 +89,16 @@ export default function PrPanelReview(props) {
                   {(section) => (
                     <div class="panel-section">
                       <div class="panel-section-title">{section.title}</div>
-                      <div class="panel-section-body">{section.body}</div>
+                      <div class="panel-section-body" innerHTML={renderMarkdown(section.body)} />
                     </div>
                   )}
                 </For>
               </Show>
+              <div class="panel-actions-row">
+                <button class="btn-follow-up" onClick={handleCreateFollowUps}>
+                  Create follow-up issues
+                </button>
+              </div>
             </>
           );
         }}

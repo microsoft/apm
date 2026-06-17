@@ -101,3 +101,11 @@ export async function getDraft(type, number) {
 export async function getPermissions() {
   return fetchJson("/api/permissions");
 }
+
+export async function createFollowUpIssues(prNumber, panelReview) {
+  return fetchJson("/create-follow-up-issues", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ number: prNumber, panelReview }),
+  });
+}

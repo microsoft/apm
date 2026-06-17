@@ -97,7 +97,7 @@ export default function PrDetail(props) {
               <PrPipeline checks={d().checks || []} workflowRuns={d().workflowRuns || []} />
             </Show>
             <Show when={subTab() === "panel"}>
-              <PrPanelReview panelReview={d().panelReview} />
+              <PrPanelReview panelReview={d().panelReview} prNumber={d().number} />
             </Show>
             <Show when={subTab() === "activity"}>
               <PrActivity activity={d().activity || []} />

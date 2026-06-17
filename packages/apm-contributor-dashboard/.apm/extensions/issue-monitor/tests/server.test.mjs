@@ -457,3 +457,52 @@ describe("GET /api/permissions", () => {
         await teardownServer();
     });
 });
+
+describe("POST /create-follow-up-issues", () => {
+    it("creates issues from deferred panel review items", async () => {
+        const createdIssues = [];
+        await setupServer({
+            ghExec: async (args) => {
+                if (args[0] === "issue" && args[1] === "create") {
+                    const titleIdx = args.indexOf("--title");
+                    const title = titleIdx >= 0 ? args[titleIdx + 1] : "";
+                    createdIssues.push(title);
+                    return "https://github.com/microsoft/apm/issues/999";
+                }
+                return "{}";
+            },
+        });
+
+        const panelReview = {
+            deferred: "- Add retry logic\n- Improve error messages",
+            recommendation: "- Consider caching",
+        };
+        const res = await fetch(`${baseUrl}/create-follow-up-issues`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ number: 42, panelReview }),
+        });
+        assert.equal(res.status, 200);
+        const data = await res.json();
+        assert.equal(data.ok, true);
+        assert.equal(data.created.length, 3);
+        assert.equal(createdIssues.length, 3);
+
+        await teardownServer();
+    });
+
+    it("returns empty created array when no follow-up items", async () => {
+        await setupServer({ ghExec: async () => "{}" });
+
+        const res = await fetch(`${baseUrl}/create-follow-up-issues`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ number: 1, panelReview: { recommendation: "All good." } }),
+        });
+        const data = await res.json();
+        assert.equal(data.ok, true);
+        assert.equal(data.created.length, 0);
+
+        await teardownServer();
+    });
+});
