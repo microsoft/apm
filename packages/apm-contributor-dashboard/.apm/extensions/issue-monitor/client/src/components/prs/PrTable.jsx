@@ -29,7 +29,7 @@ export default function PrTable(props) {
 
   function panelLabel(pr) {
     if (pr.panelCounts) {
-      return `B:${pr.panelCounts.blocking} R:${pr.panelCounts.review} N:${pr.panelCounts.nit}`;
+      return `B:${pr.panelCounts.b} R:${pr.panelCounts.r} N:${pr.panelCounts.n}`;
     }
     return pr.panel?.label || "Not requested";
   }
