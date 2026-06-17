@@ -59,11 +59,6 @@ export default function PrPanelReview(props) {
                 <Show when={r().author}>
                   <div class="panel-verdict-meta">by {r().author}</div>
                 </Show>
-                <Show when={r().verdict === "ship_with_followups" && (r().deferred || r().totals?.r > 0 || r().totals?.n > 0)}>
-                  <button class="btn-follow-up" onClick={handleCreateFollowUps}>
-                    Create follow-up issues
-                  </button>
-                </Show>
               </div>
               <div class="panel-stats-row">
                 <div class="panel-stat-card blocking"><div class="stat-num">{r().totals?.b ?? 0}</div><div class="stat-label">Blocking</div></div>
@@ -98,6 +93,13 @@ export default function PrPanelReview(props) {
                     </div>
                   )}
                 </For>
+              </Show>
+              <Show when={r().verdict === "ship_with_followups" && (r().deferred || r().totals?.r > 0 || r().totals?.n > 0)}>
+                <div class="panel-actions-row">
+                  <button class="btn-follow-up" onClick={handleCreateFollowUps}>
+                    Create follow-up issues
+                  </button>
+                </div>
               </Show>
             </>
           );
