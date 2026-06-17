@@ -18,7 +18,7 @@ from pathlib import Path
 import click
 
 from ..core.command_logger import CommandLogger
-from ..deps.lockfile import get_lockfile_path
+from ..deps.lockfile import LockFile, get_lockfile_path
 from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
 from ..security.content_scanner import ContentScanner, ScanFinding
 from ..security.file_scanner import (
@@ -34,6 +34,7 @@ from ..utils.console import (
 from ._audit_ops import _audit_ci_gate as _audit_ci_gate
 from ._audit_ops import _audit_content_scan as _audit_content_scan
 from ._audit_ops import _resolve_external_options as _resolve_external_options
+from ._audit_ops import _resolve_fail_on_drift as _resolve_fail_on_drift
 from ._audit_ops import _run_external_scanners as _run_external_scanners
 
 # -- Shared config --------------------------------------------------
@@ -248,7 +249,6 @@ def _deployed_canvas_bundles(project_root: Path, package_filter: str | None) -> 
     even when the content scan finds no hidden characters. Returns bundle roots
     such as ``.copilot/extensions/widget`` (one entry per bundle).
     """
-    from ..deps.lockfile import LockFile
     from ..integration.canvas_integrator import is_canvas_bundle_path
 
     lock = LockFile.read(get_lockfile_path(project_root))

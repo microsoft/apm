@@ -1,0 +1,90 @@
+{
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "creationInfo": {
+    "created": "2024-01-01T00:00:00+00:00",
+    "creators": [
+      "Tool: apm lock export"
+    ]
+  },
+  "dataLicense": "CC0-1.0",
+  "documentNamespace": "https://spdx.org/spdxdocs/apm-sbom-2024-01-01T00:00:00+00:00",
+  "name": "apm-sbom",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-0",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:generic/local-helper@sha256:aaa111",
+          "referenceType": "purl"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "acme/local-helper",
+      "versionInfo": "sha256:aaa111"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-1",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:github/acme/dual@c0ffee00",
+          "referenceType": "purl"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "(MIT OR Apache-2.0)",
+      "name": "acme/dual",
+      "versionInfo": "c0ffee00"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-2",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:github/acme/git-utils@def789ghi012",
+          "referenceType": "purl"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "MIT",
+      "name": "acme/git-utils",
+      "versionInfo": "def789ghi012"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-3",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:github/acme/proprietary@abc123",
+          "referenceType": "purl"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "UNLICENSED",
+      "name": "acme/proprietary",
+      "versionInfo": "abc123"
+    },
+    {
+      "SPDXID": "SPDXRef-Package-4",
+      "downloadLocation": "oci://registry.example.com/acme/oci-tools@sha256:abc123",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:oci/oci-tools@sha256:abc123",
+          "referenceType": "purl"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "name": "acme/oci-tools",
+      "versionInfo": "sha256:abc123"
+    }
+  ],
+  "spdxVersion": "SPDX-2.3"
+}

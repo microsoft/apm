@@ -616,7 +616,7 @@ class TestUnmanagedFiles:
         policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
         result = _check_unmanaged_files(tmp_path, lock, policy)
         assert not result.passed
-        assert ".github/agents/rogue.md" in result.details
+        assert any(".github/agents/rogue.md" in d for d in result.details)
 
     def test_warn_unmanaged(self, tmp_path):
         (tmp_path / ".cursor" / "rules").mkdir(parents=True)
@@ -652,9 +652,9 @@ class TestUnmanagedFiles:
 
     def test_rglob_cap_skips_check(self, tmp_path, monkeypatch):
         """When file count exceeds the safety cap, check passes with a warning."""
-        from apm_cli.policy import policy_checks
+        from apm_cli.policy import _policy_checks_unmanaged
 
-        monkeypatch.setattr(policy_checks, "_MAX_UNMANAGED_SCAN_FILES", 3)
+        monkeypatch.setattr(_policy_checks_unmanaged, "_MAX_UNMANAGED_SCAN_FILES", 3)
         gov = tmp_path / ".github" / "agents"
         gov.mkdir(parents=True)
         for i in range(5):
@@ -692,7 +692,7 @@ class TestUnmanagedFiles:
         policy = UnmanagedFilesPolicy(action="deny", directories=[".github/instructions"])
         result = _check_unmanaged_files(tmp_path, lock, policy)
         assert not result.passed
-        assert ".github/instructions/handrolled.instructions.md" in result.details
+        assert any(".github/instructions/handrolled.instructions.md" in d for d in result.details)
 
     def test_handrolled_file_not_masked_by_deployed_deps(self, tmp_path: Path) -> None:
         """A hand-rolled file is flagged even when sibling files are managed.
@@ -722,7 +722,7 @@ class TestUnmanagedFiles:
         policy = UnmanagedFilesPolicy(action="deny", directories=[".github/instructions"])
         result = _check_unmanaged_files(tmp_path, lock, policy)
         assert not result.passed
-        assert ".github/instructions/rogue.instructions.md" in result.details
+        assert any(".github/instructions/rogue.instructions.md" in d for d in result.details)
         # Managed files must NOT appear in the unmanaged details list.
         assert ".github/instructions/a.instructions.md" not in result.details
         assert ".github/instructions/b.instructions.md" not in result.details
@@ -749,9 +749,9 @@ class TestUnmanagedFiles:
         )
         result = _check_unmanaged_files(tmp_path, lock, policy)
         assert not result.passed
-        assert ".github/instructions/handrolled.instructions.md" in result.details
-        assert ".github/hooks/handrolled.hooks.md" in result.details
-        assert ".github/agents/handrolled.agents.md" in result.details
+        assert any(".github/instructions/handrolled.instructions.md" in d for d in result.details)
+        assert any(".github/hooks/handrolled.hooks.md" in d for d in result.details)
+        assert any(".github/agents/handrolled.agents.md" in d for d in result.details)
 
     def test_local_deployed_files_not_flagged(self, tmp_path: Path) -> None:
         """Files in local_deployed_files are treated as managed and not flagged.
@@ -813,7 +813,7 @@ class TestUnmanagedFiles:
         result = _check_unmanaged_files(tmp_path, lock, policy)
         assert not result.passed
         # The hand-rolled instruction file must be flagged...
-        assert ".github/instructions/handrolled.instructions.md" in result.details
+        assert any(".github/instructions/handrolled.instructions.md" in d for d in result.details)
         # ...while files under the managed skill directory must NOT be flagged.
         assert ".github/skills/my-skill/SKILL.md" not in result.details
 
@@ -848,7 +848,7 @@ class TestUnmanagedFiles:
         lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
         result = _check_unmanaged_files(tmp_path, lock, merged.unmanaged_files)
         assert not result.passed
-        assert ".github/agents/rogue.md" in result.details
+        assert any(".github/agents/rogue.md" in d for d in result.details)
 
     def test_integration_chain_deny_propagates(self, tmp_path):
         """Integration chain: parent deny + child omits block -> merge -> check catches rogue file."""
@@ -862,12 +862,238 @@ class TestUnmanagedFiles:
         lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
         result = _check_unmanaged_files(tmp_path, lock, merged.unmanaged_files)
         assert not result.passed
-        assert ".github/agents/rogue.md" in result.details
+        assert any(".github/agents/rogue.md" in d for d in result.details)
+
+
+# -- Check 16b: enriched unmanaged-files (#1775) --------------------
+
+
+def _detail_for(result, path: str) -> str | None:
+    """Return the single enriched detail line that mentions *path*."""
+    matches = [d for d in result.details if path in d]
+    assert len(matches) == 1, f"{path} reported {len(matches)} time(s): {result.details}"
+    return matches[0]
+
+
+class TestUnmanagedClassification:
+    """Lazy primitive-type classification of already-flagged files."""
+
+    def test_classify_skill_dir(self):
+        from apm_cli.policy.policy_checks import _classify_primitive_type
+
+        assert _classify_primitive_type(".claude/skills/my-skill/helper.md") == "skill"
+
+    def test_classify_instruction_file(self):
+        from apm_cli.policy.policy_checks import _classify_primitive_type
+
+        assert _classify_primitive_type(".github/instructions/x.instructions.md") == "instruction"
+
+    def test_classify_agent_dir(self):
+        from apm_cli.policy.policy_checks import _classify_primitive_type
+
+        assert _classify_primitive_type(".github/agents/reviewer.agent.md") == "agent"
+
+    def test_classify_mcp_config(self):
+        from apm_cli.policy.policy_checks import _classify_primitive_type
+
+        assert _classify_primitive_type(".vscode/mcp.json") == "mcp"
+
+    def test_classify_agent_in_mcp_named_dir(self):
+        # A path segment literally named "mcp" must NOT override an explicit
+        # .agent.md filename convention.
+        from apm_cli.policy.policy_checks import _classify_primitive_type
+
+        assert _classify_primitive_type(".github/agents/mcp/rogue.agent.md") == "agent"
+
+    def test_classify_dot_mcp_root_config(self):
+        from apm_cli.policy.policy_checks import _classify_primitive_type
+
+        assert _classify_primitive_type(".mcp/servers.json") == "mcp"
+
+    def test_classify_plain_mcp_segment_not_mcp(self):
+        # A non-config file under a dir merely named "mcp" is not an MCP config.
+        from apm_cli.policy.policy_checks import _classify_primitive_type
+
+        assert _classify_primitive_type(".github/mcp/notes.txt") is None
+
+    def test_classify_unknown_returns_none(self):
+        from apm_cli.policy.policy_checks import _classify_primitive_type
+
+        assert _classify_primitive_type(".github/random/notes.txt") is None
+
+
+class TestUnmanagedEnrichment:
+    """Each flagged file carries reason + type, surfaced in details."""
+
+    def test_reason_not_tracked_present(self, tmp_path):
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+        (tmp_path / ".github" / "agents" / "rogue.agent.md").write_text("x", encoding="utf-8")
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        result = _check_unmanaged_files(tmp_path, lock, policy)
+        detail = _detail_for(result, ".github/agents/rogue.agent.md")
+        assert "not tracked in apm.lock.yaml" in detail
+
+    def test_type_present_in_detail(self, tmp_path):
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+        (tmp_path / ".github" / "agents" / "rogue.agent.md").write_text("x", encoding="utf-8")
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        result = _check_unmanaged_files(tmp_path, lock, policy)
+        detail = _detail_for(result, ".github/agents/rogue.agent.md")
+        assert "[type: agent]" in detail
+
+    def test_next_action_hint_present(self, tmp_path):
+        # A non-empty report must carry exactly one actionable next-step hint
+        # (track vs suppress) so a flagged file is self-resolving.
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+        (tmp_path / ".github" / "agents" / "rogue.agent.md").write_text("x", encoding="utf-8")
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        result = _check_unmanaged_files(tmp_path, lock, policy)
+        hints = [d for d in result.details if "unmanaged_files.exclude" in d and "apm install" in d]
+        assert len(hints) == 1, f"expected one next-action hint, got: {result.details}"
+
+
+class TestUnmanagedDenyConflict:
+    """Unmanaged files matching apm-policy deny rules are surfaced as conflicts."""
+
+    def test_dependency_deny_conflict(self, tmp_path):
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+        (tmp_path / ".github" / "agents" / "rogue.agent.md").write_text("x", encoding="utf-8")
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        result = _check_unmanaged_files(
+            tmp_path,
+            lock,
+            policy,
+            dependency_deny=("**/rogue*",),
+        )
+        detail = _detail_for(result, ".github/agents/rogue.agent.md")
+        assert "matches deny rule" in detail
+
+    def test_mcp_deny_conflict(self, tmp_path):
+        (tmp_path / ".vscode").mkdir(parents=True)
+        (tmp_path / ".vscode" / "mcp.json").write_text("{}", encoding="utf-8")
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".vscode"])
+        result = _check_unmanaged_files(
+            tmp_path,
+            lock,
+            policy,
+            mcp_deny=("*mcp.json",),
+        )
+        detail = _detail_for(result, ".vscode/mcp.json")
+        assert "matches deny rule" in detail
+
+    def test_no_deny_conflict_when_no_match(self, tmp_path):
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+        (tmp_path / ".github" / "agents" / "clean.agent.md").write_text("x", encoding="utf-8")
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        result = _check_unmanaged_files(
+            tmp_path,
+            lock,
+            policy,
+            dependency_deny=("**/evil*",),
+        )
+        detail = _detail_for(result, ".github/agents/clean.agent.md")
+        assert "matches deny rule" not in detail
+
+
+class TestUnmanagedExcludeSuppression:
+    """Excluded paths are not reported."""
+
+    def test_excluded_path_not_reported(self, tmp_path):
+        agents = tmp_path / ".github" / "agents"
+        agents.mkdir(parents=True)
+        (agents / "harness.agent.md").write_text("x", encoding="utf-8")
+        (agents / "rogue.agent.md").write_text("x", encoding="utf-8")
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = UnmanagedFilesPolicy(
+            action="deny",
+            directories=[".github/agents"],
+            exclude=[".github/agents/harness.agent.md"],
+        )
+        result = _check_unmanaged_files(tmp_path, lock, policy)
+        assert not any(".github/agents/harness.agent.md" in d for d in result.details)
+        assert any(".github/agents/rogue.agent.md" in d for d in result.details)
+
+    def test_exclude_glob_suppresses_subtree(self, tmp_path):
+        target = tmp_path / ".github" / "agents" / "vendor"
+        target.mkdir(parents=True)
+        (target / "a.agent.md").write_text("x", encoding="utf-8")
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = UnmanagedFilesPolicy(
+            action="deny",
+            directories=[".github/agents"],
+            exclude=[".github/agents/vendor/**"],
+        )
+        result = _check_unmanaged_files(tmp_path, lock, policy)
+        assert result.passed
+        assert not result.details
+
+
+class TestUnmanagedSymlinkGuard:
+    """Symlinks pointing outside the workspace are not followed."""
+
+    def test_symlink_outside_project_not_followed(self, tmp_path):
+        outside = tmp_path.parent / "outside_target.md"
+        outside.write_text("secret", encoding="utf-8")
+        agents = tmp_path / ".github" / "agents"
+        agents.mkdir(parents=True)
+        link = agents / "escape.agent.md"
+        try:
+            link.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks not supported on this platform")
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        result = _check_unmanaged_files(tmp_path, lock, policy)
+        # The traversal must not follow the symlink out of the workspace.
+        assert not any("escape.agent.md" in d for d in result.details)
+
+    def test_symlinked_directory_outside_not_recursed(self, tmp_path):
+        # A symlinked *directory* resolving outside the workspace must not be
+        # recursed into -- its contents must never surface. rglob() follows
+        # directory symlinks, so the scan must use a non-following walk.
+        outside = tmp_path.parent / "outside_tree"
+        outside.mkdir()
+        (outside / "secret.agent.md").write_text("secret", encoding="utf-8")
+        agents = tmp_path / ".github" / "agents"
+        agents.mkdir(parents=True)
+        link = agents / "linked"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks not supported on this platform")
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        result = _check_unmanaged_files(tmp_path, lock, policy)
+        assert not any("secret.agent.md" in d for d in result.details)
+        assert not any("linked" in d for d in result.details)
+
+
+class TestUnmanagedNonDuplication:
+    """A file is reported exactly once -- one unified unmanaged report."""
+
+    def test_file_reported_once_even_with_deny_conflict(self, tmp_path):
+        (tmp_path / ".github" / "agents").mkdir(parents=True)
+        (tmp_path / ".github" / "agents" / "rogue.agent.md").write_text("x", encoding="utf-8")
+        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = UnmanagedFilesPolicy(action="deny", directories=[".github/agents"])
+        result = _check_unmanaged_files(
+            tmp_path,
+            lock,
+            policy,
+            dependency_deny=("**/rogue*",),
+            mcp_deny=("**/rogue*",),
+        )
+        occurrences = [d for d in result.details if ".github/agents/rogue.agent.md" in d]
+        assert len(occurrences) == 1
 
 
 # -- Integration: run_policy_checks ---------------------------------
-
-
 class TestRunPolicyChecks:
     def test_returns_all_18_checks(self, tmp_path):
         """Full run should produce exactly 18 checks."""

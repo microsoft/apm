@@ -1,7 +1,7 @@
 """Target detection for auto-selecting compilation and integration targets.
 
 This module implements the auto-detection pattern for determining which agent
-targets (Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Kiro) should be used
+targets (Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Antigravity, Kiro) should be used
 based on existing project structure and configuration.
 
 Detection priority (highest to lowest):
@@ -75,6 +75,7 @@ TargetType = Literal[
     "opencode",
     "codex",
     "gemini",
+    "antigravity",
     "windsurf",
     "kiro",
     "agent-skills",
@@ -115,6 +116,7 @@ UserTargetType = Literal[
     "opencode",
     "codex",
     "gemini",
+    "antigravity",
     "windsurf",
     "kiro",
     "agent-skills",
@@ -137,6 +139,7 @@ _NAME_TO_CANONICAL: dict[str, TargetType] = {
     "opencode": "opencode",
     "codex": "codex",
     "gemini": "gemini",
+    "antigravity": "antigravity",
     "windsurf": "windsurf",
     "kiro": "kiro",
     "agent-skills": "agent-skills",
@@ -241,6 +244,7 @@ def get_target_description(target: UserTargetType) -> str:
         "opencode": "AGENTS.md + .opencode/agents/ + .opencode/commands/ + .opencode/skills/",
         "codex": "AGENTS.md + .agents/skills/ + .codex/agents/ + .codex/hooks.json",
         "gemini": "GEMINI.md + .gemini/commands/ + .gemini/skills/ + .gemini/settings.json (MCP/hooks)",
+        "antigravity": "AGENTS.md + .agents/rules/ + .agents/skills/ + .agents/hooks.json + .agents/mcp_config.json (explicit --target only)",
         "windsurf": "AGENTS.md + .windsurf/rules/ + .windsurf/skills/ + .windsurf/workflows/ + .windsurf/hooks.json",
         "kiro": "AGENTS.md + .kiro/steering/ + .kiro/skills/ + .kiro/hooks/ + .kiro/settings/mcp.json",
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
@@ -272,14 +276,17 @@ EXPERIMENTAL_TARGETS: frozenset[str] = frozenset(
 
 #: Stable targets excluded from "all" expansion (cross-client deploy
 #: locations). Unlike EXPERIMENTAL_TARGETS, these are GA -- they just do
-#: not represent a single client tool.
-EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset({"agent-skills"})
+#: not represent a single client tool.  Antigravity is explicit-only
+#: because its workspace config lives under the SHARED ``.agents/`` root,
+#: so there is no Antigravity-unique signal to auto-detect on.
+EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset({"agent-skills", "antigravity"})
 
 #: Alias mapping: user-facing name -> canonical internal name.
 TARGET_ALIASES: dict[str, str] = {
     "copilot": "vscode",
     "agents": "vscode",
     "vscode": "vscode",
+    "agy": "antigravity",
 }
 
 

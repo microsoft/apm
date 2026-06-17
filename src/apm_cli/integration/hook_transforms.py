@@ -85,6 +85,7 @@ _HOOK_EVENT_EXPECTED_CASING: dict[str, str] = {
     "cursor": "PascalCase",
     "codex": "PascalCase",
     "gemini": "PascalCase",
+    "antigravity": "PascalCase",
     "windsurf": "PascalCase",
     "kiro": "camelCase",
 }
@@ -98,6 +99,7 @@ _HOOK_FILE_TARGET_SUFFIXES: dict[str, set[str]] = {
     "claude-hooks": {"claude"},
     "codex-hooks": {"codex"},
     "gemini-hooks": {"gemini"},
+    "antigravity-hooks": {"antigravity"},
     "windsurf-hooks": {"windsurf"},
     "kiro-hooks": {"kiro"},
 }
@@ -114,6 +116,12 @@ class _MergeHookConfig:
     target_key: str  # target name passed to _rewrite_hooks_data
     require_dir: bool  # True = skip if target dir doesn't exist
     schema_strict: bool = False  # True = strip _apm_source before writing to disk
+    # Top-level JSON key the merged event map lives under.  Defaults to
+    # "hooks" (Claude/Cursor/Codex/Gemini/Windsurf).  Antigravity's native
+    # schema keys hooks by an arbitrary hook *name*, so APM reserves the
+    # single name "apm" as its container and leaves sibling user hook-names
+    # untouched.
+    event_container_key: str = "hooks"
 
 
 _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
@@ -137,6 +145,12 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         config_filename="settings.json",
         target_key="gemini",
         require_dir=True,
+    ),
+    "antigravity": _MergeHookConfig(
+        config_filename="hooks.json",
+        target_key="antigravity",
+        require_dir=True,
+        event_container_key="apm",
     ),
     "windsurf": _MergeHookConfig(
         config_filename="hooks.json",
@@ -215,13 +229,13 @@ def _emit_hook_event_diagnostics(
 # ---------------------------------------------------------------------------
 
 
-def _to_gemini_hook_entries(entries: list) -> list:
-    """Transform hook entries into Gemini CLI format.
+def _to_nested_hook_entries(entries: list, key_fixer) -> list:
+    """Wrap flat Copilot hook entries in the ``{"hooks": [...]}`` nesting.
 
-    Gemini requires ``{"hooks": [...]}`` nesting, uses ``command`` (not
-    ``bash``), and ``timeout`` in milliseconds (not ``timeoutSec`` in
-    seconds).  Entries already in Claude/Gemini nested format are left
-    unchanged.
+    Shared by the Gemini and Antigravity transforms (both use the Claude
+    nested matcher shape for tool events).  *key_fixer* renames the inner
+    command/timeout keys in place for the specific target.  Entries already
+    in nested form have only their inner keys fixed.
     """
     result = []
     for entry in entries:
@@ -231,19 +245,29 @@ def _to_gemini_hook_entries(entries: list) -> list:
         # Already nested (Claude / Gemini format) -- just fix inner keys
         if "hooks" in entry and isinstance(entry["hooks"], list):
             for hook in entry["hooks"]:
-                _copilot_keys_to_gemini(hook)
+                key_fixer(hook)
             result.append(entry)
             continue
         # Flat Copilot entry -- wrap in nested format
         inner = dict(entry)
-        _copilot_keys_to_gemini(inner)
-        # Pull _apm_source to outer level (set later, but keep if present)
+        key_fixer(inner)
         apm_source = inner.pop("_apm_source", None)
         outer: dict = {"hooks": [inner]}
         if apm_source:
             outer["_apm_source"] = apm_source
         result.append(outer)
     return result
+
+
+def _to_gemini_hook_entries(entries: list) -> list:
+    """Transform hook entries into Gemini CLI format.
+
+    Gemini requires ``{"hooks": [...]}`` nesting, uses ``command`` (not
+    ``bash``), and ``timeout`` in milliseconds (not ``timeoutSec`` in
+    seconds).  Entries already in Claude/Gemini nested format are left
+    unchanged.
+    """
+    return _to_nested_hook_entries(entries, _copilot_keys_to_gemini)
 
 
 def _copilot_keys_to_gemini(hook: dict) -> None:
@@ -257,6 +281,62 @@ def _copilot_keys_to_gemini(hook: dict) -> None:
     # timeoutSec (seconds) -> timeout (milliseconds)
     if "timeoutSec" in hook:
         hook["timeout"] = hook.pop("timeoutSec") * 1000
+
+
+# Antigravity events that use the nested ``{matcher, hooks:[...]}`` matcher
+# shape.  All other events (PreInvocation/PostInvocation/Stop) take a flat
+# list of handler dicts; matcher has no meaning there.
+_ANTIGRAVITY_NESTED_EVENTS: frozenset[str] = frozenset({"PreToolUse", "PostToolUse"})
+
+
+def _to_antigravity_hook_entries(entries: list, event_name: str) -> list:
+    """Transform hook entries into Antigravity CLI native format.
+
+    Antigravity's ``hooks.json`` uses TWO entry shapes:
+
+    * ``PreToolUse`` / ``PostToolUse`` -- nested
+      ``[{"matcher": "*", "hooks": [handler, ...]}]``.
+    * ``PreInvocation`` / ``PostInvocation`` / ``Stop`` -- a flat list of
+      handler dicts (``matcher`` is ignored).
+
+    A handler is ``{"type": "command", "command": ..., "timeout": <sec>}``.
+    Unlike Gemini, ``timeout`` stays in SECONDS (no ms conversion).
+    """
+    if event_name in _ANTIGRAVITY_NESTED_EVENTS:
+        return _to_nested_hook_entries(entries, _copilot_keys_to_antigravity)
+    # Flat handler list -- fix inner keys without wrapping.
+    result = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            result.append(entry)
+            continue
+        # A pre-nested entry (matcher + hooks[]) is flattened to its handlers.
+        if "hooks" in entry and isinstance(entry["hooks"], list):
+            apm_source = entry.get("_apm_source")
+            for hook in entry["hooks"]:
+                if isinstance(hook, dict):
+                    _copilot_keys_to_antigravity(hook)
+                    if apm_source and "_apm_source" not in hook:
+                        hook["_apm_source"] = apm_source
+                result.append(hook)
+            continue
+        handler = dict(entry)
+        _copilot_keys_to_antigravity(handler)
+        result.append(handler)
+    return result
+
+
+def _copilot_keys_to_antigravity(hook: dict) -> None:
+    """Rename Copilot hook keys to Antigravity equivalents in-place."""
+    # bash / powershell -> command
+    if "command" not in hook:
+        for key in ("bash", "powershell", "windows"):
+            if key in hook:
+                hook["command"] = hook.pop(key)
+                break
+    # timeoutSec (seconds) -> timeout (SECONDS -- Antigravity uses seconds)
+    if "timeoutSec" in hook:
+        hook["timeout"] = hook.pop("timeoutSec")
 
 
 # ---------------------------------------------------------------------------

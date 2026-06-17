@@ -17,7 +17,11 @@ from ..core.command_logger import CommandLogger
 from ..core.target_detection import TargetParamType
 from ..utils.console import set_console_stderr
 from ._pack_ops import _emit_drift_recipe as _emit_drift_recipe
+from ._pack_ops import _log_bundle_meta as _log_bundle_meta
+from ._pack_ops import _log_unpack_file_list as _log_unpack_file_list
+from ._pack_ops import _mapping_summary as _mapping_summary
 from ._pack_ops import _run_release_gates
+from ._pack_ops import _warn_empty as _warn_empty
 
 MARKETPLACE_DOCS_URL = (
     "https://microsoft.github.io/apm/producer/publish-to-a-marketplace/#consume-from-any-assistant"
@@ -326,6 +330,12 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     marketplace_formats = _parse_marketplace_filter(marketplace_filter, ctx, json_output)
     # _parse_marketplace_filter raises/exits on error via _emit_json_error_or_raise
     project_root = Path(".").resolve()
+    # Authoring-path nudge (#1777): warn when the author's own package declares
+    # no license. Suppressed under --json (machine output). Never blocks pack.
+    if not json_output:
+        from ..export.authoring import warn_if_license_undeclared
+
+        warn_if_license_undeclared(project_root / "apm.yml", logger.warning)
     # Issue #1207 D1: when --target is not given, detect the project's
     # actual target so the embedded ``pack.target`` reflects what was
     # tested rather than a hardcoded "copilot".  ``pack.target`` is now
@@ -708,88 +718,3 @@ def unpack_cmd(
     except (FileNotFoundError, ValueError) as exc:
         logger.error(str(exc))
         sys.exit(1)
-
-
-def _log_unpack_file_list(result, logger):
-    """Log unpacked files grouped by dependency, using tree-style output."""
-    if result.dependency_files:
-        for dep_name, dep_files in result.dependency_files.items():
-            logger.progress(f"  {dep_name}")
-            for f in dep_files:
-                logger.tree_item(f"    - {f}")
-    else:
-        for f in result.files:
-            logger.tree_item(f"  - {f}")
-
-
-def _mapping_summary(path_mappings):
-    """Build a compact ': src/ -> dst/' suffix from path mappings, or empty string."""
-    if not path_mappings:
-        return ""
-    # Derive source and destination prefixes from the first mapping entry
-    src_sample = next(iter(path_mappings.values()))
-    dst_sample = next(iter(path_mappings))
-    src_root = src_sample.split("/")[0] + "/"
-    dst_root = dst_sample.split("/")[0] + "/"
-    return f": {src_root} -> {dst_root}"
-
-
-def _warn_empty(logger, target, result):
-    """Emit a contextual warning when the bundle has no files."""
-    if target:
-        # User explicitly asked for a target but got nothing
-        # Check if there are source files under other prefixes
-        if result.path_mappings or result.mapped_count:
-            # Mapping was attempted but somehow produced nothing
-            logger.warning(f"No files to pack for target '{target}'")
-        else:
-            logger.warning(f"No files to pack for target '{target}'")
-            logger.verbose_detail(
-                "    Hint: check that apm.lock.yaml has deployed_files entries (run apm install first)"
-            )
-    else:
-        logger.warning("No deployed files found -- empty bundle created")
-
-
-def _log_bundle_meta(result, output_dir, logger):
-    """Show bundle provenance and warn if target mismatches the project."""
-    meta = result.pack_meta
-    if not meta:
-        return
-
-    bundle_target = meta.get("target", "")
-    dep_count = len(result.dependency_files) if result.dependency_files else 0
-    file_count = len(result.files) if result.files else 0
-
-    # Map internal canonical names to user-facing names for display
-    _DISPLAY = {"vscode": "copilot", "agents": "copilot"}
-    display_bundle = _DISPLAY.get(bundle_target, bundle_target)
-
-    logger.progress(f"Bundle target: {display_bundle} ({dep_count} dep(s), {file_count} file(s))")
-
-    # Detect project target from output directory
-    try:
-        from ..core.target_detection import detect_target
-
-        project_target, _reason = detect_target(output_dir.resolve())
-    except Exception:
-        return  # can't detect -- skip mismatch check
-
-    display_project = _DISPLAY.get(project_target, project_target)
-
-    # Normalize to canonical internal names for comparison
-    _CANONICAL = {"copilot": "vscode", "agents": "vscode"}
-    norm_bundle = _CANONICAL.get(bundle_target, bundle_target)
-    norm_project = _CANONICAL.get(project_target, project_target)
-
-    if norm_bundle == "all" or norm_project in ("all", "minimal"):
-        return  # universal bundle or no strong project signal
-
-    if norm_bundle != norm_project:
-        logger.warning(
-            f"Bundle target '{display_bundle}' differs from project target '{display_project}'"
-        )
-        logger.verbose_detail(
-            f"    To get a {display_project}-targeted bundle, "
-            f"ask the publisher to run: apm pack --target {display_project}"
-        )

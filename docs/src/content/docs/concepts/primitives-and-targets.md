@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-A **primitive** is a unit of agent context APM can manage: instructions, prompts, agents, skills, hooks, commands, plugins, and MCP servers. A **target** is a harness APM compiles primitives for: Copilot, Claude, Cursor, Codex, Gemini, OpenCode, and Windsurf. The matrix below is the full reach map. For any primitive X and harness Y, it tells you whether Y receives X natively, receives it after APM transforms it, or does not receive it at all.
+A **primitive** is a unit of agent context APM can manage: instructions, prompts, agents, skills, hooks, commands, plugins, and MCP servers. A **target** is a harness APM compiles primitives for: Copilot, Claude, Cursor, Codex, Gemini, Antigravity, OpenCode, and Windsurf. The matrix below is the full reach map. For any primitive X and harness Y, it tells you whether Y receives X natively, receives it after APM transforms it, or does not receive it at all.
 
 This page is the canonical reference. Tutorials and how-tos link here; do not duplicate.
 
@@ -87,6 +87,7 @@ Each target is identified by a slug used in `apm.yml`'s `targets:` field and on 
 | `cursor` | `.cursor/` | agents |
 | `codex` | `.codex/` plus `.agents/` for skills | agents |
 | `gemini` | `.gemini/` | gemini |
+| `antigravity` | `.agents/` (project), `~/.gemini/` (user) | agents |
 | `opencode` | `.opencode/` (project), `~/.config/opencode/` (user) | agents |
 | `windsurf` | `.windsurf/` (project), `~/.codeium/windsurf/` (user) | agents |
 | `kiro` | `.kiro/` (project and user) | agents |
@@ -98,6 +99,7 @@ Notes per target:
 - **cursor** -- Cursor IDE. Rules use the `.mdc` extension. Instructions are not deployable at user scope (Cursor exposes them via the Settings UI only).
 - **codex** -- Codex CLI. Agents and hooks use TOML; skills use the cross-tool `.agents/` directory.
 - **gemini** -- Gemini CLI. Commands are TOML. Hooks merge into `.gemini/settings.json`. No native agents or instructions primitives -- both arrive via compiled context files.
+- **antigravity** -- Google Antigravity CLI (`agy`), successor to Gemini CLI. Explicit-only target (`--target antigravity`); the `.agents/` root is shared, so it is never auto-detected and is not part of `--target all`. Instructions deploy as rules under `.agents/rules/`. Skills use `.agents/skills/`. Hooks use Antigravity's native `.agents/hooks.json` schema. MCP servers write to a dedicated `.agents/mcp_config.json`. No commands primitive (legacy Gemini commands convert to skills upstream).
 - **opencode** -- OpenCode. No hooks support.
 - **windsurf** -- Windsurf / Cascade. No native agents primitive -- Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so personas ship as skills. Workflows are the harness's name for commands.
 - **kiro** -- Kiro IDE. Instructions become steering files, skills stay as `SKILL.md` folders, hooks are individual JSON files, and MCP lands in `.kiro/settings/mcp.json`.
@@ -111,23 +113,25 @@ Rows are primitives, columns are harnesses. Cell legend:
 - **unsupported** -- APM does not deliver this primitive to this harness.
 - **gated** -- delivered behind an explicit declaration or trust flag.
 
-| Primitive | Copilot | Claude | Cursor | Codex | Gemini | OpenCode | Windsurf | Kiro |
-|---|---|---|---|---|---|---|---|---|
-| instructions | native | native | native | compiled | compiled | compiled | native | native |
-| prompts | native | compiled | compiled | unsupported | compiled | compiled | compiled | unsupported |
-| agents | native | native | compiled | compiled | unsupported | native | unsupported | unsupported |
-| skills | native | native | native | native | native | native | native | native |
-| hooks | native | native | native | native | native | unsupported | native | native |
-| commands | unsupported | native | compiled | unsupported | compiled | compiled | compiled | unsupported |
-| plugins | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled |
-| MCP servers | native | native | native | native | native | native | native | native |
-| canvas (experimental) | gated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| Primitive | Copilot | Claude | Cursor | Codex | Gemini | Antigravity | OpenCode | Windsurf | Kiro |
+|---|---|---|---|---|---|---|---|---|---|
+| instructions | native | native | native | compiled | compiled | native | compiled | native | native |
+| prompts | native | compiled | compiled | unsupported | compiled | compiled | compiled | compiled | unsupported |
+| agents | native | native | compiled | compiled | unsupported | unsupported | native | unsupported | unsupported |
+| skills | native | native | native | native | native | native | native | native | native |
+| hooks | native | native | native | native | native | native | unsupported | native | native |
+| commands | unsupported | native | compiled | unsupported | compiled | unsupported | compiled | compiled | unsupported |
+| plugins | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled | compiled |
+| MCP servers | native | native | native | native | native | native | native | native | native |
+| canvas (experimental) | gated | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 
 How to read a cell:
 
 - `instructions / claude = native` -- APM writes `.claude/rules/<name>.md`; Claude Code reads it directly.
 - `prompts / claude = compiled` -- APM transforms `.apm/prompts/<n>.prompt.md` into `.claude/commands/<n>.md`. The prompt becomes a `/command`.
 - `agents / gemini = unsupported` -- Gemini CLI has no agents primitive; APM does not deliver `.agent.md` files to it. Their content still reaches Gemini through the compiled `GEMINI.md` if referenced from instructions.
+- `agents / antigravity = unsupported` -- Antigravity CLI has no agents primitive; their content reaches Antigravity through the compiled `AGENTS.md`.
+- `instructions / antigravity = native` -- APM deploys instructions as plain-markdown rules under `.agents/rules/`.
 - `commands / copilot = unsupported` -- Copilot has no commands primitive; the same source `.prompt.md` reaches Copilot as a native prompt instead.
 - `plugins / *` -- APM unpacks the plugin at install time into the primitives in the rows above; routing then follows those rows.
 - `MCP servers / *` -- APM writes the harness's standard MCP config. Transitive MCP servers brought in by deep dependencies must be explicitly declared or trusted with `--trust-transitive-mcp` -- effectively `gated` for those, `native` for direct dependencies.

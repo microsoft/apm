@@ -20,7 +20,11 @@ from apm_cli.install.registry_wiring import (
     get_registry_resolver,
     resolver_last_registry_resolution,
 )
-from apm_cli.install.sources_base import DependencySource, Materialization
+from apm_cli.install.sources_base import (
+    DependencySource,
+    Materialization,
+    _record_declared_license,
+)
 from apm_cli.utils.console import _rich_error, _rich_success
 from apm_cli.utils.short_sha import format_short_sha
 
@@ -301,6 +305,7 @@ class FreshDependencySource(DependencySource):
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value
+            _record_declared_license(ctx, dep_key, install_path)
 
             if hasattr(package_info, "package_type"):
                 package_type = package_info.package_type

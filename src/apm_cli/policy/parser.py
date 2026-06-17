@@ -16,6 +16,7 @@ from .schema import (
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
     DependencyPolicy,
+    IntegrityPolicy,
     ManifestPolicy,
     McpPolicy,
     McpTransportPolicy,
@@ -169,27 +170,53 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
                 f"unmanaged_files.action must be one of "
                 f"{sorted(_VALID_UNMANAGED_ACTION)}, got '{action}'"
             )
+        exclude = uf.get("exclude")
+        if exclude is not None and not isinstance(exclude, list):
+            errors.append(
+                "unmanaged_files.exclude must be a YAML list of path globs "
+                f"(got {type(exclude).__name__})"
+            )
 
     # security.audit (install-time audit + external scanners)
-    security = data.get("security")
-    if security is not None and not isinstance(security, dict):
-        errors.append("security must be a YAML mapping")
-    elif isinstance(security, dict):
-        audit = security.get("audit")
-        if audit is not None and not isinstance(audit, dict):
-            errors.append("security.audit must be a YAML mapping")
-        elif isinstance(audit, dict):
-            on_install = audit.get("on_install")
-            if isinstance(on_install, bool):
-                on_install = _YAML_BOOL_COERCE.get(on_install, str(on_install))
-            if on_install is not None and on_install not in _VALID_AUDIT_ON_INSTALL:
-                errors.append(
-                    f"security.audit.on_install must be one of "
-                    f"{sorted(_VALID_AUDIT_ON_INSTALL)}, got '{on_install}'"
-                )
-            _validate_scanners(audit.get("scanners"), errors, warnings)
+    _validate_security(data.get("security"), errors, warnings)
 
     return errors, warnings
+
+
+def _validate_security(security: object, errors: list[str], warnings: list[str]) -> None:
+    """Validate the ``security`` policy block (audit + integrity sub-blocks)."""
+    if security is None:
+        return
+    if not isinstance(security, dict):
+        errors.append("security must be a YAML mapping")
+        return
+
+    audit = security.get("audit")
+    if audit is not None and not isinstance(audit, dict):
+        errors.append("security.audit must be a YAML mapping")
+    elif isinstance(audit, dict):
+        on_install = audit.get("on_install")
+        if isinstance(on_install, bool):
+            on_install = _YAML_BOOL_COERCE.get(on_install, str(on_install))
+        if on_install is not None and on_install not in _VALID_AUDIT_ON_INSTALL:
+            errors.append(
+                f"security.audit.on_install must be one of "
+                f"{sorted(_VALID_AUDIT_ON_INSTALL)}, got '{on_install}'"
+            )
+        fail_on_drift = audit.get("fail_on_drift")
+        if fail_on_drift is not None and not isinstance(fail_on_drift, bool):
+            errors.append(f"security.audit.fail_on_drift must be a boolean, got '{fail_on_drift}'")
+        _validate_scanners(audit.get("scanners"), errors, warnings)
+
+    integrity = security.get("integrity")
+    if integrity is not None and not isinstance(integrity, dict):
+        errors.append("security.integrity must be a YAML mapping")
+    elif isinstance(integrity, dict):
+        require_hashes = integrity.get("require_hashes")
+        if require_hashes is not None and not isinstance(require_hashes, bool):
+            errors.append(
+                f"security.integrity.require_hashes must be a boolean, got '{require_hashes}'"
+            )
 
 
 def _build_policy(data: dict) -> ApmPolicy:
@@ -263,7 +290,14 @@ def _build_policy(data: dict) -> ApmPolicy:
         uf_data = raw_uf
         action = uf_data.get("action")
         directories = _parse_tuple(uf_data.get("directories")) if "directories" in uf_data else None
-        unmanaged_files = UnmanagedFilesPolicy(action=action, directories=directories)
+        exclude = (
+            None
+            if ("exclude" not in uf_data or uf_data["exclude"] is None)
+            else _parse_tuple(uf_data["exclude"])
+        )
+        unmanaged_files = UnmanagedFilesPolicy(
+            action=action, directories=directories, exclude=exclude
+        )
 
     reg_data = data.get("registry_source") or {}
     registry_source = RegistrySourcePolicy(
@@ -277,6 +311,8 @@ def _build_policy(data: dict) -> ApmPolicy:
     on_install = audit_data.get("on_install")
     if isinstance(on_install, bool):
         on_install = _YAML_BOOL_COERCE.get(on_install, str(on_install))
+    raw_integrity = sec_data.get("integrity")
+    integrity_data = raw_integrity if isinstance(raw_integrity, dict) else {}
     security = SecurityPolicy(
         audit=AuditPolicy(
             on_install=on_install,
@@ -284,6 +320,10 @@ def _build_policy(data: dict) -> ApmPolicy:
             if "external" not in audit_data or audit_data["external"] is None
             else _parse_tuple(audit_data["external"]),
             scanners=_parse_scanners(audit_data.get("scanners")),
+            fail_on_drift=bool(audit_data.get("fail_on_drift", False)),
+        ),
+        integrity=IntegrityPolicy(
+            require_hashes=bool(integrity_data.get("require_hashes", False)),
         ),
     )
 

@@ -126,4 +126,88 @@ def test_policy_provides_default_deny_list_shape():
     assert "deny" in deps and deps["deny"]["oneOf"][0]["type"] == "array"
 
 
+@pytest.mark.req("req-pl-013")
+def test_policy_require_hashes_parses_and_is_specified():
+    """req-pl-013: security.integrity.require_hashes fail-closed install.
+
+    Binds the parsed boolean to the spec MUST. The install enforcement
+    itself is exercised by tests/unit/install/test_require_hashes.py;
+    here we assert the parser surfaces the key and the spec language
+    that mandates the fail-closed behaviour is intact.
+    """
+    from apm_cli.policy.parser import load_policy
+
+    policy, _ = load_policy(fixture_path("policy", "security-integrity.yml"))
+    assert policy.security.integrity.require_hashes is True
+    assert_spec_contains(
+        "`security.integrity.require_hashes: true`",
+        "fail-closed diagnostic",
+    )
+
+
+@pytest.mark.req("req-pl-014")
+def test_policy_fail_on_drift_parses_and_is_specified():
+    """req-pl-014: security.audit.fail_on_drift non-zero audit exit.
+
+    Binds the parsed boolean to the spec MUST. The audit exit-code
+    path is exercised by tests/unit/test_audit_fail_on_drift.py; here
+    we assert the parser surfaces the key and the spec language that
+    mandates the non-zero exit is intact.
+    """
+    from apm_cli.policy.parser import load_policy
+
+    policy, _ = load_policy(fixture_path("policy", "security-integrity.yml"))
+    assert policy.security.audit.fail_on_drift is True
+    assert_spec_contains(
+        "`security.audit.fail_on_drift: true`",
+        "non-zero exit status when lockfile",
+    )
+
+
+@pytest.mark.req("req-pl-015")
+def test_unmanaged_files_surfacing_completeness(tmp_path):
+    """req-pl-015: surface every untracked file under a managed primitive
+    target tree with its reason, deny-conflict note, and inferred type,
+    while an ``unmanaged_files.exclude`` match is never surfaced.
+
+    Binds the spec MUST to the real ``_check_unmanaged_files`` behavior so a
+    regression in reason strings, type tagging, deny-conflict, or exclude
+    suppression breaks at PR time. Also asserts the normative spec phrases.
+    """
+    from apm_cli.policy.policy_checks import _check_unmanaged_files
+    from apm_cli.policy.schema import UnmanagedFilesPolicy
+
+    inst_dir = tmp_path / ".github" / "instructions"
+    agents_dir = tmp_path / ".github" / "agents"
+    inst_dir.mkdir(parents=True)
+    agents_dir.mkdir(parents=True)
+    (inst_dir / "foo.instructions.md").write_text("x", encoding="utf-8")
+    (inst_dir / "ignored.md").write_text("x", encoding="utf-8")
+    (agents_dir / "evil.agent.md").write_text("x", encoding="utf-8")
+
+    policy = UnmanagedFilesPolicy(
+        action="warn",
+        directories=(".github/instructions", ".github/agents"),
+        exclude=("**/ignored.md",),
+    )
+    result = _check_unmanaged_files(tmp_path, None, policy, dependency_deny=("**/evil*",))
+    body = "\n".join(result.details)
+
+    # Untracked primitive surfaced with reason + inferred type.
+    assert ".github/instructions/foo.instructions.md [type: instruction]" in body
+    assert "not tracked in apm.lock.yaml" in body
+    # Deny-conflict note carried where the path also matches a deny pattern.
+    assert "matches deny rule (**/evil*)" in body
+    assert ".github/agents/evil.agent.md [type: agent]" in body
+    # An excluded path MUST NOT be surfaced.
+    assert "ignored.md" not in body
+
+    # Spec-text drift guard: the normative phrasing MUST stay in the body.
+    assert_spec_contains(
+        "not tracked in `apm.lock.yaml`",
+        "inferred primitive type",
+        "MUST NOT be surfaced",
+    )
+
+
 _ = waive  # keep import for any future structural waiver

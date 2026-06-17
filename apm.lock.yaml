@@ -1,6 +1,6 @@
 lockfile_version: '1'
-generated_at: '2026-06-09T20:09:37.099937+00:00'
-apm_version: 0.19.0
+generated_at: '2026-06-17T08:26:14.843724+00:00'
+apm_version: 0.20.0
 dependencies:
 - repo_url: _local/apm-issue-autopilot
   package_type: apm_package
@@ -66,6 +66,7 @@ dependencies:
     .agents/skills/apm-issue-autopilot/scripts/run_evals.py: sha256:8f4580cb2bdb88e7e570e4feb60cbf244d7fbe3e8217a8eadfd9dff2c763b615
   source: local
   local_path: ./packages/apm-issue-autopilot
+  declared_license: MIT
 - repo_url: _local/batch-bug-shepherd
   package_type: apm_package
   deployed_files:
@@ -116,6 +117,7 @@ dependencies:
     .agents/skills/batch-bug-shepherd/scripts/run_evals.py: sha256:ecc003164e65cb002f301a7cdff9c0a2e39eddc35a81ede63da8934519e483c9
   source: local
   local_path: ./packages/batch-bug-shepherd
+  declared_license: MIT
 - repo_url: _local/apm-triage-panel
   depth: 2
   resolved_by: _local/apm-issue-autopilot
@@ -131,6 +133,7 @@ dependencies:
     .agents/skills/apm-triage-panel/assets/triage-template.md: sha256:69a027959eaec5335668e087c86babd814ba20cf21662ed524cf285b178e21d1
   source: local
   local_path: ../apm-triage-panel
+  declared_license: MIT
 - repo_url: _local/pr-description-skill
   depth: 2
   resolved_by: _local/apm-issue-autopilot
@@ -182,6 +185,7 @@ dependencies:
     .agents/skills/pr-description-skill/scripts/run_evals.py: sha256:a1792f8cb95b4fb37a4133af079908e2a3b5643c1a81d97e4dcda399bac069a2
   source: local
   local_path: ../pr-description-skill
+  declared_license: MIT
 - repo_url: _local/shepherd-driver
   depth: 2
   resolved_by: _local/apm-issue-autopilot
@@ -211,6 +215,7 @@ dependencies:
     .agents/skills/shepherd-driver/references/mergeability-gate.md: sha256:90bf5cd838d1025dd0fa223a0843be926cd509c85c91ef683cc9bfc98b5e8785
   source: local
   local_path: ../shepherd-driver
+  declared_license: MIT
 - repo_url: _local/apm-review-panel
   depth: 3
   resolved_by: _local/shepherd-driver
@@ -244,6 +249,7 @@ dependencies:
     .agents/skills/apm-review-panel/evals/trigger-evals.json: sha256:c715ba52cd2131f294c1cf685a10995a08e4ee6971f97cf5d36e09df28d3af91
   source: local
   local_path: ../apm-review-panel
+  declared_license: MIT
 local_deployed_files:
 - .agents/skills/apm-spec-guardian
 - .agents/skills/apm-spec-guardian/SKILL.md

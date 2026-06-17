@@ -33,7 +33,11 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.install.registry_wiring import (
     registry_resolution_for_cached_registry_dep,
 )
-from apm_cli.install.sources_base import DependencySource, Materialization
+from apm_cli.install.sources_base import (
+    DependencySource,
+    Materialization,
+    _record_declared_license,
+)
 from apm_cli.install.sources_fresh import (
     FreshDependencySource,
     _format_package_type_label,
@@ -231,6 +235,7 @@ class LocalDependencySource(DependencySource):
 
         if local_info.package_type:
             ctx.package_types[dep_key] = local_info.package_type.value
+        _record_declared_license(ctx, dep_key, install_path)
 
         return Materialization(
             package_info=local_info,
@@ -458,6 +463,7 @@ class CachedDependencySource(DependencySource):
             ctx.package_hashes[dep_key] = _compute_hash(install_path)
         if cached_package_info.package_type:
             ctx.package_types[dep_key] = cached_package_info.package_type.value
+        _record_declared_license(ctx, dep_key, install_path)
 
         # Return without deploying integration files when the target set is empty.
         if not ctx.targets:

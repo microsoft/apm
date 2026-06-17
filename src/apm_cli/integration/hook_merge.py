@@ -22,6 +22,7 @@ from apm_cli.utils.path_security import (
 from .hook_transforms import (
     _APM_HOOKS_SIDECAR,
     _reinject_apm_source_from_sidecar,
+    _to_antigravity_hook_entries,
     _to_gemini_hook_entries,
 )
 
@@ -332,10 +333,14 @@ def _load_merged_config_and_sidecar(
     json_path: Path,
     sidecar_path: Path,
     schema_strict: bool,
+    container: str = "hooks",
 ) -> dict:
     """Load target config JSON and optionally re-inject sidecar _apm_source markers.
 
-    Returns a json_config dict that always has a ``"hooks"`` key.
+    Returns a json_config dict that always has the *container* key (the
+    top-level event map).  *container* defaults to ``"hooks"``; Antigravity
+    passes ``"apm"`` so its events nest under the reserved ``apm`` hook-name
+    and sibling user hook-names in the native file are preserved.
     """
     json_config: dict = {}
     if json_path.exists():
@@ -363,8 +368,8 @@ def _load_merged_config_and_sidecar(
         if sidecar_data and "hooks" in json_config:
             _reinject_apm_source_from_sidecar(json_config["hooks"], sidecar_data)
 
-    if "hooks" not in json_config:
-        json_config["hooks"] = {}
+    if container not in json_config:
+        json_config[container] = {}
 
     return json_config
 
@@ -401,11 +406,14 @@ def _merge_hook_file_entries(
     heal_stale_root_source: bool,
     dependency_sources: set,
     capture_entries: dict | None = None,
+    container: str = "hooks",
 ) -> bool:
-    """Merge hook entries from one hook file into json_config["hooks"].
+    """Merge hook entries from one hook file into ``json_config[container]``.
 
-    Applies Gemini transforms, stamps _apm_source, performs idempotent
-    upsert (stripping prior same-package entries), and deduplicates.
+    Applies the target's nested/native transform (Gemini or Antigravity),
+    stamps _apm_source, performs idempotent upsert (stripping prior
+    same-package entries), and deduplicates.  *container* is the top-level
+    event-map key ("hooks" for most targets, "apm" for Antigravity).
 
     Returns True when at least one event received new entries.
     """
@@ -420,12 +428,15 @@ def _merge_hook_file_entries(
         if not isinstance(entries, list) or not entries:
             continue
         event_name = event_map.get(raw_event_name, raw_event_name)
-        if event_name not in json_config["hooks"]:
-            json_config["hooks"][event_name] = []
+        if event_name not in json_config[container]:
+            json_config[container][event_name] = []
 
-        # Transform flat Copilot entries to Gemini nested format
+        # Transform flat Copilot entries to the target's nested / native
+        # hook shape.
         if target_key == "gemini":
             entries = _to_gemini_hook_entries(entries)
+        elif target_key == "antigravity":
+            entries = _to_antigravity_hook_entries(entries, event_name)
 
         # Mark each entry with APM source for sync/cleanup
         for entry in entries:
@@ -451,12 +462,13 @@ def _merge_hook_file_entries(
                 dependency_sources,
                 reverse_map,
                 remove_current_source,
+                container=container,
             )
             cleared_events.add(event_name)
 
-        json_config["hooks"][event_name].extend(entries)
-        json_config["hooks"][event_name] = _deduplicate_event_entries(
-            json_config["hooks"][event_name]
+        json_config[container][event_name].extend(entries)
+        json_config[container][event_name] = _deduplicate_event_entries(
+            json_config[container][event_name]
         )
         entries_appended = True
         if capture_entries is not None:
@@ -476,12 +488,13 @@ def _upsert_event_entries(
     dependency_sources: set,
     reverse_map: dict,
     remove_current_source: bool,
+    container: str = "hooks",
 ) -> None:
     """Remove stale same-package entries before fresh ones are appended.
 
-    Mutates json_config["hooks"] in-place.
+    Mutates ``json_config[container]`` in-place.
     """
-    prior_entries = json_config["hooks"][event_name]
+    prior_entries = json_config[container][event_name]
     kept_entries = [
         e
         for e in prior_entries
@@ -513,15 +526,15 @@ def _upsert_event_entries(
                 source_marker,
                 event_name,
             )
-    json_config["hooks"][event_name] = kept_entries
+    json_config[container][event_name] = kept_entries
 
     # Also clear from any alias events that map to this normalised name
     # (handles migration from corrupted installs with mixed-case event keys).
     for alias in reverse_map.get(event_name, set()):
-        if alias != event_name and alias in json_config["hooks"]:
-            json_config["hooks"][alias] = [
+        if alias != event_name and alias in json_config[container]:
+            json_config[container][alias] = [
                 e
-                for e in json_config["hooks"][alias]
+                for e in json_config[container][alias]
                 if not _should_remove_prior_merged_entry(
                     e,
                     source_marker=source_marker,
@@ -532,8 +545,8 @@ def _upsert_event_entries(
                 )
             ]
             # Remove the alias key entirely if now empty
-            if not json_config["hooks"][alias]:
-                del json_config["hooks"][alias]
+            if not json_config[container][alias]:
+                del json_config[container][alias]
 
 
 def _warn_empty_hook_file(hook_file: Path, target_key: str) -> None:
@@ -728,11 +741,15 @@ def _sync_claude_hooks_settings(json_path: Path, stats: dict[str, int]) -> None:
         stats["errors"] += 1
 
 
-def _clean_apm_entries_from_json(json_path: Path, stats: dict[str, int]) -> None:
+def _clean_apm_entries_from_json(
+    json_path: Path, stats: dict[str, int], container: str = "hooks"
+) -> None:
     """Remove APM-tagged entries from a hooks JSON file.
 
     Filters out entries with ``_apm_source`` markers and cleans up
-    empty event arrays and the ``hooks`` key itself.
+    empty event arrays and the *container* key itself.  *container*
+    defaults to ``"hooks"``; Antigravity passes ``"apm"`` (its reserved
+    hook-name container) so sibling user hook-names are left intact.
     """
     if not json_path.exists():
         return
@@ -740,22 +757,22 @@ def _clean_apm_entries_from_json(json_path: Path, stats: dict[str, int]) -> None
         with open(json_path, encoding="utf-8") as f:
             data = json.load(f)
 
-        if "hooks" not in data:
+        if container not in data:
             return
 
         modified = False
-        for event_name in list(data["hooks"].keys()):
-            entries = data["hooks"][event_name]
+        for event_name in list(data[container].keys()):
+            entries = data[container][event_name]
             if isinstance(entries, list):
                 filtered = [e for e in entries if not (isinstance(e, dict) and "_apm_source" in e)]
                 if len(filtered) != len(entries):
                     modified = True
-                data["hooks"][event_name] = filtered
+                data[container][event_name] = filtered
                 if not filtered:
-                    del data["hooks"][event_name]
+                    del data[container][event_name]
 
-        if not data["hooks"]:
-            del data["hooks"]
+        if not data[container]:
+            del data[container]
 
         if modified:
             with open(json_path, "w", encoding="utf-8") as f:

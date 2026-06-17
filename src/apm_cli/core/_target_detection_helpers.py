@@ -32,6 +32,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
         "opencode",
         "codex",
         "gemini",
+        "antigravity",
         "windsurf",
         "kiro",
         "hermes",

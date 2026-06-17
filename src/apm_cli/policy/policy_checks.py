@@ -44,6 +44,21 @@ from ._policy_checks_mcp import (
 from ._policy_checks_mcp import (
     _load_raw_apm_yml as _load_raw_apm_yml,
 )
+from ._policy_checks_unmanaged import (
+    _check_unmanaged_files as _check_unmanaged_files,
+)
+from ._policy_checks_unmanaged import (
+    _classify_primitive_type as _classify_primitive_type,
+)
+from ._policy_checks_unmanaged import (
+    _format_unmanaged_detail as _format_unmanaged_detail,
+)
+from ._policy_checks_unmanaged import (
+    _symlink_escapes_workspace as _symlink_escapes_workspace,
+)
+from ._policy_checks_unmanaged import (
+    _unmanaged_deny_conflict as _unmanaged_deny_conflict,
+)
 from .models import CheckResult, CIAuditResult
 
 if TYPE_CHECKING:
@@ -53,25 +68,12 @@ if TYPE_CHECKING:
         DependencyPolicy,
         DependencyReference,
         RegistrySourcePolicy,
-        UnmanagedFilesPolicy,
     )
 
 _logger = logging.getLogger(__name__)
 
 # -- Sentinel for "manifest_includes not provided" in run_dependency_policy_checks --
 _INCLUDES_NOT_PROVIDED = object()
-
-_DEFAULT_GOVERNANCE_DIRS = [
-    ".github/agents",
-    ".github/instructions",
-    ".github/hooks",
-    ".cursor/rules",
-    ".claude",
-    ".opencode",
-    ".kiro",
-]
-
-_MAX_UNMANAGED_SCAN_FILES = 10_000
 
 
 # -- Individual policy checks (dependency cluster) -------------------------
@@ -423,91 +425,6 @@ def _check_pinned_constraints(
     )
 
 
-def _check_unmanaged_files(
-    project_root: Path,
-    lock: LockFile | None,
-    policy: UnmanagedFilesPolicy,
-) -> CheckResult:
-    """Check 16: no untracked files in governance directories."""
-    if policy.effective_action == "ignore":
-        return CheckResult(
-            name="unmanaged-files",
-            passed=True,
-            message="Unmanaged files check disabled (action: ignore)",
-        )
-
-    dirs = policy.directories if policy.directories else _DEFAULT_GOVERNANCE_DIRS
-
-    deployed: set = set()
-    deployed_dir_prefixes: list = []
-    if lock:
-        for _key, dep in lock.dependencies.items():
-            for f in dep.deployed_files:
-                cleaned = f.rstrip("/")
-                deployed.add(cleaned)
-                if f.endswith("/"):
-                    deployed_dir_prefixes.append(cleaned + "/")
-
-    dir_prefix_tuple = tuple(deployed_dir_prefixes)
-
-    unmanaged: list[str] = []
-    files_scanned = 0
-    cap_hit = False
-    for gov_dir in dirs:
-        dir_path = project_root / gov_dir
-        if not dir_path.exists() or not dir_path.is_dir():
-            continue
-        for file_path in dir_path.rglob("*"):
-            if file_path.is_file():
-                files_scanned += 1
-                if files_scanned > _MAX_UNMANAGED_SCAN_FILES:
-                    cap_hit = True
-                    break
-                rel = file_path.relative_to(project_root).as_posix()
-                if rel not in deployed and not (
-                    dir_prefix_tuple and rel.startswith(dir_prefix_tuple)
-                ):
-                    unmanaged.append(rel)
-        if cap_hit:
-            break
-
-    if cap_hit:
-        return CheckResult(
-            name="unmanaged-files",
-            passed=True,
-            message=(
-                f"Scan capped at {_MAX_UNMANAGED_SCAN_FILES:,} files "
-                "-- skipping unmanaged-files check"
-            ),
-            details=[
-                f"Governance directories contain > {_MAX_UNMANAGED_SCAN_FILES:,} files; "
-                "consider adding exclude patterns in a future policy version"
-            ],
-        )
-
-    if not unmanaged:
-        return CheckResult(
-            name="unmanaged-files",
-            passed=True,
-            message="No unmanaged files in governance directories",
-        )
-
-    if policy.effective_action == "warn":
-        return CheckResult(
-            name="unmanaged-files",
-            passed=True,
-            message=f"{len(unmanaged)} unmanaged file(s) found (warn)",
-            details=unmanaged,
-        )
-
-    return CheckResult(
-        name="unmanaged-files",
-        passed=False,
-        message=f"{len(unmanaged)} unmanaged file(s) in governance directories",
-        details=unmanaged,
-    )
-
-
 # -- Aggregate runners ---------------------------------------------
 
 
@@ -690,5 +607,14 @@ def run_policy_checks(
         if _run(check):
             return result
 
-    _run(_check_unmanaged_files(project_root, lock, policy.unmanaged_files))
+    _run(
+        _check_unmanaged_files(
+            project_root,
+            lock,
+            policy.unmanaged_files,
+            dependency_deny=policy.dependencies.effective_deny,
+            mcp_deny=policy.mcp.deny,
+        )
+    )
+
     return result

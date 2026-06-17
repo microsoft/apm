@@ -231,6 +231,52 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         compile_family="gemini",
         hooks_config_display=".gemini/settings.json",
     ),
+    # Antigravity CLI (agy) -- Google's Gemini-derived agentic CLI.
+    # Workspace config lives under the cross-tool .agents/ root (the same
+    # shared root used for agent skills); Antigravity has no unique
+    # workspace directory of its own, so this target is EXPLICIT-ONLY --
+    # never auto-detected and not part of `--target all` -- modelled on
+    # the agent-skills target.
+    # Rules are plain markdown under .agents/rules/ (frontmatter stripped).
+    # Skills use the cross-tool .agents/skills/ standard.
+    # Hooks merge into a single .agents/hooks.json file in Antigravity's
+    # OWN native schema (PreToolUse/PostToolUse/PreInvocation/
+    # PostInvocation/Stop), NOT the Gemini settings.json hook schema.
+    # MCP servers live in a dedicated .agents/mcp_config.json (written by
+    # AntigravityClientAdapter), NOT settings.json.
+    # Antigravity has no TOML command surface (legacy Gemini commands
+    # convert to skills upstream), so there is no commands primitive.
+    # User scope: skills -> ~/.gemini/antigravity-cli/skills/; MCP ->
+    # ~/.gemini/config/mcp_config.json (handled by the adapter).
+    # Instructions/hooks are not offered at user scope because Antigravity
+    # spreads them across heterogeneous ~/.gemini/ subdirs.
+    # Compile family is "agents" (emits AGENTS.md, not GEMINI.md).
+    # Ref: https://antigravity.google/docs/cli-using
+    # Ref: https://antigravity.google/docs/skills
+    # Ref: https://antigravity.google/docs/hooks
+    # Ref: https://antigravity.google/docs/mcp
+    "antigravity": TargetProfile(
+        name="antigravity",
+        root_dir=".agents",
+        primitives={
+            "instructions": PrimitiveMapping(
+                "rules", ".md", "antigravity_rules", output_compare=True
+            ),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+            ),
+            "hooks": PrimitiveMapping("", "hooks.json", "antigravity_hooks"),
+        },
+        auto_create=True,
+        detect_by_dir=False,
+        user_supported="partial",
+        user_root_dir=".gemini/antigravity-cli",
+        unsupported_user_primitives=("instructions", "hooks"),
+        compile_family="agents",
+        hooks_config_display=".agents/hooks.json",
+    ),
     # Codex CLI: skills use the cross-tool .agents/ dir (agent skills standard),
     # agents are TOML under .codex/agents/, hooks merge into .codex/hooks.json.
     # Instructions are compile-only (AGENTS.md) -- not installed.

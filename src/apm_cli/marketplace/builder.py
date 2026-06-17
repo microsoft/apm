@@ -55,6 +55,7 @@ from ._builder_reports import (
 from ._builder_resolve import _BuilderResolveMixin
 from ._builder_resolve import _strip_ref_prefix as _strip_ref_prefix
 from ._io import atomic_write
+from .auth_helpers import resolve_token_for_host
 from .diagnostics import BuildDiagnostic as BuildDiagnostic
 from .errors import BuildError
 from .output_mappers import (
@@ -254,28 +255,21 @@ class MarketplaceBuilder(_BuilderResolveMixin):
             return resolver
 
     def _resolve_token_for_host(self, host: str, *, org: str | None = None) -> str | None:
-        """Resolve an auth token for *host* via ``AuthResolver``.
-
-        Returns ``None`` -- letting ``git`` fall back to ambient credentials
-        -- when offline, when no token is configured for the host, or when
-        ``AuthResolver`` raises.  Never raises.
-        """
+        """Resolve an auth token for *host* via the shared marketplace helper."""
         if self._options.offline:
             return None
-        try:
-            from ..core.auth import AuthResolver  # lazy import
+        from ..core.auth import AuthResolver  # lazy import
 
-            resolver = self._auth_resolver
-            if resolver is None:
-                resolver = AuthResolver()
-                self._auth_resolver = resolver
-            ctx = resolver.resolve(host) if org is None else resolver.resolve(host, org=org)
-            if ctx.token:
-                logger.debug("Resolved token for host %s (source=%s)", host, ctx.source)
-                return ctx.token
-        except Exception:
-            logger.debug("Could not resolve token for host %s", host, exc_info=True)
-        return None
+        resolver = self._auth_resolver
+        if resolver is None:
+            resolver = AuthResolver()
+            self._auth_resolver = resolver
+        return resolve_token_for_host(
+            host,
+            offline=self._options.offline,
+            org=org,
+            auth_resolver=resolver,
+        )
 
     def _ensure_auth(self) -> None:
         """Lazily resolve host classification and GitHub token."""

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 RULE_FORMATS: frozenset[str] = frozenset(
-    {"cursor_rules", "claude_rules", "windsurf_rules", "kiro_steering"}
+    {"cursor_rules", "claude_rules", "windsurf_rules", "kiro_steering", "antigravity_rules"}
 )
 """Canonical set of format-transforming rule ``format_id``s.
 

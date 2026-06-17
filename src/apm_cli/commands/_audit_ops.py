@@ -183,6 +183,91 @@ def _audit_ci_gate(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_fail_on_drift(project_root: Path) -> bool:
+    """Return True when ``security.audit.fail_on_drift`` is enabled.
+
+    Respects ``APM_POLICY_DISABLE`` and fails open on any discovery error so a
+    transient policy-resolution failure never converts advisory drift into a
+    hard failure. Discovery is invoked by the caller only when drift was
+    actually detected, keeping the no-drift common path free of extra work.
+    """
+    if os.environ.get("APM_POLICY_DISABLE"):
+        return False
+    try:
+        from ..policy.discovery import discover_policy_with_chain
+
+        fetch_result = discover_policy_with_chain(project_root)
+    except Exception:
+        return False
+    policy = getattr(fetch_result, "policy", None)
+    if policy is None:
+        return False
+    return bool(policy.security.audit.fail_on_drift)
+
+
+def _run_drift_detection(
+    cfg,
+    project_root: Path,
+    *,
+    no_drift: bool,
+    strip: bool,
+    file_path,
+    package,
+) -> tuple[list, bool]:
+    """Run advisory drift detection for a bare ``apm audit`` run.
+
+    Returns ``(drift_findings, drift_failed)``. Drift detection is skipped for
+    ``--strip``, ``--file``, package-scoped, and ``--no-drift`` runs (the last
+    emits an advisory coverage-reduced note in text mode). Renders the
+    could-not-run / advisory-skip warnings as a side effect.
+    """
+    if no_drift:
+        if cfg.output_format == "text":
+            click.echo(
+                f"{STATUS_SYMBOLS['warning']} drift detection skipped (--no-drift); "
+                "coverage reduced -- hand-edits and missing integrations will not be caught",
+                err=True,
+            )
+        return [], False
+
+    if strip or file_path or package or not (project_root / "apm.yml").exists():
+        return [], False
+
+    from apm_cli.commands import audit as _a
+
+    from ..policy.ci_checks import DRIFT_SKIP_PREFIX, _check_drift
+
+    lockfile_path = _a.get_lockfile_path(project_root)
+    if not lockfile_path.exists():
+        return [], False
+    lockfile = LockFile.read(lockfile_path)
+    if lockfile is None:
+        return [], False
+
+    drift_check, drift_findings = _check_drift(
+        project_root,
+        lockfile,
+        cache_only=True,
+        verbose=cfg.verbose,
+    )
+    drift_failed = not drift_check.passed
+    if drift_failed and not drift_findings:
+        click.echo(
+            f"{STATUS_SYMBOLS['warning']} drift check could not run: {drift_check.message}",
+            err=True,
+        )
+    elif (
+        drift_check.passed
+        and not drift_findings
+        and drift_check.message.startswith(DRIFT_SKIP_PREFIX)
+    ):
+        click.echo(
+            f"{STATUS_SYMBOLS['warning']} {drift_check.message}",
+            err=True,
+        )
+    return drift_findings, drift_failed
+
+
 def _audit_content_scan(
     cfg,
     package,
@@ -271,49 +356,9 @@ def _audit_content_scan(
             logger.progress("Nothing to clean -- no strippable characters found")
         sys.exit(0)
 
-    drift_findings: list = []
-    drift_failed = False
-    if (
-        not no_drift
-        and not strip
-        and not file_path
-        and not package
-        and (project_root / "apm.yml").exists()
-    ):
-        from ..policy.ci_checks import DRIFT_SKIP_PREFIX, _check_drift
-
-        lockfile_path = _a.get_lockfile_path(project_root)
-        if lockfile_path.exists():
-            lockfile = LockFile.read(lockfile_path)
-            if lockfile is not None:
-                drift_check, drift_findings = _check_drift(
-                    project_root,
-                    lockfile,
-                    cache_only=True,
-                    verbose=cfg.verbose,
-                )
-                drift_failed = not drift_check.passed
-                if drift_failed and not drift_findings:
-                    click.echo(
-                        f"{STATUS_SYMBOLS['warning']} drift check could not run: "
-                        f"{drift_check.message}",
-                        err=True,
-                    )
-                elif (
-                    drift_check.passed
-                    and not drift_findings
-                    and drift_check.message.startswith(DRIFT_SKIP_PREFIX)
-                ):
-                    click.echo(
-                        f"{STATUS_SYMBOLS['warning']} {drift_check.message}",
-                        err=True,
-                    )
-    elif no_drift and cfg.output_format == "text":
-        click.echo(
-            f"{STATUS_SYMBOLS['warning']} drift detection skipped (--no-drift); "
-            "coverage reduced -- hand-edits and missing integrations will not be caught",
-            err=True,
-        )
+    drift_findings, drift_failed = _run_drift_detection(
+        cfg, project_root, no_drift=no_drift, strip=strip, file_path=file_path, package=package
+    )
 
     if not findings_by_file or not _a._has_actionable_findings(findings_by_file):
         exit_code = 0
@@ -321,7 +366,17 @@ def _audit_content_scan(
         all_findings = [f for ff in findings_by_file.values() for f in ff]
         exit_code = 1 if _a.ContentScanner.has_critical(all_findings) else 2
 
-    _ = drift_failed  # retained for symmetry; gate path lives in --ci.
+    # Bare `apm audit` is advisory for drift by default: drift findings are
+    # rendered (text/json/sarif) but DO NOT escalate the exit code. When
+    # `security.audit.fail_on_drift` is enabled, any drift-check FAILURE
+    # escalates a clean run to exit 1 -- matching the `apm audit --ci` gate,
+    # which fails on the same `drift_check.passed is False` signal. That covers
+    # both detected drift AND a drift check that could not run (corrupt local
+    # graph, unsupported replay); an advisory cache-miss SKIP stays passed=True
+    # and does NOT gate. Policy is discovered only when a drift failure
+    # occurred, so the clean common case is unchanged.
+    if drift_failed and exit_code == 0 and _a._resolve_fail_on_drift(project_root):
+        exit_code = 1
 
     if effective_format == "text":
         if cfg.output_path:

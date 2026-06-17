@@ -52,6 +52,7 @@ _KNOWN_TARGETS = (  # noqa: RUF005
     "codex",
     "agent-skills",
     "gemini",
+    "antigravity",
     "windsurf",
     "kiro",
     "all",

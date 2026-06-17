@@ -147,9 +147,11 @@ class HookIntegrator(BaseIntegrator):
         return _dependency_hook_sources(project_root)
 
     @staticmethod
-    def _clean_apm_entries_from_json(json_path: Path, stats: dict[str, int]) -> None:
+    def _clean_apm_entries_from_json(
+        json_path: Path, stats: dict[str, int], container: str = "hooks"
+    ) -> None:
         """Remove APM-tagged entries from a hooks JSON file."""
-        _clean_apm_entries_from_json(json_path, stats)
+        _clean_apm_entries_from_json(json_path, stats, container=container)
 
     def _rewrite_command_for_target(
         self,
@@ -475,7 +477,9 @@ class HookIntegrator(BaseIntegrator):
 
         json_path = target_dir / config.config_filename
         sidecar_path = target_dir / _APM_HOOKS_SIDECAR
-        json_config = _load_merged_config_and_sidecar(json_path, sidecar_path, config.schema_strict)
+        json_config = _load_merged_config_and_sidecar(
+            json_path, sidecar_path, config.schema_strict, container=config.event_container_key
+        )
 
         for hook_file in hook_files:
             data = self._parse_hook_json(hook_file)
@@ -507,6 +511,7 @@ class HookIntegrator(BaseIntegrator):
                 heal_stale_root_source=heal_stale,
                 dependency_sources=dep_sources,
                 capture_entries=file_event_entries,
+                container=config.event_container_key,
             )
 
             if appended:
@@ -769,6 +774,8 @@ class HookIntegrator(BaseIntegrator):
                 if t.name == "claude":
                     _sync_claude_hooks_settings(json_path, stats)
                 else:
-                    _clean_apm_entries_from_json(json_path, stats)
+                    _clean_apm_entries_from_json(
+                        json_path, stats, container=config.event_container_key
+                    )
 
         return stats

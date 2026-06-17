@@ -25,6 +25,25 @@ if TYPE_CHECKING:
     from apm_cli.models.apm_package import PackageInfo
 
 
+def _record_declared_license(ctx, dep_key: str, install_path) -> None:
+    """Backfill ctx.package_declared_licenses from the resolved dep's manifest.
+
+    Reads the DECLARED license (apm.yml ``license:`` or plugin.json
+    ``license``) at the install path. APM never reads the LICENSE file text or
+    concludes a license -- this is a passthrough of an author claim. When no
+    manifest declares one, the key is left ABSENT (not declared == unknown);
+    no sentinel is stored. Best-effort: any read error leaves the key absent.
+    """
+    try:
+        from apm_cli.export.declared_license import read_declared_license
+
+        declared = read_declared_license(install_path)
+    except Exception:
+        declared = None
+    if declared:
+        ctx.package_declared_licenses[dep_key] = declared
+
+
 @dataclass
 class Materialization:
     """Outcome of ``DependencySource.acquire()``.

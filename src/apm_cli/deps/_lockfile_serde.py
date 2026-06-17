@@ -104,6 +104,7 @@ def locked_dependency_from_dict(
         "constraint",
         "resolved_tag",
         "resolved_at",
+        "declared_license",
         # legacy migration key handled above
         "deployed_skills",
     }
@@ -141,6 +142,7 @@ def locked_dependency_from_dict(
         constraint=data.get("constraint"),
         resolved_tag=data.get("resolved_tag"),
         resolved_at=data.get("resolved_at"),
+        declared_license=data.get("declared_license"),
         _unknown_fields=unknown_fields,
     )
 
