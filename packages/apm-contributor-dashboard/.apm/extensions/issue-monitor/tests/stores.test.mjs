@@ -16,7 +16,7 @@
  * solid-js notes (server / dev build in Node.js)
  * -----------------------------------------------
  * - createResource(source, fetcher) calls fetcher immediately when the source
- *   signal already has a value (signal(0) → initial fetch on import).
+ *   signal already has a value (signal(0) -> initial fetch on import).
  * - Advancing the source signal (setPollTick(t => t+1)) triggers a new fetch.
  * - refetch() marks the resource stale but does not synchronously re-invoke
  *   the fetcher in the dev build outside a reactive owner; interval-driven
@@ -27,7 +27,7 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 
 // ---------------------------------------------------------------------------
-// Spies – installed at module load time so they are in place when the stores
+// Spies -- installed at module load time so they are in place when the stores
 // execute their top-level code during import.
 // ---------------------------------------------------------------------------
 
@@ -89,10 +89,10 @@ describe("Solid.js stores", () => {
   });
 
   // -------------------------------------------------------------------------
-  // issues.js – exports
+  // issues.js -- exports
   // -------------------------------------------------------------------------
 
-  describe("issues.js — exports", () => {
+  describe("issues.js -- exports", () => {
     it("exports issueResource", () => {
       assert.ok(
         issuesStore.issueResource !== undefined,
@@ -110,10 +110,10 @@ describe("Solid.js stores", () => {
   });
 
   // -------------------------------------------------------------------------
-  // prs.js – exports
+  // prs.js -- exports
   // -------------------------------------------------------------------------
 
-  describe("prs.js — exports", () => {
+  describe("prs.js -- exports", () => {
     it("exports prResource", () => {
       assert.ok(
         prsStore.prResource !== undefined,
@@ -162,7 +162,7 @@ describe("Solid.js stores", () => {
       assert.strictEqual(
         thirtySecIntervals.length,
         2,
-        `Expected 2 × 30 s intervals, got ${thirtySecIntervals.length}`,
+        `Expected 2 x 30 s intervals, got ${thirtySecIntervals.length}`,
       );
     });
 
@@ -204,7 +204,7 @@ describe("Solid.js stores", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Interval isolation – each store's interval only affects its own endpoint
+  // Interval isolation -- each store's interval only affects its own endpoint
   // -------------------------------------------------------------------------
 
   describe("interval isolation", () => {

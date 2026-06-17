@@ -78,7 +78,7 @@ describe("escapeHtml", () => {
 // ---------------------------------------------------------------------------
 
 describe("renderMarkdown", () => {
-  // ── null / empty ──────────────────────────────────────────────────────────
+  // -- null / empty ----------------------------------------------------------
 
   it("returns empty string for null", () => {
     assert.equal(renderMarkdown(null), "");
@@ -92,13 +92,13 @@ describe("renderMarkdown", () => {
     assert.equal(renderMarkdown(""), "");
   });
 
-  // ── plain text ────────────────────────────────────────────────────────────
+  // -- plain text ------------------------------------------------------------
 
   it("wraps plain text in a paragraph", () => {
     assert.equal(renderMarkdown("hello"), '<p class="md-p">hello</p>');
   });
 
-  // ── code blocks ───────────────────────────────────────────────────────────
+  // -- code blocks -----------------------------------------------------------
 
   it("renders a fenced code block with a language tag", () => {
     const result = renderMarkdown("```js\nconsole.log('hi')\n```");
@@ -131,7 +131,7 @@ describe("renderMarkdown", () => {
     assert.ok(!result.includes("<b>"), "raw <b> tag must not appear in code block");
   });
 
-  // ── inline code ───────────────────────────────────────────────────────────
+  // -- inline code -----------------------------------------------------------
 
   it("renders inline code in a md-code span", () => {
     assert.equal(
@@ -146,7 +146,7 @@ describe("renderMarkdown", () => {
     assert.ok(result.includes('<span class="md-code">beta</span>'));
   });
 
-  // ── images ────────────────────────────────────────────────────────────────
+  // -- images ----------------------------------------------------------------
 
   it("renders an image tag with alt and src", () => {
     const result = renderMarkdown("![my alt](https://example.com/img.png)");
@@ -168,7 +168,7 @@ describe("renderMarkdown", () => {
     assert.ok(!result.includes("<a "), "should not produce anchor");
   });
 
-  // ── links ─────────────────────────────────────────────────────────────────
+  // -- links -----------------------------------------------------------------
 
   it("renders a link with target=_blank", () => {
     assert.equal(
@@ -182,7 +182,7 @@ describe("renderMarkdown", () => {
     assert.ok(result.includes(">open the docs</a>"), `got: ${result}`);
   });
 
-  // ── headings ──────────────────────────────────────────────────────────────
+  // -- headings --------------------------------------------------------------
 
   it("renders h1", () => {
     assert.ok(renderMarkdown("# Hello World").includes("<h1>Hello World</h1>"));
@@ -201,12 +201,12 @@ describe("renderMarkdown", () => {
   });
 
   it("does not treat ##### as h5 (not supported)", () => {
-    // Implementation only handles h1–h4, so h5 should remain as raw text
+    // Implementation only handles h1-h4, so h5 should remain as raw text
     const result = renderMarkdown("##### Five");
     assert.ok(!result.includes("<h5>"), `h5 should not be rendered: ${result}`);
   });
 
-  // ── horizontal rules ──────────────────────────────────────────────────────
+  // -- horizontal rules ------------------------------------------------------
 
   it("renders --- as a horizontal rule", () => {
     assert.ok(renderMarkdown("---").includes('<hr class="md-hr" />'));
@@ -220,7 +220,7 @@ describe("renderMarkdown", () => {
     assert.ok(renderMarkdown("-----").includes('<hr class="md-hr" />'));
   });
 
-  // ── emphasis ──────────────────────────────────────────────────────────────
+  // -- emphasis --------------------------------------------------------------
 
   it("renders **text** as bold", () => {
     assert.ok(renderMarkdown("**bold**").includes("<strong>bold</strong>"));
@@ -240,7 +240,7 @@ describe("renderMarkdown", () => {
     assert.ok(renderMarkdown("~~strike~~").includes("<del>strike</del>"));
   });
 
-  // ── blockquotes ───────────────────────────────────────────────────────────
+  // -- blockquotes -----------------------------------------------------------
 
   it("renders > as a blockquote div", () => {
     // escapeHtml turns '>' into '&gt;'; the regex then matches '^&gt; '
@@ -254,7 +254,7 @@ describe("renderMarkdown", () => {
     assert.ok(result.includes("hello world"), `got: ${result}`);
   });
 
-  // ── task lists ────────────────────────────────────────────────────────────
+  // -- task lists ------------------------------------------------------------
 
   it("renders a checked task list item", () => {
     const result = renderMarkdown("- [x] done task");
@@ -278,7 +278,7 @@ describe("renderMarkdown", () => {
     assert.ok(!result.includes('<li class="md-li">'), "task items should not become <li>");
   });
 
-  // ── unordered lists ───────────────────────────────────────────────────────
+  // -- unordered lists -------------------------------------------------------
 
   it("renders a single unordered list item", () => {
     const result = renderMarkdown("- item one");
@@ -295,7 +295,7 @@ describe("renderMarkdown", () => {
     assert.ok(result.includes('<li class="md-li">gamma</li>'));
   });
 
-  // ── ordered lists ─────────────────────────────────────────────────────────
+  // -- ordered lists ---------------------------------------------------------
 
   it("renders a single ordered list item", () => {
     const result = renderMarkdown("1. first item");
@@ -312,7 +312,7 @@ describe("renderMarkdown", () => {
     assert.ok(result.includes('<li class="md-oli">third</li>'));
   });
 
-  // ── tables ────────────────────────────────────────────────────────────────
+  // -- tables ----------------------------------------------------------------
 
   it("renders a table with thead and tbody", () => {
     const md = "| Name | Age |\n|------|-----|\n| Alice | 30 |";
@@ -335,7 +335,7 @@ describe("renderMarkdown", () => {
     assert.ok(result.includes("<td>D</td>"));
   });
 
-  // ── paragraph breaks ──────────────────────────────────────────────────────
+  // -- paragraph breaks ------------------------------------------------------
 
   it("splits a double newline into two paragraphs", () => {
     const result = renderMarkdown("first\n\nsecond");
@@ -354,7 +354,7 @@ describe("renderMarkdown", () => {
     assert.equal(pCount, 3, `expected 3 paragraphs, got ${pCount}: ${result}`);
   });
 
-  // ── line breaks ───────────────────────────────────────────────────────────
+  // -- line breaks -----------------------------------------------------------
 
   it("converts a single newline to <br />", () => {
     const result = renderMarkdown("line one\nline two");
@@ -366,7 +366,7 @@ describe("renderMarkdown", () => {
     assert.ok(result.includes("a<br />b<br />c"), `got: ${result}`);
   });
 
-  // ── XSS protection ────────────────────────────────────────────────────────
+  // -- XSS protection --------------------------------------------------------
 
   it("does not pass raw <script> tags through to output", () => {
     const result = renderMarkdown("<script>alert(1)</script>");

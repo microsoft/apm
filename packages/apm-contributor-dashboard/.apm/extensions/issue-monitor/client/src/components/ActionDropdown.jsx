@@ -3,6 +3,7 @@ import { createSignal, Show, onCleanup } from "solid-js";
 export default function ActionDropdown(props) {
   const [open, setOpen] = createSignal(false);
   let ref;
+  const setRef = (el) => { ref = el; };
 
   function handleDocClick(e) {
     if (ref && !ref.contains(e.target)) setOpen(false);
@@ -13,7 +14,7 @@ export default function ActionDropdown(props) {
   onCleanup(() => document.removeEventListener("click", handleDocClick));
 
   return (
-    <div class="action-dropdown" ref={ref}>
+    <div class="action-dropdown" ref={setRef}>
       <button class="btn-details" onClick={() => props.onDetails()}>Details</button>
       <Show when={props.items && props.items.length > 0}>
         <button class="btn-dropdown" onClick={(e) => { e.stopPropagation(); setOpen(!open()); }}>...</button>

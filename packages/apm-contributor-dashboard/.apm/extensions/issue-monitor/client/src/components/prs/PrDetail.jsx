@@ -82,7 +82,7 @@ export default function PrDetail(props) {
               <For each={tabs}>
                 {(tab) => (
                   <button
-                    class={`activity-body-tab ${subTab() === tab.id ? "active" : ""} ${tab.id === "panel" && d().panelReview ? "panel-tab-has-data" : ""} ${tab.id === "pipeline" && d().checks?.some(c => c.conclusion === "failure") ? "pipeline-tab-failing" : ""}`}
+                    class={`activity-body-tab ${subTab() === tab.id ? "active" : ""} ${tab.id === "panel" && d().panelReview ? "panel-tab-has-data" : ""} ${tab.id === "pipeline" && d().checks?.some(c => (c.conclusion || "").toLowerCase() === "failure") ? "pipeline-tab-failing" : ""}`}
                     onClick={() => setSubTab(tab.id)}
                   >
                     {tab.label}

@@ -3,13 +3,15 @@ import { Show, For } from "solid-js";
 const statusIcons = { success: "[+]", failure: "[x]", pending: "[>]", skipped: "[-]", neutral: "[~]", action_required: "[!]" };
 
 function classifyConclusion(check) {
-  if (check.conclusion === "success") return "success";
-  if (check.conclusion === "failure") return "failure";
-  if (check.conclusion === "action_required") return "action_required";
-  if (check.conclusion === "skipped") return "skipped";
-  if (check.conclusion === "neutral") return "neutral";
-  if (check.status === "IN_PROGRESS" || check.status === "QUEUED" || check.status === "PENDING") return "pending";
-  if (check.conclusion) return check.conclusion;
+  const c = (check.conclusion || "").toLowerCase();
+  const s = (check.status || "").toLowerCase();
+  if (c === "success") return "success";
+  if (c === "failure") return "failure";
+  if (c === "action_required") return "action_required";
+  if (c === "skipped") return "skipped";
+  if (c === "neutral") return "neutral";
+  if (s === "in_progress" || s === "queued" || s === "pending") return "pending";
+  if (c) return c;
   return "pending";
 }
 

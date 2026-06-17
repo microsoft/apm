@@ -7,6 +7,13 @@ export default defineConfig({
     outDir: "../dist",
     emptyOutDir: true,
     target: "esnext",
+    rollupOptions: {
+      output: {
+        generatedCode: { arrowFunctions: true, constBindings: true },
+      },
+    },
+    minify: "terser",
+    terserOptions: { output: { ascii_only: true } },
   },
   server: {
     port: 5173,

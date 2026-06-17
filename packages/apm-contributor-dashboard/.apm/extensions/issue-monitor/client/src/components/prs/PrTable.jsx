@@ -28,8 +28,8 @@ export default function PrTable(props) {
   }
 
   function panelLabel(pr) {
-    if (pr.panel?.status !== "none" && pr.panel?.counts) {
-      return `B:${pr.panel.counts.blocking} R:${pr.panel.counts.review} N:${pr.panel.counts.nit}`;
+    if (pr.panelCounts) {
+      return `B:${pr.panelCounts.blocking} R:${pr.panelCounts.review} N:${pr.panelCounts.nit}`;
     }
     return pr.panel?.label || "Not requested";
   }

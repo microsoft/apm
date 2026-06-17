@@ -5,7 +5,7 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 
 // ---------------------------------------------------------------------------
-// Fetch mock — must be in place before the module is imported so the module's
+// Fetch mock -- must be in place before the module is imported so the module's
 // module-level `fetch` reference is already mocked.
 // ---------------------------------------------------------------------------
 
@@ -21,7 +21,7 @@ function mockFetch({ ok = true, status = 200, statusText = "OK", json = { ok: tr
 // Install a default success mock before the dynamic import so the module loads fine.
 mockFetch();
 
-// Dynamic import — happens once; the mock is already wired into globalThis.fetch.
+// Dynamic import -- happens once; the mock is already wired into globalThis.fetch.
 const api = await import("../client/src/services/api.js");
 
 // Helper: reset recorded calls and install a fresh success mock before each test.
@@ -148,7 +148,7 @@ describe("getPrDetail", () => {
 });
 
 // ---------------------------------------------------------------------------
-// POST endpoints — shared helper to verify JSON POST shape
+// POST endpoints -- shared helper to verify JSON POST shape
 // ---------------------------------------------------------------------------
 
 function assertJsonPost(call, url, expectedBody) {
