@@ -11,6 +11,14 @@ import { join, resolve, normalize } from "node:path";
 import { randomBytes } from "node:crypto";
 import { parsePanelReview, extractFollowUpItems } from "./logic.mjs";
 
+// Sanitize user-controlled strings before interpolation into session prompts.
+// Strips backticks and angle brackets to prevent prompt injection via
+// adversary-controlled GitHub issue/PR titles.
+function sanitizeForPrompt(str) {
+    if (typeof str !== "string") return "";
+    return str.replace(/[`<>]/g, "").slice(0, 200);
+}
+
 const MIME_TYPES = {
     ".html": "text/html",
     ".js": "text/javascript",
@@ -78,7 +86,8 @@ export function createHandler(deps) {
 
     const handler = async function handler(req, res) {
         // CSRF protection for write endpoints
-        if (req.method === "POST" && WRITE_ENDPOINTS.has(req.url)) {
+        const csrfPath = req.url.split("?")[0];
+        if (req.method === "POST" && WRITE_ENDPOINTS.has(csrfPath)) {
             const origin = req.headers.origin || "";
             const host = req.headers.host || "";
             // Reject cross-origin requests (only allow localhost)
@@ -105,9 +114,10 @@ export function createHandler(deps) {
                 saveSessions();
                 res.setHeader("Content-Type", "application/json");
                 res.end(JSON.stringify({ ok: true }));
+                const safeTitle = sanitizeForPrompt(title);
                 setTimeout(() => {
                     session.send({
-                        prompt: `Open a new session for issue #${number} ("Title: ${title}") in ${repo}. Use the open_issue_session tool with repo_full_name "${repo}", issue_number ${number}, issue_title "#${number} ${title}", and kickoff_mode "plan". The session should plan the implementation of this issue.`,
+                        prompt: `Open a new session for issue #${number} ("Title: ${safeTitle}") in ${repo}. Use the open_issue_session tool with repo_full_name "${repo}", issue_number ${number}, issue_title "#${number} ${safeTitle}", and kickoff_mode "plan". The session should plan the implementation of this issue.`,
                     });
                 }, 0);
             } catch (e) {
@@ -124,9 +134,10 @@ export function createHandler(deps) {
                 const { number, title } = JSON.parse(raw);
                 res.setHeader("Content-Type", "application/json");
                 res.end(JSON.stringify({ ok: true }));
+                const safeTitle = sanitizeForPrompt(title);
                 setTimeout(() => {
                     session.send({
-                        prompt: `Navigate to the existing session for issue #${number} ("${title}") in ${repo}. Use the list_sessions_and_chats tool to find a session linked to issue #${number}, then use navigate_to with its project_session_id to open it.`,
+                        prompt: `Navigate to the existing session for issue #${number} ("${safeTitle}") in ${repo}. Use the list_sessions_and_chats tool to find a session linked to issue #${number}, then use navigate_to with its project_session_id to open it.`,
                     });
                 }, 0);
             } catch (e) {
@@ -358,9 +369,11 @@ export function createHandler(deps) {
                 res.setHeader("Content-Type", "application/json");
                 res.end(JSON.stringify({ ok: true }));
                 const label = type === "pr" ? "PR" : "Issue";
+                const safeTitle = sanitizeForPrompt(title);
+                const safeDraft = sanitizeForPrompt(draft);
                 setTimeout(() => {
                     session.send({
-                        prompt: `The user is drafting a comment for ${label} #${number} ("${title || ""}") in ${repo}. Please help refine this draft. When you have a final version, use invoke_canvas_action with instanceId "apm-dashboard", actionName "update-draft", and input { "type": "${type}", "number": ${number}, "text": "<your refined text>" } to push it back to the composer.\n\nCurrent draft:\n\n${draft}`,
+                        prompt: `The user is drafting a comment for ${label} #${number} ("${safeTitle}") in ${repo}. Please help refine this draft. When you have a final version, use invoke_canvas_action with instanceId "apm-dashboard", actionName "update-draft", and input { "type": "${type}", "number": ${number}, "text": "<your refined text>" } to push it back to the composer.\n\nCurrent draft:\n\n${safeDraft}`,
                     });
                 }, 0);
             } catch (e) {
