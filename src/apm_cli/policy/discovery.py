@@ -2,13 +2,21 @@
 
 Discovery flow:
 1. Extract org from git remote (github.com/contoso/my-project -> "contoso")
-2. Fetch <org>/.github/apm-policy.yml via GitHub API (Contents API)
-3. Resolve inheritance chain via resolve_policy_chain
-4. Cache the **merged effective policy** with chain metadata
-5. Parse and return ApmPolicy
+2. Determine host profile (default or ado) to select candidate repos
+3. Try candidate repos in precedence order (.github > .apm > _apm)
+4. Fetch apm-policy.yml via GitHub Contents API or ADO Items API
+5. Resolve inheritance chain via resolve_policy_chain
+6. Cache the **merged effective policy** with chain metadata
+7. Parse and return ApmPolicy
+
+Candidate repo precedence:
+- .github  -- GitHub convention (skipped on ADO)
+- .apm     -- cross-platform convention (skipped on ADO)
+- _apm     -- universal fallback (valid on every git host)
 
 Supports:
 - GitHub.com and GitHub Enterprise (*.ghe.com)
+- Azure DevOps (dev.azure.com, *.visualstudio.com)
 - Manual override via --policy <path|url>
 - Cache with TTL (default 1 hour), stale fallback up to MAX_STALE_TTL
 - Atomic cache writes (temp file + os.replace)
@@ -33,6 +41,7 @@ import requests
 import yaml
 
 from ..cache.url_normalize import SCP_LIKE_RE
+from ..utils.github_host import build_ado_api_url, is_azure_devops_hostname
 from ..utils.path_security import PathTraversalError, ensure_path_within
 from .parser import PolicyValidationError, load_policy
 from .project_config import (
@@ -47,6 +56,29 @@ from .project_config import (
 from .schema import ApmPolicy
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Policy repo discovery: cascading candidate repos per host profile
+# ---------------------------------------------------------------------------
+
+# Candidate repo names in precedence order (first valid policy wins).
+# Host profiles select which candidates are valid for a given git host.
+_DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github", ".apm", "_apm")
+_ADO_POLICY_REPOS: tuple[str, ...] = ("_apm",)
+
+# ADO project name for the policy repo (ADO requires a project container).
+ADO_POLICY_PROJECT = "_apm"
+
+
+def _policy_repo_candidates(host: str) -> tuple[str, ...]:
+    """Return candidate policy repo names for *host* in precedence order.
+
+    ADO hosts cannot have repo names starting/ending with ``.``, so only
+    ``_apm`` is valid.  All other hosts try the full cascade.
+    """
+    if is_azure_devops_hostname(host):
+        return _ADO_POLICY_REPOS
+    return _DEFAULT_POLICY_REPOS
 
 
 def _split_hash_pin(expected_hash: str) -> tuple[str, str]:
@@ -613,11 +645,16 @@ def _auto_discover(
     no_cache: bool = False,
     expected_hash: str | None = None,
 ) -> PolicyFetchResult:
-    """Auto-discover policy from org's .github repo.
+    """Auto-discover policy by cascading through candidate repos.
 
     1. Run git remote get-url origin
-    2. Parse org from URL
-    3. Fetch <org>/.github/apm-policy.yml
+    2. Parse org + host from URL
+    3. Select host profile to determine candidate repos
+    4. Try each candidate in precedence order (.github > .apm > _apm)
+       - 404/absent -> continue to next candidate
+       - Error (auth, timeout, malformed) -> fail-closed immediately
+       - Found -> return (first match wins)
+    5. All candidates exhausted -> outcome="absent"
     """
     org_and_host = _extract_org_from_git_remote(project_root)
     if org_and_host is None:
@@ -627,11 +664,40 @@ def _auto_discover(
         )
 
     org, host = org_and_host
-    repo_ref = f"{org}/.github"
-    if host and host != "github.com":
-        repo_ref = f"{host}/{repo_ref}"
+    candidates = _policy_repo_candidates(host)
+    is_ado = is_azure_devops_hostname(host)
 
-    return _fetch_from_repo(repo_ref, project_root, no_cache=no_cache, expected_hash=expected_hash)
+    for candidate_repo in candidates:
+        if is_ado:
+            result = _fetch_from_ado_repo(
+                org=org,
+                project=ADO_POLICY_PROJECT,
+                repo=candidate_repo,
+                host=host,
+                project_root=project_root,
+                no_cache=no_cache,
+                expected_hash=expected_hash,
+            )
+        else:
+            repo_ref = f"{org}/{candidate_repo}"
+            if host and host != "github.com":
+                repo_ref = f"{host}/{repo_ref}"
+            result = _fetch_from_repo(
+                repo_ref, project_root, no_cache=no_cache, expected_hash=expected_hash
+            )
+
+        # 404 / absent -> try the next candidate
+        if result.outcome == "absent":
+            continue
+
+        # Any other outcome (found, error, malformed, etc.) -> return immediately
+        return result
+
+    # All candidates exhausted: no policy published anywhere.
+    return PolicyFetchResult(
+        error=None,
+        outcome="absent",
+    )
 
 
 def _extract_org_from_git_remote(
@@ -940,6 +1006,133 @@ def _fetch_github_contents(
             return data["content"], None
         else:
             return None, f"Unexpected response format from {repo_ref}"
+    except requests.exceptions.Timeout:
+        return None, f"Timeout fetching policy from {repo_ref}"
+    except requests.exceptions.ConnectionError:
+        return None, f"Connection error fetching policy from {repo_ref}"
+    except Exception as e:
+        return None, f"Error fetching policy from {repo_ref}: {e}"
+
+
+# ---------------------------------------------------------------------------
+# ADO policy fetch
+# ---------------------------------------------------------------------------
+
+
+def _fetch_from_ado_repo(
+    *,
+    org: str,
+    project: str,
+    repo: str,
+    host: str,
+    project_root: Path,
+    no_cache: bool = False,
+    expected_hash: str | None = None,
+) -> PolicyFetchResult:
+    """Fetch apm-policy.yml from an Azure DevOps repo.
+
+    Mirrors ``_fetch_from_repo`` but uses ``_fetch_ado_contents`` (ADO
+    Items API) instead of ``_fetch_github_contents`` (GitHub Contents API).
+    """
+    repo_ref = f"{host}/{org}/{project}/{repo}"
+    source_label = f"org:{repo_ref}"
+    cache_entry: _CacheEntry | None = None
+
+    if not no_cache:
+        cache_entry = _read_cache_entry(repo_ref, project_root, expected_hash=expected_hash)
+        if cache_entry is not None and not cache_entry.stale:
+            outcome = "empty" if _is_policy_empty(cache_entry.policy) else "found"
+            return PolicyFetchResult(
+                policy=cache_entry.policy,
+                source=cache_entry.source,
+                cached=True,
+                cache_age_seconds=cache_entry.age_seconds,
+                outcome=outcome,
+                raw_bytes_hash=cache_entry.raw_bytes_hash or None,
+                expected_hash=expected_hash,
+            )
+
+    content, error = _fetch_ado_contents(org, project, repo, "apm-policy.yml", host=host)
+
+    if error:
+        if "404" in error:
+            return PolicyFetchResult(source=source_label, outcome="absent")
+        return _stale_fallback_or_error(cache_entry, error, source_label, "cache_miss_fetch_fail")
+
+    if content is None:
+        return PolicyFetchResult(source=source_label, outcome="absent")
+
+    garbage_result = _detect_garbage(content, repo_ref, source_label, cache_entry)
+    if garbage_result is not None:
+        return garbage_result
+
+    mismatch = _verify_hash_pin(content, expected_hash, source_label)
+    if mismatch is not None:
+        return mismatch
+
+    try:
+        policy, _warnings = load_policy(content)
+    except PolicyValidationError as e:
+        return PolicyFetchResult(
+            error=f"Invalid policy in {repo_ref}: {e}",
+            source=source_label,
+            outcome="malformed",
+        )
+
+    chain_refs = [repo_ref]
+    actual_hash = _compute_hash_normalized(content, expected_hash)
+    _write_cache(
+        repo_ref,
+        policy,
+        project_root,
+        chain_refs=chain_refs,
+        raw_bytes_hash=actual_hash,
+    )
+    outcome = "empty" if _is_policy_empty(policy) else "found"
+    return PolicyFetchResult(
+        policy=policy,
+        source=source_label,
+        outcome=outcome,
+        raw_bytes_hash=actual_hash,
+        expected_hash=expected_hash,
+    )
+
+
+def _fetch_ado_contents(
+    org: str,
+    project: str,
+    repo: str,
+    file_path: str,
+    *,
+    host: str = "dev.azure.com",
+) -> tuple[str | None, str | None]:
+    """Fetch file contents from Azure DevOps Items API.
+
+    Returns ``(content_string, error_string)``. One will be ``None``.
+    """
+    api_url = build_ado_api_url(org, project, repo, file_path, host=host)
+    repo_ref = f"{host}/{org}/{project}/{repo}"
+
+    token = _get_token_for_host(host)
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        resp = requests.get(api_url, headers=headers, timeout=10, allow_redirects=False)
+        if resp.status_code == 404:
+            return None, "404: Policy file not found"
+        if resp.status_code in (401, 403):
+            return None, f"{resp.status_code}: Access denied to {repo_ref}"
+        if 300 <= resp.status_code < 400:
+            location = resp.headers.get("Location", "<no Location header>")
+            return None, (
+                f"Refusing HTTP redirect ({resp.status_code}) from {api_url} to {location}"
+            )
+        if resp.status_code != 200:
+            return None, f"HTTP {resp.status_code} fetching policy from {repo_ref}"
+        # ADO Items API returns raw file content by default
+        return resp.text, None
     except requests.exceptions.Timeout:
         return None, f"Timeout fetching policy from {repo_ref}"
     except requests.exceptions.ConnectionError:

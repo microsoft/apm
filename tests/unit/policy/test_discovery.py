@@ -20,12 +20,14 @@ from apm_cli.policy.discovery import (
     _auto_discover,
     _cache_key,
     _extract_org_from_git_remote,
+    _fetch_ado_contents,
     _fetch_from_repo,
     _fetch_from_url,
     _fetch_github_contents,
     _get_cache_dir,
     _load_from_file,
     _parse_remote_url,
+    _policy_repo_candidates,
     _read_cache,
     _write_cache,
     discover_policy,
@@ -655,39 +657,102 @@ class TestDiscoverPolicy(unittest.TestCase):
 
 
 class TestAutoDiscover(unittest.TestCase):
-    """Test _auto_discover logic."""
+    """Test _auto_discover logic with cascading candidate repos."""
 
     @patch("apm_cli.policy.discovery._fetch_from_repo")
     @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
-    def test_github_com_repo_ref(self, mock_extract, mock_fetch):
+    def test_github_com_first_candidate_found(self, mock_extract, mock_fetch):
+        """When .github has a policy, it wins immediately."""
         mock_extract.return_value = ("contoso", "github.com")
         mock_fetch.return_value = PolicyFetchResult(
-            policy=ApmPolicy(), source="org:contoso/.github"
+            policy=ApmPolicy(), source="org:contoso/.github", outcome="found"
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             result = _auto_discover(Path(tmpdir), no_cache=True)
-            mock_fetch.assert_called_once_with(
-                "contoso/.github", Path(tmpdir), no_cache=True, expected_hash=None
-            )
+            # First call should be for .github
+            first_call = mock_fetch.call_args_list[0]
+            self.assertEqual(first_call[0][0], "contoso/.github")
             self.assertTrue(result.found)
+
+    @patch("apm_cli.policy.discovery._fetch_from_repo")
+    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    def test_github_com_cascades_to_dot_apm(self, mock_extract, mock_fetch):
+        """.github absent -> falls back to .apm."""
+        mock_extract.return_value = ("contoso", "github.com")
+        mock_fetch.side_effect = [
+            PolicyFetchResult(outcome="absent"),  # .github 404
+            PolicyFetchResult(
+                policy=ApmPolicy(), source="org:contoso/.apm", outcome="found"
+            ),  # .apm found
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+            self.assertEqual(mock_fetch.call_count, 2)
+            self.assertEqual(mock_fetch.call_args_list[0][0][0], "contoso/.github")
+            self.assertEqual(mock_fetch.call_args_list[1][0][0], "contoso/.apm")
+            self.assertTrue(result.found)
+
+    @patch("apm_cli.policy.discovery._fetch_from_repo")
+    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    def test_github_com_cascades_to_underscore_apm(self, mock_extract, mock_fetch):
+        """All dot-prefixed repos absent -> falls back to _apm."""
+        mock_extract.return_value = ("contoso", "github.com")
+        mock_fetch.side_effect = [
+            PolicyFetchResult(outcome="absent"),  # .github 404
+            PolicyFetchResult(outcome="absent"),  # .apm 404
+            PolicyFetchResult(
+                policy=ApmPolicy(), source="org:contoso/_apm", outcome="found"
+            ),  # _apm found
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+            self.assertEqual(mock_fetch.call_count, 3)
+            self.assertTrue(result.found)
+
+    @patch("apm_cli.policy.discovery._fetch_from_repo")
+    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    def test_github_com_all_absent(self, mock_extract, mock_fetch):
+        """All candidates return absent -> outcome is absent."""
+        mock_extract.return_value = ("contoso", "github.com")
+        mock_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+            self.assertEqual(mock_fetch.call_count, 3)
+            self.assertEqual(result.outcome, "absent")
+            self.assertFalse(result.found)
+
+    @patch("apm_cli.policy.discovery._fetch_from_repo")
+    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    def test_github_com_error_fail_closed(self, mock_extract, mock_fetch):
+        """Auth error on first candidate -> fail-closed, no fallback."""
+        mock_extract.return_value = ("contoso", "github.com")
+        mock_fetch.return_value = PolicyFetchResult(
+            error="401: Unauthorized", outcome="cache_miss_fetch_fail"
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+            # Only one call -- error stops the cascade
+            self.assertEqual(mock_fetch.call_count, 1)
+            self.assertFalse(result.found)
+            self.assertIn("401", result.error)
 
     @patch("apm_cli.policy.discovery._fetch_from_repo")
     @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
     def test_ghe_repo_ref_includes_host(self, mock_extract, mock_fetch):
         mock_extract.return_value = ("contoso", "ghe.example.com")
         mock_fetch.return_value = PolicyFetchResult(
-            policy=ApmPolicy(), source="org:ghe.example.com/contoso/.github"
+            policy=ApmPolicy(), source="org:ghe.example.com/contoso/.github", outcome="found"
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             _auto_discover(Path(tmpdir), no_cache=True)
-            mock_fetch.assert_called_once_with(
-                "ghe.example.com/contoso/.github",
-                Path(tmpdir),
-                no_cache=True,
-                expected_hash=None,
-            )
+            first_call = mock_fetch.call_args_list[0]
+            self.assertEqual(first_call[0][0], "ghe.example.com/contoso/.github")
 
     @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
     def test_no_remote_returns_error(self, mock_extract):
@@ -697,6 +762,125 @@ class TestAutoDiscover(unittest.TestCase):
             result = _auto_discover(Path(tmpdir), no_cache=True)
             self.assertFalse(result.found)
             self.assertIn("Could not determine org", result.error)
+
+    @patch("apm_cli.policy.discovery._fetch_from_ado_repo")
+    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    def test_ado_host_only_tries_underscore_apm(self, mock_extract, mock_ado_fetch):
+        """ADO host profile skips .github and .apm, only tries _apm."""
+        mock_extract.return_value = ("contoso", "dev.azure.com")
+        mock_ado_fetch.return_value = PolicyFetchResult(
+            policy=ApmPolicy(), source="org:dev.azure.com/contoso/_apm/_apm", outcome="found"
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+            mock_ado_fetch.assert_called_once()
+            call_kwargs = mock_ado_fetch.call_args
+            self.assertEqual(call_kwargs[1]["repo"], "_apm")
+            self.assertEqual(call_kwargs[1]["project"], "_apm")
+            self.assertTrue(result.found)
+
+    @patch("apm_cli.policy.discovery._fetch_from_ado_repo")
+    @patch("apm_cli.policy.discovery._extract_org_from_git_remote")
+    def test_ado_visualstudio_host(self, mock_extract, mock_ado_fetch):
+        """*.visualstudio.com hosts also use ADO profile."""
+        mock_extract.return_value = ("contoso", "contoso.visualstudio.com")
+        mock_ado_fetch.return_value = PolicyFetchResult(outcome="absent")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _auto_discover(Path(tmpdir), no_cache=True)
+            mock_ado_fetch.assert_called_once()
+            self.assertEqual(result.outcome, "absent")
+
+
+class TestPolicyRepoCandidates(unittest.TestCase):
+    """Test _policy_repo_candidates host profile selection."""
+
+    def test_github_com_returns_all_candidates(self):
+        result = _policy_repo_candidates("github.com")
+        self.assertEqual(result, (".github", ".apm", "_apm"))
+
+    def test_ghe_returns_all_candidates(self):
+        result = _policy_repo_candidates("ghe.example.com")
+        self.assertEqual(result, (".github", ".apm", "_apm"))
+
+    def test_ado_dev_azure_com(self):
+        result = _policy_repo_candidates("dev.azure.com")
+        self.assertEqual(result, ("_apm",))
+
+    def test_ado_visualstudio_com(self):
+        result = _policy_repo_candidates("contoso.visualstudio.com")
+        self.assertEqual(result, ("_apm",))
+
+    def test_unknown_host_returns_all(self):
+        result = _policy_repo_candidates("gitlab.example.com")
+        self.assertEqual(result, (".github", ".apm", "_apm"))
+
+
+class TestFetchAdoContents(unittest.TestCase):
+    """Test _fetch_ado_contents for Azure DevOps Items API."""
+
+    @patch("apm_cli.policy.discovery._get_token_for_host", return_value="ado-token")
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_success(self, mock_get, _mock_token):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = VALID_POLICY_YAML
+        mock_get.return_value = mock_resp
+
+        content, error = _fetch_ado_contents("contoso", "_apm", "_apm", "apm-policy.yml")
+        self.assertIsNone(error)
+        self.assertEqual(content, VALID_POLICY_YAML)
+
+    @patch("apm_cli.policy.discovery._get_token_for_host", return_value="ado-token")
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_404_returns_error(self, mock_get, _mock_token):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+        mock_get.return_value = mock_resp
+
+        content, error = _fetch_ado_contents("contoso", "_apm", "_apm", "apm-policy.yml")
+        self.assertIsNone(content)
+        self.assertIn("404", error)
+
+    @patch("apm_cli.policy.discovery._get_token_for_host", return_value="ado-token")
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_401_returns_error(self, mock_get, _mock_token):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_get.return_value = mock_resp
+
+        content, error = _fetch_ado_contents("contoso", "_apm", "_apm", "apm-policy.yml")
+        self.assertIsNone(content)
+        self.assertIn("401", error)
+
+    @patch("apm_cli.policy.discovery._get_token_for_host", return_value="ado-token")
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_redirect_rejected(self, mock_get, _mock_token):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 302
+        mock_resp.headers = {"Location": "https://evil.example.com"}
+        mock_get.return_value = mock_resp
+
+        content, error = _fetch_ado_contents("contoso", "_apm", "_apm", "apm-policy.yml")
+        self.assertIsNone(content)
+        self.assertIn("redirect", error.lower())
+
+    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_no_auth_token_still_sends_request(self, mock_get, _mock_token):
+        """Unauthenticated requests are allowed (public ADO repos)."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = VALID_POLICY_YAML
+        mock_get.return_value = mock_resp
+
+        _content, error = _fetch_ado_contents("contoso", "_apm", "_apm", "apm-policy.yml")
+        self.assertIsNone(error)
+        # Verify no Authorization header was sent
+        call_kwargs = mock_get.call_args
+        headers = call_kwargs[1].get("headers", {})
+        self.assertNotIn("Authorization", headers)
 
 
 class TestGetTokenForHost(unittest.TestCase):
