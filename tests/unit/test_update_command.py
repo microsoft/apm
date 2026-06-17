@@ -261,8 +261,21 @@ class TestUpdateCommandLogic(unittest.TestCase):
         result = self.runner.invoke(cli, ["update", "--help"])
 
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("kiro", result.output)
-        self.assertIn("--target claude,cursor", result.output)
+        target_help_lines = []
+        for line in result.output.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("-t, --target"):
+                target_help_lines.append(stripped)
+                continue
+            if target_help_lines:
+                if stripped.startswith("-") and not stripped.startswith("--target"):
+                    break
+                target_help_lines.append(stripped)
+
+        target_help = " ".join(target_help_lines)
+        self.assertIn("--target", target_help)
+        self.assertIn("gemini", target_help)
+        self.assertIn("kiro", target_help)
 
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value=None)
     @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
