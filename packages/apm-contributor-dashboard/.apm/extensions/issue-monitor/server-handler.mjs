@@ -7,7 +7,7 @@
 //   const server = createServer(handler);
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, normalize } from "node:path";
 import { parsePanelReview } from "./logic.mjs";
 
 const MIME_TYPES = {
@@ -370,7 +370,11 @@ export function createHandler(deps) {
         if (urlPath === "/" || urlPath === "/index.html") {
             serveStatic(res, join(distDir, "index.html"));
         } else if (urlPath.startsWith("/assets/")) {
-            serveStatic(res, join(distDir, urlPath.startsWith("/") ? urlPath.slice(1) : urlPath));
+            const resolved = resolve(distDir, normalize(urlPath.slice(1)));
+            if (!resolved.startsWith(resolve(distDir))) {
+                res.writeHead(403); res.end("Forbidden"); return;
+            }
+            serveStatic(res, resolved);
         } else {
             serveStatic(res, join(distDir, "index.html"));
         }

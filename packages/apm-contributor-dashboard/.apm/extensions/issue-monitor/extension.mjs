@@ -22,6 +22,7 @@ let prData = [];
 let lastUpdated = null;
 let lastError = null;
 let pollTimer = null;
+let openInstanceCount = 0;
 
 // Persist started sessions to disk so they survive extension reloads
 const __extensionDir = dirname(fileURLToPath(import.meta.url));
@@ -277,6 +278,7 @@ const session = await joinSession({
             open: async (ctx) => {
                 // Fetch data before starting server so first page load has content
                 await fetchIssues();
+                openInstanceCount++;
                 startPolling();
                 let entry = servers.get(ctx.instanceId);
                 if (!entry) {
@@ -286,7 +288,8 @@ const session = await joinSession({
                 return { title: "APM Contributor Dashboard", url: entry.url };
             },
             onClose: async (ctx) => {
-                stopPolling();
+                openInstanceCount = Math.max(0, openInstanceCount - 1);
+                if (openInstanceCount === 0) stopPolling();
                 const entry = servers.get(ctx.instanceId);
                 if (entry) {
                     servers.delete(ctx.instanceId);

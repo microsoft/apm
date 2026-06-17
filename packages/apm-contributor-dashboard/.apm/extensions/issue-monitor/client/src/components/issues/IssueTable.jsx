@@ -12,7 +12,7 @@ const prStatusClasses = { draft: "pr-status-draft", "ci-failing": "pr-status-fai
 export default function IssueTable(props) {
   function sortIndicator(col) {
     if (props.sortCol() !== col) return "";
-    return props.sortAsc() ? " ▲" : " ▼";
+    return props.sortAsc() ? " ^" : " v";
   }
 
   async function handleStart(issue) {
