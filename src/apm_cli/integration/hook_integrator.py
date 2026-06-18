@@ -29,6 +29,7 @@ Hook JSON format (GitHub Copilot  -- flat arrays with bash/powershell keys):
 
 Hook JSON format (Cursor  -- flat arrays with command key):
     {
+        "version": 1,
         "hooks": {
             "afterFileEdit": [
                 {"command": "./hooks/format.sh"}
@@ -104,7 +105,7 @@ class _MergeHookConfig:
     # Cursor) that APM does not otherwise write.  Existing keys are never
     # overwritten -- the guard in _integrate_merged_hooks() preserves any
     # value the user has set manually.
-    top_level_defaults: dict = field(default_factory=dict)
+    top_level_defaults: dict[str, Any] = field(default_factory=dict)
 
 
 # Per-target hook event name mapping.  Packages are authored with
