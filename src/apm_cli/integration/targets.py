@@ -816,6 +816,47 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         compile_family="agents",
         requires_flag="hermes",
     ),
+    # Goose agent (Block) -- experimental.  Goose has no project-level config
+    # directory of its own; each APM primitive maps onto a different native
+    # Goose surface:
+    #   - agents  -> RECIPES at .goose/recipes/<name>.yaml, the "packaged
+    #     agent" unit Goose runs via `goose run --recipe`.  Each recipe carries
+    #     title/description/instructions (+ settings.goose_model when the agent
+    #     pins a model).  MCP servers are NOT embedded per-recipe -- an APM
+    #     agent declares no MCP servers; those live at package scope and are
+    #     written to ~/.config/goose/config.yaml by GooseClientAdapter (which
+    #     Goose reads globally at run time, honouring $XDG_CONFIG_HOME).
+    #   - skills  -> the cross-tool .agents/skills/ standard Goose reads
+    #     natively (project .agents/skills/, user ~/.agents/skills/).
+    #   - instructions -> a .goosehints stub at the project root (compile
+    #     stub -- see compile_family below).
+    # compile_family="agents" emits AGENTS.md; a thin .goosehints stub at the
+    # project root imports it via Goose's ``@./AGENTS.md`` preprocessor.
+    # Recipes have no canonical user-scope home (Goose loads them from the cwd
+    # or $GOOSE_RECIPE_PATH), so the agents primitive is project-scope only.
+    # Ref: https://goose-docs.ai/docs/guides/recipes/recipe-reference/
+    # Ref: https://goose-docs.ai/docs/guides/context-engineering/using-skills/
+    # Ref: https://goose-docs.ai/docs/guides/context-engineering/using-goosehints/
+    "goose": TargetProfile(
+        name="goose",
+        root_dir=".goose",
+        primitives={
+            "agents": PrimitiveMapping("recipes", ".yaml", "goose_recipe"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
+        },
+        auto_create=True,
+        detect_by_dir=False,
+        user_supported="partial",
+        unsupported_user_primitives=("agents",),
+        compile_family="agents",
+        requires_flag="goose",
+        pack_prefixes=(".goose/", ".agents/"),
+    ),
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
     # The deploy root is resolved dynamically at runtime via

@@ -96,11 +96,13 @@ accepted in target lists for symmetry only. Unknown slugs are
 rejected before any work runs.
 
 Experimental targets (`hermes`, `openclaw`, `copilot-cowork`,
-`copilot-app`) are also accepted once their flag is enabled via
+`copilot-app`, `goose`) are also accepted once their flag is enabled via
 `apm experimental enable <flag>`, but are excluded from `--all`.
 `apm compile -t hermes` emits `AGENTS.md` (the `hermes` target shares
 the `agents` compile family). See
-[Hermes Agent](../integrations/hermes/).
+[Hermes Agent](../integrations/hermes/). `apm compile -t goose`
+additionally writes a `.goosehints` stub that imports `AGENTS.md`; see
+[Goose](../integrations/goose/).
 
 ## Detection cascade
 

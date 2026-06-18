@@ -247,6 +247,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
         "windsurf",
         "kiro",
         "hermes",
+        "goose",
         "all",
         "minimal",
     )
@@ -280,6 +281,26 @@ def should_compile_gemini_md(target: CompileTargetType) -> bool:
     if isinstance(target, frozenset):
         return "gemini" in target
     return target in ("gemini", "all")
+
+
+def should_compile_goose_hints(target: CompileTargetType) -> bool:
+    """Check if a ``.goosehints`` stub should be compiled.
+
+    Goose belongs to the ``agents`` compile family (it consumes AGENTS.md),
+    so a multi-target frozenset only carries the ``"agents"`` token and the
+    Goose-specific stub is intentionally NOT emitted for generic agents-family
+    compiles.  The stub is generated only for an explicit single ``goose``
+    target -- Goose is experimental and explicit-only, so it never appears in
+    the ``"all"`` expansion.
+
+    Args:
+        target: The detected or configured target. May be a string or a
+            frozenset of compiler families for multi-target lists.
+
+    Returns:
+        bool: True if ``.goosehints`` should be generated
+    """
+    return target == "goose"
 
 
 def should_compile_copilot_instructions_md(target: CompileTargetType) -> bool:
@@ -361,6 +382,7 @@ def get_target_description(target: UserTargetType) -> str:
         "agent-skills": ".agents/skills/ only (cross-client shared skills -- no agents, hooks, or commands)",
         "openclaw": ".agents/skills/ (project) or ~/.openclaw/skills/ (--global) -- experimental",
         "hermes": "AGENTS.md + .agents/skills/ (project) or ~/.hermes/skills/ + config.yaml MCP (--global) -- experimental",
+        "goose": "MCP servers as extensions in ~/.config/goose/config.yaml (--global); .goosehints at project root -- experimental",
         "all": "AGENTS.md + CLAUDE.md + GEMINI.md + .github/copilot-instructions.md + .github/ + .claude/ + .cursor/ + .opencode/ + .codex/ + .gemini/ + .windsurf/ + .kiro/ + .agents/",
         "minimal": "AGENTS.md only (create .github/, .claude/, or .gemini/ for full integration)",
     }
@@ -382,7 +404,7 @@ ALL_CANONICAL_TARGETS = frozenset(
 #: ``integration/targets.py``.  They are NOT included in the
 #: ``parse_target_arg("all")`` expansion -- explicit opt-in only.
 EXPERIMENTAL_TARGETS: frozenset[str] = frozenset(
-    {"copilot-cowork", "copilot-app", "openclaw", "hermes"}
+    {"copilot-cowork", "copilot-app", "openclaw", "hermes", "goose"}
 )
 
 #: Stable targets excluded from "all" expansion (cross-client deploy

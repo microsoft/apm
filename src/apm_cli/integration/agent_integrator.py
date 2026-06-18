@@ -168,6 +168,9 @@ class AgentIntegrator(BaseIntegrator):
             if mapping.format_id == "codex_agent":
                 self._write_codex_agent(source_file, target_path)
                 links_resolved = 0
+            elif mapping.format_id == "goose_recipe":
+                self._write_goose_recipe(source_file, target_path)
+                links_resolved = 0
             else:
                 if mapping.format_id == "opencode_agent":
                     self._warn_opencode_frontmatter(
@@ -299,15 +302,17 @@ class AgentIntegrator(BaseIntegrator):
     )
 
     @staticmethod
-    def _write_codex_agent(source: Path, target: Path) -> None:
-        """Transform an ``.agent.md`` file to Codex ``.toml`` format.
+    def _parse_agent_frontmatter(source: Path) -> tuple[str, str, str, dict]:
+        """Return ``(name, description, body, frontmatter)`` for an agent file.
 
-        Parses YAML frontmatter for ``name`` and ``description``, uses
-        the markdown body as ``developer_instructions``.
+        Shared by the per-target agent transformers (Codex TOML, Goose
+        recipe) so the frontmatter-parsing preamble lives in one place.
+        ``name`` falls back to the file stem (``.agent`` suffix stripped);
+        ``description`` defaults to empty; ``body`` is the markdown after the
+        frontmatter; ``frontmatter`` is the parsed mapping (``{}`` on error).
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
-        import toml as _toml
 
         content = source.read_text(encoding="utf-8")
 
@@ -316,16 +321,32 @@ class AgentIntegrator(BaseIntegrator):
             name = name[: -len(".agent")]
         description = ""
         body = content
+        fm: dict = {}
 
         fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
         if fm_match:
             body = content[fm_match.end() :]
             try:
                 fm = yaml.safe_load(fm_match.group(1)) or {}
+                if not isinstance(fm, dict):
+                    fm = {}
                 name = fm.get("name", name)
                 description = fm.get("description", description)
             except Exception:
-                pass
+                fm = {}
+
+        return name, description, body, fm
+
+    @staticmethod
+    def _write_codex_agent(source: Path, target: Path) -> None:
+        """Transform an ``.agent.md`` file to Codex ``.toml`` format.
+
+        Parses YAML frontmatter for ``name`` and ``description``, uses
+        the markdown body as ``developer_instructions``.
+        """
+        import toml as _toml
+
+        name, description, body, _fm = AgentIntegrator._parse_agent_frontmatter(source)
 
         doc = {
             "name": name,
@@ -333,6 +354,32 @@ class AgentIntegrator(BaseIntegrator):
             "developer_instructions": body.strip(),
         }
         target.write_text(_toml.dumps(doc), encoding="utf-8")
+
+    @staticmethod
+    def _write_goose_recipe(source: Path, target: Path) -> None:
+        """Transform an ``.agent.md`` file to a Goose recipe ``.yaml``.
+
+        Emits a valid, runnable recipe (``goose run --recipe``) with
+        ``version``/``title``/``description``/``instructions``; a pinned
+        ``model`` becomes ``settings.goose_model``. MCP ``extensions`` are
+        intentionally not embedded -- an APM agent declares no MCP servers,
+        which live at package scope in ``~/.config/goose/config.yaml``.
+        """
+        from ..utils.yaml_io import yaml_to_str
+
+        name, description, body, fm = AgentIntegrator._parse_agent_frontmatter(source)
+
+        recipe: dict = {
+            "version": "1.0.0",
+            "title": name,
+            "description": description,
+            "instructions": body.strip(),
+        }
+        model = fm.get("model")
+        if model:
+            recipe["settings"] = {"goose_model": model}
+
+        target.write_text(yaml_to_str(recipe), encoding="utf-8")
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.
     def integrate_package_agents(
