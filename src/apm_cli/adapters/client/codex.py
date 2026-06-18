@@ -273,6 +273,24 @@ class CodexClientAdapter(MCPClientAdapter):
             if http_headers:
                 remote_config["http_headers"] = http_headers
                 self._warn_input_variables(http_headers, server_name, "Codex CLI")
+            env_http_headers: dict[str, str] = {}
+            raw_env_headers = remote.get("env_headers", [])
+            if raw_env_headers is None:
+                raw_env_headers = []
+            if isinstance(raw_env_headers, dict):
+                for h_name, env_name in raw_env_headers.items():
+                    if h_name and env_name:
+                        env_http_headers[str(h_name)] = str(env_name)
+            else:
+                for header in raw_env_headers:
+                    if not isinstance(header, dict):
+                        continue
+                    h_name = header.get("name", "")
+                    env_name = header.get("env", "")
+                    if h_name and env_name:
+                        env_http_headers[str(h_name)] = str(env_name)
+            if env_http_headers:
+                remote_config["env_http_headers"] = env_http_headers
             return remote_config
 
         if not packages:

@@ -43,6 +43,14 @@ dependencies:
       url: https://mcp.linear.app/sse
       headers:
         Authorization: "Bearer ${LINEAR_TOKEN}"
+
+    # 4. Self-defined remote with native env-header binding
+    - name: internal-docs
+      registry: false
+      transport: streamable-http
+      url: https://mcp.example.com/mcp
+      env_headers:
+        X-Api-Key: INTERNAL_DOCS_MCP_KEY
 ```
 
 The full grammar (overlays, `${input:...}` variables, `tools:`
@@ -150,6 +158,9 @@ MCP defines two transport families. APM exposes both:
   remote endpoint. Requires `url:` (http or https only -- websockets
   and `file://` are rejected). Use `--header KEY=VALUE` (repeatable)
   for HTTP headers such as `Authorization`.
+  In `apm.yml`, use `env_headers:` when the target runtime should read
+  a header value from an environment variable at server-start instead
+  of storing or resolving the value during install.
 
 `--transport` is inferred when omitted: a `--url` implies a remote
 transport, a post-`--` command implies `stdio`. The mutually-exclusive
