@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm update --target` help text now lists `kiro` as a valid example
+  target, matching `apm install`. (#1821)
 - `apm marketplace check` no longer fails with exit 128 for entries on
   non-default hosts, including relative entries composed onto
   `marketplace.sourceBase` (self-managed GitLab / GHES / Azure DevOps). It now
