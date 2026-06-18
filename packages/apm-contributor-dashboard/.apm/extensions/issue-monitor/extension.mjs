@@ -316,8 +316,8 @@ const session = await joinSession({
                 },
             ],
             open: async (ctx) => {
-                // Fetch data before starting server so first page load has content
-                await fetchIssues();
+                // Start server immediately; fetch data in background so
+                // the canvas opens fast and shows a loading state.
                 openInstanceCount++;
                 startPolling();
                 let entry = servers.get(ctx.instanceId);

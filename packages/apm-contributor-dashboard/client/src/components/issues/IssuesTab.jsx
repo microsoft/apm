@@ -118,15 +118,22 @@ export default function IssuesTab() {
           <button class="btn-clear-filters" onClick={clearFilters}>Clear all</button>
         </div>
       </Show>
-      <Show when={issues().length > 0} fallback={<div class="empty">Loading issues from microsoft/apm...</div>}>
-        <IssueTable issues={paged()} onFilter={toggleFilter} onSort={toggleSort} sortCol={sortCol} sortAsc={sortAsc} onDetail={(issue) => setDetailIssue(issue)} />
-        <Pagination
-          page={page}
-          pageSize={pageSize}
-          total={() => filtered().length}
-          onPageChange={setPage}
-          onPageSizeChange={(s) => { setPageSize(s); setPage(0); }}
-        />
+      <Show when={!issueResource.loading || issues().length > 0} fallback={
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <p>Fetching issues from microsoft/apm...</p>
+        </div>
+      }>
+        <Show when={issues().length > 0} fallback={<div class="empty">No open issues found.</div>}>
+          <IssueTable issues={paged()} onFilter={toggleFilter} onSort={toggleSort} sortCol={sortCol} sortAsc={sortAsc} onDetail={(issue) => setDetailIssue(issue)} />
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={() => filtered().length}
+            onPageChange={setPage}
+            onPageSizeChange={(s) => { setPageSize(s); setPage(0); }}
+          />
+        </Show>
       </Show>
       <Show when={detailIssue() !== null}>
         <IssueDetail issue={detailIssue()} onClose={() => setDetailIssue(null)} />

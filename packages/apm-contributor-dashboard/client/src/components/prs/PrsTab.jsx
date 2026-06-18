@@ -66,15 +66,22 @@ export default function PrsTab() {
           <button class="btn-clear-filters" onClick={clearFilters}>Clear all</button>
         </div>
       </Show>
-      <Show when={prs().length > 0} fallback={<div class="empty">Loading pull requests...</div>}>
-        <PrTable prs={paged()} onFilter={toggleFilter} onDetail={(pr) => setDetailPr(pr)} />
-        <Pagination
-          page={page}
-          pageSize={pageSize}
-          total={() => filtered().length}
-          onPageChange={setPage}
-          onPageSizeChange={(s) => { setPageSize(s); setPage(0); }}
-        />
+      <Show when={!prResource.loading || prs().length > 0} fallback={
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <p>Fetching pull requests from microsoft/apm...</p>
+        </div>
+      }>
+        <Show when={prs().length > 0} fallback={<div class="empty">No open pull requests found.</div>}>
+          <PrTable prs={paged()} onFilter={toggleFilter} onDetail={(pr) => setDetailPr(pr)} />
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={() => filtered().length}
+            onPageChange={setPage}
+            onPageSizeChange={(s) => { setPageSize(s); setPage(0); }}
+          />
+        </Show>
       </Show>
       <Show when={detailPr() !== null}>
         <PrDetail pr={detailPr()} onClose={() => setDetailPr(null)} />
