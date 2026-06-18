@@ -1410,13 +1410,22 @@ class HookIntegrator(BaseIntegrator):
         container = config.event_container_key
         if container not in json_config:
             json_config[container] = {}
+            _log.debug("Seeded hook container '%s' in %s", container, config.config_filename)
 
         # Inject any target-specific top-level defaults (e.g. "version": 1 for
         # Cursor) that are absent from the existing file.  Existing values are
         # never overwritten so a user-set "version" is preserved across reinstalls.
+        injected_keys: list[str] = []
         for key, value in config.top_level_defaults.items():
             if key not in json_config:
                 json_config[key] = value
+                injected_keys.append(key)
+        if injected_keys:
+            _log.debug(
+                "Injected top_level_defaults into %s: %s",
+                config.config_filename,
+                injected_keys,
+            )
 
         for hook_file in hook_files:
             data = self._parse_hook_json(hook_file)
