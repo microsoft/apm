@@ -22,6 +22,7 @@ from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
 from apm_cli.adapters.client.cursor import CursorClientAdapter
 from apm_cli.adapters.client.gemini import GeminiClientAdapter
+from apm_cli.adapters.client.goose import GooseClientAdapter
 from apm_cli.adapters.client.hermes import HermesClientAdapter
 from apm_cli.adapters.client.intellij import IntelliJClientAdapter
 from apm_cli.adapters.client.kiro import KiroClientAdapter
@@ -40,7 +41,7 @@ _KNOWN_COMPILE_FAMILIES = {"vscode", "claude", "gemini", "agents"}
 # key means a new MCP config schema; ``MCPConflictDetector`` must learn how
 # to parse it (today only ``mcp_servers`` needs the codex-style flattened-
 # key fallback -- the others are plain top-level dicts).
-_KNOWN_MCP_KEYS = {"mcpServers", "mcp_servers", "servers"}
+_KNOWN_MCP_KEYS = {"mcpServers", "mcp_servers", "servers", "extensions"}
 
 # Adapter target_names that are MCP-only pseudo-targets (no entry in
 # KNOWN_TARGETS).  Code that joins adapter -> profile must tolerate misses
@@ -63,6 +64,7 @@ _ADAPTER_CLASSES = (
     VSCodeClientAdapter,
     WindsurfClientAdapter,
     HermesClientAdapter,
+    GooseClientAdapter,
 )
 
 

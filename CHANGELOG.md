@@ -205,6 +205,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm install --target goose` and `apm compile -t goose` add the Goose
+  agent (Block) as a new **experimental** target, gated behind the `goose`
+  flag (`apm experimental enable goose`). APM agents compile to Goose
+  *recipes* at `.goose/recipes/<name>.yaml` (the native `goose run --recipe`
+  unit; `title`/`description`/`instructions`/`prompt`, plus
+  `settings.goose_model` when the agent pins a model -- the `prompt` makes
+  every recipe headless-runnable and is taken from an optional `prompt:`
+  frontmatter key when present; an optional `parameters:` frontmatter block
+  passes through verbatim so authors can template `{{ key }}` variables in
+  the body/prompt), skills deploy to the cross-tool
+  `.agents/skills/<name>/SKILL.md` standard Goose reads natively, MCP servers
+  write to the YAML `extensions:` block of `~/.config/goose/config.yaml`
+  (honouring `$XDG_CONFIG_HOME`), and `compile` emits `AGENTS.md` plus a thin
+  `.goosehints` stub that imports it via Goose's `@./AGENTS.md` preprocessor.
+  MCP `extensions` are not embedded per-recipe (an APM agent declares no MCP
+  servers). Like the other frontier targets, `goose` is never auto-detected
+  and is excluded from `--target all`. (#1833)
 - `apm audit` now surfaces unmanaged files in governance directories as a single enriched report: each finding states a factual reason (`not tracked in apm.lock.yaml`), a lazy primitive-type tag (`[type: skill|agent|instruction|mcp]`), and a deny-conflict note (`matches deny rule (<pattern>)`) when the path matches the policy's own `dependencies.deny` / `mcp.deny`. A new `unmanaged_files.exclude` policy key suppresses known harness-managed paths, and a symlink guard prevents following links out of the workspace. This is drift / divergence visibility, not supply-chain-attack prevention. (closes #1775) (#1793)
 - Azure DevOps is now documented as a first-class marketplace authoring host: a `marketplace.sourceBase` of `https://dev.azure.com/{org}/{project}/_git` composes relative package sources and preserves the `dev.azure.com` host through to the consumer (authenticated with `ADO_APM_PAT`). The end-to-end authoring -> consume path is pinned by a hermetic test. (closes #1010) (#1810)
 - `apm install --target antigravity` and `apm compile -t antigravity` add

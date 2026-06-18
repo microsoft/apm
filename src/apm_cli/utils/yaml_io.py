@@ -28,6 +28,24 @@ _DUMP_DEFAULTS: dict[str, Any] = dict(
 )
 
 
+class _BlockStringDumper(yaml.SafeDumper):
+    """SafeDumper that renders multi-line strings as literal block scalars.
+
+    Opt-in via ``yaml_to_str(..., multiline_block=True)``.  Single-line
+    strings are unaffected.  The emitter falls back to a quoted style on
+    its own when ``|`` cannot faithfully represent the value (e.g. trailing
+    whitespace), so output stays valid and round-trips.
+    """
+
+
+def _represent_str_block(dumper: yaml.Dumper, data: str) -> yaml.nodes.ScalarNode:
+    style = "|" if "\n" in data else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+
+
+_BlockStringDumper.add_representer(str, _represent_str_block)
+
+
 def load_yaml(path: str | Path) -> dict[str, Any] | None:
     """Load a YAML file with explicit UTF-8 encoding.
 
@@ -49,12 +67,26 @@ def dump_yaml(
         yaml.safe_dump(data, fh, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
 
 
-def yaml_to_str(data: Any, *, sort_keys: bool = False) -> str:
+def yaml_to_str(data: Any, *, sort_keys: bool = False, multiline_block: bool = False) -> str:
     """Serialize data to a YAML string with unicode support.
 
     Use instead of bare ``yaml.dump()`` when building YAML content
     for later file writes or string returns.
+
+    When *multiline_block* is True, multi-line strings render as literal
+    block scalars (``key: |``) instead of quoted flow scalars -- the
+    human-readable form for embedded prose (e.g. Goose recipe
+    ``instructions``).  Single-line strings are unaffected.  A wide line
+    width is used so a long single-line value (e.g. a recipe ``prompt``) is
+    not wrapped mid-sentence.
     """
+    if multiline_block:
+        return yaml.dump(
+            data,
+            Dumper=_BlockStringDumper,
+            width=4096,
+            **{**_DUMP_DEFAULTS, "sort_keys": sort_keys},
+        )
     return yaml.safe_dump(data, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
 
 

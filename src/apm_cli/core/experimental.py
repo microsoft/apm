@@ -139,6 +139,17 @@ FLAGS: dict[str, ExperimentalFlag] = {
             "home at ~/.hermes/ (skills + MCP servers in config.yaml)."
         ),
     ),
+    "goose": ExperimentalFlag(
+        name="goose",
+        description="Configure MCP servers for the Goose agent (Block).",
+        default=False,
+        hint=(
+            "Use '--target goose --global' to write MCP servers as Goose "
+            "extensions in ~/.config/goose/config.yaml. Goose has no "
+            "project-level config; instruction context is provided via "
+            ".goosehints at the project root."
+        ),
+    ),
 }
 
 

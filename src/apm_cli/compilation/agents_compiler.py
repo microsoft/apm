@@ -18,6 +18,7 @@ from ..core.target_detection import (
     should_compile_claude_md,
     should_compile_copilot_instructions_md,
     should_compile_gemini_md,
+    should_compile_goose_hints,
 )
 from ..primitives.discovery import discover_primitives
 from ..primitives.models import PrimitiveCollection
@@ -52,6 +53,7 @@ _KNOWN_TARGETS = (  # noqa: RUF005
     "antigravity",
     "windsurf",
     "kiro",
+    "goose",
     "all",
     "minimal",
 ) + _VSCODE_TARGET_ALIASES
@@ -399,6 +401,9 @@ class AgentsCompiler:
 
             if should_compile_gemini_md(routing_target):
                 results.append(self._compile_gemini_md(config, primitives))
+
+            if should_compile_goose_hints(routing_target):
+                results.append(self._compile_goose_hints(config, primitives))
 
             # Some targets (e.g. cursor, agent-skills) use the data-driven
             # integration layer and don't need compilation.
@@ -1042,64 +1047,98 @@ class AgentsCompiler:
             has_critical_security=critical_security_found,
         )
 
-    def _compile_gemini_md(
-        self, config: CompilationConfig, primitives: PrimitiveCollection
+    def _compile_import_stub(
+        self,
+        config: CompilationConfig,
+        primitives: PrimitiveCollection,
+        formatter,
+        label: str,
+        stat_key: str,
     ) -> CompilationResult:
-        """Compile GEMINI.md stub that imports AGENTS.md.
+        """Compile a thin "@import AGENTS.md" stub via *formatter*.
 
-        Gemini CLI supports ``@./path`` import syntax, so GEMINI.md is a
-        thin wrapper that pulls in AGENTS.md at load time.  The actual
-        instruction roll-up is handled by the AGENTS.md pipeline (which
-        is always compiled alongside via ``should_compile_agents_md``).
+        Shared by the GEMINI.md and ``.goosehints`` paths: both emit a
+        single wrapper file at the project root that pulls in AGENTS.md
+        through the target CLI's ``@path`` preprocessor.  The actual
+        instruction roll-up is handled by the AGENTS.md pipeline (always
+        compiled alongside via ``should_compile_agents_md``).
 
         Args:
             config: Compilation configuration.
-            primitives: Primitives to compile.
+            formatter: A formatter exposing ``format_distributed`` and a
+                ``content_map`` of path -> rendered stub content.
+            label: Human-readable output name (e.g. ``"GEMINI.md"``).
+            stat_key: Stats key under which the written-file count is stored.
 
         Returns:
-            CompilationResult for the GEMINI.md compilation.
+            CompilationResult for the stub compilation.
         """
-        from .gemini_formatter import GeminiFormatter
+        result = formatter.format_distributed(primitives)
 
-        gemini_formatter = GeminiFormatter(str(self.base_dir))
-        gemini_result = gemini_formatter.format_distributed(primitives)
-
-        all_warnings = self.warnings + gemini_result.warnings
-        all_errors = self.errors + gemini_result.errors
+        all_warnings = self.warnings + result.warnings
+        all_errors = self.errors + result.errors
 
         if config.dry_run:
             return CompilationResult(
                 success=len(all_errors) == 0,
-                output_path="Preview mode - GEMINI.md",
-                content="GEMINI.md Preview: Would generate stub importing AGENTS.md",
+                output_path=f"Preview mode - {label}",
+                content=f"{label} Preview: Would generate stub importing AGENTS.md",
                 warnings=all_warnings,
                 errors=all_errors,
-                stats=gemini_result.stats,
+                stats=result.stats,
             )
 
         files_written = 0
         from .output_writer import CompiledOutputWriter
 
         writer = CompiledOutputWriter()
-        for gemini_path, content in gemini_result.content_map.items():
+        for path, content in result.content_map.items():
             try:
-                writer.write(gemini_path, content)
+                writer.write(path, content)
                 files_written += 1
             except OSError as e:
-                all_errors.append(f"Failed to write {gemini_path}: {e!s}")
+                all_errors.append(f"Failed to write {path}: {e!s}")
 
-        stats = gemini_result.stats.copy()
-        stats["gemini_files_written"] = files_written
+        stats = result.stats.copy()
+        stats[stat_key] = files_written
 
-        self._log("progress", "Generated GEMINI.md (imports AGENTS.md)")
+        self._log("progress", f"Generated {label} (imports AGENTS.md)")
 
         return CompilationResult(
             success=len(all_errors) == 0,
-            output_path=f"GEMINI.md: {files_written} files",
-            content=f"Generated {files_written} GEMINI.md stub importing AGENTS.md",
+            output_path=f"{label}: {files_written} files",
+            content=f"Generated {files_written} {label} stub importing AGENTS.md",
             warnings=all_warnings,
             errors=all_errors,
             stats=stats,
+        )
+
+    def _compile_gemini_md(
+        self, config: CompilationConfig, primitives: PrimitiveCollection
+    ) -> CompilationResult:
+        """Compile the GEMINI.md stub that imports AGENTS.md (Gemini CLI)."""
+        from .gemini_formatter import GeminiFormatter
+
+        return self._compile_import_stub(
+            config,
+            primitives,
+            GeminiFormatter(str(self.base_dir)),
+            "GEMINI.md",
+            "gemini_files_written",
+        )
+
+    def _compile_goose_hints(
+        self, config: CompilationConfig, primitives: PrimitiveCollection
+    ) -> CompilationResult:
+        """Compile the ``.goosehints`` stub that imports AGENTS.md (Goose)."""
+        from .goose_formatter import GooseFormatter
+
+        return self._compile_import_stub(
+            config,
+            primitives,
+            GooseFormatter(str(self.base_dir)),
+            ".goosehints",
+            "goose_files_written",
         )
 
     def _merge_results(self, results: list[CompilationResult]) -> CompilationResult:

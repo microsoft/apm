@@ -143,6 +143,13 @@ class YamlMcpClientAdapter(CopilotClientAdapter):
             return True
         except OSError:
             return False
+        except (TypeError, ValueError):
+            # A per-server transform (_to_native_format) rejected malformed
+            # registry/config data. Fail closed like any other write failure
+            # rather than crashing the install. Do not interpolate the
+            # exception -- inputs may carry embedded credentials.
+            _rich_error(f"Could not serialize MCP config for {self._label}; skipping write.")
+            return False
 
     def configure_mcp_server(
         self,
