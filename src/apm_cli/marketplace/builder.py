@@ -716,7 +716,7 @@ class MarketplaceBuilder:
         # Determine tag pattern: entry > build > default
         pattern = entry.tag_pattern or yml.build.tag_pattern
 
-        tag_rx = build_tag_regex(pattern)
+        tag_rx = build_tag_regex(pattern, name=entry.name)
         refs = resolver.list_remote_refs(owner_repo)
 
         # Filter tags matching the pattern and extract versions
