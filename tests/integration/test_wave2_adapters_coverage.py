@@ -2268,7 +2268,7 @@ class TestGeminiAdapterConfigure:
         """configure_mcp_server returns True (opt-in skip) when .gemini/ absent."""
         adapter = GeminiClientAdapter(project_root=tmp_path)
         server_info = {"name": "test", "packages": []}
-        with patch.object(adapter, "_get_gemini_dir", return_value=tmp_path / ".gemini"):
+        with patch.object(adapter, "_get_config_dir", return_value=tmp_path / ".gemini"):
             result = adapter.configure_mcp_server(
                 "owner/server",
                 server_info_cache={"owner/server": server_info},

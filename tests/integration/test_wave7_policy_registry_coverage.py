@@ -680,7 +680,10 @@ class TestCheckUnmanagedFiles:
         policy = UnmanagedFilesPolicy(action="deny", directories=(".github/agents",))
         result = _check_unmanaged_files(tmp_path, None, policy)
         assert not result.passed
-        assert len(result.details) == 1
+        # details = one per-file line + a single trailing next-action hint.
+        file_details = [d for d in result.details if "not tracked in apm.lock.yaml" in d]
+        assert len(file_details) == 1
+        assert "stray.md" in file_details[0]
 
     def test_deployed_file_not_unmanaged(self, tmp_path):
         gov_dir = tmp_path / ".github" / "agents"
