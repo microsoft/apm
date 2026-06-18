@@ -94,10 +94,11 @@ async function fetchIssues() {
             }
             return issue;
         });
-        // Fetch open PRs and match to issues by #number references
-        await fetchAndMatchPRs();
+        // Mark issues as available immediately (PR enrichment follows)
         lastUpdated = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
         lastError = null;
+        // Enrich with PR data in background (non-blocking)
+        fetchAndMatchPRs().catch(() => {});
     } catch (e) {
         lastError = String(e.message || e);
     }
@@ -170,6 +171,7 @@ async function fetchAndMatchPRs() {
         // Store raw workflow runs for change-detection cache
         for (const pr of prs) { pr._rawWorkflowRuns = pr.workflowRuns || []; }
         prData = prs.map(pr => classifyPrForTable(pr));
+        lastUpdated = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     } catch (_) {
         // PR fetch is best-effort; ignore failures
     }
