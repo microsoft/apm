@@ -47,7 +47,7 @@ import json
 import logging
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +99,12 @@ class _MergeHookConfig:
     # single name "apm" as its container and leaves sibling user hook-names
     # untouched.
     event_container_key: str = "hooks"
+    # Target-specific top-level keys to inject into the config file when
+    # absent.  Used to emit required schema fields (e.g. "version": 1 for
+    # Cursor) that APM does not otherwise write.  Existing keys are never
+    # overwritten -- the guard in _integrate_merged_hooks() preserves any
+    # value the user has set manually.
+    top_level_defaults: dict = field(default_factory=dict)
 
 
 # Per-target hook event name mapping.  Packages are authored with
@@ -335,6 +341,7 @@ _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
         config_filename="hooks.json",
         target_key="cursor",
         require_dir=True,
+        top_level_defaults={"version": 1},
     ),
     "codex": _MergeHookConfig(
         config_filename="hooks.json",
@@ -1402,6 +1409,13 @@ class HookIntegrator(BaseIntegrator):
         container = config.event_container_key
         if container not in json_config:
             json_config[container] = {}
+
+        # Inject any target-specific top-level defaults (e.g. "version": 1 for
+        # Cursor) that are absent from the existing file.  Existing values are
+        # never overwritten so a user-set "version" is preserved across reinstalls.
+        for key, value in config.top_level_defaults.items():
+            if key not in json_config:
+                json_config[key] = value
 
         for hook_file in hook_files:
             data = self._parse_hook_json(hook_file)
