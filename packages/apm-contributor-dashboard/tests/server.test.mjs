@@ -5,12 +5,12 @@
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { createHandler } from "../server-handler.mjs";
+import { createHandler } from "../.apm/extensions/issue-monitor/server-handler.mjs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const DIST_DIR = join(__dir, "..", "dist");
+const DIST_DIR = join(__dir, "..", ".apm", "extensions", "issue-monitor", "dist");
 
 // ---------------------------------------------------------------------------
 // Test infrastructure

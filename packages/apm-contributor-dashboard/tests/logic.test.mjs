@@ -14,7 +14,7 @@ import {
     parsePanelCounts,
     parsePanelReview,
     extractFollowUpItems,
-} from "../logic.mjs";
+} from "../.apm/extensions/issue-monitor/logic.mjs";
 
 // -- classifyIssue --
 
