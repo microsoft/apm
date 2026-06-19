@@ -181,14 +181,16 @@ class MarketplaceSource:
 
     @property
     def kind(self) -> str:
-        """Derived source kind: ``local`` | ``url`` | ``github`` | ``gitlab`` | ``git``.
+        """Derived source kind: ``local`` | ``url`` | ``github`` | ``gitlab`` | ``ado`` | ``git``.
 
         Classification:
         - Local filesystem path or ``file://`` URI -> ``local``
         - Direct remote marketplace.json URL (``path == ""``) -> ``url``
         - Host classified by AuthResolver as github/ghe_cloud/ghes -> ``github``
         - Host classified as gitlab -> ``gitlab``
-        - Anything else (ado, generic, ssh to non-classified host) -> ``git``
+        - Host classified as Azure DevOps -> ``ado`` (REST items fast path with
+          generic-git fallback; see ``marketplace.client._fetch_ado``)
+        - Anything else (generic, ssh to non-classified host) -> ``git``
         """
         if not self.url or _looks_like_local_path(self.url):
             return "local"
@@ -205,6 +207,8 @@ class MarketplaceSource:
             return "github"
         if host_kind == "gitlab":
             return "gitlab"
+        if host_kind == "ado":
+            return "ado"
         return "git"
 
     @property

@@ -246,8 +246,9 @@ def _source_needs_explicit_git_path(source: MarketplaceSource) -> bool:
     For URL-first sources, the ``kind`` derivation already encodes the routing
     decision: any host APM doesn't classify as github-family needs the explicit
     git+path canonical (mirrors the existing GitLab self-managed pattern), and
-    that now includes Azure DevOps and generic git hosts since their
-    ``marketplace.json`` is fetched via subprocess git instead of an API.
+    that includes Azure DevOps (``ado``) and generic git hosts. ADO metadata is
+    read via the REST items fast path with a subprocess-git fallback, but its
+    plugin sources still need the explicit git+path canonical like generic git.
 
     Local marketplaces handle relative sources via :func:`_resolve_local_relative_source`
     on the fast path and never reach this helper.
@@ -255,7 +256,7 @@ def _source_needs_explicit_git_path(source: MarketplaceSource) -> bool:
     kind = source.kind
     if kind == "github":
         return False
-    if kind in ("gitlab", "git"):
+    if kind in ("gitlab", "git", "ado"):
         return True
     # Fall back to legacy host-based behaviour for any kind we don't recognise
     return _marketplace_host_needs_explicit_git_path(source.host)
