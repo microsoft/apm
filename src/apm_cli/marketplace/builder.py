@@ -905,11 +905,9 @@ class MarketplaceBuilder:
         A token resolved for the builder's default host is never sent to
         another host.
 
-        Each package is fetched from its own host: ``github.com``
-        packages use the fast ``raw.githubusercontent.com`` CDN; GHES
-        and GHE Cloud packages use the GitHub REST API on the package's
-        host.  For non-GitHub-class hosts, metadata enrichment is
-        skipped.
+        Metadata is fetched via the GitHub REST API (Contents endpoint
+        with raw media type) on the package's host.  For non-GitHub-class
+        hosts, metadata enrichment is skipped.
         """
         try:
             path_prefix = f"{pkg.subdir}/" if pkg.subdir else ""
@@ -950,21 +948,18 @@ class MarketplaceBuilder:
                 return None
 
             if effective_host == "github.com":
-                # github.com -- use fast raw.githubusercontent.com CDN
-                url = f"https://raw.githubusercontent.com/{pkg.source_repo}/{pkg.sha}/{file_path}"
-                req = urllib.request.Request(url)  # noqa: S310
-                if token:
-                    req.add_header("Authorization", f"token {token}")
+                # github.com -- REST API at api.github.com
+                api_base = (host_info.api_base if host_info else None) or "https://api.github.com"
             else:
-                # GHES / GHE Cloud -- use REST API on the package's host
+                # GHES / GHE Cloud -- REST API on the package's host
                 api_base = (
                     host_info.api_base if host_info else None
                 ) or f"https://{effective_host}/api/v3"
-                url = f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}?ref={pkg.sha}"
-                req = urllib.request.Request(url)  # noqa: S310
-                req.add_header("Accept", "application/vnd.github.raw")
-                if token:
-                    req.add_header("Authorization", f"token {token}")
+            url = f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}?ref={pkg.sha}"
+            req = urllib.request.Request(url)  # noqa: S310
+            req.add_header("Accept", "application/vnd.github.raw")
+            if token:
+                req.add_header("Authorization", f"token {token}")
 
             with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
                 raw = resp.read().decode("utf-8")

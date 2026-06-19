@@ -2402,6 +2402,31 @@ class TestFetchRemoteMetadataGHEHost:
         assert parsed.path.startswith("/api/v3/repos/")
         assert req.get_header("Accept") == "application/vnd.github.raw"
 
+    def test_metadata_fetch_github_com_uses_rest_api(self, tmp_path: Path) -> None:
+        """github.com host uses REST API (not raw CDN) -- fixes INTERNAL/private repos."""
+        pkg = self._make_pkg(source_repo="acme/private-tools", subdir="plugins/core")
+        builder = self._make_builder(tmp_path)
+        builder._host = "github.com"
+        builder._github_token = "ghp_test_token"
+        builder._host_info = SimpleNamespace(
+            kind="github",
+            api_base="https://api.github.com",
+        )
+        yaml_body = b"description: Private tool\nversion: 2.1.0\n"
+        mock_resp = _FakeHTTPResponse(yaml_body)
+        with patch(
+            "apm_cli.marketplace.builder.urllib.request.urlopen",
+            return_value=mock_resp,
+        ) as mock_open:
+            result = builder._fetch_remote_metadata(pkg)
+        assert result == {"description": "Private tool", "version": "2.1.0"}
+        req = mock_open.call_args[0][0]
+        parsed = urllib.parse.urlparse(req.full_url)
+        assert parsed.hostname == "api.github.com"
+        assert "/repos/acme/private-tools/contents/plugins/core/apm.yml" in parsed.path
+        assert req.get_header("Accept") == "application/vnd.github.raw"
+        assert req.get_header("Authorization") == "token ghp_test_token"
+
     def test_metadata_fetch_non_github_skipped(self, tmp_path: Path) -> None:
         """Non-GitHub host (kind='generic') returns None without any HTTP request."""
         pkg = self._make_pkg()
@@ -2437,9 +2462,9 @@ class TestFetchRemoteMetadataGHEHost:
 
         Regression guard: previously ``_fetch_remote_metadata`` branched
         only on ``self._host``, so a GHE-hosted package would be fetched
-        from ``raw.githubusercontent.com`` -- potentially returning an
-        unrelated github.com repo's metadata.  After the fix, the
-        package's own host drives every decision.
+        from the wrong API endpoint -- potentially returning an
+        unrelated repo's metadata.  After the fix, the package's own
+        host drives every decision.
         """
         from unittest.mock import MagicMock
 
