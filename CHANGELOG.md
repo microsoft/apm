@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never auto-detected and is not part of `--target all`. (by @sergio-sisternes-epam;
   closes #1650) (#1770)
 - Two additive, default-off policy keys under the existing `security:` namespace: `security.integrity.require_hashes` makes `apm install` fail closed when any non-local lockfile entry lacks a content hash, and `security.audit.fail_on_drift` makes `apm audit` exit non-zero when the workspace drifts from the lockfile. Both only tighten through policy inheritance. (#1794)
+- `apm install owner/repo#ref` now routes to the configured default registry (project `registries.default` or `registry.<name>.default true` in `~/.apm/config.json`) instead of probing GitHub. A version selector (`#<ref>`) is required; omitting it exits `1`. Non-semver selectors (`stable`, `main`, a branch name, or any opaque string) are exact-matched against the registry's published version list. Use the `git:` URL form in `apm.yml` to force the GitHub path. (#1816)
+
+### Fixed
+
+- Registry deps with non-semver version selectors (e.g. `stable`, `main`) no longer report perpetual `outdated`. The drift check now uses literal equality for non-semver registry pins rather than range comparison, which always returned `True` against a semver range. (#1816)
+- Non-semver registry version selectors are now exact-matched against the registry's published version list at install time. Previously they were rejected with "not a valid semver range". (#1816)
 
 ### Changed
 
@@ -40,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Cursor hook integration: emit required top-level `version: 1` in `.cursor/hooks.json`.
+  Affected versions: v0.14.1-v0.20.0. Hooks were silently ignored by Cursor on those
+  versions. Run `apm install` (or `apm install --target cursor`) to repair existing
+  installations. (closes #1823) (#1840)
+- `apm update --target` help text now lists `kiro` as a valid example
+  target, matching `apm install`. (#1821)
 - `apm marketplace check` no longer fails with exit 128 for entries on
   non-default hosts, including relative entries composed onto
   `marketplace.sourceBase` (self-managed GitLab / GHES / Azure DevOps). It now

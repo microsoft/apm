@@ -237,7 +237,7 @@ class _BuilderResolveMixin:
         out_host = self._resolved_output_host(source_host=source_host, source_url=source_url)
 
         pattern = entry.tag_pattern or yml.build.tag_pattern
-        tag_rx = build_tag_regex(pattern)
+        tag_rx = build_tag_regex(pattern, name=entry.name)
         refs = resolver.list_remote_refs(owner_repo)
 
         candidates: list[tuple[SemVer, str, str]] = []

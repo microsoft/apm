@@ -123,12 +123,21 @@ class TestRegistryRangeMatching:
         locked = _LockedDep(source="registry", version="1.0.0")
         assert detect_ref_change(dep, locked) is True
 
-    def test_invalid_manifest_range_is_drift(self):
-        # Branch-shaped ref slipped past parsing for some reason — fail
-        # loud on the drift path so it surfaces.
+    def test_non_semver_ref_differing_from_locked_is_drift(self):
+        # A non-semver selector (branch/label/exact tag) is exact-matched, so
+        # drift is a literal mismatch: the locked version differs from the ref.
         dep = DependencyReference(repo_url="acme/web", reference="main", source="registry")
         locked = _LockedDep(source="registry", version="1.0.0")
         assert detect_ref_change(dep, locked) is True
+
+    def test_non_semver_ref_matching_locked_is_not_drift(self):
+        # When the locked version equals the non-semver selector, there is no
+        # drift -- the lockfile-replay fast path must NOT re-download on every
+        # install (the bug: range-coverage returns False for non-semver, which
+        # without a literal fallback reported perpetual drift).
+        dep = DependencyReference(repo_url="acme/web", reference="main", source="registry")
+        locked = _LockedDep(source="registry", version="main")
+        assert detect_ref_change(dep, locked) is False
 
 
 # ───────────────────────────────────────────────────────────────────────────

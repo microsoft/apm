@@ -188,17 +188,22 @@ registries:
 
 dependencies:
   apm:
-    - acme/foo#^1.2.3        # semver range  -> corp-main
-    - acme/bar#1.4.0         # exact semver  -> corp-main
-    - acme/baz#~2.0.0        # tilde range   -> corp-main
+    - acme/foo#^1.2.3        # semver range    -> corp-main
+    - acme/bar#1.4.0         # exact semver   -> corp-main
+    - acme/baz#~2.0.0        # tilde range    -> corp-main
+    - acme/qux#stable        # non-semver label, exact-matched -> corp-main
 ```
 
-Registry-routed deps require a semver version or range. Non-semver refs
-(labels like `stable`/`latest`, `v`-prefixed tags such as `v1.4.2`,
-branch names, SHAs) are rejected at parse time when the entry routes to
-a registry; use `- git:` if you need to keep such a ref.
+Registry-routed deps must include a version selector. Semver versions and
+ranges (`1.0.0`, `^1.2.3`, `~2.0`, `>=1.0 <2.0`) use range matching
+against the registry catalogue. Non-semver selectors (`stable`, `latest`,
+`v1.4.2`, a branch name, or any opaque string) are matched exactly against
+the registry's published version list. A missing version selector (no
+`#<ref>`) and a malformed range-like ref (e.g. `^1.0` without a patch
+component) are both rejected during `apm install` -- the write gate rejects
+them before `apm.yml` is changed.
 
-Routing is unconditional: every still-unrouted shorthand entry with a `#<ref>` is sent through the default registry, regardless of what the ref looks like. Object-form entries (`- git:`, `- path:`, `- id:`) are left alone.
+Routing applies to every still-unrouted shorthand entry with a `#<ref>`: a valid semver range is range-matched, any other selector is exact-matched, and a malformed range-like ref is rejected. Object-form entries (`- git:`, `- path:`, `- id:`) are left alone.
 
 ### Object form -- explicit per-dep routing and virtual packages
 
@@ -234,14 +239,17 @@ dependencies:
 
 ### Version selectors
 
-Registry-routed entries must specify a **semver** version or range -- the registry uses it to look up an exact match or to range-match against the versions it has published. Non-semver refs (opaque labels, `v`-prefixed tags, branch names, SHAs) are rejected at parse time:
+Registry-routed entries must include a version selector. Semver selectors
+use range matching; non-semver selectors are matched exactly against the
+registry's published version list:
 
 | Selector | Behavior |
 |---|---|
-| `1.0.0`, `1.4.2` | Exact semver -- matched against the registry catalogue |
+| `1.0.0`, `1.4.2` | Exact semver -- resolves to exactly that version |
 | `^1.0.0`, `~1.2.3`, `>=1.2.0 <2.0.0` | Semver range -- APM picks the highest matching version |
-| `stable`, `latest`, `v1.4.2`, branch/SHA | Rejected -- non-semver refs are not allowed for registry-routed deps |
-| unset (no `#<ref>`) | Rejected -- a version is always required for registry-routed dependencies |
+| `stable`, `latest`, `v1.4.2`, or any opaque string | Exact match -- matched literally against the registry's published version list |
+| `^1.0`, `~2`, `>=1.0` (range operator, malformed) | Rejected -- looks like a semver range but is invalid (e.g. missing patch); fix the range or drop the operator |
+| unset (no `#<ref>`) | Rejected -- a version selector is always required for registry-routed dependencies |
 
 Registry-routed deps are byte-for-byte reproducible via `resolved_hash`; Git-routed deps are SHA-reproducible via `resolved_commit`.
 
@@ -255,7 +263,7 @@ Registry-routed deps are byte-for-byte reproducible via `resolved_hash`; Git-rou
 | `- git:` object form | Git (always -- explicit override) |
 | `- path:` object form | Local filesystem (unchanged) |
 
-A shorthand entry without any ref (`acme/foo`) is always rejected -- a version selector is required for registry-routed dependencies.
+A shorthand entry without any ref (`acme/foo`) is rejected at `apm install` time and at parse time -- a version selector is always required for registry-routed dependencies.
 
 :::caution[Behavior change -- not a warning at install time]
 There is no one-time migration prompt. Existing Git shorthand deps begin routing to the registry as soon as a default is configured. Plan the audit before enabling the default; see [Pitfalls -- default registry rerouting](#default-registry-silently-reroutes-git-shorthand) and [Migration paths](../../troubleshooting/migration/#6-default-registry-adoption-git--registry-routing).

@@ -11,7 +11,6 @@ from apm_cli.install.insecure_policy import (
 )
 from apm_cli.install.package_resolution import (
     dependency_reference_to_yaml_entry,
-    update_existing_dependency_entry_if_needed,
 )
 from apm_cli.install.validation import _local_path_failure_reason
 
@@ -45,6 +44,127 @@ def _check_package_conflicts(current_deps):
     return existing_identities
 
 
+def _resolve_package_accessibility(
+    dep_ref,
+    package,
+    *,
+    default_registry,
+    auth_resolver,
+    logger,
+    verbose,
+    validate_package_exists,
+):
+    """Return ``(accessible, registry_ref_error)`` for *dep_ref*.
+
+    When the dep routes to the default registry the GitHub probe is skipped
+    and the version selector is validated instead; *registry_ref_error* is
+    non-None only when that registry validation fails (caller records it as an
+    invalid outcome). Otherwise the standard accessibility probe runs.
+    """
+    from apm_cli.install.registry_wiring import (
+        should_skip_github_probe_for_dep,
+        validate_registry_ref,
+    )
+
+    if should_skip_github_probe_for_dep(dep_ref, default_registry):
+        ref_ok, ref_err = validate_registry_ref(dep_ref)
+        if not ref_ok:
+            return False, ref_err
+        return True, None
+    accessible = validate_package_exists(
+        package,
+        verbose=verbose,
+        auth_resolver=auth_resolver,
+        logger=logger,
+        dep_ref=dep_ref,
+    )
+    return accessible, None
+
+
+def _marketplace_cross_repo_reason(risk):
+    """Build the #1326 dependency-confusion rejection message for *risk*."""
+    lead = (
+        f"refused (dependency-confusion risk #1326): bare"
+        f" `repo: {risk.bare_repo_field}` on enterprise"
+        f" marketplace '{risk.marketplace_host}' is ambiguous."
+        f" Host-qualify the plugin `repo` field in"
+        f" marketplace.json to one of:"
+    )
+    return "\n".join(
+        [
+            lead,
+            f"  - '{risk.suggested_qualified_repo}' (enterprise dep on this marketplace)",
+            f"  - 'github.com/{risk.bare_repo_field}' (declared cross-host dep on public github.com)",
+        ]
+    )
+
+
+def _intercept_marketplace_ref(package, dependency_reference_cls, *, auth_resolver, logger):
+    """Resolve a ``NAME@MARKETPLACE`` shorthand to a canonical owner/repo[#ref].
+
+    Returns ``(package, marketplace_provenance, marketplace_dep_ref,
+    invalid_reason)``. Inputs that are not marketplace candidates (they contain
+    '/' or are local paths) are returned unchanged with all-None companions.
+    When the bare token is neither a marketplace ref nor a valid format, or
+    marketplace resolution fails, *invalid_reason* is set and the original
+    package is returned so the caller records the rejection.
+    """
+    if "/" in package or dependency_reference_cls.is_local_path(package):
+        return package, None, None, None
+
+    try:
+        from apm_cli.marketplace.resolver import (
+            parse_marketplace_ref,
+            resolve_marketplace_plugin,
+        )
+
+        mkt_ref = parse_marketplace_ref(package)
+    except ImportError:
+        mkt_ref = None
+
+    if mkt_ref is None:
+        return (
+            package,
+            None,
+            None,
+            ("invalid format -- use 'owner/repo' or 'plugin-name@marketplace'"),
+        )
+
+    plugin_name, marketplace_name, version_spec = mkt_ref
+    try:
+        warning_handler = None
+        if logger:
+
+            def warning_handler(msg):
+                return logger.warning(msg)
+
+            logger.verbose_detail(
+                f"    Resolving {plugin_name}@{marketplace_name} via marketplace..."
+            )
+        resolution = resolve_marketplace_plugin(
+            plugin_name,
+            marketplace_name,
+            version_spec=version_spec,
+            auth_resolver=auth_resolver,
+            warning_handler=warning_handler,
+        )
+        canonical_str, _resolved_plugin = resolution
+        if logger:
+            logger.verbose_detail(f"    Resolved to: {canonical_str}")
+        # #1326: dependency-confusion fail-closed gate. Bare ``owner/repo`` on
+        # *.ghe.com falls back to github.com -- refuse before outbound
+        # validation so no probe reaches a potentially attacker-controlled URL.
+        # Escape hatch: host-qualify ``repo:`` in marketplace.json.
+        _risk = resolution.cross_repo_misconfig_risk
+        if _risk is not None:
+            return package, None, None, _marketplace_cross_repo_reason(_risk)
+        marketplace_provenance = resolution.provenance(marketplace_name, plugin_name)
+        marketplace_dep_ref = getattr(resolution, "dependency_reference", None)
+        return canonical_str, marketplace_provenance, marketplace_dep_ref, None
+    except Exception as mkt_err:
+        return package, None, None, str(mkt_err)
+
+
 def _resolve_package_references(
     packages,
     current_deps,
@@ -55,6 +175,7 @@ def _resolve_package_references(
     scope=None,
     allow_insecure=False,
     skill_subset=None,
+    default_registry=None,
 ):
     """Validate, canonicalize, and resolve package references.
 
@@ -92,82 +213,19 @@ def _resolve_package_references(
         # canonical owner/repo[#ref] string before entering the standard
         # parse path.  Anything that doesn't match is rejected as an
         # invalid format.
-        marketplace_provenance = None
-        marketplace_dep_ref = None
-        if "/" not in package and not DependencyReference.is_local_path(package):
-            try:
-                from apm_cli.marketplace.resolver import (
-                    parse_marketplace_ref,
-                    resolve_marketplace_plugin,
-                )
-
-                mkt_ref = parse_marketplace_ref(package)
-            except ImportError:
-                mkt_ref = None
-
-            if mkt_ref is not None:
-                plugin_name, marketplace_name, version_spec = mkt_ref
-                try:
-                    warning_handler = None
-                    if logger:
-
-                        def warning_handler(msg):
-                            return logger.warning(msg)
-
-                        logger.verbose_detail(
-                            f"    Resolving {plugin_name}@{marketplace_name} via marketplace..."
-                        )
-                    resolution = resolve_marketplace_plugin(
-                        plugin_name,
-                        marketplace_name,
-                        version_spec=version_spec,
-                        auth_resolver=auth_resolver,
-                        warning_handler=warning_handler,
-                    )
-                    canonical_str, _resolved_plugin = resolution
-                    if logger:
-                        logger.verbose_detail(f"    Resolved to: {canonical_str}")
-                    # #1326: dependency-confusion fail-closed gate.
-                    # Bare ``owner/repo`` on *.ghe.com falls back to
-                    # github.com -- refuse before outbound validation so
-                    # no probe reaches a potentially attacker-controlled URL.
-                    # Escape hatch: host-qualify ``repo:`` in marketplace.json.
-                    _risk = resolution.cross_repo_misconfig_risk
-                    if _risk is not None:
-                        _lead = (
-                            f"refused (dependency-confusion risk #1326): bare"
-                            f" `repo: {_risk.bare_repo_field}` on enterprise"
-                            f" marketplace '{_risk.marketplace_host}' is ambiguous."
-                            f" Host-qualify the plugin `repo` field in"
-                            f" marketplace.json to one of:"
-                        )
-                        reason = "\n".join(
-                            [
-                                _lead,
-                                f"  - '{_risk.suggested_qualified_repo}' (enterprise dep on this marketplace)",
-                                f"  - 'github.com/{_risk.bare_repo_field}' (declared cross-host dep on public github.com)",
-                            ]
-                        )
-                        invalid_outcomes.append((package, reason))
-                        if logger:
-                            logger.validation_fail(package, reason)
-                        continue
-                    marketplace_provenance = resolution.provenance(marketplace_name, plugin_name)
-                    package = canonical_str
-                    marketplace_dep_ref = getattr(resolution, "dependency_reference", None)
-                except Exception as mkt_err:
-                    reason = str(mkt_err)
-                    invalid_outcomes.append((package, reason))
-                    if logger:
-                        logger.validation_fail(package, reason)
-                    continue
-            else:
-                # No slash, not a local path, and not a marketplace ref
-                reason = "invalid format -- use 'owner/repo' or 'plugin-name@marketplace'"
-                invalid_outcomes.append((package, reason))
-                if logger:
-                    logger.validation_fail(package, reason)
-                continue
+        package, marketplace_provenance, marketplace_dep_ref, mkt_invalid = (
+            _intercept_marketplace_ref(
+                package,
+                DependencyReference,
+                auth_resolver=auth_resolver,
+                logger=logger,
+            )
+        )
+        if mkt_invalid is not None:
+            invalid_outcomes.append((package, mkt_invalid))
+            if logger:
+                logger.validation_fail(package, mkt_invalid)
+            continue
 
         # Canonicalize input
         try:
@@ -238,14 +296,22 @@ def _resolve_package_references(
 
         # Validate package exists and is accessible
         verbose = bool(logger and logger.verbose)
-        if _vpe(
+        package_accessible, registry_ref_err = _resolve_package_accessibility(
+            dep_ref,
             package,
-            verbose=verbose,
+            default_registry=default_registry,
             auth_resolver=auth_resolver,
             logger=logger,
-            dep_ref=dep_ref,
-        ):
-            updates_existing_entry = update_existing_dependency_entry_if_needed(
+            verbose=verbose,
+            validate_package_exists=_vpe,
+        )
+        if registry_ref_err is not None:
+            invalid_outcomes.append((package, registry_ref_err))
+            if logger:
+                logger.validation_fail(package, registry_ref_err)
+            continue
+        if package_accessible:
+            updates_existing_entry = _m.update_existing_dependency_entry_if_needed(
                 current_deps,
                 already_in_deps=already_in_deps,
                 apm_yml_entries=_apm_yml_entries,
@@ -408,6 +474,10 @@ def _validate_and_add_packages_to_apm_yml(
 
     current_deps = data[dep_section]["apm"] or []
 
+    from apm_cli.install.registry_wiring import get_effective_default_registry
+
+    _default_registry_for_cli = get_effective_default_registry(data)
+
     # Detect duplicates against existing deps
     existing_identities = _m._check_package_conflicts(current_deps)
 
@@ -428,6 +498,7 @@ def _validate_and_add_packages_to_apm_yml(
         scope=scope,
         allow_insecure=allow_insecure,
         skill_subset=skill_subset,
+        default_registry=_default_registry_for_cli,
     )
 
     outcome = _m._ValidationOutcome(

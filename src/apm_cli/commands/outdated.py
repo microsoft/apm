@@ -29,6 +29,15 @@ logger = logging.getLogger(__name__)
 TAG_RE = re.compile(r"^v?\d+\.\d+\.\d+")
 
 
+def _unknown_row(dep) -> OutdatedRow:
+    """Degraded row for a dependency whose check raised unexpectedly.
+
+    Keeps ``apm outdated`` from crashing when a single dependency check
+    fails; the dependency is surfaced as ``unknown`` instead.
+    """
+    return OutdatedRow(package=dep.get_unique_key(), current="(none)", latest="-", status="unknown")
+
+
 def _is_tag_ref(ref: str, package_name: str | None = None) -> bool:
     """Return True when *ref* names a version tag (plain or patterned)."""
     from ..marketplace.tag_pattern import is_version_tag_ref
@@ -620,7 +629,10 @@ def _check_deps_with_progress(
                 for dep in checkable:
                     short = dep.get_unique_key().split("/")[-1]
                     progress.update(task_id, description=f"Checking {short}")
-                    result = _check_one_dep(dep, downloader, verbose, registry_ctx)
+                    try:
+                        result = _check_one_dep(dep, downloader, verbose, registry_ctx)
+                    except Exception:
+                        result = _unknown_row(dep)
                     rows.append(result)
                     progress.advance(task_id)
     except ImportError:
@@ -636,7 +648,10 @@ def _check_deps_with_progress(
             )
         else:
             for dep in checkable:
-                rows.append(_check_one_dep(dep, downloader, verbose, registry_ctx))
+                try:
+                    rows.append(_check_one_dep(dep, downloader, verbose, registry_ctx))
+                except Exception:
+                    rows.append(_unknown_row(dep))
 
     return rows
 
@@ -668,8 +683,7 @@ def _check_parallel(
             try:
                 result = fut.result()
             except Exception:
-                pkg = dep.get_unique_key()
-                result = OutdatedRow(package=pkg, current="(none)", latest="-", status="unknown")
+                result = _unknown_row(dep)
             results[dep.get_unique_key()] = result
             progress.update(task_id, visible=False)
             progress.advance(overall_id)
@@ -694,8 +708,7 @@ def _check_parallel_plain(checkable, downloader, verbose, max_workers, registry_
             try:
                 result = fut.result()
             except Exception:
-                pkg = dep.get_unique_key()
-                result = OutdatedRow(package=pkg, current="(none)", latest="-", status="unknown")
+                result = _unknown_row(dep)
             results[dep.get_unique_key()] = result
 
     return [results[dep.get_unique_key()] for dep in checkable if dep.get_unique_key() in results]

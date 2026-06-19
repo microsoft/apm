@@ -1263,6 +1263,7 @@ class TestCursorIntegration:
 
         config = json.loads(hooks_path.read_text())
         assert "hooks" in config
+        assert config["version"] == 1
         assert "PreToolUse" in config["hooks"]
         assert "PostToolUse" in config["hooks"]
         assert "Stop" in config["hooks"]
@@ -1428,6 +1429,31 @@ class TestCursorIntegration:
 
         updated = json.loads(hooks_path.read_text())
         assert "hooks" not in updated
+
+    def test_cursor_version_emitted_on_fresh_install(self, temp_project):
+        """Fresh .cursor/hooks.json must contain top-level "version": 1."""
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+
+        integrator.integrate_package_hooks_cursor(pkg_info, temp_project)
+
+        hooks_path = temp_project / ".cursor" / "hooks.json"
+        assert hooks_path.exists()
+        config = json.loads(hooks_path.read_text())
+        assert config.get("version") == 1
+
+    def test_cursor_existing_version_preserved(self, temp_project):
+        """A pre-existing "version" value in hooks.json must not be overwritten."""
+        hooks_path = temp_project / ".cursor" / "hooks.json"
+        hooks_path.write_text(json.dumps({"version": 2, "hooks": {}}))
+
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+
+        integrator.integrate_package_hooks_cursor(pkg_info, temp_project)
+
+        config = json.loads(hooks_path.read_text())
+        assert config.get("version") == 2
 
 
 # ─── Sync/cleanup tests ──────────────────────────────────────────────────────

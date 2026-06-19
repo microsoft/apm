@@ -34,6 +34,7 @@ from apm_cli.install.package_resolution import (
     GIT_PARENT_USER_SCOPE_ERROR,
     persist_dependency_list_if_changed,  # noqa: F401 -- RULE A: re-exported for @patch('apm_cli.commands.install.*')
     resolve_parsed_dependency_reference,  # noqa: F401 -- RULE A: re-exported for @patch('apm_cli.commands.install.*')
+    update_existing_dependency_entry_if_needed,  # noqa: F401 -- RULE A: re-exported for @patch('apm_cli.commands.install.*')
     user_scope_rejection_reason,  # noqa: F401 -- RULE A: re-exported for @patch('apm_cli.commands.install.*')
 )
 from apm_cli.install.package_selection import only_packages_from_validation
@@ -440,7 +441,7 @@ def install(  # noqa: PLR0913
 
     Examples:
         apm install                             # Install existing deps from apm.yml
-        apm install org/pkg1                    # Add package to apm.yml and install
+        apm install org/pkg1#1.0.0              # Add package to apm.yml and install
         apm install --exclude codex             # Install for all except Codex CLI
         apm install --only=apm                  # Install only APM dependencies
         apm install --update                    # Update dependencies to latest Git refs
