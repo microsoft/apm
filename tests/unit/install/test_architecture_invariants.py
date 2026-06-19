@@ -217,12 +217,37 @@ def test_install_py_under_legacy_budget():
     the local-bundle handler. All glue at the handler boundary; the
     integrator and its trust gate live in
     ``apm_cli/integration/canvas_integrator.py``.
+
+    Default-registry CLI routing raised 2110 -> 2128 to wire
+    ``_default_registry_for_cli`` into ``_validate_and_add_packages_to_apm_yml``
+    and add the ``should_skip_github_probe_for_dep`` bypass in
+    ``_resolve_package_references``.  The probe-skip condition and the
+    default-registry extractor both live in
+    ``apm_cli/install/registry_wiring.py``; only the glue wiring at the
+    handler boundary remains here.
+
+    Non-semver ref guard raised 2128 -> 2136 to add the
+    ``validate_registry_ref`` call inside the bypass block so that
+    malformed semver-range refs (e.g. ``^1.0`` without a patch component)
+    are rejected with a clear error instead of falling through.  Logic
+    lives in ``validate_registry_ref`` in ``registry_wiring.py``; the
+    inline addition is a 6-line guard + a 3-line import expansion.
+
+    Review fix raised 2136 -> 2138 to record marketplace provenance in the
+    probe-skip bypass block (the normal probe path already did this; the
+    bypass dropped it for registry-routed marketplace installs).  Two lines:
+    the same ``if marketplace_provenance:`` guard the normal path uses.
+
+    Bypass+probe restructuring reduced 2138 -> 2100 by sharing the outcome
+    recording block between the registry bypass path and the normal GitHub
+    probe path, eliminating duplicated ``update_existing_dependency_entry_if_needed``
+    + ``valid_outcomes.append`` + provenance blocks.
     """
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 2110, (
-        f"commands/install.py grew to {n} LOC (budget 2110). "
+    assert n <= 2100, (
+        f"commands/install.py grew to {n} LOC (budget 2100). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.apm/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."

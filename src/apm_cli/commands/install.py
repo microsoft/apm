@@ -103,15 +103,9 @@ from ..install.mcp.command import run_mcp_install as _run_mcp_install
 from ..install.mcp.conflicts import (
     validate_mcp_conflicts as _validate_mcp_conflicts,
 )
-from ..install.mcp.registry import (
-    resolve_registry_url as _resolve_registry_url,
-)
-from ..install.mcp.registry import (
-    validate_mcp_dry_run_entry as _validate_mcp_dry_run_entry,
-)
-from ..install.mcp.registry import (
-    validate_registry_url as _validate_registry_url,
-)
+from ..install.mcp.registry import resolve_registry_url as _resolve_registry_url
+from ..install.mcp.registry import validate_mcp_dry_run_entry as _validate_mcp_dry_run_entry
+from ..install.mcp.registry import validate_registry_url as _validate_registry_url
 from ..utils.console import (  # noqa: F401 -- _rich_success re-exported; tests patch commands.install._rich_success
     _rich_echo,
     _rich_error,
@@ -125,12 +119,6 @@ from ._helpers import (
 
 # ---------------------------------------------------------------------------
 # Manifest snapshot + rollback (W2-pkg-rollback, #827)
-# ---------------------------------------------------------------------------
-# When the user runs ``apm install <pkg>``, ``_validate_and_add_packages_to_apm_yml``
-# mutates ``apm.yml`` BEFORE the install pipeline runs.  If the pipeline fails
-# (policy block, download error, etc.) the failed package would stay in
-# ``apm.yml`` forever.  These helpers snapshot the raw bytes before mutation
-# and atomically restore on failure.
 # ---------------------------------------------------------------------------
 
 
@@ -341,6 +329,7 @@ def _resolve_package_references(
     scope=None,
     allow_insecure=False,
     skill_subset=None,
+    default_registry=None,
 ):
     """Validate, canonicalize, and resolve package references.
 
@@ -354,6 +343,8 @@ def _resolve_package_references(
         Tuple of ``(valid_outcomes, invalid_outcomes, validated_packages,
         marketplace_provenance, apm_yml_entries, dependencies_changed)``.
     """
+    from ..install.registry_wiring import should_skip_github_probe_for_dep, validate_registry_ref
+
     valid_outcomes = []  # (canonical, already_present) tuples
     invalid_outcomes = []  # (package, reason) tuples
     _marketplace_provenance = {}  # canonical -> {discovered_via, marketplace_plugin_name}
@@ -515,15 +506,24 @@ def _resolve_package_references(
         # Check if package is already in dependencies (by identity)
         already_in_deps = identity in existing_identities
 
-        # Validate package exists and is accessible
         verbose = bool(logger and logger.verbose)
-        if _validate_package_exists(
-            package,
-            verbose=verbose,
-            auth_resolver=auth_resolver,
-            logger=logger,
-            dep_ref=dep_ref,
-        ):
+        if should_skip_github_probe_for_dep(dep_ref, default_registry):
+            ref_ok, ref_err = validate_registry_ref(dep_ref)
+            if not ref_ok:
+                invalid_outcomes.append((package, ref_err))
+                if logger:
+                    logger.validation_fail(package, ref_err)
+                continue
+            package_accessible = True
+        else:
+            package_accessible = _validate_package_exists(
+                package,
+                verbose=verbose,
+                auth_resolver=auth_resolver,
+                logger=logger,
+                dep_ref=dep_ref,
+            )
+        if package_accessible:
             updates_existing_entry = update_existing_dependency_entry_if_needed(
                 current_deps,
                 already_in_deps=already_in_deps,
@@ -537,10 +537,9 @@ def _resolve_package_references(
             valid_outcomes.append((canonical, already_in_deps))
             if logger:
                 logger.validation_pass(canonical, already_in_deps, updates_existing_entry)
-
             if not already_in_deps:
                 validated_packages.append(canonical)
-                existing_identities.add(identity)  # prevent duplicates within batch
+                existing_identities.add(identity)
             dependencies_changed = dependencies_changed or updates_existing_entry
             if marketplace_provenance:
                 _marketplace_provenance[identity] = marketplace_provenance
@@ -671,6 +670,10 @@ def _validate_and_add_packages_to_apm_yml(
             _rich_error(f"Failed to read {APM_YML_FILENAME}: {e}")
         sys.exit(1)
 
+    from ..install.registry_wiring import get_effective_default_registry
+
+    _default_registry_for_cli = get_effective_default_registry(data)
+
     # Ensure dependencies structure exists
     dep_section = "devDependencies" if dev else "dependencies"
     if dep_section not in data:
@@ -700,6 +703,7 @@ def _validate_and_add_packages_to_apm_yml(
         scope=scope,
         allow_insecure=allow_insecure,
         skill_subset=skill_subset,
+        default_registry=_default_registry_for_cli,
     )
 
     outcome = _ValidationOutcome(
@@ -1165,7 +1169,7 @@ def install(  # noqa: PLR0913
 
     Examples:
         apm install                             # Install existing deps from apm.yml
-        apm install org/pkg1                    # Add package to apm.yml and install
+        apm install org/pkg1#1.0.0              # Add package to apm.yml and install
         apm install --exclude codex             # Install for all except Codex CLI
         apm install --only=apm                  # Install only APM dependencies
         apm install --update                    # Update dependencies to latest Git refs

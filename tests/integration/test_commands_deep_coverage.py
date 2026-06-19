@@ -312,23 +312,24 @@ class TestMcpCommand:
 class TestOutdatedCommand:
     """Tests for ``apm outdated`` command."""
 
-    def test_outdated_no_lockfile(self, runner: CliRunner, project_no_deps: Path):
+    def test_outdated_no_lockfile(
+        self, runner: CliRunner, project_no_deps: Path, monkeypatch: pytest.MonkeyPatch
+    ):
         """Test outdated when no lockfile exists."""
+        # outdated resolves the project via Path.cwd(); pin it deterministically.
+        monkeypatch.chdir(project_no_deps)
         result = runner.invoke(
             cli,
             ["outdated"],
             catch_exceptions=False,
-            obj={"cwd": str(project_no_deps)},
         )
-        # outdated succeeds but reports no dependencies to check
-        assert result.exit_code == 0
-        assert (
-            "No remote dependencies" in result.output
-            or "no packages" in result.output.lower()
-            or "No locked dependencies" in result.output
-        )
+        # No lockfile is a hard error -- the command exits 1 and says so.
+        assert result.exit_code == 1
+        assert "No lockfile found" in result.output
 
-    def test_outdated_no_dependencies(self, runner: CliRunner, project_with_deps: Path):
+    def test_outdated_no_dependencies(
+        self, runner: CliRunner, project_with_deps: Path, monkeypatch: pytest.MonkeyPatch
+    ):
         """Test outdated with empty dependency list."""
         # Create project with lockfile but no dependencies
         project_path = project_with_deps
@@ -338,14 +339,16 @@ class TestOutdatedCommand:
         )
         (project_path / "apm.lock.yaml").write_text("version: 1\npackages: {}\n", encoding="utf-8")
 
+        # outdated resolves the project via Path.cwd(); pin it deterministically.
+        monkeypatch.chdir(project_path)
         result = runner.invoke(
             cli,
             ["outdated"],
             catch_exceptions=False,
-            obj={"cwd": str(project_path)},
         )
         # Should succeed with message about no dependencies
         assert result.exit_code == 0
+        assert "No locked dependencies" in result.output
 
     def test_outdated_with_mocked_checks(self, runner: CliRunner, project_with_deps: Path):
         """Test outdated command with mocked downloader."""
@@ -462,27 +465,35 @@ class TestDepsCommand:
 class TestCompileCommand:
     """Tests for ``apm compile`` command."""
 
-    def test_compile_no_apm_yml(self, runner: CliRunner, tmp_path: Path):
+    def test_compile_no_apm_yml(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
         """Test compile when no apm.yml exists."""
+        # compile resolves the project via Path.cwd(); pin it to an empty dir.
+        monkeypatch.chdir(tmp_path)
         result = runner.invoke(
             cli,
             ["compile"],
             catch_exceptions=False,
-            obj={"cwd": str(tmp_path)},
         )
-        # compile succeeds and auto-detects vscode target
-        assert result.exit_code == 0
+        # No apm.yml is a hard error -- the command exits 1 and says so.
+        assert result.exit_code == 1
+        assert "Not an APM project" in result.output
 
-    def test_compile_no_agents_md(self, runner: CliRunner, project_no_deps: Path):
+    def test_compile_no_agents_md(
+        self, runner: CliRunner, project_no_deps: Path, monkeypatch: pytest.MonkeyPatch
+    ):
         """Test compile when no agents.md exists."""
+        # compile resolves the project via Path.cwd(); pin it deterministically.
+        monkeypatch.chdir(project_no_deps)
         result = runner.invoke(
             cli,
             ["compile"],
             catch_exceptions=False,
-            obj={"cwd": str(project_no_deps)},
         )
-        # Should succeed and process available assets
-        assert result.exit_code == 0
+        # With an apm.yml but no APM content, compile exits 1 with guidance.
+        assert result.exit_code == 1
+        assert "No APM content found" in result.output
 
     def test_compile_single_file_mode(self, runner: CliRunner, project_no_deps: Path):
         """Test compile with a single agents.md file."""

@@ -38,8 +38,8 @@ Flags
 * ``--parallel-downloads`` -- max concurrent package downloads
   (0 disables parallelism).
 * ``--target``/``-t`` -- agent harness(es) to deploy to (e.g.
-  ``claude``, ``copilot``, ``cursor``, ``windsurf``, ``codex``,
-  ``opencode``, ``gemini``); comma-separated for multiple targets.
+  ``claude``, ``copilot``, ``cursor``, ``windsurf``, ``kiro``,
+  ``codex``, ``opencode``, ``gemini``); comma-separated for multiple targets.
   Overrides ``apm.yml targets:`` and auto-detection.
 
 These flags make ``apm update`` a strict superset of the deprecated
@@ -251,7 +251,7 @@ def _annotate_lockfile_revision_tags(project_root: Path, updates: list[RevisionP
     default=None,
     help=(
         "Agent target(s) to update for "
-        "(e.g. claude, copilot, cursor, windsurf, codex, opencode, gemini). "
+        "(e.g. claude, copilot, cursor, windsurf, kiro, codex, opencode, gemini). "
         "Comma-separated for multiple: --target claude,cursor. "
         "Highest-priority entry in the resolution chain "
         "(--target > apm.yml targets: > auto-detect)."
