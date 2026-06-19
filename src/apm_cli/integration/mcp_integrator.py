@@ -13,7 +13,6 @@ import builtins
 import copy
 import logging
 import re
-import shutil
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +29,9 @@ from apm_cli.integration.mcp_config_clean import (
 from apm_cli.integration.mcp_config_clean import (
     _clean_toml_mcp_config as _clean_toml_mcp_config,
 )
+from apm_cli.integration.mcp_vscode import (
+    _is_vscode_available as _is_vscode_available,
+)
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.console import (
     _get_console,  # noqa: F401 -- re-exported; mcp_integrator_install imports this via lazy import
@@ -37,23 +39,6 @@ from apm_cli.utils.console import (
 )
 
 _log = logging.getLogger(__name__)
-
-
-def _is_vscode_available(project_root: Path | str | None = None) -> bool:
-    """Return True when VS Code can be targeted for MCP configuration.
-
-    VS Code is considered available when either:
-    - the ``code`` CLI command is on PATH (the standard case), or
-    - a ``.vscode/`` directory exists in the resolved project root
-      (common on macOS where the user hasn't run "Install 'code' command
-      in PATH" from the VS Code command palette).
-
-    Args:
-        project_root: Project root to inspect for a `.vscode/` directory when
-            explicit project context is provided. Falls back to CWD when unset.
-    """
-    root = Path(project_root) if project_root is not None else Path.cwd()
-    return shutil.which("code") is not None or (root / ".vscode").is_dir()
 
 
 class MCPIntegrator:
@@ -163,6 +148,10 @@ class MCPIntegrator:
         if dep.tools:
             info["_apm_tools_override"] = dep.tools
 
+        # Pass through harness-specific extra keys for adapters to merge
+        if dep.extra:
+            info["_extra"] = dict(dep.extra)
+
         return info
 
     @staticmethod
@@ -223,6 +212,10 @@ class MCPIntegrator:
         # Tools overlay: embed for adapters to pick up
         if dep.tools:
             info["_apm_tools_override"] = dep.tools
+
+        # Pass through harness-specific extra keys for adapters to merge
+        if dep.extra:
+            info["_extra"] = dict(dep.extra)
 
         # Warn about overlay fields not yet applied at install time
         if dep.version:

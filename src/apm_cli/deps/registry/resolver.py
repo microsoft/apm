@@ -95,13 +95,13 @@ def _package_info_from_extracted_registry_tree(
     if not validation_result.is_valid:
         errs = "\n  - ".join(validation_result.errors)
         raise RegistryResolutionError(
-            f"registry tarball for {dep_ref.repo_url!r} did not validate "
+            f"registry archive for {dep_ref.repo_url!r} did not validate "
             f"as an APM package:\n  - {errs}"
         )
     package = validation_result.package
     if package is None:
         raise RegistryResolutionError(
-            f"registry tarball for {dep_ref.repo_url!r} validated but produced no package metadata"
+            f"registry archive for {dep_ref.repo_url!r} validated but produced no package metadata"
         )
     resolved_url = client.archive_url(owner, repo, chosen.version)
     package.source = resolved_url
@@ -304,8 +304,8 @@ class RegistryPackageResolver:
         _clear_install_target(target_path)
 
         # extract_archive dispatches on Content-Type (with magic-bytes
-        # fallback) — supports both tar.gz (default) and zip (Anthropic
-        # skills format). Hash check happens before any extraction.
+        # fallback) -- supports both zip (default) and legacy tar.gz.
+        # Hash check happens before any extraction.
         actual_hash = extract_archive(
             archive_bytes,
             chosen.digest,
@@ -374,13 +374,13 @@ class RegistryPackageResolver:
         if not validation_result.is_valid:
             errs = "\n  - ".join(validation_result.errors)
             raise RegistryResolutionError(
-                f"registry tarball for {dep_ref.repo_url!r} did not validate "
+                f"registry archive for {dep_ref.repo_url!r} did not validate "
                 f"as an APM package:\n  - {errs}"
             )
         package = validation_result.package
         if package is None:
             raise RegistryResolutionError(
-                f"registry tarball for {dep_ref.repo_url!r} validated but "
+                f"registry archive for {dep_ref.repo_url!r} validated but "
                 f"produced no package metadata"
             )
         package.source = resolved_url

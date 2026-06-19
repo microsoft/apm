@@ -43,7 +43,24 @@ dependencies:
       url: https://mcp.linear.app/sse
       headers:
         Authorization: "Bearer ${LINEAR_TOKEN}"
+
+    # 4. Self-defined remote with harness-specific extra keys
+    - name: slack
+      registry: false
+      transport: http
+      url: https://mcp.slack.com/mcp
+      oauth:
+        clientId: "<pre-registered-client-id>"
+        callbackPort: 3118
 ```
+
+Unknown keys like `oauth` above are **passthrough fields**: they are
+preserved and written into the generated config for every harness you
+install (so a Claude Code `oauth` block reaches all targets; harnesses
+that do not recognise it ignore it). Keys that collide with a modeled
+field (`command`, `url`, `headers`, `env`, ...) are rejected with a
+warning so they cannot redirect a server. See
+[Manifest Schema](../../reference/manifest-schema/) for the full rules.
 
 The full grammar (overlays, `${input:...}` variables, `tools:`
 allowlists, `package:` selection) is in

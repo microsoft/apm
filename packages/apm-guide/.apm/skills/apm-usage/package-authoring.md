@@ -505,13 +505,13 @@ EOF
 export APM_REGISTRY_TOKEN_CORP_MAIN=eyJ...
 
 # 4. Preview then publish
-apm publish --registry corp-main --dry-run -v
-apm publish --registry corp-main
+apm publish --package acme/my-skill --registry corp-main --dry-run -v
+apm publish --package acme/my-skill --registry corp-main
 ```
 
 `apm publish` auto-packs a **flat registry archive** in the project root
-(`{name}-{version}.tar.gz`) containing `apm.yml` and `.apm/` at the
-tarball root. This layout differs from the plugin bundle that
+(`{name}-{version}.zip`) containing `apm.yml` and `.apm/` at the
+archive root. This layout differs from the plugin bundle that
 `apm pack` produces (`{name}-{version}/plugin.json`). Auto-pack skips
 macOS `._*` / `.DS_Store` sidecars.
 
@@ -520,12 +520,10 @@ Auto-pack requires:
   identity differs from the package name)
 - A `.apm/` directory with at least one primitive
 
-Skill-only or custom layouts: build the tarball yourself and pass
-`--tarball`:
+Custom layouts: build the zip yourself and pass `--zip`:
 
 ```bash
-tar czf my-skill-0.0.1.tar.gz apm.yml SKILL.md
-apm publish --tarball my-skill-0.0.1.tar.gz --registry corp-main
+apm publish --package acme/my-skill --zip ./build/my-skill-0.0.1.zip --registry corp-main
 ```
 
 Upload contract: `PUT /v1/packages/{owner}/{repo}/versions/{version}`.

@@ -45,7 +45,7 @@ def _make_self_defined(name, transport="stdio", command=None, url=None, **kwargs
 class TestIsVscodeAvailable:
     def test_returns_true_when_code_on_path(self, tmp_path):
         with (
-            patch("apm_cli.integration.mcp_integrator.shutil.which", return_value="/usr/bin/code"),
+            patch("apm_cli.integration.mcp_vscode.shutil.which", return_value="/usr/bin/code"),
             patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
         ):
             assert _is_vscode_available() is True
@@ -53,14 +53,14 @@ class TestIsVscodeAvailable:
     def test_returns_true_when_vscode_dir_exists(self, tmp_path):
         (tmp_path / ".vscode").mkdir()
         with (
-            patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None),
+            patch("apm_cli.integration.mcp_vscode.shutil.which", return_value=None),
             patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
         ):
             assert _is_vscode_available() is True
 
     def test_returns_false_when_neither_available(self, tmp_path):
         with (
-            patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None),
+            patch("apm_cli.integration.mcp_vscode.shutil.which", return_value=None),
             patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
         ):
             assert _is_vscode_available() is False
@@ -68,7 +68,7 @@ class TestIsVscodeAvailable:
     def test_code_on_path_takes_precedence_over_missing_dir(self, tmp_path):
         # No .vscode dir, but 'code' is on PATH
         with (
-            patch("apm_cli.integration.mcp_integrator.shutil.which", return_value="/usr/bin/code"),
+            patch("apm_cli.integration.mcp_vscode.shutil.which", return_value="/usr/bin/code"),
             patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
         ):
             assert _is_vscode_available() is True
@@ -670,7 +670,7 @@ class TestInstallProjectRootDetection:
     @patch("apm_cli.registry.operations.MCPServerOperations")
     @patch("apm_cli.integration.mcp_integrator.MCPIntegrator._install_for_runtime")
     @patch("apm_cli.runtime.manager.RuntimeManager")
-    @patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None)
+    @patch("apm_cli.integration.mcp_vscode.shutil.which", return_value=None)
     def test_install_uses_explicit_project_root_for_workspace_runtime_detection(
         self, _which, mock_mgr_cls, mock_install_rt, mock_ops_cls, tmp_path
     ):

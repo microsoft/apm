@@ -364,7 +364,7 @@ class TestClaudeAutoDetection(unittest.TestCase):
         scripts = {"start": "claude --interactive"}
         detected = MCPIntegrator._detect_runtimes(scripts)
         self.assertIn("claude", detected)
-        with patch("apm_cli.integration.mcp_integrator.shutil.which", return_value=None):
+        with patch("apm_cli.integration.mcp_vscode.shutil.which", return_value=None):
             filtered = MCPIntegrator._filter_runtimes(detected)
             self.assertNotIn("claude", filtered)
 

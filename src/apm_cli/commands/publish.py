@@ -1,4 +1,4 @@
-"""``apm publish`` command — upload a packed tarball to a registry.
+"""``apm publish`` command -- upload a packed zip archive to a registry.
 
 Implements docs/proposals/registry-api.md §5.3:
 ``PUT /v1/packages/{owner}/{repo}/versions/{version}``
@@ -23,7 +23,7 @@ _PUBLISH_HELP = """\
 Publish a package to a registry.
 
 Reads apm.yml for the package name/version, packs a flat registry zip archive
-(``apm.yml`` + ``.apm/`` at the archive root — not ``apm pack`` plugin bundles),
+(``apm.yml`` + ``.apm/`` at the archive root -- not ``apm pack`` plugin bundles),
 or uses a pre-built zip via --zip, then uploads to the registry via
 PUT /v1/packages/{owner}/{repo}/versions/{version}.
 
@@ -33,16 +33,16 @@ Requires the 'registries' experimental feature:
 Examples:
 
   # Auto-pack and publish to the only configured registry:
-  apm publish
+  apm publish --package acme/my-skill
 
   # Choose a registry when multiple are configured:
-  apm publish --registry corp-main
+  apm publish --package acme/my-skill --registry corp-main
 
   # Publish a pre-built zip (skip the pack step):
-  apm publish --zip ./build/my-package-1.0.0.zip
+  apm publish --package acme/my-skill --zip ./build/my-package-1.0.0.zip
 
   # Preview what would be uploaded:
-  apm publish --dry-run
+  apm publish --package acme/my-skill --dry-run
 """
 
 
@@ -119,7 +119,7 @@ def publish_cmd(ctx, registry_name, package_id, zip_path, dry_run, verbose):
     if dry_run:
         logger.info(f"Would publish {owner}/{repo}@{version} to {registry_name} ({base_url})")
         logger.info(f"  archive : {archive}  ({archive_size:,} bytes)")
-        logger.info("(dry-run — nothing uploaded)")
+        logger.info("(dry-run -- nothing uploaded)")
         return
 
     # ----------------------------------------------------------- upload
@@ -129,7 +129,7 @@ def publish_cmd(ctx, registry_name, package_id, zip_path, dry_run, verbose):
     auth = make_auth_context(registry_name)
     client = RegistryClient(base_url, auth)
 
-    logger.info(f"Publishing {owner}/{repo}@{version} to {registry_name} …")
+    logger.info(f"Publishing {owner}/{repo}@{version} to {registry_name}...")
 
     archive_bytes = archive.read_bytes()
     try:
@@ -275,7 +275,7 @@ def _handle_publish_error(
         from ..deps.registry.auth import registry_token_env_var
 
         raise click.ClickException(
-            f"Forbidden — your token does not have publish permission for "
+            f"Forbidden -- your token does not have publish permission for "
             f"{owner}/{repo} in {registry_name!r}.\n"
             f"Check the token configured via {registry_token_env_var(registry_name)}."
         )
