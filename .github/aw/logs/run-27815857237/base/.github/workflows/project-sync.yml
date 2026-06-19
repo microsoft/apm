@@ -1,0 +1,47 @@
+name: PGS project sync
+
+on:
+  issues:
+    types: [opened, labeled, unlabeled, milestoned, demilestoned, closed, reopened]
+  pull_request_target:
+    types: [opened, labeled, unlabeled, closed, reopened]
+  workflow_dispatch:
+    inputs:
+      content_id:
+        description: "Issue or PR GraphQL node ID (e.g. I_kwDO... / PR_kwDO...). Obtain via: gh api graphql -f query='query{repository(owner:\"microsoft\",name:\"apm\"){issue(number:N){id}}}'"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      contains(toJson(github.event.issue.labels.*.name), 'theme/') ||
+      contains(toJson(github.event.pull_request.labels.*.name), 'theme/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/project
+      - name: Resolve content node ID
+        id: cid
+        env:
+          # Pass workflow_dispatch input through env to avoid shell-level
+          # template interpolation (script-injection hardening, GHSA-pattern).
+          # github.event.* node IDs are GitHub-generated opaque IDs, safe to
+          # interpolate directly.
+          INPUT_CONTENT_ID: ${{ inputs.content_id }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "id=$INPUT_CONTENT_ID" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "issues" ]; then
+            echo "id=${{ github.event.issue.node_id }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "id=${{ github.event.pull_request.node_id }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Sync to project
+        env:
+          GITHUB_TOKEN: ${{ secrets.PROJECT_SYNC_PAT }}
+        run: python3 scripts/project/sync_item.py --content-id "${{ steps.cid.outputs.id }}"

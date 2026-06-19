@@ -1,0 +1,195 @@
+﻿2026-06-19T09:27:14.8249141Z ##[group]Run actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+2026-06-19T09:27:14.8249836Z with:
+2026-06-19T09:27:14.8251370Z   script: const { setupGlobals } = require('/home/runner/work/_temp/gh-aw/actions/setup_globals.cjs');
+setupGlobals(core, github, context, exec, io, getOctokit);
+const { main } = require('/home/runner/work/_temp/gh-aw/actions/collect_ndjson_output.cjs');
+await main();
+
+2026-06-19T09:27:14.8259002Z   github-token: ***
+2026-06-19T09:27:14.8259422Z   debug: false
+2026-06-19T09:27:14.8259788Z   user-agent: actions/github-script
+2026-06-19T09:27:14.8260252Z   result-encoding: json
+2026-06-19T09:27:14.8260627Z   retries: 0
+2026-06-19T09:27:14.8261029Z   retry-exempt-status-codes: 400,401,403,404,422
+2026-06-19T09:27:14.8261522Z env:
+2026-06-19T09:27:14.8261848Z   DEFAULT_BRANCH: main
+2026-06-19T09:27:14.8262230Z   GH_AW_ASSETS_ALLOWED_EXTS: 
+2026-06-19T09:27:14.8262643Z   GH_AW_ASSETS_BRANCH: 
+2026-06-19T09:27:14.8263026Z   GH_AW_ASSETS_MAX_SIZE_KB: 0
+2026-06-19T09:27:14.8263540Z   GH_AW_MCP_LOG_DIR: /tmp/gh-aw/mcp-logs/safeoutputs
+2026-06-19T09:27:14.8264382Z   GH_AW_WORKFLOW_ID_SANITIZED: prreviewpanel
+2026-06-19T09:27:14.8278103Z   GH_AW_MODEL_MULTIPLIERS: {
+  "version": "1",
+  "description": "Effective Tokens (ET) computation data per the gh-aw Effective Tokens Specification v0.2.0. Token class weights are applied first to normalize across token classes, then the per-model multiplier scales the result relative to the reference model. The registry keeps complete model history; entries are removed only by explicit manual deletion.",
+  "reference_model": "claude-sonnet-4.5",
+  "token_class_weights": {
+    "input": 1.0,
+    "cached_input": 0.1,
+    "output": 4.0,
+    "reasoning": 4.0,
+    "cache_write": 1.0
+  },
+  "multipliers": {
+    "claude-haiku-4-5": 0.33,
+    "claude-haiku-4.5": 0.33,
+    "claude-haiku-4-5-20251001": 0.33,
+    "claude-3-5-haiku": 0.1,
+    "claude-3-haiku": 0.1,
+    "claude-sonnet-4": 1.0,
+    "claude-sonnet-4-20250514": 1.0,
+    "claude-sonnet-4-5": 6.0,
+    "claude-sonnet-4.5": 6.0,
+    "claude-sonnet-4-5-20250929": 6.0,
+    "claude-sonnet-4-6": 9.0,
+    "claude-sonnet-4.6": 9.0,
+    "claude-3-5-sonnet": 1.0,
+    "claude-3-7-sonnet": 1.0,
+    "claude-3-sonnet": 1.0,
+    "claude-opus-4": 5.0,
+    "claude-opus-4-20250514": 5.0,
+    "claude-opus-4-1": 5.0,
+    "claude-opus-4-1-20250805": 5.0,
+    "claude-opus-4-5": 15.0,
+    "claude-opus-4-5-20251101": 15.0,
+    "claude-opus-4-6": 27.0,
+    "claude-opus-4-7": 27.0,
+    "claude-opus-4.5": 15.0,
+    "claude-opus-4.6": 27.0,
+    "claude-3-5-opus": 5.0,
+    "claude-3-opus": 5.0,
+    "gpt-4o": 0.33,
+    "gpt-4o-2024-05-13": 0.33,
+    "gpt-4o-2024-08-06": 0.33,
+    "gpt-4o-2024-11-20": 0.33,
+    "gpt-4o-mini": 0.33,
+    "gpt-4o-mini-2024-07-18": 0.33,
+    "gpt-4.1": 1.0,
+    "gpt-4.1-2025-04-14": 1.0,
+    "gpt-41-copilot": 1.0,
+    "gpt-4.1-mini": 1.0,
+    "gpt-4.1-nano": 1.0,
+    "gpt-4-turbo": 1.0,
+    "gpt-4": 1.0,
+    "gpt-4-0613": 1.0,
+    "gpt-4-o-preview": 1.0,
+    "gpt-3.5-turbo": 0.0,
+    "gpt-3.5-turbo-0613": 0.0,
+    "gpt-5": 1.0,
+    "gpt-5-2025-08-07": 1.0,
+    "gpt-5-search-api": 1.0,
+    "gpt-5-search-api-2025-10-14": 1.0,
+    "gpt-5-chat-latest": 1.0,
+    "gpt-5-mini": 0.33,
+    "gpt-5-mini-2025-08-07": 0.33,
+    "gpt-5-nano": 0.05,
+    "gpt-5-nano-2025-08-07": 0.05,
+    "gpt-5-pro": 2.0,
+    "gpt-5-pro-2025-10-06": 2.0,
+    "gpt-5.1": 3.0,
+    "gpt-5.1-2025-11-13": 3.0,
+    "gpt-5.1-chat-latest": 3.0,
+    "gpt-5-codex": 1.0,
+    "gpt-5.1-codex": 3.0,
+    "gpt-5.1-codex-mini": 3.0,
+    "gpt-5.1-codex-max": 3.0,
+    "gpt-5.1-codex-max-customsummarizer": 3.0,
+    "gpt-5.2": 3.0,
+    "gpt-5.2-2025-12-11": 3.0,
+    "gpt-5.2-chat-latest": 3.0,
+    "gpt-5.2-codex": 3.0,
+    "gpt-5.2-pro": 3.0,
+    "gpt-5.2-pro-2025-12-11": 3.0,
+    "gpt-5.3-chat-latest": 3.0,
+    "gpt-5.3-codex": 6.0,
+    "gpt-5.3-codex-api-preview": 6.0,
+    "gpt-5.4": 6.0,
+    "gpt-5.4-2026-03-05": 6.0,
+    "gpt-5.4-mini": 6.0,
+    "gpt-5.4-mini-2026-03-17": 6.0,
+    "gpt-5.4-nano": 6.0,
+    "gpt-5.4-nano-2026-03-17": 6.0,
+    "gpt-5.4-pro": 6.0,
+    "gpt-5.4-pro-2026-03-05": 6.0,
+    "gpt-5.5": 7.5,
+    "gpt-5.5-2026-04-23": 7.5,
+    "gpt-5.5-pro": 2.0,
+    "gpt-5.5-pro-2026-04-23": 2.0,
+    "o1": 3.0,
+    "o1-2024-12-17": 3.0,
+    "o1-mini": 0.5,
+    "o1-pro": 10.0,
+    "o1-pro-2025-03-19": 10.0,
+    "o3": 3.0,
+    "o3-2025-04-16": 3.0,
+    "o3-mini": 0.5,
+    "o3-mini-2025-01-31": 0.5,
+    "o3-pro": 10.0,
+    "o3-pro-2025-06-10": 10.0,
+    "o3-deep-research": 3.0,
+    "o3-deep-research-2025-06-26": 3.0,
+    "o4-mini": 0.5,
+    "o4-mini-2025-04-16": 0.5,
+    "o4-mini-deep-research": 0.5,
+    "o4-mini-deep-research-2025-06-26": 0.5,
+    "gemini-2.5-pro": 1.0,
+    "gemini-2.5-pro-preview-tts": 1.0,
+    "gemini-2.5-flash": 0.2,
+    "gemini-2.5-flash-native-audio-latest": 0.2,
+    "gemini-2.5-flash-native-audio-preview-09-2025": 0.2,
+    "gemini-2.5-flash-native-audio-preview-12-2025": 0.2,
+    "gemini-2.5-flash-preview-tts": 0.2,
+    "gemini-2.5-flash-image": 0.2,
+    "gemini-2.5-flash-lite": 0.1,
+    "gemini-2.0-flash": 0.1,
+    "gemini-2.0-flash-001": 0.1,
+    "gemini-2.0-flash-lite": 0.1,
+    "gemini-2.0-flash-lite-001": 0.1,
+    "gemini-1.5-pro": 1.0,
+    "gemini-1.5-flash": 0.1,
+    "gemini-flash-latest": 0.2,
+    "gemini-flash-lite-latest": 0.1,
+    "gemini-pro-latest": 1.0,
+    "gemini-3-flash-preview": 0.33,
+    "gemini-3-pro-preview": 6.0,
+    "gemini-3-pro-image-preview": 6.0,
+    "gemini-3.1-pro-preview": 6.0,
+    "gemini-3.1-pro-preview-customtools": 6.0,
+    "gemini-3.1-flash-live-preview": 0.1,
+    "gemini-3.1-flash-lite": 0.1,
+    "gemini-3.1-flash-lite-preview": 0.1,
+    "gemini-3.1-flash-image-preview": 0.33,
+    "gemini-3.1-flash-tts-preview": 0.1,
+    "gemini-3.5-flash": 14.0,
+    "gemini-2.5-computer-use-preview": 0.2,
+    "gemini-2.5-computer-use-preview-10-2025": 0.2,
+    "gemini-robotics-er-1.5-preview": 0.2,
+    "gemini-robotics-er-1.6-preview": 0.2,
+    "deep-research-max-preview-04-2026": 1.0,
+    "deep-research-preview-04-2026": 1.0,
+    "deep-research-pro-preview-12-2025": 1.0,
+    "gemma-4-26b-a4b-it": 0.1,
+    "gemma-4-31b-it": 0.2,
+    "grok-code-fast-1": 0.33,
+    "raptor-mini": 0.33
+  }
+}
+2026-06-19T09:27:14.8292155Z   GITHUB_AW_OTEL_TRACE_ID: fb74a35b6e34e823bbe06fd7fcc5d027
+2026-06-19T09:27:14.8292565Z   GITHUB_AW_OTEL_PARENT_SPAN_ID: e687aae9e7225de6
+2026-06-19T09:27:14.8292910Z   GITHUB_AW_OTEL_JOB_START_MS: 1781859382528
+2026-06-19T09:27:14.8293329Z   GH_AW_SAFE_OUTPUTS: /home/runner/work/_temp/gh-aw/safeoutputs/outputs.jsonl
+2026-06-19T09:27:14.8307700Z   GH_AW_ALLOWED_DOMAINS: *.githubusercontent.com,api.business.githubcopilot.com,api.enterprise.githubcopilot.com,api.github.com,api.githubcopilot.com,api.individual.githubcopilot.com,api.snapcraft.io,archive.ubuntu.com,azure.archive.ubuntu.com,codeload.github.com,crl.geotrust.com,crl.globalsign.com,crl.identrust.com,crl.sectigo.com,crl.thawte.com,crl.usertrust.com,crl.verisign.com,crl3.digicert.com,crl4.digicert.com,crls.ssl.com,docs.github.com,github-cloud.githubusercontent.com,github-cloud.s3.amazonaws.com,github.blog,github.com,github.githubassets.com,host.docker.internal,json-schema.org,json.schemastore.org,keyserver.ubuntu.com,lfs.github.com,objects.githubusercontent.com,ocsp.digicert.com,ocsp.geotrust.com,ocsp.globalsign.com,ocsp.identrust.com,ocsp.sectigo.com,ocsp.ssl.com,ocsp.thawte.com,ocsp.usertrust.com,ocsp.verisign.com,packagecloud.io,packages.cloud.google.com,packages.microsoft.com,patch-diff.githubusercontent.com,ppa.launchpad.net,raw.githubusercontent.com,registry.npmjs.org,s.symcb.com,s.symcd.com,security.ubuntu.com,telemetry.enterprise.githubcopilot.com,ts-crl.ws.symantec.com,ts-ocsp.ws.symantec.com,www.googleapis.com
+2026-06-19T09:27:14.8322319Z   GITHUB_SERVER_URL: https://github.com
+2026-06-19T09:27:14.8322654Z   GITHUB_API_URL: https://api.github.com
+2026-06-19T09:27:14.8322943Z ##[endgroup]
+2026-06-19T09:27:14.9417891Z Loaded validation config from /home/runner/work/_temp/gh-aw/safeoutputs/validation.json
+2026-06-19T09:27:14.9424628Z Found 1 unique mentions in text
+2026-06-19T09:27:15.2043420Z Cached 4 recent collaborators for optimistic resolution
+2026-06-19T09:27:15.2044657Z Resolved 0 mentions via individual API calls
+2026-06-19T09:27:15.2045142Z Total allowed mentions: 1
+2026-06-19T09:27:15.2045508Z [OUTPUT COLLECTOR] Allowed mentions: sergio-sisternes-epam
+2026-06-19T09:27:15.2046642Z [INGESTION] Reading config from: /home/runner/work/_temp/gh-aw/safeoutputs/config.json
+2026-06-19T09:27:15.2048215Z [INGESTION] Raw config content: {"add_comment":{"max":2},"create_report_incomplete_issue":{},"missing_data":{},"missing_tool":{},"noop":{"max":1,"report-as-issue":"true"},"remove_labels":{"allowed":["panel-review","panel-approved","panel-rejected"],"max":3},"report_incomplete":{}}
+2026-06-19T09:27:15.2049226Z 
+2026-06-19T09:27:15.2049877Z [INGESTION] Parsed config keys: ["add_comment","create_report_incomplete_issue","missing_data","missing_tool","noop","remove_labels","report_incomplete"]
+2026-06-19T09:27:15.2050694Z [INGESTION] Output file path: /home/runner/work/_temp/gh-aw/safeoutputs/outputs.jsonl
+2026-06-19T09:27:15.2051270Z Output file does not exist: /home/runner/work/_temp/gh-aw/safeoutputs/outputs.jsonl

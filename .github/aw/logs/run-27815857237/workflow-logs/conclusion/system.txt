@@ -1,0 +1,9 @@
+2026-06-19T09:27:21.0890000Z Requested labels: ubuntu-slim
+2026-06-19T09:27:21.0890000Z Job defined at: microsoft/apm/.github/workflows/pr-review-panel.lock.yml@refs/heads/main
+2026-06-19T09:27:21.0890000Z Waiting for a runner to pick up this job...
+2026-06-19T09:27:21.0870000Z Evaluating conclusion.if
+2026-06-19T09:27:21.0870000Z Evaluating: (always() && (((needs.agent.result != 'skipped') || (needs.activation.outputs.lockdown_check_failed == 'true') || (needs.activation.outputs.stale_lock_file_failed == 'true'))))
+2026-06-19T09:27:21.0870000Z Expanded: (true && (('failure' != 'skipped') || (needs.activation.outputs.lockdown_check_failed == 'true') || (needs.activation.outputs.stale_lock_file_failed == 'true')))
+2026-06-19T09:27:21.0870000Z Result: true
+2026-06-19T09:27:23.6450000Z Job is about to start running on the hosted runner: GitHub Actions 1041615712
+2026-06-19T09:27:23.6440000Z Job is waiting for a hosted runner to come online.

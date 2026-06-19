@@ -1,0 +1,8 @@
+2026-06-17T15:43:19.7420000Z Evaluating agent.if
+2026-06-17T15:43:19.7420000Z Evaluating: success()
+2026-06-17T15:43:19.7420000Z Result: true
+2026-06-17T15:43:19.7730000Z Requested labels: ubuntu-latest
+2026-06-17T15:43:19.7730000Z Job defined at: microsoft/apm/.github/workflows/pr-review-panel.lock.yml@refs/heads/main
+2026-06-17T15:43:19.7730000Z Waiting for a runner to pick up this job...
+2026-06-17T15:43:20.6710000Z Job is waiting for a hosted runner to come online.
+2026-06-17T15:43:20.6720000Z Job is about to start running on the hosted runner: GitHub Actions 1041231282

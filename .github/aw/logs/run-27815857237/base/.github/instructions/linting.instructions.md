@@ -1,0 +1,69 @@
+---
+description: "Lint contract: run BEFORE pushing or producing artifacts that claim green CI. Mirrors the CI Lint job."
+---
+
+# Linting (canonical contract)
+
+The CI `Lint` job is a hard gate. Mirror it locally before `git push`
+and before producing any artifact (PR body, release note, audit
+report) that claims CI is green.
+
+## CI-mirror commands
+
+The `Lint` job runs (see `.github/workflows/ci.yml`):
+
+1. `uv run --extra dev ruff check src/ tests/`
+2. `uv run --extra dev ruff format --check src/ tests/`
+3. YAML I/O safety guard (rejects raw `yaml.dump(..., handle)` outside
+   `utils/yaml_io.py`; mark approved exceptions with `# yaml-io-exempt`).
+4. File length guardrail (no `src/**/*.py` may exceed **2450 lines**).
+5. No raw `str(path.relative_to(...))` patterns -- use
+   `portable_relpath()` from `apm_cli.utils.paths`.
+6. **Code duplication guardrail (pylint R0801):**
+   `uv run --extra dev python -m pylint --disable=all --enable=R0801 \
+   --min-similarity-lines=10 --fail-on=R0801 src/apm_cli/`
+7. Auth-protocol boundary check: `bash scripts/lint-auth-signals.sh`
+
+All seven must succeed. CI evaluates these on the **PR merge commit**
+(HEAD merged with current `main`), so duplication introduced by a
+recent main commit can fail your PR even if your own diff is clean.
+Always merge `main` locally before running the mirror.
+
+## Local workflow
+
+- **Auto-fix style+imports:** `uv run --extra dev ruff check src/ tests/ --fix`
+- **Apply formatter:** `uv run --extra dev ruff format src/ tests/`
+- **Verify the full Lint job (must all be silent / exit 0):**
+  ```bash
+  uv run --extra dev ruff check src/ tests/ \
+    && uv run --extra dev ruff format --check src/ tests/ \
+    && uv run --extra dev python -m pylint --disable=all --enable=R0801 \
+       --min-similarity-lines=10 --fail-on=R0801 src/apm_cli/ \
+    && bash scripts/lint-auth-signals.sh
+  ```
+  (The YAML, file-length, and `relative_to` guards are pure-grep one-liners
+  from `ci.yml`; run them directly if you have touched those surfaces.)
+
+Always run the verify chain before `git push` -- the CI Lint job
+fails on any remaining diagnostic.
+
+## Common surprises
+
+- `RUF043` -- use `match=r"..."` for `pytest.raises` patterns with
+  regex metacharacters (`(`, `)`, `[`, etc.).
+- `UP006` / `UP045` -- use `list` / `dict` / `X | None` instead of
+  `List` / `Dict` / `Optional`.
+- `RUF100` -- drop stale `# noqa` directives.
+- `F401` / `F841` -- remove unused imports / unused locals.
+- `SIM103` -- inline negated returns where the body is one line.
+- `I001` -- import sort order (auto-fixable).
+- `R0801` -- 10+ identical lines across two files. Extract the shared
+  block into a base class / helper module instead of disabling.
+
+## Lifecycle binding
+
+This is the canonical lint contract for the repo. Skills that
+produce artifacts asserting green CI -- notably `pr-description-skill`
+(whose "Validation evidence" row covers CI checks) -- inherit this
+gate transitively. Do NOT redefine ruff or pylint commands inside
+individual skills; honor this instruction before invoking them.

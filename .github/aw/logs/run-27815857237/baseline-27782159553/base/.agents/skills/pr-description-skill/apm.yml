@@ -1,0 +1,16 @@
+name: pr-description-skill
+version: 0.1.0
+description: Authors one anchored, mermaid-validated GitHub-Flavored Markdown PR body for any microsoft/apm pull request -- TL;DR, WHY/WHAT/HOW, trade-offs, validation evidence, how-to-test. Single-thread skill; consumed by the issue/PR orchestrators at every PR-open site and usable standalone.
+author: Microsoft
+license: MIT
+type: skill
+
+# Stand-alone primitive: no transitive APM deps. The skill body honors
+# the consumer repo's linting / encoding rules at runtime by activating
+# whichever instructions the consumer has installed. Extracted from
+# .apm/skills/ so the issue/PR orchestrators can declare it as a
+# first-class dependency (genesis step 3.5 declaration mechanism = BOTH)
+# and so consumers can install it standalone for manual PR-body work.
+dependencies:
+  apm: []
+  mcp: []

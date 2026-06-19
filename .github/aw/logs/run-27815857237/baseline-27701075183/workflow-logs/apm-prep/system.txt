@@ -1,0 +1,8 @@
+2026-06-17T15:41:26.6880000Z Evaluating apm-prep.if
+2026-06-17T15:41:26.6880000Z Evaluating: success()
+2026-06-17T15:41:26.6880000Z Result: true
+2026-06-17T15:41:27.1360000Z Requested labels: ubuntu-slim
+2026-06-17T15:41:27.1360000Z Job defined at: microsoft/apm/.github/workflows/pr-review-panel.lock.yml@refs/heads/main
+2026-06-17T15:41:27.1360000Z Waiting for a runner to pick up this job...
+2026-06-17T15:41:40.0330000Z Job is waiting for a hosted runner to come online.
+2026-06-17T15:41:40.0340000Z Job is about to start running on the hosted runner: GitHub Actions 1041231045

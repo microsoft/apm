@@ -1,0 +1,1243 @@
+﻿2026-06-19T08:56:50.7857553Z ##[group]Run set -o pipefail
+2026-06-19T08:56:50.7858292Z [36;1mset -o pipefail[0m
+2026-06-19T08:56:50.7858788Z [36;1mprintf '%s' "$(date +%s%3N)" > /tmp/gh-aw/agent_cli_start_ms.txt[0m
+2026-06-19T08:56:50.7859491Z [36;1mtouch /tmp/gh-aw/agent-step-summary.md[0m
+2026-06-19T08:56:50.7860057Z [36;1mGH_AW_NODE_BIN=$(command -v node 2>/dev/null || true)[0m
+2026-06-19T08:56:50.7860686Z [36;1mexport GH_AW_NODE_BIN[0m
+2026-06-19T08:56:50.7861178Z [36;1mexport COPILOT_API_KEY="$COPILOT_DUMMY_BYOK"[0m
+2026-06-19T08:56:50.7861787Z [36;1m(umask 177 && touch /tmp/gh-aw/agent-stdio.log)[0m
+2026-06-19T08:56:50.7875393Z [36;1mprintf '%s\n' '{"$schema":"https://github.com/github/gh-aw-firewall/releases/download/v0.25.55/awf-config.schema.json","network":{"allowDomains":["*.githubusercontent.com","api.business.githubcopilot.com","api.enterprise.githubcopilot.com","api.github.com","api.githubcopilot.com","api.individual.githubcopilot.com","api.snapcraft.io","archive.ubuntu.com","azure.archive.ubuntu.com","codeload.github.com","crl.geotrust.com","crl.globalsign.com","crl.identrust.com","crl.sectigo.com","crl.thawte.com","crl.usertrust.com","crl.verisign.com","crl3.digicert.com","crl4.digicert.com","crls.ssl.com","docs.github.com","github-cloud.githubusercontent.com","github-cloud.s3.amazonaws.com","github.blog","github.com","github.githubassets.com","host.docker.internal","json-schema.org","json.schemastore.org","keyserver.ubuntu.com","lfs.github.com","objects.githubusercontent.com","ocsp.digicert.com","ocsp.geotrust.com","ocsp.globalsign.com","ocsp.identrust.com","ocsp.sectigo.com","ocsp.ssl.com","ocsp.thawte.com","ocsp.usertrust.com","ocsp.verisign.com","packagecloud.io","packages.cloud.google.com","packages.microsoft.com","patch-diff.githubusercontent.com","ppa.launchpad.net","raw.githubusercontent.com","registry.npmjs.org","s.symcb.com","s.symcd.com","security.ubuntu.com","telemetry.enterprise.githubcopilot.com","ts-crl.ws.symantec.com","ts-ocsp.ws.symantec.com","www.googleapis.com"]},"apiProxy":{"enabled":true,"enableTokenSteering":true,"maxRuns":500,"maxEffectiveTokens":25000000,"models":{"agent":["sonnet-6x","gpt-5.4","gpt-5.3","gemini-pro","any"],"antigravity":["copilot/antigravity*","google/antigravity*","gemini/antigravity*"],"any":["copilot/*","anthropic/*","openai/*","google/*","gemini/*"],"claude":["agent"],"codex":["agent"],"coding":["copilot/gpt-5*codex*","openai/gpt-5*codex*","gpt-5-codex"],"computer-use":["copilot/*computer-use*","google/*computer-use*","gemini/*computer-use*","openai/*computer-use*"],"copilot":["agent"],"deep-research":["copilot/deep-research*","copilot/o3-deep-research*","copilot/o4-mini-deep-research*","google/deep-research*","gemini/deep-research*","openai/o3-deep-research*","openai/o4-mini-deep-research*"],"gemini":["agent"],"gemini-3-flash":["copilot/gemini-3*flash*","google/gemini-3*flash*","gemini/gemini-3*flash*"],"gemini-3-pro":["copilot/gemini-3*pro*","google/gemini-3*pro*","gemini/gemini-3*pro*"],"gemini-3.1-flash":["copilot/gemini-3.1*flash*","google/gemini-3.1*flash*","gemini/gemini-3.1*flash*"],"gemini-3.1-pro":["copilot/gemini-3.1*pro*","google/gemini-3.1*pro*","gemini/gemini-3.1*pro*"],"gemini-3.5-flash":["copilot/gemini-3.5*flash*","google/gemini-3.5*flash*","gemini/gemini-3.5*flash*"],"gemini-flash":["copilot/gemini-*flash*","google/gemini-*flash*","gemini/gemini-*flash*"],"gemini-flash-lite":["copilot/gemini-*flash*lite*","google/gemini-*flash*lite*","gemini/gemini-*flash*lite*"],"gemini-pro":["copilot/gemini-*pro*","google/gemini-*pro*","gemini/gemini-*pro*"],"gemma":["copilot/gemma*","google/gemma*","gemini/gemma*"],"gpt-4.1":["copilot/gpt-4.1*","openai/gpt-4.1*"],"gpt-5":["copilot/gpt-5*","openai/gpt-5*"],"gpt-5-codex":["copilot/gpt-5*codex*","openai/gpt-5*codex*"],"gpt-5-mini":["copilot/gpt-5*mini*","openai/gpt-5*mini*"],"gpt-5-nano":["copilot/gpt-5*nano*","openai/gpt-5*nano*"],"gpt-5-pro":["copilot/gpt-5*pro*","openai/gpt-5*pro*"],"gpt-5.2":["copilot/gpt-5.2*","openai/gpt-5.2*"],"gpt-5.3":["copilot/gpt-5.3*","openai/gpt-5.3*"],"gpt-5.4":["copilot/gpt-5.4*","openai/gpt-5.4*"],"gpt-5.5":["copilot/gpt-5.5*","openai/gpt-5.5*"],"haiku":["copilot/*haiku*","anthropic/*haiku*"],"large":["sonnet","gpt-5-pro","gpt-5","gemini-pro"],"mini":["haiku","gpt-5-mini","gpt-5-nano","gemini-flash-lite"],"opus":["copilot/*opus*","anthropic/*opus*"],"opusplan":["opus?effort=high"],"reasoning":["copilot/o1*","copilot/o3*","copilot/o4*","openai/o1*","openai/o3*","openai/o4*"],"robotics":["copilot/*robotics*","google/*robotics*","gemini/*robotics*"],"small":["mini"],"sonnet":["copilot/*sonnet*","anthropic/*sonnet*"],"sonnet-6x":["copilot/*sonnet-4-5-*","anthropic/*sonnet-4-5-*","copilot/*sonnet-4-6*","anthropic/*sonnet-4-6*"],"summarization":["haiku","gpt-5-mini","gemini-flash-lite","mini"],"vision":["copilot/gemini-*image*","gemini/gemini-*image*","copilot/gemini-*flash*","gemini/gemini-*flash*"]}},"container":{"imageTag":"0.25.55"}}' > "${RUNNER_TEMP}/gh-aw/awf-config.json"[0m
+2026-06-19T08:56:50.7890050Z [36;1mcp "${RUNNER_TEMP}/gh-aw/awf-config.json" /tmp/gh-aw/awf-config.json[0m
+2026-06-19T08:56:50.7890699Z [36;1mGH_AW_DOCKER_HOST_PATH_PREFIX_ARGS=""[0m
+2026-06-19T08:56:50.7891337Z [36;1mif [[ "${DOCKER_HOST:-}" =~ ^tcp:// ]]; then[0m
+2026-06-19T08:56:50.7891937Z [36;1m  GH_AW_DOCKER_HOST_PATH_PREFIX_ARGS="--docker-host-path-prefix /tmp/gh-aw"[0m
+2026-06-19T08:56:50.7892579Z [36;1mfi[0m
+2026-06-19T08:56:50.7892948Z [36;1m# shellcheck disable=SC1003[0m
+2026-06-19T08:56:50.7895412Z [36;1msudo -E awf --config "${RUNNER_TEMP}/gh-aw/awf-config.json" --container-workdir "${GITHUB_WORKSPACE}" --mount "${RUNNER_TEMP}/gh-aw:${RUNNER_TEMP}/gh-aw:ro" --mount "${RUNNER_TEMP}/gh-aw:/host${RUNNER_TEMP}/gh-aw:ro" ${GH_AW_DOCKER_HOST_PATH_PREFIX_ARGS} --env-all --exclude-env COPILOT_GITHUB_TOKEN --exclude-env GITHUB_MCP_SERVER_TOKEN --exclude-env MCP_GATEWAY_API_KEY --log-level info --proxy-logs-dir /tmp/gh-aw/sandbox/firewall/logs --audit-dir /tmp/gh-aw/sandbox/firewall/audit --enable-host-access --allow-host-ports 80,443,8080 --skip-pull \[0m
+2026-06-19T08:56:50.7900191Z [36;1m  -- /bin/bash -c 'export PATH="${RUNNER_TEMP}/gh-aw/mcp-cli/bin:$PATH" && export PATH="$(find /opt/hostedtoolcache /home/runner/work/_tool -maxdepth 5 -type d -name bin 2>/dev/null | tr '\''\n'\'' '\'':'\'')$PATH"; [ -n "$GOROOT" ] && export PATH="$GOROOT/bin:$PATH" || true && GH_AW_NODE_EXEC="${GH_AW_NODE_BIN:-}"; if [ -z "$GH_AW_NODE_EXEC" ] || [ ! -x "$GH_AW_NODE_EXEC" ]; then GH_AW_NODE_EXEC="$(command -v node 2>/dev/null || true)"; fi; if [ -z "$GH_AW_NODE_EXEC" ]; then echo "node runtime missing on this runner — check runtimes.node in workflow YAML" >&2; exit 127; fi; "$GH_AW_NODE_EXEC" ${RUNNER_TEMP}/gh-aw/actions/copilot_harness.cjs /usr/local/bin/copilot --add-dir /tmp/gh-aw/ --log-level all --log-dir /tmp/gh-aw/sandbox/agent/logs/ --disable-builtin-mcps --no-ask-user --allow-all-tools --allow-all-paths --add-dir "${GITHUB_WORKSPACE}" --prompt-file /tmp/gh-aw/aw-prompts/prompt.txt' 2>&1 | tee -a /tmp/gh-aw/agent-stdio.log[0m
+2026-06-19T08:56:50.7935044Z shell: /usr/bin/bash -e {0}
+2026-06-19T08:56:50.7935611Z env:
+2026-06-19T08:56:50.7935983Z   DEFAULT_BRANCH: main
+2026-06-19T08:56:50.7936459Z   GH_AW_ASSETS_ALLOWED_EXTS: 
+2026-06-19T08:56:50.7936901Z   GH_AW_ASSETS_BRANCH: 
+2026-06-19T08:56:50.7937342Z   GH_AW_ASSETS_MAX_SIZE_KB: 0
+2026-06-19T08:56:50.7937794Z   GH_AW_MCP_LOG_DIR: /tmp/gh-aw/mcp-logs/safeoutputs
+2026-06-19T08:56:50.7938326Z   GH_AW_WORKFLOW_ID_SANITIZED: prreviewpanel
+2026-06-19T08:56:50.7951758Z   GH_AW_MODEL_MULTIPLIERS: {
+  "version": "1",
+  "description": "Effective Tokens (ET) computation data per the gh-aw Effective Tokens Specification v0.2.0. Token class weights are applied first to normalize across token classes, then the per-model multiplier scales the result relative to the reference model. The registry keeps complete model history; entries are removed only by explicit manual deletion.",
+  "reference_model": "claude-sonnet-4.5",
+  "token_class_weights": {
+    "input": 1.0,
+    "cached_input": 0.1,
+    "output": 4.0,
+    "reasoning": 4.0,
+    "cache_write": 1.0
+  },
+  "multipliers": {
+    "claude-haiku-4-5": 0.33,
+    "claude-haiku-4.5": 0.33,
+    "claude-haiku-4-5-20251001": 0.33,
+    "claude-3-5-haiku": 0.1,
+    "claude-3-haiku": 0.1,
+    "claude-sonnet-4": 1.0,
+    "claude-sonnet-4-20250514": 1.0,
+    "claude-sonnet-4-5": 6.0,
+    "claude-sonnet-4.5": 6.0,
+    "claude-sonnet-4-5-20250929": 6.0,
+    "claude-sonnet-4-6": 9.0,
+    "claude-sonnet-4.6": 9.0,
+    "claude-3-5-sonnet": 1.0,
+    "claude-3-7-sonnet": 1.0,
+    "claude-3-sonnet": 1.0,
+    "claude-opus-4": 5.0,
+    "claude-opus-4-20250514": 5.0,
+    "claude-opus-4-1": 5.0,
+    "claude-opus-4-1-20250805": 5.0,
+    "claude-opus-4-5": 15.0,
+    "claude-opus-4-5-20251101": 15.0,
+    "claude-opus-4-6": 27.0,
+    "claude-opus-4-7": 27.0,
+    "claude-opus-4.5": 15.0,
+    "claude-opus-4.6": 27.0,
+    "claude-3-5-opus": 5.0,
+    "claude-3-opus": 5.0,
+    "gpt-4o": 0.33,
+    "gpt-4o-2024-05-13": 0.33,
+    "gpt-4o-2024-08-06": 0.33,
+    "gpt-4o-2024-11-20": 0.33,
+    "gpt-4o-mini": 0.33,
+    "gpt-4o-mini-2024-07-18": 0.33,
+    "gpt-4.1": 1.0,
+    "gpt-4.1-2025-04-14": 1.0,
+    "gpt-41-copilot": 1.0,
+    "gpt-4.1-mini": 1.0,
+    "gpt-4.1-nano": 1.0,
+    "gpt-4-turbo": 1.0,
+    "gpt-4": 1.0,
+    "gpt-4-0613": 1.0,
+    "gpt-4-o-preview": 1.0,
+    "gpt-3.5-turbo": 0.0,
+    "gpt-3.5-turbo-0613": 0.0,
+    "gpt-5": 1.0,
+    "gpt-5-2025-08-07": 1.0,
+    "gpt-5-search-api": 1.0,
+    "gpt-5-search-api-2025-10-14": 1.0,
+    "gpt-5-chat-latest": 1.0,
+    "gpt-5-mini": 0.33,
+    "gpt-5-mini-2025-08-07": 0.33,
+    "gpt-5-nano": 0.05,
+    "gpt-5-nano-2025-08-07": 0.05,
+    "gpt-5-pro": 2.0,
+    "gpt-5-pro-2025-10-06": 2.0,
+    "gpt-5.1": 3.0,
+    "gpt-5.1-2025-11-13": 3.0,
+    "gpt-5.1-chat-latest": 3.0,
+    "gpt-5-codex": 1.0,
+    "gpt-5.1-codex": 3.0,
+    "gpt-5.1-codex-mini": 3.0,
+    "gpt-5.1-codex-max": 3.0,
+    "gpt-5.1-codex-max-customsummarizer": 3.0,
+    "gpt-5.2": 3.0,
+    "gpt-5.2-2025-12-11": 3.0,
+    "gpt-5.2-chat-latest": 3.0,
+    "gpt-5.2-codex": 3.0,
+    "gpt-5.2-pro": 3.0,
+    "gpt-5.2-pro-2025-12-11": 3.0,
+    "gpt-5.3-chat-latest": 3.0,
+    "gpt-5.3-codex": 6.0,
+    "gpt-5.3-codex-api-preview": 6.0,
+    "gpt-5.4": 6.0,
+    "gpt-5.4-2026-03-05": 6.0,
+    "gpt-5.4-mini": 6.0,
+    "gpt-5.4-mini-2026-03-17": 6.0,
+    "gpt-5.4-nano": 6.0,
+    "gpt-5.4-nano-2026-03-17": 6.0,
+    "gpt-5.4-pro": 6.0,
+    "gpt-5.4-pro-2026-03-05": 6.0,
+    "gpt-5.5": 7.5,
+    "gpt-5.5-2026-04-23": 7.5,
+    "gpt-5.5-pro": 2.0,
+    "gpt-5.5-pro-2026-04-23": 2.0,
+    "o1": 3.0,
+    "o1-2024-12-17": 3.0,
+    "o1-mini": 0.5,
+    "o1-pro": 10.0,
+    "o1-pro-2025-03-19": 10.0,
+    "o3": 3.0,
+    "o3-2025-04-16": 3.0,
+    "o3-mini": 0.5,
+    "o3-mini-2025-01-31": 0.5,
+    "o3-pro": 10.0,
+    "o3-pro-2025-06-10": 10.0,
+    "o3-deep-research": 3.0,
+    "o3-deep-research-2025-06-26": 3.0,
+    "o4-mini": 0.5,
+    "o4-mini-2025-04-16": 0.5,
+    "o4-mini-deep-research": 0.5,
+    "o4-mini-deep-research-2025-06-26": 0.5,
+    "gemini-2.5-pro": 1.0,
+    "gemini-2.5-pro-preview-tts": 1.0,
+    "gemini-2.5-flash": 0.2,
+    "gemini-2.5-flash-native-audio-latest": 0.2,
+    "gemini-2.5-flash-native-audio-preview-09-2025": 0.2,
+    "gemini-2.5-flash-native-audio-preview-12-2025": 0.2,
+    "gemini-2.5-flash-preview-tts": 0.2,
+    "gemini-2.5-flash-image": 0.2,
+    "gemini-2.5-flash-lite": 0.1,
+    "gemini-2.0-flash": 0.1,
+    "gemini-2.0-flash-001": 0.1,
+    "gemini-2.0-flash-lite": 0.1,
+    "gemini-2.0-flash-lite-001": 0.1,
+    "gemini-1.5-pro": 1.0,
+    "gemini-1.5-flash": 0.1,
+    "gemini-flash-latest": 0.2,
+    "gemini-flash-lite-latest": 0.1,
+    "gemini-pro-latest": 1.0,
+    "gemini-3-flash-preview": 0.33,
+    "gemini-3-pro-preview": 6.0,
+    "gemini-3-pro-image-preview": 6.0,
+    "gemini-3.1-pro-preview": 6.0,
+    "gemini-3.1-pro-preview-customtools": 6.0,
+    "gemini-3.1-flash-live-preview": 0.1,
+    "gemini-3.1-flash-lite": 0.1,
+    "gemini-3.1-flash-lite-preview": 0.1,
+    "gemini-3.1-flash-image-preview": 0.33,
+    "gemini-3.1-flash-tts-preview": 0.1,
+    "gemini-3.5-flash": 14.0,
+    "gemini-2.5-computer-use-preview": 0.2,
+    "gemini-2.5-computer-use-preview-10-2025": 0.2,
+    "gemini-robotics-er-1.5-preview": 0.2,
+    "gemini-robotics-er-1.6-preview": 0.2,
+    "deep-research-max-preview-04-2026": 1.0,
+    "deep-research-preview-04-2026": 1.0,
+    "deep-research-pro-preview-12-2025": 1.0,
+    "gemma-4-26b-a4b-it": 0.1,
+    "gemma-4-31b-it": 0.2,
+    "grok-code-fast-1": 0.33,
+    "raptor-mini": 0.33
+  }
+}
+2026-06-19T08:56:50.7966152Z   GITHUB_AW_OTEL_TRACE_ID: fb74a35b6e34e823bbe06fd7fcc5d027
+2026-06-19T08:56:50.7966850Z   GITHUB_AW_OTEL_PARENT_SPAN_ID: e687aae9e7225de6
+2026-06-19T08:56:50.7967323Z   GITHUB_AW_OTEL_JOB_START_MS: 1781859382528
+2026-06-19T08:56:50.7967836Z   AWF_REFLECT_ENABLED: 1
+2026-06-19T08:56:50.7968253Z   COPILOT_AGENT_RUNNER_TYPE: STANDALONE
+2026-06-19T08:56:50.7968795Z   COPILOT_DUMMY_BYOK: dummy-byok-key-for-offline-mode
+2026-06-19T08:56:50.7969796Z   COPILOT_GITHUB_TOKEN: ***
+2026-06-19T08:56:50.7970224Z   COPILOT_MODEL: claude-sonnet-4.6
+2026-06-19T08:56:50.7970599Z   GH_AW_MCP_CONFIG: /home/runner/.copilot/mcp-config.json
+2026-06-19T08:56:50.7970941Z   GH_AW_PHASE: agent
+2026-06-19T08:56:50.7971224Z   GH_AW_PROMPT: /tmp/gh-aw/aw-prompts/prompt.txt
+2026-06-19T08:56:50.7971665Z   GH_AW_SAFE_OUTPUTS: /home/runner/work/_temp/gh-aw/safeoutputs/outputs.jsonl
+2026-06-19T08:56:50.7972070Z   GH_AW_VERSION: v0.76.1
+2026-06-19T08:56:50.7972350Z   GITHUB_API_URL: https://api.github.com
+2026-06-19T08:56:50.7972658Z   GITHUB_AW: true
+2026-06-19T08:56:50.7972940Z   GITHUB_COPILOT_INTEGRATION_ID: agentic-workflows
+2026-06-19T08:56:50.7973391Z   GITHUB_HEAD_REF: sergio-sisternes-epam/feat-installation-analytics-hooks
+2026-06-19T08:56:50.7976994Z   GITHUB_MCP_SERVER_TOKEN: ***
+2026-06-19T08:56:50.7977280Z   GITHUB_REF_NAME: main
+2026-06-19T08:56:50.7977555Z   GITHUB_SERVER_URL: https://github.com
+2026-06-19T08:56:50.7977904Z   GITHUB_STEP_SUMMARY: /tmp/gh-aw/agent-step-summary.md
+2026-06-19T08:56:50.7978270Z   GITHUB_WORKSPACE: /home/runner/work/apm/apm
+2026-06-19T08:56:50.7978658Z   GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+2026-06-19T08:56:50.7979042Z   GIT_AUTHOR_NAME: github-actions[bot]
+2026-06-19T08:56:50.7979422Z   GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
+2026-06-19T08:56:50.7979806Z   GIT_COMMITTER_NAME: github-actions[bot]
+2026-06-19T08:56:50.7980104Z   XDG_CONFIG_HOME: /home/runner
+2026-06-19T08:56:50.7980364Z ##[endgroup]
+2026-06-19T08:56:50.9676036Z [INFO] Auto-detected DNS servers from /run/systemd/resolve/resolv.conf: 168.63.129.16
+2026-06-19T08:56:50.9695910Z [WARN] ⚠️  Using --env-all: All host environment variables will be passed to container
+2026-06-19T08:56:50.9705371Z [WARN]    This may expose sensitive credentials if logs or configs are shared
+2026-06-19T08:56:50.9706539Z [WARN] ⚠️  Host access enabled with host.docker.internal in allowed domains
+2026-06-19T08:56:50.9707478Z [WARN]    Containers can access ANY service running on the host machine
+2026-06-19T08:56:50.9708299Z [WARN]    Only use this for trusted workloads (e.g., MCP gateways)
+2026-06-19T08:56:50.9709175Z [INFO] API proxy enabled: OpenAI=false, Anthropic=false, Copilot=true, Gemini=false
+2026-06-19T08:56:53.4765207Z [INFO] Allowed domains: *.githubusercontent.com, api.business.githubcopilot.com, api.enterprise.githubcopilot.com, api.github.com, api.githubcopilot.com, api.individual.githubcopilot.com, api.snapcraft.io, archive.ubuntu.com, azure.archive.ubuntu.com, codeload.github.com, crl.geotrust.com, crl.globalsign.com, crl.identrust.com, crl.sectigo.com, crl.thawte.com, crl.usertrust.com, crl.verisign.com, crl3.digicert.com, crl4.digicert.com, crls.ssl.com, docs.github.com, github-cloud.githubusercontent.com, github-cloud.s3.amazonaws.com, github.blog, github.com, github.githubassets.com, host.docker.internal, json-schema.org, json.schemastore.org, keyserver.ubuntu.com, lfs.github.com, objects.githubusercontent.com, ocsp.digicert.com, ocsp.geotrust.com, ocsp.globalsign.com, ocsp.identrust.com, ocsp.sectigo.com, ocsp.ssl.com, ocsp.thawte.com, ocsp.usertrust.com, ocsp.verisign.com, packagecloud.io, packages.cloud.google.com, packages.microsoft.com, patch-diff.githubusercontent.com, ppa.launchpad.net, raw.githubusercontent.com, registry.npmjs.org, s.symcb.com, s.symcd.com, security.ubuntu.com, telemetry.enterprise.githubcopilot.com, ts-crl.ws.symantec.com, ts-ocsp.ws.symantec.com, www.googleapis.com
+2026-06-19T08:56:53.4773286Z [INFO] Setting up host-level firewall network and iptables rules...
+2026-06-19T08:56:53.5469329Z [SUCCESS] Created network 'awf-net' with bridge 'fw-bridge'
+2026-06-19T08:56:53.5474613Z [INFO] Setting up host-level iptables rules...
+2026-06-19T08:56:53.6346956Z [INFO] Host access enabled: allowing traffic to gateway IPs 172.30.0.1, 172.17.0.1 on ports 80, 443, 8080
+2026-06-19T08:56:53.6841075Z [SUCCESS] Host-level iptables rules configured successfully
+2026-06-19T08:56:53.6913929Z [INFO] Generating configuration files...
+2026-06-19T08:56:55.1319690Z [INFO] API proxy sidecar enabled - API keys will be held securely in sidecar container
+2026-06-19T08:56:55.1320363Z [INFO] API proxy will route through Squid to respect domain whitelisting
+2026-06-19T08:56:55.1470476Z [INFO] Starting containers...
+2026-06-19T08:56:55.3768682Z  Container awf-squid  Creating
+2026-06-19T08:56:55.3769263Z  Container awf-api-proxy  Creating
+2026-06-19T08:56:55.4017558Z  Container awf-api-proxy  Created
+2026-06-19T08:56:55.4079912Z  Container awf-squid  Created
+2026-06-19T08:56:55.4080800Z  Container awf-agent  Creating
+2026-06-19T08:56:55.4210534Z  Container awf-agent  Created
+2026-06-19T08:56:55.4211070Z  Container awf-iptables-init  Creating
+2026-06-19T08:56:55.4312682Z  Container awf-iptables-init  Created
+2026-06-19T08:56:55.4328825Z  Container awf-api-proxy  Starting
+2026-06-19T08:56:55.4329445Z  Container awf-squid  Starting
+2026-06-19T08:56:55.5777343Z  Container awf-api-proxy  Started
+2026-06-19T08:56:55.7218513Z  Container awf-squid  Started
+2026-06-19T08:56:55.7219513Z  Container awf-api-proxy  Waiting
+2026-06-19T08:56:55.7220241Z  Container awf-squid  Waiting
+2026-06-19T08:57:00.7232923Z  Container awf-api-proxy  Healthy
+2026-06-19T08:57:01.2239938Z  Container awf-squid  Healthy
+2026-06-19T08:57:01.2240541Z  Container awf-agent  Starting
+2026-06-19T08:57:01.3576524Z  Container awf-agent  Started
+2026-06-19T08:57:01.3577088Z  Container awf-agent  Waiting
+2026-06-19T08:57:06.8594678Z  Container awf-agent  Healthy
+2026-06-19T08:57:06.8595236Z  Container awf-iptables-init  Starting
+2026-06-19T08:57:06.9391980Z  Container awf-iptables-init  Started
+2026-06-19T08:57:06.9441552Z [SUCCESS] Containers started successfully
+2026-06-19T08:57:06.9444871Z [INFO] Executing agent command...
+2026-06-19T08:57:06.9608491Z [entrypoint] Agentic Workflow Firewall - Agent Container
+2026-06-19T08:57:06.9609033Z [entrypoint] ==================================
+2026-06-19T08:57:06.9609445Z [entrypoint] Adjusting awfuser UID:GID from 1000:1000 to 1001:1001
+2026-06-19T08:57:06.9609850Z [entrypoint] UID/GID adjustment complete
+2026-06-19T08:57:06.9610162Z [entrypoint] Configuring DNS...
+2026-06-19T08:57:06.9610785Z [entrypoint] DNS configured with Docker embedded DNS (127.0.0.11) only
+2026-06-19T08:57:06.9611687Z [entrypoint] Waiting for iptables initialization from init container...
+2026-06-19T08:57:07.5607655Z [entrypoint] iptables initialization complete
+2026-06-19T08:57:07.5625014Z [health-check] API Proxy Pre-flight Check
+2026-06-19T08:57:07.5625423Z [health-check] ==========================================
+2026-06-19T08:57:07.5630526Z [health-check] Checking GitHub Copilot API proxy configuration...
+2026-06-19T08:57:07.5631096Z [health-check] COPILOT_API_URL=http://172.30.0.30:10002
+2026-06-19T08:57:07.5631820Z [health-check] ✓ COPILOT_GITHUB_TOKEN is placeholder value (correct)
+2026-06-19T08:57:07.5632364Z [health-check] ✓ COPILOT_API_KEY is placeholder value (correct)
+2026-06-19T08:57:07.5632868Z [health-check] ✓ COPILOT_TOKEN is placeholder value (correct)
+2026-06-19T08:57:07.5633383Z [health-check] ✓ COPILOT_PROVIDER_API_KEY is placeholder value (correct)
+2026-06-19T08:57:07.5634050Z [health-check] COPILOT_PROVIDER_BASE_URL=http://172.30.0.30:10002 (offline+BYOK mode)
+2026-06-19T08:57:07.5635114Z [health-check] ✓ COPILOT_PROVIDER_BASE_URL matches COPILOT_API_URL
+2026-06-19T08:57:07.5636140Z [health-check] ✓ Copilot CLI offline+BYOK mode configured
+2026-06-19T08:57:07.5636923Z [health-check] Testing connectivity to GitHub Copilot API proxy at http://172.30.0.30:10002...
+2026-06-19T08:57:07.6081363Z [health-check] ✓ GitHub Copilot API proxy is reachable at http://172.30.0.30:10002
+2026-06-19T08:57:07.6082026Z [health-check] ==========================================
+2026-06-19T08:57:07.6082485Z [health-check] ✓ All API proxy health checks passed
+2026-06-19T08:57:07.6082912Z [health-check] ✓ Credential isolation verified
+2026-06-19T08:57:07.6083283Z [health-check] ✓ Connectivity established
+2026-06-19T08:57:07.6083628Z [health-check] ==========================================
+2026-06-19T08:57:07.6086548Z [entrypoint] Pre-seeding JVM build tool proxy configuration (squid-proxy:3128)...
+2026-06-19T08:57:07.6550619Z [entrypoint] ✓ Created Maven proxy config (/host/home/runner/.m2/settings.xml)
+2026-06-19T08:57:07.6590743Z [entrypoint] ✓ Created Gradle proxy config (/host/home/runner/.gradle/gradle.properties)
+2026-06-19T08:57:07.6614578Z [entrypoint] ✓ Set JAVA_TOOL_OPTIONS with proxy and nonProxyHosts flags
+2026-06-19T08:57:07.6615277Z [entrypoint] Proxy configuration:
+2026-06-19T08:57:07.6615657Z [entrypoint]   HTTP_PROXY=http://172.30.0.10:3128
+2026-06-19T08:57:07.6616060Z [entrypoint]   HTTPS_PROXY=http://172.30.0.10:3128
+2026-06-19T08:57:07.6616392Z [entrypoint] Network information:
+2026-06-19T08:57:07.7083172Z [entrypoint]   IP address: 172.30.0.20 
+2026-06-19T08:57:07.7094272Z [entrypoint]   Hostname: 446cdadaa15a
+2026-06-19T08:57:08.3145829Z [entrypoint] ==================================
+2026-06-19T08:57:08.3146623Z [entrypoint] Chroot mode enabled - dropping CAP_SYS_CHROOT and CAP_SYS_ADMIN
+2026-06-19T08:57:08.3181849Z [entrypoint] Switching to awfuser (UID: 1001, GID: 1001)
+2026-06-19T08:57:08.3186502Z [entrypoint] Executing command: /bin/bash -c /bin/bash -c 'export PATH="${RUNNER_TEMP}/gh-aw/mcp-cli/bin:$PATH" && export PATH="$(find /opt/hostedtoolcache /home/runner/work/_tool -maxdepth 5 -type d -name bin 2>/dev/null | tr '\''\n'\'' '\'':'\'')$PATH"; [ -n "$GOROOT" ] && export PATH="$GOROOT/bin:$PATH" || true && GH_AW_NODE_EXEC="${GH_AW_NODE_BIN:-}"; if [ -z "$GH_AW_NODE_EXEC" ] || [ ! -x "$GH_AW_NODE_EXEC" ]; then GH_AW_NODE_EXEC="$(command -v node 2>/dev/null || true)"; fi; if [ -z "$GH_AW_NODE_EXEC" ]; then echo "node runtime missing on this runner — check runtimes.node in workflow YAML" >&2; exit 127; fi; "$GH_AW_NODE_EXEC" ${RUNNER_TEMP}/gh-aw/actions/copilot_harness.cjs /usr/local/bin/copilot --add-dir /tmp/gh-aw/ --log-level all --log-dir /tmp/gh-aw/sandbox/agent/logs/ --disable-builtin-mcps --no-ask-user --allow-all-tools --allow-all-paths --add-dir "${GITHUB_WORKSPACE}" --prompt-file /tmp/gh-aw/aw-prompts/prompt.txt'
+2026-06-19T08:57:08.3189901Z 
+2026-06-19T08:57:08.3191772Z [entrypoint] Chroot mode: running command inside host filesystem (/host)
+2026-06-19T08:57:08.3948827Z [entrypoint] Mounted procfs at /host/proc (nosuid,nodev,noexec,hidepid=2)
+2026-06-19T08:57:08.4085837Z [entrypoint] One-shot token library copied to chroot at /tmp/awf-lib/one-shot-token.so
+2026-06-19T08:57:08.4139625Z [entrypoint] DNS configuration created in chroot (/host/etc/resolv.conf)
+2026-06-19T08:57:08.4220417Z [entrypoint] Chroot working directory: /home/runner/work/apm/apm
+2026-06-19T08:57:08.4249965Z [entrypoint] Running as host user: runner (UID: 1001)
+2026-06-19T08:57:08.4250380Z [entrypoint] Using host PATH for chroot
+2026-06-19T08:57:08.4263871Z [entrypoint] Adding JAVA_HOME/bin to PATH: /usr/lib/jvm/temurin-17-jdk-amd64/bin
+2026-06-19T08:57:08.4337088Z [entrypoint] DNS configuration will be removed on exit
+2026-06-19T08:57:08.4385641Z [entrypoint] Transferred /host/tmp/gh-aw ownership to chroot user (1001:1001)
+2026-06-19T08:57:08.4475337Z [entrypoint][WARN] Failed to transfer /host/home/runner/work/_temp/gh-aw/safeoutputs ownership to chroot user
+2026-06-19T08:57:09.4082705Z [copilot-harness] 2026-06-19T08:57:09.387Z starting: command=/usr/local/bin/copilot maxRetries=3 initialDelayMs=5000 backoffMultiplier=2 maxDelayMs=60000 nodeVersion=v22.22.3 platform=linux
+2026-06-19T08:57:09.4102689Z [copilot-harness] 2026-06-19T08:57:09.409Z pre-flight: command is accessible and executable: /usr/local/bin/copilot
+2026-06-19T08:57:09.4106137Z [copilot-harness] 2026-06-19T08:57:09.410Z resolved --prompt-file: path=/tmp/gh-aw/aw-prompts/prompt.txt size=10493B
+2026-06-19T08:57:09.4107658Z [copilot-harness] 2026-06-19T08:57:09.410Z awf-reflect: fetching http://api-proxy:10000/reflect (timeout=60000ms)
+2026-06-19T08:57:09.4647534Z [entrypoint] Unsetting sensitive tokens from parent shell environment...
+2026-06-19T08:57:09.4648454Z [entrypoint] Unset COPILOT_GITHUB_TOKEN from /proc/1/environ
+2026-06-19T08:57:09.6308684Z [copilot-harness] 2026-06-19T08:57:09.630Z awf-reflect: fetched 36 model(s) from http://api-proxy:10002/models
+2026-06-19T08:57:09.6318329Z [copilot-harness] 2026-06-19T08:57:09.630Z awf-reflect: saved 4490B to /tmp/gh-aw/sandbox/firewall/awf-reflect.json
+2026-06-19T08:57:09.6321232Z [copilot-harness] 2026-06-19T08:57:09.630Z attempt 1: spawning: /usr/local/bin/copilot --add-dir /tmp/gh-aw/ --log-level all --log-dir /tmp/gh-aw/sandbox/agent/logs/ --disable-builtin-mcps --no-ask-user --allow-all-tools --allow-all-paths --add-dir /home/runner/work/apm/apm -p <redacted
+2026-06-19T08:57:09.6355837Z [copilot-harness] 2026-06-19T08:57:09.634Z attempt 1: process started (pid=180)
+2026-06-19T08:57:19.7110392Z ● pull_request_read (MCP: github) · method: "get_files", owner: "microsoft", repo: "apm", pullNumbe…
+2026-06-19T08:57:19.7111203Z   └ Output too large to read at once (98.5 KB). Saved to: /tmp/1781859439664...
+2026-06-19T08:57:19.7111529Z 
+2026-06-19T08:57:20.2627201Z ● pull_request_read (MCP: github) · method: "get", owner: "microsoft", repo: "apm", pullNumber: 1798
+2026-06-19T08:57:20.2628354Z   └ [{"additions":2423,"base":{"ref":"main","repo":{"description":"Agent Pac...
+2026-06-19T08:57:20.2628823Z 
+2026-06-19T08:57:25.5609492Z ● pull_request_read (MCP: github) · method: "get_reviews", owner: "microsoft", pullNumber: 1798, re…
+2026-06-19T08:57:25.5610453Z   └ [{"content":[{"text":"[{\"id\":4504742740,\"state\":\"COMMENTED\",\"body...
+2026-06-19T08:57:25.5610811Z 
+2026-06-19T08:57:25.6267676Z ● pull_request_read (MCP: github) · method: "get_diff", owner: "microsoft", pullNumber: 1798, repo:…
+2026-06-19T08:57:25.6269741Z   └ Output too large to read at once (92.0 KB). Saved to: /tmp/1781859445618...
+2026-06-19T08:57:25.6270463Z 
+2026-06-19T08:57:33.2640789Z ● pull_request_read (MCP: github) · method: "get_review_comments", owner: "microsoft", pullNumber: …
+2026-06-19T08:57:33.2641850Z   └ [{"content":[{"text":"{\"review_threads\":[{\"is_resolved\":false,\"is_o...
+2026-06-19T08:57:33.2642166Z 
+2026-06-19T08:57:36.6109351Z ● Read diff content (shell)
+2026-06-19T08:57:36.6109982Z   │ cat /tmp/1781859445618-copilot-tool-output-2ckdlz.txt | python3 -c "
+2026-06-19T08:57:36.6110443Z   │ import sys, json
+2026-06-19T08:57:36.6110728Z   │ data = json.load(sys.stdin)
+2026-06-19T08:57:36.6111098Z   │ diff_text = data[0]['content'][0]['text']
+2026-06-19T08:57:36.6111470Z   │ print(diff_text[:20000])…
+2026-06-19T08:57:36.6111762Z   └ 21 lines...
+2026-06-19T08:57:36.6111892Z 
+2026-06-19T08:57:44.8374805Z ● List changed files with stats (shell)
+2026-06-19T08:57:44.8375595Z   │ cat /tmp/1781859439664-copilot-tool-output-9jpzia.txt | python3 -c "
+2026-06-19T08:57:44.8376138Z   │ import sys, json
+2026-06-19T08:57:44.8376432Z   │ data = json.load(sys.stdin)
+2026-06-19T08:57:44.8376796Z   │ files = json.loads(data[0]['content'][0]['text'])
+2026-06-19T08:57:44.8377153Z   │ for f in files:…
+2026-06-19T08:57:44.8377412Z   └ 4 lines...
+2026-06-19T08:57:44.8377543Z 
+2026-06-19T08:57:45.1453715Z ● Get diff file sections overview (shell)
+2026-06-19T08:57:45.1455253Z   │ cat /tmp/1781859445618-copilot-tool-output-2ckdlz.txt | python3 -c "
+2026-06-19T08:57:45.1456175Z   │ import sys, json
+2026-06-19T08:57:45.1456934Z   │ data = json.load(sys.stdin)
+2026-06-19T08:57:45.1457948Z   │ diff_text = data[0]['content'][0]['text']
+2026-06-19T08:57:45.1458381Z   │ # Print sections in chunks…
+2026-06-19T08:57:45.1458691Z   └ 23 lines...
+2026-06-19T08:57:45.1458831Z 
+2026-06-19T08:57:51.4194290Z ● Read key sections of the diff (shell)
+2026-06-19T08:57:51.4195202Z   │ cat /tmp/1781859445618-copilot-tool-output-2ckdlz.txt | python3 -c "
+2026-06-19T08:57:51.4195931Z   │ import sys, json
+2026-06-19T08:57:51.4196357Z   │ data = json.load(sys.stdin)
+2026-06-19T08:57:51.4196842Z   │ diff_text = data[0]['content'][0]['text']
+2026-06-19T08:57:51.4197348Z   │ lines = diff_text.split('\n')…
+2026-06-19T08:57:51.4197657Z   └ 507 lines...
+2026-06-19T08:57:51.4197789Z 
+2026-06-19T08:57:58.5787328Z ● Read remaining diff sections (shell)
+2026-06-19T08:57:58.5788311Z   │ cat /tmp/1781859445618-copilot-tool-output-2ckdlz.txt | python3 -c "
+2026-06-19T08:57:58.5789018Z   │ import sys, json
+2026-06-19T08:57:58.5789462Z   │ data = json.load(sys.stdin)
+2026-06-19T08:57:58.5789934Z   │ diff_text = data[0]['content'][0]['text']
+2026-06-19T08:57:58.5790456Z   │ lines = diff_text.split('\n')…
+2026-06-19T08:57:58.5790898Z   └ 39 lines...
+2026-06-19T08:57:58.5791162Z 
+2026-06-19T08:58:02.2046398Z ● Read remaining diff sections - first half (shell)
+2026-06-19T08:58:02.2048036Z   │ head -c 15000 /tmp/copilot-tool-output-1781859478512-5v3cp3.txt
+2026-06-19T08:58:02.2049500Z   └ 468 lines...
+2026-06-19T08:58:02.2049936Z 
+2026-06-19T08:58:02.2106317Z ● Read remaining diff sections - second half (shell)
+2026-06-19T08:58:02.2107192Z   │ tail -c 15000 /tmp/copilot-tool-output-1781859478512-5v3cp3.txt
+2026-06-19T08:58:02.2107659Z   └ 452 lines...
+2026-06-19T08:58:02.2107811Z 
+2026-06-19T08:58:10.3214758Z Now I have a thorough understanding of the diff. Let me invoke the apm-review-panel skill.
+2026-06-19T08:58:10.3215423Z 
+2026-06-19T08:58:10.3258974Z ● skill(apm-review-panel)
+2026-06-19T08:58:10.3259334Z 
+2026-06-19T08:58:15.6898826Z ● Read ceo-return-schema.json
+2026-06-19T08:58:15.6899421Z   │ .agents/skills/apm-review-panel/assets/ceo-return-schema.json
+2026-06-19T08:58:15.6899907Z   └ 78 lines read
+2026-06-19T08:58:15.6900044Z 
+2026-06-19T08:58:15.6930127Z ● Read panelist-return-schema.json
+2026-06-19T08:58:15.6930726Z   │ .agents/skills/apm-review-panel/assets/panelist-return-schema.json
+2026-06-19T08:58:15.6931194Z   └ 154 lines read
+2026-06-19T08:58:15.6931334Z 
+2026-06-19T08:58:15.6963524Z ● Read recommendation-template.md
+2026-06-19T08:58:15.6964432Z   │ .agents/skills/apm-review-panel/assets/recommendation-template.md
+2026-06-19T08:58:15.6965094Z   └ 142 lines read
+2026-06-19T08:58:15.6965303Z 
+2026-06-19T08:58:39.8111330Z Now I'll fan out all panelists in parallel. First let me get the test file diffs.
+2026-06-19T08:58:39.8111806Z 
+2026-06-19T08:58:40.4324287Z ● Read test_hooks.py diff section (shell)
+2026-06-19T08:58:40.4325149Z   │ cat /tmp/1781859445618-copilot-tool-output-2ckdlz.txt | python3 -c "
+2026-06-19T08:58:40.4325805Z   │ import sys, json
+2026-06-19T08:58:40.4326211Z   │ data = json.load(sys.stdin)
+2026-06-19T08:58:40.4326913Z   │ diff_text = data[0]['content'][0]['text']
+2026-06-19T08:58:40.4328042Z   │ lines = diff_text.split('\n')…
+2026-06-19T08:58:40.4328782Z   └ 204 lines...
+2026-06-19T08:58:40.4329112Z 
+2026-06-19T08:58:40.4378605Z ● Read test_hook_executors.py diff (shell)
+2026-06-19T08:58:40.4379416Z   │ cat /tmp/1781859445618-copilot-tool-output-2ckdlz.txt | python3 -c "
+2026-06-19T08:58:40.4395537Z   │ import sys, json
+2026-06-19T08:58:40.4395872Z   │ data = json.load(sys.stdin)
+2026-06-19T08:58:40.4396232Z   │ diff_text = data[0]['content'][0]['text']
+2026-06-19T08:58:40.4396692Z   │ lines = diff_text.split('\n')…
+2026-06-19T08:58:40.4397146Z   └ 204 lines...
+2026-06-19T08:58:40.4397358Z 
+2026-06-19T09:02:18.0702601Z Now I'll fan out all panelists in parallel. All are synchronous (blocking) tasks.
+2026-06-19T09:02:18.0703205Z 
+2026-06-19T09:03:55.6848653Z ```json
+2026-06-19T09:03:55.6849278Z {
+2026-06-19T09:03:55.6862332Z   "persona": "oss-growth-hacker",
+2026-06-19T09:03:55.6870063Z   "active": true,
+2026-06-19T09:03:55.6995358Z   "summary": "Strong foundation -- three-tier discovery and dry-run test command are genuine friction reducers -- but the feature is effectively hidden: no entry in CHANGELOG [Unreleased], not linked from enterprise/index.md, and the init scaffold leaves the first-run experience flat.",
+2026-06-19T09:03:55.6998093Z   "findings": [
+2026-06-19T09:03:55.6998580Z     {
+2026-06-19T09:03:55.7003307Z       "severity": "recommended",
+2026-06-19T09:03:55.7018428Z       "summary": "lifecycle-hooks.md is not linked from enterprise/index.md section map -- hidden feature anti-pattern",
+2026-06-19T09:03:58.6547279Z       "rationale": "enterprise/index.md has an explicit 'Section map' table listing every page in the section. lifecycle-hooks.md is absent from that table. An enterprise user landing on the enterprise index -- the primary entry point for platform engineers -- has no path to this feature except accidental search. This is the classic 'shipped but nobody knows' failure: the code and doc exist but the funnel is broken. Every conversion surface in the enterprise section (adoption playbook, governance guide) is a potential cross-link target that is also missing.",
+2026-06-19T09:03:58.6558869Z       "file": "docs/src/content/docs/enterprise/index.md",
+2026-06-19T09:04:00.9173619Z       "suggestion": "Add to the Section map table: '- [Lifecycle Hooks](./lifecycle-hooks/) -- fire shell commands or HTTPS webhooks on install, update, and uninstall; enterprise analytics and CI notification without modifying project configuration.' Also add a row to the 'Where to start' table for platform engineers."
+2026-06-19T09:04:00.9175377Z     },
+2026-06-19T09:04:00.9177123Z     {
+2026-06-19T09:04:00.9177478Z       "severity": "recommended",
+2026-06-19T09:04:00.9203048Z       "summary": "CHANGELOG [Unreleased] has no entry -- existing users upgrading will not discover this feature",
+2026-06-19T09:04:04.3169092Z       "rationale": "The [Unreleased] section of CHANGELOG.md is empty. Lifecycle hooks is a significant surface addition (new top-level CLI command group, new JSON schema, three discovery tiers, log file). Users who read the changelog before upgrading -- the segment most likely to evangelize -- will miss it entirely. Release narratives are mined from CHANGELOG; without an entry here the feature will not appear in the next release post. This directly undermines the 'existing user -> upgrades and shares' conversion funnel.",
+2026-06-19T09:04:04.3173934Z       "file": "CHANGELOG.md",
+2026-06-19T09:04:04.3175438Z       "line": 8,
+2026-06-19T09:04:07.6599803Z       "suggestion": "Add under [Unreleased] Added: '- `apm hooks` command group: `apm hooks init` scaffolds a starter hook file, `apm hooks test [event]` dry-runs hooks without a real install, `apm hooks validate` checks all discovered files, and `apm hooks` lists active hooks. Hooks fire shell commands or HTTPS webhooks at pre/post install, update, and uninstall -- enterprise analytics, CI notifications, and custom automation with no project-config changes required for policy-level hooks. See [Lifecycle Hooks](https://microsoft.github.io/apm/enterprise/lifecycle-hooks/).'"
+2026-06-19T09:04:07.6602127Z     },
+2026-06-19T09:04:07.6602350Z     {
+2026-06-19T09:04:07.6606677Z       "severity": "recommended",
+2026-06-19T09:04:07.6623188Z       "summary": "apm hooks init scaffold uses echo/cat -- first-run experience leaves value invisible",
+2026-06-19T09:04:12.1716916Z       "rationale": "The default scaffold generated by apm hooks init produces a post-install command hook of `echo 'Installed:' && cat`. This is functionally correct (it shows the JSON payload on stdout) but strategically flat: a developer running apm hooks init sees nothing that makes them want to keep the hook. npm post-install hooks won mindshare because the first example was always 'run your build' or 'print a success message with color'. A two-entry default that shows (1) a working log-to-file command hook and (2) a commented-out HTTP webhook skeleton would immediately demonstrate both hook types and create the 'oh I see what this is for' moment that drives word-of-mouth.",
+2026-06-19T09:04:12.1727447Z       "file": "src/apm_cli/commands/hooks.py",
+2026-06-19T09:04:12.1735018Z       "line": 29,
+2026-06-19T09:04:16.6746599Z       "suggestion": "Replace _INIT_TEMPLATE with a two-hook scaffold:\n{\n  \"version\": 1,\n  \"hooks\": {\n    \"post-install\": [\n      {\n        \"type\": \"command\",\n        \"bash\": \"echo \\\"[apm] post-install fired at $(date -u +%Y-%m-%dT%H:%MZ)\\\" >> /tmp/apm-install.log\",\n        \"timeoutSec\": 5\n      }\n    ],\n    \"post-update\": [\n      {\n        \"_comment\": \"Uncomment to notify a Slack channel on update\",\n        \"_type\": \"http\",\n        \"_url\": \"https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK\",\n        \"_timeoutSec\": 5\n      }\n    ]\n  }\n}\nThe log-to-file command runs immediately and leaves an artifact the user can verify with cat /tmp/apm-install.log, making the 'it worked' moment concrete. JSON does not support comments; the _comment/_type trick or a real second hook entry with a placeholder URL both work."
+2026-06-19T09:04:16.6750652Z     },
+2026-06-19T09:04:16.6750975Z     {
+2026-06-19T09:04:16.6751313Z       "severity": "recommended",
+2026-06-19T09:04:16.6769093Z       "summary": "concepts/lifecycle.md omits hooks from the lifecycle diagram -- mental model gap for new users",
+2026-06-19T09:04:20.0535489Z       "rationale": "concepts/lifecycle.md defines APM's conceptual lifecycle as five steps (init -> install -> compile -> run -> audit) with no mention of hooks. A developer reading this doc to understand 'how APM works' gets no signal that hooks exist or that install fires events. This is the top-of-funnel conceptual doc; it shapes whether a developer even considers hooks for their use case. A one-line callout and a link is all that is needed -- hooks are a side-channel, not a lifecycle step, but the doc is the right place to establish that mental slot.",
+2026-06-19T09:04:20.0538798Z       "file": "docs/src/content/docs/concepts/lifecycle.md",
+2026-06-19T09:04:20.5325039Z       "suggestion": "After the ascii diagram, add: 'install```json
+2026-06-19T09:04:20.5333615Z {
+2026-06-19T09:04:20.5333990Z   "persona": "doc-writer",
+2026-06-19T09:04:20.5340832Z   "active": true,
+2026-06-19T09:04:21.1381913Z   "summary": "Two blocking defects: (1) the opening paragraph and security section both call command hooks 'fire-and-forget' when the implementation is synchronous subprocess.run() — blocking the CLI for up to 30s per hook — while HTTP hooks are the only truly async path; (2) packages/apm-guide/.apm/skills/apm-usage/commands.md has no apm hooks section, leaving the AI-accessible CLI reference st also fires **lifecycle hooks** (pre/post-install, pre/post-update, pre/post-uninstall) -- shell commands or HTTPS webhooks that run without blocking the CLI. See [Lifecycle Hooks](/apm/enterprise/lifecycle-hooks/).'"
+2026-06-19T09:04:21.1385207Z     },
+2026-06-19T09:04:21.1385423Z     {
+2026-06-19T09:04:21.1385644Z       "severity": "nit",
+2026-06-19T09:04:22.0096055Z       "summary": "Docale. Three recommended improvements cover Windows policy path, missing cross-links, and the security section's omission of the two-layer model framing. One nit on sidebar gap.",
+2026-06-19T09:04:22.0098636Z   "findings": [
+2026-06-19T09:04:22.0098879Z     {
+2026-06-19T09:04:22.0108954Z       "id": "doc-writer-1",
+2026-06-19T09:04:22.2903814Z       "severity misses the npm-lifecycle analogy in the opening -- the one repostable hook for JS developers is absent",
+2026-06-19T09:04:23.0686150Z       "rationale": "The opening line of lifecycle-hooks.md ('APM supports lifecycle": "blocking",
+2026-06-19T09:04:23.0692684Z       "category": "accuracy",
+2026-06-19T09:04:23.0717387Z       "title": "Command hooks are synchronous — 'fire-and-forget' claim is factually wrong",
+2026-06-19T09:04:23.0728719Z       "file": "docs/src/content/docs/enterprise/lifecycle-hooks.md",
+2026-06-19T09:04:23.0743067Z       "lines": "8-10, 177-180",
+2026-06-19T09:04:25.6531715Z       "description": "The document opens with 'Hooks are fire-and-forget: a failing hook never blocks the CLI.' hooks -- custom actions that fire automatically at key moments') is accurate but does not land the analogy that would make a JS developer share this on Twitter: and the security section repeats 'All hooks are fire-and-forget with configurable timeouts (10s for HTTP, 30s for commands by default). Hook failures are logged in verbose mode and never block the CLI.'\n\nThis is accurate for HTTP 'Like npm post-install scripts, but for your AI agent stack.' That one sentence would make the feature legible to the largest adjacent audience (npm users) in hooks, which use `threading.Thread(target=_send, daemon=True)` and return immediately. It is factually wrong for command hooks: `_execute_command` calls `subprocess.run(...)` — synchronous, blocking — and the CLI is held for up to `timeoutSec` seconds ( under five seconds. The 'Copilot CLI aligned model' is mentioned only in the PR description, not in the doc.",
+2026-06-19T09:04:25.6538585Z       "file": "docs/src/content/docs/enterprise/lifecycle-hooks.md",
+2026-06-19T09:04:25.6538993Z       "line": 8,
+2026-06-19T09:04:26.7586590Z       "suggestion": "Open with: 'APM supports lifecycle hooks -- like npm post-install scripts, but for your AI agent stack. Custom shell commands or HTTPS webhooks firedefault 30) per command hook. Multiple command hooks for one event multiply linearly.\n\nThe error originates in the `lifecycle_hooks.py` module docstring ('All hooks are fire-and-forget'), which the doc faithfully transcribed.\n\nRequired corrections automatically at install, update, and uninstall time, without ever blocking the CLI.'"
+2026-06-19T09:04:26.7589823Z     },
+2026-06-19T09:04:26.7590153Z     {
+2026-06-19T09:04:26.7590743Z       "severity": "nit",
+2026-06-19T09:04:26.7608315Z       "summary": "No example hooks gallery or community hooks pointer -- missed compounding opportunity",
+2026-06-19T09:04:29.6152247Z       "rationale": "The analytics use case in the doc is the right anchor example, but a:\n1. Opening paragraph: remove the blanket 'fire-and-forget' claim. Replace with a type-differentiated statement, e.g. 'Command hooks execute synchronously — the CLI waits up to timeoutSec ( single enterprise use case positions this as 'IT department only.' Three to five copy-pasteable real-world snippets (Slack notification, Datadog event, GitHub Actions trigger, audit log rotation, teamdefault 30s) for each one. HTTP hooks fire in a background thread. A hook failure never aborts the CLI.'\n2. Security section line 178: replace 'All hooks are fire-and-forget with configurable timeouts (10s for HTTP, 30s for commands by default)' with accurate per-type wording, e.g. 'HTTP hooks fire asynchronously (default 10s timeout). Command hooks run synchronously; Slack bot) would drive the 'second project' conversion and give the OSS community something to share. npm's post-install ecosystem exploded because examples were everywhere; APM hooks have no equivalent starting inventory.",
+2026-06-19T09:04:29.8423142Z       "suggestion": "Add a  budget up to timeoutSec (default 30s) per hook per event.'\n3. The `lifecycle_hooks.py` module docstring itself repeats the inaccuracy — a companion code fix should update it.",
+2026-06-19T09:04:31.4207699Z       "suggested_fix'Recipe: common hooks' section to lifecycle-hooks.md with 3 copy-pasteable snippets covering Slack HTTP webhook, a local audit-log command, and a CI notification. Or link to a community-": "Opening paragraph replacement:\n```\nAPM supports **lifecycle hooks** -- custom actions that fire automatically\nat key moments during install, update, and uninstall operations.\n\nCommand hooks execute synchronously: the CLI waits up to `timeoutSec`\n(default 30s) for each one to complete. HTTP hooks fire in a background\nthread and dohooks wiki page / GitHub Discussion as a future placeholder."
+2026-06-19T09:04:31.4211181Z     }
+2026-06-19T09:04:31.4211483Z   ],
+2026-06-19T09:04:31.4211779Z   "extras": {
+2026-06-19T09:04:33.0300500Z     "growth_strategy_note": "2025-06 | PR #1798 -- Lifecycle hooks: APM's npm- not hold the CLI. A hook failure never aborts the operation.\n```\n\nSecurity section replacement for the inaccurate bullet:\n```\n- HTTP hooks fire asynchronously (daemon thread, default 10s timeout).\n  Command hooks run synchronously; the CLI waits up to `timeoutSec`\n  (default 30s) per hook per event.\n```scripts moment\n\nStrategic signal: lifecycle hooks are APM's first programmatic extension point -- the feature that makes APM sticky in enterprise CI/automation pipelines, not just developer workstations. This is worth a dedicated launch beat.\n\nRelease narrative angle"
+2026-06-19T09:04:33.0303161Z     },
+2026-06-19T09:04:33.0303372Z     {
+2026-06-19T09:04:33.0307193Z       "id": "doc-writer-2",
+2026-06-19T09:04:33.0307627Z       "severity": "blocking",
+2026-06-19T09:04:33.0308046Z       "category": "completeness",
+2026-06-19T09:04:33.0317003Z       "title": "packages/apm-guide/.apm/skills/apm-usage/commands.md missing apm hooks section",
+2026-06-19T09:04:33.0328392Z       "file": "packages/apm-guide/.apm/skills/apm-usage/commands.md",
+2026-06-19T09:04:33.0334962Z       "lines": "entire file",
+2026-06-19T09:04:36.4261153Z       "description": "The file covers every existing CLI command group (project setup, dependency management, compilation, scripts, security/: 'APM now has post-install hooks -- like npm scripts, but for your entire AI agent stack. One JSON file in .apm/ and every apm install can ping your SIEM,audit, distribution, registry publishing, marketplace, MCP servers, runtime management, experimental features, configuration) but has no `apm hooks` section. This is the maintained AI-accessible skill that agents use to surface CLI commands. Leaving it stale means AI assistants cannot answer questions about `apm hooks`, notify your team Slack, or run a compliance check. No project config changes needed for org-wide policy hooks.' This framing: (1) uses the npm analogy JS developers already understand, (2) leads with enterprise `apm hooks init`, `apm hooks test`, or `apm hooks validate`.\n\nThe copilot reviewer also flagged this at hooks.py:46.\n\nRequired: add a `## analytics (SIEM/compliance -- APM's strongest enterprise differentiator), (3) layers on community with 'share your hooks'.\n\nAction items for growth-strategy.md:\n1. Add lifecycle hooks to the 'features worth a launch beat' list Lifecycle hooks` section to commands.md with the four sub-commands, their purpose, and key flags, consistent with the table format used throughout the file.",
+2026-06-19T09:04:40.9411233Z       "suggested_fix": "Add to commands.md after the 'Security and audit' section ( -- specifically the policy-tier (IT-managed, no developer action required) angle.\n2. Seed a 'community hooks gallery' initiative: a GitHub Discussion threador at the end of the table sections before 'Distribution'):\n\n```markdown\n## Lifecycle hooks\n\n| Command | Purpose | Key flags |\n|---------|---------|-----------|\n| `apm hooks` | List all discovered lifecycle hooks (policy, user, project) | -- |\n| `apm hooks or wiki page with copy-pasteable snippets. npm's ecosystem started with README examples; APM hooks need the same.\n3. The apm hooks test dry-run command is a standalone DevX story -- a 15-second GIF of init` | Scaffold a starter hook JSON file at `.apm/hooks.json` | `--force` overwrite existing |\n| `apm hooks validate` | Validate all discovered hook files for schema errors, unknown events 'apm hooks init && apm hooks test' would convert better than any prose explanation. Tag for the next release post's visual.\n4. Cross-link opportunity: the enterprise/, and non-HTTPS URLs; exits non-zero on any error | -- |\n| `apm hooks test [EVENT]` | Fire a synthetic lifecycle event through all discovered hooks (default: `postadoption-playbook.md should mention hooks as the 'zero-friction audit instrumentation' story for platform engineers rolling out APM org-wide.\n5. README is clean -- do NOT add hooks to the top 30-install`). Output written to `~/.apm/logs/hooks.log`. | `-v` verbose |\n```"
+2026-06-19T09:04:40.9420082Z     },
+2026-06-19T09:04:40.9420411Z     {
+2026-06-19T09:04:40.9424075Z       "id": "doc-writer-3",
+2026-06-19T09:04:40.9424926Z       "severity": "recommended",
+2026-06-19T09:04:40.9425315Z       "category": "accuracy",
+2026-06-19T09:04:40.9425657Z       "title": "Discovery table omits Windows policy path",
+2026-06-19T09:04:41.4109315Z       "file": lines hero section. The right home is a callout in the 'Governed by policy' section under the enterprise features list."
+2026-06-19T09:04:41.4110296Z   }
+2026-06-19T09:04:41.4110607Z }
+2026-06-19T09:04:41.4360152Z ```● Oss-growth-hacker OSS growth/adoption review of lifecycle hooks PR
+2026-06-19T09:04:41.4361015Z   │ Confirm CHANGELOG Unreleased is empty (shell)
+2026-06-19T09:04:41.4361858Z   │   │ grep -n "lifecycle\|hooks" /home/runner/work/apm/apm/CHANGELOG.md | grep -E
+2026-06-19T09:04:41.4362792Z   │   │ "^\d" | head -5; echo "---"; head -12 /home/runner/work/apm/apm/CHANGELOG.md
+2026-06-19T09:04:41.4363409Z   │   └ 14 lines...
+2026-06-19T09:04:41.4363906Z   └ Review init scaffold template detail (shell)
+2026-06-19T09:04:41.4364940Z       │ cat /home/runner/work/apm/apm/src/apm_cli/commands/hooks.py | grep -A5
+2026-06-19T09:04:41.4365632Z       │ "_INIT_TEMPLATE" | head -20
+2026-06-19T09:04:41.4366125Z       └ 14 lines...
+2026-06-19T09:04:41.4366324Z 
+2026-06-19T09:04:42.0493573Z  "docs/src/content/docs/enterprise/lifecycle-hooks.md",
+2026-06-19T09:04:42.0497634Z       "lines": "103-108",
+2026-06-19T09:04:45.3738859Z       "description": "The discovery locations table documents only the Unix/Linux policy path (`/etc/apm/policy.d/*.json`). The implementation in `_get_policy_hooks_dir()` returns `C:\\ProgramData\\APM\\policy.d` on Windows. Enterprise deployments often span Windows developer machines and CI runners. An enterprise reader provisioning policy hooks on Windows has no doc guidance.\n\nThe user hooks dir (`~/.apm/hooks/`) and the `APM_HOME` override are portable and correctly documented. Only the policy path is OS-specific and undocumented.",
+2026-06-19T09:04:48.6617905Z       "suggested_fix": "Update the discovery table or add a callout:\n\n```\n| Priority     | Path (Linux/macOS)          | Path (Windows)                  | Who controls     |\n|--------------|-----------------------------|----------------------------------|------------------|\n| 1 (highest)  | `/etc/apm/policy.d/*.json`  | `C:\\ProgramData\\APM\\policy.d\\*.json` | Platform/IT team |\n| 2            | `~/.apm/hooks/*.json`       | `~/.apm/hooks/*.json`            | Individual user  |\n| 3            | `.apm/hooks.json`           | `.apm/hooks.json`                | Project          |\n```\n\nOr, more concisely, add a note beneath the existing table: 'On Windows, the policy path is `C:\\ProgramData\\APM\\policy.d`.'"
+2026-06-19T09:04:48.6620219Z     },
+2026-06-19T09:04:48.6620434Z     {
+2026-06-19T09:04:48.6623345Z       "id": "doc-writer-4",
+2026-06-19T09:04:48.6623794Z       "severity": "recommended",
+2026-06-19T09:04:48.6630440Z       "category": "accuracy",
+2026-06-19T09:04:48.6637539Z       "title": "Hook examples use bash-only field without cross-platform guidance",
+2026-06-19T09:04:48.6644814Z       "file": "docs/src/content/docs/enterprise/lifecycle-hooks.md",
+2026-06-19T09:04:48.6653174Z       "lines": "56-72",
+2026-06-19T09:04:53.1930947Z       "description": "The hook format examples in both the opening JSON block (line 38) and the Command type section (line 57) use the `bash` field only:\n```json\n{ \"type\": \"command\", \"bash\": \"./scripts/notify.sh\", \"timeoutSec\": 10 }\n```\n`effective_command` is `return self.bash or self.command` — `bash` always wins when set. On Windows (where bash may not be on PATH), a hook with only the `bash` field will attempt to run a bash invocation and fail. The doc correctly notes (line 68-69) that `command` is 'cross-platform' and `bash` takes priority, but the examples never show the dual-field pattern that makes a hook portable.\n\nEnterprise platform teams deploying policy hooks across mixed OS fleets need to know to supply both fields.",
+2026-06-19T09:04:55.3661437Z       "suggested_fix": "Add a sentence in the Command section after the priority note (line 74), and update at least one example to show the dual-field pattern:\n\n```markdown\nFor hooks deployed to mixed OS environments, supply both fields:\n\n```json\n{\n  \"type\": \"command\",\n  \"bash\": \"./scripts/notify.sh\",\n  \"command\": \"powershell.exe -File scripts/notify.ps1\",\n  \"timeoutSec\": 10\n}\n```\n\n`bash` runs on Linux/macOS; `command` runs on Windows where `bash` is absent.\n```"
+2026-06-19T09:04:55.3663153Z     },
+2026-06-19T09:04:55.3667644Z     {
+2026-06-19T09:04:55.3667919Z       "id": "doc-writer-5",
+2026-06-19T09:04:55.3668213Z       "severity": "recommended",
+2026-06-19T09:04:55.3673507Z       "category": "structure",
+2026-06-19T09:04:55.3687942Z       "title": "No cross-links to related enterprise pages",
+2026-06-19T09:04:55.3688635Z       "file": "docs/src/content/docs/enterprise/lifecycle-hooks.md",
+2026-06-19T09:04:56.6006608Z       "lines": "entire file",
+2026-06-19T09:04:59.9830494Z       "description": "The page is an island. It has zero links to related enterprise pages. Per PROSE/Orchestrated Composition, docs compose via cross-references. Relevant neighbours that readers will need:\n- `governance-overview.md` — explains the policy directory model that policy hooks depend on\n- `security-and-supply-chain.md` — the threat model hooks operate within\n- `apm-policy.md` or `apm-policy-getting-started.md` — policy file authoring (policy hooks live in `/etc/apm/policy.d/`, same admin who writes `apm-policy.yml`)\n\nThe absence is especially notable in the 'Enterprise policy hooks' concept (lines 100-111) which should link to the governance chapter, and in the security section which should link to `security-and-supply-chain.md`.",
+2026-06-19T09:05:02.1741902Z       "suggested_fix": "Add a 'See also' section at the end of the page:\n```markdown\n## See also\n\n- [Governance overview](./governance-overview/) -- the full enterprise trust model\n- [Security and supply chain](./security-and-supply-chain/) -- threat model and built-in scanning\n- [APM policy: getting started](./apm-policy-getting-started/) -- authoring the policy file that governs hook deployment\n```\n\nAlso inline a link at the policy hooks discovery explanation (line 102): 'Policy hooks cannot be disabled — see [Governance overview](./governance-overview/) for the full enforcement model.'"
+2026-06-19T09:05:02.1745920Z     },
+2026-06-19T09:05:02.1746254Z     {
+2026-06-19T09:05:02.1747957Z       "id": "doc-writer-6",
+2026-06-19T09:05:02.1751908Z       "severity": "recommended",
+2026-06-19T09:05:03.2790037Z       "category": "security-model",
+2026-06-19T09:05:03.2800361Z       "title": "Security section omits two-layer model framing",
+2026-06-19T09:05:03.2807256Z       "file": "docs/src/content/docs/enterprise/lifecycle-hooks.md",
+2026-06-19T09:05:03.2816236Z       "lines": "173-180",
+2026-06-19T09:05:03.9299163Z       "description": "Per the doc-writer persona's security consistency rule: 'do all security-related sections```json
+2026-06-19T09:05:03.9300139Z {
+2026-06-19T09:05:03.9313352Z   "persona": "devx-ux-expert",
+2026-06-19T09:05:04.7932632Z   "active": use the two-layer model (built-in + apm audit)? Are the layers described correctly?'\n\nThe security section lists four bullets but does not situate hooks within APM's two-layer model. Specifically true,
+2026-06-19T09:05:07.7606995Z   "summary": "The hooks command group ships a solid skeleton — good event naming, guard on init, validate exit-code, sensible discovery order. Four issues need attention before this is safe to expose to end users. Two are blocking: the init scaffold produces a Windows-broken file that fails silently (first-:\n1. It does not state that hook execution occurs after APM's built-in `SecurityGate` has already scanned hook files for hidden Unicode and content findings — so the hook script itself is not APM-scanned.\n2. It does not note that `apm audit` does not scan hook contents or outputs (hooks are a separate execution surface).\n\nThis omission couldrun flow collapses), and apm hooks test is fundamentally broken for HTTP hooks because daemon threads are killed when the CLI exits, so the log the user is told to check is never written. Three recommended findings cover a frozen-terminal leave an enterprise security reviewer with a false impression that APM's content scanning covers hook scripts.",
+2026-06-19T09:05:09.2134630Z       "suggested_fix": "Add one clarifying sentence to the security section:\n```markdown\nAPM's built-in security gate sc risk during apm install, the 'dry-run' label on a command that fires real HTTP POSTs, and bare 'apm hooks' diverging from every package-manager convention for group commands. Two nits roundans installed package content before it\nreaches disk. Hook scripts and their output are not scanned by APM --\nadministrators are responsible for the trustworthiness of hook commands\ out the review.",
+2026-06-19T09:05:09.2141122Z   "findings": [
+2026-06-19T09:05:09.2141671Z     {
+2026-06-19T09:05:09.2161982Z       "id": "DUX-1",
+2026-06-19T09:05:09.2167236Z       "severity": "blocking",
+2026-06-19T09:05:09.2181168Z       "title": "init scaffold generates a Windows-broken file that fails silently",
+2026-06-19T09:05:10.2439937Z       "location": "src/apm_cli/commands/hooks.py:33-42 nand HTTP endpoints. Use policy hooks (in `/etc/apm/policy.d/`) to deploy\norg-controlled hooks without granting developers write access to them.\n```"
+2026-06-19T09:05:10.2444554Z     },
+2026-06-19T09:05:10.2445413Z     {
+2026-06-19T09:05:10.2445968Z       "id": "doc-writer-7",
+2026-06-19T09:05:10.2452202Z       "severity": "nit",
+2026-06-19T09:05:10.3291034Z       "category": "structure(_INIT_TEMPLATE)",
+2026-06-19T09:05:11.1249839Z       "description": "The template written by 'apm hooks init' contains only the 'bash' field: {\"bash\": \"echo 'Installed:' && cat\"}. On Windows, effective_command resolves to the bash value and runs it via subprocess.run(",
+2026-06-19T09:05:11.1343325Z       "title": "Sidebar order 12 leaves unexplained gap; double-backtick heading style is inconsistent",
+2026-06-19T09:05:11.1361655Z       "file": "docs/src/content/docs/enterprise/lifecycle-hooks.md",
+2026-06-19T09:05:11.1382856Z       "lines": "5, 205, 214, 226, 236",
+2026-06-19T09:05:13.7502337Z       "description": "Two minor issues:\n\n1. Thecmd, shell=True) which uses cmd.exe. 'cat' is not a Windows built-in, so the hook fails. Because all hook failures are fire-and-forget-swallowed, the user sees '[+] event fired. Check ~/.apm/logs/hooks.log for output.' while the log highest existing sidebar order in the enterprise section is 9 (github-rulesets.md). Lifecycle hooks at order 12 skips 10 and 11. While Starlight tolerates gaps and the value doesn't cause a collision, a gap of 3 between the records status=error. A Windows developer following the canonical init → test flow gets a silent, undiagnosed broken state on the very previous max and this page will puzzle future contributors assigning orders to new pages.\n\n2. The CLI command headings use double-backtick formatting (e.g. `### ``apm hooks`` -- list discovered hooks`) which renders first command they run. The init scaffold is the first-run touchpoint; a broken scaffold is the worst possible first-run failure mode.",
+2026-06-19T09:05:15.8188741Z       "suggested_fix": "Include both fields in the template so either as literal double backticks in most Markdown renderers rather than an inline code span. Other enterprise pages use single backticks in headings (e.g. `### \`apm policy status\``). The double-backtick pattern is unconventional and may render incorre platform works: {\"bash\": \"echo 'Installed:' && cat\", \"command\": \"echo Installed\"}. The runtime correctly prefers 'bash' on Unix and falls back to 'command' on Windows. Add a comment in the scaffold JSON: 'ctly.",
+2026-06-19T09:05:16.0354409Z       "suggested_fix": "1. Change `order: 12` to `order: 10` to immediately follow github-rulesets.\n\n2. Replace double-backtick headings with single-backtick code spans:\n```\n### `apm hooks` — list discovered hooks\n### `apm hooks// bash: Unix/macOS  command: Windows/cross-platform' so the author understands the distinction without reading docs."
+2026-06-19T09:05:16.0360609Z     },
+2026-06-19T09:05:16.0361212Z     {
+2026-06-19T09:05:16.0361726Z       "id": "DUX-2",
+2026-06-19T09:05:16.0362290Z       "severity": "blocking",
+2026-06-19T09:05:16.1767232Z       "title": "apm hooks test exits before HTTP daemon threads complete — init` — scaffold a starter hook file\n### `apm hooks validate` — check hook files for errors\n### `apm hooks test` — dry-run a synthetic event\n```"
+2026-06-19T09:05:16.1768660Z     }
+2026-06-19T09:05:16.1769532Z   ]
+2026-06-19T09:05:16.1769866Z }
+2026-06-19T09:05:16.2045016Z ```● Doc-writer Documentation review of lifecycle hooks PR
+2026-06-19T09:05:16.2045634Z   │ Check sidebar orders across enterprise docs (shell)
+2026-06-19T09:05:16.2046037Z   │   │ grep -n "order:"
+2026-06-19T09:05:16.2046511Z   │   │ /home/runner/work/apm/apm/docs/src/content/docs/enterprise/*.md | sort -t:
+2026-06-19T09:05:16.2049170Z   │   │ -k3 -n | head -30
+2026-06-19T09:05:16.2049598Z   │   └ 17 lines...
+2026-06-19T09:05:16.2049914Z   └ Read security-and-supply-chain.md
+2026-06-19T09:05:16.2050365Z       │ docs/src/content/docs/enterprise/security-and-supply-chain.md
+2026-06-19T09:05:16.2050967Z       └ L1:15 (15 lines read)
+2026-06-19T09:05:16.2051165Z 
+2026-06-19T09:05:17.1413821Z  log entries are never written",
+2026-06-19T09:05:17.1465462Z       "location": "src/apm_cli/core/hook_executors.py:170-173 (_execute_http), src/apm_cli/commands/hooks.py:159-166 (hooks_test)",
+2026-06-19T09:05:20.5035568Z       "description": "HTTP hooks run in a daemon thread:Now I have all the evidence. Let me produce the return JSON. 'thread = threading.Thread(target=_send, daemon=True); thread.start()'. No join() is called anywhere. When 'apm hooks test' returns, the Click handler completes, the process exits, and the Python interpreter kills all remaining daemon threads — including the in-flight HTTP request. The log entry (_append_to_hook_log) is written inside _send(), so it is also killed. The success message 'Check ~/.apm/logs/hooks.log for output' points to a log that has nothing (or only stale entries). The user's primary workflow for verifying HTTP webhook connectivity — the entire stated purpose of 'apm hooks test' — is silently broken. This is not a UX polish issue; it is a functional correctness fault in the test command.",
+2026-06-19T09:05:22.1935184Z       "suggested_fix": "In 'apm hooks test' (and only there), collect HTTP threads from the runner and join them with the hook's configured timeout before printing the success message. The simplest approach: expose```json
+2026-06-19T09:05:22.1936341Z {
+2026-06-19T09:05:22.1950278Z   "persona": "performance-expert",
+2026-06-19T09:05:22.1955323Z   "active": true,
+2026-06-19T09:05:24.3557717Z   "summary": "Serial command hook execution adds N*30s worst-case latency per phase to the install/ a LifecycleHookRunner.fire_and_wait(event_name, event, timeout) method used exclusively by the test command. For the production install/updateupdate/uninstall hot paths; double discovery in update/uninstall wastes 3 extra stat syscalls per operation; 30s default timeout is 3-6x too generous for a synchronous CLI path path, keep the current fire-and-forget daemon behaviour. Alternatively, make _execute_http return the thread and let hooks_test join it: 'thread.join(timeout=hook.effective_timeout)'..",
+2026-06-19T09:05:24.3560606Z   "findings": [
+2026-06-19T09:05:24.3560949Z     {
+2026-06-19T09:05:24.3573190Z       "severity": "recommended",
+2026-06-19T09:05:24.3600716Z       "summary": "Serial command hook execution multiplies timeout worst-case into install/update/uninstall wall-time",
+2026-06-19T09:05:24.3603003Z       "file": "src/apm_cli/core/lifecycle_hooks.py",
+2026-06-19T09:05:24.3615137Z       "line": 306,
+2026-06-19T09:05:25.1313345Z       "rationale": "LifecycleHookRunner.fire() iterates `for hook in matching:` and calls Update the success message to distinguish: 'Command hooks executed. HTTP hooks dispatched (waited up to Xs for responses).'."
+2026-06-19T09:05:25.1315784Z     },
+2026-06-19T09:05:25.1316115Z     {
+2026-06-19T09:05:25.1316455Z       "id": "DUX-3",
+2026-06-19T09:05:25.1321031Z       "severity": "recommended",
+2026-06-19T09:05:26.2286818Z       "title": "30 execute_hook() synchronously for each entry. execute_hook() dispatches to _execute_command() which calls subprocess.run(..., shell=True, timeout=30) -- a blocking call. With 3 policy + 3 user + 1 project command hooks (7 total), fire-second synchronous command hook blocks apm install with no user indicator",
+2026-06-19T09:05:26.2320233Z       "location": "src/apm_cli/install/service.py:68-70, src/apm_cli/core/hook_executors.py:178-201 (_execute_command)",
+2026-06-19T09:05:29.4641258Z       "description": "runner.fire('pre-install', event) is() blocks for sum(min(hook_ms, 30000ms)) per event phase. Worst case: 7 hooks * 30s * 2 phases (pre+post) = 420s = 7 minutes of serial subprocess wait added to a single install. Even called synchronously before the install pipeline. If a command hook is configured, subprocess.run() blocks the process for up to 30 seconds (default timeout) with no output, no progress indicator, and no hint that a hook is running. From a fast-hook scenario (each hook completes in 2s): 7 * 2s * 2 phases = 28s of added wall-time. The install core pipeline (resolve + fetch the user's perspective, 'apm install' has frozen. This is especially painful in CI where a maintainer added a post-install analytics hook with a flaky endpoint; developers see a ) typically runs in 5-60s; 28s of serial hook overhead doubles that budget for users with a typical hook suite. HTTP```json
+2026-06-19T09:05:29.4646321Z {
+2026-06-19T09:05:29.4646582Z   "persona": "auth-expert",
+2026-06-19T09:05:29.4646855Z   "active": true,
+2026-06-19T09:05:29.4832505Z   "summary": "Two blocking auth risks: (1) _expand_env_vars has no blocklist, allowing any HTTP hook to exfiltrate GITHUB_APM_PAT/ADO_APM_PAT to an attacker endpoint; (2) raw URLs (incl. user:pass@ form) written verbatim to hooks.log bypassing SecretRedactionFilter.",
+2026-06-19T09:05:29.4834389Z   "findings": [
+2026-06-19T09:05:29.4837395Z     {
+2026-06-19T09:05:29.4837818Z       "severity": "blocking",
+2026-06-19T09:05:29.5693517Z       "summary": "_expand_env_vars has no credential blocklist -- project hook files can exfiltrate GITHUB_APM_PAT/ADO_APM_PAT via HTTP headers30-second stall they cannot diagnose. npm prints '> script hook' for every lifecycle script. apm prints nothing.",
+2026-06-19T09:05:30.0361510Z       "suggested_fix": "Print a brief status line before firing",
+2026-06-19T09:05:31.7022461Z       "rationale": "src/apm_cli/core/hook_executors.py line 109 expands ANY $VAR or ${VAR} match in header values with os.environ.get( hooks correctly fire in daemon threads (hook_executors.py:181) and add zero wall-time. Command hooks must receive the same treatment: each should dispatch to a thread so they execute hooks in the install/update paths: _rich_info('Running pre-install hooks...') at --verbose, or at minimum log a debug entry that appears in --Now I have all the context I need. Let me compose the security review JSON.var_name). The APM token precedence chain puts GITHUB_APM_PAT, GITHUB_APM_PAT_{ORG}, ADO_APM_PAT, GITHUB_TOKEN, and GH_TOKEN in the process environment before hooks fire. A project-level concurrently within a phase. The fire() loop can then join the threads before returning if completion semantics are needed, or stay truly fireNow I have everything needed. Let me produce the JSON review.
+2026-06-19T09:05:31.7027613Z 
+2026-06-19T09:05:31.7027807Z ```json
+2026-06-19T09:05:31.7028120Z {
+2026-06-19T09:05:31.7037964Z   "persona": "cli-logging-expert",
+2026-06-19T09:05:31.7044660Z   "active": true,
+2026-06-19T09:05:32.9684658Z   "summary": "One blocking defect breaks all Rich output permanently (wrong import).verbose output. In hooks_test, print each hook being executed: '[>] Firing post-install command hook: echo ...' so the user can see what is running and for how long. Consider reducing .apm/hooks.json containing {\"headers\": {\"Authorization\": \"***"}} silently sends the developer's live PAT to any HTTPS endpoint on every install/update/uninstall.-and-forget to match the documented contract. subprocess.run with shell=True also spawns an extra shell process (~10-20ms on Linux, ~50ms on Windows) per hook invocation; for Two recommended issues: a Rich markup collision in a Panel title that would silently eat the status symbol, and a timing-lie verbose message that says 'sent' before the the default command timeout from 30s to 10s and making it visible in 'apm hooks validate' output."
+2026-06-19T09:05:32.9693259Z     },
+2026-06-19T09:05:32.9693615Z     {
+2026-06-19T09:05:32.9693933Z       "id": "DUX-4",
+2026-06-19T09:05:32.9694512Z       "severity": "recommended",
+2026-06-19T09:05:33.6878440Z       "title": "apm hooks test is labelled 'dry-run' but fires real HTTP POSTs with HTTPS-only enforcement (line 135) protects only against passive MITM -- it does NOT prevent an attacker-controlled server from receiving the token. Because project-level hook files are committed 7 hooks that adds ~70-350ms of deterministic process-spawn overhead beyond hook execution time.",
+2026-06-19T09:05:33.7095919Z       "suggestion": "Replace the serial loop in LifecycleHookRunner.fire() with a ThreadPoolExecutor bounded to len(matching): async HTTP thread has done anything. Three nits: hardcoded symbol literals in verbose_detail, CommandLogger bypass, and a premature success message for fire-and-forget dispatches.",
+2026-06-19T09:05:33.7097956Z   "findings": [
+2026-06-19T09:05:33.7098299Z     {
+2026-06-19T09:05:33.7101545Z       "severity": "blocking",
+2026-06-19T09:05:34.1518946Z       "summary": "`from apm_cli.utils.console import console` imports a name that does real credentials",
+2026-06-19T09:05:34.1579546Z       "location": "src/apm_cli/commands/hooks.py:108 (help text), docs/src/content/docs/enterprise/lifecycle-hooks.md line 'without performing a real install'",
+2026-06-19T09:05:34.8955698Z       "description": " to git repositories (supply-chain attack surface) and the docs explicitly describe header env-var expansion as the intended pattern for injecting bearer tokens, this is an unrestr `from concurrent.futures import ThreadPoolExecutor, as_completed; with ThreadPoolExecutor(max_workers=len(matching)) as pool: futs = [pool.submit(execute_hook, h, event, ...) for h in matching]; [f.result() for f in as_completed(futs)]`. This collapses wall-time for N concurrent not exist at module level — Rich table and Panel never render",
+2026-06-19T09:05:35.7571865Z       "rationale": "`console.py` exposes `_get_console()` but has no module-level `console` variable. Both `hooks()` (lineThe command help reads 'Dry-run a synthetic lifecycle event' and the docs say 'verify wiring without performing a real install/update/uninstall.' Neither mention that HTTP hooks fire real HTTPS POSTs toicted credential exfiltration primitive with no architectural guard.",
+2026-06-19T09:05:35.7580312Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:05:35.7581882Z       "line": 109,
+2026-06-19T09:05:36.0309602Z       "suggestion": "Add a MODULE-LEVEL blocklist of APM credential var names and refuse to expand them in _ hooks to max(individual_hook_time) instead of sum. If fire-and-forget semantics are preferred (consistent with HTTP), use daemon threads and skip join -- matching 74) and `hooks_init()` (line 189) attempt `from apm_cli.utils.console import console` inside try blocks that catch `ImportError`/`NameError`. The import always fails and the except branch always wins, so the Rich table in```json
+2026-06-19T09:05:36.0311693Z {
+2026-06-19T09:05:36.0323959Z   "persona": "supply-chain-security-expert",
+2026-06-19T09:05:36.0326513Z   "active": true,
+2026-06-19T09:05:37.0443229Z   "summary": "4 blocking findings: security.md contract violated on 3 explicit claims real endpoints with real expanded credentials (*** from $ENV_VAR). In a production environment, running 'apm hooks test' emits real analytics events to real backend systems. 'Synthetic packageexpand_env_vars. Minimal set: GITHUB_APM_PAT, GITHUB_APM_PAT_*, ADO_APM_PAT, GITHUB_TOKEN, GH_TOKEN, GH_ENTERPRISE_TOKEN, GITHUB_APP_TOKEN, GITHUB_APP_INSTALLATION_TOKEN. Example: _ the HTTP executor pattern at hook_executors.py:181."
+2026-06-19T09:05:37.0446380Z     },
+2026-06-19T09:05:37.0446619Z     {
+2026-06-19T09:05:37.0446871Z       "severity": "recommended",
+2026-06-19T09:05:37.0477106Z       "summary": "update.py and uninstall/cli.py call discover_hooks() twice per operation; install correctly calls it once",
+2026-06-19T09:05:37.0485780Z       "file": "src/apm_cli/commands/update.py",
+2026-06-19T09:05:37.0486219Z       "line": 531,
+2026-06-19T09:05:37.5158883Z       "rationale `apm hooks` and the onboarding Panel in `apm hooks init` are permanently dead. Users see the bare click.echo fallback regardless of Rich availability. The established codebase pattern (see `commands/run.py`, `commands/marketplace/__init__.py`), full token env passed to shell subprocess, env-var exfiltration channel in HTTP headers by design, and Windows policy dir is world-writable. 4 recommended findings on credential' ≠ 'no side effects'. The 'dry-run' label is actively misleading and will cause surprise in prod.",
+2026-06-19T09:05:38.1948757Z       "suggested_fix": "Remove 'dry-run' from the help text; replace with 'Fire a synthetic test event through all discovered hooks (executes realCREDENTIAL_BLOCKLIST = frozenset({\"GITHUB_APM_PAT\", \"ADO_APM_PAT\", \"GITHUB_TOKEN\", \"GH_TOKEN\", ...}); return \"\" if var_name in _CREDENTIAL_BLOCKLIST or var_name.startswith(\"GITHUB_APM_PAT_\"). Document the blocklist in the enterprise/": "In update.py, _fire_update_hooks() is called at line 531 (pre-update) and again at line 606 (post-update). Each invocation internally calls build_runner_from_context() -> discover_hooks() -> 3 filesystem stat syscalls (is_dir on / is `from ._helpers import _get_console` then `console = _get_console()` inside the try block.",
+2026-06-19T09:05:38.1955254Z       "file": "src/apm_cli/commands/hooks.py",
+2026-06-19T09:05:38.1958094Z       "line": 74,
+2026-06-19T09:05:38.2055344Z       "suggestion": "Replace both `from apm_cli.utils.console import console` lines with `from apm_cli.utils.console import _get_console` and assign `console = _get_console()` as the persistence, SSRF, URL leak, and missing consent gate.",
+2026-06-19T09:05:38.2057723Z   "findings": [
+2026-06-19T09:05:38.2058094Z     {
+2026-06-19T09:05:38.2063419Z       "severity": "blocking",
+2026-06-19T09:05:38.2093954Z       "summary": "security.md 'No arbitrary code execution' and 'No network calls after install' are now false; attack surface table row contradicts this PR",
+2026-06-19T09:05:39.2219819Z       "rationale": "docs/src hooks).' Add a --dry-run / --print-only flag that resolves hooks, prints what would execute (command string or target hostname), and exits withoutlifecycle-hooks.md page.",
+2026-06-19T09:05:39.2223045Z       "evidence": {
+2026-06-19T09:05:39.2226018Z         "outcome": "missing",
+2026-06-19T09:05:39.2228732Z         "tier": "unit",
+2026-06-19T09:05:39.2245360Z         "test_file": "tests/unit/core/test_hook_executors.py",
+2026-06-19T09:05:39.2278792Z         "test_name": "TestExpandEnvVars::test_does_not_expand_github_apm_pat",
+2026-06-19T09:05:39.3166839Z         "assertion_excerpt": "monkeypatch.setenv(' first statement inside each try block. This matches the pattern used by run.py and marketplace commands."
+2026-06-19T09:05:39.3168186Z     },
+2026-06-19T09:05:39.3168640Z     {
+2026-06-19T09:05:39.3169038Z       "severity": "recommended",
+2026-06-19T09:05:39.3185562Z       "summary": "`title=\"[i] Getting Started\"` — Rich parses `[i]` as an italic markup tag and silently drops the status symbol",
+2026-06-19T09:05:39.7775661Z       "rationale": "`_rich_echo` passes `markup/content/docs/enterprise/security.md line 33 states 'No arbitrary code execution. APM does not execute scripts from packages.' Line 32 states 'No network calls after install. There are no callbacks, webhooks, or phone-home requests.' Line 357 in the attack surface comparison table lists APM's mitigation foretc/apm/policy.d, is_dir on ~/.apm/hooks/, is_file on .apm/hooks.json). Total: 6 stat syscalls per update instead of 3. The same pattern is running anything. That flag deserves the dry-run label. Update the docs to match."
+2026-06-19T09:05:39.7778256Z     },
+2026-06-19T09:05:39.7778538Z     {
+2026-06-19T09:05:39.7778850Z       "id": "DUX-5",
+2026-06-19T09:05:39.7780021Z       "severity": "recommended",
+2026-06-19T09:05:39.7802492Z       "title": "Bare 'apm hooks' as the list command breaks package-manager conventions and is non-discoverable",
+2026-06-19T09:05:40.2740992Z       "GITHUB_APM_PAT', 'ghp_secret'); assert _expand_env_vars('${GITHUB_APM_PAT}') == ''",
+2026-06-19T09:05:40.2765396Z         "proves": "APM credential env vars cannot be injected into HTTP hook headers",
+2026-06-19T09:05:40.9410290Z         "principles": ["secure-by-default", "governed-by-policy"] 'Post-install scripts' as 'No code execution.' This PR adds both shell command execution and HTTP POST callbacks fired at install time, directly invalidating all three claims. The security model doc is=False` to `console.print()`, so `[i]` is safe there. But `hooks_init` calls `console.print(Panel(..., title=\"[i] Getting Started\", ...))` directly, without `markup=False`. Rich's Panel renderer applies markup to the title string in uninstall/cli.py at lines 87 and 298 (also 6 stats per uninstall). By contrast, InstallService.run() in service.py:68 builds the runner ONCE before the pipeline and reuses it for both runner.fire('prelocation": "src/apm_cli/commands/hooks.py:55-62 (hooks group, invoke_without_command=True)",
+2026-06-19T09:05:41.3947467Z       "description": "In every reference package manager — npm, pip, cargo, brew — invoking a command group bare
+2026-06-19T09:05:41.3948100Z       }
+2026-06-19T09:05:41.3948310Z     },
+2026-06-19T09:05:41.3951136Z     {
+2026-06-19T09:05:41.3954487Z       "severity": "blocking",
+2026-06-19T09:05:41.3992768Z       "summary": "Raw hook URL (including user:password@ userinfo) written verbatim to hooks.log -- SecretRedactionFilter does not apply to direct file writes",
+2026-06-19T09:05:42.6254849Z       "rationale": "src/apm_cli/core/hook_executors.py lines 170-179 pass by default, interpreting `[i]` as an open italic tag and consuming it. The rendered title becomes blank-prefixed \" Getting Started\" with no `[i]` symbol visible. This only matters once the blocking import the contract APM makes with enterprise security reviewers and compliance audits; silently shipping behavior that contradicts it without updating the doc in the same-install') and runner.fire('post-install') -- the correct pattern. On local NVMe, 3 extra stats costs ~3-15us: noise. On NFS or SMB network shows help, not live output. 'npm config' shows help; 'npm config list' lists. 'apm hooks' silently enumerating live hook state is surprising the raw `url` string as the `target` argument to _append_to_hook_log. _append_to_hook_log writes via open() + f.write() directly, NOT via Python's logging module ( is fixed, but it is a real display bug.",
+2026-06-19T09:05:42.6261000Z       "file": "src/apm_cli/commands/hooks.py",
+2026-06-19T09:05:42.6261531Z       "line": 198,
+2026-06-19T09:05:42.7278577Z       "suggestion": "Escape the bracket: `title=\"\\\\[i] Getting Started\"`, or construct the title from the constant: `title=f\"{STATUS_SYMBOLS['info']} Getting Started PR is an architectural fault. The 'planned hardening' note at line 182 ('Hook transparency -- display hook script contents during install') acknowledges this feature was expected but also signals the transparency gate was supposed to ship first.",
+2026-06-19T09:05:43.7478136Z       "file shares (common in enterprise CI and shared dev environments), each stat can cost 10-50ms; 3 extra stats adds 30-150ms latency penalty per operation for every user regardless of whether hooks to any developer who expects a help screen. More importantly, 'apm --help' lists 'hooks' as a command, giving no indication that bare invocation produces data. The feature is effectively invisible in '--logging.getLogger). auth.py's SecretRedactionFilter (line 86) is installed on the apm_cli logger hierarchy and only intercepts records emitted through LogRecord.getMessage() -- it has zero coverage\"` and add `markup=False` to the `console.print()` call. Using `_rich_panel()` (which routes through click.echo with plain title) is the safest fallback path."
+2026-06-19T09:05:43.7481098Z     },
+2026-06-19T09:05:43.7481303Z     {
+2026-06-19T09:05:43.7481528Z       "severity": "recommended",
+2026-06-19T09:05:43.8339939Z       "summary": "`verbose_detail` says event was ": "docs/src/content/docs/enterprise/security.md",
+2026-06-19T09:05:43.8341635Z       "line": 32,
+2026-06-19T09:05:43.9666614Z       "suggestion": "Update security.md in this PR: replace the 'No arbitrary code execution' and 'No network calls after install' bullets with scoped statements (e.g. 'APM does not execute scripts from installed packages; project-scoped lifecycle hooks can are configured.",
+2026-06-19T09:05:44.3931532Z       "suggestion": "In update.py, hoist runner construction out of _fire_update_hooks: build the runner once before the try block, then pass it into both fire calls. Mirror what service.py:68 does. Similarly refhelp' output.",
+2026-06-19T09:05:44.9536038Z       "suggested_fix": "Add 'apm hooks list' as an explicit subcommand that performs the discovery and table output. Keep bare 'apm hooks' showing the Click-generated help screen (the default for over direct file I/O. urlparse() at line 134 returns a parsed result but the original `url` string is never sanitised before being handed to the log writer. A hook be configured by project authors and run at install time with explicit user awareness'). Update the attack surface table row for 'Post-install scripts' to reflect the new posture. Remove or promote the 'planned hardening' Hook'sent' before the background HTTP thread has executed",
+2026-06-19T09:05:45.5207492Z       "rationale": "At `hook_executors.py:185`, immediately after `thread.start()`, the code logs `f\"[i] {event.event} event sent to {hostname}\"`. The daemon thread has only been scheduled; `actor _fire_uninstall_hooks in uninstall/cli.py. Signature change: add an optional `runner=None` param to both helpers, constructing lazily only when not provided, to preserve backward compat with any groups). Optionally add a note in the help: 'Run apm hooks list to see discovered hooks.' This matches the pattern used by 'apm policy', 'apm marketplace', and every peer tool."
+2026-06-19T09:05:45.5209754Z     },
+2026-06-19T09:05:45.5209972Z     {
+2026-06-19T09:05:46.0703869Z       "id": "DUX URL of the form ***analytics.corp.com/hook passes the scheme check (urlparse.scheme == 'https'), requests.post sends the credentials as HTTP Basic Auth over TLS, and the full URL including transparency item -- either ship it now or document it as a follow-on requirement before hooks are generally available."
+2026-06-19T09:05:46.0705798Z     },
+2026-06-19T09:05:46.0706154Z     {
+2026-06-19T09:05:46.0707276Z       "severity": "blocking",
+2026-06-19T09:05:46.1416250Z       "summary": "_build_hook_env passes the entire process environment -- including allrequests.post()` has not been called yet and the TCP connection has not been made. 'sent' implies delivery completed. If the CLI process exits quickly (as it does in `apm hooks test`), daemon threads are killed direct callers."
+2026-06-19T09:05:46.1418217Z     },
+2026-06-19T09:05:46.1419630Z     {
+2026-06-19T09:05:46.1420681Z       "severity": "recommended",
+2026-06-19T09:05:46.1434343Z       "summary": "30s default command hook timeout is 3-6x too generous for a synchronous CLI blocking path",
+2026-06-19T09:05:46.1443241Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:05:46.1446177Z       "line": 35,
+2026-06-19T09:05:46.6311034Z       "rationale": "_DEFAULT_COMMAND_TIMEOUT = 30 at line 35 means a single misconfigured or hung hook (-6",
+2026-06-19T09:05:46.6313257Z       "severity": "recommended",
+2026-06-19T09:05:46.6347604Z       "title": "Rich Panel title '[i]' is interpreted as italic markup, not the APM info symbol",
+2026-06-19T09:05:46.6357645Z       "location": "src/apm_cli/commands/hooks.py:238",
+2026-06-19T09:05:47.0775762Z       "description": "Panel(... title='[i] Getting Started' ...) — Rich the credential is persisted to ~/.apm/logs/hooks.log in plaintext on every hook execution.",
+2026-06-19T09:05:47.0783154Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:05:47.0787069Z       "line": 170,
+2026-06-19T09:05:47.1734494Z       "suggestion": "Log a sanitised URL. After parsing, reconstruct without APM auth tokens -- to hook subprocesses",
+2026-06-19T09:05:47.1885646Z       "rationale": "hook_executors.py line 246: env = dict(os.environ) copies every variable from the APM process environment into the subprocess env. APM's process holds GITHUB_TOKEN, GITHUB_AP and the request may never go out at all. This message is factually wrong and actively misleading for the operator debugging a failed hook delivery.",
+2026-06-19T09:05:47.1892928Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:05:47.1897357Z       "line": 185,
+2026-06-19T09:05:48.9495271Z       "suggestion": "Changee.g., a script that blocks waiting on stdin, or a network call to a slow endpoint) freezes the CLI for 30 full seconds before subprocess.TimeoutExpired is raised and execution continues. With 7 hooks in parses '[i]' as an opening italic tag, not a literal string. The rendered title will be italic 'Getting Started' with no prefix icon, or raise a markup parse userinfo: log_url = url if not parsed.username else parsed._replace(netloc=parsed.hostname + (f':{parsed.port}' if parsed.port else '')).geturl(). Alternatively, import _redact_secrets fromM_PAT, ADO_APM_PAT, and any other credentials the user or CI system exported. A command hook therefore receives full access to every credential APM holds, far beyond what the hook to `f\"[i] {event.event} event dispatching to {hostname} (async)\"` or `\"queued to {hostname}\"`. Optionally join the thread with a short timeout and report the actual outcome if it completes within the worst-case suite and the serial fire loop, a fully timed-out run waits 7 * 30s = 210s per phase before the timeout cascade completes -- this is 7 minutes of apparent-hang CLI output error if Rich's strict mode is enabled. This is a visual regression in the init command's post-creation guidance, which is the most important UX moment for new users.",
+2026-06-19T09:05:49.3087913Z       "suggested_fix": "Use title='ℹ Getting Started' ( apm_cli.core.auth and apply it to the target string before the log write. Also apply the same fix to the error-path call at line 179.",
+2026-06-19T09:05:49.3088990Z       "evidence": {
+2026-06-19T09:05:49.3089325Z         "outcome": "missing",
+2026-06-19T09:05:49.3093111Z         "tier": "unit",
+2026-06-19T09:05:49.4572323Z         "test_file": "tests/unit/core/ needs. This violates Threat #5 (token over-scope) and is the enabling condition for Threat #6 (credential exfiltration): a hook can trivially read $GITHUB_TOKEN and curl it to an external endpoint. Even for well that window."
+2026-06-19T09:05:49.4574072Z     },
+2026-06-19T09:05:49.4574600Z     {
+2026-06-19T09:05:49.4577028Z       "severity": "nit",
+2026-06-19T09:05:49.4606524Z       "summary": "`verbose_detail` calls hardcode `[i]` as a literal string prefix rather than using `STATUS_SYMBOLS`",
+2026-06-19T09:05:50.4122580Z       "rationale": "`verbose_detail(f\"[i] Lifecycle command hook timed out: {cmd per phase with no user feedback. The HTTP hook default is 10s (hook_executors.py:34), reflecting a more realistic expectation. Command hooks are shell processes that should complete within aUnicode info glyph, renders as plain text) or title='[bold]Getting Started[/bold]' and drop the icon entirely from the title. The STATUS_SYMBOLS dict used elsewhere in the codebase should have a renderable symbol:test_hook_executors.py",
+2026-06-19T09:05:50.4152175Z         "test_name": "TestAppendToHookLog::test_url_userinfo_stripped_before_log",
+2026-06-19T09:05:50.4190827Z         "assertion_excerpt": "logged content should not contain ':secret@' when url='***host/hook'",
+2026-06-19T09:05:51.1602973Z         "proves-intentioned hooks, an unintended credential can leak through verbose logging, error output, or process listing. The secure design is an explicit opt-in allowlist: only pass APM_}\")` and four similar calls bake the symbol string directly into the message. `verbose_detail` delegates to `_rich_echo(..., color=\"dim\")` with no `symbol=` parameter, so the `[i]` is few seconds for any reasonable audit/notification/build-trigger script. 5s is a better default: it still allows hook scripts to do meaningful work (query a use STATUS_SYMBOLS.get('info', 'i') + ' Getting Started' as the title string, escaping it with rich.markup.escape() before passing to Panel."
+2026-06-19T09:05:51.1606977Z     },
+2026-06-19T09:05:51.1607289Z     {
+2026-06-19T09:05:51.1607597Z       "id": "DUX-7",
+2026-06-19T09:05:51.1607992Z       "severity": "recommended",
+2026-06-19T09:05:51.5293781Z       "title": "Validate error message echoes up to": "Embedded URL credentials are not persisted to hooks.log",
+2026-06-19T09:05:51.5300809Z         "principles": ["secure-by-default"]
+2026-06-19T09:05:51.5301460Z       }
+2026-06-19T09:05:51.5301927Z     },
+2026-06-19T09:05:51.5302823Z     {
+2026-06-19T09:05:51.5305775Z       "severity": "recommended",
+2026-06-19T09:05:51.7820435Z       "summary": "_build_hook_env copies the entire process environment to command hook subprocesses, unnecessarily exposing GITHUB_APM_PAT, ADO_APM_PAT, and a raw string. Today this renders correctly because `markup=False` is set. But if `STATUS_SYMBOLS[\"info\"]` changes, these callers drift silently. The restEVENT_*, APM_PROJECT_*, and any env vars the hook author explicitly declares under the 'env' key.",
+2026-06-19T09:05:51.7836172Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:05:51.7839221Z       "line": 246,
+2026-06-19T09:05:52.2743399Z       "suggestion": "Build a minimal REST API, write a log file, invoke a lightweight linter) while bounding the worst-case per-hook latency to 5s instead of 30s. Administrators who need longer timeouts can set timeoutS 30 characters of the URL back to the terminal",
+2026-06-19T09:05:52.2753309Z       "location": "src/apm_cli/commands/hooks.py:314",
+2026-06-19T09:05:52.5869907Z       "description": "errors.append(f\"{prefix}: URL must use https:// (got '{url[: GITHUB_TOKEN to arbitrary shell commands",
+2026-06-19T09:05:52.8271721Z       "rationale": "src/apm_cli/core/hook_executors.py line 250 does dict(os.environ), which clones all process-level variables including APM's full token precedence chain into the subprocess environment. The hook's of the codebase consistently passes `symbol=` to the logger methods.",
+2026-06-19T09:05:52.8275785Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:05:52.8282205Z       "line": 233,
+2026-06-19T09:05:53.0539605Z       "suggestion": "Add a `symbol: str = \"\"` parameter to `CommandLogger.verbose_detail`, prepend `STATUS_SYMBOLS.get(symbol, \ env: start from a safe baseline (PATH, HOME, USER, TMPDIR, LANG, TERM) rather than the full process env. Merge only hook.env entries theec per hook in their hook JSON file.",
+2026-06-19T09:05:53.9567870Z       "suggestion": "Lower _DEFAULT_COMMAND_TIMEOUT from 30 to 5. Update the enterprise docs (docs/src/content/docs/enterprise/lifecycle-hooks.md) to note that per30]}')\") — prints the first 30 chars of the URL to stdout (and any CI log). For enterprise users whose hook files reference internal analytics endpoints, this leaks hostname and `env` field (line 252) already provides an explicit, auditable mechanism for injecting any variable a hook needs. Full env inheritance is the maximal-privilege grant"\")` there, and drop the hardcoded `[i]` from each call site. Or at minimum replace each `\"[i] \"` prefix with `STATUS_SYMBOLS['info'] + ' '`."
+2026-06-19T09:05:53.9570754Z     },
+2026-06-19T09:05:53.9570971Z     {
+2026-06-19T09:05:53.9571482Z       "severity": "nit",
+2026-06-19T09:05:54.5475001Z       "summary": "All author explicitly declared. Never include variables matching /TOKEN|SECRET|PAT|KEY|PASSWORD|CREDENTIAL|AUTH/i unless the hook author explicitly allowlists them by name-hook timeoutSec overrides the default upward for hooks that legitimately need more time. This is a non-breaking change: existing hook files with explicit timeoutSec are unaffected; only hooks `apm hooks` sub-commands bypass `CommandLogger` and call `_rich_*` helpers directly",
+2026-06-19T09:05:55.1172559Z       "rationale": "APM's output architecture contract requires CommandLogger as the base for all commands (lifecycle: start → progress → complete → summary). `hooks.py` imports and calls `_rich_info`, `_rich_success path structure in terminal output that may be captured, screen-shared, or logged. The validate command is the first place an admin audits hook files; leaking internal URLs here is an inad: any command hook (including a future project hook from a compromised dependency's .apm/hooks.json) can read, echo, or exfiltrate these tokens. The principle of least privilege applied to subprocess in the hook definition. Add an APM_EVENT_* prefix namespace for the event payload if callers need structured data beyond stdin."
+2026-06-19T09:05:55.1175927Z     },
+2026-06-19T09:05:55.1176258Z     {
+2026-06-19T09:05:55.1177240Z       "severity": "blocking",
+2026-06-19T09:05:55.2385417Z       "summary": "_expand_env_vars is a designed-in credential exfilt without a timeout field get the new default."
+2026-06-19T09:05:55.2388664Z     },
+2026-06-19T09:05:55.2389001Z     {
+2026-06-19T09:05:55.2393225Z       "severity": "nit",
+2026-06-19T09:05:55.2421606Z       "summary": "discover_hooks() has no process-level cache; 3 stat syscalls paid on every install/update/uninstall even with zero hooks configured",
+2026-06-19T09:05:55.2427707Z       "file": "src/apm_cli/core/lifecycle_hooks.py",
+2026-06-19T09:05:55.2429727Z       "line": 252,
+2026-06-19T09:05:55.7526018Z       `, `_rich_warning`, `_rich_error`, and `_rich_echo` directly throughout. This means no dry-run awareness, no structured diagnostic collection, and no consistent start/end framing. The four sub-commands are new surface area; establishingvertent information-disclosure.",
+2026-06-19T09:05:56.2829393Z       "suggested_fix": "Replace the echo with a scheme-only message: f'{prefix}: URL must use https:// (http:// and other schemes are rejected)'. The user already knows their own envs means starting from a curated minimal env (PATH, HOME, TMPDIR, SHELL, platform OS vars) and having the hook author declare additional needs via the `env` field -- making intentration channel: any env var including auth tokens can be injected into HTTP headers sent to arbitrary HTTPS endpoints",
+2026-06-19T09:05:56.8157206Z       "rationale": "hook_executors.py lines 104-111 and 151: _expand_env_vars silently resolves $VAR and ${VAR} from"rationale": "discover_hooks() performs platform.system() + 2x directory.is_dir() + 1x project_file.is_file() on every call. There is no functools.lru_cache or equivalent. On the right pattern now is cheaper than retrofitting later.",
+2026-06-19T09:05:56.8161239Z       "file": "src/apm_cli/commands/hooks.py",
+2026-06-19T09:05:56.8172876Z       "line": 19,
+2026-06-19T09:05:56.8670739Z       "suggestion": "Instantiate a `CommandLogger(\"hooks\", verbose=verbose)` at the top of each command function URL; they don't need it echoed back. If schema context is genuinely helpful, show only the scheme: f'{prefix}: URL must use https:// (got scheme: {parsed.scheme!r})'."
+2026-06-19T09:05:56.8672607Z     },
+2026-06-19T09:05:56.8672915Z     {
+2026-06-19T09:05:56.8676122Z       "id": "DUX-8",
+2026-06-19T09:05:57.9733065Z        legible in the hook file and auditable by IT. Note: this is a lower-severity concern than finding 1 because command hooks require OS process execution (higher trust signal os.environ with no denylist, no allowlist, and no user-visible audit. A project hook or policy hook (which cannot be disabled) can specify {'headers': {'Authorization': '$GITHUB_TOKEN'}} local NVMe the 3 stat syscalls cost ~3-15us total -- genuinely negligible for a single-operation CLI run. The cost becomes non-trivial in two cases: (1) NFS/SMB mounts ( (hooks_test already receives `verbose`; add `--verbose` to validate and list). Delegate output through its `.start()`, `.progress()`, `.success()`, `.error()`, and `.verbose"severity": "recommended",
+2026-06-19T09:05:57.9759473Z       "title": "runner._hooks private attribute accessed directly in hooks_test",
+2026-06-19T09:05:57.9762146Z       "location": "src/apm_cli/commands/hooks.py:137",
+2026-06-19T09:05:59.0325623Z       "description": "matching = [h for h in runner._hooks if h.event == event] — the test command reaches into the private state than a URL in a JSON file), but the architectural inconsistency with APM's AuthResolver contract (every operation that needs a token requests it explicitly through AuthResolver) is worth or {'X-Pat': '$GITHUB_APM_PAT'} and ship the resolved token in every request to any HTTPS endpoint. There is no warning to the user that their credentials are being expanded, no validation that the expanded values doenterprise CI): each stat can cost 10-50ms, 3 stats = 30-150ms per operation, and the double-discovery bug in update/uninstall doubles this to 60-300ms; (2) future programmatic/batch callers invo_detail()` methods."
+2026-06-19T09:05:59.0329912Z     },
+2026-06-19T09:05:59.0330269Z     {
+2026-06-19T09:05:59.0330558Z       "severity": "nit",
+2026-06-19T09:05:59.0364811Z       "summary": "`apm hooks test` success message is premature: log may not yet contain the hook output for HTTP hooks",
+2026-06-19T09:05:59.4313159Z       "rationale": "`_rich_success(f\"'{event}' event fired. Check ~/.apm/logs/hooks.log of LifecycleHookRunner to count matching hooks before deciding whether to print the 'no hooks' warning. runner.fire() already does the same internal filter. The double-filter diverges if resolving.",
+2026-06-19T09:05:59.4323621Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:05:59.4328934Z       "line": 250,
+2026-06-19T09:06:00.2199181Z       "suggestion": "Replace dict(os.environ) with a curated minimal base: _BASE_ENV_KEYS = {'PATH', 'HOME', 'USER', 'USERNAME', 'LOGNAME', 'TMPDIR', 'TEMP', 'TMP', 'SHELL', 'LANG', 'LC_ not resemble secrets, and no log entry recording which variable names were resolved (only the final resolved value that might appear in error paths). This is Threat #6 (credential exfiltration) offered as a first-class feature. Combined with Threat #5 finding aboveking multiple install operations in a single Python process. A simple @functools.lru_cache(maxsize=None) keyed on project_root would eliminate all repeat discovery within a process lifetime. for output.\")` (hooks.py:151–154) runs immediately after `runner.fire()` returns. For HTTP hooks, `fire()` returns after `thread.start()` — the log write happens in the daemon thread and may not have _hooks is ever refactored to a lazy property or filtered view. A public API surface is the correct boundary.",
+2026-06-19T09:06:01.2719238Z       "suggested_fix": "Add LifecycleHookRunner.hooks_for(event: str) ->ALL', 'TERM', 'SYSTEMROOT', 'COMSPEC'}; env = {k: v for k, v in os.environ.items() if k in _BASE_ENV_KEYS}; if hook.env: env.update(hook.env). Document in lifecycle-hooks.md that command hooks do NOT inherit GITHUB_APM_PAT etc. and show -- where _build_hook_env ensures the full token surface is in os.environ -- this forms a complete exfiltration path requiring zero exploit: hook author sets url + headers, APM does the Caveat: lru_cache means hooks added/removed during a run are not picked up on the second call -- acceptable given the CLI's single-operation-per-invocation design and the docstring's existing occurred yet. Directing the user to check the log when it may be empty (or may never be written if the process exits before the thread completes) is confusing for the test/debug workflow.",
+2026-06-19T09:06:01.3322154Z       "file": " list[HookEntry] as a public method. hooks_test uses runner.hooks_for(event) to check emptiness and get the count. runner.fire() calls the same method internally. The private attribute _hooks stays private."
+2026-06-19T09:06:01.3323400Z     },
+2026-06-19T09:06:01.3323614Z     {
+2026-06-19T09:06:01.6597606Z        how to inject a token explicitly."
+2026-06-19T09:06:01.6598186Z     },
+2026-06-19T09:06:01.6598540Z     {
+2026-06-19T09:06:01.6600277Z       "severity": "recommended",
+2026-06-19T09:06:01.6631160Z       "summary": "No SSRF guard against loopback, RFC 1918, or cloud metadata service addresses in HTTP hook executor",
+2026-06-19T09:06:01.9900275Z       "rationale": "src/apm_cli/core/hook_executors.py lines 134-145 validate rest.",
+2026-06-19T09:06:01.9907867Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:06:01.9913181Z       "line": 104,
+2026-06-19T09:06:02.1182738Z       "suggestion": "Restrict _expand_env_vars to an explicit denylist of patterns matching credential-bearing variable names (TOKEN|SECRET|PAT|KEY|PASSWORD|CREDENTIAL|AUTH) and raise a validation error at hook 'fire-and-forget' framing.",
+2026-06-19T09:06:02.3814600Z       "suggestion": "Add `@functools.lru_cache(maxsize=None)` to discover_hooks(). Since project_root is a str|None argument, it is already hashable. Also add a `_clear_hookssrc/apm_cli/commands/hooks.py",
+2026-06-19T09:06:02.3815920Z       "line": 151,
+2026-06-19T09:06:02.4717135Z       "suggestion": "For the `test` sub-command specifically, consider joining HTTP threads with a short timeout (e.g. 5 s) before printing the success message, so the log entry is actually"id": "DUX-9",
+2026-06-19T09:06:02.4725461Z       "severity": "nit",
+2026-06-19T09:06:02.4742547Z       "title": "apm hooks test --help does not show the default event",
+2026-06-19T09:06:02.4756829Z       "location": "src/apm_cli/commands/hooks.py:113-126",
+2026-06-19T09:06:03.1972638Z       "description": "The EVENT argument is optional with default='post-install' only that the scheme is 'https' and a hostname exists. No check prevents targeting https://localhost:8443/internal-api, https://10.0.0.1/admin-load time when a header value would expand a blocked variable. Better: invert the model -- require an explicit allowlist of env var names that may be expanded, enfor_cache()` helper (calls discover_hooks.cache_clear()) for tests that need isolation between calls."
+2026-06-19T09:06:03.1976000Z     },
+2026-06-19T09:06:03.1976343Z     {
+2026-06-19T09:06:03.1977228Z       "severity": "nit",
+2026-06-19T09:06:03.2142627Z       "summary": "HTTP hook daemon threads have no drain before CLI exit; silent delivery loss on fast-completing present. Or qualify the message: `\"Check ~/.apm/logs/hooks.log for output (HTTP hooks may still be in flight).\"`"
+2026-06-19T09:06:03.2143599Z     }
+2026-06-19T09:06:03.2146213Z   ]
+2026-06-19T09:06:03.2146510Z }
+2026-06-19T09:06:03.2376721Z ```● Cli-logging-expert CLI output UX review of lifecycle hooks PR
+2026-06-19T09:06:03.2377733Z   │ Check if marketplace commands use markup=False for panel/table output (shell)
+2026-06-19T09:06:03.2378505Z   │   │ grep -n "markup="
+2026-06-19T09:06:03.2379182Z   │   │ /home/runner/work/apm/apm/src/apm_cli/commands/marketplace/__init__.py |
+2026-06-19T09:06:03.2379841Z   │   │ head -10
+2026-06-19T09:06:03.2380093Z   │   └ 1 line...
+2026-06-19T09:06:03.2380458Z   └ Check _get_console in _helpers.py (shell)
+2026-06-19T09:06:03.2380983Z       │ grep -n "_get_console\|def _get_console"
+2026-06-19T09:06:03.2381471Z       │ /home/runner/work/apm/apm/src/apm_cli/commands/_helpers.py | head -10
+2026-06-19T09:06:03.2381886Z       └ 4 lines...
+2026-06-19T09:06:03.2382023Z 
+2026-06-19T09:06:03.7435777Z  but the help text does not surface this. Click renders it as '[EVENT]' with no default annotation.",
+2026-06-19T09:06:04.2221181Z       "suggested_fix": "Add show_default=True to the Argument decorator, or annotate in, https://192.168.1.1/config, or https://169.254.169.254/ (IMDS -- where some hosts serve TLS). APM is explicitly positioned as an enterprise CI/CD tool runningced at hooks validate time. At minimum, add a user-visible warning when env-var expansion is performed so operators can see credential movement in logs."
+2026-06-19T09:06:04.2223923Z     },
+2026-06-19T09:06:04.2224364Z     {
+2026-06-19T09:06:04.2224929Z       "severity": "blocking",
+2026-06-19T09:06:04.2962344Z       "summary": " installs",
+2026-06-19T09:06:04.2970967Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:06:04.2974809Z       "line": 181,
+2026-06-19T09:06:04.8485359Z       "rationale": "HTTP hooks spawn threading.Thread(daemon=True) and never join (hook_executors.py:181-182). Daemon threads are killed immediately when the main thread exits -- Python does not wait for them help: \"EVENT  Lifecycle event to fire [default: post-install]\"."
+2026-06-19T09:06:04.8486491Z     },
+2026-06-19T09:06:04.8486699Z     {
+2026-06-19T09:06:04.8489924Z       "id": "DUX-10",
+2026-06-19T09:06:04.8491517Z       "severity": "nit",
+2026-06-19T09:06:05.3301252Z       "title": "Empty-state 'Create one with: apm hooks init' is wrong for policy in containerized and cloud environments (GitHub Actions, Azure DevOps, Kubernetes) where internal metadata services, sidecar APIs, and internal registries are reachable. Because HTTP hooks fire automaticallyC:\\ProgramData\\APM\\policy.d is world-writable by default on Windows, enabling any local user to inject unskippable policy hooks",
+2026-06-19T09:06:05.9567692Z       "rationale": "lifecycle_hooks.py line 220 resolves the policy hooks directory to C. For a typical apm install that takes 30s, a 10s-timeout HTTP hook thread will likely complete before process exit. But for a fast install and user hook sources",
+2026-06-19T09:06:05.9590144Z       "location": "src/apm_cli/commands/hooks.py:77, 237, hooks_validate",
+2026-06-19T09:06:07.4185921Z       "description": "The empty-state hint 'Create one with: apm hooks init' appears in apm hooks list, a on every install/update/uninstall without user interaction, a project .apm/hooks.json can use hooks as an SSRF gadget to probe or interact with internal services on behalf of the CI runner. HTTPS-only enforcement does:\\ProgramData\\APM\\policy.d on Windows. C:\\ProgramData inherits Authenticated Users: Write ACLs by default on most Windows configurations (the directory exists so all users can write application data, e.g. %ALLUSERSPROFILE%). This means any authenticated local user can create (all deps cached, <2s total wall-time) or when the HTTP endpoint is slow, the daemon thread is killed mid-request. From a perf perspective thispm hooks validate, and apm hooks test. apm hooks init creates a project-scope file (.apm/hooks.json). For a sysadmin who controls /etc/apm/policy.d/ or a user managing ~/. not mitigate this; it only closes the passive-MITM vector.",
+2026-06-19T09:06:07.4191841Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:06:07.4195045Z       "line": 134,
+2026-06-19T09:06:08.2289286Z       "suggestion": "After urlparse, resolve the hostname to an IP (socket.getaddrinfo) and reject if it falls C:\\ProgramData\\APM\\policy.d\\evil.json with arbitrary command or http hooks. Policy hooks load first (discover_hooks line 263) and cannot be disabled by the user or project. A low-privilege local is the right design for wall-time: HTTP hooks should not block the CLI. The reliability gap (silent loss) is noted here for completeness since it affects the correctness of audit and compliance hook patterns documentedapm/hooks/, this hint is wrong and potentially confusing.",
+2026-06-19T09:06:08.2994762Z       "suggested_fix": "Broaden to 'Create a project hook with: apm hooks init, or see the hooks documentation for policy and user-scope hook files.' One line is fine."
+2026-06-19T09:06:08.2995698Z     }
+2026-06-19T09:06:08.2995988Z   ]
+2026-06-19T09:06:08.2996285Z }
+2026-06-19T09:06:08.3231704Z ```● Devx-ux-expert DevX UX review of lifecycle hooks CLI
+2026-06-19T09:06:08.3232318Z   │ Check effective_command and Windows shell behavior (shell)
+2026-06-19T09:06:08.3232905Z   │   │ cat /tmp/1781859750128-copilot-tool-output-zb4x9t.txt | python3 -c "
+2026-06-19T09:06:08.3233689Z   │   │ import sys, json
+2026-06-19T09:06:08.3234228Z   │   │ data = json.load(sys.stdin)
+2026-06-19T09:06:08.3234719Z   │   │ text = data[0]['content'][0]['text']
+2026-06-19T09:06:08.3235230Z   │   │ # Look for the effective_command property and its platform handling…
+2026-06-19T09:06:08.3235651Z   │   └ 54 lines...
+2026-06-19T09:06:08.3235990Z   └ Verify daemon thread termination issue (shell)
+2026-06-19T09:06:08.3236339Z       │ python3 -c "
+2026-06-19T09:06:08.3236666Z       │ # Verify the daemon thread issue in hooks test
+2026-06-19T09:06:08.3237003Z       │ code = '''
+2026-06-19T09:06:08.3237336Z       │ thread = threading.Thread(target=_send, daemon=True)
+2026-06-19T09:06:08.3237697Z       │ thread.start()…
+2026-06-19T09:06:08.3237956Z       └ 13 lines...
+2026-06-19T09:06:08.3238088Z 
+2026-06-19T09:06:09.6510062Z  in ipaddress.IPv4Network('127.0.0.0/8'), ipaddress.IPv4Network('10.0.0.0/8'), ipaddress.IPv4Network('172.16.0.0/12'), ipaddress.IPv4Network('192.168.0.0/16'), ipaddress.IPv4Network('169.254.0.0/16'), ipaddress.IPv6Address('::1'), or ipaddress.IPv6Network('fe user thereby escalates to execute code with the privileges of any other user who subsequently runs apm install on that machine. The fix is not to change the directory path but to verify ownership and permission in the enterprise guide. A bounded thread pool with a short drain (e.g., pool.shutdown(wait=True, cancel_futures=False) with a 1s ceiling via a timeout wrapper) at80::/10'). Skip the check only for policy-source hooks (source == 'policy') if IT admins need to reach internal endpoints -- and document the trust distinction."
+2026-06-19T09:06:09.6512747Z     },
+2026-06-19T09:06:09.6512958Z     {
+2026-06-19T09:06:09.7837849Z       "severity": "n bits before trusting its contents.",
+2026-06-19T09:06:09.7840817Z       "file": "src/apm_cli/core/lifecycle_hooks.py",
+2026-06-19T09:06:09.7848512Z       "line": 220,
+2026-06-19T09:06:09.9680584Z       "suggestion": "Before loading from _get_policy_hooks_dir(), verify the directory is owned by an admin process-exit would give best-effort delivery without adding wall-time to the critical path.",
+2026-06-19T09:06:10.7546131Z       "suggestion": "Register an atexit handler that calls a module-level `_http_thread_pool.shutdown(wait=True, cancel_futures=False)` with a hardit",
+2026-06-19T09:06:10.7584909Z       "summary": "hooks.py:350 validation error echoes url[:30] which can include userinfo credentials from http:// URLs",
+2026-06-19T09:06:11.1480078Z       "rationale": "src/apm_cli/commands/hooks.py line 350: errors.append(f\"{prefix}: URL must use 2s ceiling. Replace the per-hook Thread() spawn with `_http_thread_pool.submit(_send)` using a module-level ThreadPoolExecutor(max_workers=8). This gives best-effort delivery on clean exit while bounding the thread account and not world-writable: on Windows check the ACL (win32security or icacls) to confirm only Administrators/SYSTEM have write permission; on count."
+2026-06-19T09:06:11.1481813Z     }
+2026-06-19T09:06:11.1482067Z   ]
+2026-06-19T09:06:11.1482263Z }
+2026-06-19T09:06:11.1692119Z ```● Performance-expert Performance review of lifecycle hooks PR
+2026-06-19T09:06:11.1693031Z   │ Confirm double-discovery pattern in update.py (shell)
+2026-06-19T09:06:11.1693558Z   │   │ # Confirm update.py calls build_runner_from_context INSIDE
+2026-06-19T09:06:11.1694029Z   │   │ _fire_update_hooks (not hoisted)
+2026-06-19T09:06:11.1694943Z   │   │ grep -n -A 30 "def _fire_update_hooks"
+2026-06-19T09:06:11.1695482Z   │   │ /home/runner/work/apm/apm/src/apm_cli/commands/update.py
+2026-06-19T09:06:11.1695868Z   │   └ 32 lines...
+2026-06-19T09:06:11.1696181Z   └ Confirm exact line numbers for findings (shell)
+2026-06-19T09:06:11.1696621Z       │ # Verify line numbers precisely for citing in findings
+2026-06-19T09:06:11.1697091Z       │ grep -n "_DEFAULT_COMMAND_TIMEOUT\|_DEFAULT_HTTP_TIMEOUT"
+2026-06-19T09:06:11.1697574Z       │ /home/runner/work/apm/apm/src/apm_cli/core/hook_executors.py
+2026-06-19T09:06:11.1697989Z       │ grep -n "^def discover_hooks"
+2026-06-19T09:06:11.1698850Z       │ /home/runner/work/apm/apm/src/apm_cli/core/lifecycle_hooks.py…
+2026-06-19T09:06:11.1699567Z       └ 8 lines...
+2026-06-19T09:06:11.1699744Z 
+2026-06-19T09:06:13.3295698Z  https:// (got '{url[:30]}')\"). For a URL like ***corp.com/hook, url[:30] == '***corp.com/' -- the partial credential is emitted to the user's console via _rich_error Linux/macOS stat the directory and reject if (mode & 0o022) != 0 (group- or world-writable). If the check fails, log a warning and skip policy hooks rather than silently loading potentially. Impact is low (user's own terminal, only fires for URLs that already fail validation) but contradicts the doc claim 'Tokens are never stored in hook files' attacker-controlled files. Document that operators must create this directory with restrictive permissions during APM deployment."
+2026-06-19T09:06:13.3298492Z     },
+2026-06-19T09:06:13.3298709Z     {
+2026-06-19T09:06:13.3300850Z       "severity": "recommended",
+2026-06-19T09:06:14.1485442Z       "summary": "Full HTTP hook URL including.",
+2026-06-19T09:06:14.1492948Z       "file": "src/apm_cli/commands/hooks.py",
+2026-06-19T09:06:14.1497838Z       "line": 350,
+2026-06-19T09:06:14.3824960Z       "suggestion": "Replace url[:30] with f\"{parsed.scheme}://{parsed.hostname}\" (using urlparse result from the enclosing scope, or re-parsing inline) so only the scheme and hostname are surfaced in the error."
+2026-06-19T09:06:14.3826326Z     }
+2026-06-19T09:06:14.3826604Z   ]
+2026-06-19T09:06:14.3828700Z }
+2026-06-19T09:06:14.4060709Z ```● Auth-expert Auth/credential review of lifecycle hooks PR
+2026-06-19T09:06:14.4061443Z   │ Confirm HTTPS scheme check passes for credential-bearing URLs (shell)
+2026-06-19T09:06:14.4062218Z   │   │ cd /home/runner/work/apm/apm && python3 -c "
+2026-06-19T09:06:14.4062801Z   │   │ from urllib.parse import urlparse
+2026-06-19T09:06:14.4063489Z   │   │ # Verify: does urlparse pass scheme check for user:pass@ URLs?
+2026-06-19T09:06:14.4064784Z   │   │ url = '***analytics.corp.com/hook'
+2026-06-19T09:06:14.4065423Z   │   │ parsed = urlparse(url)…
+2026-06-19T09:06:14.4065866Z   │   └ 13 lines...
+2026-06-19T09:06:14.4066321Z   └ Read panelist return schema (shell)
+2026-06-19T09:06:14.4067122Z       │ cat /home/runner/work/apm/apm/packages/apm-review-panel/assets/panelist-retu
+2026-06-19T09:06:14.4067876Z       │ rn-schema.json
+2026-06-19T09:06:14.4068618Z       └ 155 lines...
+2026-06-19T09:06:14.4068814Z 
+2026-06-19T09:06:14.4437022Z  any user:pass@host credentials is written verbatim to hooks.log",
+2026-06-19T09:06:17.7859623Z       "rationale": "hook_executors.py line 71: _append_to_hook_log writes target={target} where target for HTTP hooks is the raw url passed to _execute_http -- the same url string from hook.url that has already passed scheme validation. RFC 3986 userinfo (***host/path) is deprecated but still accepted by requests and common enough to appear in enterprise webhook configurations. This persists credentials to ~/.apm/logs/hooks.log in plaintext, violating Threat #6 (credential exfiltration to log files). The same problem exists in the error path at line 180 where str(exc) may echo the URL with credentials.",
+2026-06-19T09:06:17.7863859Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:06:17.7866920Z       "line": 71,
+2026-06-19T09:06:18.9091838Z       "suggestion": "Log parsed.hostname (already computed) instead of the raw url as the target. Add a sanitize_url() helper that strips userinfo: re.sub(r'://[^@]+@', '://', url). Apply the same sanitization before passing url to str(exc) in the except block."
+2026-06-19T09:06:18.9093445Z     },
+2026-06-19T09:06:18.9093699Z     {
+2026-06-19T09:06:18.9093926Z       "severity": "recommended",
+2026-06-19T09:06:20.0192869Z       "summary": "No SSRF guard on HTTP hooks: internal HTTPS endpoints (cloud metadata, Kubernetes API) are reachable",
+2026-06-19T09:06:23.4703397Z       "rationale": "hook_executors.py _execute_http validates scheme (HTTPS only) and disables redirects (allow_redirects=False), which prevents HTTP-downgrade via redirect. However there is no IP range or hostname denylist. A misconfigured or malicious hook targeting https://169.254.169.254/latest/meta-data/ (AWS IMDSv1), https://metadata.google.internal/, https://kubernetes.default.svc/, or internal RFC-1918 addresses can reach those endpoints from within a cloud VM or container. If APM is used in CI/CD environments -- the primary enterprise target -- this is the canonical SSRF-to-credential-theft path.",
+2026-06-19T09:06:23.4706645Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:06:23.4710170Z       "line": 127,
+2026-06-19T09:06:25.6874647Z       "suggestion": "After urlparse, resolve the hostname via socket.getaddrinfo and reject private/link-local ranges: 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, ::1, fc00::/7. Also block bare hostnames with no dot (e.g. 'kubernetes') to prevent single-label intranet resolution. Document this in hooks schema validation output."
+2026-06-19T09:06:25.6876121Z     },
+2026-06-19T09:06:25.6876418Z     {
+2026-06-19T09:06:25.6876757Z       "severity": "recommended",
+2026-06-19T09:06:26.7959156Z       "summary": "URL validation error message echoes up to 30 chars of URL, leaking credential prefix from user:pass@host format",
+2026-06-19T09:06:29.0086339Z       "rationale": "hooks.py line 350: errors.append(f\"{prefix}: URL must use https:// (got '{url[:30]}')\"). A URL like ***internal.corp/path has its first 30 characters as '***internal.', exposing both the username and partial password in the validation error output which may be surfaced in CI logs. The scheme check already tells the user what is wrong; echoing any URL content is unnecessary and risk-bearing.",
+2026-06-19T09:06:30.1135656Z       "file": "src/apm_cli/commands/hooks.py",
+2026-06-19T09:06:30.1136769Z       "line": 350,
+2026-06-19T09:06:31.3281023Z       "suggestion": "Replace url[:30] with urlparse(url).scheme or just the string 'http' / 'ftp' / 'file' etc. The error message becomes: 'URL must use https:// (got http://)' with zero credential surface."
+2026-06-19T09:06:31.3281918Z     },
+2026-06-19T09:06:31.3282131Z     {
+2026-06-19T09:06:31.3282347Z       "severity": "recommended",
+2026-06-19T09:06:31.3325295Z       "summary": "Command hooks execute silently at install time with no user consent step; planned hook-transparency gate never shipped",
+2026-06-19T09:06:34.6892820Z       "rationale": "security.md line 182 lists 'Hook transparency -- display hook script contents during install so developers can review what will execute' as planned hardening. That gate is not present in this PR. A developer who clones a project with a .apm/hooks.json and runs apm install will have command hooks fire silently in the background with no per-install prompt or summary. This matches how npm postinstall attacks succeed: the attack surface is not just malicious authors but also developers who copy hooks.json templates without reading them. APM's 'secure by default' principle (PRINCIPLES.md) requires explicit user awareness for features that execute code on behalf of the user.",
+2026-06-19T09:06:35.8368325Z       "file": "src/apm_cli/install/service.py",
+2026-06-19T09:06:35.8371272Z       "line": 70,
+2026-06-19T09:06:38.0256723Z       "suggestion": "Before runner.fire('pre-install', event), emit a summary of hooks that will run (count, type, target/command truncated to 60 chars) so the user sees what is about to execute. For first-run (hooks discovered but never acknowledged), require explicit --allow-hooks flag or a one-time confirmation stored in ~/.apm/config.json. This is consistent with the 'allow_insecure' pattern already established in the install pipeline."
+2026-06-19T09:06:38.0259236Z     },
+2026-06-19T09:06:38.0259460Z     {
+2026-06-19T09:06:38.0259685Z       "severity": "nit",
+2026-06-19T09:06:38.0276485Z       "summary": "_expand_env_vars silently returns empty string for undefined variables, masking header misconfiguration",
+2026-06-19T09:06:40.2847439Z       "rationale": "os.environ.get(var_name, '') in hook_executors.py line 109 returns an empty string when a variable is not set. A typo in $GITHB_TOKEN produces a blank Authorization header sent to the endpoint with no warning. Logging an unresolved variable name (not value) at debug level would surface misconfiguration without leaking credentials.",
+2026-06-19T09:06:40.2851930Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:06:40.2855398Z       "line": 109,
+2026-06-19T09:06:41.2800304Z       "suggestion": "Log _logger.debug('Expanding undefined env var %s in hook header', var_name) when os.environ.get returns None, then return '' as now. The variable name is not a secret; logging it helps operators debug hook configuration."
+2026-06-19T09:06:41.2801689Z     }
+2026-06-19T09:06:41.2802107Z   ]
+2026-06-19T09:06:41.2802410Z }
+2026-06-19T09:06:41.3007977Z ```● Supply-chain-security-expert Security review of lifecycle hooks PR
+2026-06-19T09:06:41.3009009Z   │ Get exact line numbers for security model claims being violated (shell)
+2026-06-19T09:06:41.3010007Z   │   │ grep -n "No network calls\|No arbitrary\|no callbacks\|webhooks\|phone.home"
+2026-06-19T09:06:41.3010858Z   │   │ /home/runner/work/apm/apm/docs/src/content/docs/enterprise/security.md
+2026-06-19T09:06:41.3011313Z   │   └ 3 lines...
+2026-06-19T09:06:41.3011700Z   └ Get exact line of attack surface table post-install row (shell)
+2026-06-19T09:06:41.3012223Z       │ grep -n "post.install\|Post.install\|Post-install"
+2026-06-19T09:06:41.3012745Z       │ /home/runner/work/apm/apm/docs/src/content/docs/enterprise/security.md
+2026-06-19T09:06:41.3013178Z       └ 2 lines...
+2026-06-19T09:06:41.3013312Z 
+2026-06-19T09:09:09.5005552Z Now I have all the evidence I need. Let me assemble the full JSON return.```json
+2026-06-19T09:09:09.5006354Z {
+2026-06-19T09:09:09.5020821Z   "persona": "test-coverage-expert",
+2026-06-19T09:09:09.5033237Z   "active": true,
+2026-06-19T09:09:10.6116029Z   "summary": "Four coverage gaps: (1) InstallService pre/post-install hook wiring asserted at unit but not at integration-with-fixtures floor; (2) _fire_update_hooks has zero tests at any tier; (3) _fire_uninstall_hooks has zero tests at any tier; (4) _execute_http header env-var expansion wiring untested. All four are recommended; none block merge.",
+2026-06-19T09:09:10.6119144Z   "findings": [
+2026-06-19T09:09:10.6119498Z     {
+2026-06-19T09:09:11.7078088Z       "severity": "recommended",
+2026-06-19T09:09:11.7128415Z       "summary": "Unit coverage exists for LifecycleHookRunner.fire(); no test at integration-with-fixtures floor confirms InstallService.run() actually calls runner.fire() in the correct order",
+2026-06-19T09:09:18.5375873Z       "rationale": "Tier-floor compliance check (install pipeline surface → floor: integration-with-fixtures). `test_service.py` mocks `run_install_pipeline` and calls `InstallService().run(request)` with a MagicMock package. Because `fake_apm_package.get_apm_dependencies()` returns a MagicMock (not an empty list), the code path through `_build_hook_runner` / `discover_hooks` / `runner.fire()` is entered but fires against an empty fixture environment with no configured hooks, so the fire calls are silent no-ops. The test asserts only on the pipeline delegation kwargs — it never patches `build_runner_from_context` and never asserts `runner.fire(\"pre-install\", ...)` and `runner.fire(\"post-install\", ...)` were called in the right order. Unit coverage for `LifecycleHookRunner.fire()` exists in `TestLifecycleHookRunner.test_fire_calls_matching_hooks` (passes, unit tier). Probe: `grep -n 'fire\\|build_runner\\|pre-install\\|post-install\\|hook_runner' tests/unit/install/test_service.py` returned 0 matches. The install-pipeline surface floor is integration-with-fixtures; a unit-level service assertion is a reasonable first step.",
+2026-06-19T09:09:18.5386498Z       "file": "src/apm_cli/install/service.py",
+2026-06-19T09:09:21.8550683Z       "suggestion": "Add to `tests/unit/install/test_service.py`: mock `build_runner_from_context` to return a `MagicMock` runner, call `InstallService().run(request)`, and assert `runner.fire.call_args_list` equals `[call('pre-install', ANY), call('post-install', ANY)]` in that order. For the integration-with-fixtures floor: add a fixture project with `.apm/hooks.json` containing a `post-install` command hook and assert the command is invoked after a successful `apm install` via the subprocess-based CLI runner.",
+2026-06-19T09:09:21.8554056Z       "evidence": {
+2026-06-19T09:09:21.8557191Z         "outcome": "missing",
+2026-06-19T09:09:21.8559360Z         "tier": "integration-with-fixtures",
+2026-06-19T09:09:21.8569915Z         "test_file": "tests/unit/install/test_service.py",
+2026-06-19T09:09:22.9061368Z         "test_name": "TestInstallServiceDelegation::test_fires_pre_and_post_install_hooks_in_order",
+2026-06-19T09:09:22.9083447Z         "assertion_excerpt": "runner.fire.assert_has_calls([call('pre-install', ANY), call('post-install', ANY)])",
+2026-06-19T09:09:22.9125629Z         "proves": "When apm install runs, pre-install hooks fire before the pipeline and post-install hooks fire after — in that exact order",
+2026-06-19T09:09:24.0073661Z         "principles": ["DevX", "Governed by policy"],
+2026-06-19T09:09:24.0076699Z         "tier": "integration-with-fixtures"
+2026-06-19T09:09:24.0079929Z       }
+2026-06-19T09:09:24.0080211Z     },
+2026-06-19T09:09:24.0080421Z     {
+2026-06-19T09:09:24.0083650Z       "severity": "recommended",
+2026-06-19T09:09:25.1484492Z       "summary": "_fire_update_hooks (pre-update / post-update) has no test at any tier — zero coverage on the new code path in update.py",
+2026-06-19T09:09:29.6233884Z       "rationale": "Probe: `grep -rn '_fire_update_hooks\\|build_runner_from_context' tests/` returned zero matches across the entire test tree. The function is called twice in `update.py` — lines 531-537 ('pre-update') and 606-612 ('post-update') — but neither call site is exercised by any existing test. `tests/unit/commands/test_update_command.py` was searched (`grep -n 'fire_update\\|lifecycle\\|hook_runner' tests/unit/commands/test_update_command.py`) and returned no matches. The function body uses `contextlib.suppress(Exception)` around the entire hook invocation, so a silent regression (wrong event name, wrong scope passed, runner not built) would never surface as a test failure. Cross-module surface (update.py → lifecycle_hooks.py → hook_executors.py); floor tier is integration-with-fixtures.",
+2026-06-19T09:09:29.6238949Z       "file": "src/apm_cli/commands/update.py",
+2026-06-19T09:09:31.9103457Z       "suggestion": "Add a unit-level regression trap in `tests/unit/commands/test_update_command.py`: patch `build_runner_from_context` to capture the runner mock, invoke `_fire_update_hooks('pre-update', ...)` with a synthetic APMPackage, and assert `runner.fire` was called with event_name='pre-update'. Separately, add a `tests/integration/test_lifecycle_hooks_e2e.py` fixture test that writes a `.apm/hooks.json` with a `pre-update` command hook and asserts the hook runs after an `apm update --yes` invocation.",
+2026-06-19T09:09:31.9106387Z       "evidence": {
+2026-06-19T09:09:31.9106648Z         "outcome": "missing",
+2026-06-19T09:09:31.9110059Z         "tier": "integration-with-fixtures",
+2026-06-19T09:09:31.9119580Z         "test_file": "tests/unit/commands/test_update_command.py",
+2026-06-19T09:09:32.9186560Z         "test_name": "test_fire_update_hooks_fires_pre_and_post_update_events",
+2026-06-19T09:09:32.9209358Z         "assertion_excerpt": "mock_runner.fire.assert_any_call('pre-update', ANY); mock_runner.fire.assert_any_call('post-update', ANY)",
+2026-06-19T09:09:32.9231944Z         "proves": "When apm update completes successfully, pre-update fires before the install pipeline and post-update fires after",
+2026-06-19T09:09:32.9236307Z         "principles": ["DevX", "Governed by policy"],
+2026-06-19T09:09:32.9242103Z         "tier": "integration-with-fixtures"
+2026-06-19T09:09:32.9242608Z       }
+2026-06-19T09:09:33.9788856Z     },
+2026-06-19T09:09:33.9789331Z     {
+2026-06-19T09:09:33.9789674Z       "severity": "recommended",
+2026-06-19T09:09:33.9815817Z       "summary": "_fire_uninstall_hooks (pre-uninstall / post-uninstall) has no test at any tier — zero coverage on the new code path in uninstall/cli.py",
+2026-06-19T09:09:36.1623064Z       "rationale": "Probe: `grep -rn '_fire_uninstall_hooks\\|build_runner_from_context' tests/` returned zero matches. The function is called at lines 87-95 ('pre-uninstall') and 298-306 ('post-uninstall') of `uninstall/cli.py`. The function body is identical in structure to `_fire_update_hooks` — `contextlib.suppress(Exception)` around the entire invocation — so silent regressions would be invisible. The integration tests under `tests/integration/test_uninstall_*.py` were checked and contain no reference to `lifecycle`, `lifecycle_hooks`, or `_fire_uninstall_hooks`. Cross-module surface (uninstall/cli.py → lifecycle_hooks.py → hook_executors.py); floor tier is integration-with-fixtures.",
+2026-06-19T09:09:36.1628038Z       "file": "src/apm_cli/commands/uninstall/cli.py",
+2026-06-19T09:09:38.4036071Z       "suggestion": "Add to `tests/unit/commands/` (new file `test_uninstall_hooks.py` or inline in existing uninstall tests): patch `build_runner_from_context`, call `_fire_uninstall_hooks('pre-uninstall', ...)`, assert `runner.fire` called with 'pre-uninstall'. Mirror for 'post-uninstall'. Integration floor: fixture project with `.apm/hooks.json` containing a `post-uninstall` command hook; assert hook runs after `apm uninstall <pkg>`.",
+2026-06-19T09:09:38.4038675Z       "evidence": {
+2026-06-19T09:09:38.4039899Z         "outcome": "missing",
+2026-06-19T09:09:38.4042753Z         "tier": "integration-with-fixtures",
+2026-06-19T09:09:38.4052698Z         "test_file": "tests/unit/commands/test_uninstall_hooks.py",
+2026-06-19T09:09:38.4064267Z         "test_name": "test_fire_uninstall_hooks_fires_pre_and_post_events",
+2026-06-19T09:09:39.4654427Z         "assertion_excerpt": "mock_runner.fire.assert_any_call('pre-uninstall', ANY); mock_runner.fire.assert_any_call('post-uninstall', ANY)",
+2026-06-19T09:09:39.4667374Z         "proves": "When apm uninstall runs, pre-uninstall hooks fire before removal and post-uninstall hooks fire after",
+2026-06-19T09:09:39.4674348Z         "principles": ["DevX", "Governed by policy"],
+2026-06-19T09:09:39.4677032Z         "tier": "integration-with-fixtures"
+2026-06-19T09:09:39.4697136Z       }
+2026-06-19T09:09:39.4697442Z     },
+2026-06-19T09:09:39.4698064Z     {
+2026-06-19T09:09:39.4698279Z       "severity": "recommended",
+2026-06-19T09:09:41.6882050Z       "summary": "env-var expansion in HTTP headers is unit-tested in isolation but the wiring from _execute_http into _expand_env_vars for header values has no test — removing line 151 in hook_executors.py would not break any existing test",
+2026-06-19T09:09:47.3515254Z       "rationale": "Tier-floor compliance check (two evidence rows follow). `TestExpandEnvVars` covers the `_expand_env_vars` function for `$VAR`, `${VAR}`, missing var, and no-var cases — passes at unit tier. However, the wiring that actually calls `_expand_env_vars` on header values lives at `hook_executors.py:151` inside `_execute_http`. None of the four `TestHttpExecutor` tests supply a hook with headers containing `$TOKEN`; all four construct hooks without a `headers` field. Probe: `grep -n 'headers.*execute_http\\|execute_http.*header\\|expand.*header\\|header.*expand' tests/unit/core/test_hook_executors.py` returned zero matches. If line 151 were removed (expansion silently dropped), `TestExpandEnvVars` would still pass and `TestHttpExecutor` would still pass. The security promise ('HTTP headers support $ENV_VAR expansion for auth tokens') would drift silently. The unit floor is sufficient here since the behavior is deterministic and does not require a real network call.",
+2026-06-19T09:09:47.3522713Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:09:49.5471921Z       "suggestion": "Add to `TestHttpExecutor` in `tests/unit/core/test_hook_executors.py`: set env var `MY_AUTH_TOKEN=secret`, construct `hook = HookEntry(hook_type='http', event='post-install', url='https://hook.corp.net/', headers={'Authorization': '***'})`, patch `apm_cli.core.hook_executors.threading`, call `_execute_http(hook, _make_event())`, capture the `Thread(target=fn)` callable, and assert the `requests.post` call includes header `Authorization: ***",
+2026-06-19T09:09:49.5475208Z       "evidence": {
+2026-06-19T09:09:49.5475956Z         "outcome": "missing",
+2026-06-19T09:09:49.5477039Z         "tier": "unit",
+2026-06-19T09:09:50.6861160Z         "test_file": "tests/unit/core/test_hook_executors.py",
+2026-06-19T09:09:50.6881988Z         "test_name": "TestHttpExecutor::test_expands_env_vars_in_headers_before_sending",
+2026-06-19T09:09:50.6907751Z         "assertion_excerpt": "assert captured_headers.get('Authorization') == '***'  # $MY_AUTH_TOKEN expanded",
+2026-06-19T09:09:51.7887975Z         "proves": "When a hook declares a header with $TOKEN syntax, the expanded value (not the literal $TOKEN string) is sent in the HTTP request",
+2026-06-19T09:09:51.7897248Z         "principles": ["Secure by default", "DevX"],
+2026-06-19T09:09:51.7901849Z         "tier": "unit"
+2026-06-19T09:09:51.7902442Z       }
+2026-06-19T09:09:51.7902747Z     },
+2026-06-19T09:09:51.7903758Z     {
+2026-06-19T09:09:51.7907353Z       "severity": "recommended",
+2026-06-19T09:09:53.9952536Z       "summary": "Hook log (_append_to_hook_log) writes the raw URL as the 'target' field — a URL with embedded credentials (***corp.com/webhook) would land in hooks.log in plain text; no test asserts sanitization",
+2026-06-19T09:09:59.7075442Z       "rationale": "Probe: `grep -n 'user.*@\\|token@\\|sanitize\\|redact\\|userinfo' src/apm_cli/core/hook_executors.py` returned zero matches. The `_append_to_hook_log` function (line 71) writes `target={url}` to the log entry. The `url` passed from `_execute_http` (lines 170-179) is the raw hook URL exactly as the user configured it. If a user's enterprise webhook requires inline basic-auth (`***internal.corp/webhook`), the fully-expanded URL — with the credential value — is written to `~/.apm/logs/hooks.log`. `TestAppendToHookLog` covers file creation, exit codes, stderr, and append behavior but none of the five tests pass a URL with a userinfo component. The missing test should document that the URL is either sanitized (`netloc` stripped of userinfo) or explicitly accepted as-is — currently it is neither documented nor guarded. This is a `Secure by default` surface that supply-chain-security-expert should weigh on for code correctness; the test-coverage gap is that any future sanitization would ship without a regression trap.",
+2026-06-19T09:09:59.7081913Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:10:01.8815365Z       "suggestion": "Add to `TestAppendToHookLog` in `tests/unit/core/test_hook_executors.py`: call `_append_to_hook_log('post-install', 'http', '***corp.com/hook')` and assert `'secret' not in content` (if sanitization is added) or at minimum add a doc-comment to `_append_to_hook_log` explicitly noting the full URL is logged. Also add a test to `TestHttpExecutor` that passes an `***corp.com/` URL and captures what is written to the log.",
+2026-06-19T09:10:01.8817724Z       "evidence": {
+2026-06-19T09:10:01.8818699Z         "outcome": "missing",
+2026-06-19T09:10:01.8822223Z         "tier": "unit",
+2026-06-19T09:10:02.9830569Z         "test_file": "tests/unit/core/test_hook_executors.py",
+2026-06-19T09:10:02.9849132Z         "test_name": "TestAppendToHookLog::test_url_with_credentials_sanitized_in_log",
+2026-06-19T09:10:02.9881305Z         "assertion_excerpt": "assert 'secret' not in (tmp_path / 'logs' / 'hooks.log').read_text()  # userinfo stripped from target= field",
+2026-06-19T09:10:03.4410923Z         "proves": "When a hook URL contains embedded credentials (user:pass@host), those credentials do not appear in the hooks.log file",
+2026-06-19T09:10:03.4415529Z         "principles": ["Secure by default"],
+2026-06-19T09:10:03.4418078Z         "tier": "unit"
+2026-06-19T09:10:03.4418460Z       }
+2026-06-19T09:10:03.4423932Z     }
+2026-06-19T09:10:03.4424441Z   ]
+2026-06-19T09:10:03.4425034Z }
+2026-06-19T09:10:03.4627448Z ```● Test-coverage-expert Test coverage review of lifecycle hooks PR
+2026-06-19T09:10:03.4628513Z   │ Final confirmation test_service.py has no hook assertions (shell)
+2026-06-19T09:10:03.4629538Z   │   │ grep -n "def test_run_delegates\|runner\|fire\|hook"
+2026-06-19T09:10:03.4630382Z   │   │ /home/runner/work/apm/apm/tests/unit/install/test_service.py | head -20
+2026-06-19T09:10:03.4630985Z   │   └ 2 lines...
+2026-06-19T09:10:03.4631386Z   └ Count hook-related terms in test_service.py (shell)
+2026-06-19T09:10:03.4632114Z       │ grep -c "fire\|hook_runner\|build_runner\|pre-install\|post-install"
+2026-06-19T09:10:03.4632956Z       │ /home/runner/work/apm/apm/tests/unit/install/test_service.py
+2026-06-19T09:10:03.4633555Z       └ 2 lines...
+2026-06-19T09:10:03.4633755Z 
+2026-06-19T09:13:34.8425923Z ```json
+2026-06-19T09:13:34.8426318Z {
+2026-06-19T09:13:34.8432004Z   "persona": "python-architect",
+2026-06-19T09:13:34.8443977Z   "active": true,
+2026-06-19T09:13:40.5058474Z   "summary": "Solid foundation: clean dataclass value objects, correct fire-and-forget exception isolation, good JSON schema versioning. Three architectural issues compound over time: (1) build-runner + build-event + fire logic is triplicated across InstallService, update.py, and uninstall/cli.py -- adding a fourth operation copies it again; (2) command hooks block the CLI synchronously for up to 30s each while HTTP hooks are async, a discrepancy undocumented in the PR; (3) effective_command always prefers bash regardless of platform, breaking Windows enterprise targets. Pre-install hooks fire before the ImportError guard, leaving analytics systems with an orphaned event on the defensive path. Full URL including query-string credentials is written verbatim to hooks.log. Private _hooks access from the CLI layer creates coupling that resists future refactoring.",
+2026-06-19T09:13:40.5061564Z   "findings": [
+2026-06-19T09:13:40.5061795Z     {
+2026-06-19T09:13:40.5066953Z       "severity": "recommended",
+2026-06-19T09:13:40.5075241Z       "summary": "Build-runner + build-event + fire logic triplicated across three files",
+2026-06-19T09:13:51.6258366Z       "rationale": "InstallService._build_hook_runner/_build_event (service.py:113,129), _fire_update_hooks (update.py:615), and _fire_uninstall_hooks (uninstall/cli.py:313) each independently implement the same ~25-line pattern: resolve project_root from apm_package, call build_runner_from_context(), build a PackageInfo list, call LifecycleEvent.create(), call runner.fire(). The only variation is how the packages list is built (from get_apm_dependencies() vs a pre-built list). Adding a fourth operation type copies the pattern a fourth time.\n\nFix: add one free function to lifecycle_hooks.py:\n\n    def fire_event(\n        event_name: str,\n        *,\n        packages: list[PackageInfo],\n        scope: str,\n        project_root: str | None,\n        logger: Any = None,\n        verbose: bool = False,\n    ) -> None:\n        import contextlib\n        with contextlib.suppress(Exception):\n            runner = build_runner_from_context(logger=logger, verbose=verbose, project_root=project_root)\n            event = LifecycleEvent.create(event=event_name, packages=packages, scope=scope, working_directory=project_root)\n            runner.fire(event_name, event)\n\nAll three call sites reduce to: build the packages list, then call fire_event().\n\n**Design patterns**\n- Used in this PR: Dataclass-as-value-object (HookEntry, PackageInfo, LifecycleEvent -- appropriate and readable; consider adding frozen=True to LifecycleEvent since it crosses into the HTTP daemon thread); Strategy dispatch in execute_hook() (if/elif by hook_type, annotated as <<StrategyDispatch>> in the class diagram); Collect-then-render in discover_hooks() (accumulates from three sources before returning the full list).\n- Pragmatic suggestion: extract fire_event() free function to lifecycle_hooks.py -- collapses the triplication at exactly three call sites, the threshold where extraction pays off per the APM abstraction rule, without adding new abstraction layers.",
+2026-06-19T09:13:51.6267879Z       "file": "src/apm_cli/core/lifecycle_hooks.py",
+2026-06-19T09:13:51.6268345Z       "line": 332,
+2026-06-19T09:13:52.7138192Z       "suggestion": "Add fire_event(event_name, *, packages, scope, project_root, logger, verbose) -> None to lifecycle_hooks.py with contextlib.suppress(Exception) inside. Replace the bodies of _fire_update_hooks, _fire_uninstall_hooks, and InstallService._build_hook_runner/_build_event with calls to this function."
+2026-06-19T09:13:52.7140190Z     },
+2026-06-19T09:13:52.7140508Z     {
+2026-06-19T09:13:52.7140860Z       "severity": "recommended",
+2026-06-19T09:13:53.8157698Z       "summary": "effective_command always prefers bash regardless of platform, breaking Windows",
+2026-06-19T09:13:57.1489252Z       "rationale": "HookEntry.effective_command (lifecycle_hooks.py:143) returns self.bash or self.command unconditionally. A hook file that supplies both bash (Unix script) and command (Windows-safe fallback) will always run bash -- which fails silently on Windows without WSL. The enterprise policy hook use case (policy.d/*.json deployed to AD-managed Windows machines) is a primary motivation for this PR. _get_policy_hooks_dir() already has Windows-specific logic (lifecycle_hooks.py:219), confirming Windows is an intended target, making this a concrete cross-platform gap.",
+2026-06-19T09:13:57.1493191Z       "file": "src/apm_cli/core/lifecycle_hooks.py",
+2026-06-19T09:13:57.1493713Z       "line": 143,
+2026-06-19T09:13:58.2499003Z       "suggestion": "import sys\nreturn (self.command or self.bash) if sys.platform == 'win32' else (self.bash or self.command)"
+2026-06-19T09:13:58.2502890Z     },
+2026-06-19T09:13:58.2503206Z     {
+2026-06-19T09:13:58.2509522Z       "severity": "recommended",
+2026-06-19T09:13:58.2538467Z       "summary": "Command hooks block the CLI synchronously up to 30s each; HTTP hooks do not -- undocumented contract mismatch",
+2026-06-19T09:14:01.6571980Z       "rationale": "_execute_command calls subprocess.run() at hook_executors.py:210, blocking the calling thread for up to 30s per hook (the default timeout). _execute_http fires a daemon thread (hook_executors.py:181) and returns immediately. With N command hooks on pre-install, the CLI blocks for N*30s before the install begins. The module docstring and PR body both describe all hooks as fire-and-forget, which is accurate only for HTTP. Enterprise pre-install use cases (analytics, CI gate callbacks) suggest command hooks should also be non-blocking unless the author explicitly intended serial pre-install gating.",
+2026-06-19T09:14:01.6576438Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:14:01.6577597Z       "line": 210,
+2026-06-19T09:14:03.8526355Z       "suggestion": "Either (a) run _execute_command in a daemon thread matching _execute_http, (b) reduce the default command timeout to 10s to match HTTP, or (c) add a blocking: bool field to HookEntry (default False) and document the sync vs async contract explicitly in the schema."
+2026-06-19T09:14:03.8528174Z     },
+2026-06-19T09:14:03.8528485Z     {
+2026-06-19T09:14:03.8529920Z       "severity": "recommended",
+2026-06-19T09:14:03.8544242Z       "summary": "Pre-install hooks fire before the ImportError guard, leaving analytics with an orphaned event",
+2026-06-19T09:14:07.1788803Z       "rationale": "runner.fire(\"pre-install\", event) is called at service.py:70. The try-import for run_install_pipeline is at lines 74-77. If the import fails, pre-install has already fired but the install never executes and post-install never fires. Analytics or CI systems consuming hook events will observe a pre-install event with no matching post-install. The ImportError path is pragma: no cover -- defensive, so probability is very low, but the hook semantic contract is wrong regardless.",
+2026-06-19T09:14:07.1792007Z       "file": "src/apm_cli/install/service.py",
+2026-06-19T09:14:07.1794482Z       "line": 70,
+2026-06-19T09:14:08.2585463Z       "suggestion": "Move the lazy import block (lines 74-77) above the hook runner construction so the first hook-visible line is runner.fire(\"pre-install\") only after confirming the pipeline is importable."
+2026-06-19T09:14:08.2587182Z     },
+2026-06-19T09:14:08.2588036Z     {
+2026-06-19T09:14:08.2597151Z       "severity": "recommended",
+2026-06-19T09:14:08.2598850Z       "summary": "Full URL including query-string credentials written verbatim to hooks.log",
+2026-06-19T09:14:10.5909126Z       "rationale": "_append_to_hook_log receives the raw url variable as the target argument (hook_executors.py:173, 179) and writes it to ~/.apm/logs/hooks.log as target=<url>. Enterprise webhook configurations commonly embed bearer tokens or API keys in query strings (e.g., https://hooks.example.com/notify?token=SECRET). hooks.log is an unencrypted append-only file with no rotation policy, readable by any process running as the same user.",
+2026-06-19T09:14:11.6896579Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:14:11.6906956Z       "line": 173,
+2026-06-19T09:14:12.7910199Z       "suggestion": "Log only scheme+host+path: from urllib.parse import urlparse; p = urlparse(url); safe_url = f\"{p.scheme}://{p.hostname}{p.path}\". Pass safe_url as the target argument to _append_to_hook_log instead of the raw url."
+2026-06-19T09:14:12.7916008Z     },
+2026-06-19T09:14:12.7916407Z     {
+2026-06-19T09:14:12.7916898Z       "severity": "recommended",
+2026-06-19T09:14:12.7953202Z       "summary": "hooks_test accesses runner._hooks directly, bypassing the class abstraction boundary",
+2026-06-19T09:14:16.2251553Z       "rationale": "hooks.py:129: matching = [h for h in runner._hooks if h.event == event]. _hooks is private storage. If the runner is refactored to lazy-load hooks, shard by source, or filter on demand, this CLI-layer bypass breaks silently. The purpose -- count matching hooks before firing -- is a legitimate query the runner should expose as a public method.",
+2026-06-19T09:14:16.2257964Z       "file": "src/apm_cli/commands/hooks.py",
+2026-06-19T09:14:16.2260596Z       "line": 129,
+2026-06-19T09:14:17.2096193Z       "suggestion": "Add def hooks_for_event(self, event_name: str) -> list[HookEntry] to LifecycleHookRunner, returning [h for h in self._hooks if h.event == event_name]. Replace the direct _hooks access in hooks_test with runner.hooks_for_event(event)."
+2026-06-19T09:14:17.2098642Z     },
+2026-06-19T09:14:17.2098923Z     {
+2026-06-19T09:14:17.2099225Z       "severity": "nit",
+2026-06-19T09:14:18.3549213Z       "summary": "Missing return type annotations on InstallService static helpers and _fire_update_hooks params",
+2026-06-19T09:14:19.4958988Z       "rationale": "InstallService._build_hook_runner (service.py:113) and _build_event (service.py:129) have no return type annotations. _fire_update_hooks params apm_package, scope, logger are untyped (update.py:618-620). Violates the APM standard of type hints on all public/static APIs.",
+2026-06-19T09:14:19.4961613Z       "file": "src/apm_cli/install/service.py",
+2026-06-19T09:14:19.4966317Z       "line": 113,
+2026-06-19T09:14:20.5915609Z       "suggestion": "Add -> LifecycleHookRunner to _build_hook_runner, -> LifecycleEvent to _build_event. In update.py annotate apm_package, scope, logger with their concrete types (or CommandLogger | None)."
+2026-06-19T09:14:20.5917025Z     },
+2026-06-19T09:14:20.5917353Z     {
+2026-06-19T09:14:20.5920030Z       "severity": "nit",
+2026-06-19T09:14:21.6885327Z       "summary": "Rich markup [i] in Panel title renders as italic tag, not literal text",
+2026-06-19T09:14:21.6944463Z       "rationale": "hooks.py:198: title=\"[i] Getting Started\" -- Rich interprets [i] as an italic open tag, consuming the bracket characters from the rendered output.",
+2026-06-19T09:14:22.6905609Z       "file": "src/apm_cli/commands/hooks.py",
+2026-06-19T09:14:22.6906214Z       "line": 198,
+2026-06-19T09:14:22.6928573Z       "suggestion": "title=\"Getting Started\" or title=\"[bold]Getting Started[/bold]\""
+2026-06-19T09:14:22.6929768Z     },
+2026-06-19T09:14:22.6932448Z     {
+2026-06-19T09:14:22.6937001Z       "severity": "nit",
+2026-06-19T09:14:22.6943923Z       "summary": "HTTP verbose detail says event was sent before the daemon thread has executed",
+2026-06-19T09:14:22.6969006Z       "rationale": "hook_executors.py:185: verbose_detail fires after thread.start() but before the HTTP POST completes or even begins. \"sent\" implies delivery; \"dispatched\" is accurate.",
+2026-06-19T09:14:23.6896560Z       "file": "src/apm_cli/core/hook_executors.py",
+2026-06-19T09:14:23.6915535Z       "line": 185,
+2026-06-19T09:14:23.6916199Z       "suggestion": "Change \"event sent to\" to \"event dispatched to\""
+2026-06-19T09:14:23.6916809Z     }
+2026-06-19T09:14:23.6917095Z   ],
+2026-06-19T09:14:23.6920431Z   "extras": {
+2026-06-19T09:14:23.6923139Z     "diagrams": {
+2026-06-19T09:14:28.9643724Z       "class_diagram": "classDiagram\n    direction LR\n    class HookEntry:::touched {\n        <<ValueObject>>\n        +hook_type str\n        +event str\n        +bash str\n        +command str\n        +url str\n        +source str\n        +effective_command() str\n        +effective_timeout() int\n    }\n    class PackageInfo {\n        <<ValueObject>>\n        +name str\n        +reference str\n    }\n    class LifecycleEvent:::touched {\n        <<ValueObject>>\n        +event str\n        +packages list\n        +scope str\n        +to_json() str\n        +create(event, pkgs) LifecycleEvent\n    }\n    class LifecycleHookRunner:::touched {\n        <<Orchestrator>>\n        -_hooks list[HookEntry]\n        -_logger CommandLogger\n        +fire(event_name, event) None\n    }\n    class hook_executors:::touched {\n        <<StrategyDispatch>>\n        +execute_hook(hook, event) None\n        -_execute_http() daemon Thread\n        -_execute_command() subprocess SYNC\n    }\n    class CommandLogger {\n        <<Interface>>\n        +verbose_detail(msg) None\n    }\n    class InstallService:::touched {\n        <<ApplicationService>>\n        +run(request) InstallResult\n        -_build_hook_runner(request)\n        -_build_event(event_name, request)\n    }\n    class update_py:::touched {\n        <<Module>>\n        -_fire_update_hooks()\n    }\n    class uninstall_cli:::touched {\n        <<Module>>\n        -_fire_uninstall_hooks()\n    }\n    note for hook_executors \"command: subprocess.run SYNC 30s / http: daemon Thread async\"\n    note for LifecycleHookRunner \"build+fire triplicated in InstallService, update_py, uninstall_cli\"\n    LifecycleHookRunner *-- HookEntry : holds\n    LifecycleHookRunner ..> hook_executors : dispatches\n    LifecycleHookRunner ..> CommandLogger : optional\n    LifecycleEvent *-- PackageInfo : carries\n    hook_executors ..> HookEntry : reads\n    hook_executors ..> LifecycleEvent : serialises\n    InstallService ..> LifecycleHookRunner : builds and fires\n    InstallService ..> LifecycleEvent : creates\n    update_py ..> LifecycleHookRunner : builds and fires\n    update_py ..> LifecycleEvent : creates\n    uninstall_cli ..> LifecycleHookRunner : builds and fires\n    uninstall_cli ..> LifecycleEvent : creates\n    classDef touched fill:#fff3b0,stroke:#d47600",
+2026-06-19T09:14:30.9772524Z       "component": "flowchart TD\n    A[apm install] --> B[InstallService.run]\n    B --> C[_build_hook_runner]\n    C --> D[\"[FS] discover_hooks lifecycle_hooks.py:252\"]\n    D --> E[\"[FS] policy.d and user hooks and .apm/hooks.json\"]\n    E --> F[LifecycleHookRunner]\n    F --> G[\"runner.fire pre-install service.py:70 BEFORE import guard\"]\n    G --> H[\"execute_hook loop hook_executors.py:86\"]\n    H --> I{hook_type}\n    I -->|command| J[\"[EXEC] subprocess.run BLOCKS 30s hook_executors.py:210\"]\n    I -->|http| K[\"[NET] Thread daemon async hook_executors.py:181\"]\n    J --> L[\"[FS] _append_to_hook_log full URL hook_executors.py:51\"]\n    K --> L\n    L --> M{more hooks}\n    M -->|yes| H\n    M -->|no| N{import run_install_pipeline}\n    N -->|ImportError| O[\"InstallNotAvailableError raised pre-install already fired\"]\n    N -->|ok| P[\"[NET+FS] run_install_pipeline install/pipeline.py\"]\n    P --> Q[\"runner.fire post-install service.py:106\"]\n    Q --> R[return InstallResult]",
+2026-06-19T09:14:33.1414748Z       "sequence": "sequenceDiagram\n    participant CLI as apm install\n    participant SVC as InstallService\n    participant LHR as LifecycleHookRunner\n    participant EX as hook_executors\n    participant FS as filesystem\n    CLI->>SVC: run(request)\n    SVC->>LHR: discover_hooks + build runner\n    Note over LHR,FS: [FS] reads policy.d, ~/.apm/hooks, .apm/hooks.json\n    LHR-->>SVC: LifecycleHookRunner\n    Note over SVC: pre-install fires BEFORE import guard service.py:70\n    SVC->>LHR: fire(\"pre-install\", event)\n    LHR->>EX: execute_hook(command_hook)\n    Note over EX: [EXEC] subprocess.run BLOCKS up to 30s\n    EX->>FS: _append_to_hook_log(full_url)\n    FS-->>EX: done\n    EX-->>LHR: hook done\n    LHR-->>SVC: pre-install complete\n    SVC->>SVC: import run_install_pipeline\n    SVC->>SVC: run_install_pipeline(request)\n    SVC->>LHR: fire(\"post-install\", event)\n    LHR->>EX: execute_hook per hook\n    EX-->>LHR: done\n    LHR-->>SVC: post-install complete\n    SVC-->>CLI: InstallResult"
+2026-06-19T09:14:33.1418105Z     }
+2026-06-19T09:14:33.1419122Z   }
+2026-06-19T09:14:33.1419441Z }
+2026-06-19T09:14:33.1967682Z ```● Python-architect Architecture review of lifecycle hooks PR
+2026-06-19T09:14:33.1968286Z   │ Validate mermaid strings as JSON (shell)
+2026-06-19T09:14:33.1968658Z   │   │ python3 -c "
+2026-06-19T09:14:33.1968938Z   │   │ import json
+2026-06-19T09:14:33.1969184Z   │   │
+2026-06-19T09:14:33.1969443Z   │   │ class_diagram = '''classDiagram
+2026-06-19T09:14:33.1969787Z   │   │ direction LR…
+2026-06-19T09:14:33.1970067Z   │   └ 149 lines...
+2026-06-19T09:14:33.1970357Z   └ Validate full output JSON (shell)
+2026-06-19T09:14:33.1970681Z       │ python3 -c "
+2026-06-19T09:14:33.1970939Z       │ import json
+2026-06-19T09:14:33.1971174Z       │
+2026-06-19T09:14:33.1971486Z       │ # Build the full output object and validate it
+2026-06-19T09:14:33.1971854Z       │ output = {…
+2026-06-19T09:14:33.1972097Z       └ 280 lines...
+2026-06-19T09:14:33.1972231Z 
+2026-06-19T09:17:25.9140163Z All 9 panelists returned. Now spawning CEO synthesizer.
+2026-06-19T09:17:25.9140541Z 
+2026-06-19T09:21:57.3273982Z ```json
+2026-06-19T09:21:57.3277727Z {
+2026-06-19T09:21:57.3301502Z   "headline": "Do not merge: _expand_env_vars is a zero-exploit PAT exfiltration channel, security.md now carries two false claims, and correctness bugs silently kill the feature's display layer and test command — all five must be fixed in-branch before this PR is enterprise-safe.",
+2026-06-19T09:22:02.0277750Z   "arbitration": "Supply-chain-security and auth-expert independently converge on the same root finding, making it the highest-weight signal in this panel: _expand_env_vars resolves any $VAR from os.environ with no denylist, and _build_hook_env passes dict(os.environ) to every command-hook subprocess. A project's .apm/hooks.json can specify headers: {Authorization: \"$GITHUB_APM_PAT\"} and ship the live PAT to any HTTPS endpoint on every apm install — no exploit required, no user error required. The auth-expert's evidence block (TestExpandEnvVars::test_does_not_expand_github_apm_pat, outcome: missing, principles: [secure-by-default, governed-by-policy]) confirms no test enforces this contract today; per arbitration policy, a missing test on a secure-by-default surface ranks at blocking regardless of the persona's original tier. Supply-chain's additional finding that C:\\ProgramData\\APM\\policy.d is world-writable on Windows is a real policy-tier trust failure; I distinguish it from the cross-platform exfiltration path in calibration but do not defer it — an ACL-check stub with a tracked follow-up is the minimum acceptable; shipping without acknowledgment is not.\n\nThree correctness bugs mean the feature will not work correctly out of the box. CLI-logging-expert identifies a permanent import failure: from apm_cli.utils.console import console references a name that does not exist in console.py — the import always fails silently, the Rich table and Panel are permanently dead, and every user sees only the bare click.echo fallback. DevX-UX-expert identifies that apm hooks test exits before its HTTP daemon threads complete, meaning the primary test workflow silently produces no output in hooks.log. Most critically for enterprise trust, supply-chain's finding that security.md lines 32–33 now carry false claims ('No arbitrary code execution', 'No network calls after install') must be corrected in this PR — these claims are relied upon by enterprise security reviewers and allowing them to persist after merge is a public contract violation. Doc-writer's corroborating finding that 'fire-and-forget' is factually wrong for command hooks (which block subprocess.run() for up to 30 seconds each) must be corrected in the module docstring and the documentation in the same commit.\n\nPython-architect and performance-expert agree on structural concerns — triplication of fire logic across three files, serial hook execution adding N×30s worst-case per phase, 30s default timeout 3–6× too generous for a synchronous CLI path — that compound over time but are suitable for tracked follow-up issues once the five blockers are resolved. The oss-growth-hacker's 'APM's npm-scripts moment' framing is exactly right: the three-tier discovery model and apm hooks init && apm hooks test flow are genuinely differentiated. That growth upside is worth protecting — which is precisely why the five blocking items must land before this PR ships. A token-exfiltration incident in week one would permanently damage the enterprise trust that the hooks feature is intended to deepen.",
+2026-06-19T09:22:03.0326183Z   "dissent_notes": "No panelists disagreed on the core findings. One calibration worth naming: supply-chain classified the Windows policy.d world-writable path as blocking alongside the cross-platform exfiltration findings. I distinguish them by blast radius — the exfiltration path (any platform, any project hook, zero user error) is categorically more urgent than the Windows-only local-privilege path. The Windows ACL finding is also blocking but could ship with an ownership-check warning stub and a tracked follow-up rather than holding the Linux/macOS user base indefinitely; I do not side with full deferral. All test-coverage-expert findings carry valid evidence blocks with outcome: missing; none are downweighted. The doc-writer's two blocking findings (false fire-and-forget claim, missing commands.md entry) were undisputed across all nine panelists and are included in the required rework scope.",
+2026-06-19T09:22:03.0331899Z   "principle_alignment": {
+2026-06-19T09:22:04.0744612Z     "secure_by_default": "Failed. _expand_env_vars expands any credential env var into HTTP hook headers with no denylist; _build_hook_env passes the full process environment including GITHUB_APM_PAT and ADO_APM_PAT to shell subprocesses. Both are zero-exploit paths: a project maintainer adds one line to hooks.json and every developer's live PAT is exfiltrated on install with no indicator. Auth-expert's evidence (outcome: missing, secure-by-default + governed-by-policy surfaces) confirms no test enforces this promise. Raw URLs including embedded user:password credentials are also written verbatim to hooks.log, bypassing SecretRedactionFilter. These are not hardening deferrals — they are pre-merge requirements.",
+2026-06-19T09:22:05.0820276Z     "governed_by_policy": "Partially failed. The three-tier discovery model (user / project / policy) is architecturally sound and the right governance structure. The policy tier is undermined by the world-writable Windows policy directory, which allows any local user to inject hooks that run with the privileges of any apm user on that machine. The credential denylist gap means project-tier hooks can also circumvent governance by exfiltrating tokens before any policy gate fires. The trust model needs both the ACL check and the env-var denylist to be structurally meaningful.",
+2026-06-19T09:22:06.0337194Z     "pragmatic_as_npm": "Partially failed. The feature skeleton — three-tier discovery, init scaffold, test command — is genuine npm-scripts-level ergonomics and the right UX direction. Broken by: command hooks blocking the install terminal for N×30s with no progress indicator; apm hooks test silently producing no log output because HTTP daemon threads are killed on CLI exit; the init scaffold generating a Windows-broken bash-only template; and the console import failure that renders the entire display layer as bare fallback text for every user. The npm-parity promise requires these to work correctly before launch."
+2026-06-19T09:22:06.0366013Z   },
+2026-06-19T09:22:08.0452810Z   "growth_amplification": "oss-growth-hacker's 'APM's npm-scripts moment' is the right launch narrative: lifecycle hooks close the last ergonomic gap between APM and npm for AI-stack CI/CD integrations, and the three-tier discovery model is a genuine differentiator incumbents cannot copy without breaking their existing hook contracts. The 'apm hooks init && apm hooks test' 15-second GIF conversion angle is strong, unused, and will convert better than prose. Hold the launch until the security fixes land — a token-exfiltration CVE in week one would permanently damage the enterprise trust this feature is meant to deepen. When fixed: add a CHANGELOG [Unreleased] entry framing hooks as 'zero-friction audit instrumentation'; cross-link from enterprise/adoption-playbook.md; seed a community hooks gallery in GitHub Discussions; add the npm-lifecycle analogy to the doc opening for JS-ecosystem onramp. README placement: governed-by-policy section only, not the hero.",
+2026-06-19T09:22:08.0458697Z   "recommended_followups": [
+2026-06-19T09:22:08.0459122Z     {
+2026-06-19T09:22:08.0459428Z       "from_persona": "auth-expert",
+2026-06-19T09:22:09.0997160Z       "summary": "Add credential denylist to _expand_env_vars blocking /TOKEN|SECRET|PAT|KEY|PASSWORD/i env vars from resolving into HTTP hook headers; add test TestExpandEnvVars::test_does_not_expand_github_apm_pat asserting monkeypatch.setenv('GITHUB_APM_PAT', 'ghp_secret'); assert _expand_env_vars('${GITHUB_APM_PAT}') == ''",
+2026-06-19T09:22:10.1697144Z       "why": "Evidence-backed (outcome: missing, secure-by-default + governed-by-policy). auth-expert and supply-chain-security independently converge on the same root: a project hooks.json with headers: {Authorization: '$GITHUB_APM_PAT'} ships the live PAT to any HTTPS endpoint on every apm install. Zero-exploit exfiltration channel with no test guardrail; highest-priority fix in this PR.",
+2026-06-19T09:22:10.1700247Z       "blocking": true
+2026-06-19T09:22:10.1700651Z     },
+2026-06-19T09:22:10.1700951Z     {
+2026-06-19T09:22:10.1704071Z       "from_persona": "supply-chain-security-expert",
+2026-06-19T09:22:10.1735610Z       "summary": "Update security.md to retract 'No arbitrary code execution' (line 33) and 'No network calls after install' (line 32) — both claims are now false after this PR merges",
+2026-06-19T09:22:11.1832186Z       "why": "Enterprise security reviewers rely on security.md as APM's public security posture contract. Shipping this PR without updating these lines is a public contract violation with direct consequences for adopters who cited those claims to their infosec teams. Must land in the same commit as the feature code.",
+2026-06-19T09:22:11.1835428Z       "blocking": true
+2026-06-19T09:22:11.1836196Z     },
+2026-06-19T09:22:11.1836766Z     {
+2026-06-19T09:22:11.1839923Z       "from_persona": "supply-chain-security-expert",
+2026-06-19T09:22:12.2333798Z       "summary": "Replace dict(os.environ) in _build_hook_env with a minimal curated env (PATH, HOME, USER, TMPDIR + explicit hook.env entries); strip all variables matching /TOKEN|SECRET|PAT|KEY|PASSWORD/i",
+2026-06-19T09:22:13.3059300Z       "why": "Every command-hook subprocess currently inherits GITHUB_APM_PAT, ADO_APM_PAT, and all other tokens in the APM process. Combined with the _expand_env_vars gap, this is a complete cross-platform exfiltration path requiring zero exploit skill from a project maintainer — fixing only _expand_env_vars leaves shell hooks with full token inheritance.",
+2026-06-19T09:22:13.3061877Z       "blocking": true
+2026-06-19T09:22:13.3062344Z     },
+2026-06-19T09:22:13.3062649Z     {
+2026-06-19T09:22:13.3075238Z       "from_persona": "cli-logging-expert",
+2026-06-19T09:22:13.3091080Z       "summary": "Fix 'from apm_cli.utils.console import console' — the symbol does not exist in console.py; replace with _get_console() called inside each try block",
+2026-06-19T09:22:14.3174757Z       "why": "The import always fails silently. Both hooks() and hooks_init() fall back permanently to click.echo. The entire Rich display layer — table, Panel, all formatting — is dead for every user on every platform. Easy one-line fix with the highest visible user-impact of any correctness bug in this PR.",
+2026-06-19T09:22:14.3176360Z       "blocking": true
+2026-06-19T09:22:14.3176649Z     },
+2026-06-19T09:22:14.3178714Z     {
+2026-06-19T09:22:14.3183809Z       "from_persona": "devx-ux-expert",
+2026-06-19T09:22:14.3198003Z       "summary": "Add bounded join/drain for HTTP daemon threads before CLI exit in apm hooks test so hooks.log entries are actually written",
+2026-06-19T09:22:15.3735634Z       "why": "daemon=True threads are killed when the CLI process exits. apm hooks test produces no hooks.log output for HTTP hooks — the primary test workflow is silently broken. This is the first command a new user runs after apm hooks init; a silent empty log destroys the conversion funnel the oss-growth-hacker identified and makes the feature appear non-functional on first contact.",
+2026-06-19T09:22:15.3737805Z       "blocking": true
+2026-06-19T09:22:15.3738174Z     }
+2026-06-19T09:22:15.3738464Z   ],
+2026-06-19T09:22:15.3738788Z   "ship_recommendation": {
+2026-06-19T09:22:15.3743412Z     "stance": "needs_rework",
+2026-06-19T09:22:17.0422197Z     "prose": "Five blocking items must land in the same commit before this PR merges. Security fixes: add a credential denylist to _expand_env_vars with a test asserting GITHUB_APM_PAT and ADO_APM_PAT cannot resolve into HTTP headers; replace dict(os.environ) in _build_hook_env with a minimal curated environment that strips all credential variables; update security.md to retract the two now-false security claims. Correctness fixes: resolve the console import so the Rich display layer works; add a thread drain to apm hooks test so the test command produces log output. Architecture improvements (serial hook execution, fire-logic triplication, 30s timeout, Windows ACL hardening, SSRF guard, URL redaction in hooks.log) are well-scoped and suitable as tracked follow-up issues on the same milestone — the doc-writer's commands.md gap and the oss-growth-hacker's CHANGELOG and index entries belong there too. The feature concept is strong: three-tier discovery is the right architecture, the init+test flow is genuine npm-parity ergonomics, and the growth upside is real. These are fixable issues measured in days, not weeks. Do not ship as-is to enterprise users who have staked their security posture on APM's documented promises."
+2026-06-19T09:22:17.0427097Z   }
+2026-06-19T09:22:17.0427315Z }
+2026-06-19T09:22:17.0802019Z ```● Apm-ceo CEO synthesis of PR #1798 panel
+2026-06-19T09:22:17.0802436Z 
+2026-06-19T09:26:43.0001801Z Now I'll render the final comment. Let me write it out.
+2026-06-19T09:26:43.0002298Z 
+2026-06-19T09:26:43.0240727Z ✗ Write rendered comment to file (shell)
+2026-06-19T09:26:43.0241582Z   │ cat > /tmp/gh-aw/agent/panel-comment.md << 'COMMENT_EOF'
+2026-06-19T09:26:43.0242254Z   │ ## APM Review Panel: `needs_rework`
+2026-06-19T09:26:43.0242698Z   │
+2026-06-19T09:26:43.0243237Z   │ > Do not merge: _expand_env_vars is a zero-exploit PAT exfiltration
+2026-06-19T09:26:43.0244358Z   │ channel, security.md now carries two false claims, and correctness bugs …
+2026-06-19T09:26:43.0245279Z   └ Command not executed. The 'kill' command must specify at least one numeric
+2026-06-19T09:26:43.0245925Z     PID. Usage: kill <PID> or kill -9 <PID>
+2026-06-19T09:26:43.0246255Z 
+2026-06-19T09:26:47.5389595Z ● Test file write (shell)
+2026-06-19T09:26:47.5390403Z   │ mkdir -p /tmp/gh-aw/agent && printf '%s' '## APM Review Panel:
+2026-06-19T09:26:47.5391237Z   │ `needs_rework`' > /tmp/gh-aw/agent/comment-test.md && echo "ok"
+2026-06-19T09:26:47.5391826Z   └ 2 lines...
+2026-06-19T09:26:47.5392015Z 
+2026-06-19T09:27:03.2920545Z ##[error]The action 'Execute GitHub Copilot CLI' has timed out after 30 minutes.

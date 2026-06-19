@@ -1,0 +1,41 @@
+{
+  "description": "Content evals for the docs-corpus-audit skill. Each scenario seeds a known drift pattern into a corpus snapshot (or describes one already present at HEAD) and asserts the skill catches it AND that the applied fix grounds out true on re-verification. Run twice per scenario: WITH the skill loaded and WITHOUT (control). If with-skill and without-skill produce indistinguishable outputs, the skill adds no value.",
+  "scenarios": [
+    {
+      "id": "stale-cli-flag",
+      "prompt": "Audit the entire docs corpus and reground every claim against current code.",
+      "seeded_drift": "In docs/src/content/docs/reference/cli/install.md, the --no-cache flag table row is renamed in source to --skip-cache. The docs still document --no-cache.",
+      "expected_behavior": [
+        "Wave agent extracts the --no-cache claim from the install.md page.",
+        "S7 verification: `uv run apm install --help` does NOT list --no-cache; lists --skip-cache.",
+        "Wave agent marks DRIFTED, applies surgical 1-line edit: --no-cache -> --skip-cache.",
+        "Alignment-loop re-grep: --no-cache no longer appears in install.md."
+      ],
+      "control_baseline": "Without the skill, the LLM may rewrite the flag from recall (manufactured), miss the drift entirely, or rewrite unrelated rows. Skill value = S7 verification step caught the drift and bounded the edit."
+    },
+    {
+      "id": "ia-dead-link",
+      "prompt": "We just reshaped the TOC, find every dead nav link across the docs.",
+      "seeded_drift": "Three pages (quickstart.mdx, getting-started/first-package.md, concepts/lifecycle.md) reference the retired slug guides/install-and-use/. The current slug is consumer/install-and-use/.",
+      "expected_behavior": [
+        "Per-scope agents may catch the dead link on the pages they own.",
+        "Orchestrator post-pass runs scripts/scan-cross-corpus-drift.sh ia-links and finds ALL THREE residues (per-scope agents only see their own scope).",
+        "Orchestrator patches all three inline.",
+        "Alignment-loop: re-run ia-links scan returns no matches."
+      ],
+      "control_baseline": "Without the skill, per-page review catches at most 1 of the 3 (the one the human happens to read). The cross-corpus post-pass is the load-bearing primitive here."
+    },
+    {
+      "id": "expired-deprecation-target",
+      "prompt": "Quarterly docs drift sweep -- catch the accumulated drift, especially deprecation banners.",
+      "seeded_drift": "src/apm_cli/commands/pack.py warns 'apm unpack is deprecated and will be removed in v0.14'. Current version is v0.15.0 -- the v0.14 target has already passed.",
+      "expected_behavior": [
+        "scripts/scan-cross-corpus-drift.sh stale-deprecation surfaces the line.",
+        "Orchestrator applies surgical edit: 'removed in v0.14' -> 'removed in a future release'.",
+        "Re-run stale-deprecation scan: no v0.14-target matches remain.",
+        "CHANGELOG [Unreleased] gets a Fixed entry noting the timeline refresh."
+      ],
+      "control_baseline": "Without the skill, this drift survives indefinitely -- per-PR review doesn't fire because no PR touches the line."
+    }
+  ]
+}

@@ -1,0 +1,232 @@
+﻿2026-06-19T09:27:44.3036550Z ##[group]Run actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+2026-06-19T09:27:44.3037472Z with:
+2026-06-19T09:27:44.3041809Z   github-token: ***
+2026-06-19T09:27:44.3044915Z   script: const { setupGlobals } = require('/home/runner/work/_temp/gh-aw/actions/setup_globals.cjs');
+setupGlobals(core, github, context, exec, io, getOctokit);
+const { main } = require('/home/runner/work/_temp/gh-aw/actions/handle_agent_failure.cjs');
+await main();
+
+2026-06-19T09:27:44.3052453Z   debug: false
+2026-06-19T09:27:44.3053030Z   user-agent: actions/github-script
+2026-06-19T09:27:44.3053627Z   result-encoding: json
+2026-06-19T09:27:44.3054126Z   retries: 0
+2026-06-19T09:27:44.3054642Z   retry-exempt-status-codes: 400,401,403,404,422
+2026-06-19T09:27:44.3055265Z env:
+2026-06-19T09:27:44.3105207Z   GH_AW_MODEL_MULTIPLIERS: {
+  "version": "1",
+  "description": "Effective Tokens (ET) computation data per the gh-aw Effective Tokens Specification v0.2.0. Token class weights are applied first to normalize across token classes, then the per-model multiplier scales the result relative to the reference model. The registry keeps complete model history; entries are removed only by explicit manual deletion.",
+  "reference_model": "claude-sonnet-4.5",
+  "token_class_weights": {
+    "input": 1.0,
+    "cached_input": 0.1,
+    "output": 4.0,
+    "reasoning": 4.0,
+    "cache_write": 1.0
+  },
+  "multipliers": {
+    "claude-haiku-4-5": 0.33,
+    "claude-haiku-4.5": 0.33,
+    "claude-haiku-4-5-20251001": 0.33,
+    "claude-3-5-haiku": 0.1,
+    "claude-3-haiku": 0.1,
+    "claude-sonnet-4": 1.0,
+    "claude-sonnet-4-20250514": 1.0,
+    "claude-sonnet-4-5": 6.0,
+    "claude-sonnet-4.5": 6.0,
+    "claude-sonnet-4-5-20250929": 6.0,
+    "claude-sonnet-4-6": 9.0,
+    "claude-sonnet-4.6": 9.0,
+    "claude-3-5-sonnet": 1.0,
+    "claude-3-7-sonnet": 1.0,
+    "claude-3-sonnet": 1.0,
+    "claude-opus-4": 5.0,
+    "claude-opus-4-20250514": 5.0,
+    "claude-opus-4-1": 5.0,
+    "claude-opus-4-1-20250805": 5.0,
+    "claude-opus-4-5": 15.0,
+    "claude-opus-4-5-20251101": 15.0,
+    "claude-opus-4-6": 27.0,
+    "claude-opus-4-7": 27.0,
+    "claude-opus-4.5": 15.0,
+    "claude-opus-4.6": 27.0,
+    "claude-3-5-opus": 5.0,
+    "claude-3-opus": 5.0,
+    "gpt-4o": 0.33,
+    "gpt-4o-2024-05-13": 0.33,
+    "gpt-4o-2024-08-06": 0.33,
+    "gpt-4o-2024-11-20": 0.33,
+    "gpt-4o-mini": 0.33,
+    "gpt-4o-mini-2024-07-18": 0.33,
+    "gpt-4.1": 1.0,
+    "gpt-4.1-2025-04-14": 1.0,
+    "gpt-41-copilot": 1.0,
+    "gpt-4.1-mini": 1.0,
+    "gpt-4.1-nano": 1.0,
+    "gpt-4-turbo": 1.0,
+    "gpt-4": 1.0,
+    "gpt-4-0613": 1.0,
+    "gpt-4-o-preview": 1.0,
+    "gpt-3.5-turbo": 0.0,
+    "gpt-3.5-turbo-0613": 0.0,
+    "gpt-5": 1.0,
+    "gpt-5-2025-08-07": 1.0,
+    "gpt-5-search-api": 1.0,
+    "gpt-5-search-api-2025-10-14": 1.0,
+    "gpt-5-chat-latest": 1.0,
+    "gpt-5-mini": 0.33,
+    "gpt-5-mini-2025-08-07": 0.33,
+    "gpt-5-nano": 0.05,
+    "gpt-5-nano-2025-08-07": 0.05,
+    "gpt-5-pro": 2.0,
+    "gpt-5-pro-2025-10-06": 2.0,
+    "gpt-5.1": 3.0,
+    "gpt-5.1-2025-11-13": 3.0,
+    "gpt-5.1-chat-latest": 3.0,
+    "gpt-5-codex": 1.0,
+    "gpt-5.1-codex": 3.0,
+    "gpt-5.1-codex-mini": 3.0,
+    "gpt-5.1-codex-max": 3.0,
+    "gpt-5.1-codex-max-customsummarizer": 3.0,
+    "gpt-5.2": 3.0,
+    "gpt-5.2-2025-12-11": 3.0,
+    "gpt-5.2-chat-latest": 3.0,
+    "gpt-5.2-codex": 3.0,
+    "gpt-5.2-pro": 3.0,
+    "gpt-5.2-pro-2025-12-11": 3.0,
+    "gpt-5.3-chat-latest": 3.0,
+    "gpt-5.3-codex": 6.0,
+    "gpt-5.3-codex-api-preview": 6.0,
+    "gpt-5.4": 6.0,
+    "gpt-5.4-2026-03-05": 6.0,
+    "gpt-5.4-mini": 6.0,
+    "gpt-5.4-mini-2026-03-17": 6.0,
+    "gpt-5.4-nano": 6.0,
+    "gpt-5.4-nano-2026-03-17": 6.0,
+    "gpt-5.4-pro": 6.0,
+    "gpt-5.4-pro-2026-03-05": 6.0,
+    "gpt-5.5": 7.5,
+    "gpt-5.5-2026-04-23": 7.5,
+    "gpt-5.5-pro": 2.0,
+    "gpt-5.5-pro-2026-04-23": 2.0,
+    "o1": 3.0,
+    "o1-2024-12-17": 3.0,
+    "o1-mini": 0.5,
+    "o1-pro": 10.0,
+    "o1-pro-2025-03-19": 10.0,
+    "o3": 3.0,
+    "o3-2025-04-16": 3.0,
+    "o3-mini": 0.5,
+    "o3-mini-2025-01-31": 0.5,
+    "o3-pro": 10.0,
+    "o3-pro-2025-06-10": 10.0,
+    "o3-deep-research": 3.0,
+    "o3-deep-research-2025-06-26": 3.0,
+    "o4-mini": 0.5,
+    "o4-mini-2025-04-16": 0.5,
+    "o4-mini-deep-research": 0.5,
+    "o4-mini-deep-research-2025-06-26": 0.5,
+    "gemini-2.5-pro": 1.0,
+    "gemini-2.5-pro-preview-tts": 1.0,
+    "gemini-2.5-flash": 0.2,
+    "gemini-2.5-flash-native-audio-latest": 0.2,
+    "gemini-2.5-flash-native-audio-preview-09-2025": 0.2,
+    "gemini-2.5-flash-native-audio-preview-12-2025": 0.2,
+    "gemini-2.5-flash-preview-tts": 0.2,
+    "gemini-2.5-flash-image": 0.2,
+    "gemini-2.5-flash-lite": 0.1,
+    "gemini-2.0-flash": 0.1,
+    "gemini-2.0-flash-001": 0.1,
+    "gemini-2.0-flash-lite": 0.1,
+    "gemini-2.0-flash-lite-001": 0.1,
+    "gemini-1.5-pro": 1.0,
+    "gemini-1.5-flash": 0.1,
+    "gemini-flash-latest": 0.2,
+    "gemini-flash-lite-latest": 0.1,
+    "gemini-pro-latest": 1.0,
+    "gemini-3-flash-preview": 0.33,
+    "gemini-3-pro-preview": 6.0,
+    "gemini-3-pro-image-preview": 6.0,
+    "gemini-3.1-pro-preview": 6.0,
+    "gemini-3.1-pro-preview-customtools": 6.0,
+    "gemini-3.1-flash-live-preview": 0.1,
+    "gemini-3.1-flash-lite": 0.1,
+    "gemini-3.1-flash-lite-preview": 0.1,
+    "gemini-3.1-flash-image-preview": 0.33,
+    "gemini-3.1-flash-tts-preview": 0.1,
+    "gemini-3.5-flash": 14.0,
+    "gemini-2.5-computer-use-preview": 0.2,
+    "gemini-2.5-computer-use-preview-10-2025": 0.2,
+    "gemini-robotics-er-1.5-preview": 0.2,
+    "gemini-robotics-er-1.6-preview": 0.2,
+    "deep-research-max-preview-04-2026": 1.0,
+    "deep-research-preview-04-2026": 1.0,
+    "deep-research-pro-preview-12-2025": 1.0,
+    "gemma-4-26b-a4b-it": 0.1,
+    "gemma-4-31b-it": 0.2,
+    "grok-code-fast-1": 0.33,
+    "raptor-mini": 0.33
+  }
+}
+2026-06-19T09:27:44.3139608Z   GITHUB_AW_OTEL_TRACE_ID: fb74a35b6e34e823bbe06fd7fcc5d027
+2026-06-19T09:27:44.3140704Z   GITHUB_AW_OTEL_PARENT_SPAN_ID: ebb060e00d331bee
+2026-06-19T09:27:44.3141633Z   GITHUB_AW_OTEL_JOB_START_MS: 1781861261518
+2026-06-19T09:27:44.3142347Z   GH_AW_AGENT_OUTPUT: /tmp/gh-aw/agent_output.json
+2026-06-19T09:27:44.3158369Z   GH_AW_WORKFLOW_NAME: PR Review Panel
+2026-06-19T09:27:44.3161740Z   GH_AW_WORKFLOW_SOURCE_URL: https://github.com/microsoft/apm/blob/main/.github/workflows/pr-review-panel.md
+2026-06-19T09:27:44.3168716Z   GH_AW_RUN_URL: https://github.com/microsoft/apm/actions/runs/27815857237
+2026-06-19T09:27:44.3169574Z   GH_AW_AGENT_CONCLUSION: failure
+2026-06-19T09:27:44.3170162Z   GH_AW_WORKFLOW_ID: pr-review-panel
+2026-06-19T09:27:44.3170784Z   GH_AW_ACTION_FAILURE_ISSUE_EXPIRES_HOURS: 168
+2026-06-19T09:27:44.3171443Z   GH_AW_ENGINE_ID: copilot
+2026-06-19T09:27:44.3171991Z   GH_AW_SECRET_VERIFICATION_RESULT: success
+2026-06-19T09:27:44.3172610Z   GH_AW_CHECKOUT_PR_SUCCESS: true
+2026-06-19T09:27:44.3173180Z   GH_AW_EFFECTIVE_TOKENS: 23656115
+2026-06-19T09:27:44.3173787Z   GH_AW_EFFECTIVE_TOKENS_RATE_LIMIT_ERROR: false
+2026-06-19T09:27:44.3174428Z   GH_AW_INFERENCE_ACCESS_ERROR: false
+2026-06-19T09:27:44.3175305Z   GH_AW_MCP_POLICY_ERROR: false
+2026-06-19T09:27:44.3176084Z   GH_AW_AGENTIC_ENGINE_TIMEOUT: false
+2026-06-19T09:27:44.3176696Z   GH_AW_MODEL_NOT_SUPPORTED_ERROR: false
+2026-06-19T09:27:44.3178082Z   GH_AW_ENGINE_API_HOSTS: api.enterprise.githubcopilot.com,api.githubcopilot.com,api.business.githubcopilot.com,api.individual.githubcopilot.com
+2026-06-19T09:27:44.3179371Z   GH_AW_LOCKDOWN_CHECK_FAILED: false
+2026-06-19T09:27:44.3179960Z   GH_AW_STALE_LOCK_FILE_FAILED: false
+2026-06-19T09:27:44.3180538Z   GH_AW_GROUP_REPORTS: false
+2026-06-19T09:27:44.3181099Z   GH_AW_FAILURE_REPORT_AS_ISSUE: true
+2026-06-19T09:27:44.3182088Z   GH_AW_MISSING_TOOL_REPORT_AS_FAILURE: true
+2026-06-19T09:27:44.3190719Z   GH_AW_MISSING_DATA_REPORT_AS_FAILURE: true
+2026-06-19T09:27:44.3193141Z   GH_AW_TIMEOUT_MINUTES: 30
+2026-06-19T09:27:44.3193730Z   GH_AW_MAX_EFFECTIVE_TOKENS: 25000000
+2026-06-19T09:27:44.3194314Z ##[endgroup]
+2026-06-19T09:27:44.5492770Z Agent conclusion: failure
+2026-06-19T09:27:44.5505947Z Workflow name: PR Review Panel
+2026-06-19T09:27:44.5513362Z Workflow ID: pr-review-panel
+2026-06-19T09:27:44.5517418Z Secret verification result: success
+2026-06-19T09:27:44.5519878Z Assignment error count: 0
+2026-06-19T09:27:44.5521699Z Assign copilot failure count: 0
+2026-06-19T09:27:44.5526071Z Create discussion error count: 0
+2026-06-19T09:27:44.5539530Z Code push failure count: 0
+2026-06-19T09:27:44.5543238Z Checkout PR success: true
+2026-06-19T09:27:44.5550361Z Effective tokens: 23656115
+2026-06-19T09:27:44.5555814Z Configured max effective tokens: 25000000
+2026-06-19T09:27:44.5570160Z Effective tokens rate-limit error: false
+2026-06-19T09:27:44.5571474Z Inference access error: false
+2026-06-19T09:27:44.5572055Z MCP policy error: false
+2026-06-19T09:27:44.5573406Z Agentic engine timeout: false
+2026-06-19T09:27:44.5574078Z Model not supported error: false
+2026-06-19T09:27:44.5574680Z Push repo-memory result: 
+2026-06-19T09:27:44.5575449Z App token minting failed (safe_outputs/conclusion/activation): false/false/false
+2026-06-19T09:27:44.5615079Z Lockdown check failed: false
+2026-06-19T09:27:44.5618357Z Stale lock file check failed: false
+2026-06-19T09:27:44.5618989Z Cache memory enabled: false
+2026-06-19T09:27:44.5619573Z Missing tool report-as-failure: true
+2026-06-19T09:27:44.5620177Z Missing data report-as-failure: true
+2026-06-19T09:27:44.5620763Z Agent output content length: 13
+2026-06-19T09:27:44.5818226Z Searching for pull request from branch: sergio-sisternes-epam/feat-installation-analytics-hooks
+2026-06-19T09:27:45.1287693Z Found pull request #1798: https://github.com/microsoft/apm/pull/1798
+2026-06-19T09:27:46.4319511Z PR #1798 details - head_sha: a214a9601616b5697da4862e5cbc7198b4a5bf9f, mergeable: true, mergeable_state: blocked
+2026-06-19T09:27:46.4321995Z Parent issue creation is disabled (group-reports: false)
+2026-06-19T09:27:46.4324101Z Checking for existing issue with precise metadata match for title: "[aw] PR Review Panel failed"
+2026-06-19T09:27:46.5219159Z No existing issue found, creating a new one
+2026-06-19T09:27:46.5257654Z No specific error patterns found; including last 10 line(s) of agent-stdio.log as fallback
+2026-06-19T09:27:47.0739251Z [@octokit/request] "POST https://api.github.com/repos/microsoft/apm/issues" is deprecated. It is scheduled to be removed on Fri, 10 Mar 2028 00:00:00 GMT. See https://docs.github.com/en/rest/about-the-rest-api/api-versions
+2026-06-19T09:27:47.0744550Z ✓ Created new issue #1843: https://github.com/microsoft/apm/issues/1843
+2026-06-19T09:27:47.3381896Z Cascade check: 1 failure issue(s) in the last 60 min (threshold: 10) — no cascade

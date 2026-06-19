@@ -1,0 +1,9 @@
+2026-06-18T19:22:39.7050000Z Requested labels: ubuntu-slim
+2026-06-18T19:22:39.7050000Z Job defined at: microsoft/apm/.github/workflows/pr-review-panel.lock.yml@refs/heads/main
+2026-06-18T19:22:39.7050000Z Waiting for a runner to pick up this job...
+2026-06-18T19:22:39.6990000Z Evaluating safe_outputs.if
+2026-06-18T19:22:39.6990000Z Evaluating: ((!cancelled()) && (needs.agent.result != 'skipped') && (needs.detection.result == 'success'))
+2026-06-18T19:22:39.6990000Z Expanded: (!false && ('success' != 'skipped') && ('success' == 'success'))
+2026-06-18T19:22:39.6990000Z Result: true
+2026-06-18T19:22:55.2730000Z Job is waiting for a hosted runner to come online.
+2026-06-18T19:22:55.2740000Z Job is about to start running on the hosted runner: GitHub Actions 1041507136

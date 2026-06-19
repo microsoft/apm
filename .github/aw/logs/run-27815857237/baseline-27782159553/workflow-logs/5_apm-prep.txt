@@ -1,0 +1,125 @@
+﻿2026-06-18T18:54:25.6511326Z Current runner version: '2.335.1'
+2026-06-18T18:54:25.6547180Z ##[group]Runner Image Provisioner
+2026-06-18T18:54:25.6548237Z Hosted Compute Agent
+2026-06-18T18:54:25.6548831Z Version: 20260520.533
+2026-06-18T18:54:25.6549953Z Commit: 189110e25284a9812c124fd27b339e2fb4f2f9db
+2026-06-18T18:54:25.6550762Z Build Date: 2026-05-20T17:44:04Z
+2026-06-18T18:54:25.6551442Z Worker ID: {8156c397-68e3-4914-a86a-220291f3e0e5}
+2026-06-18T18:54:25.6552559Z Azure Region: eastus
+2026-06-18T18:54:25.6553151Z ##[endgroup]
+2026-06-18T18:54:25.6555078Z ##[group]VM Image
+2026-06-18T18:54:25.6555768Z - OS: Linux (x64)
+2026-06-18T18:54:25.6556897Z - Source: Docker
+2026-06-18T18:54:25.6557452Z - Name: ubuntu:24.04
+2026-06-18T18:54:25.6558088Z - Version: 20260526.57.1
+2026-06-18T18:54:25.6558686Z ##[endgroup]
+2026-06-18T18:54:25.6560176Z ##[group]GITHUB_TOKEN Permissions
+2026-06-18T18:54:25.6562324Z Metadata: read
+2026-06-18T18:54:25.6563554Z ##[endgroup]
+2026-06-18T18:54:25.6566911Z Secret source: Actions
+2026-06-18T18:54:25.6567876Z Prepare workflow directory
+2026-06-18T18:54:25.7090551Z Prepare all required actions
+2026-06-18T18:54:25.7221257Z Complete job name: apm-prep
+2026-06-18T18:54:25.8212030Z ##[group]Run # Derive GH_HOST from GITHUB_SERVER_URL so the gh CLI targets the correct
+2026-06-18T18:54:25.8214097Z [36;1m# Derive GH_HOST from GITHUB_SERVER_URL so the gh CLI targets the correct[0m
+2026-06-18T18:54:25.8215252Z [36;1m# GitHub instance (GHES/GHEC). On github.com this is a harmless no-op.[0m
+2026-06-18T18:54:25.8216141Z [36;1mGH_HOST="${GITHUB_SERVER_URL#https://}"[0m
+2026-06-18T18:54:25.8217221Z [36;1mGH_HOST="${GH_HOST#http://}"[0m
+2026-06-18T18:54:25.8217904Z [36;1mecho "GH_HOST=${GH_HOST}" >> "$GITHUB_ENV"[0m
+2026-06-18T18:54:25.8425947Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-18T18:54:25.8427141Z ##[endgroup]
+2026-06-18T18:54:25.9197377Z ##[group]Run set -euo pipefail
+2026-06-18T18:54:25.9198222Z [36;1mset -euo pipefail[0m
+2026-06-18T18:54:25.9198925Z [36;1mpackages_json=${AW_APM_PACKAGES:-null}[0m
+2026-06-18T18:54:25.9199682Z [36;1mapps_json=${AW_APM_APPS:-null}[0m
+2026-06-18T18:54:25.9200375Z [36;1mlegacy_id=${AW_APM_LEGACY_APP_ID:-}[0m
+2026-06-18T18:54:25.9298149Z [36;1m[0m
+2026-06-18T18:54:25.9298795Z [36;1m# gh-aw substitutes `["microsoft/apm#main"]` at[0m
+2026-06-18T18:54:25.9299628Z [36;1m# compile time using Go's default slice formatter, which emits[0m
+2026-06-18T18:54:25.9300485Z [36;1m# `[a b c]` (space-separated, no quotes) instead of valid JSON.[0m
+2026-06-18T18:54:25.9301316Z [36;1m# That breaks `jq --argjson` below. Repair string-array inputs[0m
+2026-06-18T18:54:25.9302181Z [36;1m# in place; leave already-valid JSON untouched. apps[] (objects)[0m
+2026-06-18T18:54:25.9303014Z [36;1m# is not repairable this way -- consumers must use the legacy[0m
+2026-06-18T18:54:25.9304220Z [36;1m# single-app inputs until upstream gh-aw exposes a JSON-encoding[0m
+2026-06-18T18:54:25.9304978Z [36;1m# helper for import-inputs.[0m
+2026-06-18T18:54:25.9305520Z [36;1mrepair_string_array() {[0m
+2026-06-18T18:54:25.9306058Z [36;1m  local raw="$1"[0m
+2026-06-18T18:54:25.9306597Z [36;1m  if [ -z "$raw" ] || [ "$raw" = "null" ]; then[0m
+2026-06-18T18:54:25.9307188Z [36;1m    echo "$raw"; return[0m
+2026-06-18T18:54:25.9307675Z [36;1m  fi[0m
+2026-06-18T18:54:25.9308237Z [36;1m  if printf '%s' "$raw" | jq -e 'type=="array"' >/dev/null 2>&1; then[0m
+2026-06-18T18:54:25.9308916Z [36;1m    echo "$raw"; return[0m
+2026-06-18T18:54:25.9309412Z [36;1m  fi[0m
+2026-06-18T18:54:25.9310548Z [36;1m  python3 -c 'import json, re, sys; s=sys.argv[1].strip(); s=s[1:-1] if s.startswith("[") and s.endswith("]") else s; print(json.dumps([t for t in re.split(r"[\s,]+", s) if t]))' "$raw"[0m
+2026-06-18T18:54:25.9311760Z [36;1m}[0m
+2026-06-18T18:54:25.9312299Z [36;1mpackages_json=$(repair_string_array "$packages_json")[0m
+2026-06-18T18:54:25.9312936Z [36;1m[0m
+2026-06-18T18:54:25.9313478Z [36;1mgroups=$(jq -nc \[0m
+2026-06-18T18:54:25.9314192Z [36;1m  --argjson packages "$packages_json" \[0m
+2026-06-18T18:54:25.9315339Z [36;1m  --argjson apps "$apps_json" \[0m
+2026-06-18T18:54:25.9315904Z [36;1m  --arg legacy_id "$legacy_id" \[0m
+2026-06-18T18:54:25.9316531Z [36;1m  --arg legacy_owner "${AW_APM_LEGACY_OWNER:-}" \[0m
+2026-06-18T18:54:25.9317210Z [36;1m  --arg legacy_repos "${AW_APM_LEGACY_REPOS:-}" \[0m
+2026-06-18T18:54:25.9317962Z [36;1m  'def slug(s): s | gsub("[^a-zA-Z0-9-]"; "-") | ascii_downcase | .[0:32];[0m
+2026-06-18T18:54:25.9318870Z [36;1m   def with_id(g):[0m
+2026-06-18T18:54:25.9319578Z [36;1m     g + (if (g.id // "") == "" then {id: ("auto-" + slug(g.owner // "default"))} else {} end);[0m
+2026-06-18T18:54:25.9320293Z [36;1m   [[0m
+2026-06-18T18:54:25.9320816Z [36;1m     (if (($packages // []) | length) > 0 and $legacy_id == ""[0m
+2026-06-18T18:54:25.9321860Z [36;1m        then [{id:"default",kind:"default",index:0,owner:"",repositories:"",packages:$packages,("has-app"):"false"}][0m
+2026-06-18T18:54:25.9322788Z [36;1m        else [] end),[0m
+2026-06-18T18:54:25.9323296Z [36;1m     (if $legacy_id != ""[0m
+2026-06-18T18:54:25.9327659Z [36;1m        then [with_id({id:"legacy",kind:"legacy",index:0,owner:$legacy_owner,repositories:$legacy_repos,packages:($packages // []),("has-app"):"true"})][0m
+2026-06-18T18:54:25.9328882Z [36;1m        else [] end),[0m
+2026-06-18T18:54:25.9329436Z [36;1m     (($apps // []) | to_entries | map([0m
+2026-06-18T18:54:25.9330003Z [36;1m        with_id({[0m
+2026-06-18T18:54:25.9330509Z [36;1m          id: (.value.id // ""),[0m
+2026-06-18T18:54:25.9331055Z [36;1m          kind: "apps",[0m
+2026-06-18T18:54:25.9331553Z [36;1m          index: .key,[0m
+2026-06-18T18:54:25.9332077Z [36;1m          owner: (.value.owner // ""),[0m
+2026-06-18T18:54:25.9332810Z [36;1m          repositories: (.value.repositories // ""),[0m
+2026-06-18T18:54:25.9333895Z [36;1m          packages: (.value.packages // []),[0m
+2026-06-18T18:54:25.9334514Z [36;1m          ("has-app"): "true"[0m
+2026-06-18T18:54:25.9335033Z [36;1m        })))[0m
+2026-06-18T18:54:25.9335484Z [36;1m   ] | add // []')[0m
+2026-06-18T18:54:25.9335954Z [36;1m[0m
+2026-06-18T18:54:25.9336401Z [36;1mcount=$(echo "$groups" | jq 'length')[0m
+2026-06-18T18:54:25.9336983Z [36;1mif [ "$count" = "0" ]; then[0m
+2026-06-18T18:54:25.9338160Z [36;1m  echo "::error::shared/apm.md import provided no packages. Add packages: <list>, single-app inputs (app-id + private-key), or apps: <list> in the with: block."[0m
+2026-06-18T18:54:25.9339306Z [36;1m  exit 1[0m
+2026-06-18T18:54:25.9339721Z [36;1mfi[0m
+2026-06-18T18:54:25.9340113Z [36;1m[0m
+2026-06-18T18:54:25.9340804Z [36;1mdups=$(echo "$groups" | jq -r '[.[].id] | group_by(.) | map(select(length > 1) | first) | join(", ")')[0m
+2026-06-18T18:54:25.9341625Z [36;1mif [ -n "$dups" ]; then[0m
+2026-06-18T18:54:25.9342652Z [36;1m  echo "::error::duplicate apm group ids after auto-derivation: $dups. Set apps[].id explicitly when two entries share the same owner."[0m
+2026-06-18T18:54:25.9343671Z [36;1m  exit 1[0m
+2026-06-18T18:54:25.9344270Z [36;1mfi[0m
+2026-06-18T18:54:25.9344674Z [36;1m[0m
+2026-06-18T18:54:25.9345087Z [36;1mwhile IFS= read -r id; do[0m
+2026-06-18T18:54:25.9345683Z [36;1m  if ! echo "$id" | grep -Eq '^[a-z0-9-]{1,32}$'; then[0m
+2026-06-18T18:54:25.9346721Z [36;1m    echo "::error::invalid apm group id: '$id' (lowercase alphanumeric and dashes, 1-32 chars). Set apps[].id explicitly."[0m
+2026-06-18T18:54:25.9347664Z [36;1m    exit 1[0m
+2026-06-18T18:54:25.9380055Z [36;1m  fi[0m
+2026-06-18T18:54:25.9380707Z [36;1mdone < <(echo "$groups" | jq -r '.[].id')[0m
+2026-06-18T18:54:25.9381331Z [36;1m[0m
+2026-06-18T18:54:25.9381958Z [36;1m# Emit only id + package-count to logs to keep notice output tight.[0m
+2026-06-18T18:54:25.9382878Z [36;1m# The matrix itself is non-secret under the env-relay design, but a[0m
+2026-06-18T18:54:25.9384135Z [36;1m# condensed summary remains easier to scan in the run UI.[0m
+2026-06-18T18:54:25.9384812Z [36;1m{[0m
+2026-06-18T18:54:25.9385263Z [36;1m  echo "matrix={\"group\":$groups}"[0m
+2026-06-18T18:54:25.9386115Z [36;1m} >> "$GITHUB_OUTPUT"[0m
+2026-06-18T18:54:25.9386791Z [36;1mprintf "::notice::APM matrix: %d credential group(s)\n" "$count"[0m
+2026-06-18T18:54:25.9387758Z [36;1mecho "$groups" | jq -r '.[] | "  - " + .id + " (" + (.packages | length | tostring) + " package(s))"'[0m
+2026-06-18T18:54:25.9394234Z shell: /usr/bin/bash -e {0}
+2026-06-18T18:54:25.9394750Z env:
+2026-06-18T18:54:25.9395937Z   GH_HOST: github.com
+2026-06-18T18:54:25.9396421Z   AW_APM_APPS: 
+2026-06-18T18:54:25.9396867Z   AW_APM_LEGACY_APP_ID: 
+2026-06-18T18:54:25.9397367Z   AW_APM_LEGACY_OWNER: 
+2026-06-18T18:54:25.9397843Z   AW_APM_LEGACY_REPOS: 
+2026-06-18T18:54:25.9398337Z   AW_APM_PACKAGES: ["microsoft/apm#main"]
+2026-06-18T18:54:25.9398891Z ##[endgroup]
+2026-06-18T18:54:26.3079442Z ##[notice]APM matrix: 1 credential group(s)
+2026-06-18T18:54:26.3086974Z   - default (1 package(s))
+2026-06-18T18:54:26.3194465Z Evaluate and set job outputs
+2026-06-18T18:54:26.3202884Z Set output 'matrix'
+2026-06-18T18:54:26.3205300Z Cleaning up orphan processes

@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "docs-impact-classifier return",
+  "type": "object",
+  "required": ["verdict", "confidence", "reasoning"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["no_change", "in_place_resolved", "in_place", "structural"],
+      "description": "no_change: no doc impact (true negative). in_place_resolved: doc impact existed but the PR's own diff already patched every affected page (silent success; skill emits NO advisory). in_place: existing pages need edits. structural: TOC change or new page required."
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "source": {
+      "type": "string",
+      "enum": ["L0", "L1", "L2"],
+      "description": "Which funnel layer produced the verdict."
+    },
+    "scope_pages": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Candidate doc pages affected. Empty for no_change."
+    },
+    "structural_proposal": {
+      "type": ["object", "null"],
+      "properties": {
+        "new_pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "slug": {"type": "string"},
+              "rationale": {"type": "string"}
+            }
+          }
+        },
+        "moved_pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {"type": "string"},
+              "to": {"type": "string"}
+            }
+          }
+        },
+        "toc_changes": {"type": "string"}
+      }
+    },
+    "reasoning": {"type": "string"}
+  }
+}

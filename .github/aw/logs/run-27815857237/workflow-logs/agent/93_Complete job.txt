@@ -1,0 +1,18 @@
+﻿2026-06-19T09:27:17.8355153Z Evaluate and set job outputs
+2026-06-19T09:27:17.8361967Z Set output 'agentic_engine_timeout'
+2026-06-19T09:27:17.8363687Z Set output 'checkout_pr_success'
+2026-06-19T09:27:17.8364741Z Set output 'effective_tokens'
+2026-06-19T09:27:17.8365172Z Set output 'effective_tokens_rate_limit_error'
+2026-06-19T09:27:17.8365597Z Set output 'has_patch'
+2026-06-19T09:27:17.8365960Z Set output 'inference_access_error'
+2026-06-19T09:27:17.8366352Z Set output 'mcp_policy_error'
+2026-06-19T09:27:17.8366730Z Set output 'model'
+2026-06-19T09:27:17.8367093Z Set output 'model_not_supported_error'
+2026-06-19T09:27:17.8367531Z Set output 'setup-parent-span-id'
+2026-06-19T09:27:17.8367923Z Set output 'setup-span-id'
+2026-06-19T09:27:17.8368305Z Set output 'setup-trace-id'
+2026-06-19T09:27:17.8369086Z Cleaning up orphan processes
+2026-06-19T09:27:17.8723565Z Terminate orphan process: pid (4138) (node)
+2026-06-19T09:27:17.8782662Z Terminate orphan process: pid (4532) (tee)
+2026-06-19T09:27:17.8895295Z Terminate orphan process: pid (5762) (awf-cmd-1.sh)
+2026-06-19T09:27:17.8964524Z Terminate orphan process: pid (5783) (node)

@@ -1,0 +1,229 @@
+﻿2026-06-19T08:56:26.3058257Z ##[group]Run microsoft/apm-action@b48dd081eb0050f6d7f32d0e7caa0a59a2d419fd
+2026-06-19T08:56:26.3058677Z with:
+2026-06-19T08:56:26.3058939Z   bundles-file: /tmp/gh-aw/apm-bundle-list.txt
+2026-06-19T08:56:26.3059260Z   working-directory: .
+2026-06-19T08:56:26.3059506Z   apm-version: 0.12.4
+2026-06-19T08:56:26.3059744Z   isolated: false
+2026-06-19T08:56:26.3059972Z   compile: false
+2026-06-19T08:56:26.3060185Z   pack: false
+2026-06-19T08:56:26.3060395Z   archive: true
+2026-06-19T08:56:26.3063598Z   github-token: ***
+2026-06-19T08:56:26.3063836Z   setup-only: false
+2026-06-19T08:56:26.3064045Z env:
+2026-06-19T08:56:26.3064560Z   DEFAULT_BRANCH: main
+2026-06-19T08:56:26.3065006Z   GH_AW_ASSETS_ALLOWED_EXTS: 
+2026-06-19T08:56:26.3065266Z   GH_AW_ASSETS_BRANCH: 
+2026-06-19T08:56:26.3065505Z   GH_AW_ASSETS_MAX_SIZE_KB: 0
+2026-06-19T08:56:26.3065801Z   GH_AW_MCP_LOG_DIR: /tmp/gh-aw/mcp-logs/safeoutputs
+2026-06-19T08:56:26.3066148Z   GH_AW_WORKFLOW_ID_SANITIZED: prreviewpanel
+2026-06-19T08:56:26.3079241Z   GH_AW_MODEL_MULTIPLIERS: {
+  "version": "1",
+  "description": "Effective Tokens (ET) computation data per the gh-aw Effective Tokens Specification v0.2.0. Token class weights are applied first to normalize across token classes, then the per-model multiplier scales the result relative to the reference model. The registry keeps complete model history; entries are removed only by explicit manual deletion.",
+  "reference_model": "claude-sonnet-4.5",
+  "token_class_weights": {
+    "input": 1.0,
+    "cached_input": 0.1,
+    "output": 4.0,
+    "reasoning": 4.0,
+    "cache_write": 1.0
+  },
+  "multipliers": {
+    "claude-haiku-4-5": 0.33,
+    "claude-haiku-4.5": 0.33,
+    "claude-haiku-4-5-20251001": 0.33,
+    "claude-3-5-haiku": 0.1,
+    "claude-3-haiku": 0.1,
+    "claude-sonnet-4": 1.0,
+    "claude-sonnet-4-20250514": 1.0,
+    "claude-sonnet-4-5": 6.0,
+    "claude-sonnet-4.5": 6.0,
+    "claude-sonnet-4-5-20250929": 6.0,
+    "claude-sonnet-4-6": 9.0,
+    "claude-sonnet-4.6": 9.0,
+    "claude-3-5-sonnet": 1.0,
+    "claude-3-7-sonnet": 1.0,
+    "claude-3-sonnet": 1.0,
+    "claude-opus-4": 5.0,
+    "claude-opus-4-20250514": 5.0,
+    "claude-opus-4-1": 5.0,
+    "claude-opus-4-1-20250805": 5.0,
+    "claude-opus-4-5": 15.0,
+    "claude-opus-4-5-20251101": 15.0,
+    "claude-opus-4-6": 27.0,
+    "claude-opus-4-7": 27.0,
+    "claude-opus-4.5": 15.0,
+    "claude-opus-4.6": 27.0,
+    "claude-3-5-opus": 5.0,
+    "claude-3-opus": 5.0,
+    "gpt-4o": 0.33,
+    "gpt-4o-2024-05-13": 0.33,
+    "gpt-4o-2024-08-06": 0.33,
+    "gpt-4o-2024-11-20": 0.33,
+    "gpt-4o-mini": 0.33,
+    "gpt-4o-mini-2024-07-18": 0.33,
+    "gpt-4.1": 1.0,
+    "gpt-4.1-2025-04-14": 1.0,
+    "gpt-41-copilot": 1.0,
+    "gpt-4.1-mini": 1.0,
+    "gpt-4.1-nano": 1.0,
+    "gpt-4-turbo": 1.0,
+    "gpt-4": 1.0,
+    "gpt-4-0613": 1.0,
+    "gpt-4-o-preview": 1.0,
+    "gpt-3.5-turbo": 0.0,
+    "gpt-3.5-turbo-0613": 0.0,
+    "gpt-5": 1.0,
+    "gpt-5-2025-08-07": 1.0,
+    "gpt-5-search-api": 1.0,
+    "gpt-5-search-api-2025-10-14": 1.0,
+    "gpt-5-chat-latest": 1.0,
+    "gpt-5-mini": 0.33,
+    "gpt-5-mini-2025-08-07": 0.33,
+    "gpt-5-nano": 0.05,
+    "gpt-5-nano-2025-08-07": 0.05,
+    "gpt-5-pro": 2.0,
+    "gpt-5-pro-2025-10-06": 2.0,
+    "gpt-5.1": 3.0,
+    "gpt-5.1-2025-11-13": 3.0,
+    "gpt-5.1-chat-latest": 3.0,
+    "gpt-5-codex": 1.0,
+    "gpt-5.1-codex": 3.0,
+    "gpt-5.1-codex-mini": 3.0,
+    "gpt-5.1-codex-max": 3.0,
+    "gpt-5.1-codex-max-customsummarizer": 3.0,
+    "gpt-5.2": 3.0,
+    "gpt-5.2-2025-12-11": 3.0,
+    "gpt-5.2-chat-latest": 3.0,
+    "gpt-5.2-codex": 3.0,
+    "gpt-5.2-pro": 3.0,
+    "gpt-5.2-pro-2025-12-11": 3.0,
+    "gpt-5.3-chat-latest": 3.0,
+    "gpt-5.3-codex": 6.0,
+    "gpt-5.3-codex-api-preview": 6.0,
+    "gpt-5.4": 6.0,
+    "gpt-5.4-2026-03-05": 6.0,
+    "gpt-5.4-mini": 6.0,
+    "gpt-5.4-mini-2026-03-17": 6.0,
+    "gpt-5.4-nano": 6.0,
+    "gpt-5.4-nano-2026-03-17": 6.0,
+    "gpt-5.4-pro": 6.0,
+    "gpt-5.4-pro-2026-03-05": 6.0,
+    "gpt-5.5": 7.5,
+    "gpt-5.5-2026-04-23": 7.5,
+    "gpt-5.5-pro": 2.0,
+    "gpt-5.5-pro-2026-04-23": 2.0,
+    "o1": 3.0,
+    "o1-2024-12-17": 3.0,
+    "o1-mini": 0.5,
+    "o1-pro": 10.0,
+    "o1-pro-2025-03-19": 10.0,
+    "o3": 3.0,
+    "o3-2025-04-16": 3.0,
+    "o3-mini": 0.5,
+    "o3-mini-2025-01-31": 0.5,
+    "o3-pro": 10.0,
+    "o3-pro-2025-06-10": 10.0,
+    "o3-deep-research": 3.0,
+    "o3-deep-research-2025-06-26": 3.0,
+    "o4-mini": 0.5,
+    "o4-mini-2025-04-16": 0.5,
+    "o4-mini-deep-research": 0.5,
+    "o4-mini-deep-research-2025-06-26": 0.5,
+    "gemini-2.5-pro": 1.0,
+    "gemini-2.5-pro-preview-tts": 1.0,
+    "gemini-2.5-flash": 0.2,
+    "gemini-2.5-flash-native-audio-latest": 0.2,
+    "gemini-2.5-flash-native-audio-preview-09-2025": 0.2,
+    "gemini-2.5-flash-native-audio-preview-12-2025": 0.2,
+    "gemini-2.5-flash-preview-tts": 0.2,
+    "gemini-2.5-flash-image": 0.2,
+    "gemini-2.5-flash-lite": 0.1,
+    "gemini-2.0-flash": 0.1,
+    "gemini-2.0-flash-001": 0.1,
+    "gemini-2.0-flash-lite": 0.1,
+    "gemini-2.0-flash-lite-001": 0.1,
+    "gemini-1.5-pro": 1.0,
+    "gemini-1.5-flash": 0.1,
+    "gemini-flash-latest": 0.2,
+    "gemini-flash-lite-latest": 0.1,
+    "gemini-pro-latest": 1.0,
+    "gemini-3-flash-preview": 0.33,
+    "gemini-3-pro-preview": 6.0,
+    "gemini-3-pro-image-preview": 6.0,
+    "gemini-3.1-pro-preview": 6.0,
+    "gemini-3.1-pro-preview-customtools": 6.0,
+    "gemini-3.1-flash-live-preview": 0.1,
+    "gemini-3.1-flash-lite": 0.1,
+    "gemini-3.1-flash-lite-preview": 0.1,
+    "gemini-3.1-flash-image-preview": 0.33,
+    "gemini-3.1-flash-tts-preview": 0.1,
+    "gemini-3.5-flash": 14.0,
+    "gemini-2.5-computer-use-preview": 0.2,
+    "gemini-2.5-computer-use-preview-10-2025": 0.2,
+    "gemini-robotics-er-1.5-preview": 0.2,
+    "gemini-robotics-er-1.6-preview": 0.2,
+    "deep-research-max-preview-04-2026": 1.0,
+    "deep-research-preview-04-2026": 1.0,
+    "deep-research-pro-preview-12-2025": 1.0,
+    "gemma-4-26b-a4b-it": 0.1,
+    "gemma-4-31b-it": 0.2,
+    "grok-code-fast-1": 0.33,
+    "raptor-mini": 0.33
+  }
+}
+2026-06-19T08:56:26.3093026Z   GITHUB_AW_OTEL_TRACE_ID: fb74a35b6e34e823bbe06fd7fcc5d027
+2026-06-19T08:56:26.3093428Z   GITHUB_AW_OTEL_PARENT_SPAN_ID: e687aae9e7225de6
+2026-06-19T08:56:26.3093758Z   GITHUB_AW_OTEL_JOB_START_MS: 1781859382528
+2026-06-19T08:56:26.3094044Z ##[endgroup]
+2026-06-19T08:56:26.3866210Z Working directory: /home/runner/work/apm/apm
+2026-06-19T08:56:26.3879605Z Multi-bundle restore: 1 bundle(s) from /tmp/gh-aw/apm-bundle-list.txt
+2026-06-19T08:56:26.3882055Z Installing APM (version: 0.12.4)...
+2026-06-19T08:56:26.3888632Z Downloading APM 0.12.4 from https://github.com/microsoft/apm/releases/download/v0.12.4/apm-linux-x86_64.tar.gz
+2026-06-19T08:56:26.6267982Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/9d545d91-3eb7-4e70-aa74-1cbf3a237485 -f /home/runner/work/_temp/7636a8e9-3b69-46f1-919e-9429e7ad0a1e
+2026-06-19T08:56:26.8542090Z [command]/opt/hostedtoolcache/apm/0.12.4/x64/apm --version
+2026-06-19T08:56:27.3117978Z Agent Package Manager (APM) CLI version 0.12.4 (6aceef7)
+2026-06-19T08:56:27.3656598Z APM 0.12.4 installed successfully
+2026-06-19T08:56:27.8939731Z [bundle 1 of 1] Unpacking: /tmp/gh-aw/apm-bundles/apm-default/inline-workflow-1.0.0.tar.gz
+2026-06-19T08:56:27.8950110Z [command]/opt/hostedtoolcache/apm/0.12.4/x64/apm unpack /tmp/gh-aw/apm-bundles/apm-default/inline-workflow-1.0.0.tar.gz -o /home/runner/work/apm/apm
+2026-06-19T08:56:28.4732170Z [!] A new version of APM is available: 0.20.0 (current: 0.12.4)
+2026-06-19T08:56:28.4733300Z Run apm update to upgrade
+2026-06-19T08:56:28.4735227Z 
+2026-06-19T08:56:28.4758754Z [!] 'apm unpack' is deprecated and will be removed in v0.14. Use 'apm install 
+2026-06-19T08:56:28.4759495Z <bundle-path>' instead.
+2026-06-19T08:56:28.4760145Z [>] Unpacking /tmp/gh-aw/apm-bundles/apm-default/inline-workflow-1.0.0.tar.gz ->
+2026-06-19T08:56:28.4760799Z /home/runner/work/apm/apm
+2026-06-19T08:56:28.5110871Z [i] Bundle target: copilot (1 dep(s), 29 file(s))
+2026-06-19T08:56:28.5113850Z [i]   microsoft/apm
+2026-06-19T08:56:28.5116160Z     - .github/agents/agentic-workflows.agent.md
+2026-06-19T08:56:28.5118434Z     - .github/agents/apm-ceo.agent.md
+2026-06-19T08:56:28.5120773Z     - .github/agents/apm-primitives-architect.agent.md
+2026-06-19T08:56:28.5122810Z     - .github/agents/auth-expert.agent.md
+2026-06-19T08:56:28.5125044Z     - .github/agents/cdo.agent.md
+2026-06-19T08:56:28.5127293Z     - .github/agents/cli-logging-expert.agent.md
+2026-06-19T08:56:28.5129366Z     - .github/agents/devx-ux-expert.agent.md
+2026-06-19T08:56:28.5131486Z     - .github/agents/doc-analyser.agent.md
+2026-06-19T08:56:28.5133535Z     - .github/agents/doc-writer.agent.md
+2026-06-19T08:56:28.5135784Z     - .github/agents/editorial-owner.agent.md
+2026-06-19T08:56:28.5137936Z     - .github/agents/oss-growth-hacker.agent.md
+2026-06-19T08:56:28.5139976Z     - .github/agents/performance-expert.agent.md
+2026-06-19T08:56:28.5141990Z     - .github/agents/python-architect.agent.md
+2026-06-19T08:56:28.5144047Z     - .github/agents/spec-editor-synthesizer.agent.md
+2026-06-19T08:56:28.5146324Z     - .github/agents/spec-oci-editor.agent.md
+2026-06-19T08:56:28.5148425Z     - .github/agents/spec-pkgmgr-editor.agent.md
+2026-06-19T08:56:28.5150380Z     - .github/agents/spec-swagger-editor.agent.md
+2026-06-19T08:56:28.5152353Z     - .github/agents/spec-tag-architect.agent.md
+2026-06-19T08:56:28.5154557Z     - .github/agents/supply-chain-security-expert.agent.md
+2026-06-19T08:56:28.5156718Z     - .github/agents/test-coverage-expert.agent.md
+2026-06-19T08:56:28.5158773Z     - .github/instructions/changelog.instructions.md
+2026-06-19T08:56:28.5160731Z     - .github/instructions/cicd.instructions.md
+2026-06-19T08:56:28.5162698Z     - .github/instructions/cli.instructions.md
+2026-06-19T08:56:28.5175292Z     - .github/instructions/doc-sync.instructions.md
+2026-06-19T08:56:28.5176043Z     - .github/instructions/encoding.instructions.md
+2026-06-19T08:56:28.5176888Z     - .github/instructions/integrators.instructions.md
+2026-06-19T08:56:28.5177722Z     - .github/instructions/linting.instructions.md
+2026-06-19T08:56:28.5178304Z     - .github/instructions/python.instructions.md
+2026-06-19T08:56:28.5178839Z     - .github/instructions/tests.instructions.md
+2026-06-19T08:56:28.5179285Z [*] Unpacked 29 file(s) (verified)
+2026-06-19T08:56:28.5782555Z [bundle 1 of 1] OK
+2026-06-19T08:56:28.5783154Z Restored 1 bundle(s) successfully into /home/runner/work/apm/apm
+2026-06-19T08:56:28.5784534Z APM action completed successfully (multi-bundle restore mode)

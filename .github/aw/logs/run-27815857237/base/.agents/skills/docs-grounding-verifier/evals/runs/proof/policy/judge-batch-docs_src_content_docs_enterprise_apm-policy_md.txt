@@ -1,0 +1,1579 @@
+JUDGE BATCH FOR PAGE: docs/src/content/docs/enterprise/apm-policy.md
+Apply assets/judge-prompt.md to each tuple below.
+Return one JSON verdict per claim_id, in a JSON array.
+---
+
+TUPLE claim_id=c1:
+{
+  "claim_id": "c1",
+  "claim_text": "The apm-policy.yml file is located at <org>/.github/apm-policy.yml and is auto-discovered by apm install and apm audit --ci --policy org.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 1,
+      "snippet": "\"\"\"Auto-discover and fetch org-level apm-policy.yml files.",
+      "matched_keyword": "apm-policy.yml"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 5,
+      "snippet": "2. Fetch <org>/.github/apm-policy.yml via GitHub API (Contents API)",
+      "matched_keyword": "apm-policy.yml"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 621,
+      "snippet": "    3. Fetch <org>/.github/apm-policy.yml",
+      "matched_keyword": "apm-policy.yml"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 819,
+      "snippet": "    \"\"\"Fetch apm-policy.yml from a GitHub repo via Contents API.",
+      "matched_keyword": "apm-policy.yml"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 840,
+      "snippet": "    content, error = _fetch_github_contents(repo_ref, \"apm-policy.yml\")",
+      "matched_keyword": "apm-policy.yml"
+    },
+    {
+      "file": "src/apm_cli/policy/models.py",
+      "line": 120,
+      "snippet": "                \"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/\"",
+      "matched_keyword": ".github"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 5,
+      "snippet": "2. Fetch <org>/.github/apm-policy.yml via GitHub API (Contents API)",
+      "matched_keyword": ".github"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 187,
+      "snippet": "    source: str = \"\"  # \"org:contoso/.github\", \"file:/path\", \"url:https://...\"",
+      "matched_keyword": ".github"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 374,
+      "snippet": "    ``extends: \"evil.example.com/org/.github\"`` could otherwise route",
+      "matched_keyword": ".github"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 617,
+      "snippet": "    \"\"\"Auto-discover policy from org's .github repo.",
+      "matched_keyword": ".github"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 533,
+      "snippet": "    3. If policy_override is \"org\" -> auto-discover from project's git remote",
+      "matched_keyword": "auto-discover"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 536,
+      "snippet": "    5. If policy_override is None -> auto-discover from project's git remote",
+      "matched_keyword": "auto-discover"
+    },
+    {
+      "file": "src/apm_cli/policy/_help_text.py",
+      "line": 15,
+      "snippet": "    \"Accepts: 'org' (auto-discover from your project's git remote), \"",
+      "matched_keyword": "auto-discover"
+    },
+    {
+      "file": "src/apm_cli/core/command_logger.py",
+      "line": 593,
+      "snippet": "                \"Could not determine org from git remote; policy auto-discovery skipped\",",
+      "matched_keyword": "auto-discover"
+    },
+    {
+      "file": "src/apm_cli/integration/mcp_integrator_install.py",
+      "line": 465,
+      "snippet": "    # Applied after both explicit --runtime and auto-discovery paths.",
+      "matched_keyword": "auto-discover"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 37,
+      "snippet": "# Overflow is collapsed into a single tail line pointing to ``apm audit``.",
+      "matched_keyword": "apm audit"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 185,
+      "snippet": "                    \"Run `apm audit` for full report.\"",
+      "matched_keyword": "apm audit"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 194,
+      "snippet": "                    f\"... and {overflow} more policy warnings. Run `apm audit` for full report.\"",
+      "matched_keyword": "apm audit"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 540,
+      "snippet": "    is the single source of truth shared by ``apm audit --policy`` and",
+      "matched_keyword": "apm audit"
+    },
+    {
+      "file": "src/apm_cli/policy/project_config.py",
+      "line": 90,
+      "snippet": "    ignored (a stricter validator could surface this in ``apm audit``).",
+      "matched_keyword": "apm audit"
+    }
+  ],
+  "evidence_count": 20
+}
+
+TUPLE claim_id=c2:
+{
+  "claim_id": "c2",
+  "claim_text": "Policy enforcement has two modes: install time (preflight gate) and CI time (audit gate).",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/ci_checks.py",
+      "line": 290,
+      "snippet": "        in ``deployed_file_hashes`` at install time.",
+      "matched_keyword": "install time"
+    },
+    {
+      "file": "src/apm_cli/install/drift.py",
+      "line": 233,
+      "snippet": "    # unverifiable -- there is no marker we can write at install time and",
+      "matched_keyword": "install time"
+    },
+    {
+      "file": "src/apm_cli/integration/targets.py",
+      "line": 440,
+      "snippet": "            # diagnostics.warn() at install time -- see",
+      "matched_keyword": "install time"
+    },
+    {
+      "file": "src/apm_cli/integration/command_integrator.py",
+      "line": 261,
+      "snippet": "        # via diagnostics so users see the lossy transform at install time.",
+      "matched_keyword": "install time"
+    },
+    {
+      "file": "src/apm_cli/integration/copilot_app_project.py",
+      "line": 82,
+      "snippet": "    Captured once at install time and shared between the project-",
+      "matched_keyword": "install time"
+    },
+    {
+      "file": "src/apm_cli/policy/ci_checks.py",
+      "line": 8,
+      "snippet": "Exit-code contract (consumed by the ``apm audit --ci`` command):",
+      "matched_keyword": "apm audit --ci"
+    },
+    {
+      "file": "src/apm_cli/policy/policy_checks.py",
+      "line": 913,
+      "snippet": "    Used by both ``apm audit --ci`` (after resolving from disk) and the",
+      "matched_keyword": "apm audit --ci"
+    },
+    {
+      "file": "src/apm_cli/policy/policy_checks.py",
+      "line": 1050,
+      "snippet": "    # wrapper that ``apm audit --ci`` calls.",
+      "matched_keyword": "apm audit --ci"
+    },
+    {
+      "file": "src/apm_cli/core/command_logger.py",
+      "line": 718,
+      "snippet": "            \"This does NOT bypass apm audit --ci. \"",
+      "matched_keyword": "apm audit --ci"
+    },
+    {
+      "file": "src/apm_cli/commands/audit.py",
+      "line": 425,
+      "snippet": "    \"\"\"Handle ``apm audit --ci`` -- lockfile consistency gate.",
+      "matched_keyword": "apm audit --ci"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 4,
+      "snippet": "- ``install --mcp`` branch (W2-mcp-preflight)",
+      "matched_keyword": "preflight"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 6,
+      "snippet": "- ``install --dry-run`` preflight (W2-dry-run) -- same helper, read-only mode",
+      "matched_keyword": "preflight"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 9,
+      "snippet": "delegate to :func:`run_policy_preflight` for discovery + outcome logic",
+      "matched_keyword": "preflight"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 66,
+      "snippet": "def run_policy_preflight(",
+      "matched_keyword": "preflight"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 126,
+      "snippet": "    # so this preflight and the install-pipeline gate stay aligned.",
+      "matched_keyword": "preflight"
+    }
+  ],
+  "evidence_count": 15
+}
+
+TUPLE claim_id=c3:
+{
+  "claim_id": "c3",
+  "claim_text": "The enforcement field has three values: block, warn, and off.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 1,
+      "snippet": "\"\"\"Pre-install policy enforcement for non-pipeline command sites.",
+      "matched_keyword": "enforcement"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 11,
+      "snippet": "(writing ``ctx.policy_fetch``, ``ctx.policy_enforcement_active``).",
+      "matched_keyword": "enforcement"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 103,
+      "snippet": "    (PolicyFetchResult | None, enforcement_active: bool)",
+      "matched_keyword": "enforcement"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 104,
+      "snippet": "        ``enforcement_active`` is ``True`` when a policy was found and",
+      "matched_keyword": "enforcement"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 105,
+      "snippet": "        its enforcement level is ``\"warn\"`` or ``\"block\"``.",
+      "matched_keyword": "enforcement"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 97,
+      "snippet": "        ``\"[!] Would be blocked by policy: <dep> -- <reason>\"``",
+      "matched_keyword": "block"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 105,
+      "snippet": "        its enforcement level is ``\"warn\"`` or ``\"block\"``.",
+      "matched_keyword": "block"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 110,
+      "snippet": "        When ``enforcement == \"block\"`` and at least one check fails",
+      "matched_keyword": "block"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 135,
+      "snippet": "        raise_blocking_errors=not dry_run,",
+      "matched_keyword": "block"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 146,
+      "snippet": "    # -- Enforcement (warn or block) -----------------------------------",
+      "matched_keyword": "block"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 92,
+      "snippet": "        ``warning``).",
+      "matched_keyword": "warn"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 98,
+      "snippet": "        and warn-severity as ``\"[!] Policy warning: <dep> -- <reason>\"``.",
+      "matched_keyword": "warn"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 105,
+      "snippet": "        its enforcement level is ``\"warn\"`` or ``\"block\"``.",
+      "matched_keyword": "warn"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 146,
+      "snippet": "    # -- Enforcement (warn or block) -----------------------------------",
+      "matched_keyword": "warn"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 165,
+      "snippet": "            warn_lines: list[tuple[str, str]] = []",
+      "matched_keyword": "warn"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 143,
+      "snippet": "    if enforcement == \"off\":",
+      "matched_keyword": "off"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 198,
+      "snippet": "    # raw_bytes_hash is the digest of the leaf policy bytes off the wire,",
+      "matched_keyword": "off"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 776,
+      "snippet": "    # Hash pin verification (#827) -- BEFORE parse, on raw bytes off wire.",
+      "matched_keyword": "off"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 857,
+      "snippet": "    # Hash pin verification (#827) -- BEFORE parse, on raw bytes off wire.",
+      "matched_keyword": "off"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 1000,
+      "snippet": "    raw_bytes_hash: str = \"\"  # \"<algo>:<hex>\" of leaf bytes off wire (#827)",
+      "matched_keyword": "off"
+    }
+  ],
+  "evidence_count": 20
+}
+
+TUPLE claim_id=c4:
+{
+  "claim_id": "c4",
+  "claim_text": "MCP transport policy accepts http and stdio but blocks sse and streamable-http by default.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 1061,
+      "snippet": "                \"allow\": _opt_list(policy.mcp.transport.allow),",
+      "matched_keyword": "mcp.transport"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 1112,
+      "snippet": "        and policy.mcp.transport.allow is None",
+      "matched_keyword": "mcp.transport"
+    },
+    {
+      "file": "src/apm_cli/policy/policy_checks.py",
+      "line": 380,
+      "snippet": "        if mcp.transport and mcp.transport not in allowed_transports:",
+      "matched_keyword": "mcp.transport"
+    },
+    {
+      "file": "src/apm_cli/policy/policy_checks.py",
+      "line": 382,
+      "snippet": "                f\"{mcp.name}: transport '{mcp.transport}' not in allowed {allowed_transports}\"",
+      "matched_keyword": "mcp.transport"
+    },
+    {
+      "file": "src/apm_cli/commands/policy.py",
+      "line": 94,
+      "snippet": "        \"mcp_transports_allowed\": _allow_count(policy.mcp.transport.allow),",
+      "matched_keyword": "mcp.transport"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 161,
+      "snippet": "    if not audit_result.passed:",
+      "matched_keyword": "sse"
+    },
+    {
+      "file": "src/apm_cli/policy/models.py",
+      "line": 9,
+      "snippet": "from dataclasses import dataclass, field",
+      "matched_keyword": "sse"
+    },
+    {
+      "file": "src/apm_cli/policy/models.py",
+      "line": 41,
+      "snippet": "# ── Result data classes ───────────────────────────────────────────",
+      "matched_keyword": "sse"
+    },
+    {
+      "file": "src/apm_cli/policy/models.py",
+      "line": 49,
+      "snippet": "    passed: bool",
+      "matched_keyword": "sse"
+    },
+    {
+      "file": "src/apm_cli/policy/models.py",
+      "line": 61,
+      "snippet": "    def passed(self) -> bool:",
+      "matched_keyword": "sse"
+    },
+    {
+      "file": "src/apm_cli/policy/schema.py",
+      "line": 61,
+      "snippet": "    allow: tuple[str, ...] | None = None  # stdio, sse, http, streamable-http",
+      "matched_keyword": "streamable-http"
+    },
+    {
+      "file": "src/apm_cli/install/mcp/conflicts.py",
+      "line": 110,
+      "snippet": "    if transport in (\"http\", \"sse\", \"streamable-http\") and command_argv:",
+      "matched_keyword": "streamable-http"
+    },
+    {
+      "file": "src/apm_cli/integration/mcp_integrator.py",
+      "line": 200,
+      "snippet": "            dep.transport not in (\"http\", \"sse\", \"streamable-http\") and dep.command",
+      "matched_keyword": "streamable-http"
+    },
+    {
+      "file": "src/apm_cli/integration/mcp_integrator.py",
+      "line": 208,
+      "snippet": "        if dep.transport in (\"http\", \"sse\", \"streamable-http\"):",
+      "matched_keyword": "streamable-http"
+    },
+    {
+      "file": "src/apm_cli/integration/mcp_integrator.py",
+      "line": 262,
+      "snippet": "            if dep.transport in (\"http\", \"sse\", \"streamable-http\"):",
+      "matched_keyword": "streamable-http"
+    },
+    {
+      "file": "src/apm_cli/policy/schema.py",
+      "line": 61,
+      "snippet": "    allow: tuple[str, ...] | None = None  # stdio, sse, http, streamable-http",
+      "matched_keyword": "stdio"
+    },
+    {
+      "file": "src/apm_cli/install/mcp/command.py",
+      "line": 82,
+      "snippet": "    # F5 + F7 warnings -- do not block.  Source the stdio command from the",
+      "matched_keyword": "stdio"
+    },
+    {
+      "file": "src/apm_cli/install/mcp/command.py",
+      "line": 87,
+      "snippet": "    stdio_command = command_argv[0] if command_argv else None",
+      "matched_keyword": "stdio"
+    },
+    {
+      "file": "src/apm_cli/install/mcp/command.py",
+      "line": 88,
+      "snippet": "    warn_shell_metachars(env, logger, command=stdio_command)",
+      "matched_keyword": "stdio"
+    },
+    {
+      "file": "src/apm_cli/install/mcp/warnings.py",
+      "line": 11,
+      "snippet": "- **F7 (Shell metachars)**: warn when env values OR the stdio ``command``",
+      "matched_keyword": "stdio"
+    }
+  ],
+  "evidence_count": 20
+}
+
+TUPLE claim_id=c5:
+{
+  "claim_id": "c5",
+  "claim_text": "The apm install --no-policy flag and APM_POLICY_DISABLE=1 environment variable skip policy enforcement at install time.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 116,
+      "snippet": "    if no_policy or os.environ.get(\"APM_POLICY_DISABLE\") == \"1\":",
+      "matched_keyword": "APM_POLICY_DISABLE"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 117,
+      "snippet": "        reason = \"--no-policy\" if no_policy else \"APM_POLICY_DISABLE=1\"",
+      "matched_keyword": "APM_POLICY_DISABLE"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 178,
+      "snippet": "    * ``disabled``            -- ``--no-policy`` / ``APM_POLICY_DISABLE=1``",
+      "matched_keyword": "APM_POLICY_DISABLE"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 235,
+      "snippet": "    The escape hatch (``--no-policy`` flag, ``APM_POLICY_DISABLE=1``",
+      "matched_keyword": "APM_POLICY_DISABLE"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 252,
+      "snippet": "    if os.environ.get(\"APM_POLICY_DISABLE\") == \"1\":",
+      "matched_keyword": "APM_POLICY_DISABLE"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 497,
+      "snippet": "                # The reason string embeds the full URL already, so skip",
+      "matched_keyword": "skip"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 930,
+      "snippet": "    help=\"Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)\",",
+      "matched_keyword": "skip"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1006,
+      "snippet": "        \"auto-detect); writes only for active targets, skips others with [i].\"",
+      "matched_keyword": "skip"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1202,
+      "snippet": "        # as an APM-pack bundle, we skip the dependency-resolution pipeline",
+      "matched_keyword": "skip"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 1528,
+      "snippet": "            # the scope explicit so a CI pipeline that skips",
+      "matched_keyword": "skip"
+    }
+  ],
+  "evidence_count": 10
+}
+
+TUPLE claim_id=c6:
+{
+  "claim_id": "c6",
+  "claim_text": "Child repo policies can only tighten parent org policies, never relax them.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 4,
+      "snippet": "Each level can tighten but never relax the parent.",
+      "matched_keyword": "tighten"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 286,
+      "snippet": "    \"\"\"Intersect two allow-lists (tighten-only).",
+      "matched_keyword": "tighten"
+    },
+    {
+      "file": "src/apm_cli/install/phases/local_content.py",
+      "line": 108,
+      "snippet": "            keep the security model in mind and so a future tightening",
+      "matched_keyword": "tighten"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 4,
+      "snippet": "Each level can tighten but never relax the parent.",
+      "matched_keyword": "tighten"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 286,
+      "snippet": "    \"\"\"Intersect two allow-lists (tighten-only).",
+      "matched_keyword": "tighten"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 6,
+      "snippet": "3. Resolve inheritance chain via resolve_policy_chain",
+      "matched_keyword": "inherit"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 214,
+      "snippet": "    \"\"\"Discover policy with full inheritance chain resolution.",
+      "matched_keyword": "inherit"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 245,
+      "snippet": "        With merged effective policy and real chain_refs when inheritance",
+      "matched_keyword": "inherit"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 377,
+      "snippet": "    from . import inheritance as _inheritance_mod",
+      "matched_keyword": "inherit"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 384,
+      "snippet": "        raise _inheritance_mod.PolicyInheritanceError(",
+      "matched_keyword": "inherit"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 230,
+      "snippet": "        cleared. The pin applies only to the **leaf** -- parent policies",
+      "matched_keyword": "parent"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 404,
+      "snippet": "    Walks the ``extends:`` chain depth-first, fetching each parent via the",
+      "matched_keyword": "parent"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 410,
+      "snippet": "    Partial-chain policy: if any parent fetch fails, emit a warning via",
+      "matched_keyword": "parent"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 429,
+      "snippet": "    # Ordered ancestors collected as we walk parents.  Built leaf-first",
+      "matched_keyword": "parent"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 464,
+      "snippet": "        parent_result = discover_policy(",
+      "matched_keyword": "parent"
+    },
+    {
+      "file": "src/apm_cli/policy/schema.py",
+      "line": 115,
+      "snippet": "    :func:`~apm_cli.policy.inheritance.merge_policies` the child is transparent",
+      "matched_keyword": "child"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 50,
+      "snippet": "def merge_policies(parent: ApmPolicy, child: ApmPolicy) -> ApmPolicy:",
+      "matched_keyword": "child"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 51,
+      "snippet": "    \"\"\"Merge a child policy with its parent.",
+      "matched_keyword": "child"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 53,
+      "snippet": "    The child can TIGHTEN but never RELAX the parent's constraints.",
+      "matched_keyword": "child"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 56,
+      "snippet": "        name=child.name or parent.name,",
+      "matched_keyword": "child"
+    }
+  ],
+  "evidence_count": 20
+}
+
+TUPLE claim_id=c7:
+{
+  "claim_id": "c7",
+  "claim_text": "Allow list merge rule: child sees only entries present in both parent and child (intersection).",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 46,
+      "snippet": "    ``_check_dependency_allowlist`` -- ``violations.append(f\"{ref}: {reason}\")``).",
+      "matched_keyword": "allow"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 1,
+      "snippet": "\"\"\"Pattern matching for policy allow/deny lists.\"\"\"",
+      "matched_keyword": "allow"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 44,
+      "snippet": "def _check_allow_deny(",
+      "matched_keyword": "allow"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 46,
+      "snippet": "    allow: tuple[str, ...] | None,",
+      "matched_keyword": "allow"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 49,
+      "snippet": "    \"\"\"Shared allow/deny logic.",
+      "matched_keyword": "allow"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 141,
+      "snippet": "        allow=_intersect_allow(parent.allow, child.allow),",
+      "matched_keyword": "intersect"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 159,
+      "snippet": "        allow=_intersect_allow(parent.allow, child.allow),",
+      "matched_keyword": "intersect"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 161,
+      "snippet": "            allow=_intersect_allow(parent.transport.allow, child.transport.allow),",
+      "matched_keyword": "intersect"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 171,
+      "snippet": "            allow=_intersect_allow(parent.target.allow, child.target.allow),",
+      "matched_keyword": "intersect"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 184,
+      "snippet": "    merged_ct_allow = _intersect_allow(parent_ct_allow, child_ct_allow)",
+      "matched_keyword": "intersect"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 121,
+      "snippet": "    # -- Discovery (chain-aware: resolves extends: + merges) -----------",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 7,
+      "snippet": "4. Cache the **merged effective policy** with chain metadata",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 219,
+      "snippet": "    merged effective policy with real ``chain_refs``.",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 245,
+      "snippet": "        With merged effective policy and real chain_refs when inheritance",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 402,
+      "snippet": "    \"\"\"Resolve inheritance chain and update cache with merged policy + chain_refs.",
+      "matched_keyword": "merge"
+    }
+  ],
+  "evidence_count": 15
+}
+
+TUPLE claim_id=c8:
+{
+  "claim_id": "c8",
+  "claim_text": "Deny list merge rule: child adds to parent's deny list (union).",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 1,
+      "snippet": "\"\"\"Pattern matching for policy allow/deny lists.\"\"\"",
+      "matched_keyword": "deny"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 44,
+      "snippet": "def _check_allow_deny(",
+      "matched_keyword": "deny"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 47,
+      "snippet": "    deny: tuple[str, ...],",
+      "matched_keyword": "deny"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 49,
+      "snippet": "    \"\"\"Shared allow/deny logic.",
+      "matched_keyword": "deny"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 51,
+      "snippet": "    1. If ref matches any deny pattern -> denied.",
+      "matched_keyword": "deny"
+    },
+    {
+      "file": "src/apm_cli/policy/schema.py",
+      "line": 13,
+      "snippet": "  * ``(...)`` -- union-merged with parent during inheritance.",
+      "matched_keyword": "union"
+    },
+    {
+      "file": "src/apm_cli/policy/schema.py",
+      "line": 119,
+      "snippet": "    ``directories`` key), the merge applies escalation / union rules.",
+      "matched_keyword": "union"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 158,
+      "snippet": "        deny=_union(parent.deny, child.deny),",
+      "matched_keyword": "union"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 194,
+      "snippet": "        required_fields=_union(parent.required_fields, child.required_fields),",
+      "matched_keyword": "union"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 205,
+      "snippet": "def _coerce_unmanaged_directories_for_union(value: tuple[str, ...] | None) -> tuple[str, ...]:",
+      "matched_keyword": "union"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 121,
+      "snippet": "    # -- Discovery (chain-aware: resolves extends: + merges) -----------",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 7,
+      "snippet": "4. Cache the **merged effective policy** with chain metadata",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 219,
+      "snippet": "    merged effective policy with real ``chain_refs``.",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 245,
+      "snippet": "        With merged effective policy and real chain_refs when inheritance",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 402,
+      "snippet": "    \"\"\"Resolve inheritance chain and update cache with merged policy + chain_refs.",
+      "matched_keyword": "merge"
+    }
+  ],
+  "evidence_count": 15
+}
+
+TUPLE claim_id=c9:
+{
+  "claim_id": "c9",
+  "claim_text": "Inheritance chains support up to 5 levels: enterprise hub -> org policy -> team policy -> repo override.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 3,
+      "snippet": "Supports three-level chains: enterprise hub -> org -> repo.",
+      "matched_keyword": "enterprise hub"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 3,
+      "snippet": "Supports three-level chains: enterprise hub -> org -> repo.",
+      "matched_keyword": "enterprise hub"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 213,
+      "snippet": "                f\"Install blocked by org policy: {len(audit_result.failed_checks)} check(s) failed\",",
+      "matched_keyword": "org policy"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 373,
+      "snippet": "    See Security Finding F1: a malicious org policy author setting",
+      "matched_keyword": "org policy"
+    },
+    {
+      "file": "src/apm_cli/policy/project_config.py",
+      "line": 14,
+      "snippet": "fails closed if the org policy cannot be fetched / parsed (i.e. the",
+      "matched_keyword": "org policy"
+    },
+    {
+      "file": "src/apm_cli/policy/outcome_routing.py",
+      "line": 146,
+      "snippet": "                \"Install blocked: no enforceable org policy was resolved \"",
+      "matched_keyword": "org policy"
+    },
+    {
+      "file": "src/apm_cli/policy/outcome_routing.py",
+      "line": 175,
+      "snippet": "                \"Install blocked: org policy refresh failed and the cached \"",
+      "matched_keyword": "org policy"
+    }
+  ],
+  "evidence_count": 7
+}
+
+TUPLE claim_id=c10:
+{
+  "claim_id": "c10",
+  "claim_text": "Policy violations at install time halt the operation with non-zero exit code before files are written.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 46,
+      "snippet": "    ``_check_dependency_allowlist`` -- ``violations.append(f\"{ref}: {reason}\")``).",
+      "matched_keyword": "violation"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 91,
+      "snippet": "        ``policy_disabled``, ``policy_resolved``, ``policy_violation``,",
+      "matched_keyword": "violation"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 96,
+      "snippet": "        Block-severity violations render as",
+      "matched_keyword": "violation"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 197,
+      "snippet": "            # -- Real install: push each violation to DiagnosticCollector",
+      "matched_keyword": "violation"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 204,
+      "snippet": "                    logger.policy_violation(",
+      "matched_keyword": "violation"
+    },
+    {
+      "file": "src/apm_cli/install/pipeline.py",
+      "line": 493,
+      "snippet": "        # PolicyViolationError halts the pipeline cleanly.",
+      "matched_keyword": "halt"
+    },
+    {
+      "file": "src/apm_cli/install/pipeline.py",
+      "line": 521,
+      "snippet": "        # PolicyViolationError halts the pipeline cleanly.",
+      "matched_keyword": "halt"
+    },
+    {
+      "file": "src/apm_cli/install/errors.py",
+      "line": 10,
+      "snippet": "* :class:`PolicyViolationError` -- org-policy enforcement halted install.",
+      "matched_keyword": "halt"
+    },
+    {
+      "file": "src/apm_cli/install/errors.py",
+      "line": 89,
+      "snippet": "    \"\"\"Raised when org-policy enforcement halts an install.",
+      "matched_keyword": "halt"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 112,
+      "snippet": "        The caller should abort the install and exit non-zero.",
+      "matched_keyword": "exit"
+    },
+    {
+      "file": "src/apm_cli/policy/ci_checks.py",
+      "line": 9,
+      "snippet": "  * All checks pass -> exit 0",
+      "matched_keyword": "exit"
+    },
+    {
+      "file": "src/apm_cli/policy/ci_checks.py",
+      "line": 10,
+      "snippet": "  * Any check fails  -> exit 1",
+      "matched_keyword": "exit"
+    },
+    {
+      "file": "src/apm_cli/policy/policy_checks.py",
+      "line": 1118,
+      "snippet": "    # Early exit if dep checks already failed in fail-fast mode",
+      "matched_keyword": "exit"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 635,
+      "snippet": "        sys.exit(1)",
+      "matched_keyword": "exit"
+    }
+  ],
+  "evidence_count": 14
+}
+
+TUPLE claim_id=c11:
+{
+  "claim_id": "c11",
+  "claim_text": "apm audit --ci --policy org produces SARIF output that GitHub Code Scanning renders inline on PR diffs.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/models.py",
+      "line": 12,
+      "snippet": "# Check name -> most relevant artifact for SARIF locations.",
+      "matched_keyword": "SARIF"
+    },
+    {
+      "file": "src/apm_cli/policy/models.py",
+      "line": 89,
+      "snippet": "        \"\"\"Serialize to SARIF v2.1.0 format for GitHub Code Scanning.\"\"\"",
+      "matched_keyword": "SARIF"
+    },
+    {
+      "file": "src/apm_cli/install/drift.py",
+      "line": 155,
+      "snippet": "    machine-parseable JSON/SARIF on stdout is never polluted.",
+      "matched_keyword": "SARIF"
+    },
+    {
+      "file": "src/apm_cli/install/drift.py",
+      "line": 170,
+      "snippet": "        Stays on stderr so JSON/SARIF stdout payloads remain",
+      "matched_keyword": "SARIF"
+    },
+    {
+      "file": "src/apm_cli/install/drift.py",
+      "line": 703,
+      "snippet": "    \"\"\"SARIF ``results`` array; rule IDs use ``apm/drift/<kind>``.\"\"\"",
+      "matched_keyword": "SARIF"
+    },
+    {
+      "file": "src/apm_cli/policy/models.py",
+      "line": 89,
+      "snippet": "        \"\"\"Serialize to SARIF v2.1.0 format for GitHub Code Scanning.\"\"\"",
+      "matched_keyword": "Code Scanning"
+    },
+    {
+      "file": "src/apm_cli/commands/audit.py",
+      "line": 839,
+      "snippet": "    help=\"Output format: text (default), json, sarif (GitHub Code Scanning), markdown (step summaries).\",",
+      "matched_keyword": "Code Scanning"
+    },
+    {
+      "file": "src/apm_cli/commands/audit.py",
+      "line": 942,
+      "snippet": "        apm audit --ci -f sarif        # SARIF for GitHub Code Scanning",
+      "matched_keyword": "Code Scanning"
+    },
+    {
+      "file": "src/apm_cli/policy/models.py",
+      "line": 89,
+      "snippet": "        \"\"\"Serialize to SARIF v2.1.0 format for GitHub Code Scanning.\"\"\"",
+      "matched_keyword": "Code Scanning"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 37,
+      "snippet": "# Overflow is collapsed into a single tail line pointing to ``apm audit``.",
+      "matched_keyword": "apm audit"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 185,
+      "snippet": "                    \"Run `apm audit` for full report.\"",
+      "matched_keyword": "apm audit"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 194,
+      "snippet": "                    f\"... and {overflow} more policy warnings. Run `apm audit` for full report.\"",
+      "matched_keyword": "apm audit"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 540,
+      "snippet": "    is the single source of truth shared by ``apm audit --policy`` and",
+      "matched_keyword": "apm audit"
+    },
+    {
+      "file": "src/apm_cli/policy/project_config.py",
+      "line": 90,
+      "snippet": "    ignored (a stricter validator could surface this in ``apm audit``).",
+      "matched_keyword": "apm audit"
+    }
+  ],
+  "evidence_count": 14
+}
+
+TUPLE claim_id=c12:
+{
+  "claim_id": "c12",
+  "claim_text": "Policy file can specify allow and deny lists for dependency sources using org globs and package patterns.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 46,
+      "snippet": "    ``_check_dependency_allowlist`` -- ``violations.append(f\"{ref}: {reason}\")``).",
+      "matched_keyword": "allow"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 1,
+      "snippet": "\"\"\"Pattern matching for policy allow/deny lists.\"\"\"",
+      "matched_keyword": "allow"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 44,
+      "snippet": "def _check_allow_deny(",
+      "matched_keyword": "allow"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 46,
+      "snippet": "    allow: tuple[str, ...] | None,",
+      "matched_keyword": "allow"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 49,
+      "snippet": "    \"\"\"Shared allow/deny logic.",
+      "matched_keyword": "allow"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 1,
+      "snippet": "\"\"\"Pattern matching for policy allow/deny lists.\"\"\"",
+      "matched_keyword": "deny"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 44,
+      "snippet": "def _check_allow_deny(",
+      "matched_keyword": "deny"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 47,
+      "snippet": "    deny: tuple[str, ...],",
+      "matched_keyword": "deny"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 49,
+      "snippet": "    \"\"\"Shared allow/deny logic.",
+      "matched_keyword": "deny"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 51,
+      "snippet": "    1. If ref matches any deny pattern -> denied.",
+      "matched_keyword": "deny"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 13,
+      "snippet": "def _compile_pattern(pattern: str) -> re.Pattern:",
+      "matched_keyword": "pattern"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 14,
+      "snippet": "    \"\"\"Compile a policy glob pattern into a regex.",
+      "matched_keyword": "pattern"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 20,
+      "snippet": "    parts = re.split(r\"(\\*\\*|\\*)\", pattern)",
+      "matched_keyword": "pattern"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 32,
+      "snippet": "def matches_pattern(canonical_ref: str, pattern: str) -> bool:",
+      "matched_keyword": "pattern"
+    },
+    {
+      "file": "src/apm_cli/policy/matcher.py",
+      "line": 33,
+      "snippet": "    \"\"\"Check if a canonical dependency ref matches a policy pattern.\"\"\"",
+      "matched_keyword": "pattern"
+    }
+  ],
+  "evidence_count": 15
+}
+
+TUPLE claim_id=c13:
+{
+  "claim_id": "c13",
+  "claim_text": "The max_depth field merge rule is min(parent, child) - whichever is smaller wins.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 1055,
+      "snippet": "            \"max_depth\": policy.dependencies.max_depth,",
+      "matched_keyword": "max_depth"
+    },
+    {
+      "file": "src/apm_cli/policy/parser.py",
+      "line": 116,
+      "snippet": "        md = deps.get(\"max_depth\")",
+      "matched_keyword": "max_depth"
+    },
+    {
+      "file": "src/apm_cli/policy/parser.py",
+      "line": 119,
+      "snippet": "                errors.append(f\"dependencies.max_depth must be a positive integer, got '{md}'\")",
+      "matched_keyword": "max_depth"
+    },
+    {
+      "file": "src/apm_cli/policy/parser.py",
+      "line": 121,
+      "snippet": "                errors.append(f\"dependencies.max_depth must be a positive integer, got {md}\")",
+      "matched_keyword": "max_depth"
+    },
+    {
+      "file": "src/apm_cli/policy/parser.py",
+      "line": 191,
+      "snippet": "        max_depth=deps_data.get(\"max_depth\", DependencyPolicy.max_depth),",
+      "matched_keyword": "max_depth"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 170,
+      "snippet": "    The ``outcome`` field discriminates the 9 discovery outcomes defined in",
+      "matched_keyword": "min"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 180,
+      "snippet": "    * ``no_git_remote``       -- cannot determine org from git remote",
+      "matched_keyword": "min"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 299,
+      "snippet": "    Returns the host in lowercase, or None if it cannot be determined.",
+      "matched_keyword": "min"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 626,
+      "snippet": "            error=\"Could not determine org from git remote\",",
+      "matched_keyword": "min"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 1034,
+      "snippet": "    \"\"\"Generate a deterministic cache filename from repo ref.\"\"\"",
+      "matched_keyword": "min"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 121,
+      "snippet": "    # -- Discovery (chain-aware: resolves extends: + merges) -----------",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 7,
+      "snippet": "4. Cache the **merged effective policy** with chain metadata",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 219,
+      "snippet": "    merged effective policy with real ``chain_refs``.",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 245,
+      "snippet": "        With merged effective policy and real chain_refs when inheritance",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 402,
+      "snippet": "    \"\"\"Resolve inheritance chain and update cache with merged policy + chain_refs.",
+      "matched_keyword": "merge"
+    }
+  ],
+  "evidence_count": 15
+}
+
+TUPLE claim_id=c14:
+{
+  "claim_id": "c14",
+  "claim_text": "The trust_transitive field merge rule is parent AND child - both must allow it.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 1064,
+      "snippet": "            \"trust_transitive\": policy.mcp.trust_transitive,",
+      "matched_keyword": "trust_transitive"
+    },
+    {
+      "file": "src/apm_cli/policy/parser.py",
+      "line": 206,
+      "snippet": "        trust_transitive=mcp_data.get(\"trust_transitive\", McpPolicy.trust_transitive),",
+      "matched_keyword": "trust_transitive"
+    },
+    {
+      "file": "src/apm_cli/policy/schema.py",
+      "line": 72,
+      "snippet": "    trust_transitive: bool = False",
+      "matched_keyword": "trust_transitive"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 164,
+      "snippet": "        trust_transitive=parent.trust_transitive and child.trust_transitive,",
+      "matched_keyword": "trust_transitive"
+    },
+    {
+      "file": "src/apm_cli/commands/install.py",
+      "line": 218,
+      "snippet": "    trust_transitive_mcp: bool",
+      "matched_keyword": "trust_transitive"
+    },
+    {
+      "file": "src/apm_cli/policy/policy_checks.py",
+      "line": 700,
+      "snippet": "    # Build set of deployed files AND directory prefixes from lockfile",
+      "matched_keyword": "AND"
+    },
+    {
+      "file": "src/apm_cli/install/services.py",
+      "line": 421,
+      "snippet": "    # A3: warm-cache visibility. If nothing was integrated for any kind AND",
+      "matched_keyword": "AND"
+    },
+    {
+      "file": "src/apm_cli/install/package_resolution.py",
+      "line": 15,
+      "snippet": "from apm_cli.install.gitlab_resolver import _GITLAB_DIRECT_SHORTHAND_UNRESOLVED",
+      "matched_keyword": "AND"
+    },
+    {
+      "file": "src/apm_cli/install/package_resolution.py",
+      "line": 67,
+      "snippet": "            raise ValueError(_GITLAB_DIRECT_SHORTHAND_UNRESOLVED)",
+      "matched_keyword": "AND"
+    },
+    {
+      "file": "src/apm_cli/install/drift.py",
+      "line": 10,
+      "snippet": "  is not present in the scratch replay AND not tracked in the lockfile.",
+      "matched_keyword": "AND"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 121,
+      "snippet": "    # -- Discovery (chain-aware: resolves extends: + merges) -----------",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 7,
+      "snippet": "4. Cache the **merged effective policy** with chain metadata",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 219,
+      "snippet": "    merged effective policy with real ``chain_refs``.",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 245,
+      "snippet": "        With merged effective policy and real chain_refs when inheritance",
+      "matched_keyword": "merge"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 402,
+      "snippet": "    \"\"\"Resolve inheritance chain and update cache with merged policy + chain_refs.",
+      "matched_keyword": "merge"
+    }
+  ],
+  "evidence_count": 15
+}
+
+TUPLE claim_id=c15:
+{
+  "claim_id": "c15",
+  "claim_text": "The enforcement field can escalate from off to warn to block, but a child can never move enforcement backward.",
+  "evidence": [
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 1,
+      "snippet": "\"\"\"Pre-install policy enforcement for non-pipeline command sites.",
+      "matched_keyword": "enforcement"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 11,
+      "snippet": "(writing ``ctx.policy_fetch``, ``ctx.policy_enforcement_active``).",
+      "matched_keyword": "enforcement"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 103,
+      "snippet": "    (PolicyFetchResult | None, enforcement_active: bool)",
+      "matched_keyword": "enforcement"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 104,
+      "snippet": "        ``enforcement_active`` is ``True`` when a policy was found and",
+      "matched_keyword": "enforcement"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 105,
+      "snippet": "        its enforcement level is ``\"warn\"`` or ``\"block\"``.",
+      "matched_keyword": "enforcement"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 105,
+      "snippet": "def _escalate(levels: dict[str, int], parent_val: str, child_val: str) -> str:",
+      "matched_keyword": "escalate"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 131,
+      "snippet": "    return _escalate(_ENFORCEMENT_LEVELS, parent, child)",
+      "matched_keyword": "escalate"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 143,
+      "snippet": "        require_resolution=_escalate(",
+      "matched_keyword": "escalate"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 163,
+      "snippet": "        self_defined=_escalate(_SELF_DEFINED_LEVELS, parent.self_defined, child.self_defined),",
+      "matched_keyword": "escalate"
+    },
+    {
+      "file": "src/apm_cli/policy/inheritance.py",
+      "line": 195,
+      "snippet": "        scripts=_escalate(_SCRIPTS_LEVELS, parent.scripts, child.scripts),",
+      "matched_keyword": "escalate"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 143,
+      "snippet": "    if enforcement == \"off\":",
+      "matched_keyword": "off"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 198,
+      "snippet": "    # raw_bytes_hash is the digest of the leaf policy bytes off the wire,",
+      "matched_keyword": "off"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 776,
+      "snippet": "    # Hash pin verification (#827) -- BEFORE parse, on raw bytes off wire.",
+      "matched_keyword": "off"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 857,
+      "snippet": "    # Hash pin verification (#827) -- BEFORE parse, on raw bytes off wire.",
+      "matched_keyword": "off"
+    },
+    {
+      "file": "src/apm_cli/policy/discovery.py",
+      "line": 1000,
+      "snippet": "    raw_bytes_hash: str = \"\"  # \"<algo>:<hex>\" of leaf bytes off wire (#827)",
+      "matched_keyword": "off"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 92,
+      "snippet": "        ``warning``).",
+      "matched_keyword": "warn"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 98,
+      "snippet": "        and warn-severity as ``\"[!] Policy warning: <dep> -- <reason>\"``.",
+      "matched_keyword": "warn"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 105,
+      "snippet": "        its enforcement level is ``\"warn\"`` or ``\"block\"``.",
+      "matched_keyword": "warn"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 146,
+      "snippet": "    # -- Enforcement (warn or block) -----------------------------------",
+      "matched_keyword": "warn"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 165,
+      "snippet": "            warn_lines: list[tuple[str, str]] = []",
+      "matched_keyword": "warn"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 97,
+      "snippet": "        ``\"[!] Would be blocked by policy: <dep> -- <reason>\"``",
+      "matched_keyword": "block"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 105,
+      "snippet": "        its enforcement level is ``\"warn\"`` or ``\"block\"``.",
+      "matched_keyword": "block"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 110,
+      "snippet": "        When ``enforcement == \"block\"`` and at least one check fails",
+      "matched_keyword": "block"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 135,
+      "snippet": "        raise_blocking_errors=not dry_run,",
+      "matched_keyword": "block"
+    },
+    {
+      "file": "src/apm_cli/policy/install_preflight.py",
+      "line": 146,
+      "snippet": "    # -- Enforcement (warn or block) -----------------------------------",
+      "matched_keyword": "block"
+    }
+  ],
+  "evidence_count": 25
+}
