@@ -539,10 +539,33 @@ class TestOutdatedSequential:
 
         assert result.exit_code == 0
 
+    def test_sequential_check_dep_error_degrades(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An unexpected error in a single dep check must not crash outdated.
 
-# ---------------------------------------------------------------------------
-# outdated -- multiple deps (parallel path)
-# ---------------------------------------------------------------------------
+        Regression for the sequential path, which previously let an exception
+        from ``_check_one_dep`` (e.g. ``TypeError: '<' not supported between
+        instances of 'MagicMock' and 'MagicMock'``) propagate and exit 1
+        instead of degrading the dependency to an ``unknown`` row.
+        """
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(tmp_path)
+        _write_lockfile(
+            tmp_path,
+            "  - repo_url: test-org/test-repo\n"
+            "    resolved_ref: main\n"
+            "    resolved_commit: aabbccdd11223344\n",
+        )
+
+        with patch(
+            "apm_cli.commands.outdated._check_one_dep",
+            side_effect=TypeError("'<' not supported between MagicMock and MagicMock"),
+        ):
+            result = runner.invoke(cli, ["outdated", "-j", "0"])
+
+        assert result.exit_code == 0
+        assert "unknown" in result.output.lower()
 
 
 class TestOutdatedParallel:
@@ -605,6 +628,36 @@ class TestOutdatedParallel:
         assert result.exit_code == 0
         # repo-one should be outdated, repo-two up-to-date
         assert "outdated" in result.output.lower()
+
+    def test_multiple_deps_one_check_errors_degrades(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Parallel path: a raising dep check degrades to unknown, exit 0.
+
+        Regression guard mirroring the sequential case so both paths handle an
+        unexpected ``_check_one_dep`` failure identically.
+        """
+        monkeypatch.chdir(tmp_path)
+        _write_apm_yml(tmp_path)
+        sha = "aabbccdd11223344"
+        _write_lockfile(
+            tmp_path,
+            f"  - repo_url: test-org/repo-one\n"
+            f"    resolved_ref: main\n"
+            f"    resolved_commit: {sha}\n"
+            f"  - repo_url: test-org/repo-two\n"
+            f"    resolved_ref: main\n"
+            f"    resolved_commit: {sha}\n",
+        )
+
+        with patch(
+            "apm_cli.commands.outdated._check_one_dep",
+            side_effect=TypeError("'<' not supported between MagicMock and MagicMock"),
+        ):
+            result = runner.invoke(cli, ["outdated", "-j", "2"])
+
+        assert result.exit_code == 0
+        assert "unknown" in result.output.lower()
 
 
 # ---------------------------------------------------------------------------

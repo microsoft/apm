@@ -256,6 +256,27 @@ class TestUpdateCommandLogic(unittest.TestCase):
         self.assertIn("development mode", result.output)
         self.assertNotIn("reinstall", result.output)
 
+    def test_dependency_update_help_lists_kiro_target_example(self):
+        """`apm update --help` should keep target examples aligned with supported targets."""
+        result = self.runner.invoke(cli, ["update", "--help"])
+
+        self.assertEqual(result.exit_code, 0)
+        target_help_lines = []
+        for line in result.output.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("-t, --target"):
+                target_help_lines.append(stripped)
+                continue
+            if target_help_lines:
+                if stripped.startswith("-") and not stripped.startswith("--target"):
+                    break
+                target_help_lines.append(stripped)
+
+        target_help = " ".join(target_help_lines)
+        self.assertIn("--target", target_help)
+        self.assertIn("gemini", target_help)
+        self.assertIn("kiro", target_help)
+
     @patch("apm_cli.utils.version_checker.get_latest_version_from_github", return_value=None)
     @patch("apm_cli.commands.self_update.get_version", return_value="1.0.0")
     def test_update_cannot_fetch_latest_exits_1(self, mock_version, mock_latest):
