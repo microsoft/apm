@@ -36,7 +36,12 @@ pytestmark = [
 @pytest.fixture(scope="module")
 def temp_e2e_home():
     """Create a temporary home directory for E2E testing."""
-    with tempfile.TemporaryDirectory() as temp_dir:
+    # ignore_cleanup_errors guards against a teardown race: the real `copilot`
+    # CLI launched by these tests downloads its binary asynchronously into
+    # $HOME/.cache/copilot/pkg/..., and a still-running child can repopulate the
+    # tree while TemporaryDirectory's rmtree runs -> OSError [Errno 39]
+    # Directory not empty. The temp dir is ephemeral, so leftover files are fine.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
         original_home = os.environ.get("HOME")
         test_home = os.path.join(temp_dir, "e2e_home")
         os.makedirs(test_home)
