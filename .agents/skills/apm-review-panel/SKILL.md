@@ -384,6 +384,20 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
    fill the placeholders from the panelist + CEO JSON, and emit it as
    exactly ONE comment.
 
+   Emission mechanism (non-negotiable): emit by calling the `add_comment`
+   safe-output tool ONCE, passing the rendered markdown directly as its
+   `body` argument. The tool carries the body as a structured value -- it
+   never goes through a shell. Do NOT stage, buffer, or pipe the comment
+   body through the shell: no `cat > file << EOF` heredoc, no `printf`, no
+   `echo`, no intermediate `/tmp/.../*.md` file. The panel prose routinely
+   contains words like `kill`, `rm`, or `sudo` (e.g. "a bug silently kills
+   the display layer"); when such prose is fed to a shell command the
+   copilot engine's command-safety parser misreads a wrapped line as a real
+   command, refuses to run it ("Command not executed. The 'kill' command
+   must specify at least one numeric PID"), and the comment is never
+   emitted -- the documented cause of run 27815857237's failure. Pass the
+   body straight to `add_comment`.
+
    Filling rules:
    - The per-persona summary table renders ONLY active panelists, one
      row per persona, with finding counts by severity and the persona's
@@ -488,6 +502,18 @@ no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
   the turn MUST end with a safe output -- the comment, or an explicit
   `noop`. See the "Synchronous fan-out" and "Non-empty turn exit"
   architecture invariants and step 9.
+- **Never route the comment body through the shell.** Emit the rendered
+  comment by passing it straight to the `add_comment` safe-output tool's
+  `body` argument. Do NOT stage it in a temp file via `cat <<EOF`,
+  `printf`, or `echo` first. The copilot engine's bash command-safety
+  parser scans command text (including heredoc bodies) and treats a
+  word-wrapped line that begins with `kill`, `rm`, `sudo`, etc. as a real
+  command -- panel prose like "a bug silently kills the display layer"
+  trips it, the engine aborts the write ("Command not executed. The
+  'kill' command must specify at least one numeric PID"), and the run
+  fails with no comment posted. This is the documented cause of run
+  27815857237. The same hazard applies to any shell write of subagent or
+  CEO prose, not just the final comment.
 - **No verdict-label reset workflow.** The previous regime had a
   companion workflow `pr-panel-label-reset.yml` that stripped verdict
   labels on every push. The advisory regime has no verdict labels to
