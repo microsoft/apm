@@ -1,10 +1,8 @@
 """Template building system for AGENTS.md compilation."""
 
-import re  # noqa: F401
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from ..primitives.models import Chatmode, Instruction
 from ..utils.paths import portable_relpath
@@ -86,11 +84,59 @@ def render_instructions_block(
     return sections
 
 
-def build_conditional_sections(instructions: list[Instruction]) -> str:
+def build_attributed_instructions(
+    instructions: list[Instruction],
+    source_attribution: dict | None,
+    base_dir: Path,
+) -> list[str]:
+    """Render an instructions block with optional source-attribution comments.
+
+    Convenience wrapper around :func:`render_instructions_block` that bundles
+    the common attribution-header ``_emit`` closure used by both
+    :class:`~apm_cli.compilation.claude_formatter.ClaudeFormatter` and
+    :class:`~apm_cli.compilation.distributed_compiler.DistributedCompiler`.
+
+    Args:
+        instructions: Instructions to render.
+        source_attribution: Optional ``{str(file_path): source_label}`` map.
+            When provided, each instruction is prefixed with a
+            ``<!-- Source: <label> <rel_path> -->`` comment.
+        base_dir: Directory used as anchor for stable sort keys.
+
+    Returns:
+        Lines ready to be joined or extended into a parent ``sections`` list.
+    """
+
+    def _emit(instruction: Instruction) -> list[str]:
+        lines: list[str] = []
+        if source_attribution:
+            source = source_attribution.get(str(instruction.file_path), "local")
+            rel_path = portable_relpath(instruction.file_path, base_dir)
+            lines.append(f"<!-- Source: {source} {rel_path} -->")
+        lines.append(instruction.content.strip())
+        lines.append("")
+        return lines
+
+    return render_instructions_block(
+        instructions,
+        base_dir=base_dir,
+        emit_instruction=_emit,
+    )
+
+
+def build_conditional_sections(
+    instructions: list[Instruction],
+    source_dir: Path | None = None,
+) -> str:
     """Build sections grouped by applyTo patterns.
 
     Args:
-        instructions (List[Instruction]): List of instruction primitives.
+        instructions: List of instruction primitives.
+        source_dir: Root used to compute display-relative paths in
+            ``<!-- Source: ... -->`` comments.  Defaults to ``Path.cwd()``;
+            callers using ``apm compile --root`` should pass the source
+            root so attribution paths render relative to the user's
+            working directory rather than the deploy target.
 
     Returns:
         str: Formatted conditional sections content.
@@ -98,12 +144,16 @@ def build_conditional_sections(instructions: list[Instruction]) -> str:
     if not instructions:
         return ""
 
-    cwd = Path.cwd()
+    # ``source_dir`` is the project source root.  Defaults to ``Path.cwd()``;
+    # callers using ``apm compile --root`` pass the captured ``$PWD`` so
+    # ``<!-- Source: ... -->`` paths render against the user's working
+    # directory rather than the deploy target.
+    relpath_root = source_dir if source_dir is not None else Path.cwd()
 
     def emit(instruction: Instruction) -> list[str]:
         try:
             if instruction.file_path.is_absolute():
-                relative_path = portable_relpath(instruction.file_path, cwd)
+                relative_path = portable_relpath(instruction.file_path, relpath_root)
             else:
                 relative_path = str(instruction.file_path)
         except (ValueError, OSError):
@@ -116,7 +166,7 @@ def build_conditional_sections(instructions: list[Instruction]) -> str:
             "",
         ]
 
-    sections = render_instructions_block(instructions, base_dir=cwd, emit_instruction=emit)
+    sections = render_instructions_block(instructions, base_dir=relpath_root, emit_instruction=emit)
     return "\n".join(sections)
 
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
-from typing import Optional, Tuple  # noqa: F401, UP035
 
 from .schema import DependencyPolicy, McpPolicy
 
@@ -41,6 +40,20 @@ def matches_pattern(canonical_ref: str, pattern: str) -> bool:
     return bool(_compile_pattern(pattern).match(canonical_ref))
 
 
+def first_matching_pattern(name: str, patterns: tuple[str, ...] | None) -> str | None:
+    """Return the first glob pattern in *patterns* that matches *name*.
+
+    Single source of truth for glob membership. Reused by the dependency /
+    MCP deny-list checks (via :func:`_check_allow_deny`) and by the
+    unmanaged-files check for both deny-conflict surfacing and ``exclude``
+    suppression -- so there is exactly one matcher, never a parallel impl.
+    """
+    for pattern in patterns or ():
+        if matches_pattern(name, pattern):
+            return pattern
+    return None
+
+
 def _check_allow_deny(
     ref: str,
     allow: tuple[str, ...] | None,
@@ -54,16 +67,15 @@ def _check_allow_deny(
     4. If ref matches any allow pattern -> allowed.
     5. Otherwise -> not in allowed sources.
     """
-    for pattern in deny:
-        if matches_pattern(ref, pattern):
-            return False, f"denied by pattern: {pattern}"
+    denied = first_matching_pattern(ref, deny)
+    if denied is not None:
+        return False, f"denied by pattern: {denied}"
 
     if allow is None:
         return True, ""
 
-    for pattern in allow:
-        if matches_pattern(ref, pattern):
-            return True, ""
+    if first_matching_pattern(ref, allow) is not None:
+        return True, ""
 
     return False, "not in allowed sources"
 

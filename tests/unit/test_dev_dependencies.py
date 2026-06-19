@@ -318,7 +318,9 @@ class TestInstallDevFlag:
             mock_apm_package.from_apm_yml.return_value = mock_pkg
 
             mock_install_apm.return_value = InstallResult(
-                diagnostics=MagicMock(has_diagnostics=False, has_critical_security=False)
+                diagnostics=MagicMock(
+                    has_diagnostics=False, has_critical_security=False, error_count=0
+                )
             )
 
             result = self.runner.invoke(cli, ["install", "--dev", "test/dev-pkg"])
@@ -362,7 +364,9 @@ class TestInstallDevFlag:
             mock_apm_package.from_apm_yml.return_value = mock_pkg
 
             mock_install_apm.return_value = InstallResult(
-                diagnostics=MagicMock(has_diagnostics=False, has_critical_security=False)
+                diagnostics=MagicMock(
+                    has_diagnostics=False, has_critical_security=False, error_count=0
+                )
             )
 
             result = self.runner.invoke(cli, ["install", "test/prod-pkg"])

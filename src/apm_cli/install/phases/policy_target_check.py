@@ -67,6 +67,8 @@ def run(ctx: InstallContext) -> None:
 
     policy = ctx.policy_fetch.policy
 
+    registries_map = getattr(ctx.apm_package, "registries", None) if ctx.apm_package else None
+
     audit_result = run_dependency_policy_checks(
         ctx.deps_to_install,
         lockfile=ctx.existing_lockfile,
@@ -74,6 +76,8 @@ def run(ctx: InstallContext) -> None:
         effective_target=effective_target,
         fetch_outcome=ctx.policy_fetch.outcome,
         fail_fast=False,  # ensure target check runs even if dep checks re-pass
+        registries=registries_map,
+        direct_dep_keys={d.get_unique_key() for d in getattr(ctx, "all_apm_deps", []) or []},
     )
 
     # ------------------------------------------------------------------

@@ -42,6 +42,7 @@ def run(ctx: InstallContext) -> None:
     apm_modules_dir = ctx.apm_modules_dir
     downloader = ctx.downloader
     callback_downloaded = ctx.callback_downloaded
+    callback_failures = ctx.callback_failures
 
     # Phase 4 (#171): Parallel package downloads using ThreadPoolExecutor
     # Pre-download all non-cached packages in parallel for wall-clock speedup.
@@ -60,6 +61,15 @@ def run(ctx: InstallContext) -> None:
         )
         # Skip local packages -- they are copied, not downloaded
         if _pd_ref.is_local:
+            continue
+        # Skip deps that already failed during BFS resolution (#1111 C2).
+        # Without this, registry failures fall through to the git downloader
+        # and hang on a non-existent github.com/{owner}/{repo} clone (~180s).
+        if _pd_key in callback_failures:
+            continue
+        # Registry-sourced deps are fetched in resolve.py's callback; the git
+        # downloader must never handle them here.
+        if getattr(_pd_ref, "source", None) == "registry":
             continue
         # Skip if already downloaded during BFS resolution
         if _pd_key in callback_downloaded:
@@ -89,11 +99,27 @@ def run(ctx: InstallContext) -> None:
                 # Git check failed (e.g. .git removed after download).
                 # Fall back to content-hash verification so correctly
                 # installed packages are not re-downloaded every run (#763).
-                if _pd_locked_chk.content_hash and _pd_path.is_dir():
-                    from apm_cli.utils.content_hash import verify_package_hash as _pd_verify_hash
+                from apm_cli.install.phases._redownload import _should_skip_redownload
 
-                    if _pd_verify_hash(_pd_path, _pd_locked_chk.content_hash):
-                        continue
+                if _should_skip_redownload(_pd_locked_chk, _pd_path):
+                    ctx.content_hash_verified_deps.add(_pd_key)
+                    continue
+        elif (
+            _pd_path.exists()
+            and _pd_locked_chk
+            and _pd_locked_chk.content_hash
+            and not update_refs
+            and not _pd_ref_changed
+        ):
+            # Content-hash-only lockfile entries have no commit anchor.
+            # The hash is the sole trust signal: skip only after verifying
+            # on-disk bytes still match it, otherwise fall through to the
+            # fresh-download path and its supply-chain mismatch check.
+            from apm_cli.install.phases._redownload import _should_skip_redownload
+
+            if _should_skip_redownload(_pd_locked_chk, _pd_path):
+                ctx.content_hash_verified_deps.add(_pd_key)
+                continue
         # Build download ref (use locked commit for reproducibility).
         # build_download_ref() uses the manifest ref when ref_changed is True.
         _pd_dlref = build_download_ref(

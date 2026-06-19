@@ -1,5 +1,8 @@
 """Unit tests for apm_cli.utils.console."""
 
+import importlib
+import sys
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -389,3 +392,138 @@ class TestShowDownloadSpinner:
 
         captured = capsys.readouterr()
         assert "owner/repo" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# ImportError fallback branches (lines 18-23 and 31-34) reached by
+# re-importing the module with the target library blocked in sys.modules.
+# ---------------------------------------------------------------------------
+
+
+def _reimport_console_without(blocked_modules: list[str]):
+    """Re-import apm_cli.utils.console with ``blocked_modules`` blocked.
+
+    Returns the freshly imported module, then restores everything in
+    sys.modules so other tests are unaffected.
+    """
+    # Save and remove existing entries we will touch.
+    saved: dict[str, object] = {}
+    for key in list(sys.modules.keys()):
+        if key == "apm_cli.utils.console" or any(
+            key == m or key.startswith(m + ".") for m in blocked_modules
+        ):
+            saved[key] = sys.modules.pop(key)
+
+    # Block the target imports by storing None (Python import machinery
+    # raises ImportError when sys.modules[name] is None).
+    for mod_name in blocked_modules:
+        sys.modules[mod_name] = None  # type: ignore[assignment]
+
+    try:
+        import apm_cli.utils.console as fresh
+
+        importlib.reload(fresh)  # ensure module-level code re-runs
+        return fresh
+    finally:
+        # Remove freshly loaded/reloaded entries.
+        for key in list(sys.modules.keys()):
+            if key == "apm_cli.utils.console" or any(
+                key == m or key.startswith(m + ".") for m in blocked_modules
+            ):
+                del sys.modules[key]
+        # Restore originals.
+        sys.modules.update(saved)
+
+
+class TestImportFallbacks:
+    """Cover the except-ImportError branches at module level (lines 18-23, 31-34)."""
+
+    def test_rich_unavailable_sets_constants(self):
+        """Lines 18-23: RICH_AVAILABLE=False and sentinel Any assignments."""
+        fresh = _reimport_console_without(["rich"])
+        assert fresh.RICH_AVAILABLE is False
+        assert fresh.Console is Any
+        assert fresh.Panel is Any
+        assert fresh.Table is Any
+        assert fresh.rich_print is None
+
+    def test_colorama_unavailable_sets_constants(self):
+        """Lines 31-34: COLORAMA_AVAILABLE=False and Fore/Style set to None."""
+        fresh = _reimport_console_without(["colorama"])
+        assert fresh.COLORAMA_AVAILABLE is False
+        assert fresh.Fore is None
+        assert fresh.Style is None
+
+
+class TestGetConsoleDoubleCheckLock:
+    """Line 80: inner guard of the double-checked locking pattern."""
+
+    def setup_method(self):
+        from apm_cli.utils.console import _reset_console
+
+        _reset_console()
+
+    def teardown_method(self):
+        from apm_cli.utils.console import _reset_console
+
+        _reset_console()
+
+    def test_inner_guard_returns_pre_set_instance(self):
+        """Hit line 80 by setting _console_instance inside the lock's __enter__.
+
+        The outer None-check sees None, we enter the lock, the mock __enter__
+        sets _console_instance to a sentinel, then the inner guard returns it
+        immediately without constructing a new Console.
+        """
+        import apm_cli.utils.console as mod
+
+        sentinel = MagicMock(name="pre_set_console")
+        real_lock = mod._console_lock
+
+        class _FakeLock:
+            def __enter__(self_inner):
+                # Simulate another thread having set _console_instance.
+                mod._console_instance = sentinel
+                real_lock.acquire()
+                return self_inner
+
+            def __exit__(self_inner, *args: object) -> None:
+                real_lock.release()
+
+        with patch.object(mod, "_console_lock", _FakeLock()):
+            result = mod._get_console()
+
+        assert result is sentinel
+
+
+class TestSetConsoleStderr:
+    """Tests for set_console_stderr (also resets singleton)."""
+
+    def setup_method(self):
+        from apm_cli.utils.console import _reset_console
+
+        _reset_console()
+
+    def teardown_method(self):
+        from apm_cli.utils.console import _reset_console
+
+        _reset_console()
+
+    def test_set_stderr_true_clears_singleton(self):
+        import apm_cli.utils.console as mod
+
+        # Force singleton creation.
+        mod._get_console()
+        assert mod._console_instance is not None
+
+        mod.set_console_stderr(True)
+        assert mod._console_instance is None
+        assert mod._console_stderr is True
+
+    def test_set_stderr_false_restores_default(self):
+        import apm_cli.utils.console as mod
+
+        mod.set_console_stderr(True)
+        mod.set_console_stderr(False)
+        assert mod._console_stderr is False
+        assert mod._console_instance is None

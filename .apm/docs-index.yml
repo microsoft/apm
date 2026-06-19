@@ -139,6 +139,15 @@ pages:
       flags: [--target, --lockfile-only, --no-cache, --force]
       schemas: [apm.yml.dependencies, apm.lock.yaml]
 
+  - path: docs/src/content/docs/consumer/installing-from-marketplaces.md
+    title: "Installing from marketplaces"
+    persona: consumer
+    promise: 1
+    documents_symbols:
+      cli: [apm marketplace add, apm install]
+      flags: []
+      schemas: [marketplace.json]
+
   - path: docs/src/content/docs/producer/index.md
     title: "Producer overview"
     persona: producer
@@ -162,12 +171,41 @@ pages:
       cli: [apm pack]
       flags: [--format, --out]
 
+  - path: docs/src/content/docs/producer/repo-shapes.md
+    title: "Repo shapes for marketplace producers"
+    persona: producer
+    promise: 2
+    documents_symbols:
+      cli: [apm plugin init, apm marketplace init, apm marketplace package add]
+      flags: []
+      schemas: [apm.yml.marketplace, apm.yml.marketplace.packages]
+
   - path: docs/src/content/docs/producer/publish-to-a-marketplace.md
     title: "Publish to a marketplace"
     persona: producer
     promise: 2
     documents_symbols:
-      cli: [apm publish]
+      cli: [apm marketplace init, apm marketplace check, apm marketplace doctor, apm marketplace outdated, apm marketplace publish, apm marketplace migrate, apm marketplace package add, apm marketplace package set, apm marketplace package remove, apm pack]
+      flags: [--marketplace, --offline, --include-prerelease, --dry-run, --yes, --no-pr]
+      schemas: [apm.yml.marketplace, marketplace.json]
+
+  - path: docs/src/content/docs/producer/releasing-from-any-ci.md
+    title: "Releasing from any CI"
+    persona: producer
+    promise: 2
+    documents_symbols:
+      cli: [apm pack]
+      flags: [--check-versions, --check-clean, --json]
+      schemas: []
+
+  - path: docs/src/content/docs/producer/versioning-strategies.md
+    title: "Versioning strategies"
+    persona: producer
+    promise: 2
+    documents_symbols:
+      cli: [apm pack]
+      flags: [--check-versions]
+      schemas: [apm.yml.marketplace.versioning]
 
   - path: docs/src/content/docs/producer/author-primitives/skills.md
     title: "Author skills"
@@ -206,20 +244,41 @@ pages:
       cli: [apm audit]
       flags: [--strip, --file, --sarif, --json]
 
+  - path: docs/src/content/docs/integrations/external-scanners.md
+    title: "External scanners"
+    persona: cross
+    promise: cross
+    documents_symbols:
+      cli: [apm audit]
+      flags: [--external, --external-sarif]
+
 # Symbol-to-page reverse index. The localizer skill consults this
 # to translate a diff symbol (e.g. a new flag) into a page list.
 # Bootstrap: derived from the pages[] above. Regenerated on every
 # structural verdict.
 symbol_index:
   cli:
-    "apm install": [docs/src/content/docs/consumer/install.md]
+    "apm install": [docs/src/content/docs/consumer/install.md, docs/src/content/docs/consumer/installing-from-marketplaces.md]
     "apm compile": [docs/src/content/docs/producer/compile.md]
-    "apm pack": [docs/src/content/docs/producer/pack-a-bundle.md]
-    "apm publish": [docs/src/content/docs/producer/publish-to-a-marketplace.md]
-    "apm audit": [docs/src/content/docs/enterprise/apm-policy.md, docs/src/content/docs/enterprise/security.md]
+    "apm pack": [docs/src/content/docs/producer/pack-a-bundle.md, docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/producer/releasing-from-any-ci.md, docs/src/content/docs/producer/versioning-strategies.md]
+    "apm plugin init": [docs/src/content/docs/producer/repo-shapes.md, docs/src/content/docs/reference/cli/plugin.md]
+    "apm marketplace add": [docs/src/content/docs/consumer/installing-from-marketplaces.md]
+    "apm marketplace init": [docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/producer/repo-shapes.md]
+    "apm marketplace check": [docs/src/content/docs/producer/publish-to-a-marketplace.md]
+    "apm marketplace package add": [docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/producer/repo-shapes.md]
+    "apm marketplace publish": [docs/src/content/docs/producer/publish-to-a-marketplace.md]
+    "apm audit": [docs/src/content/docs/enterprise/apm-policy.md, docs/src/content/docs/enterprise/security.md, docs/src/content/docs/integrations/external-scanners.md]
+  flags:
+    "--check-versions": [docs/src/content/docs/producer/releasing-from-any-ci.md, docs/src/content/docs/producer/versioning-strategies.md]
+    "--check-clean": [docs/src/content/docs/producer/releasing-from-any-ci.md]
+    "--external": [docs/src/content/docs/integrations/external-scanners.md, docs/src/content/docs/reference/cli/audit.md]
+    "--external-sarif": [docs/src/content/docs/integrations/external-scanners.md, docs/src/content/docs/reference/cli/audit.md]
   schemas:
     "apm.yml": [docs/src/content/docs/consumer/install.md]
     "apm.lock.yaml": [docs/src/content/docs/consumer/install.md]
+    "apm.yml.marketplace": [docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/producer/repo-shapes.md]
+    "apm.yml.marketplace.versioning": [docs/src/content/docs/producer/versioning-strategies.md]
+    "marketplace.json": [docs/src/content/docs/producer/publish-to-a-marketplace.md, docs/src/content/docs/consumer/installing-from-marketplaces.md]
     "apm-policy.yml": [docs/src/content/docs/enterprise/apm-policy.md]
     "SKILL.md": [docs/src/content/docs/producer/author-primitives/skills.md]
     ".agent.md": [docs/src/content/docs/producer/author-primitives/instructions-and-agents.md]

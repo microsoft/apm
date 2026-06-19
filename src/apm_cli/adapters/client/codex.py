@@ -3,12 +3,14 @@
 import logging
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import toml
 
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
-from ...utils.console import _rich_warning
+from ...utils.console import _rich_success, _rich_warning
+from ._mcp_runtime_args import process_v01_value_hint_arg
 from .base import MCPClientAdapter
 
 _log = logging.getLogger(__name__)
@@ -84,6 +86,7 @@ class CodexClientAdapter(MCPClientAdapter):
 
         with open(config_path, "w", encoding="utf-8") as f:
             toml.dump(current_config, f)
+        os.chmod(config_path, 0o600)
         _log.debug("Codex config written to %s", config_path)
         return True
 
@@ -143,52 +146,27 @@ class CodexClientAdapter(MCPClientAdapter):
             return False
 
         try:
-            # Use cached server info if available, otherwise fetch from registry
-            if server_info_cache and server_url in server_info_cache:
-                server_info = server_info_cache[server_url]
-            else:
-                # Fallback to registry lookup if not cached
-                server_info = self.registry_client.find_server_by_reference(server_url)
-
-            # Fail if server is not found in registry - security requirement
-            if not server_info:
-                print(f"Error: MCP server '{server_url}' not found in registry")
+            server_info = self._fetch_server_info(server_url, server_info_cache)
+            if server_info is None:
                 return False
 
-            # Check for remote servers early - Codex doesn't support remote/SSE servers
-            remotes = server_info.get("remotes", [])
-            packages = server_info.get("packages", [])
-
-            # If server has only remote endpoints and no packages, it's a remote-only server
-            if remotes and not packages:
-                print(f"[!]  Warning: MCP server '{server_url}' is a remote server (SSE type)")
-                print("   Codex CLI only supports local servers with command/args configuration")
-                print("   Remote servers are not supported by Codex CLI")
-                print("   Skipping installation for Codex CLI")
-                return False
-
-            # Determine the server name for configuration key
-            if server_name:
-                # Use explicitly provided server name
-                config_key = server_name
-            else:  # noqa: PLR5501
-                # Extract name from server_url (part after last slash)
-                # For URLs like "microsoft/azure-devops-mcp" -> "azure-devops-mcp"
-                # For URLs like "github/github-mcp-server" -> "github-mcp-server"
-                if "/" in server_url:  # noqa: SIM108
-                    config_key = server_url.split("/")[-1]
-                else:
-                    # Fallback to full server_url if no slash
-                    config_key = server_url
+            config_key = self._determine_config_key(server_url, server_name)
 
             # Generate server configuration with environment variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
+
+            # Skip if formatter signaled "unsupported" (e.g. SSE remote on Codex)
+            if server_config is None:
+                return False
 
             # Update configuration using the chosen key
             if not self.update_config({config_key: server_config}):
                 return False
 
-            print(f"Successfully configured MCP server '{config_key}' for Codex CLI")
+            _rich_success(
+                f"Configured MCP server '{config_key}' for Codex CLI",
+                symbol="success",
+            )
             return True
 
         except Exception as e:
@@ -204,8 +182,11 @@ class CodexClientAdapter(MCPClientAdapter):
             runtime_vars (dict, optional): Runtime variable values.
 
         Returns:
-            dict: Formatted server configuration for Codex CLI.
+            dict | None: Formatted server configuration for Codex CLI, or None if unsupported (e.g. SSE remote).
         """
+        if runtime_vars is None:
+            runtime_vars = {}
+
         # Default configuration structure with registry ID for conflict detection
         config = {
             "command": "unknown",
@@ -214,21 +195,87 @@ class CodexClientAdapter(MCPClientAdapter):
             "id": server_info.get("id", ""),  # Add registry UUID for conflict detection
         }
 
-        # Self-defined stdio deps carry raw command/args  -- use directly
+        # Self-defined stdio deps carry raw command/args. Route ``env`` and
+        # ``args`` through the resolver pipeline so all three placeholder
+        # syntaxes (``<VAR>``, ``${VAR}``, ``${env:VAR}``) are resolved at
+        # install time before being written to ~/.codex/config.toml.
+        # See issue #1266.
         raw = server_info.get("_raw_stdio")
         if raw:
             config["command"] = raw["command"]
-            config["args"] = [self.normalize_project_arg(arg) for arg in raw["args"]]
+            resolved_env_for_args: dict = {}
             if raw.get("env"):
-                config["env"] = raw["env"]
+                resolved_env_for_args = self._resolve_environment_variables(
+                    raw["env"], env_overrides=env_overrides
+                )
+                config["env"] = resolved_env_for_args
                 self._warn_input_variables(raw["env"], server_info.get("name", ""), "Codex CLI")
+
+            def _process_stdio_arg(arg):
+                if isinstance(arg, str):
+                    arg = self._resolve_variable_placeholders(
+                        arg, resolved_env_for_args, runtime_vars
+                    )
+                return self.normalize_project_arg(arg)
+
+            config["args"] = [_process_stdio_arg(arg) for arg in raw.get("args") or []]
+            self._merge_extra(config, server_info)
             return config
 
-        # Note: Remote servers (SSE type) are handled in configure_mcp_server and rejected early
-        # This method only handles local servers with packages
-
-        # Get packages from server info
+        # Remote MCP handling.
+        # Precedence on Codex when a server publishes BOTH a remote and a stdio
+        # package: prefer the stdio package (falls through to the packages branch
+        # below). The remote-only branch here handles the streamable-http path
+        # and rejects SSE / non-https / empty-url remotes with explicit warnings.
+        remotes = server_info.get("remotes", [])
         packages = server_info.get("packages", [])
+        if remotes and not packages:
+            remote = self._select_remote_with_url(remotes) or remotes[0]
+            server_name = server_info.get("name", "")
+            if (remote.get("transport_type") or "").strip() == "sse":
+                _rich_warning(
+                    f"Skipping MCP server '{server_name}' for Codex CLI: SSE transport "
+                    "is deprecated by the MCP spec and not supported by Codex. "
+                    "Switch to `transport: streamable-http`.",
+                    symbol="warning",
+                )
+                return None
+
+            remote_url = (remote.get("url") or "").strip()
+            if not remote_url:
+                _rich_warning(
+                    f"Skipping MCP server '{server_name}' for Codex CLI: remote entry "
+                    "has an empty url. Set `url:` to the server's streamable-http endpoint.",
+                    symbol="warning",
+                )
+                return None
+
+            scheme = urlparse(remote_url).scheme.lower()
+            if scheme != "https":
+                _rich_warning(
+                    f"Skipping MCP server '{server_name}' for Codex CLI: remote URL "
+                    f"must use https:// (got {scheme or 'no scheme'}).",
+                    symbol="warning",
+                )
+                return None
+
+            remote_config = {
+                "url": remote_url,
+                "id": server_info.get("id", ""),
+            }
+            http_headers: dict[str, str] = {}
+            for header in remote.get("headers", []):
+                h_name = header.get("name", "")
+                h_value = header.get("value", "")
+                if h_name and h_value:
+                    http_headers[h_name] = self._resolve_variable_placeholders(
+                        h_value, env_overrides or {}, runtime_vars or {}
+                    )
+            if http_headers:
+                remote_config["http_headers"] = http_headers
+                self._warn_input_variables(http_headers, server_name, "Codex CLI")
+            self._merge_extra(remote_config, server_info)
+            return remote_config
 
         if not packages:
             # If no packages are available, this indicates incomplete server configuration
@@ -240,6 +287,13 @@ class CodexClientAdapter(MCPClientAdapter):
             )
 
         if packages:
+            if remotes:
+                # Hybrid registry server: log that Codex prefers the stdio package
+                # over the remote endpoint so the precedence is auditable.
+                _log.debug(
+                    "Codex hybrid server '%s': preferring stdio package over remote endpoint",
+                    server_info.get("name", "unknown"),
+                )
             # Use the first package for configuration (prioritize npm, then docker, then others)
             package = self._select_best_package(packages)
 
@@ -299,33 +353,22 @@ class CodexClientAdapter(MCPClientAdapter):
                     if resolved_env:
                         config["env"] = resolved_env
                 elif registry_name == "pypi":
-                    config["command"] = runtime_hint or "uvx"
-                    config["args"] = (
-                        [package_name] + processed_runtime_args + processed_package_args  # noqa: RUF005
+                    self._apply_pypi_homebrew_generic_config(
+                        config,
+                        registry_name,
+                        package_name,
+                        runtime_hint,
+                        processed_runtime_args,
+                        processed_package_args,
+                        resolved_env,
                     )
-                    # For PyPI packages, use env block for environment variables
-                    if resolved_env:
-                        config["env"] = resolved_env
-                elif registry_name == "homebrew":
-                    # For homebrew packages, assume the binary name is the command
-                    config["command"] = (
-                        package_name.split("/")[-1] if "/" in package_name else package_name
-                    )
-                    config["args"] = processed_runtime_args + processed_package_args
-                    # For Homebrew packages, use env block for environment variables
-                    if resolved_env:
-                        config["env"] = resolved_env
-                else:
-                    # Generic package handling
-                    config["command"] = runtime_hint or package_name
-                    config["args"] = processed_runtime_args + processed_package_args
-                    # For generic packages, use env block for environment variables
-                    if resolved_env:
-                        config["env"] = resolved_env
 
+        self._merge_extra(config, server_info)
         return config
 
-    def _process_arguments(self, arguments, resolved_env=None, runtime_vars=None):
+    def _process_arguments(  # pylint: disable=duplicate-code  # structural similarity with copilot adapter is intentional
+        self, arguments, resolved_env=None, runtime_vars=None
+    ):
         """Process argument objects to extract simple string values with environment resolution.
 
         Args:
@@ -371,6 +414,15 @@ class CodexClientAdapter(MCPClientAdapter):
                                 str(additional_value), resolved_env, runtime_vars
                             )
                             processed.append(processed_value)
+                elif not arg_type and "value_hint" in arg:
+                    # v0.1 registry format: shared helper handles is_required
+                    # guard and {var_name} placeholder substitution.
+                    value = process_v01_value_hint_arg(arg, runtime_vars)
+                    if value:
+                        processed_value = self._resolve_variable_placeholders(
+                            value, resolved_env, runtime_vars
+                        )
+                        processed.append(processed_value)
             elif isinstance(arg, str):
                 # Already a string, use as-is but resolve variable placeholders
                 processed_value = self._resolve_variable_placeholders(
@@ -390,118 +442,8 @@ class CodexClientAdapter(MCPClientAdapter):
         Returns:
             dict: Dictionary of resolved environment variable values.
         """
-        import os
-        import sys
-
-        from rich.prompt import Prompt
-
-        resolved = {}
-        env_overrides = env_overrides or {}
-
-        # If env_overrides is provided, it means the CLI has already handled environment variable collection
-        # In this case, we should NEVER prompt for additional variables
-        skip_prompting = bool(env_overrides)
-
-        # Check for CI/automated environment via APM_E2E_TESTS flag (more reliable than TTY detection)
-        if os.getenv("APM_E2E_TESTS") == "1":
-            skip_prompting = True
-            print(f" APM_E2E_TESTS detected, will skip environment variable prompts")  # noqa: F541
-
-        # Also skip prompting if we're in a non-interactive environment (fallback)
-        is_interactive = sys.stdin.isatty() and sys.stdout.isatty()
-        if not is_interactive:
-            skip_prompting = True
-
-        # Add default GitHub MCP server environment variables for essential functionality first
-        # This ensures variables have defaults when user provides empty values or they're optional
         default_github_env = {"GITHUB_TOOLSETS": "context", "GITHUB_DYNAMIC_TOOLSETS": "1"}
-
-        # Track which variables were explicitly provided with empty values (user wants defaults)
-        empty_value_vars = set()
-        if env_overrides:
-            for key, value in env_overrides.items():
-                if key in env_overrides and (not value or not value.strip()):
-                    empty_value_vars.add(key)
-
-        for env_var in env_vars:
-            if isinstance(env_var, dict):
-                name = env_var.get("name", "")
-                description = env_var.get("description", "")
-                required = env_var.get("required", True)
-
-                if name:
-                    # First check overrides, then environment
-                    value = env_overrides.get(name) or os.getenv(name)
-
-                    # Only prompt if not provided in overrides or environment AND it's required AND we're not in managed override mode
-                    if not value and required and not skip_prompting:
-                        # Only prompt if not provided in overrides
-                        prompt_text = f"Enter value for {name}"
-                        if description:
-                            prompt_text += f" ({description})"
-                        value = Prompt.ask(
-                            prompt_text,
-                            password=True  # noqa: SIM210
-                            if "token" in name.lower() or "key" in name.lower()
-                            else False,
-                        )
-
-                    # Add variable if it has a value OR if user explicitly provided empty and we have a default
-                    if value and value.strip():
-                        resolved[name] = value
-                    elif name in empty_value_vars and name in default_github_env:
-                        # User provided empty value and we have a default - use default
-                        resolved[name] = default_github_env[name]
-                    elif not required and name in default_github_env:
-                        # Variable is optional and we have a default - use default
-                        resolved[name] = default_github_env[name]
-                    elif skip_prompting and name in default_github_env:
-                        # Non-interactive environment and we have a default - use default
-                        resolved[name] = default_github_env[name]
-
-        return resolved
-
-    def _resolve_variable_placeholders(self, value, resolved_env, runtime_vars):
-        """Resolve both environment and runtime variable placeholders in values.
-
-        Args:
-            value (str): Value that may contain placeholders like <TOKEN_NAME> or {runtime_var}
-            resolved_env (dict): Dictionary of resolved environment variables.
-            runtime_vars (dict): Dictionary of resolved runtime variables.
-
-        Returns:
-            str: Processed value with actual variable values.
-        """
-        import re
-
-        if not value:
-            return value
-
-        processed = str(value)
-
-        # Replace <TOKEN_NAME> with actual values from resolved_env (for Docker env vars)
-        env_pattern = r"<([A-Z_][A-Z0-9_]*)>"
-
-        def replace_env_var(match):
-            env_name = match.group(1)
-            return resolved_env.get(env_name, match.group(0))  # Return original if not found
-
-        processed = re.sub(env_pattern, replace_env_var, processed)
-
-        # Replace {runtime_var} with actual values from runtime_vars
-        runtime_pattern = r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}"
-
-        def replace_runtime_var(match):
-            var_name = match.group(1)
-            return runtime_vars.get(var_name, match.group(0))  # Return original if not found
-
-        processed = re.sub(runtime_pattern, replace_runtime_var, processed)
-
-        return processed
-
-    def _resolve_env_placeholders(self, value, resolved_env):
-        """Legacy method for backward compatibility. Use _resolve_variable_placeholders instead."""
-        return self._resolve_variable_placeholders(value, resolved_env, {})
+        return self._resolve_env_vars_with_prompting(env_vars, env_overrides, default_github_env)
 
     def _ensure_docker_env_flags(self, base_args, env_vars):
         """Ensure all environment variables are represented as -e flags in Docker args.
@@ -594,26 +536,3 @@ class CodexClientAdapter(MCPClientAdapter):
                         result.extend(["-e", env_name])
 
         return result
-
-    def _select_best_package(self, packages):
-        """Select the best package for installation from available packages.
-
-        Prioritizes packages in order: npm, docker, pypi, homebrew, others.
-        Uses ``_infer_registry_name`` so selection works even when the
-        registry API returns empty ``registry_name``.
-
-        Args:
-            packages (list): List of package dictionaries.
-
-        Returns:
-            dict: Best package to use, or None if no suitable package found.
-        """
-        priority_order = ["npm", "docker", "pypi", "homebrew"]
-
-        for target in priority_order:
-            for package in packages:
-                if self._infer_registry_name(package) == target:
-                    return package
-
-        # If no priority package found, return the first one
-        return packages[0] if packages else None

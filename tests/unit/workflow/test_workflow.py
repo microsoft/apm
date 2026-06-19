@@ -4,6 +4,9 @@ import os
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
+
+import pytest
 
 from apm_cli.workflow.discovery import create_workflow_template, discover_workflows
 from apm_cli.workflow.parser import WorkflowDefinition, parse_workflow_file
@@ -157,6 +160,127 @@ input:
             self.assertIn("mcp:", content)
             self.assertIn("input:", content)
             self.assertIn("# Test Template", content)
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage for missed lines
+# ---------------------------------------------------------------------------
+
+
+class TestWorkflowParserMissedLines(unittest.TestCase):
+    """Cover lines 61-62 (error path) and 88-92 (non-github/prompts name extraction)."""
+
+    def test_parse_workflow_file_raises_on_nonexistent_file(self) -> None:
+        """Lines 61-62: IOError from open() is re-raised as ValueError."""
+
+        with self.assertRaises(ValueError, msg="Failed to parse workflow file"):
+            parse_workflow_file("/nonexistent/path/does_not_exist.prompt.md")
+
+    def test_extract_name_from_prompt_md_not_in_github_prompts(self) -> None:
+        """Lines 88-89: .prompt.md file outside .github/prompts uses basename."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fpath = os.path.join(tmp, "my-workflow.prompt.md")
+            with open(fpath, "w") as f:
+                f.write("---\ndescription: My workflow\n---\nContent\n")
+            workflow = parse_workflow_file(fpath)
+        assert workflow.name == "my-workflow"
+
+    def test_extract_name_from_non_prompt_md_extension(self) -> None:
+        """Line 92: non-.prompt.md file uses splitext fallback."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fpath = os.path.join(tmp, "my-workflow.md")
+            with open(fpath, "w") as f:
+                f.write("---\ndescription: My workflow\n---\nContent\n")
+            workflow = parse_workflow_file(fpath)
+        assert workflow.name == "my-workflow"
+
+    def test_extract_name_from_nested_prompt_md_not_in_github_prompts(self) -> None:
+        """Lines 88-89: .prompt.md in a directory that is NOT .github/prompts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            subdir = os.path.join(tmp, "custom", "workflows")
+            os.makedirs(subdir)
+            fpath = os.path.join(subdir, "deploy.prompt.md")
+            with open(fpath, "w") as f:
+                f.write("---\ndescription: Deploy workflow\n---\nDeploy\n")
+            workflow = parse_workflow_file(fpath)
+        assert workflow.name == "deploy"
+
+
+class TestDiscoveryCoverage:
+    """Cover discovery.py lines 19, 44-45, 63, 96."""
+
+    def test_discover_defaults_to_cwd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Line 19: base_dir=None falls back to os.getcwd()."""
+        prompts = tmp_path / ".github" / "prompts"
+        prompts.mkdir(parents=True)
+        (prompts / "a.prompt.md").write_text("---\ndescription: A\n---\nA\n")
+        monkeypatch.chdir(tmp_path)
+        result = discover_workflows()
+        assert len(result) == 1
+
+    def test_discover_skips_unparseable_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Lines 44-45: malformed file triggers parse error and is skipped."""
+        prompts = tmp_path / ".github" / "prompts"
+        prompts.mkdir(parents=True)
+        bad = prompts / "bad.prompt.md"
+        bad.write_text("---\ndescription: ok\n---\nContent\n")
+        # Make the file unreadable after discovery finds it
+        import apm_cli.workflow.discovery as disc_mod
+
+        def _fail(path: str) -> None:
+            raise Exception("forced parse error")
+
+        monkeypatch.setattr(disc_mod, "parse_workflow_file", _fail)
+        result = discover_workflows(str(tmp_path))
+        assert result == []
+
+    def test_create_template_non_vscode(self, tmp_path: Path) -> None:
+        """Line 96: use_vscode_convention=False writes to output_dir directly."""
+        path = create_workflow_template("my-wf", str(tmp_path), use_vscode_convention=False)
+        assert os.path.basename(path) == "my-wf.prompt.md"
+        assert os.path.dirname(path) == str(tmp_path)
+
+    def test_create_template_defaults_output_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Line 63: output_dir=None falls back to os.getcwd()."""
+        monkeypatch.chdir(tmp_path)
+        path = create_workflow_template("x")
+        assert os.path.exists(path)
+
+
+class TestContentHashSymlink:
+    """Cover content_hash.py line 91."""
+
+    def test_symlink_returns_empty_hash(self, tmp_path: Path) -> None:
+        from apm_cli.utils.content_hash import _EMPTY_HASH, compute_file_hash
+
+        target = tmp_path / "real.txt"
+        target.write_text("hello")
+        link = tmp_path / "link.txt"
+        link.symlink_to(target)
+        result = compute_file_hash(link)
+        assert result == _EMPTY_HASH
+
+
+class TestPackageManagerFactory:
+    """Cover factory.py lines 94-102."""
+
+    def test_create_default(self) -> None:
+        from apm_cli.factory import PackageManagerFactory
+
+        manager = PackageManagerFactory.create_package_manager()
+        assert manager is not None
+
+    def test_create_unsupported_raises(self) -> None:
+        from apm_cli.factory import PackageManagerFactory
+
+        with pytest.raises(ValueError, match=r"Unsupported package manager type"):
+            PackageManagerFactory.create_package_manager(manager_type="nonexistent")
 
 
 if __name__ == "__main__":

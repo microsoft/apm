@@ -44,6 +44,7 @@ def install_local_bundle(
     logger,
     legacy_skill_paths: bool = False,
     rejected_flags: dict[str, object],
+    trust_canvas: bool = False,
 ) -> None:
     """Deploy a local bundle into project / user scope.
 
@@ -137,6 +138,7 @@ def install_local_bundle(
             logger=logger,
             scope=scope,
             alias=alias,
+            trust_canvas=trust_canvas,
         )
 
         deployed = result.get("deployed_files", [])
@@ -364,8 +366,8 @@ def _wire_bundle_mcp_servers(
 
     from apm_cli.integration.mcp_integrator import MCPIntegrator
 
-    target_csv = ",".join(t.name for t in targets)
-    apm_config = {"target": target_csv, "scripts": {}}
+    target_names = [t.name for t in targets]
+    apm_config = {"targets": target_names, "scripts": {}}
     try:
         count = MCPIntegrator.install(
             deps,
@@ -373,7 +375,7 @@ def _wire_bundle_mcp_servers(
             apm_config=apm_config,
             project_root=project_root,
             user_scope=user_scope,
-            explicit_target=target_csv,
+            explicit_target=target_names,
             logger=logger,
         )
     except Exception as exc:
@@ -385,15 +387,15 @@ def _wire_bundle_mcp_servers(
         return 0
 
     if count:
-        logger.success(
-            f"Wired {count} MCP server(s) from bundle .mcp.json (target(s): {target_csv})"
-        )
+        joined = ", ".join(target_names)
+        logger.success(f"Wired {count} MCP server(s) from bundle .mcp.json (target(s): {joined})")
     elif deps:
         # Bundle declared servers but none applied (e.g. resolved targets
         # all gated out, or all servers already configured).  Emit an info
         # line so users have a paper-trail.
+        joined = ", ".join(target_names)
         logger.info(
             f"Bundle .mcp.json declared {len(deps)} server(s); "
-            f"no new MCP config changes for target(s): {target_csv}"
+            f"no new MCP config changes for target(s): {joined}"
         )
     return count

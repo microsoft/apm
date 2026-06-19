@@ -400,3 +400,205 @@ marketplace:
     resolved = [builder._resolve_entry(local_entry)]
     with pytest.raises(BuildError, match="yields empty path"):
         builder.compose_marketplace_json(resolved)
+
+
+# ---------------------------------------------------------------------------
+# Local apm.yml metadata inheritance
+# ---------------------------------------------------------------------------
+
+
+_APM_LOCAL_NO_CURATOR_METADATA = """\
+name: my-project
+description: Marketplace description.
+version: 1.0.0
+marketplace:
+  owner:
+    name: ACME
+  packages:
+    - name: local-tool
+      source: ./packages/local-tool
+"""
+
+
+def test_compose_local_inherits_description_from_package_apm_yml(
+    tmp_path: Path,
+) -> None:
+    """When the curator entry omits ``description``, ``apm pack`` reads it
+    from the local package's own ``apm.yml`` -- parity with remote sources.
+    """
+    _write(tmp_path / "apm.yml", _APM_LOCAL_NO_CURATOR_METADATA)
+    package_dir = tmp_path / "packages" / "local-tool"
+    package_dir.mkdir(parents=True)
+    _write(
+        package_dir / "apm.yml",
+        """\
+        name: local-tool
+        version: 0.3.0
+        description: From the package manifest.
+        """,
+    )
+
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = next(p for p in config.packages if p.is_local)
+    resolved = builder._resolve_entry(local_entry)
+    doc = builder.compose_marketplace_json([resolved])
+
+    plugin = doc["plugins"][0]
+    assert plugin["description"] == "From the package manifest."
+
+
+def test_compose_local_inherits_version_from_package_apm_yml(
+    tmp_path: Path,
+) -> None:
+    """When the curator entry omits ``version``, it falls back to the local
+    package's own ``apm.yml``.
+    """
+    _write(tmp_path / "apm.yml", _APM_LOCAL_NO_CURATOR_METADATA)
+    package_dir = tmp_path / "packages" / "local-tool"
+    package_dir.mkdir(parents=True)
+    _write(
+        package_dir / "apm.yml",
+        """\
+        name: local-tool
+        version: 0.3.0
+        description: A tool.
+        """,
+    )
+
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = next(p for p in config.packages if p.is_local)
+    resolved = builder._resolve_entry(local_entry)
+    doc = builder.compose_marketplace_json([resolved])
+
+    assert doc["plugins"][0]["version"] == "0.3.0"
+
+
+def test_compose_local_curator_description_wins_over_package(
+    tmp_path: Path,
+) -> None:
+    """Curator-side ``description`` still overrides the package manifest --
+    same precedence as the existing remote path.
+    """
+    _write(
+        tmp_path / "apm.yml",
+        """\
+        name: my-project
+        description: M.
+        version: 1.0.0
+        marketplace:
+          owner:
+            name: ACME
+          packages:
+            - name: local-tool
+              source: ./packages/local-tool
+              description: Curator-side blurb.
+        """,
+    )
+    package_dir = tmp_path / "packages" / "local-tool"
+    package_dir.mkdir(parents=True)
+    _write(
+        package_dir / "apm.yml",
+        """\
+        name: local-tool
+        version: 0.3.0
+        description: Package-side blurb.
+        """,
+    )
+
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = next(p for p in config.packages if p.is_local)
+    resolved = builder._resolve_entry(local_entry)
+    doc = builder.compose_marketplace_json([resolved])
+
+    assert doc["plugins"][0]["description"] == "Curator-side blurb."
+
+
+def test_compose_local_curator_version_wins_over_package(tmp_path: Path) -> None:
+    """Curator-side ``version`` still overrides the package manifest --
+    same precedence as the existing remote path.
+    """
+    _write(
+        tmp_path / "apm.yml",
+        """\
+        name: my-project
+        description: M.
+        version: 1.0.0
+        marketplace:
+          owner:
+            name: ACME
+          packages:
+            - name: local-tool
+              source: ./packages/local-tool
+              version: 2.0.0
+        """,
+    )
+    package_dir = tmp_path / "packages" / "local-tool"
+    package_dir.mkdir(parents=True)
+    _write(
+        package_dir / "apm.yml",
+        """\
+        name: local-tool
+        version: 0.3.0
+        description: Package-side blurb.
+        """,
+    )
+
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = next(p for p in config.packages if p.is_local)
+    resolved = builder._resolve_entry(local_entry)
+    doc = builder.compose_marketplace_json([resolved])
+
+    assert doc["plugins"][0]["version"] == "2.0.0"
+
+
+def test_compose_local_missing_package_apm_yml_omits_description(
+    tmp_path: Path,
+) -> None:
+    """When the curator omits ``description`` and the package has no
+    ``apm.yml`` on disk, the output stays silent -- no key emitted.
+    """
+    _write(tmp_path / "apm.yml", _APM_LOCAL_NO_CURATOR_METADATA)
+    # No packages/local-tool/ directory at all.
+
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = next(p for p in config.packages if p.is_local)
+    resolved = builder._resolve_entry(local_entry)
+    doc = builder.compose_marketplace_json([resolved])
+
+    plugin = doc["plugins"][0]
+    assert "description" not in plugin
+    assert "version" not in plugin
+
+
+def test_compose_local_skips_project_root_apm_yml(tmp_path: Path) -> None:
+    """A local source that resolves to the project root must not read the
+    marketplace's own ``apm.yml`` as if it were a package manifest.
+    """
+    _write(
+        tmp_path / "apm.yml",
+        """\
+        name: my-project
+        description: Marketplace-level description.
+        version: 1.0.0
+        marketplace:
+          owner:
+            name: ACME
+          packages:
+            - name: root-tool
+              source: ./
+        """,
+    )
+
+    config = load_marketplace_config(tmp_path)
+    builder = MarketplaceBuilder.from_config(config, tmp_path, BuildOptions(offline=True))
+    local_entry = next(p for p in config.packages if p.is_local)
+    resolved = builder._resolve_entry(local_entry)
+    doc = builder.compose_marketplace_json([resolved])
+
+    plugin = doc["plugins"][0]
+    assert "description" not in plugin

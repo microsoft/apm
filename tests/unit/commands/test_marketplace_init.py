@@ -64,8 +64,8 @@ class TestInitHappyPath:
         result = runner.invoke(marketplace, ["init"])
         assert result.exit_code == 0, result.output
         text = (tmp_path / "apm.yml").read_text(encoding="utf-8")
-        assert "codex:" in text
-        assert ".agents/plugins/marketplace.json" in text
+        # G4: codex is a single-line commented toggle, not a verbose multi-line block.
+        assert "# codex: {}" in text
 
     def test_success_message(self, runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

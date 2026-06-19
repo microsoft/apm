@@ -16,3 +16,15 @@ POLICY_SOURCE_FORMS_HELP = (
     "'owner/repo' (defaults to github.com), an https:// URL, or a "
     "local file path."
 )
+
+# One-line help for ``policy.dependencies.require_pinned_constraint``.
+# Kept alongside POLICY_SOURCE_FORMS_HELP so docs/tests share one
+# source of truth.  ASCII only per
+# .github/instructions/encoding.instructions.md.
+REQUIRE_PINNED_CONSTRAINT_HELP = (
+    "When true, every direct APM dep must declare a bounded constraint "
+    "(exact version, '^'/'~'/bounded range, literal tag, or SHA). "
+    "Unbounded refs (missing ref, '*', bare branch, bare '>=X.Y') are "
+    "reported through 'policy.enforcement' (warn | block). "
+    "Default: false. Recommend rolling out with 'enforcement: warn' first."
+)

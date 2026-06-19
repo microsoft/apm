@@ -19,9 +19,9 @@ from __future__ import annotations
 import os
 import subprocess
 import threading
-from dataclasses import dataclass, field  # noqa: F401
+from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, Protocol, runtime_checkable  # noqa: F401, UP035
+from typing import Protocol, runtime_checkable
 
 # Public env vars (also recognized by CLI flag plumbing).
 ENV_PROTOCOL = "APM_GIT_PROTOCOL"
@@ -30,7 +30,8 @@ ENV_ALLOW_FALLBACK = "APM_ALLOW_PROTOCOL_FALLBACK"
 # Documented escape-hatch hint surfaced on strict-mode failures.
 FALLBACK_HINT = (
     "To allow cross-protocol fallback (not recommended), pass "
-    "--allow-protocol-fallback or set APM_ALLOW_PROTOCOL_FALLBACK=1."
+    "--allow-protocol-fallback, set APM_ALLOW_PROTOCOL_FALLBACK=1, "
+    "or run: apm config set allow-protocol-fallback true"
 )
 
 

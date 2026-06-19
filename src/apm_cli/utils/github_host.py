@@ -168,17 +168,36 @@ def maybe_raise_bare_fqdn_github_gitlab_conflict(raw: str) -> None:
 def is_github_hostname(hostname: str | None) -> bool:
     """Return True if hostname should be treated as GitHub (cloud or enterprise).
 
-    Accepts 'github.com' and hosts that end with '.ghe.com'.
+    Accepts ``github.com``, hosts that end with ``.ghe.com``, and any custom
+    GitHub Enterprise Server host configured via the ``GITHUB_HOST`` env var.
 
-    Note: This is primarily for internal hostname classification.
-    APM accepts any Git host via FQDN syntax without validation.
+    The ``GITHUB_HOST`` check mirrors the GHES detection in
+    :meth:`~apm_cli.core.auth.AuthResolver.classify_host` so that parse-time
+    host classification (used by ``_detect_virtual_package`` and
+    ``_resolve_shorthand_to_parsed_url``) agrees with install-time auth
+    routing.  Without this, FQDN shorthand with subpaths (e.g.
+    ``ghe.example.com/org/repo/packages/skill``) embeds the subpath into the
+    git URL instead of splitting into ``git:`` + ``path:``.
     """
     if not hostname:
         return False
     h = hostname.lower()
     if h == "github.com":
         return True
-    return bool(h.endswith(".ghe.com"))
+    if h.endswith(".ghe.com"):
+        return True
+    # GHES: GITHUB_HOST env var points to a custom GitHub Enterprise Server.
+    # Use the same normalization as AuthResolver.classify_host() (.lower()
+    # only, no .split("/")[0]) so both stages agree on which env values match.
+    ghes_host = os.environ.get("GITHUB_HOST", "").lower()
+    return bool(
+        ghes_host
+        and ghes_host == h
+        and ghes_host not in {"github.com", "gitlab.com"}
+        and not ghes_host.endswith(".ghe.com")
+        and not is_azure_devops_hostname(ghes_host)
+        and is_valid_fqdn(ghes_host)
+    )
 
 
 def is_supported_git_host(hostname: str | None) -> bool:
@@ -278,17 +297,67 @@ def build_raw_content_url(owner: str, repo: str, ref: str, file_path: str) -> st
     return f"https://raw.githubusercontent.com/{owner}/{repo}/{encoded_ref}/{file_path}"
 
 
-def build_ssh_url(host: str, repo_ref: str, port: int | None = None) -> str:
+_SSH_USER_RE = re.compile(r"^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$")
+_SSH_USER_MAX_LEN = 64
+
+
+def validate_ssh_user(user: str) -> str:
+    """Validate an SSH username; return it unchanged or raise ``ValueError``.
+
+    Allowlist policy (deliberately strict):
+
+    - First character must be alphanumeric or underscore. This blocks
+      SSH option injection vectors like ``-oProxyCommand=...`` from ever
+      reaching ``git clone`` argv as a userinfo segment.
+    - Remaining characters are letters, digits, ``.``, ``+``, ``-``, ``_``.
+      This forbids ``/`` (path escape), ``@`` (double-userinfo confusion
+      in ``ssh://user@host``), ``:`` (port confusion), and any whitespace
+      or control character (log/ANSI injection).
+    - Maximum length 64 bytes: long enough for any legitimate username
+      and short enough to bound log size and reject buffer-abuse payloads.
+
+    The shape matches the ``user`` group in ``SCP_LIKE_RE``
+    (``cache/url_normalize.py``) so SCP-shorthand inputs that parsed
+    successfully never fail this validation, while ``ssh://`` URLs (whose
+    userinfo is percent-decoded by ``urllib.parse``) are still gated.
+    """
+    if not user:
+        raise ValueError("SSH user must be a non-empty string")
+    if len(user) > _SSH_USER_MAX_LEN:
+        raise ValueError(f"SSH user is too long ({len(user)} > {_SSH_USER_MAX_LEN} chars)")
+    if not _SSH_USER_RE.match(user):
+        # Do NOT echo the raw user value -- a hostile apm.yml could embed
+        # control characters that survive log emission. Show only the length.
+        raise ValueError(
+            f"Invalid SSH user (length {len(user)}). "
+            "Allowed: alphanumerics, '.', '+', '-', '_'; "
+            "must not start with '-'."
+        )
+    return user
+
+
+def build_ssh_url(
+    host: str,
+    repo_ref: str,
+    port: int | None = None,
+    user: str = "git",
+) -> str:
     """Build an SSH clone URL for the given host and repo_ref (owner/repo).
 
     When ``port`` is set, emit the explicit ``ssh://`` form because SCP
     shorthand (``git@host:path``) cannot carry a port — the ``:`` is the path
     separator. Without a port, keep the compact SCP shorthand (no behavioural
     change for the common case).
+
+    ``user`` defaults to ``"git"`` for backward compatibility with public
+    GitHub / GitLab / Bitbucket which all expect that fixed account name.
+    Non-default usernames (EMU SSH accounts, self-hosted servers with a
+    different bot user) are passed through after ``validate_ssh_user``.
     """
+    safe_user = validate_ssh_user(user)
     if port:
-        return f"ssh://git@{host}:{port}/{repo_ref}.git"
-    return f"git@{host}:{repo_ref}.git"
+        return f"ssh://{safe_user}@{host}:{port}/{repo_ref}.git"
+    return f"{safe_user}@{host}:{repo_ref}.git"
 
 
 def build_https_clone_url(
@@ -432,6 +501,33 @@ _ADO_AUTH_FAILURE_SIGNALS = (
     "could not read username",
 )
 
+# SSH-specific auth failure signals from OpenSSH stderr.
+# Covers: missing key, agent has no identities, host key mismatch, and
+# explicit server rejection ("no more authentication methods to try" is the
+# final line OpenSSH emits after exhausting all auth methods).
+# NOTE: connectivity errors ("could not resolve hostname", "connection refused")
+# are intentionally NOT listed here -- those are transient network/firewall
+# failures, not auth failures, and must defer to the real download phase.
+_SSH_AUTH_FAILURE_SIGNALS = (
+    "permission denied",
+    "publickey",
+    "no more authentication methods",
+    "host key verification failed",
+    "no supported authentication methods",
+    "too many authentication failures",
+    "agent refused operation",
+)
+
+# SSH connectivity failure signals -- network/firewall errors that are NOT
+# auth failures.  The preflight probe defers these (continues) so the real
+# download phase can surface them with full diagnostics.
+_SSH_CONNECTIVITY_SIGNALS = (
+    "could not resolve hostname",
+    "connection refused",
+    "network is unreachable",
+    "connection timed out",
+)
+
 
 def is_ado_auth_failure_signal(text: str | None) -> bool:
     """Return True if ``text`` matches an ADO auth-failure signal.
@@ -448,6 +544,27 @@ def is_ado_auth_failure_signal(text: str | None) -> bool:
         return False
     lowered = text.lower()
     return any(signal in lowered for signal in _ADO_AUTH_FAILURE_SIGNALS)
+
+
+def is_ssh_auth_failure_signal(text: str | None) -> bool:
+    """Return True if ``text`` matches an SSH auth failure signal.
+
+    Accepts raw stderr from ``subprocess.run`` (git ls-remote over SSH).
+    Matches case-insensitively.
+
+    Covers OpenSSH error messages for: missing or rejected public key,
+    exhausted authentication methods, and host key mismatch.
+
+    Does NOT match connectivity/network errors such as DNS resolution
+    failures ("could not resolve hostname") or firewall blocks
+    ("connection refused") -- those are transient network conditions, not
+    auth failures, and must be left to the real download phase to surface.
+    See ``_SSH_CONNECTIVITY_SIGNALS`` for the complementary set.
+    """
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(signal in lowered for signal in _SSH_AUTH_FAILURE_SIGNALS)
 
 
 def build_ado_ssh_url(org: str, project: str, repo: str, host: str = "ssh.dev.azure.com") -> str:
@@ -512,25 +629,105 @@ def is_artifactory_path(path_segments: list) -> bool:
     return len(path_segments) >= 4 and path_segments[0].lower() == "artifactory"
 
 
+def iter_artifactory_boundary_candidates(path_segments: list, shape_filter=None):
+    """Yield ``(prefix, owner, repo, virtual_path)`` candidates shallow-first.
+
+    Mirrors :meth:`DependencyReference.iter_gitlab_direct_shorthand_boundary_candidates`:
+    enumerate every plausible (owner, repo) split and let the caller probe each
+    one against the Artifactory proxy.  The probe (HEAD on the archive URL)
+    decides the real boundary; this iterator only proposes candidates.
+
+    If *shape_filter* is provided, candidates whose ``virtual_path`` fails the
+    filter are skipped.  The candidate with no virtual path (``k == n``) is
+    always yielded as the all-as-repo fallback so callers that need a
+    deterministic answer (no probing) can pick it.
+
+    The ``//`` empty-segment notation explicitly marks the repo / virtual
+    boundary and short-circuits the iterator to a single candidate.
+
+    Returns nothing for non-Artifactory paths.
+    """
+    if not is_artifactory_path(path_segments):
+        return
+    repo_key = path_segments[1]
+    prefix = f"artifactory/{repo_key}"
+    remaining = path_segments[2:]
+    if not remaining:
+        return
+    owner = remaining[0]
+    after_owner = remaining[1:]
+    n = len(after_owner)
+    if n == 0:
+        return
+
+    if "" in after_owner:
+        empty_idx = after_owner.index("")
+        repo_parts = after_owner[:empty_idx]
+        suffix_parts = [s for s in after_owner[empty_idx + 1 :] if s]
+        if repo_parts:
+            yield (
+                prefix,
+                owner,
+                "/".join(repo_parts),
+                "/".join(suffix_parts) if suffix_parts else None,
+            )
+        return
+
+    for k in range(1, n + 1):
+        repo = "/".join(after_owner[:k])
+        suffix_parts = after_owner[k:]
+        suffix = "/".join(suffix_parts) if suffix_parts else None
+        if suffix is not None and shape_filter is not None and not shape_filter(suffix):
+            continue
+        yield (prefix, owner, repo, suffix)
+
+
 def parse_artifactory_path(path_segments: list) -> tuple:
-    """Parse Artifactory path into (prefix, owner, repo, virtual_path).
+    """Parse Artifactory path into ``(prefix, owner, repo, virtual_path)``.
 
-    Input:  ['artifactory', 'github', 'microsoft', 'apm-sample-package']
-    Output: ('artifactory/github', 'microsoft', 'apm-sample-package', None)
+    Parse-time output is intentionally simple and unambiguous: ``owner`` is the
+    first segment after ``artifactory/{key}``, ``repo`` is the next segment,
+    and any further segments become ``virtual_path``.  The authoritative
+    boundary -- needed for nested GitLab subgroup paths behind the Artifactory
+    proxy -- is determined by :func:`apm_cli.install.artifactory_resolver.\
+_resolve_artifactory_boundary`, which probes archive URLs and rebuilds the
+    dependency reference at the verified boundary.
 
-    Input:  ['artifactory', 'github', 'owner', 'repo', 'skills', 'review']
-    Output: ('artifactory/github', 'owner', 'repo', 'skills/review')
+    The ``//`` notation (empty segment) is honored as an explicit, deterministic
+    boundary marker so users can opt out of probing.
 
     Returns None if not a valid Artifactory path.
     """
     if not is_artifactory_path(path_segments):
         return None
     repo_key = path_segments[1]
-    remaining = path_segments[2:]
     prefix = f"artifactory/{repo_key}"
+    remaining = path_segments[2:]
+    if not remaining:
+        return None
     owner = remaining[0]
-    repo = remaining[1]
-    virtual_path = "/".join(remaining[2:]) if len(remaining) > 2 else None
+    after_owner = remaining[1:]
+    if not after_owner:
+        return None
+
+    if "" in after_owner:
+        empty_idx = after_owner.index("")
+        repo_parts = after_owner[:empty_idx]
+        suffix_parts = [s for s in after_owner[empty_idx + 1 :] if s]
+        if not repo_parts:
+            # ``owner//virtual`` has no segments before the explicit boundary,
+            # so there is no repo to install -- reject as invalid rather than
+            # falling through and returning ``repo=''``.
+            return None
+        return (
+            prefix,
+            owner,
+            "/".join(repo_parts),
+            "/".join(suffix_parts) if suffix_parts else None,
+        )
+
+    repo = after_owner[0]
+    virtual_path = "/".join(after_owner[1:]) if len(after_owner) > 1 else None
     return (prefix, owner, repo, virtual_path)
 
 
@@ -563,11 +760,15 @@ def build_artifactory_archive_url(
         Tuple of URLs to try in order
     """
     base = f"{scheme}://{host}/{prefix}/{owner}/{repo}"
+    # GitLab archive filenames use only the project basename, even when the
+    # project sits inside a subgroup (e.g. ``group/sub/pkg`` becomes
+    # ``pkg-{ref}.zip``).  ``rsplit`` keeps the flat case unchanged.
+    repo_basename = repo.rsplit("/", 1)[-1]
     return (
         # GitHub-style: /archive/refs/heads/{ref}.zip
         f"{base}/archive/refs/heads/{ref}.zip",
-        # GitLab-style: /-/archive/{ref}/{repo}-{ref}.zip
-        f"{base}/-/archive/{ref}/{repo}-{ref}.zip",
+        # GitLab-style: /-/archive/{ref}/{basename}-{ref}.zip
+        f"{base}/-/archive/{ref}/{repo_basename}-{ref}.zip",
         # GitHub-style tags fallback
         f"{base}/archive/refs/tags/{ref}.zip",
         # codeload.github.com-style: /zip/refs/heads/{ref}

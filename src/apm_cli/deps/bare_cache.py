@@ -33,6 +33,8 @@ from typing import TYPE_CHECKING, Any
 
 from git import Repo
 
+from ..utils.git_sparse import apply_sparse_cone
+
 if TYPE_CHECKING:
     from ..models.apm_package import DependencyReference
 
@@ -543,6 +545,7 @@ def materialize_from_bare(
     ref: str | None,
     env: dict[str, str],
     known_sha: str | None = None,
+    sparse_paths: list[str] | None = None,
 ) -> str:
     """Create a working-tree checkout from a bare repo via local-shared clone.
 
@@ -566,6 +569,16 @@ def materialize_from_bare(
       - ``filter.lfs.smudge=""`` + ``filter.lfs.required=false``
         disables LFS smudge cross-platform (the empty string trick
         works everywhere; ``cat`` is not on Windows PATH).
+
+    Sparse-cone (perf #1433):
+      - When ``sparse_paths`` is set, ``git sparse-checkout init --cone``
+        followed by ``git sparse-checkout set <paths...>`` runs BEFORE
+        ``git checkout``, so only the requested top-level directories
+        are materialized in the working tree. The bare's object DB is
+        unchanged; only the consumer working tree shrinks.
+      - Sparse-checkout failures are RAISED (not silently fallen back)
+        because a silent fallback would re-introduce the 78 MB bloat
+        this parameter exists to avoid.
 
     Returns:
         The resolved commit SHA. Caller threads this into
@@ -634,6 +647,8 @@ def materialize_from_bare(
             check=False,
         )
     checkout_target = known_sha or "HEAD"
+    if sparse_paths:
+        apply_sparse_cone(git_exe, consumer_dir, list(sparse_paths), env=env)
     subprocess.run(
         [git_exe, "-C", str(consumer_dir), "checkout", checkout_target],
         capture_output=True,

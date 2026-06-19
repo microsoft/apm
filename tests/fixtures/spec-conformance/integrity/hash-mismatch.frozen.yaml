@@ -1,0 +1,14 @@
+# req-lk-013 (archive-hash mismatch fails closed)
+# The `resolved_hash` below is deliberately WRONG (last byte flipped
+# from 9 to a). A conforming consumer MUST detect this mismatch
+# before extracting the paired archive. The test asserts that
+# sha256(archive_bytes) != claimed_hash.
+lockfile_version: "2"
+generated_at: "2026-05-10T20:14:00+00:00"
+apm_version: "0.7.0"
+dependencies:
+  - repo_url: registry.example.com/contoso/security-baseline
+    source: registry
+    resolved_url: https://registry.example.com/contoso/security-baseline/2.3.1.tgz
+    resolved_hash: "sha256:06d922a7bced192b9532f50fd37cf02ac149a2583764f7ede8bbbe8f458a7c7a"
+    version: "2.3.1"

@@ -78,7 +78,7 @@ class TestPackUnpackE2E:
         assert result.returncode == 0, f"pack failed: {result.stderr}"
 
         build_dir = temp_project / "build"
-        archives = list(build_dir.glob("*.tar.gz"))
+        archives = list(build_dir.glob("*.zip"))
         assert len(archives) == 1, f"Expected 1 archive, found {archives}"
 
         # 3. Install the bundle in a clean directory. Seed the copilot

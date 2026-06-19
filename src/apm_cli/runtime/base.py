@@ -1,7 +1,47 @@
 """Base runtime adapter interface for APM."""
 
+import subprocess
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional  # noqa: F401, UP035
+from typing import Any
+
+
+def _stream_subprocess_output(cmd: list, timeout: int | None = None) -> tuple[list, int]:
+    """Run *cmd* as a subprocess, stream stdout in real-time, and return output.
+
+    Args:
+        cmd: Command and arguments list passed to :class:`subprocess.Popen`.
+        timeout: Optional wait timeout in seconds passed to
+            :meth:`subprocess.Popen.wait`.  ``None`` waits indefinitely.
+
+    Returns:
+        ``(output_lines, return_code)`` where *output_lines* is the list of
+        streamed stdout lines (including newlines) and *return_code* is the
+        process exit code.
+    """
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,  # Merge stderr into stdout for streaming
+        text=True,
+        encoding="utf-8",
+        bufsize=1,  # Line buffered
+    )
+
+    output_lines = []
+
+    for line in iter(process.stdout.readline, ""):
+        print(line, end="", flush=True)
+        output_lines.append(line)
+
+    try:
+        return_code = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        for line in iter(process.stdout.readline, ""):
+            output_lines.append(line)
+        process.stdout.close()
+        raise
+    return output_lines, return_code
 
 
 class RuntimeAdapter(ABC):

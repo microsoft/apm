@@ -17,7 +17,7 @@ apm runtime COMMAND [ARGS] [OPTIONS]
 
 ## Description
 
-`apm runtime` manages the AI CLI binaries that execute the scripts declared in `apm.yml`. It installs them from official sources, records their location, and reports which one `apm run` will pick.
+`apm runtime` manages AI CLI binaries used by APM workflows. It installs them from official sources, records their location, and reports the active runtime according to APM's preference order.
 
 It does not install APM packages and does not deploy primitives. For that, see [`apm install`](../install/). For the `scripts:` block these runtimes execute, see the [quickstart](../../../quickstart/).
 
@@ -61,7 +61,7 @@ Prints a table of every supported runtime with its installation status, install 
 apm runtime status
 ```
 
-Prints the runtime preference order (`copilot -> codex -> gemini -> llm`) and the first runtime in that order that is currently installed. `apm run` uses this resolution to choose which CLI executes a script.
+Prints the runtime preference order (`copilot -> codex -> gemini -> llm`) and the first runtime in that order that is currently installed. Explicit `apm run` scripts still execute the command body declared in `apm.yml`.
 
 ### `apm runtime remove`
 

@@ -7,7 +7,7 @@ description: >
 
 # Python Architecture Skill
 
-[Python architect persona](../../agents/python-architect.agent.md)
+[Python architect persona](../../../.apm/agents/python-architect.agent.md)
 
 ## When to activate
 

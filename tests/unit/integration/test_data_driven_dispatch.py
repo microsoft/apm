@@ -13,12 +13,24 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from apm_cli.commands.install import _integrate_package_primitives
+from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+def _to_bundle(d: dict) -> IntegratorBundle:
+    return IntegratorBundle(
+        prompt=d["prompt_integrator"],
+        agent=d["agent_integrator"],
+        skill=d["skill_integrator"],
+        instruction=d["instruction_integrator"],
+        command=d["command_integrator"],
+        hook=d["hook_integrator"],
+    )
 
 
 def _make_integration_result(n=0):
@@ -45,6 +57,7 @@ def _make_skill_result():
     sr = MagicMock()
     sr.skill_created = False
     sr.sub_skills_promoted = 0
+    sr.bin_deployed = 0
     sr.target_paths = []
     return sr
 
@@ -96,7 +109,7 @@ def _dispatch(targets, integrators=None, package_info=None, project_root=None):
         force=False,
         managed_files=set(),
         diagnostics=None,
-        **integrators,
+        integrators=_to_bundle(integrators),
     ), integrators
 
 
@@ -253,8 +266,8 @@ class TestTargetGatingRegression:
         # Verify every non-skills primitive in each target was dispatched
         for target in all_targets:
             for prim_name in target.primitives:
-                if prim_name == "skills":
-                    continue  # skills handled separately
+                if prim_name in ("skills", "canvas"):
+                    continue  # skills + canvas (copilot-only, experimental) handled separately
                 assert (target.name, prim_name) in dispatched, (
                     f"Expected ({target.name}, {prim_name}) to be dispatched"
                 )
@@ -296,7 +309,8 @@ class TestExhaustivenessChecks:
             "agents_cursor",
             "agents_opencode",
             "agents_codex",
-            "agents_windsurf",
+            # NOTE: windsurf no longer exposes an 'agents' primitive
+            # (its content deploys as skills under .windsurf/skills/).
             "commands",  # was commands_claude, aliased
             "commands_cursor",
             "commands_gemini",
@@ -304,10 +318,14 @@ class TestExhaustivenessChecks:
             "commands_windsurf",
             "instructions",  # was instructions_copilot, aliased
             "instructions_windsurf",
+            "instructions_antigravity",
+            "instructions_kiro",
             "rules_cursor",  # was instructions_cursor, aliased
             "rules_claude",  # was instructions_claude, aliased
             "skills",  # cross-target bucket
             "hooks",  # cross-target bucket
+            "prompts_copilot-app",  # copilot-app uses dedicated prompts bucket
+            "canvas_copilot",  # canvas extensions (copilot-only, experimental)
         }
 
         assert expected_keys == set(buckets.keys()), (
@@ -729,15 +747,17 @@ class TestForScope:
         assert resolved.root_dir == ".claude"
 
     def test_filters_unsupported_primitives(self):
-        """for_scope removes unsupported primitives from the dict."""
+        """for_scope keeps instructions with a different mapping for copilot user scope."""
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         copilot = KNOWN_TARGETS["copilot"]
         assert "prompts" in copilot.primitives
         assert "instructions" in copilot.primitives
         resolved = copilot.for_scope(user_scope=True)
-        assert "prompts" not in resolved.primitives
-        assert "instructions" not in resolved.primitives
+        assert "prompts" in resolved.primitives
+        # instructions now supported at user scope via concat (#650)
+        assert "instructions" in resolved.primitives
+        assert resolved.primitives["instructions"].format_id == "copilot_user_instructions"
         # Supported primitives remain
         assert "agents" in resolved.primitives
         assert "skills" in resolved.primitives
@@ -840,6 +860,7 @@ class TestPrimitiveCoverage:
             "agents",
             "commands",
             "instructions",
+            "canvas",
         }
         # skills and hooks are special-cased
         check_primitive_coverage(
@@ -893,7 +914,15 @@ class TestDispatchTable:
         from apm_cli.integration.dispatch import get_dispatch_table
 
         dispatch = get_dispatch_table()
-        expected_counters = {"prompts", "agents", "commands", "instructions", "hooks", "skills"}
+        expected_counters = {
+            "prompts",
+            "agents",
+            "commands",
+            "instructions",
+            "hooks",
+            "skills",
+            "canvases",
+        }
         actual_counters = {entry.counter_key for entry in dispatch.values()}
         assert actual_counters == expected_counters
 
@@ -928,6 +957,7 @@ class TestCoverageReverse:
             "instructions": None,
             "hooks": None,
             "skills": None,
+            "canvas": None,
             "phantoms": None,  # not in any KNOWN_TARGETS
         }
         with pytest.raises(RuntimeError, match="phantoms"):

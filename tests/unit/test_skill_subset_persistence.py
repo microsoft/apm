@@ -311,6 +311,47 @@ class TestApmYmlWriter:
         entry = data["dependencies"]["apm"][0]
         assert entry["skills"] == ["alpha", "gamma"]
 
+    def test_no_dependencies_key_returns_false(self, tmp_path):
+        """Manifest with no 'dependencies' key at all returns False (line 30: deps_section={})."""
+        from apm_cli.commands._apm_yml_writer import set_skill_subset_for_entry
+
+        manifest = self._write_manifest(tmp_path, "name: test\n")
+        result = set_skill_subset_for_entry(manifest, "owner/repo", ["skill"])
+        assert result is False
+
+    def test_entry_matches_non_str_non_dict_returns_false(self):
+        """Non-str/non-dict entry in _entry_matches returns False (line 70)."""
+        from apm_cli.commands._apm_yml_writer import _entry_matches
+
+        assert _entry_matches(42, "owner/repo") is False
+        assert _entry_matches(None, "owner/repo") is False
+        assert _entry_matches(["owner/repo"], "owner/repo") is False
+
+    def test_entry_matches_parse_error_returns_false(self):
+        """ValueError from DependencyReference.parse returns False (lines 72-73)."""
+        from unittest.mock import patch
+
+        from apm_cli.commands._apm_yml_writer import _entry_matches
+
+        with patch(
+            "apm_cli.commands._apm_yml_writer.DependencyReference.parse",
+            side_effect=ValueError("bad ref"),
+        ):
+            result = _entry_matches("bad-ref-string", "owner/repo")
+        assert result is False
+
+    def test_apply_subset_non_str_non_dict_returns_entry_unchanged(self):
+        """Non-str/non-dict entry is returned unchanged from _apply_subset (line 84)."""
+        from apm_cli.commands._apm_yml_writer import _apply_subset
+
+        entry = 42
+        result = _apply_subset(entry, ["skill"])
+        assert result == entry
+
+        entry_list = ["owner/repo"]
+        result_list = _apply_subset(entry_list, None)
+        assert result_list == entry_list
+
 
 # ============================================================================
 # _check_skill_subset_consistency audit check
@@ -415,3 +456,170 @@ class TestSkillSubsetConsistencyCheck:
 
         result = _check_skill_subset_consistency(manifest, lock)
         assert result.passed is True
+
+
+# ============================================================================
+# get_existing_skill_subset — read persisted skills: from current_deps
+# ============================================================================
+
+
+class TestGetExistingSkillSubset:
+    """Test get_existing_skill_subset helper (issue #1771)."""
+
+    def test_returns_skills_from_dict_entry(self):
+        """Dict entry with skills: returns the list."""
+        from apm_cli.install.package_resolution import get_existing_skill_subset
+
+        current_deps = [{"git": "owner/repo", "skills": ["alpha", "beta"]}]
+        result = get_existing_skill_subset(
+            current_deps, "owner/repo", dependency_reference_cls=DependencyReference
+        )
+        assert result == ["alpha", "beta"]
+
+    def test_returns_none_for_string_entry(self):
+        """Plain string entry has no skill_subset -- returns None."""
+        from apm_cli.install.package_resolution import get_existing_skill_subset
+
+        current_deps = ["owner/repo"]
+        result = get_existing_skill_subset(
+            current_deps, "owner/repo", dependency_reference_cls=DependencyReference
+        )
+        assert result is None
+
+    def test_returns_none_when_identity_not_found(self):
+        """No matching identity returns None."""
+        from apm_cli.install.package_resolution import get_existing_skill_subset
+
+        current_deps = [{"git": "other/repo", "skills": ["alpha"]}]
+        result = get_existing_skill_subset(
+            current_deps, "owner/repo", dependency_reference_cls=DependencyReference
+        )
+        assert result is None
+
+    def test_returns_none_for_empty_deps(self):
+        """Empty deps list returns None."""
+        from apm_cli.install.package_resolution import get_existing_skill_subset
+
+        result = get_existing_skill_subset(
+            [], "owner/repo", dependency_reference_cls=DependencyReference
+        )
+        assert result is None
+
+    def test_skips_unparseable_entries(self):
+        """Unparseable entries are silently skipped."""
+        from apm_cli.install.package_resolution import get_existing_skill_subset
+
+        current_deps = [42, {"git": "owner/repo", "skills": ["alpha"]}]
+        result = get_existing_skill_subset(
+            current_deps, "owner/repo", dependency_reference_cls=DependencyReference
+        )
+        assert result == ["alpha"]
+
+
+# ============================================================================
+# _resolve_package_references — additive --skill merge (issue #1771)
+# ============================================================================
+
+
+class TestSkillSubsetAdditiveMerge:
+    """Verify that --skill merges with existing manifest skills: list."""
+
+    def test_skill_names_merge_with_existing(self):
+        """New --skill names are merged with the persisted skills: list."""
+        from unittest.mock import patch
+
+        from apm_cli.commands.install import _resolve_package_references
+
+        current_deps = [{"git": "owner/repo", "skills": ["grill-me"]}]
+        existing_identities = {"owner/repo"}
+
+        with (
+            patch(
+                "apm_cli.commands.install._validate_package_exists",
+                return_value=True,
+            ),
+        ):
+            (
+                valid_outcomes,
+                _invalid,
+                _validated,
+                _mktplace,
+                apm_yml_entries,
+                _changed,
+            ) = _resolve_package_references(
+                ["owner/repo"],
+                current_deps,
+                existing_identities.copy(),
+                skill_subset=("qa",),
+            )
+
+        # The merged skill list should contain both the existing and new
+        assert len(valid_outcomes) == 1
+        assert "owner/repo" in apm_yml_entries
+        entry = apm_yml_entries["owner/repo"]
+        assert isinstance(entry, dict)
+        assert sorted(entry["skills"]) == ["grill-me", "qa"]
+
+    def test_skill_names_no_duplicates(self):
+        """Re-adding an existing skill name does not produce duplicates."""
+        from unittest.mock import patch
+
+        from apm_cli.commands.install import _resolve_package_references
+
+        current_deps = [{"git": "owner/repo", "skills": ["alpha", "beta"]}]
+        existing_identities = {"owner/repo"}
+
+        with (
+            patch(
+                "apm_cli.commands.install._validate_package_exists",
+                return_value=True,
+            ),
+        ):
+            (
+                _valid,
+                _invalid,
+                _validated,
+                _mktplace,
+                apm_yml_entries,
+                _changed,
+            ) = _resolve_package_references(
+                ["owner/repo"],
+                current_deps,
+                existing_identities.copy(),
+                skill_subset=("alpha", "gamma"),
+            )
+
+        entry = apm_yml_entries["owner/repo"]
+        assert sorted(entry["skills"]) == ["alpha", "beta", "gamma"]
+
+    def test_skill_new_package_no_existing_to_merge(self):
+        """First install with --skill on a new package works (no existing)."""
+        from unittest.mock import patch
+
+        from apm_cli.commands.install import _resolve_package_references
+
+        current_deps = []
+        existing_identities: set[str] = set()
+
+        with (
+            patch(
+                "apm_cli.commands.install._validate_package_exists",
+                return_value=True,
+            ),
+        ):
+            (
+                _valid,
+                _invalid,
+                _validated,
+                _mktplace,
+                apm_yml_entries,
+                _changed,
+            ) = _resolve_package_references(
+                ["owner/repo"],
+                current_deps,
+                existing_identities.copy(),
+                skill_subset=("qa",),
+            )
+
+        entry = apm_yml_entries["owner/repo"]
+        assert entry["skills"] == ["qa"]

@@ -780,10 +780,15 @@ class TestApplyMCPOverlay:
         with pytest.warns(UserWarning, match=r"MCP overlay field 'version' on 'srv'.*ignored"):
             MCPIntegrator._apply_overlay(cache, dep)
 
-    def test_custom_registry_overlay_emits_warning(self):
+    def test_custom_registry_overlay_no_warning(self):
+        # Per-dep registry URLs are honoured at install time (PR #1443), so
+        # _apply_overlay must no longer warn that the field is ignored.
         cache = {"srv": {"packages": [{"registry_name": "npm"}]}}
         dep = MCPDependency(name="srv", registry="https://custom.registry.io")
-        with pytest.warns(UserWarning, match=r"MCP overlay field 'registry' on 'srv'.*ignored"):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
             MCPIntegrator._apply_overlay(cache, dep)
 
     def test_registry_false_no_warning(self):
@@ -810,7 +815,7 @@ class TestInstallMCPDepsWithOverlays:
             command="my-cmd",
         )
 
-        count = MCPIntegrator.install([dep], runtime="vscode")
+        count = MCPIntegrator.install([dep], runtime="vscode", explicit_target="vscode")
 
         # Self-defined deps should NOT go through registry validation
         # (MCPServerOperations is never instantiated for self-defined-only lists)
@@ -839,7 +844,7 @@ class TestInstallMCPDepsWithOverlays:
         mock_ops.collect_runtime_variables.return_value = {}
 
         dep = MCPDependency.from_string("io.github.github/github-mcp-server")
-        count = MCPIntegrator.install([dep], runtime="vscode")
+        count = MCPIntegrator.install([dep], runtime="vscode", explicit_target="vscode")
 
         mock_ops.validate_servers_exist.assert_called_once_with(
             ["io.github.github/github-mcp-server"]
@@ -867,7 +872,9 @@ class TestInstallMCPDepsWithOverlays:
             command="my-cmd",
         )
 
-        count = MCPIntegrator.install([registry_dep, self_defined_dep], runtime="vscode")
+        count = MCPIntegrator.install(
+            [registry_dep, self_defined_dep], runtime="vscode", explicit_target="vscode"
+        )
 
         # Registry dep goes through validation
         mock_ops.validate_servers_exist.assert_called_once_with(

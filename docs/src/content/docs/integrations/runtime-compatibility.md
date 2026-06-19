@@ -6,7 +6,7 @@ sidebar:
 
 APM manages LLM runtime installation and configuration automatically. This guide covers the supported runtimes, how to use them, and how to extend APM with additional runtimes.
 
-> **Note:** This page covers APM's experimental runtime management. See also the [Agent Workflows guide](../../guides/agent-workflows/) for running workflows locally.
+> **Note:** This page covers APM's experimental runtime management. See [`apm run`](../../reference/cli/run/) for executing scripts locally.
 
 ## Overview
 
@@ -58,7 +58,7 @@ This automatically:
 
 ### Usage
 
-APM executes scripts defined in your `apm.yml`. When scripts reference `.prompt.md` files, APM compiles them with parameter substitution. See [Prompts Guide](../../guides/prompts/) for details.
+APM executes scripts defined in your `apm.yml`. When scripts reference `.prompt.md` files, APM compiles them with parameter substitution. See [Prompts Guide](../../producer/author-primitives/prompts/) for details.
 
 ```bash
 # Run scripts (from apm.yml) with parameters
@@ -76,6 +76,13 @@ scripts:
 ## OpenAI Codex Runtime
 
 APM automatically downloads, installs, and configures the Codex CLI with GitHub Models for free usage.
+
+> **⚠️ Compatibility Note — Codex v0.116+ and GitHub Models:** Codex v0.116 and later default
+> to the OpenAI Responses API (`wire_api=responses`), which GitHub Models does not expose
+> (returns 404). If you install a Codex version ≥ v0.116, change `wire_api` in
+> `~/.codex/config.toml` from `"responses"` to `"chat"` to restore GitHub Models
+> compatibility. Alternatively, pin to the last known-compatible release:
+> `apm runtime setup codex --version rust-v0.115.0`
 
 ### Setup
 
@@ -211,7 +218,7 @@ llm keys set anthropic  # Anthropic API key
 
 ### Usage
 
-APM executes scripts defined in your `apm.yml`. See [Prompts Guide](../../guides/prompts/) for details on prompt compilation.
+APM executes scripts defined in your `apm.yml`. See [Prompts Guide](../../producer/author-primitives/prompts/) for details on prompt compilation.
 
 ```bash
 # Run scripts that use LLM runtime

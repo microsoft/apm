@@ -28,16 +28,16 @@ apm init [project-name]
 
 Scaffolds a new APM project in the current directory.
 
-`apm init` writes three things: an `apm.yml` manifest, a `.apm/` directory for your local primitives (instructions, prompts, skills, agents, hooks), and the agent target directories you select (for example `.github/`, `.claude/`, `.cursor/`). It auto-detects sensible defaults for `name`, `author`, and `description` from your git config and surrounding directory; pass `-y` to accept them without prompts.
+`apm init` writes an `apm.yml` manifest with sensible defaults for `name`, `author`, and `description`, plus empty dependency and script blocks. It records selected targets in `targets:`; author `.apm/` primitives yourself and run `apm install` or `apm compile` to create target output directories.
 
-Targets are picked in priority order. An explicit `--target copilot,claude` flag wins. Otherwise an interactive checklist runs. Otherwise APM scans the working tree for signal directories (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`) and pre-checks every harness it finds. With `-y` and no flag, all detected harnesses are written into `apm.yml`. See [primitives and targets](/apm/concepts/primitives-and-targets/) for what each target actually receives.
+Targets are picked in priority order. An explicit `--target copilot,claude` flag wins. Otherwise an interactive checklist runs. Otherwise APM scans the working tree for signal directories (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`) and pre-checks every harness it finds. With `-y` and no flag, all detected harnesses are written into `apm.yml`. See [primitives and targets](/apm/concepts/primitives-and-targets/) for what each target actually receives.
 
 **Common surprises**
 
 - Re-running `apm init` in a directory that already has `apm.yml` warns and exits unless you pass `-y` (which overwrites the manifest).
 - If you set `targets:` to an empty list in `apm.yml`, target detection runs again at compile time. To pin targets, list them explicitly.
 
-**Read more:** [`apm init` reference](/apm/reference/cli/install/), [package anatomy](/apm/concepts/package-anatomy/).
+**Read more:** [`apm init` reference](/apm/reference/cli/init/), [package anatomy](/apm/concepts/package-anatomy/).
 
 ## 2. INSTALL
 
@@ -50,7 +50,7 @@ Resolves the dependency graph declared in `apm.yml`, runs the security scan, and
 Order of operations is deterministic and worth memorizing:
 
 1. **Resolve** -- walk `dependencies` and `devDependencies` (APM packages, MCP servers, Claude skills, plugin collections), follow transitive deps, pick versions.
-2. **Policy gate** -- if `apm-policy.yml` is discovered (locally or via your repo's org), every resolved dependency is checked against the allow-list before anything touches disk. Pass `--no-policy` to skip the org policy gate for one invocation; this does not bypass `apm audit --ci`.
+2. **Policy gate** -- if `apm-policy.yml` is discovered (locally or via your repo's org), every resolved dependency is checked against the allow-list before integration writes deployed files. Pass `--no-policy` to skip the org policy gate for one invocation; this does not bypass `apm audit --ci`.
 3. **Scan** -- the pre-deploy security scan inspects every primitive for hidden Unicode (zero-width characters, bidi controls, tag characters). Critical findings block the install. Pass `--force` to deploy anyway.
 4. **Integrate** -- write primitives into each target harness's native directory (`.github/`, `.claude/`, etc.) and merge MCP server configs into the harness-specific config files.
 5. **Lockfile** -- write `apm.lock.yaml` with pinned versions, content hashes, and the resolved MCP server set.
@@ -58,13 +58,13 @@ Order of operations is deterministic and worth memorizing:
 `apm install` with no arguments installs from the existing manifest. `apm install <package>` adds a new dependency, re-runs the full pipeline, and updates both `apm.yml` and `apm.lock.yaml`. `--dry-run` runs steps 1 and 2 only and prints the plan.
 
 :::note[Coming from npm?]
-`apm install` mirrors `npm install` deliberately. The big difference: APM also runs a security scan and, if present, an org policy gate before writing anything to disk.
+`apm install` mirrors `npm install` deliberately. The big difference: APM also runs a security scan and, if present, an org policy gate before writing deployed files.
 :::
 
 **Common surprises**
 
 - The scan is not optional in normal operation. If you need to land an install with a known critical finding (for example, an upstream package you cannot patch yet), use `--force` and document the exception.
-- Transitive MCP servers are gated behind explicit trust. If a deep dependency declares a new MCP server, install pauses to ask you to re-declare it in your top-level `apm.yml`. Use `--trust-transitive-mcp` to skip this in trusted environments.
+- Transitive MCP servers are gated behind explicit trust. If a deep dependency declares a new MCP server, re-declare it in your top-level `apm.yml` or use `--trust-transitive-mcp` in trusted environments.
 
 **Read more:** [`apm install` reference](/apm/reference/cli/install/), [security](/apm/enterprise/security/), [policy reference](/apm/enterprise/policy-reference/).
 
@@ -74,18 +74,18 @@ Order of operations is deterministic and worth memorizing:
 apm compile [--target <list>]
 ```
 
-Transforms the primitives in `.apm/` (and dependencies under `apm_modules/`) into harness-native files: `AGENTS.md` for Codex, `GEMINI.md` for Gemini, populated `.cursor/`, `.opencode/`, `.windsurf/` directories, and so on.
+Transforms the primitives in `.apm/` (and dependencies under `apm_modules/`) into harness-native files: `AGENTS.md` for Codex, `GEMINI.md` for Gemini, populated `.cursor/`, `.opencode/`, `.windsurf/`, `.kiro/` directories, and so on.
 
 Most users never call `apm compile` directly. `apm install` runs it as part of the integrate phase, and `apm run` auto-compiles any `.prompt.md` files referenced by a script just before execution. Reach for `apm compile` when you want to inspect what will be deployed without changing dependencies, when you are iterating on local primitives between installs, or when you only need output for one harness.
 
-The `--target` flag accepts a comma-separated list (`copilot,claude,cursor,opencode,codex,gemini,windsurf,agent-skills`) or `all`. `--dry-run` prints placement decisions without writing files. `--validate` checks primitive frontmatter and structure without producing output. `--watch` re-runs compilation on every change.
+The `--target` flag accepts a comma-separated list (`copilot,claude,cursor,opencode,codex,gemini,windsurf,kiro,agent-skills`) or `all`. `--dry-run` prints placement decisions without writing files. `--validate` checks primitive frontmatter and structure without producing output. `--watch` re-runs compilation on every change.
 
 **Common surprises**
 
 - Running `apm compile` does not re-run the security scan. The scan happens at install time. If you hand-edit primitives between installs, run `apm audit` to scan them.
 - `--clean` removes orphaned `AGENTS.md` files from previous compilations. Without it, removed primitives can leave stale output behind.
 
-**Read more:** [`apm compile` reference](/apm/reference/cli/install/), [compilation guide](/apm/producer/compile/).
+**Read more:** [`apm compile` reference](/apm/reference/cli/compile/), [compilation guide](/apm/producer/compile/).
 
 ## 4. RUN
 
@@ -119,7 +119,7 @@ The `scripts:` shape is intentionally identical to `package.json`. Object-form s
 - A script that does not reference any `.prompt.md` file runs as-is. APM only rewrites the command when it finds `.prompt.md` arguments.
 - Parameters passed with `--param` only reach prompt files. They do not become shell environment variables.
 
-**Read more:** [`apm run` reference](/apm/reference/cli/install/), [agent workflows guide](/apm/producer/author-primitives/instructions-and-agents/).
+**Read more:** [`apm run` reference](/apm/reference/cli/run/), [agent workflows guide](/apm/producer/author-primitives/instructions-and-agents/).
 
 ## 5. AUDIT
 
@@ -140,4 +140,4 @@ apm audit --file <path>    # standalone: scan an arbitrary file
 - `apm audit --ci` exits 1 on any failure -- this is the gate you wire into branch protection. The local `apm audit` exits 0 even when findings exist, unless you also pass `--strip` and writes fail.
 - The drift check rebuilds the full context from scratch; on large repos, expect a few seconds of overhead. If your CI loop cannot afford it, narrow with `--no-drift` and accept reduced coverage.
 
-**Read more:** [`apm audit` reference](/apm/reference/cli/install/), [policy reference](/apm/enterprise/policy-reference/) for the full check list, [security](/apm/enterprise/security/).
+**Read more:** [`apm audit` reference](/apm/reference/cli/audit/), [policy reference](/apm/enterprise/policy-reference/) for the full check list, [security](/apm/enterprise/security/).

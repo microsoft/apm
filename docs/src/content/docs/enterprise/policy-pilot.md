@@ -9,7 +9,7 @@ You wrote a new rule in `<org>/.github/apm-policy.yml`. Do not flip it to `block
 
 This page is the rollout sequence. Author in `warn`, measure, remediate, then escalate to `block`. Per-rule mode flips do not exist; the dial is the top-level `enforcement` field.
 
-For the schema, see [Policy Reference](../policy-reference/). For the trust contract and bypass surfaces, see [Governance overview](../governance-overview/). For wiring the gate into pull requests, see [Enforce in CI](../enforce-in-ci/).
+For the schema, see [Policy Reference](./policy-reference/). For the trust contract and bypass surfaces, see [Governance overview](./governance-overview/). For wiring the gate into pull requests, see [Enforce in CI](./enforce-in-ci/).
 
 ---
 
@@ -67,7 +67,7 @@ Merge through your `.github` repo's branch protection. Cache TTL defaults to 1 h
 Three places surface violations:
 
 1. **`apm install` output.** Each violation is written to `DiagnosticCollector` under `CATEGORY_POLICY` and printed in the end-of-install summary (`policy_violation` in `core/command_logger.py`).
-2. **`apm audit --ci --policy org`** in CI. Same checks, structured exit code, and SARIF / JSON output for GitHub Code Scanning (`apm audit --ci --format sarif`). This is the canonical way to collect a fleet-wide violation list -- see [Enforce in CI](../enforce-in-ci/).
+2. **`apm audit --ci --policy org`** in CI. Same checks, structured exit code, and SARIF / JSON output for GitHub Code Scanning (`apm audit --ci --format sarif`). This is the canonical way to collect a fleet-wide violation list -- see [Enforce in CI](./enforce-in-ci/).
 3. **`apm install --dry-run`.** Local preview without writing to disk. Useful for a developer reproducing a CI warning.
 
 Run `apm audit --ci --policy org --format sarif` in every repo (a scheduled workflow is enough) and aggregate. Code Scanning will dedupe by rule and dependency.
@@ -99,7 +99,7 @@ There is no `dependencies.deny.enforcement: block` knob. The top-level `enforcem
 If you need a single rule to block while everything else only warns, you have two options:
 
 - **Stage rules.** Land rule A in `warn`. When clean, merge rule B in `warn`. When both are clean, flip `enforcement: block`. Slower, but the policy file stays simple.
-- **Split policies via `extends:`.** Author a strict child policy that `extends:` your org policy and lives in a specific scope (e.g., a sub-org's `.github/apm-policy.yml`). Inheritance is tighten-only, so the child can escalate `warn` to `block` for its repos only. See `policy/inheritance.py` and the [Governance overview](../governance-overview/) section on composition.
+- **Split policies via `extends:`.** Author a strict child policy that `extends:` your org policy and lives in a specific scope (e.g., a sub-org's `.github/apm-policy.yml`). Inheritance is tighten-only, so the child can escalate `warn` to `block` for its repos only. See `policy/inheritance.py` and the [Governance overview](./governance-overview/) section on composition.
 
 ---
 
@@ -111,6 +111,6 @@ Roll back when:
 
 - A violation surge reveals a category of legitimate use you missed.
 - A transitive MCP dependency that you cannot patch on your timeline starts blocking installs.
-- The policy file itself fails to fetch in a way that interacts badly with `policy.fetch_failure: block` -- see [Enforce in CI](../enforce-in-ci/) for the failure-mode matrix.
+- The policy file itself fails to fetch in a way that interacts badly with `policy.fetch_failure: block` -- see [Enforce in CI](./enforce-in-ci/) for the failure-mode matrix.
 
 A rollback is cheap. A blocked org is not. If you are debating, roll back, fix forward, escalate again.

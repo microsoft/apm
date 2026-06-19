@@ -8,7 +8,7 @@ description: >-
 
 # Developer Tooling UX Skill
 
-[Developer Tooling UX expert persona](../../agents/devx-ux-expert.agent.md)
+[Developer Tooling UX expert persona](../../../.apm/agents/devx-ux-expert.agent.md)
 
 ## When to activate
 

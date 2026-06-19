@@ -1,7 +1,7 @@
 """Tests for helper utility functions."""
 
 import json
-import sys  # noqa: F401
+import sys
 import unittest
 from pathlib import Path
 
@@ -44,7 +44,7 @@ class TestHelpers(unittest.TestCase):
 
         # On most Unix systems, at least one package manager should be available
         # This is a reasonable expectation but not guaranteed on minimal systems
-        import sys  # noqa: F811
+        import sys
 
         if sys.platform != "win32":
             # Skip this assertion on Windows since it might not have any
@@ -152,3 +152,274 @@ class TestFindPluginJson(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── Extended coverage tests ──────────────────────────────────────────
+
+
+class TestIsToolAvailableEdgeCases:
+    """Tests covering Windows path and exception fallback in is_tool_available."""
+
+    def test_exception_in_subprocess_returns_false(self, monkeypatch):
+        """subprocess.run raising an exception returns False."""
+        import shutil
+
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        import subprocess
+
+        monkeypatch.setattr(
+            subprocess, "run", lambda *a, **kw: (_ for _ in ()).throw(OSError("no subprocess"))
+        )
+        assert is_tool_available("no-such-tool-xyz") is False
+
+    def test_windows_path_returns_true_on_zero_returncode(self, monkeypatch):
+        """Simulate win32 with subprocess returning rc=0."""
+        import shutil
+        import subprocess
+
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        monkeypatch.setattr(sys, "platform", "win32")
+
+        mock_result = type("R", (), {"returncode": 0})()
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock_result)
+        assert is_tool_available("some-tool") is True
+
+    def test_windows_path_returns_false_on_nonzero_returncode(self, monkeypatch):
+        """Simulate win32 with subprocess returning rc=1."""
+        import shutil
+        import subprocess
+
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        monkeypatch.setattr(sys, "platform", "win32")
+
+        mock_result = type("R", (), {"returncode": 1})()
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock_result)
+        assert is_tool_available("nonexistent") is False
+
+
+class TestDetectPlatformAllBranches:
+    """Tests covering linux, windows, unknown in detect_platform."""
+
+    def test_linux(self, monkeypatch):
+        import platform
+
+        monkeypatch.setattr(platform, "system", lambda: "Linux")
+        assert detect_platform() == "linux"
+
+    def test_windows(self, monkeypatch):
+        import platform
+
+        monkeypatch.setattr(platform, "system", lambda: "Windows")
+        assert detect_platform() == "windows"
+
+    def test_unknown(self, monkeypatch):
+        import platform
+
+        monkeypatch.setattr(platform, "system", lambda: "FreeBSD")
+        assert detect_platform() == "unknown"
+
+
+class TestGetAvailablePackageManagersBranches:
+    """Tests covering specific package manager availability paths."""
+
+    def test_pipx_included_when_available(self, monkeypatch):
+        import shutil
+
+        def fake_which(name):
+            if name == "pipx":
+                return "/usr/bin/pipx"
+            return None
+
+        monkeypatch.setattr(shutil, "which", fake_which)
+        managers = get_available_package_managers()
+        assert "pipx" in managers
+
+    def test_apt_included_when_available(self, monkeypatch):
+        import shutil
+
+        def fake_which(name):
+            return "/usr/bin/apt" if name == "apt" else None
+
+        monkeypatch.setattr(shutil, "which", fake_which)
+        managers = get_available_package_managers()
+        assert "apt" in managers
+
+    def test_yum_included_when_available(self, monkeypatch):
+        import shutil
+
+        def fake_which(name):
+            return "/usr/bin/yum" if name == "yum" else None
+
+        monkeypatch.setattr(shutil, "which", fake_which)
+        managers = get_available_package_managers()
+        assert "yum" in managers
+
+    def test_dnf_included_when_available(self, monkeypatch):
+        import shutil
+
+        def fake_which(name):
+            return "/usr/bin/dnf" if name == "dnf" else None
+
+        monkeypatch.setattr(shutil, "which", fake_which)
+        managers = get_available_package_managers()
+        assert "dnf" in managers
+
+    def test_apk_included_when_available(self, monkeypatch):
+        import shutil
+
+        def fake_which(name):
+            return "/sbin/apk" if name == "apk" else None
+
+        monkeypatch.setattr(shutil, "which", fake_which)
+        managers = get_available_package_managers()
+        assert "apk" in managers
+
+    def test_pacman_included_when_available(self, monkeypatch):
+        import shutil
+
+        def fake_which(name):
+            return "/usr/bin/pacman" if name == "pacman" else None
+
+        monkeypatch.setattr(shutil, "which", fake_which)
+        managers = get_available_package_managers()
+        assert "pacman" in managers
+
+    def test_no_tools_returns_empty(self, monkeypatch):
+        import shutil
+
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        import subprocess
+
+        mock_result = type("R", (), {"returncode": 1})()
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: mock_result)
+        managers = get_available_package_managers()
+        assert managers == {}
+
+
+# ── core/operations.py coverage ──────────────────────────────────────
+
+
+class TestCoreOperations:
+    """Tests covering missed paths in core/operations.py."""
+
+    def test_configure_client_success(self, monkeypatch):
+        """configure_client returns True on success."""
+        from unittest.mock import MagicMock
+
+        from apm_cli.core import operations as ops
+
+        mock_client = MagicMock()
+        monkeypatch.setattr(
+            "apm_cli.core.operations.ClientFactory.create_client",
+            lambda *a, **kw: mock_client,
+        )
+        result = ops.configure_client("cursor", {"key": "val"})
+        assert result is True
+        mock_client.update_config.assert_called_once()
+
+    def test_configure_client_exception_returns_false(self, monkeypatch):
+        """configure_client returns False and prints on exception (lines 36-38)."""
+        from apm_cli.core import operations as ops
+
+        def raise_err(*a, **kw):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("apm_cli.core.operations.ClientFactory.create_client", raise_err)
+        result = ops.configure_client("cursor", {})
+        assert result is False
+
+    def test_install_package_else_branch(self, monkeypatch):
+        """install_package uses else branch when no shared params passed (line 89)."""
+        from unittest.mock import MagicMock
+
+        from apm_cli.core import operations as ops
+
+        mock_summary = MagicMock()
+        mock_summary.installed = []
+        mock_summary.skipped = []
+        mock_summary.failed = []
+
+        mock_installer = MagicMock()
+        mock_installer.install_servers.return_value = mock_summary
+        monkeypatch.setattr(
+            "apm_cli.core.operations.SafeMCPInstaller",
+            lambda *a, **kw: mock_installer,
+        )
+
+        result = ops.install_package("cursor", "my-server")
+        assert result["success"] is True
+        mock_installer.install_servers.assert_called_once_with(["my-server"])
+
+    def test_install_package_exception_returns_false(self, monkeypatch):
+        """install_package returns failure dict on exception."""
+        from apm_cli.core import operations as ops
+
+        def raise_err(*a, **kw):
+            raise ValueError("bad package")
+
+        monkeypatch.setattr("apm_cli.core.operations.SafeMCPInstaller", raise_err)
+        result = ops.install_package("cursor", "pkg")
+        assert result["success"] is False
+        assert result["installed"] is False
+
+    def test_uninstall_package_removes_legacy_config(self, monkeypatch):
+        """uninstall_package removes legacy config entry when present (lines 135-140)."""
+        from unittest.mock import MagicMock
+
+        from apm_cli.core import operations as ops
+
+        package_name = "my-pkg"
+        mock_client = MagicMock()
+        mock_client.get_current_config.return_value = {f"mcp.package.{package_name}.enabled": True}
+
+        mock_pm = MagicMock()
+        mock_pm.uninstall.return_value = True
+
+        monkeypatch.setattr(
+            "apm_cli.core.operations.ClientFactory.create_client",
+            lambda *a, **kw: mock_client,
+        )
+        monkeypatch.setattr(
+            "apm_cli.core.operations.PackageManagerFactory.create_package_manager",
+            lambda: mock_pm,
+        )
+
+        result = ops.uninstall_package("cursor", package_name)
+        assert result is True
+        mock_client.update_config.assert_called_once()
+
+    def test_uninstall_package_no_legacy_config(self, monkeypatch):
+        """uninstall_package skips config update when key not present (line 136 False branch)."""
+        from unittest.mock import MagicMock
+
+        from apm_cli.core import operations as ops
+
+        mock_client = MagicMock()
+        mock_client.get_current_config.return_value = {}
+
+        mock_pm = MagicMock()
+        mock_pm.uninstall.return_value = True
+
+        monkeypatch.setattr(
+            "apm_cli.core.operations.ClientFactory.create_client",
+            lambda *a, **kw: mock_client,
+        )
+        monkeypatch.setattr(
+            "apm_cli.core.operations.PackageManagerFactory.create_package_manager",
+            lambda: mock_pm,
+        )
+
+        result = ops.uninstall_package("cursor", "pkg")
+        assert result is True
+        mock_client.update_config.assert_not_called()
+
+    def test_uninstall_package_exception_returns_false(self, monkeypatch):
+        """uninstall_package returns False on exception (lines 143-145)."""
+        from apm_cli.core import operations as ops
+
+        def raise_err(*a, **kw):
+            raise RuntimeError("no client")
+
+        monkeypatch.setattr("apm_cli.core.operations.ClientFactory.create_client", raise_err)
+        result = ops.uninstall_package("cursor", "pkg")
+        assert result is False

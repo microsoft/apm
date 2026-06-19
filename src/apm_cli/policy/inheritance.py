@@ -11,18 +11,22 @@ extends: values:
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
-
 from .schema import (
     ApmPolicy,
+    AuditPolicy,
+    BinDeployPolicy,
     CompilationPolicy,
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
     DependencyPolicy,
+    IntegrityPolicy,
     ManifestPolicy,
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
+    RegistrySourcePolicy,
+    ScannerGovernance,
+    SecurityPolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -30,10 +34,12 @@ MAX_CHAIN_DEPTH = 5
 
 # Escalation ladders -- index = severity, higher is stricter.
 _ENFORCEMENT_LEVELS = {"off": 0, "warn": 1, "block": 2}
+_FETCH_FAILURE_LEVELS = {"warn": 0, "block": 1}
 _RESOLUTION_LEVELS = {"project-wins": 0, "policy-wins": 1, "block": 2}
 _SELF_DEFINED_LEVELS = {"allow": 0, "warn": 1, "deny": 2}
 _UNMANAGED_ACTION_LEVELS = {"ignore": 0, "warn": 1, "deny": 2}
 _SCRIPTS_LEVELS = {"allow": 0, "deny": 1}
+_AUDIT_ON_INSTALL_LEVELS = {"off": 0, "warn": 1, "block": 2}
 
 
 class PolicyInheritanceError(Exception):
@@ -57,12 +63,16 @@ def merge_policies(parent: ApmPolicy, child: ApmPolicy) -> ApmPolicy:
         version=child.version or parent.version,
         extends=None,  # resolved, no longer needed
         enforcement=_merge_enforcement(parent.enforcement, child.enforcement),
+        fetch_failure=_merge_fetch_failure(parent.fetch_failure, child.fetch_failure),
         cache=_merge_cache(parent.cache, child.cache),
         dependencies=_merge_dependencies(parent.dependencies, child.dependencies),
         mcp=_merge_mcp(parent.mcp, child.mcp),
         compilation=_merge_compilation(parent.compilation, child.compilation),
         manifest=_merge_manifest(parent.manifest, child.manifest),
         unmanaged_files=_merge_unmanaged_files(parent.unmanaged_files, child.unmanaged_files),
+        registry_source=_merge_registry_source(parent.registry_source, child.registry_source),
+        security=_merge_security(parent.security, child.security),
+        bin_deploy=_merge_bin_deploy(parent.bin_deploy, child.bin_deploy),
     )
 
 
@@ -131,6 +141,40 @@ def _merge_enforcement(parent: str, child: str) -> str:
     return _escalate(_ENFORCEMENT_LEVELS, parent, child)
 
 
+def _merge_fetch_failure(parent: str, child: str) -> str:
+    """Escalate fetch_failure on the warn < block ladder (tighten, never relax)."""
+    return _escalate(_FETCH_FAILURE_LEVELS, parent, child)
+
+
+def _merge_registry_source(
+    parent: RegistrySourcePolicy, child: RegistrySourcePolicy
+) -> RegistrySourcePolicy:
+    """Merge registry-source policy: required registries union, restrict-only.
+
+    ``require`` is union-merged like other require lists -- a child can add
+    mandated registries but never drop a parent's. ``allow_non_registry`` is
+    AND-merged so once any ancestor blocks non-registry sources (``False``),
+    a child cannot relax it back to ``True``.
+    """
+    return RegistrySourcePolicy(
+        require=_union(parent.require, child.require),
+        allow_non_registry=parent.allow_non_registry and child.allow_non_registry,
+    )
+
+
+def _merge_bin_deploy(parent: BinDeployPolicy, child: BinDeployPolicy) -> BinDeployPolicy:
+    """Merge bin/ deployment policy: restrict-only.
+
+    ``deny_all`` OR-merges so any ancestor's kill-switch (``True``) sticks;
+    ``deny`` is union-merged so a child can add packages but never drop a
+    parent's denied entries.
+    """
+    return BinDeployPolicy(
+        deny_all=parent.deny_all or child.deny_all,
+        deny=_union(parent.deny, child.deny),
+    )
+
+
 def _merge_cache(parent: PolicyCache, child: PolicyCache) -> PolicyCache:
     return PolicyCache(ttl=min(parent.ttl, child.ttl))
 
@@ -144,6 +188,12 @@ def _merge_dependencies(parent: DependencyPolicy, child: DependencyPolicy) -> De
             _RESOLUTION_LEVELS, parent.require_resolution, child.require_resolution
         ),
         max_depth=min(parent.max_depth, child.max_depth),
+        # Strict-wins: once a parent (org) policy enables the pin
+        # requirement, a child cannot relax it. This matches
+        # ``allow``/``deny``/``require`` semantics where the child can
+        # only narrow, never broaden.
+        require_pinned_constraint=parent.require_pinned_constraint
+        or child.require_pinned_constraint,
     )
 
 
@@ -204,7 +254,7 @@ def _merge_unmanaged_files(
     parent: UnmanagedFilesPolicy, child: UnmanagedFilesPolicy
 ) -> UnmanagedFilesPolicy:
     """Merge unmanaged-files policy; omitted child block is transparent (#1198)."""
-    if child.action is None and child.directories is None:
+    if child.action is None and child.directories is None and child.exclude is None:
         return parent
 
     if child.action is None:
@@ -224,10 +274,89 @@ def _merge_unmanaged_files(
             child.directories,
         )
 
+    if child.exclude is None:
+        eff_exclude = parent.exclude
+    else:
+        eff_exclude = _union(parent.exclude or (), child.exclude)
+
     eff_action = eff_action_raw if eff_action_raw is not None else "ignore"
     eff_dirs_out: tuple[str, ...] = () if eff_dirs is None else eff_dirs
 
-    return UnmanagedFilesPolicy(action=eff_action, directories=eff_dirs_out)
+    return UnmanagedFilesPolicy(action=eff_action, directories=eff_dirs_out, exclude=eff_exclude)
+
+
+def _merge_security(parent: SecurityPolicy, child: SecurityPolicy) -> SecurityPolicy:
+    """Merge the security section: audit tightens but never relaxes.
+
+    ``on_install`` escalates on the off < warn < block ladder with
+    None-transparency (``None`` means "no opinion"; the other side flows
+    through).  ``external`` (required scanners) is union-merged like other
+    require lists -- a child can add scanners but not drop a parent's.
+    """
+    p, c = parent.audit, child.audit
+    if p.on_install is None:
+        on_install = c.on_install
+    elif c.on_install is None:
+        on_install = p.on_install
+    else:
+        on_install = _escalate(_AUDIT_ON_INSTALL_LEVELS, p.on_install, c.on_install)
+    return SecurityPolicy(
+        audit=AuditPolicy(
+            on_install=on_install,
+            external=_merge_list_field(p.external, c.external),
+            scanners=_merge_scanners(p.scanners, c.scanners),
+            # Tighten-not-relax: OR-merge keeps a parent True even when a child
+            # is silent (False default), and lets a child tighten an off parent.
+            fail_on_drift=p.fail_on_drift or c.fail_on_drift,
+        ),
+        integrity=IntegrityPolicy(
+            require_hashes=parent.integrity.require_hashes or child.integrity.require_hashes,
+        ),
+    )
+
+
+def _merge_scanners(
+    parent: tuple[tuple[str, ScannerGovernance], ...] | None,
+    child: tuple[tuple[str, ScannerGovernance], ...] | None,
+) -> tuple[tuple[str, ScannerGovernance], ...] | None:
+    """Merge per-scanner governance: union of names; ``allow_args`` AND-merged.
+
+    Restrict-only -- any ancestor forbidding args (``allow_args=False``) wins,
+    so a child can tighten but never relax a parent's kill-switch. ``None``
+    means "no opinion" and flows through transparently.
+    """
+    if parent is None and child is None:
+        return None
+    p_map = dict(parent or ())
+    c_map = dict(child or ())
+    merged: list[tuple[str, ScannerGovernance]] = []
+    seen: set[str] = set()
+    for name in list(p_map) + [n for n in c_map if n not in p_map]:
+        if name in seen:
+            continue
+        seen.add(name)
+        merged.append((name, _merge_governance(p_map.get(name), c_map.get(name))))
+    return tuple(merged)
+
+
+def _merge_governance(
+    parent: ScannerGovernance | None,
+    child: ScannerGovernance | None,
+) -> ScannerGovernance:
+    """AND-merge two governance blocks (``allow_args=False`` always wins).
+
+    ``None`` is "no opinion" and flows through transparently; ``False``
+    (forbid args) beats ``True`` so an org floor can never be relaxed.
+    """
+    p_allow = parent.allow_args if parent is not None else None
+    c_allow = child.allow_args if child is not None else None
+    if p_allow is False or c_allow is False:
+        allow_args: bool | None = False
+    elif p_allow is None and c_allow is None:
+        allow_args = None
+    else:
+        allow_args = True
+    return ScannerGovernance(allow_args=allow_args)
 
 
 # ---------------------------------------------------------------------------

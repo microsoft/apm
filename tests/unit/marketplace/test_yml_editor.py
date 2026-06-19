@@ -1,4 +1,4 @@
-"""Tests for ``apm_cli.marketplace.yml_editor`` – round-trip YAML editor."""
+"""Tests for ``apm_cli.marketplace.yml_editor`` - round-trip YAML editor."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ packages:
 
 
 # ---------------------------------------------------------------------------
-# add_plugin_entry – happy paths
+# add_plugin_entry - happy paths
 # ---------------------------------------------------------------------------
 
 
@@ -116,7 +116,7 @@ class TestAddPluginHappy:
 
 
 # ---------------------------------------------------------------------------
-# add_plugin_entry – error paths
+# add_plugin_entry - error paths
 # ---------------------------------------------------------------------------
 
 
@@ -156,6 +156,28 @@ class TestAddPluginErrors:
         with pytest.raises(MarketplaceYmlError, match="source"):
             add_plugin_entry(yml, source="noslash", version=">=1.0.0")
 
+    def test_invalid_source_error_message_lists_all_forms(self, tmp_path):
+        """Error wording must mention every accepted form so users get a complete hint."""
+        yml = _write_yml(tmp_path, _BASIC_YML)
+        with pytest.raises(MarketplaceYmlError) as exc:
+            add_plugin_entry(yml, source="bogus@host/owner/repo", version=">=1.0.0")
+        msg = str(exc.value)
+        assert "<owner>/<repo>" in msg
+        assert "<host.tld>/<owner>/<repo>" in msg
+        assert "https://" in msg
+        assert "./<path>" in msg
+
+    def test_host_prefixed_source_accepted(self, tmp_path):
+        """yml_editor accepts the same host-prefixed form as the loader."""
+        yml = _write_yml(tmp_path, _BASIC_YML)
+        add_plugin_entry(
+            yml,
+            name="ghe-tool",
+            source="ghe.example.com/acme/tool",
+            ref="v1.0.0",
+        )
+        assert "ghe.example.com/acme/tool" in yml.read_text("utf-8")
+
     def test_path_traversal_in_subdir_raises(self, tmp_path):
         yml = _write_yml(tmp_path, _BASIC_YML)
         with pytest.raises(MarketplaceYmlError):
@@ -168,7 +190,7 @@ class TestAddPluginErrors:
 
 
 # ---------------------------------------------------------------------------
-# add_plugin_entry – comment preservation
+# add_plugin_entry - comment preservation
 # ---------------------------------------------------------------------------
 
 
@@ -196,7 +218,7 @@ class TestAddPluginCommentPreservation:
 
 
 # ---------------------------------------------------------------------------
-# update_plugin_entry – happy paths
+# update_plugin_entry - happy paths
 # ---------------------------------------------------------------------------
 
 
@@ -262,7 +284,7 @@ class TestUpdatePluginHappy:
 
 
 # ---------------------------------------------------------------------------
-# update_plugin_entry – error paths
+# update_plugin_entry - error paths
 # ---------------------------------------------------------------------------
 
 
@@ -284,7 +306,7 @@ class TestUpdatePluginErrors:
 
 
 # ---------------------------------------------------------------------------
-# remove_plugin_entry – happy paths
+# remove_plugin_entry - happy paths
 # ---------------------------------------------------------------------------
 
 
@@ -305,7 +327,7 @@ class TestRemovePluginHappy:
 
 
 # ---------------------------------------------------------------------------
-# remove_plugin_entry – error paths
+# remove_plugin_entry - error paths
 # ---------------------------------------------------------------------------
 
 

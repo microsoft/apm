@@ -1,0 +1,153 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "synthesizer-return-schema.json",
+  "title": "APM Spec Guardian - Synthesizer Return Shape (advisory regime)",
+  "description": "Shape the spec-editor-synthesizer MUST return when invoked by the apm-spec-guardian skill. Mirrors the structure of SPEC_BRIEF_v2 (ship decision + convergence evidence + fold-now + defer-v0.1.1 + defer-v0.2 + reject). The synthesizer does NOT pick a binary verdict; the panel is advisory. The orchestrator renders these fields into the comment template.",
+  "type": "object",
+  "required": [
+    "round",
+    "shocked_meter_avg",
+    "convergence_table",
+    "convergent_themes",
+    "fold_now",
+    "defer_v0_1_1",
+    "defer_v0_2",
+    "reject",
+    "ship_decision",
+    "ship_prose",
+    "linter_handoff_notes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "round": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3,
+      "description": "Round number this synthesis covers."
+    },
+    "shocked_meter_avg": {
+      "type": "number",
+      "minimum": 1,
+      "maximum": 10,
+      "description": "Arithmetic mean of the four panelists' shocked_meter values. Used for the ship-meter floor (>=7.0 required for fold_and_ship)."
+    },
+    "convergence_table": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "description": "One row per panelist (4 panels exactly). Used to render the top-of-comment convergence summary table.",
+      "items": {
+        "type": "object",
+        "required": ["panel", "verdict", "shocked_meter", "new_blockers", "new_recommended", "new_nits"],
+        "additionalProperties": false,
+        "properties": {
+          "panel": {
+            "type": "string",
+            "enum": [
+              "spec-swagger-editor",
+              "spec-oci-editor",
+              "spec-pkgmgr-editor",
+              "spec-tag-architect"
+            ]
+          },
+          "verdict": {
+            "type": "string",
+            "enum": ["ship", "ship_with_followups", "needs_revision", "needs_next_brief"]
+          },
+          "shocked_meter": { "type": "integer", "minimum": 1, "maximum": 10 },
+          "new_blockers": { "type": "integer", "minimum": 0 },
+          "new_recommended": { "type": "integer", "minimum": 0 },
+          "new_nits": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "convergent_themes": {
+      "type": "array",
+      "description": "Themes independently flagged by 2 or more panels. Up to 6 themes. Each cites the supporting findings.",
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "supporting_finding_ids"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^T[1-9][0-9]*$" },
+          "label": { "type": "string" },
+          "supporting_finding_ids": {
+            "type": "array",
+            "minItems": 2,
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "fold_now": {
+      "type": "array",
+      "description": "Surgical, single-section fixes the drafter can fold in one mechanical pass before shipping the PR. Each cites a success criterion the linter (or a follow-up grep) can verify.",
+      "items": { "$ref": "#/definitions/fold_item" }
+    },
+    "defer_v0_1_1": {
+      "type": "array",
+      "description": "Small patches deferred to the next patch release. Same shape as fold_now; success_criterion MAY be looser since the work happens post-merge.",
+      "items": { "$ref": "#/definitions/fold_item" }
+    },
+    "defer_v0_2": {
+      "type": "array",
+      "description": "Architectural work bound to a reserved slot in a future major. Each entry MUST cite the existing reserved-slot section anchor in the artifact (e.g. 'sec.4.8 workspaces reserved', 'sec.10.12 publisher attestations reserved').",
+      "items": {
+        "allOf": [
+          { "$ref": "#/definitions/fold_item" },
+          {
+            "type": "object",
+            "required": ["reserved_slot_anchor"],
+            "properties": {
+              "reserved_slot_anchor": {
+                "type": "string",
+                "description": "Section / anchor in the current artifact that already reserves space for this work."
+              }
+            }
+          }
+        ]
+      }
+    },
+    "reject": {
+      "type": "array",
+      "description": "Findings the synthesizer declines, with rationale. Common reject reasons: out-of-scope for v0.1 lineage; would add a forbidden vendor / foundation token; duplicates a closed round-1 reject; re-litigates a settled decision without new evidence.",
+      "items": {
+        "type": "object",
+        "required": ["finding_id", "rationale"],
+        "additionalProperties": false,
+        "properties": {
+          "finding_id": { "type": "string" },
+          "rationale": { "type": "string" }
+        }
+      }
+    },
+    "ship_decision": {
+      "type": "string",
+      "enum": ["fold_and_ship", "needs_revision", "next_brief"],
+      "description": "Advisory ship recommendation. NEVER auto-applied as a label or verdict. Decision rules: (1) if sum of panelist new_blocking_findings across all panels > 0, MUST be 'next_brief'; (2) else if shocked_meter_avg < 7.0, MUST be 'needs_revision'; (3) else MAY be 'fold_and_ship'."
+    },
+    "ship_prose": {
+      "type": "string",
+      "description": "One to two paragraphs naming the recommended next action, the highest-signal follow-up to track, and (if applicable) why the loop budget is exhausted. Plain markdown, ASCII only."
+    },
+    "linter_handoff_notes": {
+      "type": "string",
+      "description": "Anything Wave 5 (linter) must specifically verify after the fold (e.g. 'After F1 + F8 + F9 land, re-grep req-XXX count and reconcile sec.1.3 + Appendix C + Appendix D'). Empty string if no special handoff needed."
+    }
+  },
+  "definitions": {
+    "fold_item": {
+      "type": "object",
+      "required": ["id", "theme", "spec_section", "patch_instruction", "success_criterion"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^F[1-9][0-9]*$" },
+        "theme": { "type": "string", "description": "Convergent-theme id this fold addresses (e.g. T1, T2), or 'standalone' if not part of a clustered theme." },
+        "spec_section": { "type": "string", "description": "Section / appendix / req-XXX anchor where the patch lands." },
+        "patch_instruction": { "type": "string", "description": "Concrete mechanical instruction the drafter applies. ASCII only. MUST NOT add any forbidden vendor / foundation token to the artifact." },
+        "success_criterion": { "type": "string", "description": "Verifiable post-fold check (grep, schema validation, or anchor count)." }
+      }
+    }
+  }
+}

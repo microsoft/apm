@@ -119,6 +119,48 @@ class TestClaudeClientAdapterProject(unittest.TestCase):
         data = json.loads(self.mcp_path.read_text(encoding="utf-8"))
         self.assertIn("srv", data["mcpServers"])
 
+    def test_self_defined_skill_command_rewritten_to_claude_skills(self):
+        """Skill-shipped MCP launchers declare their command using the
+        cross-tool ``.agents/skills/<name>/...`` convention.  Claude does not
+        converge to ``.agents/skills/`` (see install/skill_path_migration.py),
+        so the prefix must be rewritten to ``.claude/skills/`` -- otherwise
+        ``.mcp.json`` points at a path that does not exist on disk.
+        """
+        with patch.object(self.adapter, "registry_client") as mock_registry:
+            mock_registry.find_server_by_reference.return_value = {
+                "name": "chrome-devtools",
+                "_raw_stdio": {
+                    "command": ".agents/skills/nix-chrome-devtools-mcp/bin/serve",
+                    "args": [],
+                    "env": {},
+                },
+            }
+            ok = self.adapter.configure_mcp_server("chrome-devtools")
+
+        self.assertTrue(ok)
+        data = json.loads(self.mcp_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            data["mcpServers"]["chrome-devtools"]["command"],
+            ".claude/skills/nix-chrome-devtools-mcp/bin/serve",
+        )
+
+    def test_self_defined_non_skill_command_left_unchanged(self):
+        """Only the ``.agents/skills/<name>/...`` prefix is rewritten;
+        bare binaries (``npx``, ``node``), absolute paths, and unrelated
+        relative paths must pass through verbatim.
+        """
+        for raw_command in (
+            "npx",
+            "/usr/local/bin/mcp-server",
+            "./scripts/run-mcp.sh",
+            ".agents/other/path",
+        ):
+            with self.subTest(command=raw_command):
+                self.assertEqual(
+                    self.adapter._rewrite_self_defined_skill_command(raw_command),
+                    raw_command,
+                )
+
     def test_configure_self_defined_stdio_preserves_env(self):
         with patch.object(self.adapter, "registry_client") as mock_registry:
             mock_registry.find_server_by_reference.return_value = {

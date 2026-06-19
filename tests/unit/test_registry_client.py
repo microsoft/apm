@@ -2,7 +2,9 @@
 
 import os
 import unittest
+import warnings
 from unittest import mock
+from urllib.parse import urlparse
 
 import requests
 
@@ -19,168 +21,268 @@ class TestSimpleRegistryClient(unittest.TestCase):
 
     @mock.patch("requests.Session.get")
     def test_list_servers(self, mock_get):
-        """Test listing servers from the registry."""
-        # Mock response
+        """Test listing servers from the registry under the v0.1 spec."""
         mock_response = mock.Mock()
         mock_response.json.return_value = {
             "servers": [
-                {
-                    "id": "123e4567-e89b-12d3-a456-426614174000",
-                    "name": "server1",
-                    "description": "Description 1",
-                },
-                {
-                    "id": "223e4567-e89b-12d3-a456-426614174000",
-                    "name": "server2",
-                    "description": "Description 2",
-                },
+                {"server": {"name": "io.github.foo/server1", "description": "Description 1"}},
+                {"server": {"name": "io.github.foo/server2", "description": "Description 2"}},
             ],
-            "metadata": {"next_cursor": "next-page-token", "count": 2},
+            "metadata": {"nextCursor": "next-page-token", "count": 2},
         }
         mock_response.raise_for_status.return_value = None
         mock_get.return_value = mock_response
 
-        # Call the method
         servers, next_cursor = self.client.list_servers()
 
-        # Assertions
         self.assertEqual(len(servers), 2)
-        self.assertEqual(servers[0]["name"], "server1")
-        self.assertEqual(servers[1]["name"], "server2")
+        self.assertEqual(servers[0]["name"], "io.github.foo/server1")
+        self.assertEqual(servers[1]["name"], "io.github.foo/server2")
         self.assertEqual(next_cursor, "next-page-token")
         mock_get.assert_called_once_with(
-            f"{self.client.registry_url}/v0/servers",
+            f"{self.client.registry_url}/v0.1/servers",
             params={"limit": 100},
             timeout=self.client._timeout,
         )
 
     @mock.patch("requests.Session.get")
     def test_list_servers_with_pagination(self, mock_get):
-        """Test listing servers with pagination parameters."""
-        # Mock response
+        """Test listing servers with pagination parameters under the v0.1 spec."""
         mock_response = mock.Mock()
         mock_response.json.return_value = {"servers": [], "metadata": {}}
         mock_response.raise_for_status.return_value = None
         mock_get.return_value = mock_response
 
-        # Call the method with pagination
         self.client.list_servers(limit=10, cursor="page-token")
 
-        # Assertions
         mock_get.assert_called_once_with(
-            f"{self.client.registry_url}/v0/servers",
+            f"{self.client.registry_url}/v0.1/servers",
             params={"limit": 10, "cursor": "page-token"},
             timeout=self.client._timeout,
         )
 
     @mock.patch("requests.Session.get")
+    def test_list_servers_reads_nextCursor_camelCase(self, mock_get):
+        """Regression trap (#1210): metadata.nextCursor is the spec key."""
+        mock_response = mock.Mock()
+        mock_response.json.return_value = {
+            "servers": [],
+            "metadata": {"nextCursor": "spec-cursor"},
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        _, next_cursor = self.client.list_servers()
+        self.assertEqual(next_cursor, "spec-cursor")
+
+    @mock.patch("requests.Session.get")
+    def test_list_servers_uses_v0_1_endpoint(self, mock_get):
+        """Regression trap (#1210): URL must be /v0.1/, never /v0/."""
+        mock_response = mock.Mock()
+        mock_response.json.return_value = {"servers": [], "metadata": {}}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        self.client.list_servers()
+        called_url = mock_get.call_args[0][0]
+        parsed_path = urlparse(called_url).path
+        self.assertEqual(parsed_path, "/v0.1/servers")
+        self.assertNotEqual(parsed_path, "/v0/servers")
+
+    @mock.patch("requests.Session.get")
     def test_search_servers(self, mock_get):
-        """Test searching for servers in the registry using API search endpoint."""
-        # Mock response
+        """Test searching for servers under the v0.1 spec (?search= on /v0.1/servers)."""
         mock_response = mock.Mock()
         mock_response.json.return_value = {
             "servers": [
-                {"server": {"name": "test-server", "description": "Test description"}},
-                {"server": {"name": "server2", "description": "Another test"}},
+                {
+                    "server": {
+                        "name": "io.github.foo/test-server",
+                        "description": "Test description",
+                    }
+                },
+                {"server": {"name": "io.github.foo/server2", "description": "Another test"}},
             ]
         }
         mock_response.raise_for_status.return_value = None
         mock_get.return_value = mock_response
 
-        # Call the method with a search query
         results = self.client.search_servers("test")
 
-        # Assertions
         mock_get.assert_called_once_with(
-            f"{self.client.registry_url}/v0/servers/search",
-            params={"q": "test"},
+            f"{self.client.registry_url}/v0.1/servers",
+            params={"search": "test"},
             timeout=self.client._timeout,
         )
         self.assertEqual(len(results), 2)
-        self.assertEqual(results[0]["name"], "test-server")
-        self.assertEqual(results[1]["name"], "server2")
+        self.assertEqual(results[0]["name"], "io.github.foo/test-server")
+        self.assertEqual(results[1]["name"], "io.github.foo/server2")
 
     @mock.patch("requests.Session.get")
-    def test_get_server_info(self, mock_get):
-        """Test getting server information from the registry."""
-        # Mock response
+    def test_search_servers_passes_full_reference(self, mock_get):
+        """search_servers passes the full reference (no slug pre-trim) to the spec ?search="""
+        mock_response = mock.Mock()
+        mock_response.json.return_value = {"servers": []}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        self.client.search_servers("io.github.foo/bar")
+
+        mock_get.assert_called_once_with(
+            f"{self.client.registry_url}/v0.1/servers",
+            params={"search": "io.github.foo/bar"},
+            timeout=self.client._timeout,
+        )
+
+    @mock.patch("requests.Session.get")
+    def test_get_server(self, mock_get):
+        """Test getting server info under the v0.1 spec."""
         mock_response = mock.Mock()
         server_data = {
-            "id": "123e4567-e89b-12d3-a456-426614174000",
-            "name": "test-server",
-            "description": "Test server description",
-            "repository": {
-                "url": f"https://{github_host.default_host()}/test/test-server",
-                "source": "github",
-                "id": "12345",
-            },
-            "version_detail": {
+            "server": {
+                "name": "io.github.foo/test-server",
+                "description": "Test server description",
+                "repository": {
+                    "url": f"https://{github_host.default_host()}/foo/test-server",
+                    "source": "github",
+                    "id": "12345",
+                },
                 "version": "1.0.0",
-                "release_date": "2025-05-16T19:13:21Z",
-                "is_latest": True,
-            },
-            "package_canonical": "npm",
-            "packages": [
-                {
-                    "registry_name": "npm",
-                    "name": "test-package",
-                    "version": "1.0.0",
-                    "runtime_hint": "npx",
-                }
-            ],
+                "packages": [
+                    {
+                        "registry_name": "npm",
+                        "name": "test-package",
+                        "version": "1.0.0",
+                        "runtime_hint": "npx",
+                    }
+                ],
+            }
         }
         mock_response.json.return_value = server_data
         mock_response.raise_for_status.return_value = None
         mock_get.return_value = mock_response
 
-        # Call the method
-        server_info = self.client.get_server_info("123e4567-e89b-12d3-a456-426614174000")
+        server_info = self.client.get_server("io.github.foo/test-server")
 
-        # Assertions
-        self.assertEqual(server_info["name"], "test-server")
-        self.assertEqual(server_info["version_detail"]["version"], "1.0.0")
+        self.assertEqual(server_info["name"], "io.github.foo/test-server")
+        self.assertEqual(server_info["version"], "1.0.0")
         self.assertEqual(server_info["packages"][0]["name"], "test-package")
         mock_get.assert_called_once_with(
-            f"{self.client.registry_url}/v0/servers/123e4567-e89b-12d3-a456-426614174000",
+            f"{self.client.registry_url}/v0.1/servers/io.github.foo%2Ftest-server/versions/latest",
             timeout=self.client._timeout,
         )
 
+    @mock.patch("requests.Session.get")
+    def test_get_server_url_encodes_slash_in_name(self, mock_get):
+        """Regression trap (#1210): slash in serverName must be URL-encoded as %2F."""
+        mock_response = mock.Mock()
+        mock_response.json.return_value = {"server": {"name": "io.github.github/github-mcp-server"}}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        self.client.get_server("io.github.github/github-mcp-server")
+
+        called_url = mock_get.call_args[0][0]
+        parsed_path = urlparse(called_url).path
+        # serverName slash must be encoded as %2F so the registry routes the
+        # name as a single path segment, not as nested servers/<owner>/<repo>.
+        self.assertEqual(
+            parsed_path,
+            "/v0.1/servers/io.github.github%2Fgithub-mcp-server/versions/latest",
+        )
+
+    def test_get_server_rejects_invalid_name_shape(self):
+        """get_server rejects names that don't match the MCP spec shape."""
+        for bad in ["", "../etc/passwd", "https://evil/", "name with space", "a/b/c"]:
+            with self.subTest(name=bad):
+                with self.assertRaises(ValueError):
+                    self.client.get_server(bad)
+
+    @mock.patch("requests.Session.get")
+    def test_get_server_404_raises_server_not_found(self, mock_get):
+        """get_server wraps 404s in ServerNotFoundError carrying the registry URL."""
+        from apm_cli.registry.client import ServerNotFoundError
+
+        mock_response = mock.Mock()
+        mock_response.status_code = 404
+        http_error = requests.HTTPError("404 Not Found")
+        http_error.response = mock_response
+        mock_response.raise_for_status.side_effect = http_error
+        mock_get.return_value = mock_response
+
+        with self.assertRaises(ServerNotFoundError) as cm:
+            self.client.get_server("io.github.foo/missing")
+        msg = str(cm.exception)
+        self.assertIn("io.github.foo/missing", msg)
+        # Validate the registry URL appears in the error by parsing it out of
+        # the message rather than substring-matching the raw URL (CodeQL rule
+        # `py/incomplete-url-substring-sanitization`). Find the URL token that
+        # carries a scheme and assert hostname / scheme equality.
+        registry_parsed = urlparse(self.client.registry_url)
+        url_tokens = [tok.strip(".,;'\")(") for tok in msg.split() if "://" in tok]
+        parsed_tokens = [urlparse(tok) for tok in url_tokens]
+        self.assertTrue(
+            any(
+                p.scheme == registry_parsed.scheme and p.hostname == registry_parsed.hostname
+                for p in parsed_tokens
+            ),
+            f"Registry URL not present in error message: {msg!r}",
+        )
+        # ServerNotFoundError must be a ValueError subclass for legacy callers
+        self.assertIsInstance(cm.exception, ValueError)
+
+    def test_get_server_info_is_deprecated_shim(self):
+        """get_server_info is a one-minor deprecation shim that forwards to get_server."""
+        with mock.patch.object(self.client, "get_server") as mock_get_server:
+            mock_get_server.return_value = {"name": "io.github.foo/bar"}
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                result = self.client.get_server_info("io.github.foo/bar")
+            self.assertEqual(result, {"name": "io.github.foo/bar"})
+            mock_get_server.assert_called_once_with("io.github.foo/bar")
+            self.assertTrue(
+                any(issubclass(w.category, DeprecationWarning) for w in caught),
+                f"Expected DeprecationWarning, got {[w.category for w in caught]}",
+            )
+
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server_info")
-    def test_get_server_by_name(self, mock_get_server_info, mock_search_servers):
-        """Test finding a server by name using search API."""
-        # Mock search_servers
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
+    def test_get_server_by_name(self, mock_get_server, mock_search_servers):
+        """Test finding a server by name using search API (v0.1 shape: name, no id)."""
         mock_search_servers.return_value = [
-            {"id": "123e4567-e89b-12d3-a456-426614174000", "name": "test-server"},
-            {"id": "223e4567-e89b-12d3-a456-426614174000", "name": "other-server"},
+            {"name": "test-server"},
+            {"name": "other-server"},
         ]
+        server_data = {"name": "test-server", "description": "Test server"}
+        mock_get_server.return_value = server_data
 
-        # Mock get_server_info
-        server_data = {
-            "id": "123e4567-e89b-12d3-a456-426614174000",
-            "name": "test-server",
-            "description": "Test server",
-        }
-        mock_get_server_info.return_value = server_data
-
-        # Test finding server using search
         result = self.client.get_server_by_name("test-server")
 
-        # Assertions
         self.assertEqual(result, server_data)
         mock_search_servers.assert_called_once_with("test-server")
-        mock_get_server_info.assert_called_once_with("123e4567-e89b-12d3-a456-426614174000")
+        mock_get_server.assert_called_once_with("test-server")
 
         # Reset mocks for non-existent test
-        mock_get_server_info.reset_mock()
+        mock_get_server.reset_mock()
         mock_search_servers.reset_mock()
-        mock_search_servers.return_value = []  # No search results
+        mock_search_servers.return_value = []
 
-        # Test non-existent server
         result = self.client.get_server_by_name("non-existent")
         self.assertIsNone(result)
         mock_search_servers.assert_called_once_with("non-existent")
-        mock_get_server_info.assert_not_called()
+        mock_get_server.assert_not_called()
+
+    def test_get_server_by_name_does_not_require_top_level_id(self):
+        """Regression trap (#1210): lookup chain must work without top-level 'id'."""
+        with (
+            mock.patch.object(self.client, "search_servers") as mock_search,
+            mock.patch.object(self.client, "get_server") as mock_get,
+        ):
+            mock_search.return_value = [{"name": "io.github.foo/bar"}]  # NO 'id' key
+            mock_get.return_value = {"name": "io.github.foo/bar"}
+            result = self.client.get_server_by_name("io.github.foo/bar")
+            self.assertEqual(result, {"name": "io.github.foo/bar"})
+            mock_get.assert_called_once_with("io.github.foo/bar")
 
     @mock.patch.dict(os.environ, {"MCP_REGISTRY_URL": "https://custom-registry.example.com"})
     def test_environment_variable_override(self):
@@ -192,125 +294,66 @@ class TestSimpleRegistryClient(unittest.TestCase):
         client = SimpleRegistryClient("https://explicit-url.example.com")
         self.assertEqual(client.registry_url, "https://explicit-url.example.com")
 
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server_info")
-    def test_find_server_by_reference_uuid(self, mock_get_server_info):
-        """Test finding a server by UUID reference."""
-        # Mock server data
-        server_data = {
-            "id": "123e4567-e89b-12d3-a456-426614174000",
-            "name": "test-server",
-            "description": "Test server",
-        }
-        mock_get_server_info.return_value = server_data
-
-        # Call the method with UUID
-        result = self.client.find_server_by_reference("123e4567-e89b-12d3-a456-426614174000")
-
-        # Assertions
-        self.assertEqual(result, server_data)
-        mock_get_server_info.assert_called_once_with("123e4567-e89b-12d3-a456-426614174000")
-
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server_info")
-    def test_find_server_by_reference_uuid_not_found(
-        self, mock_get_server_info, mock_search_servers
-    ):
-        """Test finding a server by UUID that doesn't exist.
-
-        When the UUID lookup raises ValueError, ``find_server_by_reference`` falls
-        through to ``search_servers``; that fallback must be mocked so the test
-        never hits the real registry (the Windows CI runner cannot resolve
-        ``api.mcp.github.com`` and the call would raise ``socket.gaierror``).
-        """
-        # Mock get_server_info to raise ValueError so the UUID branch fails.
-        mock_get_server_info.side_effect = ValueError("Server not found")
-        # Mock the fallback search to return no hits (the "not found" case).
+    def test_find_server_by_reference_uuid_input_returns_none(self, mock_search_servers):
+        """The legacy UUID strategy is removed; UUID-shaped refs route to search and miss."""
         mock_search_servers.return_value = []
-
-        # Call the method with UUID
         result = self.client.find_server_by_reference("123e4567-e89b-12d3-a456-426614174000")
-
-        # Should return None when server not found
         self.assertIsNone(result)
-        mock_get_server_info.assert_called_once_with("123e4567-e89b-12d3-a456-426614174000")
         mock_search_servers.assert_called_once_with("123e4567-e89b-12d3-a456-426614174000")
 
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server_info")
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
-    def test_find_server_by_reference_name_match(self, mock_search_servers, mock_get_server_info):
-        """Test finding a server by exact name match."""
-        # Mock search_servers
+    def test_find_server_by_reference_name_match(self, mock_search_servers, mock_get_server):
+        """Test finding a server by exact name match (v0.1 shape)."""
         mock_search_servers.return_value = [
-            {"id": "123e4567-e89b-12d3-a456-426614174000", "name": "io.github.owner/repo-name"},
-            {"id": "223e4567-e89b-12d3-a456-426614174000", "name": "other-server"},
+            {"name": "io.github.owner/repo-name"},
+            {"name": "other-server"},
         ]
+        server_data = {"name": "io.github.owner/repo-name", "description": "Test server"}
+        mock_get_server.return_value = server_data
 
-        # Mock get_server_info
-        server_data = {
-            "id": "123e4567-e89b-12d3-a456-426614174000",
-            "name": "io.github.owner/repo-name",
-            "description": "Test server",
-        }
-        mock_get_server_info.return_value = server_data
-
-        # Call the method with exact name
         result = self.client.find_server_by_reference("io.github.owner/repo-name")
 
-        # Assertions
         self.assertEqual(result, server_data)
         mock_search_servers.assert_called_once_with("io.github.owner/repo-name")
-        mock_get_server_info.assert_called_once_with("123e4567-e89b-12d3-a456-426614174000")
+        mock_get_server.assert_called_once_with("io.github.owner/repo-name")
 
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
     def test_find_server_by_reference_name_not_found(self, mock_search_servers):
         """Test finding a server by name that doesn't exist in registry."""
-        # Mock search_servers with no matching names
         mock_search_servers.return_value = [
-            {
-                "id": "123e4567-e89b-12d3-a456-426614174000",
-                "name": "io.github.owner/different-repo",
-            },
-            {"id": "223e4567-e89b-12d3-a456-426614174000", "name": "other-server"},
+            {"name": "io.github.owner/different-repo"},
+            {"name": "other-server"},
         ]
 
-        # Call the method with non-existent name
         result = self.client.find_server_by_reference("ghcr.io/github/github-mcp-server")
 
-        # Should return None when server not found
         self.assertIsNone(result)
         mock_search_servers.assert_called_once_with("ghcr.io/github/github-mcp-server")
 
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server_info")
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
-    def test_find_server_by_reference_name_match_get_server_info_fails(
-        self, mock_search_servers, mock_get_server_info
+    def test_find_server_by_reference_name_match_get_server_fails(
+        self, mock_search_servers, mock_get_server
     ):
-        """Test finding a server by name when get_server_info raises ValueError (stale ID)."""
-        # Mock search_servers
-        mock_search_servers.return_value = [
-            {"id": "123e4567-e89b-12d3-a456-426614174000", "name": "test-server"}
-        ]
+        """When get_server raises ValueError (e.g. ServerNotFoundError), return None."""
+        mock_search_servers.return_value = [{"name": "test-server"}]
+        mock_get_server.side_effect = ValueError("Server not found")
 
-        # Mock get_server_info to fail with ValueError (server not found by ID)
-        mock_get_server_info.side_effect = ValueError("Server not found")
-
-        # Should return None when get_server_info fails with ValueError
         result = self.client.find_server_by_reference("test-server")
 
         self.assertIsNone(result)
         mock_search_servers.assert_called_once_with("test-server")
 
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server_info")
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
     def test_find_server_by_reference_name_match_network_error_propagates(
-        self, mock_search_servers, mock_get_server_info
+        self, mock_search_servers, mock_get_server
     ):
-        """Test that network errors in get_server_info propagate to the caller."""
-        mock_search_servers.return_value = [
-            {"id": "123e4567-e89b-12d3-a456-426614174000", "name": "test-server"}
-        ]
-
-        mock_get_server_info.side_effect = requests.ConnectionError("Network error")
+        """Test that network errors in get_server propagate to the caller."""
+        mock_search_servers.return_value = [{"name": "test-server"}]
+        mock_get_server.side_effect = requests.ConnectionError("Network error")
 
         with self.assertRaises(requests.ConnectionError):
             self.client.find_server_by_reference("test-server")
@@ -318,16 +361,14 @@ class TestSimpleRegistryClient(unittest.TestCase):
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
     def test_find_server_by_reference_invalid_format(self, mock_search_servers):
         """Test finding a server with various invalid/edge case formats."""
-        # Mock search_servers with no matches
         mock_search_servers.return_value = []
 
-        # Test various formats that should not match
         test_cases = [
-            "",  # Empty string
-            "short",  # Too short to be UUID
-            "123e4567-e89b-12d3-a456-426614174000-extra",  # Too long to be UUID
-            "not-a-uuid-but-36-chars-long-string",  # 36 chars but wrong format
-            "registry.io/very/long/path/name",  # Container-like reference
+            "",
+            "short",
+            "123e4567-e89b-12d3-a456-426614174000-extra",
+            "not-a-uuid-but-36-chars-long-string",
+            "registry.io/very/long/path/name",
         ]
 
         for test_case in test_cases:
@@ -335,39 +376,36 @@ class TestSimpleRegistryClient(unittest.TestCase):
                 result = self.client.find_server_by_reference(test_case)
                 self.assertIsNone(result)
 
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server_info")
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
-    def test_find_server_by_reference_no_slug_collision(
-        self, mock_search_servers, mock_get_server_info
-    ):
+    def test_find_server_by_reference_no_slug_collision(self, mock_search_servers, mock_get_server):
         """Test that qualified names don't collide on shared slugs (bug #165)."""
-        # Registry returns multiple servers sharing the slug 'mcp'
         mock_search_servers.return_value = [
-            {"id": "aaa", "name": "com.supabase/mcp"},
-            {"id": "bbb", "name": "microsoftdocs/mcp"},
+            {"name": "com.supabase/mcp"},
+            {"name": "microsoftdocs/mcp"},
         ]
-        server_data = {"id": "bbb", "name": "microsoftdocs/mcp", "description": "MS Docs"}
-        mock_get_server_info.return_value = server_data
+        server_data = {"name": "microsoftdocs/mcp", "description": "MS Docs"}
+        mock_get_server.return_value = server_data
 
         result = self.client.find_server_by_reference("microsoftdocs/mcp")
 
         self.assertEqual(result, server_data)
-        mock_get_server_info.assert_called_once_with("bbb")
+        mock_get_server.assert_called_once_with("microsoftdocs/mcp")
 
-    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server_info")
+    @mock.patch("apm_cli.registry.client.SimpleRegistryClient.get_server")
     @mock.patch("apm_cli.registry.client.SimpleRegistryClient.search_servers")
     def test_find_server_by_reference_qualified_no_match(
-        self, mock_search_servers, mock_get_server_info
+        self, mock_search_servers, mock_get_server
     ):
         """Test that a qualified name with no exact match returns None."""
         mock_search_servers.return_value = [
-            {"id": "aaa", "name": "com.supabase/mcp"},
+            {"name": "com.supabase/mcp"},
         ]
 
         result = self.client.find_server_by_reference("microsoftdocs/mcp")
 
         self.assertIsNone(result)
-        mock_get_server_info.assert_not_called()
+        mock_get_server.assert_not_called()
 
     def test_is_server_match_qualified_prevents_collision(self):
         """Test _is_server_match rejects different namespaces with same slug."""
@@ -488,6 +526,134 @@ class TestSimpleRegistryClientValidation(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             SimpleRegistryClient()
         self.assertIn("MCP_REGISTRY_URL", str(cm.exception))
+
+    def test_userinfo_stripped_from_registry_url(self):
+        """SimpleRegistryClient must strip user:pass@ from the stored URL.
+
+        Regression trap for the credential-leak path: if userinfo survives
+        into ``self.registry_url``, ``ServerNotFoundError`` interpolates it
+        into terminal output and CI logs.
+        """
+        c = SimpleRegistryClient("https://token:x-oauth@registry.corp.example.com/")
+        parsed = urlparse(c.registry_url)
+        self.assertEqual(parsed.scheme, "https")
+        self.assertEqual(parsed.hostname, "registry.corp.example.com")
+        self.assertIsNone(parsed.username)
+        self.assertIsNone(parsed.password)
+        self.assertEqual(c.registry_url, "https://registry.corp.example.com")
+
+    def test_userinfo_stripped_preserves_explicit_port(self):
+        c = SimpleRegistryClient("https://user:pass@registry.corp.example.com:8443/")
+        parsed = urlparse(c.registry_url)
+        self.assertEqual(parsed.hostname, "registry.corp.example.com")
+        self.assertEqual(parsed.port, 8443)
+        self.assertIsNone(parsed.username)
+        self.assertIsNone(parsed.password)
+
+
+class TestNormalizeV01Package(unittest.TestCase):
+    """Unit tests for the v0.1 -> snake_case package shape normalizer.
+
+    Regression trap for #1210: registry returns camelCase keys per the
+    v0.1 spec, but adapters in ``src/apm_cli/adapters/client/`` consume
+    snake_case keys (``name``, ``runtime_hint``, ``package_arguments``,
+    ...). Without the boundary normalizer, ``apm install`` produced
+    ``npx -y None`` because the resolved package dict had no ``name``.
+    """
+
+    def test_normalize_v0_1_package_backfills_all_aliases(self):
+        """Every v0.1 camelCase alias backfills its snake_case counterpart."""
+        v0_1_package = {
+            "identifier": "@modelcontextprotocol/server-fetch",
+            "registryType": "npm",
+            "registryBaseUrl": "https://registry.npmjs.org",
+            "runtimeHint": "npx",
+            "packageArguments": [{"value": "-y"}],
+            "runtimeArguments": [{"value": "--no-install"}],
+            "environmentVariables": [{"name": "DEBUG", "value": "1"}],
+            "version": "1.0.0",
+        }
+        normalized = SimpleRegistryClient._normalize_v0_1_package(v0_1_package)
+
+        self.assertEqual(normalized["name"], "@modelcontextprotocol/server-fetch")
+        self.assertEqual(normalized["registry_name"], "npm")
+        self.assertEqual(normalized["registry_base_url"], "https://registry.npmjs.org")
+        self.assertEqual(normalized["runtime_hint"], "npx")
+        self.assertEqual(normalized["package_arguments"], [{"value": "-y"}])
+        self.assertEqual(normalized["runtime_arguments"], [{"value": "--no-install"}])
+        self.assertEqual(normalized["environment_variables"], [{"name": "DEBUG", "value": "1"}])
+        self.assertEqual(normalized["version"], "1.0.0")
+
+        # camelCase keys are preserved (one-way bridge, not a rewrite).
+        self.assertEqual(normalized["identifier"], "@modelcontextprotocol/server-fetch")
+        self.assertEqual(normalized["runtimeHint"], "npx")
+
+    def test_normalize_v0_1_package_preserves_existing_legacy_keys(self):
+        """When both camelCase and snake_case are present, snake_case wins."""
+        package = {
+            "identifier": "v0.1-name",
+            "name": "legacy-name",
+            "runtimeHint": "v0.1-hint",
+            "runtime_hint": "legacy-hint",
+        }
+        normalized = SimpleRegistryClient._normalize_v0_1_package(package)
+        self.assertEqual(normalized["name"], "legacy-name")
+        self.assertEqual(normalized["runtime_hint"], "legacy-hint")
+
+    def test_normalize_v0_1_package_does_not_mutate_input(self):
+        """Normalizer returns a shallow copy; the input dict is unchanged."""
+        package = {"identifier": "foo", "runtimeHint": "npx"}
+        SimpleRegistryClient._normalize_v0_1_package(package)
+        self.assertNotIn("name", package)
+        self.assertNotIn("runtime_hint", package)
+
+    def test_normalize_v0_1_package_handles_partial_aliases(self):
+        """Aliases backfill independently; missing v0.1 keys are no-ops."""
+        package = {"identifier": "foo", "version": "1.0.0"}
+        normalized = SimpleRegistryClient._normalize_v0_1_package(package)
+        self.assertEqual(normalized["name"], "foo")
+        self.assertNotIn("runtime_hint", normalized)
+        self.assertNotIn("registry_name", normalized)
+
+    def test_normalize_v0_1_package_returns_non_dict_unchanged(self):
+        self.assertIsNone(SimpleRegistryClient._normalize_v0_1_package(None))
+        self.assertEqual(SimpleRegistryClient._normalize_v0_1_package("not-a-dict"), "not-a-dict")
+
+    def test_normalize_v0_1_server_normalizes_packages_list(self):
+        """Server-level normalizer applies package normalization to each entry."""
+        server = {
+            "name": "io.github.foo/bar",
+            "version": "1.0.0",
+            "packages": [
+                {"identifier": "pkg-a", "runtimeHint": "npx"},
+                {"identifier": "pkg-b", "registryType": "pypi"},
+            ],
+        }
+        normalized = SimpleRegistryClient._normalize_v0_1_server(server)
+        self.assertEqual(normalized["packages"][0]["name"], "pkg-a")
+        self.assertEqual(normalized["packages"][0]["runtime_hint"], "npx")
+        self.assertEqual(normalized["packages"][1]["name"], "pkg-b")
+        self.assertEqual(normalized["packages"][1]["registry_name"], "pypi")
+
+    def test_normalize_v0_1_server_does_not_mutate_input(self):
+        """Server-level normalizer matches sibling copy semantics (no mutation)."""
+        server = {
+            "name": "io.github.foo/bar",
+            "packages": [{"identifier": "pkg-a", "runtimeHint": "npx"}],
+        }
+        SimpleRegistryClient._normalize_v0_1_server(server)
+        self.assertNotIn("name", server["packages"][0])
+        self.assertNotIn("runtime_hint", server["packages"][0])
+
+    def test_normalize_v0_1_server_handles_missing_packages(self):
+        """Server with no packages list passes through unchanged."""
+        server = {"name": "io.github.foo/bar", "version": "1.0.0"}
+        normalized = SimpleRegistryClient._normalize_v0_1_server(server)
+        self.assertEqual(normalized["name"], "io.github.foo/bar")
+        self.assertNotIn("packages", normalized)
+
+    def test_normalize_v0_1_server_returns_non_dict_unchanged(self):
+        self.assertIsNone(SimpleRegistryClient._normalize_v0_1_server(None))
 
 
 if __name__ == "__main__":

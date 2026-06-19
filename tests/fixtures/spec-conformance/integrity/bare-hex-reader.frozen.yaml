@@ -1,0 +1,17 @@
+# req-lk-016 (bare-hex reader-tolerance, deprecated)
+# v0.1 readers MUST tolerate the legacy bare-hex hash form (no
+# `sha256:` envelope). v0.2 will require the envelope exclusively.
+# The lockfile schema's `local_deployed_file_hashes` pattern is the
+# regression handle: it permits `[0-9a-f]{64}` as well as the
+# envelope.
+lockfile_version: "2"
+generated_at: "2026-05-10T20:14:00+00:00"
+apm_version: "0.7.0"
+dependencies:
+  - repo_url: github.com/contoso/legacy-bundle
+    resolved_commit: "a1b2c3d4e5f6789012345678901234567890abcd"
+    resolved_ref: "v1.0.0"
+local_deployed_files:
+  - .github/instructions/legacy.md
+local_deployed_file_hashes:
+  .github/instructions/legacy.md: "c62747a2802841aa2cfd57ea8696596395dd053ac6cc25386740dbbfad3997f2"

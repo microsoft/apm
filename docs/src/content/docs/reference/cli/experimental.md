@@ -68,7 +68,11 @@ Reset one flag (when `NAME` is given) or all flags (when omitted) to registry de
 | Flag | What it does | Related command |
 | --- | --- | --- |
 | `verbose-version` | Adds Python version, platform, and install path to `apm --version` output. | `apm --version` |
-| `copilot-cowork` | Enables Microsoft 365 Copilot Cowork skill deployment via OneDrive. | `apm compile --target copilot-cowork --global` |
+| `copilot-cowork` | Enables Microsoft 365 Copilot Cowork skill deployment via OneDrive. | `apm install --target copilot-cowork --global` |
+| `copilot-app` | Deploys prompts as workflows into the GitHub Copilot desktop App. Workflows arrive disabled; enable them from the Copilot app's Workflows tab. | `apm install --target copilot-app` |
+| `marketplace-authoring` | Enables marketplace authoring commands (`init`, `build`, `publish`). | `apm marketplace --help` |
+| `registries` | Enables REST-based APM package registries in `apm.yml` and `~/.apm/config.json`. | `apm install` (with `registries:` configured) |
+| `external-scanners` | Enables third-party SARIF scanner ingestion in `apm audit` (`--external`, `--external-llm`, `--external-args`), the `external.<name>.{llm,args}` config keys, and `security.audit.scanners` policy governance. | `apm audit --external skillspector` |
 
 Run `apm experimental list` to see the live registry; new flags ship in minor releases.
 

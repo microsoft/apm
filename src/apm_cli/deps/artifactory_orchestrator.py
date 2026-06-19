@@ -175,12 +175,15 @@ class ArtifactoryOrchestrator:
     @staticmethod
     def _split_owner_repo(dep_ref: DependencyReference) -> tuple[str, str]:
         repo_parts = dep_ref.repo_url.split("/")
-        if len(repo_parts) < 2 or not repo_parts[0] or not repo_parts[1]:
+        if len(repo_parts) < 2 or not all(repo_parts):
             raise ValueError(
                 f"Invalid Artifactory repo reference '{dep_ref.repo_url}': "
                 "expected 'owner/repo' format"
             )
-        return repo_parts[0], repo_parts[1]
+        # Owner is the top-level namespace; the remainder of the path is the
+        # project slug.  For GitLab projects behind an Artifactory VCS proxy
+        # the slug can include subgroups (e.g. ``group/subgroup/project``).
+        return repo_parts[0], "/".join(repo_parts[1:])
 
     @staticmethod
     def _progress(progress_obj, progress_task_id, *, completed: int, total: int = 100) -> None:
@@ -220,20 +223,10 @@ class ArtifactoryOrchestrator:
             raise
         self._progress(progress_obj, progress_task_id, completed=70)
 
+        from ._shared import _validate_and_load_package
+
         validation_result = validate_apm_package(target_path)
-        if not validation_result.is_valid:
-            if target_path.exists():
-                _rmtree(target_path)
-            error_msg = f"Invalid APM package {dep_ref.repo_url}:\n"
-            for error in validation_result.errors:
-                error_msg += f"  - {error}\n"
-            raise RuntimeError(error_msg.strip())
-        if not validation_result.package:
-            raise RuntimeError(
-                f"Package validation succeeded but no package metadata found for {dep_ref.repo_url}"
-            )
-        package = validation_result.package
-        package.source = dep_ref.to_github_url()
+        package = _validate_and_load_package(validation_result, target_path, dep_ref)
         package.resolved_commit = None
         resolved_ref = ResolvedReference(
             original_ref=f"{dep_ref.repo_url}#{ref}",
@@ -267,7 +260,9 @@ class ArtifactoryOrchestrator:
         subdir_path = dep_ref.virtual_path
         repo_parts = dep_ref.repo_url.split("/")
         owner = repo_parts[0]
-        repo = repo_parts[1] if len(repo_parts) > 1 else repo_parts[0]
+        # Preserve subgroup nesting (GitLab via proxy) by folding everything
+        # past the owner into the repo slug.
+        repo = "/".join(repo_parts[1:]) if len(repo_parts) > 1 else repo_parts[0]
         host, prefix, scheme = proxy_info
 
         self._progress(progress_obj, progress_task_id, completed=10)

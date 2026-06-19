@@ -1,15 +1,14 @@
 """Discovery functionality for primitive files."""
 
 import fnmatch
-import glob  # noqa: F401
 import logging
 import os
+import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 from ..constants import DEFAULT_SKIP_DIRS
+from ..utils import perf_stats
 from ..utils.exclude import should_exclude, validate_exclude_patterns
-from ..utils.paths import portable_relpath
 from .models import PrimitiveCollection
 from .parser import parse_primitive_file, parse_skill_file
 
@@ -44,6 +43,21 @@ LOCAL_PRIMITIVE_PATTERNS: dict[str, list[str]] = {
     ],
 }
 
+# Canonical primitive-file extensions, derived from LOCAL_PRIMITIVE_PATTERNS
+# so a new primitive type added there is automatically recognized anywhere
+# the suffix set is consumed (e.g. ``apm compile --watch`` smart-skip).
+# Computed at module load (one allocation) and exposed as a frozenset for
+# O(1) membership testing on the hot path. SKILL files are matched by
+# exact basename, not suffix, so they are NOT included here -- callers that
+# care about skills must additionally check ``os.path.basename(p) == "SKILL.md"``.
+PRIMITIVE_SUFFIXES: frozenset[str] = frozenset(
+    "." + pattern.rsplit("*.", 1)[1]
+    for patterns in LOCAL_PRIMITIVE_PATTERNS.values()
+    for pattern in patterns
+    if "*." in pattern
+)
+
+
 # Dependency primitive patterns (for .apm directory within dependencies)
 DEPENDENCY_PRIMITIVE_PATTERNS: dict[str, list[str]] = {
     "chatmode": [
@@ -69,6 +83,37 @@ DEPENDENCY_GITHUB_PRIMITIVE_PATTERNS: dict[str, list[str]] = {
 }
 
 
+# Process-scoped memo for ``discover_primitives``. Keyed on the
+# resolved absolute base directory + canonical exclude-patterns tuple.
+# Cleared explicitly at the start of every install pipeline run by
+# ``clear_discovery_cache()``. NOT thread-safe by design -- the
+# integrate phase that consumes it is sequential. See issue #1533.
+_DISCOVERY_CACHE: dict[tuple[str, tuple[str, ...]], PrimitiveCollection] = {}
+
+
+def clear_discovery_cache() -> None:
+    """Drop all memoized ``discover_primitives`` results.
+
+    Call at the start of every install pipeline invocation so counts
+    from earlier runs (tests, REPL, long-lived processes) cannot leak
+    into the next install's discovery results.
+    """
+    _DISCOVERY_CACHE.clear()
+
+
+def _discovery_cache_key(
+    base_dir: str, exclude_patterns: list[str] | None
+) -> tuple[str, tuple[str, ...]]:
+    """Build a stable cache key for ``discover_primitives``.
+
+    Uses ``os.path.realpath`` instead of ``Path.resolve()`` for symlink
+    canonicalization without the per-component pathlib overhead.
+    """
+    canonical_base = os.path.realpath(base_dir)
+    canonical_excl = tuple(sorted(exclude_patterns)) if exclude_patterns else ()
+    return (canonical_base, canonical_excl)
+
+
 def discover_primitives(
     base_dir: str = ".",
     exclude_patterns: list[str] | None = None,
@@ -78,6 +123,11 @@ def discover_primitives(
     Searches for .chatmode.md, .instructions.md, .context.md, .memory.md files
     in both .apm/ and .github/ directory structures, plus SKILL.md at root.
 
+    Results are memoized per ``(realpath(base_dir), exclude_patterns)`` for
+    the lifetime of the current install pipeline run so that the integrate
+    phase's per-(integrator, target) loop does not re-walk the same tree
+    N times. See ``clear_discovery_cache()`` for invalidation.
+
     Args:
         base_dir (str): Base directory to search in. Defaults to current directory.
         exclude_patterns (Optional[List[str]]): Glob patterns for paths to exclude.
@@ -85,8 +135,18 @@ def discover_primitives(
     Returns:
         PrimitiveCollection: Collection of discovered and parsed primitives.
     """
+    started = time.perf_counter()
+    cache_key = _discovery_cache_key(base_dir, exclude_patterns)
+    cached = _DISCOVERY_CACHE.get(cache_key)
+    if cached is not None:
+        perf_stats.record_discovery(
+            base_dir=str(base_dir),
+            duration_s=time.perf_counter() - started,
+            cache_hit=True,
+        )
+        return cached
+
     collection = PrimitiveCollection()
-    base_path = Path(base_dir)  # noqa: F841
     safe_patterns = validate_exclude_patterns(exclude_patterns)
 
     # Find and parse files for each primitive type
@@ -103,6 +163,12 @@ def discover_primitives(
     # Discover SKILL.md at project root
     _discover_local_skill(base_dir, collection, exclude_patterns=safe_patterns)
 
+    _DISCOVERY_CACHE[cache_key] = collection
+    perf_stats.record_discovery(
+        base_dir=str(base_dir),
+        duration_s=time.perf_counter() - started,
+        cache_hit=False,
+    )
     return collection
 
 
@@ -287,51 +353,57 @@ def get_dependency_declaration_order(base_dir: str) -> list[str]:
                 # This matches our org-namespaced directory structure
                 dependency_names.append(dep.repo_url)
 
-        # Include transitive dependencies from apm.lock
-        # Direct deps from apm.yml have priority; transitive deps are appended
-        lockfile_paths = LockFile.installed_paths_for_project(Path(base_dir))
+        # Include transitive dependencies + local-bundle slugs from the
+        # lockfile.  Read it once and reuse the parsed object for both
+        # the transitive-paths walk and the ``local_deployed_files``
+        # slug derivation (issue #1363) to avoid duplicate YAML parses
+        # on every compile.
+        project_root = Path(base_dir)
+        lockfile_path = project_root / "apm.lock.yaml"
+        if not lockfile_path.exists():
+            legacy = project_root / "apm.lock"
+            if legacy.exists():
+                lockfile_path = legacy
+        lock = LockFile.read(lockfile_path) if lockfile_path.exists() else None
+
         direct_set = set(dependency_names)
-        for path in lockfile_paths:
-            if path not in direct_set:
-                dependency_names.append(path)
+        if lock is not None:
+            for path in lock.get_installed_paths(project_root / "apm_modules"):
+                if path not in direct_set:
+                    dependency_names.append(path)
+
+        # Local-bundle install stages instructions under
+        # ``apm_modules/<slug>/.apm/...`` but intentionally does NOT
+        # mutate ``apm.yml`` (services.py:489-490), so the scan loop
+        # would otherwise never visit those staged dirs and
+        # ``apm compile`` would produce no output for compile-only
+        # targets (opencode, codex, gemini).
+        #
+        # Provenance is anchored to the lockfile record -- a stray
+        # directory under ``apm_modules/`` without a lockfile entry must
+        # not be discovered (defends against phantom-content injection
+        # and stale-debris drift).
+        if lock is not None:
+            local_slugs: set[str] = set()
+            for deployed in lock.local_deployed_files:
+                # Match ``apm_modules/<slug>/.apm/...`` only. Other
+                # deployed files (``.github/instructions/...``,
+                # ``.agents/skills/...``) are not bundle staging
+                # markers and must not produce phantom slugs.
+                parts = Path(deployed).parts
+                if len(parts) >= 3 and parts[0] == "apm_modules" and parts[2] == ".apm":
+                    local_slugs.add(parts[1])
+            seen = set(dependency_names)
+            for slug in sorted(local_slugs):
+                if slug not in seen:
+                    dependency_names.append(slug)
+                    seen.add(slug)
 
         return dependency_names
 
     except Exception as e:
         print(f"Warning: Failed to parse dependency order from apm.yml: {e}")
         return []
-
-
-def _glob_match(rel_path: str, pattern: str) -> bool:
-    """Match a relative path against a single glob pattern (supports ``**/`` prefix).
-
-    ``fnmatch.fnmatch`` already treats ``*`` as matching any character
-    including ``/``, so it handles single-segment wildcards over paths.
-    This helper adds support for a leading ``**/`` which means *zero or
-    more directory levels* — it strips the prefix and tries the remaining
-    sub-pattern against every suffix of *rel_path*.
-
-    Args:
-        rel_path: Forward-slash-normalised path relative to the walk root.
-        pattern: Glob pattern, e.g. ``agents/*.agent.md`` or
-            ``**/.apm/agents/*.agent.md``.
-    """
-    if pattern.startswith("**/"):
-        sub_pattern = pattern[3:]
-        # Try at root depth (zero-level match)
-        if fnmatch.fnmatch(rel_path, sub_pattern):
-            return True
-        # Try at every deeper suffix after each "/"
-        idx = 0
-        while True:
-            idx = rel_path.find("/", idx)
-            if idx == -1:
-                break
-            if fnmatch.fnmatch(rel_path[idx + 1 :], sub_pattern):
-                return True
-            idx += 1
-        return False
-    return fnmatch.fnmatch(rel_path, pattern)
 
 
 def _matches_any_pattern(rel_path: str, patterns: list[str]) -> bool:
@@ -468,6 +540,16 @@ def _glob_match(rel_path: str, pattern: str) -> bool:
     """
     path_parts: list[str] = [p for p in rel_path.split("/") if p]
     pattern_parts: list[str] = [p for p in pattern.split("/") if p]
+    return _glob_match_parts(tuple(path_parts), tuple(pattern_parts))
+
+
+def _glob_match_parts(path_parts: tuple[str, ...], pattern_parts: tuple[str, ...]) -> bool:
+    """Variant of :func:`_glob_match` that accepts pre-split tuples.
+
+    Hot-path optimization: ``find_primitive_files`` pre-splits patterns
+    once per call (instead of once per file) and re-uses the segment
+    tuple. The split path tuple changes per file but is cheap.
+    """
     memo: dict[tuple[int, int], bool] = {}
 
     def _match(pi: int, qi: int) -> bool:
@@ -528,35 +610,79 @@ def find_primitive_files(
     if not os.path.isdir(base_dir):
         return []
 
+    started = time.perf_counter()
     base_path = Path(base_dir).resolve()
+    base_str = str(base_path)
+    base_prefix_len = len(base_str) + 1  # +1 for the trailing separator
+    sep = os.sep
+
+    # Pre-split each glob pattern once per call instead of once per file
+    # so a 80k-file walk costs O(patterns) splits, not O(patterns * files).
+    pattern_tuples: list[tuple[str, ...]] = [
+        tuple(p for p in pat.split("/") if p) for pat in patterns
+    ]
 
     all_files: list[Path] = []
+    files_visited = 0
 
-    for root, dirs, files in os.walk(str(base_path)):
-        current = Path(root)
-        # Prune excluded directories BEFORE descending
-        dirs[:] = sorted(
-            d
-            for d in dirs
-            if d not in DEFAULT_SKIP_DIRS
-            and not _exclude_matches_dir(current / d, base_path, exclude_patterns)
-        )
+    for root, dirs, files in os.walk(base_str):
+        # Prune excluded directories BEFORE descending. ``DEFAULT_SKIP_DIRS``
+        # check is a frozenset lookup; the ``_exclude_matches_dir`` call
+        # only fires when the caller actually supplied exclude patterns.
+        if exclude_patterns:
+            current = Path(root)
+            dirs[:] = sorted(
+                d
+                for d in dirs
+                if d not in DEFAULT_SKIP_DIRS
+                and not _exclude_matches_dir(current / d, base_path, exclude_patterns)
+            )
+        else:
+            dirs[:] = sorted(d for d in dirs if d not in DEFAULT_SKIP_DIRS)
 
-        # Sort files for deterministic discovery order across platforms
-        for file_name in sorted(files):
-            file_path = current / file_name
-            rel_str = portable_relpath(file_path, base_path)
+        # Compute the relative directory once per ``os.walk`` step using
+        # string slicing on the already-resolved base path. This avoids
+        # the per-component ``stat`` syscalls that ``Path.resolve`` /
+        # ``Path.relative_to`` would issue per FILE under the old
+        # ``portable_relpath(file_path, base_path)`` call site.
+        if root == base_str:
+            rel_root = ""
+            rel_root_parts: tuple[str, ...] = ()
+        else:
+            rel_root = root[base_prefix_len:].replace(sep, "/")
+            rel_root_parts = tuple(p for p in rel_root.split("/") if p)
+
+        # Sort files for deterministic discovery order across platforms.
+        # Defer all Path() construction until AFTER a pattern matches --
+        # in a typical tree most files are non-matches and don't need
+        # the allocation. ``current`` is built lazily on first match.
+        sorted_files = sorted(files)
+        files_visited += len(sorted_files)
+        current_path: Path | None = None
+        for file_name in sorted_files:
+            path_parts = (*rel_root_parts, file_name)
+            matched_pattern = False
+            for pattern_parts in pattern_tuples:
+                if _glob_match_parts(path_parts, pattern_parts):
+                    matched_pattern = True
+                    break
+            if not matched_pattern:
+                continue
+            if current_path is None:
+                current_path = Path(root)
+            file_path = current_path / file_name
             # File-level exclude: a pattern like "**/*.draft.md" should drop
             # individual files even when their parent directory is included.
             if exclude_patterns and should_exclude(file_path, base_path, exclude_patterns):
                 logger.debug("Excluded by pattern: %s", file_path)
                 continue
-            for pattern in patterns:
-                if _glob_match(rel_str, pattern):
-                    all_files.append(file_path)
-                    break
+            all_files.append(file_path)
 
-    # Filter out directories, symlinks, and unreadable files
+    # Filter out directories and symlinks. We deliberately do NOT
+    # pre-open every match to test readability -- ``parse_primitive_file``
+    # downstream already handles PermissionError / UnicodeDecodeError
+    # gracefully, and the extra open() per match doubled syscall cost
+    # without catching anything new (see #1533 review).
     valid_files = []
     for file_path in all_files:
         if not file_path.is_file():
@@ -564,9 +690,15 @@ def find_primitive_files(
         if file_path.is_symlink():
             logger.debug("Rejected symlink: %s", file_path)
             continue
-        if _is_readable(file_path):
-            valid_files.append(file_path)
+        valid_files.append(file_path)
 
+    perf_stats.record_walk(
+        base_dir=str(base_dir),
+        pattern_count=len(patterns),
+        duration_s=time.perf_counter() - started,
+        files_visited=files_visited,
+        files_matched=len(valid_files),
+    )
     return valid_files
 
 
@@ -592,7 +724,6 @@ def _is_readable(file_path: Path) -> bool:
     """
     try:
         with open(file_path, encoding="utf-8") as f:
-            # Try to read first few bytes to verify it's readable
             f.read(1)
         return True
     except (PermissionError, UnicodeDecodeError, OSError):

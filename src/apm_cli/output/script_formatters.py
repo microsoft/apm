@@ -1,7 +1,6 @@
 """Professional CLI output formatters for APM script execution."""
 
 from pathlib import Path
-from typing import Dict, List, Optional  # noqa: F401, UP035
 
 try:
     from rich.console import Console

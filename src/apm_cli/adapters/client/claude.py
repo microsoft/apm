@@ -48,6 +48,28 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     # See #1152 supply-chain analysis.
     _supports_runtime_env_substitution: bool = False
 
+    # Skill packages declare self-defined MCP launchers using the cross-tool
+    # converged path ``.agents/skills/<name>/...`` (see
+    # https://microsoft.github.io/apm/reference/targets-matrix/#skills-convergence).
+    # Claude is the only target that does NOT converge to ``.agents/skills/``
+    # -- it keeps ``.claude/skills/`` (see install/skill_path_migration.py:55).
+    # Rewrite the command prefix so ``.mcp.json`` points at where the launcher
+    # actually lives after deploy.
+    _CONVERGED_SKILL_PREFIX = ".agents/skills/"
+    _CLAUDE_SKILL_PREFIX = ".claude/skills/"
+
+    @classmethod
+    def _rewrite_self_defined_skill_command(cls, command: str) -> str:
+        if isinstance(command, str) and command.startswith(cls._CONVERGED_SKILL_PREFIX):
+            return cls._CLAUDE_SKILL_PREFIX + command[len(cls._CONVERGED_SKILL_PREFIX) :]
+        return command
+
+    def _format_server_config(self, server_info, env_overrides=None, runtime_vars=None):
+        config = super()._format_server_config(server_info, env_overrides, runtime_vars)
+        if isinstance(config, dict) and "command" in config:
+            config["command"] = self._rewrite_self_defined_skill_command(config["command"])
+        return config
+
     @staticmethod
     def _normalize_mcp_entry_for_claude_code(entry: dict) -> dict:
         """Normalize a server entry to Claude Code's on-disk shape.
@@ -217,12 +239,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
                 _rich_error(f"MCP server '{server_url}' not found in registry")
                 return False
 
-            if server_name:
-                config_key = server_name
-            elif "/" in server_url:
-                config_key = server_url.split("/")[-1]
-            else:
-                config_key = server_url
+            config_key = self._determine_config_key(server_url, server_name)
 
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
             ok = self.update_config({config_key: server_config})

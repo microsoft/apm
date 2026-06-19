@@ -36,6 +36,7 @@ Per-command pages live under [`reference/cli/`](./cli/install/). Grouped by life
 | [Package types](./package-types/)                            | APM packages, plugins, marketplaces                              |
 | [Examples](./examples/)                                      | Worked end-to-end examples                                       |
 | [Experimental](./experimental/)                              | Surface area still subject to change                             |
+| [Common errors](./common-errors/)                            | Symptoms, causes, and fixes for frequently reported errors       |
 
 ## Conventions used in reference pages
 

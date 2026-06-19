@@ -295,3 +295,19 @@ class TestMCPConflictDetectionByTargetName(unittest.TestCase):
         )
         configs = detector.get_existing_server_configs()
         self.assertEqual(set(configs), {"nested", "flat", "quoted-name"})
+
+    def test_codex_flat_keys_detect_remote_url_entries(self):
+        """Codex flat-key remote entries (url-only) are picked up alongside stdio ones."""
+        detector = self._make_detector(
+            "codex",
+            "mcp_servers",
+            {
+                "mcp_servers.foo": {
+                    "url": "https://mcp.example.com/mcp",
+                    "id": "ab12cd34-0000-0000-0000-000000000000",
+                },
+            },
+        )
+        configs = detector.get_existing_server_configs()
+        self.assertIn("foo", configs)
+        self.assertEqual(configs["foo"]["url"], "https://mcp.example.com/mcp")

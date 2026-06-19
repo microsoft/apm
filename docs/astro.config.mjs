@@ -23,6 +23,8 @@ export default defineConfig({
 	// Source keys MUST NOT include `/apm` -- the base is added at build
 	// time and the source would otherwise resolve under `/apm/apm/`.
 	redirects: {
+		// Registries consolidation (v0.15)
+		'/guides/private-registries': '/apm/guides/registries',
 		// Legacy enterprise slugs
 		'/enterprise/teams': '/apm/enterprise/making-the-case',
 		'/enterprise/governance': '/apm/enterprise/governance-guide',
@@ -34,7 +36,6 @@ export default defineConfig({
 		'/introduction/anatomy-of-an-apm-package': '/apm/concepts/package-anatomy',
 		// Legacy getting-started -> persona ramps
 		'/getting-started/quick-start': '/apm/quickstart',
-		'/getting-started/installation': '/apm/quickstart',
 		'/getting-started/authentication': '/apm/consumer/authentication',
 		'/getting-started/migration': '/apm/troubleshooting/migration',
 		// Legacy guides -> consumer/producer ramps
@@ -56,6 +57,15 @@ export default defineConfig({
 		'/guides/drift-detection': '/apm/enterprise/drift-detection',
 		// Legacy reference monolith -> per-command
 		'/reference/cli-commands': '/apm/reference/cli/install',
+		// Stable shortlinks for the OpenAPM specification. Versioned
+		// URLs (/spec/v0.1) are immortal and SHOULD be the citation
+		// target for toolchain pins and external references. /spec and
+		// /spec/latest are aliases of the most recent ratified version
+		// and are intended for human prose citation; tooling MUST NOT
+		// pin to them. Mirrors the OpenAPI and AsyncAPI URL discipline.
+		'/spec': '/apm/specs/openapm-v01/',
+		'/spec/latest': '/apm/specs/openapm-v01/',
+		'/spec/v0.1': '/apm/specs/openapm-v01/',
 	},
 	integrations: [
 		sitemap(),
@@ -143,6 +153,7 @@ export default defineConfig({
 					label: 'Start here',
 					items: [
 						{ label: 'Quickstart', slug: 'quickstart' },
+						{ label: 'Installation', slug: 'getting-started/installation' },
 						{ label: 'Your first package', slug: 'getting-started/first-package' },
 					],
 				},
@@ -155,6 +166,7 @@ export default defineConfig({
 						{ label: 'Run scripts', slug: 'consumer/run-scripts' },
 						{ label: 'Update and refresh', slug: 'consumer/update-and-refresh' },
 						{ label: 'Install MCP servers', slug: 'consumer/install-mcp-servers' },
+						{ label: 'Install LSP servers', slug: 'consumer/install-lsp-servers' },
 						{ label: 'Authentication', slug: 'consumer/authentication' },
 						{ label: 'Private and org packages', slug: 'consumer/private-and-org-packages' },
 						{ label: 'Deploy a local bundle', slug: 'consumer/deploy-a-bundle' },
@@ -201,6 +213,7 @@ export default defineConfig({
 						{ label: 'Security and supply chain', slug: 'enterprise/security-and-supply-chain' },
 						{ label: 'Drift detection', slug: 'enterprise/drift-detection' },
 						{ label: 'Registry proxy and air-gapped', slug: 'enterprise/registry-proxy' },
+						{ label: 'Registries', slug: 'guides/registries' },
 						{ label: 'GitHub rulesets', slug: 'enterprise/github-rulesets' },
 					],
 				},
@@ -211,6 +224,9 @@ export default defineConfig({
 						{ label: 'CI/CD pipelines', slug: 'integrations/ci-cd' },
 						{ label: 'GitHub Agentic Workflows', slug: 'integrations/gh-aw' },
 						{ label: 'Microsoft 365 Copilot Cowork (Experimental)', slug: 'integrations/copilot-cowork' },
+						{ label: 'GitHub Copilot App workflows (Experimental)', slug: 'integrations/copilot-app' },
+						{ label: 'Canvas extensions (Experimental)', slug: 'integrations/canvas' },
+						{ label: 'Hermes Agent (Experimental)', slug: 'integrations/hermes' },
 						{ label: 'AI runtime compatibility', slug: 'integrations/runtime-compatibility' },
 						{ label: 'GitHub rulesets', slug: 'integrations/github-rulesets' },
 					],
@@ -226,7 +242,7 @@ export default defineConfig({
 					],
 				},
 				{
-					label: 'Schemas and specs',
+					label: 'Schema reference',
 					items: [
 						{ label: 'Manifest schema', slug: 'reference/manifest-schema' },
 						{ label: 'Lockfile spec', slug: 'reference/lockfile-spec' },
@@ -238,6 +254,17 @@ export default defineConfig({
 						{ label: 'Environment variables', slug: 'reference/environment-variables' },
 						{ label: 'Examples', slug: 'reference/examples' },
 						{ label: 'Experimental', slug: 'reference/experimental' },
+					],
+				},
+				{
+					label: 'OpenAPM specification',
+					items: [
+						// Starlight strips dots from slugs, so openapm-v0.1.md
+						// is reachable at /specs/openapm-v01/. Stable shortlinks
+						// (/spec, /spec/v0.1, /spec/latest) bridge this in the
+						// redirects block above for external citers.
+						{ label: 'OpenAPM v0.1', slug: 'specs/openapm-v01' },
+						{ label: 'Conformance', slug: 'specs/conformance' },
 					],
 				},
 				{

@@ -570,6 +570,72 @@ class TestCopilotEnvVarTranslationInStdioEnvBlock(unittest.TestCase):
         )
 
 
+class TestLegacyModeStdioEnvBlock(unittest.TestCase):
+    """Issue #1266 / #1222 regression trap.
+
+    Legacy-mode adapters (Claude / Cursor / Codex / Gemini) receive
+    ``_raw_stdio["env"]`` as a plain dict from ``apm.yml``. The legacy
+    branch of ``_resolve_environment_variables`` must handle this shape
+    by resolving each value via ``_resolve_env_variable`` -- otherwise the
+    pre-fix latent bug returns ``{}`` and every self-defined stdio MCP
+    server silently loses its env block.
+
+    Cursor is exercised as the representative legacy-mode subclass; the
+    method now lives on ``MCPClientAdapter`` so the contract is shared
+    with every adapter that inherits the base.
+    """
+
+    def _adapter(self):
+        from apm_cli.adapters.client.cursor import CursorClientAdapter
+
+        with (
+            patch("apm_cli.adapters.client.copilot.SimpleRegistryClient"),
+            patch("apm_cli.adapters.client.copilot.RegistryIntegration"),
+        ):
+            return CursorClientAdapter()
+
+    def test_dict_shape_resolves_all_three_placeholder_syntaxes(self):
+        adapter = self._adapter()
+        self.assertFalse(adapter._supports_runtime_env_substitution)
+        env_overrides = {"MY_TOKEN": "real-secret"}
+        result = adapter._resolve_environment_variables(
+            {
+                "DOLLAR": "${MY_TOKEN}",
+                "ENVPREFIX": "${env:MY_TOKEN}",
+                "ANGLE": "<MY_TOKEN>",
+                "LITERAL": "plain-value",
+            },
+            env_overrides=env_overrides,
+        )
+        self.assertEqual(result["DOLLAR"], "real-secret")
+        self.assertEqual(result["ENVPREFIX"], "real-secret")
+        self.assertEqual(result["ANGLE"], "real-secret")
+        self.assertEqual(result["LITERAL"], "plain-value")
+
+    def test_dict_shape_does_not_silently_drop_keys(self):
+        """The pre-fix bug: the legacy branch iterated the dict as KEYS
+        (each a string), every key failed ``isinstance(env_var, dict)``,
+        and the resolver returned ``{}``. This regression trap fails
+        immediately if that empty-drop behaviour ever returns."""
+        adapter = self._adapter()
+        result = adapter._resolve_environment_variables(
+            {"FOO": "literal", "BAR": "${UNSET}"}, env_overrides={"FOO": "x"}
+        )
+        self.assertEqual(set(result.keys()), {"FOO", "BAR"})
+
+    def test_dict_shape_unresolvable_placeholder_round_trips(self):
+        """When neither env_overrides nor os.environ provides a value, the
+        placeholder must round-trip verbatim so the author can see what
+        was missing rather than getting an empty string."""
+        adapter = self._adapter()
+        # patch.dict snapshots os.environ on enter and restores on exit, so
+        # the pop is reverted automatically after the test.
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("DEFINITELY_NOT_SET_xz123", None)
+            result = adapter._resolve_environment_variables({"X": "${DEFINITELY_NOT_SET_xz123}"})
+        self.assertEqual(result["X"], "${DEFINITELY_NOT_SET_xz123}")
+
+
 class TestCopilotInstallRunSummary(unittest.TestCase):
     """Issue #1152: aggregated post-install diagnostics.
 

@@ -61,7 +61,7 @@ dependencies:
 Commit, push. On the next `apm install` in any repo in the org, a user
 who depends on `untrusted-org/anything` will see a warning. When you
 are ready to enforce, flip `enforcement: block`. See
-[../policy-pilot/](../policy-pilot/) for the rollout pattern.
+[../policy-pilot/](./policy-pilot/) for the rollout pattern.
 
 ## 3. The schema in one screen
 
@@ -83,6 +83,7 @@ dependencies:
   require: []             # packages every repo must include
   require_resolution: project-wins   # project-wins | policy-wins | block
   max_depth: 50
+  require_pinned_constraint: false   # true = ban unbounded version ranges
 
 mcp:
   allow: null
@@ -109,12 +110,15 @@ manifest:
 unmanaged_files:
   action: ignore          # ignore | warn | deny
   directories: []
+registry_source:
+  require: []             # registry names every dep must use
+  allow_non_registry: true
 ```
 
 Allow-list semantics: `null` means "no opinion", an empty list means
 "explicitly allow nothing", a populated list means "only these".
 Deny and require lists accumulate. For per-field detail, see
-[../policy-reference/](../policy-reference/).
+[Policy Reference](./policy-reference/).
 
 ## 4. Inheritance: enterprise, org, repo
 
@@ -150,13 +154,20 @@ parent that says `block`.
 
 Discovery and enforcement run as a preflight on every install path:
 `apm install`, `apm install <pkg>`, `apm install --mcp`,
-`apm install --dry-run`. The same checks run during `apm compile` and
-`apm audit`. See [../../concepts/lifecycle/](../../concepts/lifecycle/)
-for where the gate sits in the install pipeline.
+`apm install --dry-run`. The same checks also run under
+`apm audit --ci --policy <source>`. `apm compile` and `apm run`
+enforce zero policy -- they trust what install placed on disk. See
+[../../concepts/lifecycle/](../concepts/lifecycle/) for where the
+gate sits in the install pipeline.
 
 For CI gating that runs even when a developer passes `--no-policy`
 locally, wire `apm audit --ci --policy org` into your pipeline. See
-[../enforce-in-ci/](../enforce-in-ci/).
+[../enforce-in-ci/](./enforce-in-ci/).
+
+APM policy governs install-time decisions only. If you need runtime
+permission controls, those belong in your harness configuration, not in
+`apm-policy.yml`. See
+[Governance overview](/apm/enterprise/governance-overview/#boundary-statement).
 
 ## 6. What a blocked install looks like
 
@@ -174,10 +185,10 @@ proceeds. To preview without writing anything, run `apm install
 --dry-run`; each blocked dep prints as
 `Would be blocked by policy: <dep> -- <reason>`. The consumer-side
 view of all this lives in
-[../../consumer/governance-on-the-consumer-ramp/](../../consumer/governance-on-the-consumer-ramp/).
+[../../consumer/governance-on-the-consumer-ramp/](../consumer/governance-on-the-consumer-ramp/).
 
 ## Next
 
 You have a policy that warns on one bad case. To roll it out without
-breaking your org, follow [../policy-pilot/](../policy-pilot/) -- pilot
+breaking your org, follow [../policy-pilot/](./policy-pilot/) -- pilot
 in `warn`, observe, then flip to `block`.

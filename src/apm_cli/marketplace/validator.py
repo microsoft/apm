@@ -1,7 +1,7 @@
 """Marketplace manifest validation.
 
 Provides validation functions for marketplace.json integrity checking.
-Used by ``apm marketplace validate`` and potentially by ``apm marketplace publish``.
+Used by ``apm marketplace validate``.
 
 All validators operate on parsed ``MarketplaceManifest`` / ``MarketplacePlugin``
 objects. The JSON parser (``models.py``) already drops entries that are
@@ -11,7 +11,6 @@ rules on the successfully parsed entries.
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import List  # noqa: F401, UP035
 
 from .models import MarketplaceManifest, MarketplacePlugin
 

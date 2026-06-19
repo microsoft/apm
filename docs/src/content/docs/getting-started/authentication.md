@@ -51,7 +51,9 @@ For Azure DevOps, APM resolves `ADO_APM_PAT`, then an Entra ID (AAD) bearer toke
 
 For Artifactory registry proxies, use `PROXY_REGISTRY_TOKEN`. See [Registry proxy (Artifactory)](#registry-proxy-artifactory).
 
-For Copilot/runtime token variables (`GITHUB_COPILOT_PAT`, etc.), see [Agent Workflows](../../guides/agent-workflows/).
+For dedicated APM registries (`registries:` block in `apm.yml`), use `APM_REGISTRY_TOKEN_{NAME}`. See [Registry tokens](#registry-tokens) below.
+
+For Copilot/runtime token variables (`GITHUB_COPILOT_PAT`, etc.), see [Authentication (consumer ramp)](../consumer/authentication/).
 
 ### Configuration variables
 
@@ -245,7 +247,7 @@ This confirms both paths were attempted and neither succeeded, so the fix is eit
 [i] dev.azure.com -- token from ADO_APM_PAT
 ```
 
-Bearer tokens are short-lived (~60 minutes), acquired on demand, never persisted by APM. See [Security Model: Token handling](../../enterprise/security/#token-handling) for the full posture.
+Bearer tokens are short-lived (~60 minutes), acquired on demand, never persisted by APM. See [Security Model: Token handling](../enterprise/security/#token-handling) for the full posture.
 
 ### Auth-failure diagnostics
 
@@ -257,12 +259,21 @@ When authentication fails, APM prints a targeted diagnostic instead of a generic
 
 APM must classify a host as GitLab to use **GitLab REST v4** (for example `marketplace.json` fetches and install-time single-file reads). Configuration mirrors GHES-style host overrides:
 
-| Variable | Purpose |
-|----------|---------|
-| `GITLAB_HOST` | One self-managed GitLab FQDN (e.g. `git.company.com`) |
-| `APM_GITLAB_HOSTS` | Several self-managed GitLab FQDNs, comma-separated |
+| Signal | Purpose |
+|--------|---------|
+| `GITLAB_HOST` | Environment variable for one self-managed GitLab FQDN (e.g. `git.company.com`) |
+| `APM_GITLAB_HOSTS` | Environment variable for several self-managed GitLab FQDNs, comma-separated |
+| `type: gitlab` | Manifest object-form hint for one bespoke GitLab host |
 
-`gitlab.com` is detected automatically. For GitLab-class hosts, resolved credentials follow **`GITLAB_APM_PAT` → `GITLAB_TOKEN`** and then **`git credential fill`** (see [GitLab-class hosts](#gitlab-class-hosts-gitlabcom-gitlab_host-apm_gitlab_hosts) under [Token lookup](#token-lookup)). GitHub PAT env vars are not used on GitLab. Use a GitLab personal or project access token with API read access where your policy requires it.
+`gitlab.com` is detected automatically. For a single dependency on a bespoke
+hostname, use object form instead of a hostname convention:
+
+```yaml
+- git: https://code.acme.com/platform/standards.git
+  type: gitlab
+```
+
+For GitLab-class hosts, resolved credentials follow **`GITLAB_APM_PAT` → `GITLAB_TOKEN`** and then **`git credential fill`** (see [GitLab-class hosts](#gitlab-class-hosts-gitlabcom-gitlab_host-apm_gitlab_hosts) under [Token lookup](#token-lookup)). GitHub PAT env vars are not used on GitLab. Use a GitLab personal or project access token with API read access where your policy requires it.
 
 ### REST headers (GitLab vs GitHub)
 
@@ -331,6 +342,34 @@ The following env vars still work but emit a `DeprecationWarning`. Migrate to th
 | `ARTIFACTORY_BASE_URL` | `PROXY_REGISTRY_URL` |
 | `ARTIFACTORY_APM_TOKEN` | `PROXY_REGISTRY_TOKEN` |
 | `ARTIFACTORY_ONLY` | `PROXY_REGISTRY_ONLY` |
+
+## Registry tokens
+
+Dedicated APM registries (declared in `apm.yml`, `~/.apm/config.json`, or both) use a dedicated env-var prefix that is **distinct** from `GITHUB_APM_PAT_*`, `PROXY_REGISTRY_*`, and `ARTIFACTORY_APM_TOKEN` — there is no collision with Git auth.
+
+Package registries are experimental. Run `apm experimental enable registries` before using these tokens with registry-sourced dependencies.
+
+| Env var | Auth method |
+|---|---|
+| `APM_REGISTRY_TOKEN_{NAME}` | `Authorization: Bearer <token>` |
+| `APM_REGISTRY_USER_{NAME}` + `APM_REGISTRY_PASS_{NAME}` | `Authorization: Basic <base64(user:pass)>` |
+
+`{NAME}` is the registry name, uppercased, with `-` and `.` mapped to `_` (e.g. `jf-skills` -> `JF_SKILLS`). When both forms are set, Bearer wins. When neither is set, APM tries the request anonymously and surfaces a remediation message on `401`/`403`.
+
+:::caution[Silent auth failures]
+A misspelled env var is indistinguishable from a missing token — APM attempts anonymous access and only reports auth failure from the server. Names `corp-main` and `corp.main` map to the same `APM_REGISTRY_TOKEN_CORP_MAIN`; do not register both. See [Registries guide — pitfalls](../guides/registries/#pitfalls).
+:::
+
+Token precedence (highest wins): `APM_REGISTRY_TOKEN_{NAME}` env var → `registry.<name>.token` in `~/.apm/config.json`.
+
+```bash
+export APM_REGISTRY_TOKEN_JF_SKILLS=eyJ...
+# or persist locally:
+apm config set registry.jf-skills.token eyJ...
+apm install
+```
+
+For the full registry workflow — declaring registries, scoping dependencies, and lockfile semantics — see the [Registries guide](../guides/registries/).
 
 ## Troubleshooting
 
@@ -427,7 +466,13 @@ For self-hosted Git instances on non-standard ports (e.g. Bitbucket Datacenter o
 | `libsecret` (Linux) | Yes (port in URI) |
 | `gh auth git-credential` | No -- but only used for GitHub hosts, which do not use custom ports |
 
-If APM resolves the wrong credential for a custom-port host, confirm your helper keys by `host:port`; otherwise either switch helpers or store credentials under fully qualified `https://<host>:<port>/` URLs.
+If APM resolves the wrong credential for a custom-port host, confirm your helper keys by `host:port` using the helper-agnostic verification command:
+
+```sh
+printf 'protocol=https\nhost=<host>:<port>\n\n' | git credential fill
+```
+
+This reproduces exactly what APM sends to the credential helper. If the returned `username`/`password` are wrong or empty, either switch helpers or store credentials under a fully qualified `https://<host>:<port>/` URL.
 
 ### SSH connection hangs on corporate/VPN networks
 
@@ -449,6 +494,16 @@ apm install --https
 export APM_GIT_PROTOCOL=https
 ```
 
+To persist the HTTPS preference across all future installs without re-exporting the variable:
+
+```bash
+apm config set prefer-ssh false   # explicit: never prefer SSH for shorthand deps
+# or, if you want APM to always try HTTPS for shorthand deps:
+# export APM_GIT_PROTOCOL=https   # process-scoped; add to shell profile for persistence
+```
+
+See [apm config](../reference/cli/config/) for the full transport-preference config surface.
+
 ## Choosing transport (SSH vs HTTPS)
 
 Authentication and transport are independent decisions:
@@ -464,7 +519,7 @@ URL scheme honored exactly; shorthand uses HTTPS unless
 `git config url.<base>.insteadOf` rewrites it to SSH). For the full
 selection matrix, the `--ssh` / `--https` flags, the `APM_GIT_PROTOCOL`
 env var, and the `--allow-protocol-fallback` escape hatch, see
-[Dependencies: Transport selection](../../guides/dependencies/#transport-selection-ssh-vs-https).
+[Manage dependencies: Transport selection](../consumer/manage-dependencies/).
 
 :::caution[Custom ports and cross-protocol fallback]
 When `--allow-protocol-fallback` is in effect, APM reuses the

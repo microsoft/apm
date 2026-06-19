@@ -4,7 +4,7 @@ sidebar:
   order: 3
 ---
 
-This document describes the enhanced primitive discovery system implemented for APM CLI, providing dependency support with source tracking and conflict detection.
+This legacy note describes an earlier primitive discovery design. For current deployable primitive contracts, use [Package types](./package-types/) and [Targets matrix](./targets-matrix/).
 
 ## Overview
 

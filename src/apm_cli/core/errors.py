@@ -61,8 +61,10 @@ class EmptyTargetsListError(TargetResolutionError):
 
 _SIGNAL_LIST = (
     ".claude/, CLAUDE.md, .cursor/, .cursorrules, "
-    ".github/copilot-instructions.md, .codex/, .gemini/, GEMINI.md, "
-    ".opencode/, .windsurf/"
+    ".github/copilot-instructions.md, .github/instructions/, "
+    ".github/agents/, .github/prompts/, .github/hooks/, "
+    ".codex/, .gemini/, GEMINI.md, "
+    ".opencode/, .windsurf/, .kiro/"
 )
 
 

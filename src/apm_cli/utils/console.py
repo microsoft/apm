@@ -1,9 +1,8 @@
 """Console utility functions for formatting and output."""
 
-import sys  # noqa: F401
 import threading
 from contextlib import contextmanager
-from typing import Any, Optional  # noqa: F401
+from typing import Any
 
 import click
 

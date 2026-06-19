@@ -53,6 +53,13 @@ jobs:
         working-directory: ./docs
         run: npm run build
 
+      - name: Verify schema $id reachability
+        # Asserts every JSON Schema's declared $id URL resolves to a
+        # byte-identical file in the build output. Without this, a
+        # schema move or $id typo would silently break every toolchain
+        # that pinned to the canonical URL. Uses python3 stdlib only.
+        run: python3 scripts/check_schema_ids.py
+
       - name: Upload build artifacts
         # NOTE: in a reusable workflow, github.event_name reflects the CALLER's
         # event (here: 'push' of a v* tag from build-release.yml), NOT

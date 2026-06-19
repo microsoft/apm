@@ -205,20 +205,20 @@ class TestGHEMarketplaceInstallAuthRouting:
         assert ctx.host_info.kind == "github"
 
     def test_cross_repo_locks_known_silent_misroute(self):
-        """Regression trap for the cross-repo routing semantics + #1305 sentinel.
+        """Regression trap for the cross-repo routing semantics + #1326 sentinel.
 
-        A ``*.ghe.com`` marketplace with a cross-repo dict source bears the
-        same superficial symptoms as #1285 -- canonical emerges bare, parse
-        defaults to ``github.com``. The #1305 fix deliberately preserves
-        that resolver-level routing (a bare cross-repo ``repo`` also
-        legitimately means "a github.com open-source dep from this enterprise
-        marketplace") and instead attaches a
-        :class:`~apm_cli.marketplace.resolver.CrossRepoMisconfigRisk` sentinel
-        that the install command consults at the validation-failure boundary
-        to emit an actionable host-qualify hint. This test locks both halves:
-        the routing preservation (so the legitimate path is not regressed)
-        and the sentinel attachment (so the hint emission has the metadata
-        it needs).
+        A ``*.ghe.com`` marketplace with a bare cross-repo dict source bears
+        the same superficial symptoms as #1285 -- canonical emerges bare,
+        parse defaults to ``github.com``. Resolver-level routing is
+        deliberately preserved (PR #1292 scoped its host backfill to
+        in-marketplace sources only) and the bare-cross-repo case is flagged
+        via :class:`~apm_cli.marketplace.resolver.CrossRepoMisconfigRisk`
+        sentinel. The install command consumes the sentinel at the
+        pre-validation gate (#1326) to fail-closed before any HTTP probe
+        reaches the potentially-attacker-controlled ``github.com`` URL.
+        This test locks the resolver-layer contract: the routing stays
+        unchanged and the sentinel attaches with the metadata the install
+        gate needs to render its refusal message.
         """
         plugin = MarketplacePlugin(
             name="cross-repo",
@@ -241,18 +241,18 @@ class TestGHEMarketplaceInstallAuthRouting:
             result = resolve_marketplace_plugin("cross-repo", _REPO)
 
         # Routing preservation: cross-repo canonical stays bare; parse still
-        # falls back to ``github.com``. This is intentional -- the legitimate
-        # cross-host path validates successfully and never needs to recover
-        # the enterprise host. #1305 surfaces the diagnostic at install time
-        # when the misconfigured path subsequently fails validation.
+        # falls back to ``github.com``. Resolver layer is intentionally
+        # unchanged; the dependency-confusion fix lives at the install
+        # command's pre-validation gate (#1326) which consumes the sentinel
+        # attached below.
         assert result.canonical == "anotherorg/anothertool/plugins/x"
         dep_ref = DependencyReference.parse(result.canonical)
         auth = AuthResolver()
         ctx = auth.resolve_for_dep(dep_ref)
         assert ctx.host_info.host == "github.com"
 
-        # #1305: sentinel must attach so the install command's
-        # validation-fail branch has the metadata to emit the hint.
+        # #1326: sentinel must attach so the install command's pre-validation
+        # gate has the metadata to render the refusal message.
         risk = result.cross_repo_misconfig_risk
         assert risk is not None
         assert risk.marketplace_host == _GHE_HOST
@@ -261,88 +261,54 @@ class TestGHEMarketplaceInstallAuthRouting:
 
 
 @pytest.mark.integration
-class TestCrossRepoMisconfigHintIntegration:
-    """End-to-end: the #1305 hint surfaces when a cross-repo bare entry on
-    a ``*.ghe.com`` marketplace fails validation.
+class TestCrossRepoFailClosedIntegration:
+    """End-to-end: #1326 fail-closed gate blocks bare cross-repo install on
+    ``*.ghe.com`` marketplaces before any outbound validation HTTP runs.
 
-    Unit tests in ``tests/unit/commands/`` mock ``DependencyReference`` and
-    ``resolve_marketplace_plugin``; this integration trap walks the real
-    ``_resolve_package_references`` + real ``InstallLogger`` and asserts on
-    the actual stdout the operator would see. Required by the PR review
-    panel (test-coverage-expert: ``outcome: missing`` on a secure-by-default
-    surface) and matches the e2e-integration convention PR #1292 established
-    with ``test_ghe_marketplace_backfills_host_on_bare_canonical`` above.
+    Threat model: an enterprise operator's ``corp.ghe.com`` marketplace
+    declares ``repo: platform-team/shared-tool`` (bare ``owner/repo``) intending
+    the enterprise repo. ``DependencyReference.parse`` defaults missing hosts
+    to ``github.com``. An attacker who pre-registers ``platform-team/shared-tool``
+    on public ``github.com`` would have the validator succeed against the
+    attacker repo and install attacker content under the enterprise's APM
+    context. The #1305 fix only surfaced a hint on validation FAILURE; this
+    gate is the missing half that closes the success-path attack.
 
-    Stubs at one seam only:
+    Gate semantics:
 
-    - ``_validate_package_exists``: forces the failure outcome that triggers
-      the hint. The real validate path makes outbound HTTP calls; this stub
-      keeps the test deterministic. Everything between the resolver sentinel
-      and the logger render is the real code path.
+    - Resolver attaches ``CrossRepoMisconfigRisk`` for the ambiguous form
+      (sentinel logic at ``_compute_cross_repo_misconfig_risk`` in
+      ``marketplace/resolver.py`` is unchanged).
+    - Install consumes the sentinel immediately after resolver returns --
+      before ``_validate_package_exists`` is called. No HTTP probe to the
+      potentially-attacker-controlled URL ever runs.
+    - Escape hatch: marketplace.json author host-qualifies ``repo:``
+      (``corp.ghe.com/owner/repo`` OR ``github.com/owner/repo``). That
+      prevents the sentinel from attaching at resolver layer and install
+      proceeds. No new CLI flag, env var, or schema field is introduced.
     """
 
     @pytest.fixture(autouse=True)
     def _isolate_github_host_env(self, monkeypatch):
         monkeypatch.delenv("GITHUB_HOST", raising=False)
 
-    def test_cross_repo_hint_emitted_on_validation_failure(self, capsys):
-        """The canonical misconfiguration scenario from #1305 surfaces a
-        warning-level hint identifying the marketplace host and the exact
-        host-qualified ``repo`` value to use as a fix."""
-        from apm_cli.commands.install import _resolve_package_references
-        from apm_cli.core.command_logger import InstallLogger
+    def test_cross_repo_bare_blocks_install_before_validation(self):
+        """The attack PoC: bare cross-repo on enterprise marketplace.
 
-        plugin = MarketplacePlugin(
-            name="shared-tool",
-            source={
-                "type": "github",
-                "repo": "platform-team/shared-tool",
-                "path": "plugins/shared",
-            },
-        )
+        ``_validate_package_exists`` is wrapped in a Mock returning True --
+        simulating the attacker having pre-staged ``platform-team/shared-tool``
+        on github.com. If the gate were absent the install would silently
+        succeed; the test asserts:
 
-        with (
-            patch(
-                "apm_cli.marketplace.resolver.get_marketplace_by_name",
-                return_value=_make_source(_GHE_HOST),
-            ),
-            patch(
-                "apm_cli.marketplace.resolver.fetch_or_cache",
-                return_value=_make_manifest(plugin),
-            ),
-            patch(
-                "apm_cli.commands.install._validate_package_exists",
-                return_value=False,
-            ),
-        ):
-            _resolve_package_references(
-                ["shared-tool@my-marketplace"],
-                [],
-                set(),
-                logger=InstallLogger(verbose=False),
-            )
-
-        captured = capsys.readouterr()
-        emitted = captured.out
-        # Hint identifies the plugin@marketplace
-        assert "'shared-tool@my-marketplace'" in emitted
-        # Marketplace host is named in the "registered on" clause
-        # (anchored substring sidesteps CodeQL bare-host pattern recognizers)
-        assert f"registered on '{_GHE_HOST}'" in emitted
-        # The bare repo from marketplace.json is echoed back
-        assert "`repo: platform-team/shared-tool`" in emitted
-        # Concrete remediation value the operator can copy-paste
-        assert f"'{_GHE_HOST}/platform-team/shared-tool'" in emitted
-        # Auth-expert clause acknowledges the legitimate-cross-host
-        # alternative so transient failures of real github.com deps are
-        # not misdirected into adding an enterprise host prefix.
-        assert "intentionally a github.com dependency" in emitted
-
-    def test_legitimate_cross_host_validation_passes_no_hint(self, capsys):
-        """The legitimate cross-host case (validation passes) emits no hint.
-
-        This is the entire reason the diagnostic lives at the
-        validation-failure boundary instead of resolver time."""
+        1. The mock is **never called** (gate fires pre-validation, no HTTP
+           leak to attacker-controlled host).
+        2. Independent ``requests.get`` / ``requests.head`` probes are also
+           never issued (defense-in-depth: catches a future refactor that
+           moves validation away from ``_validate_package_exists``).
+        3. The package lands in ``invalid_outcomes`` (install rejected).
+        4. The reason string names both escape-hatch forms so the operator
+           can choose qualify-to-enterprise vs qualify-to-github.com.
+        """
         from apm_cli.commands.install import _resolve_package_references
         from apm_cli.core.command_logger import InstallLogger
 
@@ -367,16 +333,142 @@ class TestCrossRepoMisconfigHintIntegration:
             patch(
                 "apm_cli.commands.install._validate_package_exists",
                 return_value=True,
-            ),
+            ) as mock_validate,
+            patch("apm_cli.install.validation.requests.get") as mock_http_get,
+            patch(
+                "apm_cli.install.validation.requests.head",
+                create=True,
+            ) as mock_http_head,
         ):
-            _resolve_package_references(
+            result = _resolve_package_references(
                 ["shared-tool@my-marketplace"],
                 [],
                 set(),
                 logger=InstallLogger(verbose=False),
             )
 
-        emitted = capsys.readouterr().out
-        # No hint substrings on the successful path.
-        assert "intentionally a github.com dependency" not in emitted
-        assert "If you meant the enterprise host" not in emitted
+        valid_outcomes, invalid_outcomes = result[0], result[1]
+
+        # (1) Gate fires pre-validation: validate function never called.
+        assert mock_validate.call_count == 0, (
+            "fail-closed gate must reject before _validate_package_exists so "
+            "no probe reaches the potentially-attacker-controlled github.com URL"
+        )
+        # (2) HTTP-layer defense-in-depth: even if a future refactor moves
+        # validation elsewhere, no outbound probe should fire on the gated
+        # path. Patching at ``apm_cli.install.validation.requests.{get,head}``
+        # catches any caller that still reaches the validator module.
+        assert mock_http_get.call_count == 0
+        assert mock_http_head.call_count == 0
+        # (2) Install rejected.
+        assert valid_outcomes == []
+        assert len(invalid_outcomes) == 1
+        rejected_package, reason = invalid_outcomes[0]
+        assert rejected_package == "shared-tool@my-marketplace"
+        # (3) Reason names both escape hatches. All host substrings are
+        # anchored with surrounding quote/backtick characters so CodeQL's
+        # ``py/incomplete-url-substring-sanitization`` pattern recognizer
+        # does not flag bare-host membership checks (see tests/**/CLAUDE.md).
+        assert f"'{_GHE_HOST}'" in reason
+        # Bare repo is echoed back inside the backtick-delimited `repo:` form.
+        assert "`repo: platform-team/shared-tool`" in reason
+        # Concrete qualification value for the enterprise path, anchored.
+        assert f"'{_GHE_HOST}/platform-team/shared-tool'" in reason
+        # Concrete qualification value for the cross-host path, anchored.
+        assert "'github.com/platform-team/shared-tool'" in reason
+        # Issue reference makes the gate's provenance grep-able.
+        assert "#1326" in reason
+
+    def test_cross_repo_qualified_to_enterprise_proceeds(self):
+        """Escape hatch (same-host intent): ``repo: corp.ghe.com/owner/repo``.
+
+        Host-qualifying to the enterprise host means the resolver does not
+        attach the sentinel (``_needs_canonical_host_prefix`` returns False
+        when canonical already starts with the host). Install proceeds
+        through ``_validate_package_exists`` as normal.
+        """
+        from apm_cli.commands.install import _resolve_package_references
+        from apm_cli.core.command_logger import InstallLogger
+
+        plugin = MarketplacePlugin(
+            name="shared-tool",
+            source={
+                "type": "github",
+                "repo": f"{_GHE_HOST}/platform-team/shared-tool",
+                "path": "plugins/shared",
+            },
+        )
+
+        with (
+            patch(
+                "apm_cli.marketplace.resolver.get_marketplace_by_name",
+                return_value=_make_source(_GHE_HOST),
+            ),
+            patch(
+                "apm_cli.marketplace.resolver.fetch_or_cache",
+                return_value=_make_manifest(plugin),
+            ),
+            patch(
+                "apm_cli.commands.install._validate_package_exists",
+                return_value=True,
+            ) as mock_validate,
+        ):
+            result = _resolve_package_references(
+                ["shared-tool@my-marketplace"],
+                [],
+                set(),
+                logger=InstallLogger(verbose=False),
+            )
+
+        valid_outcomes, invalid_outcomes = result[0], result[1]
+        # Gate did NOT fire (qualified form = no sentinel = no refusal).
+        assert mock_validate.call_count == 1
+        assert len(valid_outcomes) == 1
+        assert invalid_outcomes == []
+
+    def test_cross_repo_qualified_to_github_com_proceeds(self):
+        """Escape hatch (declared cross-host intent): ``repo: github.com/owner/repo``.
+
+        Host-qualifying to ``github.com`` makes the cross-host intent
+        explicit. Resolver does not attach the sentinel; install proceeds.
+        This is how operators with legitimate github.com open-source
+        dependencies on enterprise marketplaces declare intent without
+        falling into the bare-shorthand ambiguity.
+        """
+        from apm_cli.commands.install import _resolve_package_references
+        from apm_cli.core.command_logger import InstallLogger
+
+        plugin = MarketplacePlugin(
+            name="shared-tool",
+            source={
+                "type": "github",
+                "repo": "github.com/platform-team/shared-tool",
+                "path": "plugins/shared",
+            },
+        )
+
+        with (
+            patch(
+                "apm_cli.marketplace.resolver.get_marketplace_by_name",
+                return_value=_make_source(_GHE_HOST),
+            ),
+            patch(
+                "apm_cli.marketplace.resolver.fetch_or_cache",
+                return_value=_make_manifest(plugin),
+            ),
+            patch(
+                "apm_cli.commands.install._validate_package_exists",
+                return_value=True,
+            ) as mock_validate,
+        ):
+            result = _resolve_package_references(
+                ["shared-tool@my-marketplace"],
+                [],
+                set(),
+                logger=InstallLogger(verbose=False),
+            )
+
+        valid_outcomes, invalid_outcomes = result[0], result[1]
+        assert mock_validate.call_count == 1
+        assert len(valid_outcomes) == 1
+        assert invalid_outcomes == []

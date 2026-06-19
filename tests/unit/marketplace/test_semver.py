@@ -226,6 +226,22 @@ class TestSatisfiesRange:
         assert satisfies_range(parse_semver("0.9.0"), "<1.0.0")  # type: ignore[arg-type]
         assert not satisfies_range(parse_semver("1.0.0"), "<1.0.0")  # type: ignore[arg-type]
 
+    # -- Explicit-equality operator (=X.Y.Z): npm / cargo style --
+
+    def test_eq_exact(self) -> None:
+        assert satisfies_range(parse_semver("1.2.3"), "=1.2.3")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("1.2.4"), "=1.2.3")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("1.2.2"), "=1.2.3")  # type: ignore[arg-type]
+
+    def test_eq_prerelease(self) -> None:
+        assert satisfies_range(parse_semver("1.2.3-beta.1"), "=1.2.3-beta.1")  # type: ignore[arg-type]
+        assert not satisfies_range(parse_semver("1.2.3"), "=1.2.3-beta.1")  # type: ignore[arg-type]
+
+    def test_eq_invalid_spec(self) -> None:
+        sv = parse_semver("1.0.0")
+        assert sv is not None
+        assert not satisfies_range(sv, "=garbage")
+
     def test_gt_invalid_spec(self) -> None:
         sv = parse_semver("1.0.0")
         assert sv is not None

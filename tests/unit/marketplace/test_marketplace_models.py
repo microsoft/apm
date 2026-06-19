@@ -30,7 +30,13 @@ class TestMarketplaceSource:
     def test_to_dict_defaults(self):
         src = MarketplaceSource(name="acme", owner="acme-org", repo="plugins")
         d = src.to_dict()
-        assert d == {"name": "acme", "owner": "acme-org", "repo": "plugins"}
+        # URL is synthesised from legacy fields, plus legacy mirror retained for downgrade safety
+        assert d == {
+            "name": "acme",
+            "url": "https://github.com/acme-org/plugins",
+            "owner": "acme-org",
+            "repo": "plugins",
+        }
         assert "host" not in d  # default omitted
         assert "branch" not in d
 
@@ -367,3 +373,32 @@ class TestParseMarketplaceJson:
         data = {"name": "Test", "metadata": {"version": "1.0"}, "plugins": []}
         manifest = parse_marketplace_json(data)
         assert manifest.plugin_root == ""
+
+
+class TestLocalPathFromSource:
+    """Regression coverage for _local_path_from_source across file:// URI shapes.
+
+    Prevents Windows-only failures where ``f"file://{Path}"`` produces a
+    URI that urlsplit mis-parses (CI Windows job, after PR #1476).
+    """
+
+    def test_posix_file_uri(self):
+        from apm_cli.marketplace.models import _local_path_from_source
+
+        assert _local_path_from_source("file:///tmp/foo") == "/tmp/foo"
+
+    def test_windows_malformed_file_uri_from_fstring(self):
+        """f'file://{Path(C:\\\\...)}' yields file://C:\\... which urlsplit mis-parses."""
+        from apm_cli.marketplace.models import _local_path_from_source
+
+        assert _local_path_from_source("file://C:\\Users\\runner\\x") == "C:\\Users\\runner\\x"
+
+    def test_windows_proper_file_uri(self):
+        from apm_cli.marketplace.models import _local_path_from_source
+
+        assert _local_path_from_source("file:///C:/Users/runner/x") == "C:/Users/runner/x"
+
+    def test_plain_posix_path_passes_through(self):
+        from apm_cli.marketplace.models import _local_path_from_source
+
+        assert _local_path_from_source("/home/user/foo") == "/home/user/foo"

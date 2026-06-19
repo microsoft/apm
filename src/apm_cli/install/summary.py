@@ -24,7 +24,8 @@ def render_post_install_summary(
     logger,
     apm_count: int,
     mcp_count: int,
-    apm_diagnostics,
+    lsp_count: int = 0,
+    apm_diagnostics=None,
     force: bool,
     elapsed_seconds: float | None = None,
 ) -> None:
@@ -35,6 +36,7 @@ def render_post_install_summary(
         logger: An ``InstallLogger`` instance.
         apm_count: Number of APM dependencies installed.
         mcp_count: Number of MCP servers installed.
+        lsp_count: Number of LSP servers installed.
         apm_diagnostics: ``DiagnosticCollector`` for the install run, or
             ``None`` when no diagnostics were captured.
         force: When ``True``, suppresses the hard-fail on critical
@@ -62,6 +64,7 @@ def render_post_install_summary(
     logger.install_summary(
         apm_count=apm_count,
         mcp_count=mcp_count,
+        lsp_count=lsp_count,
         errors=error_count,
         stale_cleaned=logger.stale_cleaned_total,
         elapsed_seconds=elapsed_seconds,
@@ -70,4 +73,13 @@ def render_post_install_summary(
     # Hard-fail when critical security findings blocked any package
     # (consistent with ``apm unpack``). ``--force`` overrides.
     if not force and apm_diagnostics and apm_diagnostics.has_critical_security:
+        sys.exit(1)
+
+    # Hard-fail when ANY per-dep install error was reported. Matches
+    # the npm / pip / cargo convention: any install failure -> non-zero
+    # exit so CI scripts can detect failure without parsing stderr.
+    # ``--force`` covers critical-security overrides only; it does NOT
+    # suppress this hard-fail (Bug 2 fix on #1496, where the CLI used
+    # to exit 0 even after printing "Installation failed with N error(s)").
+    if error_count > 0:
         sys.exit(1)

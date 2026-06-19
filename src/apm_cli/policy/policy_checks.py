@@ -8,8 +8,8 @@ They are always run in addition to the baseline checks in ``ci_checks``.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
-from typing import List, Optional  # noqa: F401, UP035
 
 from .models import CheckResult, CIAuditResult
 
@@ -207,7 +207,11 @@ def _check_required_packages_deployed(
     return CheckResult(
         name="required-packages-deployed",
         passed=False,
-        message=f"{len(not_deployed)} required package(s) not deployed",
+        message=(
+            f"{len(not_deployed)} required package(s) not deployed. "
+            "Hint: run `apm install --no-policy` to repair the lockfile, "
+            "then reinstall normally."
+        ),
         details=not_deployed,
     )
 
@@ -676,18 +680,127 @@ _DEFAULT_GOVERNANCE_DIRS = [
     ".cursor/rules",
     ".claude",
     ".opencode",
+    ".kiro",
 ]
 
 
 _MAX_UNMANAGED_SCAN_FILES = 10_000
+
+# Appended once to a non-empty unmanaged-files report so a flagged file is
+# self-resolving: the reader learns how to track it or how to suppress it.
+_UNMANAGED_NEXT_ACTION = (
+    "Next: run 'apm install <ref>' to track a flagged file, "
+    "or add a glob to unmanaged_files.exclude to suppress it."
+)
+
+
+def _classify_primitive_type(rel_path: str) -> str | None:
+    """Lazily classify an already-flagged unmanaged file by APM convention.
+
+    Called ONLY on files already flagged as unmanaged -- never on the whole
+    tree -- so a user can triage skill / agent / instruction / mcp artifacts.
+    Returns ``None`` when the path matches no known primitive convention.
+    """
+    posix = rel_path.replace("\\", "/").lower()
+    name = posix.rsplit("/", 1)[-1]
+    segments = posix.split("/")
+    # Explicit filename conventions win first (most specific signal).
+    if name.endswith(".instructions.md"):
+        return "instruction"
+    if name.endswith(".agent.md"):
+        return "agent"
+    if name == "mcp.json" or name.endswith(".mcp.json"):
+        return "mcp"
+    if name == "skill.md":
+        return "skill"
+    # Directory-segment hints next (less specific). MCP is narrowed to a
+    # dedicated ``.mcp/`` root -- a directory merely named ``mcp`` is not an
+    # MCP config and must not mislabel files under it.
+    if "instructions" in segments:
+        return "instruction"
+    if "agents" in segments:
+        return "agent"
+    if "skills" in segments:
+        return "skill"
+    if ".mcp" in segments:
+        return "mcp"
+    return None
+
+
+def _unmanaged_deny_conflict(
+    rel_path: str,
+    dependency_deny: tuple[str, ...] | None,
+    mcp_deny: tuple[str, ...] | None,
+) -> str | None:
+    """Return the deny pattern an unmanaged file conflicts with, or ``None``.
+
+    Surfaces APM's OWN deny policy as a human-resolve conflict: the dependency
+    side is defaults-inclusive (``dependencies.effective_deny``) and the MCP
+    side is the raw ``mcp.deny`` -- mirroring the deny-list checks exactly.
+    Routes through the same ``first_matching_pattern`` matcher the deny-list
+    checks use -- never a second matcher.
+    """
+    from .matcher import first_matching_pattern
+
+    name = rel_path.rsplit("/", 1)[-1]
+    for patterns in (dependency_deny, mcp_deny):
+        hit = first_matching_pattern(rel_path, patterns)
+        if hit is None:
+            # Fall back to the basename so a deny glob written against a bare
+            # filename (e.g. 'mcp.json') still surfaces the conflict.
+            hit = first_matching_pattern(name, patterns)
+        if hit is not None:
+            return hit
+    return None
+
+
+def _format_unmanaged_detail(
+    rel_path: str,
+    primitive_type: str | None,
+    deny_hit: str | None,
+) -> str:
+    """Render one enriched, ASCII-only finding line for an unmanaged file."""
+    label = f"{rel_path} [type: {primitive_type}]" if primitive_type else rel_path
+    reasons = ["not tracked in apm.lock.yaml"]
+    if deny_hit:
+        reasons.append(f"matches deny rule ({deny_hit})")
+    return f"{label} -- {'; '.join(reasons)}"
+
+
+def _symlink_escapes_workspace(path: Path, project_root: Path) -> bool:
+    """Return True if *path* is a symlink resolving outside *project_root*.
+
+    Guards the traversal so a symlink pointing out of the workspace is never
+    followed (no traversal bomb); broken or looping links also count as
+    escaping and are skipped.
+    """
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(project_root.resolve())
+        return False
+    except (OSError, RuntimeError, ValueError):
+        return True
 
 
 def _check_unmanaged_files(
     project_root: Path,
     lock: LockFile | None,
     policy: UnmanagedFilesPolicy,
+    *,
+    dependency_deny: tuple[str, ...] | None = None,
+    mcp_deny: tuple[str, ...] | None = None,
 ) -> CheckResult:
-    """Check 16: no untracked files in governance directories."""
+    """Check 16: surface files in governance dirs not tracked in apm.lock.yaml.
+
+    This is the ONE unified unmanaged-files report. Each flagged file is
+    enriched in-place (within this single scan) with a factual reason, a lazy
+    primitive-type classification, and -- where it matches APM's own
+    ``dependencies.deny`` / ``mcp.deny`` -- a deny-conflict note for a human to
+    resolve. Paths matching ``policy.exclude`` are suppressed. This is drift /
+    divergence visibility, not supply-chain-attack prevention.
+    """
+    from .matcher import first_matching_pattern
+
     if policy.effective_action == "ignore":
         return CheckResult(
             name="unmanaged-files",
@@ -696,10 +809,11 @@ def _check_unmanaged_files(
         )
 
     dirs = policy.directories if policy.directories else _DEFAULT_GOVERNANCE_DIRS
+    exclude = policy.exclude or ()
 
     # Build set of deployed files AND directory prefixes from lockfile
-    deployed: set = set()
-    deployed_dir_prefixes: list = []
+    deployed: set[str] = set()
+    deployed_dir_prefixes: list[str] = []
     if lock:
         for _key, dep in lock.dependencies.items():
             for f in dep.deployed_files:
@@ -710,24 +824,41 @@ def _check_unmanaged_files(
 
     dir_prefix_tuple = tuple(deployed_dir_prefixes)
 
-    unmanaged: list[str] = []
+    details: list[str] = []
+    unmanaged_count = 0
     files_scanned = 0
     cap_hit = False
     for gov_dir in dirs:
         dir_path = project_root / gov_dir
         if not dir_path.exists() or not dir_path.is_dir():
             continue
-        for file_path in dir_path.rglob("*"):
-            if file_path.is_file():
+        # os.walk(followlinks=False) never recurses INTO a directory symlink, so
+        # a symlinked dir resolving outside the workspace is never traversed
+        # (the house pattern from security/gate.py). File symlinks still appear
+        # in the listing and are guarded individually below.
+        for dirpath, _subdirs, filenames in os.walk(dir_path, followlinks=False):
+            for fname in filenames:
+                file_path = Path(dirpath) / fname
+                # File-symlink guard: never follow a link out of the workspace.
+                if file_path.is_symlink() and _symlink_escapes_workspace(file_path, project_root):
+                    continue
+                if not file_path.is_file():
+                    continue
                 files_scanned += 1
                 if files_scanned > _MAX_UNMANAGED_SCAN_FILES:
                     cap_hit = True
                     break
                 rel = file_path.relative_to(project_root).as_posix()
-                if rel not in deployed and not (
-                    dir_prefix_tuple and rel.startswith(dir_prefix_tuple)
-                ):
-                    unmanaged.append(rel)
+                if rel in deployed or (dir_prefix_tuple and rel.startswith(dir_prefix_tuple)):
+                    continue
+                if first_matching_pattern(rel, exclude) is not None:
+                    continue
+                primitive_type = _classify_primitive_type(rel)
+                deny_hit = _unmanaged_deny_conflict(rel, dependency_deny, mcp_deny)
+                details.append(_format_unmanaged_detail(rel, primitive_type, deny_hit))
+                unmanaged_count += 1
+            if cap_hit:
+                break
         if cap_hit:
             break
 
@@ -741,31 +872,157 @@ def _check_unmanaged_files(
             ),
             details=[
                 f"Governance directories contain > {_MAX_UNMANAGED_SCAN_FILES:,} files; "
-                "consider adding exclude patterns in a future policy version"
+                "consider adding exclude patterns in the unmanaged_files policy"
             ],
         )
 
-    if not unmanaged:
+    if not details:
         return CheckResult(
             name="unmanaged-files",
             passed=True,
             message="No unmanaged files in governance directories",
         )
 
+    # One report carries a single next-action hint after the per-file lines.
+    details.append(_UNMANAGED_NEXT_ACTION)
+
     if policy.effective_action == "warn":
         return CheckResult(
             name="unmanaged-files",
             passed=True,
-            message=f"{len(unmanaged)} unmanaged file(s) found (warn)",
-            details=unmanaged,
+            message=f"{unmanaged_count} unmanaged file(s) found (warn)",
+            details=details,
         )
 
     # action == "deny"
     return CheckResult(
         name="unmanaged-files",
         passed=False,
-        message=f"{len(unmanaged)} unmanaged file(s) in governance directories",
-        details=unmanaged,
+        message=f"{unmanaged_count} unmanaged file(s) in governance directories",
+        details=details,
+    )
+
+
+def _check_registry_source(
+    deps: list[DependencyReference],
+    policy: RegistrySourcePolicy,
+    registries_map: dict[str, str] | None,
+) -> CheckResult:
+    """Check registry source policy (require / allow_non_registry).
+
+    Fail-closed when a required registry name has no URL configured in
+    *registries_map* — that means the registry source is unreachable by
+    definition and the install must not proceed.
+    """
+    check_name = "registry-source"
+    no_op = not policy.require and policy.allow_non_registry
+    if no_op:
+        return CheckResult(name=check_name, passed=True, message="No registry source policy")
+
+    violations: list[str] = []
+
+    # Fail-closed: required registry names must be configured.
+    for req_name in policy.require:
+        if not registries_map or req_name not in registries_map:
+            violations.append(
+                f"required registry '{req_name}' is not configured — "
+                "add it to the 'registries:' block or via 'apm config set registry."
+                f"{req_name}.url <url>'"
+            )
+
+    for dep in deps:
+        key = dep.get_canonical_dependency_string()
+        is_registry = getattr(dep, "source", None) == "registry"
+        registry_name = getattr(dep, "registry_name", None)
+
+        if not policy.allow_non_registry and not is_registry:
+            violations.append(
+                f"{key}: non-registry source not permitted (policy requires registry sources only)"
+            )
+            continue
+
+        if policy.require and is_registry and registry_name not in policy.require:
+            violations.append(
+                f"{key}: sourced from registry '{registry_name}' "
+                f"but policy requires one of {sorted(policy.require)}"
+            )
+
+    if violations:
+        return CheckResult(
+            name=check_name,
+            passed=False,
+            message=f"{len(violations)} registry source violation(s)",
+            details=violations,
+        )
+    return CheckResult(
+        name=check_name,
+        passed=True,
+        message="All dependencies satisfy registry source policy",
+    )
+
+
+def _check_pinned_constraints(
+    deps: list[DependencyReference],
+    policy: DependencyPolicy,
+    direct_dep_keys: set[str] | None = None,
+) -> CheckResult:
+    """Check: every direct dep declares a bounded constraint.
+
+    Skipped (passes vacuously) when
+    ``policy.require_pinned_constraint`` is ``False`` -- the default.
+
+    Operates on the **declared** constraint (``dep.reference``), not
+    the resolved one, so authors learn before the install completes
+    that a moving ref slipped past review.
+
+    When ``direct_dep_keys`` is provided, the check is restricted to
+    direct dependencies only -- transitives are excluded, since the
+    consumer cannot rewrite a constraint declared in a transitive
+    package's own manifest. Callers that have direct-vs-transitive
+    context (the install pipeline gate, the target-aware re-check,
+    and the install preflight) should always pass it. When ``None``
+    (legacy dep-only seam, or the audit wrapper that already iterates
+    direct-only manifest deps) the check falls back to evaluating
+    every dep in ``deps``.
+
+    See ``_constraint_pinning.py`` for classification rules.
+    """
+    from ._constraint_pinning import classify_unbounded_reason, humanize_reason
+
+    check_name = "dependency-pinned-constraint"
+    if not policy.require_pinned_constraint:
+        return CheckResult(
+            name=check_name,
+            passed=True,
+            message="Pinned-constraint requirement disabled",
+        )
+
+    violations: list[str] = []
+    for dep in deps:
+        if direct_dep_keys is not None and dep.get_unique_key() not in direct_dep_keys:
+            continue
+        reason = classify_unbounded_reason(dep)
+        if reason is None:
+            continue
+        key = dep.get_canonical_dependency_string()
+        hint = humanize_reason(reason, dep)
+        violations.append(f"{key}: {hint}")
+
+    if not violations:
+        return CheckResult(
+            name=check_name,
+            passed=True,
+            message="All dependencies use pinned constraints",
+        )
+
+    return CheckResult(
+        name=check_name,
+        passed=False,
+        message=(
+            f"{len(violations)} dependency(ies) use unbounded constraints "
+            "(hint: pin to a semver range, literal tag, or SHA)"
+        ),
+        details=violations,
     )
 
 
@@ -782,6 +1039,8 @@ def run_dependency_policy_checks(
     fetch_outcome: str | None = None,
     fail_fast: bool = True,
     manifest_includes=_INCLUDES_NOT_PROVIDED,
+    registries: dict[str, str] | None = None,
+    direct_dep_keys: set[str] | None = None,
 ) -> CIAuditResult:
     """Evaluate :class:`ApmPolicy` against an already-resolved dependency set.
 
@@ -819,6 +1078,15 @@ def run_dependency_policy_checks(
         the ``explicit-includes`` check is skipped -- callers that
         do not have manifest information available (e.g. dep-only
         seams) can leave it unset.
+    direct_dep_keys:
+        Optional set of ``DependencyReference.get_unique_key()`` for
+        the direct (manifest-declared) deps. When supplied, the
+        ``require_pinned_constraint`` check only evaluates direct
+        deps -- transitive entries are excluded because the consumer
+        cannot rewrite a constraint declared inside a transitive
+        package's own manifest. When ``None`` (legacy dep-only seam
+        and the audit wrapper that already iterates direct-only
+        manifest deps) every dep in ``deps_to_install`` is evaluated.
 
     Returns
     -------
@@ -861,38 +1129,36 @@ def run_dependency_policy_checks(
     if _run(_check_transitive_depth(lockfile, policy.dependencies)):
         return result
 
-    # -- MCP checks (7-10) ----------------------------------------
-    # When mcp_deps is None (not provided), skip MCP checks entirely.
+    # -- Registry source + pinned-constraint + MCP + tail checks -----
+    # Collect all remaining checks into a single loop so the function
+    # stays within the max-returns threshold.
+    remaining_checks: list[CheckResult] = [
+        _check_registry_source(deps_list, policy.registry_source, registries),
+        # Pinned-constraint: property check on declared refs. Cheap
+        # (O(N) string classification, no I/O) so it always runs.
+        # When direct_dep_keys is supplied, restrict to direct deps -- a
+        # transitive package with an unbounded ref in its own manifest is
+        # not actionable by the consumer (see Copilot review on #1494).
+        _check_pinned_constraints(deps_list, policy.dependencies, direct_dep_keys),
+    ]
+    # MCP checks -- when mcp_deps is None (not provided), skip entirely.
     # When mcp_deps is an empty list (provided but no MCP deps), still
     # run MCP checks so they report "no X configured" for completeness.
     if mcp_deps is not None:
-        if _run(_check_mcp_allowlist(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_denylist(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_transport(mcp_list, policy.mcp)):
-            return result
-        if _run(_check_mcp_self_defined(mcp_list, policy.mcp)):
-            return result
-
-    # -- Target / compilation checks (11-13) -----------------------
-    # Skipped when effective_target is None -- those run in a separate
-    # post-targets call (W2-target-aware).
+        remaining_checks += [
+            _check_mcp_allowlist(mcp_list, policy.mcp),
+            _check_mcp_denylist(mcp_list, policy.mcp),
+            _check_mcp_transport(mcp_list, policy.mcp),
+            _check_mcp_self_defined(mcp_list, policy.mcp),
+        ]
+    # Target / compilation + manifest tail checks.
     if effective_target is not None:
-        # Build a minimal raw_yml dict so _check_compilation_target
-        # sees the effective (possibly CLI-overridden) target value
-        # rather than what is literally on disk.
         synthetic_yml = {"target": effective_target}
-        if _run(_check_compilation_target(synthetic_yml, policy.compilation)):
-            return result
-
-    # -- Manifest-level explicit-includes check --------------------
-    # Only run when the caller supplied the manifest includes value.
-    # Dep-only seams that lack manifest context (legacy callers) skip
-    # this check; the install pipeline and ``apm audit`` wrappers both
-    # supply it.
+        remaining_checks.append(_check_compilation_target(synthetic_yml, policy.compilation))
     if manifest_includes is not _INCLUDES_NOT_PROVIDED:
-        if _run(_check_includes_explicit(manifest_includes, policy.manifest)):
+        remaining_checks.append(_check_includes_explicit(manifest_includes, policy.manifest))
+    for check in remaining_checks:
+        if _run(check):
             return result
 
     # NOTE: compilation strategy, source attribution, manifest fields,
@@ -925,7 +1191,7 @@ def run_policy_checks(
     Returns :class:`CIAuditResult` with individual check results.
     """
     from ..deps.lockfile import LockFile, get_lockfile_path
-    from ..models.apm_package import APMPackage, clear_apm_yml_cache
+    from ._shared import _parse_apm_yml_safe
 
     result = CIAuditResult()
 
@@ -934,20 +1200,8 @@ def run_policy_checks(
     if not apm_yml_path.exists():
         return result
 
-    import yaml
-
-    try:
-        clear_apm_yml_cache()
-        manifest = APMPackage.from_apm_yml(apm_yml_path)
-    except (ValueError, yaml.YAMLError, OSError) as exc:
-        result.checks.append(
-            CheckResult(
-                name="manifest-parse",
-                passed=False,
-                message="Cannot parse apm.yml: %s -- fix the YAML syntax error in apm.yml and re-run."  # noqa: UP031
-                % exc,
-            )
-        )
+    manifest = _parse_apm_yml_safe(apm_yml_path, result)
+    if manifest is None:
         return result
 
     # Load lockfile (optional -- some checks work without it)
@@ -976,6 +1230,7 @@ def run_policy_checks(
         # effective_target=None: target checks handled below from raw_yml
         fail_fast=fail_fast,
         manifest_includes=manifest.includes,
+        registries=getattr(manifest, "registries", None),
     )
     result.checks.extend(dep_result.checks)
 
@@ -1005,6 +1260,14 @@ def run_policy_checks(
         return result
 
     # Unmanaged files check (16)
-    _run(_check_unmanaged_files(project_root, lock, policy.unmanaged_files))
+    _run(
+        _check_unmanaged_files(
+            project_root,
+            lock,
+            policy.unmanaged_files,
+            dependency_deny=policy.dependencies.effective_deny,
+            mcp_deny=policy.mcp.deny,
+        )
+    )
 
     return result

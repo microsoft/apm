@@ -3,7 +3,7 @@
 from pathlib import Path  # noqa: F401
 from unittest.mock import Mock
 
-import pytest  # noqa: F401
+import pytest
 import yaml
 
 from apm_cli.deps.lockfile import (
@@ -27,6 +27,32 @@ class TestLockedDependency:
             repo_url="owner/repo", virtual_path="prompts/file.md", is_virtual=True
         )
         assert dep.get_unique_key() == "owner/repo/prompts/file.md"
+
+    def test_get_unique_key_preserves_github_default_host(self):
+        dep = LockedDependency(repo_url="owner/repo", host="github.com")
+        assert dep.get_unique_key() == "owner/repo"
+
+    def test_get_unique_key_includes_non_default_host(self):
+        dep = LockedDependency(repo_url="team/skills", host="gitea.myorg.com")
+        assert dep.get_unique_key() == "gitea.myorg.com/team/skills"
+
+    def test_get_unique_key_lowercases_non_default_host(self):
+        mixed_case = LockedDependency(repo_url="team/skills", host="Gitea.MyOrg.com")
+        lower_case = LockedDependency(repo_url="team/skills", host="gitea.myorg.com")
+
+        assert mixed_case.get_unique_key() == lower_case.get_unique_key()
+        assert lower_case.get_unique_key() == "gitea.myorg.com/team/skills"
+
+    def test_get_unique_key_includes_non_default_host_for_virtual_dep(self):
+        dep = LockedDependency(
+            repo_url="team/skills",
+            host="git.internal.example.com",
+            virtual_path="prompts/review.prompt.md",
+            is_virtual=True,
+        )
+        assert (
+            dep.get_unique_key() == "git.internal.example.com/team/skills/prompts/review.prompt.md"
+        )
 
     def test_to_dict_minimal(self):
         dep = LockedDependency(repo_url="owner/repo")
@@ -99,6 +125,33 @@ class TestLockedDependency:
         locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None)
         assert locked.port == 7999
 
+    def test_host_type_round_trip(self):
+        dep = LockedDependency(
+            repo_url="team/repo",
+            host="code.acme.com",
+            host_type="gitlab",
+        )
+        data = dep.to_dict()
+        assert data["host_type"] == "gitlab"
+        restored = LockedDependency.from_dict(data)
+        assert restored.host_type == "gitlab"
+        assert restored.to_dependency_ref().host_type == "gitlab"
+
+    def test_rejects_unknown_host_type_from_lockfile(self):
+        with pytest.raises(ValueError, match="Supported values: gitlab"):
+            LockedDependency.from_dict(
+                {"repo_url": "team/repo", "host": "code.acme.com", "host_type": "gitea"}
+            )
+
+    def test_host_type_from_dependency_ref(self):
+        dep_ref = DependencyReference(
+            repo_url="team/repo",
+            host="code.acme.com",
+            host_type="gitlab",
+        )
+        locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None)
+        assert locked.host_type == "gitlab"
+
     def test_deployed_file_hashes_round_trip(self):
         dep = LockedDependency(
             repo_url="owner/repo",
@@ -115,6 +168,25 @@ class TestLockedDependency:
         dep = LockedDependency(repo_url="owner/repo")
         assert "deployed_file_hashes" not in dep.to_dict()
 
+    def test_deployed_files_deduplicated_when_serialized_after_repeated_update(self, tmp_path):
+        """Repeated installs may append the same path; lock output stays canonical."""
+        lock = LockFile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="owner/repo",
+                deployed_files=["b.md", "a.md", "b.md", "a.md"],
+            )
+        )
+
+        assert lock.get_dependency("owner/repo").deployed_files == ["b.md", "a.md"]
+
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock.write(lock_path)
+
+        data = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+        [dep_data] = data["dependencies"]
+        assert dep_data["deployed_files"] == ["a.md", "b.md"]
+
     def test_from_dict_missing_hashes_defaults_empty(self):
         loaded = LockedDependency.from_dict({"repo_url": "owner/repo"})
         assert loaded.deployed_file_hashes == {}
@@ -127,6 +199,23 @@ class TestLockFile:
         lock.add_dependency(dep)
         assert lock.has_dependency("owner/repo")
         assert not lock.has_dependency("other/repo")
+
+    def test_add_dependency_keeps_same_repo_from_different_hosts(self):
+        lock = LockFile()
+        lock.add_dependency(LockedDependency(repo_url="team/skills", host="github.com"))
+        lock.add_dependency(LockedDependency(repo_url="team/skills", host="gitea.myorg.com"))
+
+        assert set(lock.dependencies) == {"team/skills", "gitea.myorg.com/team/skills"}
+        assert lock.get_dependency("team/skills").host == "github.com"
+        assert lock.get_dependency("gitea.myorg.com/team/skills").host == "gitea.myorg.com"
+
+    def test_dependency_reference_key_includes_non_default_host(self):
+        dep = DependencyReference.parse("gitea.myorg.com/team/skills")
+        assert dep.get_unique_key() == "gitea.myorg.com/team/skills"
+
+    def test_dependency_reference_key_preserves_github_com_default(self):
+        dep = DependencyReference.parse("github.com/team/skills")
+        assert dep.get_unique_key() == "team/skills"
 
     def test_to_yaml(self):
         lock = LockFile(apm_version="1.0.0")
@@ -168,6 +257,23 @@ class TestLockFile:
         assert lock.mcp_servers == []
         yaml_str = lock.to_yaml()
         assert "mcp_servers" not in yaml_str  # omitted when empty
+
+    def test_lsp_servers_round_trip(self, tmp_path):
+        """lsp_servers must survive a write -> read cycle."""
+        lock = LockFile(apm_version="1.0.0")
+        lock.lsp_servers = ["pyright", "ruff-lsp"]
+        lock.add_dependency(LockedDependency(repo_url="owner/repo"))
+        lock_path = tmp_path / "apm.lock"
+        lock.write(lock_path)
+        loaded = LockFile.read(lock_path)
+        assert loaded is not None
+        assert loaded.lsp_servers == ["pyright", "ruff-lsp"]
+
+    def test_lsp_servers_empty_by_default(self):
+        lock = LockFile()
+        assert lock.lsp_servers == []
+        yaml_str = lock.to_yaml()
+        assert "lsp_servers" not in yaml_str
 
     def test_local_deployed_file_hashes_round_trip(self, tmp_path):
         """local_deployed_file_hashes must survive a write -> read cycle."""
@@ -247,6 +353,29 @@ class TestLockFile:
         )
         lock = LockFile.from_yaml(yaml_str)
         assert lock.mcp_configs == {}
+
+    def test_lsp_configs_round_trip(self, tmp_path):
+        """lsp_configs survive a write/read cycle."""
+        lock = LockFile()
+        lock.lsp_configs = {
+            "pyright": {
+                "name": "pyright",
+                "command": "pyright-langserver",
+                "extensionToLanguage": {".py": "python"},
+            }
+        }
+        lock_path = tmp_path / "apm.lock"
+        lock.write(lock_path)
+
+        loaded = LockFile.read(lock_path)
+        assert loaded is not None
+        assert loaded.lsp_configs == lock.lsp_configs
+
+    def test_lsp_configs_empty_by_default(self):
+        lock = LockFile()
+        assert lock.lsp_configs == {}
+        yaml_str = lock.to_yaml()
+        assert "lsp_configs" not in yaml_str
 
     def test_read_nonexistent(self, tmp_path):
         loaded = LockFile.read(tmp_path / "apm.lock.yaml")
@@ -368,6 +497,21 @@ class TestLockFileSemanticEquivalence:
     def test_changed_mcp_configs_not_equivalent(self):
         a = self._make_lock(mcp_configs={"s": {"cmd": "a"}})
         b = self._make_lock(mcp_configs={"s": {"cmd": "b"}})
+        assert not a.is_semantically_equivalent(b)
+
+    def test_changed_lsp_servers_not_equivalent(self):
+        a = self._make_lock(lsp_servers=["server-a"])
+        b = self._make_lock(lsp_servers=["server-b"])
+        assert not a.is_semantically_equivalent(b)
+
+    def test_lsp_server_order_irrelevant(self):
+        a = self._make_lock(lsp_servers=["b", "a"])
+        b = self._make_lock(lsp_servers=["a", "b"])
+        assert a.is_semantically_equivalent(b)
+
+    def test_changed_lsp_configs_not_equivalent(self):
+        a = self._make_lock(lsp_configs={"s": {"cmd": "a"}})
+        b = self._make_lock(lsp_configs={"s": {"cmd": "b"}})
         assert not a.is_semantically_equivalent(b)
 
     def test_changed_lockfile_version_not_equivalent(self):

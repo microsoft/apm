@@ -3,9 +3,8 @@
 import errno
 import os
 import re
-from dataclasses import dataclass, field  # noqa: F401
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.primitives.discovery import discover_primitives
@@ -45,6 +44,12 @@ class IntegrationResult:
     # ``files_integrated`` so the install summary can surface the work
     # done in adopt-only runs instead of looking like a no-op.
     files_adopted: int = 0
+
+    # Hook transparency: per-file display metadata populated by HookIntegrator.
+    # Each entry is a dict with keys: target_label, output_path, source_hook_file,
+    # actions (list of {event, summary}), rendered_json.
+    # Faithfully reflects post-path-rewrite data actually written to disk.
+    display_payloads: list = field(default_factory=list)
 
 
 def _read_bytes_no_follow(path: Path) -> bytes:
@@ -235,6 +240,69 @@ class BaseIntegrator:
         except OSError:
             return False
 
+    @staticmethod
+    def try_adopt_identical(target_path: Path, source_path: Path, target_paths: list) -> bool:
+        """Adopt *target_path* when it is byte-identical to *source_path*.
+
+        Encapsulates the ``is_content_identical_to_source`` + append pattern
+        so secondary call sites in agent/prompt/hook integrators share a
+        single predicate call instead of repeating the three-line block.
+
+        Returns ``True`` and appends *target_path* to *target_paths* when the
+        files are identical; returns ``False`` and leaves *target_paths*
+        unchanged otherwise.
+        """
+        if BaseIntegrator.is_content_identical_to_source(target_path, source_path):
+            target_paths.append(target_path)
+            return True
+        return False
+
+    def _check_adopt_or_skip(
+        self,
+        target_path: Path,
+        source_file: Path,
+        rel_path: str,
+        managed_files: set[str] | None,
+        force: bool,
+        diagnostics,
+        target_paths: list,
+    ) -> tuple[bool, bool]:
+        """Check whether *target_path* should be adopted or skipped.
+
+        Combines :meth:`is_content_identical_to_source` (adopt) and
+        :meth:`check_collision` (skip) into a single call so integrators
+        share the decision logic without code duplication.
+
+        When adopting, *target_path* is appended to *target_paths* as a
+        side effect so the caller's bookkeeping stays correct.
+
+        Args:
+            target_path: Destination path on disk.
+            source_file: Source file to compare against for byte-identity.
+            rel_path: Relative path string used for collision detection and
+                diagnostics.
+            managed_files: Set of APM-managed relative paths; ``None`` means
+                none managed.
+            force: When ``True``, collisions are silently overwritten.
+            diagnostics: Optional diagnostics collector; forwarded to
+                :meth:`check_collision`.
+            target_paths: Mutable list; *target_path* is appended on adopt.
+
+        Returns:
+            ``(skip, adopted)`` — when ``skip`` is ``True`` the caller must
+            ``continue`` (or otherwise skip writing this file); ``adopted``
+            is ``True`` only when the existing file was byte-identical and
+            has been silently adopted.
+        """
+        if self.is_content_identical_to_source(target_path, source_file):
+            target_paths.append(target_path)
+            return True, True
+        if self.check_collision(
+            target_path, rel_path, managed_files, force, diagnostics=diagnostics
+        ):
+            return True, False
+        return False, False
+
     # Known integration prefixes that APM is allowed to deploy/remove under.
     # Derived from ``targets.KNOWN_TARGETS`` so adding a target auto-propagates.
     @staticmethod
@@ -363,12 +431,22 @@ class BaseIntegrator:
 
         for target in source:
             for prim_name, mapping in target.primitives.items():
-                # Dynamic-root targets (cowork) use cowork:// URI prefix.
+                # Dynamic-root targets (cowork, copilot-app) use URI prefixes.
                 if target.resolved_deploy_root is not None:
                     if prim_name == "skills":
                         from apm_cli.integration.copilot_cowork_paths import COWORK_LOCKFILE_PREFIX
 
                         skill_prefixes.append(COWORK_LOCKFILE_PREFIX)
+                    elif target.name == "copilot-app":
+                        from apm_cli.integration.copilot_app_db import (
+                            COPILOT_APP_LOCKFILE_PREFIX,
+                        )
+
+                        raw_key = f"{prim_name}_{target.name}"
+                        bucket_key = BaseIntegrator._BUCKET_ALIASES.get(raw_key, raw_key)
+                        if bucket_key not in buckets:
+                            buckets[bucket_key] = set()
+                        prefix_map[COPILOT_APP_LOCKFILE_PREFIX] = bucket_key
                     continue
                 effective_root = mapping.deploy_root or target.root_dir
                 prefix = (
@@ -472,31 +550,78 @@ class BaseIntegrator:
     # Link resolution helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _is_root_local_package(package_info, project_root: Path) -> bool:
+        """Return True when *package_info* represents the project's own
+        synthetic ``_local`` package (install_path == project_root).
+
+        Used to scope discovery to ``.apm/`` and ``.github/`` instead of
+        walking the entire project tree -- see issue #1507.
+        """
+        try:
+            return Path(package_info.install_path).resolve() == Path(project_root).resolve()
+        except (OSError, RuntimeError):
+            return False
+
     def init_link_resolver(self, package_info, project_root: Path) -> None:
         """Initialise and register the link resolver for a package."""
         self.link_resolver = UnifiedLinkResolver(project_root)
         try:
-            scan_root = package_info.install_path
-            # When install_path is $HOME (user-scope local package),
-            # only scan the .apm/ subdirectory to avoid recursive-
-            # globbing the entire home tree.  See issue #830.
-            if scan_root == Path.home():
-                scan_root = scan_root / ".apm"
-            primitives = discover_primitives(scan_root)
-            self.link_resolver.register_contexts(primitives)
+            install_path = Path(package_info.install_path)
+            project_root = Path(project_root)
+            home_root = Path.home()
+            # Determine which directories to scan for primitives.
+            # Default: the package's install_path itself (for real
+            # installed dependencies under apm_modules/...).
+            #
+            # Narrowing rules:
+            # - $HOME (user-scope local package): scan only ~/.apm/ to
+            #   avoid recursive-globbing the entire home tree (#830).
+            # - Project-scope synthetic _local package (install_path
+            #   equals project_root): scan only ./.apm/ and ./.github/
+            #   to avoid full-tree walks on large monorepos (#1507).
+            #   Generic patterns like ``**/*.instructions.md`` would
+            #   otherwise traverse every file in the repo even when
+            #   the user only has a handful of primitives under .apm/.
+            if install_path.resolve() == home_root.resolve():
+                home_apm_root = install_path / ".apm"
+                scan_roots = [home_apm_root] if home_apm_root.is_dir() else []
+                narrowed_local = False
+            elif self._is_root_local_package(package_info, project_root):
+                candidates = [install_path / ".apm", install_path / ".github"]
+                scan_roots = [p for p in candidates if p.is_dir()]
+                narrowed_local = True
+            else:
+                scan_roots = [install_path]
+                narrowed_local = False
+
+            for root in scan_roots:
+                primitives = discover_primitives(root)
+                self.link_resolver.register_contexts(primitives)
+
             # Generalized in-package asset link rewriting (#1147) needs the
             # authoritative source-package root. Use install_path directly:
             # for installed deps it is apm_modules/<owner>/<repo>/ (or any
             # ADO/virtual subdir variant), for local packages it is the
-            # package's apm_modules/_local/<name>/ copy. Skip when scan_root
-            # was narrowed to .apm/ (user-scope) so we do not let asset
-            # links escape the .apm/ boundary on $HOME packages.
-            if scan_root == package_info.install_path and Path(scan_root).is_dir():
-                self.link_resolver.package_root = Path(scan_root)
+            # package's apm_modules/_local/<name>/ copy. For the project-
+            # scope synthetic _local package, the authoritative root is
+            # the project itself, even though discovery was narrowed to
+            # .apm/ and .github/. Skip only when scan_root was narrowed
+            # to ~/.apm/ (user-scope $HOME) so we do not let asset links
+            # escape the .apm/ boundary on $HOME packages.
+            if install_path.resolve() != home_root.resolve() and install_path.is_dir():
+                if narrowed_local or (len(scan_roots) == 1 and scan_roots[0] == install_path):
+                    self.link_resolver.package_root = Path(install_path)
         except Exception:
             self.link_resolver = None
 
-    def resolve_links(self, content: str, source: Path, target: Path) -> tuple:
+    def resolve_links(
+        self,
+        content: str,
+        source: Path,
+        target: Path,
+        preserved_source_root: Path | None = None,
+    ) -> tuple:
         """Resolve context links in *content*.
 
         Returns:
@@ -509,6 +634,7 @@ class BaseIntegrator:
             content=content,
             source_file=source,
             target_file=target,
+            preserved_source_root=preserved_source_root,
         )
         if resolved == content:
             return content, 0

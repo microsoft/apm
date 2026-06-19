@@ -9,7 +9,7 @@ description: >-
 
 # APM Strategy Skill
 
-[APM CEO persona](../../agents/apm-ceo.agent.md)
+[APM CEO persona](../../../.apm/agents/apm-ceo.agent.md)
 
 ## When to activate
 

@@ -31,8 +31,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Any
 
+from apm_cli.install.registry_wiring import (
+    get_registry_resolver,
+    registry_resolution_for_cached_registry_dep,
+    resolver_last_registry_resolution,
+)
 from apm_cli.utils.console import _rich_error, _rich_success
 from apm_cli.utils.short_sha import format_short_sha
 
@@ -60,6 +65,59 @@ def _format_package_type_label(pkg_type) -> str | None:
         PackageType.HOOK_PACKAGE: "Hook Package (hooks/*.json only)",
         PackageType.SKILL_BUNDLE: "Skill Bundle (skills/<name>/SKILL.md)",
     }.get(pkg_type)
+
+
+def _record_declared_license(ctx, dep_key: str, install_path) -> None:
+    """Backfill ctx.package_declared_licenses from the resolved dep's manifest.
+
+    Reads the DECLARED license (apm.yml ``license:`` or plugin.json
+    ``license``) at the install path. APM never reads the LICENSE file text or
+    concludes a license -- this is a passthrough of an author claim. When no
+    manifest declares one, the key is left ABSENT (not declared == unknown);
+    no sentinel is stored. Best-effort: any read error leaves the key absent.
+    """
+    try:
+        from apm_cli.export.declared_license import read_declared_license
+
+        declared = read_declared_license(install_path)
+    except Exception:
+        declared = None
+    if declared:
+        ctx.package_declared_licenses[dep_key] = declared
+
+
+def _rebuild_cached_semver_resolution(dep_locked_chk: Any) -> Any:
+    """Rebuild a ``GitSemverResolution`` from a cached lockfile entry.
+
+    Returns ``None`` unless ALL required fields are present on
+    *dep_locked_chk*:  ``constraint``, ``version``, ``resolved_tag``,
+    and ``resolved_commit``.  Per PR #1496 review thread: gating on
+    just ``constraint`` and back-filling missing fields with empty
+    strings risks propagating an incomplete semver resolution into
+    ``InstalledPackage`` and rewriting the lockfile with empty/missing
+    fields (and an empty ``resolved_ref``).  When the lockfile cache is
+    incomplete we prefer to leave the resolution as ``None`` so the
+    caller falls back to the literal-ref path.
+    """
+    if dep_locked_chk is None:
+        return None
+    if not (
+        dep_locked_chk.constraint
+        and dep_locked_chk.version
+        and dep_locked_chk.resolved_tag
+        and dep_locked_chk.resolved_commit
+    ):
+        return None
+    from apm_cli.deps.git_semver_resolver import GitSemverResolution
+
+    return GitSemverResolution(
+        constraint=dep_locked_chk.constraint,
+        resolved_version=dep_locked_chk.version,
+        resolved_tag=dep_locked_chk.resolved_tag,
+        resolved_sha=dep_locked_chk.resolved_commit,
+        matched_pattern="",
+        resolved_at=dep_locked_chk.resolved_at or "",
+    )
 
 
 @dataclass
@@ -157,12 +215,15 @@ class LocalDependencySource(DependencySource):
                     )
                 return None
 
-        # Determine the anchor for relative ``local_path`` (#857). For direct
-        # deps from the root project this is project_root. For transitive
-        # deps declared inside another local package, it is the parent
-        # package's source directory -- captured during resolve via
-        # ``ctx.dep_base_dirs``.
-        base_dir = getattr(ctx, "dep_base_dirs", {}).get(dep_key) or ctx.project_root
+        # Determine the anchor for relative ``local_path`` (#857). For
+        # direct deps from the root project this is ``ctx.source_root``
+        # (which equals ``ctx.project_root`` unless ``apm install --root``
+        # redirects writes -- then it stays at $PWD).  For transitive
+        # deps declared inside another local package, the parent's
+        # source directory was captured during resolve via
+        # ``ctx.dep_base_dirs`` -- it is already absolute, so ``--root``
+        # has nothing to do.
+        base_dir = getattr(ctx, "dep_base_dirs", {}).get(dep_key) or ctx.source_root
         result_path = _copy_local_package(
             dep_ref,
             install_path,
@@ -253,6 +314,7 @@ class LocalDependencySource(DependencySource):
 
         if local_info.package_type:
             ctx.package_types[dep_key] = local_info.package_type.value
+        _record_declared_license(ctx, dep_key, install_path)
 
         return Materialization(
             package_info=local_info,
@@ -374,7 +436,7 @@ class CachedDependencySource(DependencySource):
                 display_name, ref=_ref, sha=_sha, cached=not self.fetched_this_run
             )
 
-        deltas: dict[str, int] = {"installed": 1}
+        deltas: dict[str, int] = {"installed": int(self.fetched_this_run)}
         if not dep_ref.reference:
             deltas["unpinned"] = 1
 
@@ -382,7 +444,9 @@ class CachedDependencySource(DependencySource):
         # write the empty deployed_files entry on its own (single source
         # of truth), so we just signal "skip integration" via
         # package_info=None.
-        if not ctx.targets:
+        # In lockfile_only mode, skip this early return so installed_packages
+        # is populated before we return without deploying any files.
+        if not ctx.targets and not ctx.lockfile_only:
             return Materialization(
                 package_info=None,
                 install_path=install_path,
@@ -448,6 +512,28 @@ class CachedDependencySource(DependencySource):
         ):
             _cached_registry = ctx.registry_config
 
+        _cached_resolution = None
+        if dep_ref.source == "registry":
+            from apm_cli.deps.registry.feature_gate import (
+                require_package_registry_enabled,
+            )
+
+            require_package_registry_enabled("Registry-sourced cached installs")
+            _cached_resolution = registry_resolution_for_cached_registry_dep(
+                ctx, dep_ref, dep_key, dep_locked_chk
+            )
+
+        # Cached git-source semver dep (#1488): replay the resolution from
+        # either ctx (we resolved earlier in this same run) or the lockfile
+        # so re-writing the lockfile from cache preserves constraint /
+        # resolved_tag / resolved_at instead of dropping them. The
+        # lockfile-backed reconstruction is gated on ALL required fields
+        # being present (see ``_rebuild_cached_semver_resolution`` and the
+        # PR #1496 review thread).
+        _cached_semver = ctx.git_semver_resolutions.get(dep_key)
+        if _cached_semver is None:
+            _cached_semver = _rebuild_cached_semver_resolution(dep_locked_chk)
+
         ctx.installed_packages.append(
             InstalledPackage(
                 dep_ref=dep_ref,
@@ -456,12 +542,24 @@ class CachedDependencySource(DependencySource):
                 resolved_by=resolved_by,
                 is_dev=_is_dev,
                 registry_config=_cached_registry,
+                registry_resolution=_cached_resolution,
+                git_semver_resolution=_cached_semver,
             )
         )
         if install_path.is_dir():
             ctx.package_hashes[dep_key] = _compute_hash(install_path)
         if cached_package_info.package_type:
             ctx.package_types[dep_key] = cached_package_info.package_type.value
+        _record_declared_license(ctx, dep_key, install_path)
+
+        # Return without deploying integration files when the target set is empty.
+        if not ctx.targets:
+            return Materialization(
+                package_info=None,
+                install_path=install_path,
+                dep_key=dep_key,
+                deltas=deltas,
+            )
 
         return Materialization(
             package_info=cached_package_info,
@@ -502,7 +600,6 @@ class FreshDependencySource(DependencySource):
     def acquire(self) -> Materialization | None:
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.drift import build_download_ref
-        from apm_cli.models.apm_package import PackageType  # noqa: F401
         from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
         from apm_cli.utils.path_security import safe_rmtree
 
@@ -543,6 +640,60 @@ class FreshDependencySource(DependencySource):
 
             if dep_key in ctx.pre_download_results:
                 package_info = ctx.pre_download_results[dep_key]
+            elif dep_ref.source == "registry":
+                from apm_cli.deps.registry.feature_gate import (
+                    require_package_registry_enabled,
+                )
+
+                require_package_registry_enabled("Registry-sourced downloads")
+
+                # Registry-sourced dep: dispatch to the dedicated-registry
+                # resolver instead of the GitHub downloader. This branch
+                # fires when (a) the BFS callback skipped due to existing
+                # install path on a re-install, or (b) parallel pre-download
+                # was skipped (registry deps aren't pre-downloaded).
+                _registry_resolver = get_registry_resolver(ctx)
+                if _registry_resolver is None:
+                    raise RuntimeError(
+                        f"dep {dep_ref.repo_url!r} is registry-sourced but "
+                        f"no registry resolver was constructed (apm.yml may "
+                        f"be missing a 'registries:' block)."
+                    )
+                # Lockfile re-install path: registry_name might be absent —
+                # look it up from the lockfile's resolved_url.
+                from apm_cli.deps.registry.auth import (
+                    dependency_ref_with_registry_name_from_lockfile,
+                )
+
+                _regs = getattr(ctx.apm_package, "registries", None) or {}
+                download_ref = dependency_ref_with_registry_name_from_lockfile(
+                    download_ref,
+                    _regs,
+                    locked_dep=dep_locked_chk,
+                )
+                # Lockfile replay (npm install model): fetch directly from the
+                # locked URL and verify against the locked hash when available
+                # and the manifest range still covers the locked version.
+                if (
+                    not ctx.update_refs
+                    and dep_locked_chk
+                    and dep_locked_chk.resolved_url
+                    and dep_locked_chk.resolved_hash
+                    and dep_locked_chk.version
+                    and not ref_changed
+                ):
+                    package_info = _registry_resolver.download_from_lockfile(
+                        download_ref,
+                        install_path,
+                        resolved_url=dep_locked_chk.resolved_url,
+                        resolved_hash=dep_locked_chk.resolved_hash,
+                        version=dep_locked_chk.version,
+                    )
+                else:
+                    package_info = _registry_resolver.download_package(
+                        download_ref,
+                        install_path,
+                    )
             else:
                 package_info = ctx.downloader.download_package(
                     download_ref,
@@ -569,7 +720,11 @@ class FreshDependencySource(DependencySource):
                     # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
                     _sha = format_short_sha(resolved.resolved_commit)
                 logger.download_complete(display_name, ref=_ref, sha=_sha)
-                if ctx.auth_resolver:
+                # Only emit the per-package git auth diagnostic for git deps.
+                # Registry-sourced deps don't talk to git hosts; resolving
+                # github.com auth here for them is misleading (and can issue
+                # network calls via auth.AuthResolver providers).
+                if ctx.auth_resolver and dep_ref.source in (None, "git"):
                     try:
                         _host = dep_ref.host or "github.com"
                         _org = (
@@ -605,6 +760,17 @@ class FreshDependencySource(DependencySource):
             depth = node.depth if node else 1
             resolved_by = node.parent.dependency_ref.repo_url if node and node.parent else None
             _is_dev = node.is_dev if node else False
+            # Registry-sourced deps: pull the captured resolution out of
+            # the resolver's per-graph map so the lockfile records
+            # resolved_url + resolved_hash + version (design §6.1).
+            _registry_resolution = (
+                resolver_last_registry_resolution(ctx, dep_key)
+                if dep_ref.source == "registry"
+                else None
+            )
+            # Git-source semver-range deps (#1488): the resolution was
+            # captured by the BFS download_callback in phases/resolve.py.
+            _git_semver_resolution = ctx.git_semver_resolutions.get(dep_key)
             ctx.installed_packages.append(
                 InstalledPackage(
                     dep_ref=dep_ref,
@@ -612,7 +778,9 @@ class FreshDependencySource(DependencySource):
                     depth=depth,
                     resolved_by=resolved_by,
                     is_dev=_is_dev,
-                    registry_config=ctx.registry_config if not dep_ref.is_local else None,
+                    registry_config=(ctx.registry_config if not dep_ref.is_local else None),
+                    registry_resolution=_registry_resolution,
+                    git_semver_resolution=_git_semver_resolution,
                 )
             )
             if install_path.is_dir():
@@ -621,12 +789,17 @@ class FreshDependencySource(DependencySource):
             # Supply-chain protection: verify content hash on fresh
             # downloads when the lockfile already records a hash.
             # Skip when ``ctx.expected_hash_change_deps`` marks this dep
-            # (set by _resolve_download_strategy when branch-ref drift or
-            # the v<=0.12.2 self-heal forces a re-download whose hash is
-            # legitimately expected to differ from the lockfile record).
+            # (set by resolve.py's BFS callback and _resolve_download_strategy
+            # when branch-ref drift or the v<=0.12.2 self-heal forces a
+            # re-download whose hash is legitimately expected to differ from
+            # the lockfile record).
+            # Thread-safety: resolve phase completes before integrate runs,
+            # so the set is stable here.  integrate.py's own .add() is
+            # idempotent (set semantics) and runs single-threaded.
+            _expected_hash_deps = ctx.expected_hash_change_deps
             if (
                 not ctx.update_refs
-                and dep_key not in ctx.expected_hash_change_deps
+                and dep_key not in _expected_hash_deps
                 and dep_locked_chk
                 and dep_locked_chk.content_hash
                 and dep_key in ctx.package_hashes
@@ -649,6 +822,7 @@ class FreshDependencySource(DependencySource):
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value
+            _record_declared_license(ctx, dep_key, install_path)
 
             if hasattr(package_info, "package_type"):
                 package_type = package_info.package_type

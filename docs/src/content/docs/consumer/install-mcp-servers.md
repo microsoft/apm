@@ -43,7 +43,24 @@ dependencies:
       url: https://mcp.linear.app/sse
       headers:
         Authorization: "Bearer ${LINEAR_TOKEN}"
+
+    # 4. Self-defined remote with harness-specific extra keys
+    - name: slack
+      registry: false
+      transport: http
+      url: https://mcp.slack.com/mcp
+      oauth:
+        clientId: "<pre-registered-client-id>"
+        callbackPort: 3118
 ```
+
+Unknown keys like `oauth` above are **passthrough fields**: they are
+preserved and written into the generated config for every harness you
+install (so a Claude Code `oauth` block reaches all targets; harnesses
+that do not recognise it ignore it). Keys that collide with a modeled
+field (`command`, `url`, `headers`, `env`, ...) are rejected with a
+warning so they cannot redirect a server. See
+[Manifest Schema](../../reference/manifest-schema/) for the full rules.
 
 The full grammar (overlays, `${input:...}` variables, `tools:`
 allowlists, `package:` selection) is in
@@ -75,25 +92,67 @@ For every harness APM detects in your environment, `apm install`
 writes a runtime-specific MCP config file. The schemas differ; the
 `apm.yml` source of truth does not.
 
+Registry-declared environment variables honor the registry's
+`required` flag. Servers with optional auth install without token
+prompts until you choose to configure one. See the
+[manifest schema reference](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
+for the full required-vs-optional runtime config rule.
+
 | Harness | File | Scope | Format |
 |---|---|---|---|
 | GitHub Copilot CLI | `~/.copilot/mcp-config.json` | global | JSON `mcpServers` |
 | VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
 | Claude Code | `.mcp.json` (project) or `~/.claude.json` (`-g`) | both | JSON `mcpServers` |
 | Cursor | `.cursor/mcp.json` | project (only if `.cursor/` exists) | JSON `mcpServers` |
-| Codex CLI | `~/.codex/config.toml` | global | TOML `[mcp_servers.*]` |
-| Gemini CLI | `.gemini/settings.json` | project (only if `.gemini/` exists) | JSON `mcpServers` |
+| Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `~/.codex/config.toml` (`-g`) | both | TOML `[mcp_servers.*]` |
+| Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
+| Antigravity CLI | `.agents/mcp_config.json` (project, only if `.agents/` exists) or `~/.gemini/config/mcp_config.json` (`-g`) | both | JSON `mcpServers` |
 | OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
+| Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
 
-Cursor, Gemini, and OpenCode are opt-in by directory: APM only writes
-their config when the corresponding `.cursor/`, `.gemini/`, or
-`.opencode/` directory already exists in the project. This avoids
-creating runtime artifacts for tools you do not use.
+## How `targets:` gates which configs get written
 
-`apm install -g --mcp NAME` is restricted to the two harnesses with
-true global MCP support: Copilot CLI and Codex CLI. The other
-runtimes are project-scoped.
+MCP install honors the same target resolution chain as `apm install`
+for any other dependency: see
+[Where files land](../install-packages/#where-files-land).
+In short: `--target` wins, then `apm.yml`'s `targets:`, then
+auto-detect from harness directories.
+
+When a runtime is outside the active target set, APM does NOT write
+its MCP config -- and announces the drop on stdout so you can confirm
+the gate took effect:
+
+```text
+[i] Skipped MCP config for claude, codex  (active targets: copilot)
+```
+
+This single rule replaces two older ones that used to coexist:
+
+- A "directory opt-in" carve-out for Cursor / Gemini / OpenCode -- now
+  redundant, because `targets:` (or auto-detection) drives the gate
+  for those runtimes too.
+- The pre-#1335 silent skip path, which dropped non-listed runtimes
+  without telling you.
+
+A malformed `targets:` field (both `target:` and `targets:` set,
+`targets: []`, or an unknown target name) fails closed: no MCP files
+are written and an `[x]` error names the field to fix. A greenfield
+project with no `targets:`, no `--target` flag, AND no detected
+signals (`.github/copilot-instructions.md`, `.cursor/`, etc.) also
+fails closed with the same `[x]` voice -- consistent with how
+`apm install` treats the same input. Pin a target with `--target` or
+declare one in `apm.yml`. (#1335)
+
+`apm install -g --mcp NAME` is a deliberate carve-out: it routes the
+write to each runtime's user-scope MCP config (for example, Copilot CLI to
+`~/.copilot/mcp-config.json`, Claude Code to `~/.claude.json`, Codex CLI to
+`~/.codex/config.toml`, Gemini CLI to `~/.gemini/settings.json`, Antigravity CLI to `~/.gemini/config/mcp_config.json`, Windsurf to
+`~/.codeium/windsurf/mcp_config.json`, Kiro to `~/.kiro/settings/mcp.json`,
+and JetBrains Copilot to its OS-specific user config). It does not consult
+the project-scope `targets:` whitelist -- user-scope writes are by
+definition not project-bound. Workspace-only runtimes (VS Code,
+Cursor, OpenCode) are skipped at user scope.
 
 ## stdio vs HTTP servers
 
@@ -124,16 +183,18 @@ When the Copilot CLI adapter writes a remote MCP config and the
 server is identified as the GitHub MCP server, APM resolves a token
 and adds an `Authorization: Bearer <token>` header.
 
-The server is identified as "GitHub" by **two** narrow checks
-([copilot.py:1208](https://github.com/microsoft/apm/blob/main/src/apm_cli/adapters/client/copilot.py#L1208)):
+The server is identified as "GitHub" only when it satisfies **both** of
+these narrow checks
+([copilot.py:1004](https://github.com/microsoft/apm/blob/main/src/apm_cli/adapters/client/copilot.py#L1004)):
 
 1. The server name (case-insensitive) is one of:
    `github-mcp-server`, `github`, `github-mcp`,
    `github-copilot-mcp-server`.
-2. Or the parsed URL hostname matches the GitHub host allowlist
-   (`github.com`, `api.github.com`, and registered GHES hostnames).
+2. **And** the parsed URL hostname matches the GitHub host allowlist
+   (`github.com`, `*.github.com`, `githubcopilot.com` hosts, and
+   registered GHES hostnames).
 
-This is an exact-match allowlist on hostname, not a substring check.
+This is a parsed-host allowlist on hostname, not a substring check.
 A URL like `https://github.com.evil.example` does not match because
 the parsed hostname is `github.com.evil.example`, not `github.com`.
 

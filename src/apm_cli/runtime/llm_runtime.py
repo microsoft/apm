@@ -1,11 +1,9 @@
 """LLM runtime adapter for APM."""
 
-import os  # noqa: F401
 import subprocess
-import tempfile  # noqa: F401
-from typing import Any, Dict, Optional  # noqa: F401, UP035
+from typing import Any
 
-from .base import RuntimeAdapter
+from .base import RuntimeAdapter, _stream_subprocess_output
 
 
 class LLMRuntime(RuntimeAdapter):
@@ -49,25 +47,7 @@ class LLMRuntime(RuntimeAdapter):
             cmd.append(prompt_content)
 
             # Execute the command with real-time streaming
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Merge stderr into stdout for streaming
-                text=True,
-                encoding="utf-8",
-                bufsize=1,  # Line buffered
-            )
-
-            output_lines = []
-
-            # Stream output in real-time
-            for line in iter(process.stdout.readline, ""):
-                # Print to terminal in real-time
-                print(line, end="", flush=True)
-                output_lines.append(line)
-
-            # Wait for process to complete
-            return_code = process.wait()
+            output_lines, return_code = _stream_subprocess_output(cmd)
 
             if return_code != 0:
                 full_output = "".join(output_lines)

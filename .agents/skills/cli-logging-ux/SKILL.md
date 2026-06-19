@@ -9,7 +9,7 @@ description: >
   if the user doesn't mention "logging" or "UX" explicitly.
 ---
 
-[CLI Logging UX expert persona](../../agents/cli-logging-expert.agent.md)
+[CLI Logging UX expert persona](../../../.apm/agents/cli-logging-expert.agent.md)
 
 # CLI Logging & Developer Experience
 

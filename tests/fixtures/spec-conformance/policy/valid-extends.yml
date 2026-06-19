@@ -1,0 +1,19 @@
+# Exercises: req-pl-002, req-pl-005, req-pl-006, req-pl-007, req-pl-011
+# Valid policy with extends chain, tri-state allow, and x-* extension.
+name: contoso-baseline
+extends: contoso-enterprise/policy
+enforcement: block
+fetch_failure: block
+dependencies:
+  allow:
+    - contoso/*
+    - microsoft/apm-skills-*
+  deny:
+    - "*/legacy-*"
+  require:
+    - contoso/security-baseline
+  require_pinned_constraint: true
+  max_depth: 25
+manifest:
+  scripts: deny
+x-acme-policy-tag: "production"

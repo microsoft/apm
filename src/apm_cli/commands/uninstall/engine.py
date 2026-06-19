@@ -3,13 +3,20 @@
 import builtins
 from pathlib import Path
 
-from ...constants import APM_MODULES_DIR, APM_YML_FILENAME  # noqa: F401
-from ...core.command_logger import CommandLogger  # noqa: F401
-from ...deps.lockfile import LockFile  # noqa: F401
+from ...constants import APM_MODULES_DIR
+from ...core.command_logger import CommandLogger
+from ...deps.lockfile import LockFile
 from ...integration.mcp_integrator import MCPIntegrator
-from ...models.apm_package import APMPackage, DependencyReference  # noqa: F401
+from ...models.apm_package import DependencyReference
 from ...utils.path_security import PathTraversalError, safe_rmtree
 from ...utils.paths import portable_relpath
+
+
+def _is_marketplace_ref(package: str) -> bool:
+    """Check if *package* is marketplace notation using the public API."""
+    from ...marketplace.resolver import parse_marketplace_ref
+
+    return parse_marketplace_ref(package) is not None
 
 
 def _build_children_index(lockfile):
@@ -39,22 +46,227 @@ def _parse_dependency_entry(dep_entry):
     raise ValueError(f"Unsupported dependency entry type: {type(dep_entry).__name__}")
 
 
-def _validate_uninstall_packages(packages, current_deps, logger):
-    """Validate which packages can be removed and return matched/unmatched lists."""
+def _resolve_marketplace_packages(
+    packages: list[str],
+    lockfile: "LockFile | None",
+    logger: "CommandLogger",
+    auth_resolver=None,
+    dry_run: bool = False,
+) -> dict[str, str | None]:
+    """Resolve marketplace refs (NAME@MARKETPLACE[#REF]) to canonical owner/repo strings.
+
+    Resolution proceeds in three stages for each marketplace-formatted package:
+
+    1. **Lockfile lookup (offline)**: scan ``lockfile.dependencies`` for entries
+       where ``discovered_via == marketplace_name`` and
+       ``marketplace_plugin_name == plugin_name``.  When found, use the
+       dependency's unique key as the canonical identity.  If an entry for the
+       same plugin name exists under a *different* marketplace, a provenance-
+       mismatch warning is emitted and that entry is used.
+    2. **Registry fallback (silent)**: call :func:`parse_marketplace_ref` then
+       :func:`resolve_marketplace_plugin` to obtain the canonical ``owner/repo``
+       from the marketplace registry.  Skipped when *dry_run* is ``True``.
+       A supply-chain guard refuses any canonical that is not already present
+       in the lockfile (prevents a poisoned registry from removing an unrelated
+       installed package).  Network errors fail only the affected package;
+       remaining packages in the batch continue.
+    3. **Unresolvable**: an error is logged with marketplace-specific wording
+       and the package maps to ``None`` in the returned dict.
+
+    Args:
+        packages: List of marketplace-formatted package strings to resolve.
+        lockfile: Current :class:`~apm_cli.deps.lockfile.LockFile` object, or
+            ``None`` when no lockfile exists.
+        logger: :class:`~apm_cli.core.command_logger.CommandLogger` for output.
+        auth_resolver: Optional auth resolver forwarded to the registry call.
+        dry_run: When ``True``, skip the network registry call (Stage 2).
+
+    Returns:
+        A dict mapping each original marketplace ref to its resolved canonical
+        string, or ``None`` when resolution failed.
+    """
+    from ...marketplace.resolver import parse_marketplace_ref, resolve_marketplace_plugin
+
+    resolved: dict[str, str | None] = {}
+
+    for package in packages:
+        parsed = parse_marketplace_ref(package)
+        if parsed is None:
+            continue  # Not a marketplace ref; skipped silently
+
+        plugin_name, marketplace_name, _ref = parsed
+        canonical: str | None = None
+
+        # Stage 1: Lockfile-first lookup (offline, zero network calls)
+        if lockfile is not None:
+            # First pass: exact match (both discovered_via AND marketplace_plugin_name)
+            for dep in lockfile.dependencies.values():
+                if (
+                    dep.discovered_via == marketplace_name
+                    and dep.marketplace_plugin_name == plugin_name
+                ):
+                    canonical = dep.get_unique_key()
+                    break
+
+            # Second pass: plugin_name match with different marketplace (provenance mismatch)
+            if canonical is None:
+                for dep in lockfile.dependencies.values():
+                    if (
+                        dep.marketplace_plugin_name == plugin_name
+                        and dep.discovered_via != marketplace_name
+                    ):
+                        canonical = dep.get_unique_key()
+                        logger.warning(
+                            f"{plugin_name}@{marketplace_name} not found; "
+                            f"package was installed via {dep.discovered_via}. "
+                            f"Proceeding with uninstall of {canonical}."
+                        )
+                        break
+
+        # Stage 2: Registry fallback (silent, mirrors install behaviour)
+        if canonical is None:
+            if dry_run:
+                logger.verbose_detail(
+                    f"Skipping registry fallback for {plugin_name}@{marketplace_name} "
+                    "(dry-run mode)"
+                )
+            else:
+                logger.progress(
+                    f"Resolving {plugin_name}@{marketplace_name} via registry...",
+                    symbol="search",
+                )
+                try:
+                    resolution = resolve_marketplace_plugin(
+                        plugin_name, marketplace_name, auth_resolver=auth_resolver
+                    )
+                    canonical = resolution.canonical
+                    # Supply-chain guard: refuse registry canonicals not present in lockfile
+                    if lockfile is not None and canonical not in lockfile.dependencies:
+                        logger.warning(
+                            f"Registry resolved {plugin_name}@{marketplace_name} to "
+                            f"{canonical}, but it is not recorded in apm.lock.yaml. "
+                            "Refusing as a supply-chain precaution; use "
+                            f"`apm uninstall {canonical}` directly if this is correct."
+                        )
+                        canonical = None
+                    elif lockfile is None:
+                        # No lockfile means no offline integrity anchor; behaviour is
+                        # accepted today but tracked as a supply-chain follow-up.
+                        logger.verbose_detail(
+                            f"No lockfile present; trusting registry canonical "
+                            f"{canonical} for {plugin_name}@{marketplace_name}."
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        f"Registry lookup for {plugin_name}@{marketplace_name} failed: "
+                        f"{exc}. Falling back to apm.yml match."
+                    )
+
+        # Stage 3: Not found in either source -- surface a clear error
+        if canonical is None:
+            if dry_run:
+                logger.warning(
+                    f"{plugin_name}@{marketplace_name} could not be resolved in dry-run "
+                    "(registry fallback skipped). Re-run without --dry-run, or use "
+                    "owner/repo notation to preview directly."
+                )
+            else:
+                logger.error(
+                    f"{plugin_name}@{marketplace_name} could not be resolved -- "
+                    "use owner/repo format to uninstall directly, or run "
+                    "`apm list` to find the owner/repo canonical name "
+                    "then use `apm uninstall owner/repo` directly."
+                )
+
+        resolved[package] = canonical
+
+    return resolved
+
+
+def _validate_uninstall_packages(
+    packages: list[str],
+    current_deps: list,
+    logger: "CommandLogger",
+    lockfile: "LockFile | None" = None,
+    auth_resolver=None,
+    dry_run: bool = False,
+) -> tuple[list, list]:
+    """Validate which packages can be removed and return matched/unmatched lists.
+
+    Accepts both canonical ``owner/repo`` strings and marketplace refs of the
+    form ``NAME@MARKETPLACE[#REF]``.  Marketplace refs are resolved to their
+    canonical form before being matched against the ``current_deps`` list from
+    ``apm.yml``.
+
+    Args:
+        packages: Package identifiers supplied by the user.
+        current_deps: Current dependency list read from ``apm.yml``.
+        logger: :class:`~apm_cli.core.command_logger.CommandLogger` for output.
+        lockfile: Optional :class:`~apm_cli.deps.lockfile.LockFile` used for
+            offline marketplace resolution.  When ``None`` the registry fallback
+            is attempted instead.
+        auth_resolver: Optional auth resolver forwarded to the registry call.
+        dry_run: When ``True``, skip the network registry call in Stage 2.
+
+    Returns:
+        A two-tuple ``(packages_to_remove, packages_not_found)`` where
+        *packages_to_remove* contains matched dep entries and
+        *packages_not_found* contains unresolved or unmatched package strings.
+    """
+    # Pre-resolve any marketplace refs before the main validation loop
+    mkt_refs_set = {p for p in packages if _is_marketplace_ref(p)}
+    mkt_resolved: dict[str, str | None] = {}
+    if mkt_refs_set:
+        mkt_resolved = _resolve_marketplace_packages(
+            list(mkt_refs_set),
+            lockfile,
+            logger,
+            auth_resolver=auth_resolver,
+            dry_run=dry_run,
+        )
+
     packages_to_remove = []
     packages_not_found = []
 
     for package in packages:
-        if "/" not in package:
-            logger.error(f"Invalid package format: {package}. Use 'owner/repo' format.")
-            continue
+        # A package arg is either: (a) a marketplace ref in
+        # `name@marketplace[#ref]` form (no slash), (b) an `owner/repo`
+        # slug, or (c) a local filesystem path. The legacy guard below
+        # only handled (a) when there is no `/`, but Windows absolute
+        # paths use backslashes (e.g. `C:\Users\...\my-pkg`) and have
+        # no `/` either -- they were wrongly rejected as "Invalid
+        # package format" and the DB row for any deployed copilot-app
+        # workflow would leak. Use the canonical local-path detector
+        # so paths fall through to DependencyReference parsing on
+        # every platform.
+        is_local = DependencyReference.is_local_path(package)
+        if "/" not in package and not is_local:
+            if package in mkt_refs_set:
+                canonical = mkt_resolved.get(package)
+                if canonical is None:
+                    # Error already logged by _resolve_marketplace_packages;
+                    # surface in packages_not_found so caller counts are accurate.
+                    packages_not_found.append(package)
+                    continue
+                canonical_for_match = canonical
+                display_label = package
+            else:
+                logger.error(
+                    f"Invalid package format: {package}. "
+                    "Use 'owner/repo' or 'plugin-name@marketplace' format."
+                )
+                packages_not_found.append(package)
+                continue
+        else:
+            canonical_for_match = package
+            display_label = package
 
         matched_dep = None
         try:
-            pkg_ref = DependencyReference.parse(package)
+            pkg_ref = DependencyReference.parse(canonical_for_match)
             pkg_identity = pkg_ref.get_identity()
         except Exception:
-            pkg_identity = package
+            pkg_identity = canonical_for_match
 
         for dep_entry in current_deps:
             try:
@@ -64,16 +276,25 @@ def _validate_uninstall_packages(packages, current_deps, logger):
                     break
             except (ValueError, TypeError, AttributeError, KeyError):
                 dep_str = dep_entry if isinstance(dep_entry, str) else str(dep_entry)
-                if dep_str == package:
+                if dep_str == canonical_for_match:
                     matched_dep = dep_entry
                     break
 
         if matched_dep is not None:
             packages_to_remove.append(matched_dep)
-            logger.progress(f"{package} - found in apm.yml", symbol="check")
+            if canonical_for_match != display_label:
+                logger.progress(
+                    f"{display_label} - found in apm.yml (as {canonical_for_match})",
+                    symbol="check",
+                )
+            else:
+                logger.progress(f"{display_label} - found in apm.yml", symbol="check")
         else:
             packages_not_found.append(package)
-            logger.warning(f"{package} - not found in apm.yml")
+            if canonical_for_match != display_label:
+                logger.warning(f"{display_label} ({canonical_for_match}) - not found in apm.yml")
+            else:
+                logger.warning(f"{display_label} - not found in apm.yml")
 
     return packages_to_remove, packages_not_found
 
@@ -92,7 +313,7 @@ def _dry_run_uninstall(packages_to_remove, apm_modules_dir, logger):
         if apm_modules_dir.exists() and package_path.exists():
             logger.progress(f"  - {pkg} from apm_modules/")
 
-    from ...deps.lockfile import LockFile, get_lockfile_path  # noqa: F811
+    from ...deps.lockfile import LockFile, get_lockfile_path
 
     lockfile_path = get_lockfile_path(Path("."))
     lockfile = LockFile.read(lockfile_path)
@@ -263,6 +484,14 @@ def _sync_integrations_after_uninstall(
     from ...integration.dispatch import get_dispatch_table
     from ...integration.targets import resolve_targets
     from ...models.apm_package import PackageInfo, validate_apm_package
+    from ...primitives.discovery import clear_discovery_cache
+
+    # Phase 2 re-integration walks the on-disk primitive set after Phase 1
+    # has removed the uninstalled package's files. The process-scoped
+    # discovery memo populated earlier in this CLI run would otherwise
+    # serve the pre-removal snapshot, causing deleted primitives to be
+    # re-integrated. See #1533 follow-up.
+    clear_discovery_cache()
 
     _dispatch = get_dispatch_table()
     _integrators = {name: entry.integrator_class() for name, entry in _dispatch.items()}
@@ -305,7 +534,11 @@ def _sync_integrations_after_uninstall(
                 continue
             _effective_root = _mapping.deploy_root or _target.root_dir
             _deploy_dir = project_root / _effective_root / _mapping.subdir
-            if not _deploy_dir.exists():
+            # Dynamic-root targets (e.g. copilot-app) have no filesystem
+            # deploy dir; their managed files are URIs that the integrator
+            # resolves internally.  Skip the dir-exists guard for them.
+            _is_dynamic = _target.resolved_deploy_root is not None
+            if not _is_dynamic and not _deploy_dir.exists():
                 continue
             _managed_subset = None
             if _buckets is not None:
@@ -369,6 +602,37 @@ def _sync_integrations_after_uninstall(
         )
         counts["skills"] = result.get("files_removed", 0)
 
+    # Scan sync_managed DIRECTLY for copilot-app-db:// entries.
+    # The copilot-app target is opt-in: resolve_targets() excludes it from the
+    # default user-scope set unless --target copilot-app was passed at install
+    # time and recorded on apm_package.target.  Without this scan, prompts
+    # deployed to ~/.copilot/data.db would never be deleted on uninstall
+    # because the per-target loop above does not iterate copilot-app.
+    if sync_managed:
+        from ...integration.copilot_app_db import COPILOT_APP_LOCKFILE_PREFIX
+
+        _copilot_app_files = {p for p in sync_managed if p.startswith(COPILOT_APP_LOCKFILE_PREFIX)}
+        if _copilot_app_files:
+            # Find or synthesise a user-scope copilot-app TargetProfile.
+            from ...integration.targets import KNOWN_TARGETS
+
+            _ca_target = next(
+                (t for t in _resolved_targets if t.name == "copilot-app"),
+                None,
+            )
+            if _ca_target is None:
+                _ca_static = KNOWN_TARGETS.get("copilot-app")
+                if _ca_static is not None:
+                    _ca_target = _ca_static.for_scope(user_scope=True)
+            if _ca_target is not None:
+                result = _integrators["prompts"].sync_for_target(
+                    _ca_target,
+                    apm_package,
+                    project_root,
+                    managed_files=_copilot_app_files,
+                )
+                counts["prompts"] += result.get("files_removed", 0)
+
     # Hooks (multi-target sync_integration handles all targets)
     result = _integrators["hooks"].sync_integration(
         apm_package,
@@ -378,6 +642,10 @@ def _sync_integrations_after_uninstall(
     counts["hooks"] = result.get("files_removed", 0)
 
     # Phase 2: Re-integrate from remaining installed packages
+    # Re-clear the discovery memo: Phase 1 mutated the on-disk primitive
+    # set (removed files), so any cache snapshot taken between entry and
+    # here is stale. Integrator dispatch below walks discovery internally.
+    clear_discovery_cache()
     _targets = _resolved_targets
 
     for dep in apm_package.get_apm_dependencies():

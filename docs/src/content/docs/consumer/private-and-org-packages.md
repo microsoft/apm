@@ -96,8 +96,8 @@ dependencies:
 
 Token: `ADO_APM_PAT`, or `az login --tenant <id>` (APM picks up the
 Azure CLI bearer). ADO is always auth-required -- no anonymous
-fallback. Azure DevOps Server (on-prem) works the same way once you
-set `GITHUB_HOST` to its FQDN.
+fallback. For Azure DevOps Server (on-prem), use an explicit git URL
+and the same credential helper your shell uses.
 
 ## GitLab
 
@@ -146,6 +146,27 @@ dependencies:
 APM falls back across protocols on the same port: `ssh://host:7999`
 will retry as `https://host:7999/...` if SSH is unreachable.
 
+## Bitbucket Data Center personal repos
+
+Bitbucket Data Center / Server exposes personal repositories under
+`/scm/~username/`. The `~` is part of the path segment and is preserved
+as-is in `apm.yml`:
+
+```yaml
+dependencies:
+  apm:
+    - git: https://bitbucket.example.com/scm/~jdoe/ml-utils.git
+      ref: v1.0.0
+    - git: ssh://git@bitbucket.example.com:7999/~jdoe/ml-utils.git
+      ref: v1.0.0
+```
+
+Token: your git credential helper (`git credential-manager`, macOS
+Keychain, `gh auth login`, etc.) for the HTTPS form, or your SSH key
+for the SSH form. There is no Bitbucket-specific `*_APM_PAT` -- APM
+shells out to `git` and inherits whatever credentials git already
+knows. Sourcehut (`~user` path convention) works the same way.
+
 ## Pre-fetched bundles (offline / air-gapped)
 
 Install a packed bundle from disk:
@@ -162,8 +183,8 @@ Full pack-and-unpack workflow: [Deploy a bundle](../deploy-a-bundle/).
 
 ADO and GitLab marketplaces use the same auth backends as direct deps
 -- once `ADO_APM_PAT` or `GITLAB_APM_PAT` is set, marketplace fetches
-authenticate. See [Marketplaces](../../guides/marketplaces/) for the
-consumer-side workflow.
+authenticate. See [Installing from marketplaces](../installing-from-marketplaces/)
+for the consumer-side workflow.
 
 ## Out of scope
 

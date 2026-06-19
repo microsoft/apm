@@ -1,0 +1,8 @@
+# Fixture: require_pinned_constraint enabled at block enforcement.
+# Used by tests/integration/policy/test_require_pinned_constraint_e2e.py
+# to verify that an unbounded dep aborts install with a policy block.
+name: require-pinned-block-policy
+version: "1.0.0"
+enforcement: block
+dependencies:
+  require_pinned_constraint: true

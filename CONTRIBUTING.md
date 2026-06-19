@@ -243,6 +243,25 @@ When adding a new precondition, add an entry to `_MARKER_CHECKS` and
 declare the marker in `pyproject.toml`; that is the only place the
 precondition needs to live.
 
+### Coverage policy
+
+Both suites enforce a hard coverage gate in CI. A PR that drops
+coverage below the gate cannot merge.
+
+| Suite       | Gate | Enforced in |
+|-------------|------|-------------|
+| Unit        | 80%  | `pyproject.toml` (`fail_under`) |
+| Integration | 70%  | `.github/workflows/ci-integration.yml` (`--fail-under`) |
+
+**Ratchet rule.** Gates only move upward. When actual coverage
+exceeds the gate by 5 or more percentage points, raise the gate to
+`actual - 3` in the next release PR.
+
+**Finding low-coverage files.** Every CI run publishes a
+"Lowest-coverage files" collapsible section in the job summary
+(rendered by `scripts/coverage-summary.py`). Check there to see
+which files would benefit most from new tests.
+
 ## Coding Style
 
 This project follows:
@@ -281,6 +300,20 @@ If your changes affect how users interact with the project, update the documenta
 
 ## Extending APM
 
+### Adding or modifying an MCP client adapter
+
+The MCP client adapters (`src/apm_cli/adapters/client/`) inherit shared
+utilities from `MCPClientAdapter` in `base.py`.  When adding a new adapter
+or modifying an existing one:
+
+- Inherit from `MCPClientAdapter` and reuse the shared helpers
+  (`_apply_pypi_homebrew_generic_config`, `_apply_auth_and_headers_impl`,
+  `_resolve_env_vars_with_prompting`).
+- Do **not** copy-paste logic from sibling adapters -- the pylint R0801
+  similarity threshold is 10 lines and CI will fail on duplicated blocks.
+- For marketplace tag-parsing, use `marketplace._shared.iter_semver_tags`
+  rather than re-implementing the refs-iteration loop.
+
 ### How to add an experimental feature flag
 
 Use an experimental flag to de-risk rollout of a user-visible behavioural change that may need early adopter feedback. Do not add a flag for a bug fix, internal refactor, or any change that should simply ship as the default behaviour.
@@ -316,6 +349,67 @@ Avoid these anti-patterns:
 - Do not gate security-critical behaviour behind an experimental flag.
 - Do not read `is_enabled()` at module import time.
 - Do not persist flag state anywhere other than `~/.apm/config.json` via `update_config`.
+
+## Adding or changing a normative requirement (OpenAPM v0.1)
+
+The OpenAPM v0.1 spec (`docs/src/content/docs/specs/openapm-v0.1.md`)
+and APM the implementation are co-evolved in this repo. APM is the
+sole implementation of the spec. To prevent the spec from rotting
+into a document of lies, every normative change MUST land as three
+coupled edits in the same PR. There is NO automated CI detector for
+"APM behaviour drifted from the spec" beyond the 4-way orphan_check
+gate -- the ritual below is the only safeguard.
+
+Three-step ritual:
+
+1. **Spec edit.** Add or change a `<a id="req-XXX"></a>` anchor with
+   prose in the spec body. Add or change the matching Appendix C row.
+2. **Manifest edit.** Add or change the entry in
+   `docs/src/content/docs/specs/manifests/openapm-v0.1.requirements.yml`
+   so it stays a byte-equivalent projection of the canonical anchors.
+3. **Test edit.** Add or extend a `@pytest.mark.req("req-XXX")` test
+   under `tests/spec_conformance/`. If a real assertion is not yet
+   possible, call `waive("...")` from `_helpers.py` with a one-line
+   rationale; the waiver will surface in `CONFORMANCE.md` as honest
+   debt, not invisible coverage.
+
+After the three edits, regenerate the conformance statement:
+
+```
+uv run --extra dev python -m tests.spec_conformance.gen_statement
+```
+
+and commit the resulting `CONFORMANCE.{md,json}` at repo root. CI
+gates a clean diff.
+
+Common modes the ritual catches:
+
+- **Mode A (silent regression)** -- a code change in `src/apm_cli/**`
+  breaks an assertion bound to a `req-XXX`. The spec-conformance
+  pytest job fails; fix the code, do not touch the spec.
+- **Mode B (silent extension)** -- a new APM behaviour lands under a
+  normative critical path (`primitives/`, `deps/`, `policy/`,
+  `registry/`, `runtime/`, `install/`, `integration/`) with no spec
+  citation. Two gates catch this: (a) `orphan_check` fails if you
+  added a `@pytest.mark.req` marker but forgot the anchor, manifest
+  row, or Appendix C row; (b) the **Mode B detector** fails if you
+  added substantive code under a critical path and added NO spec
+  artifacts at all (no anchor, no manifest row, no marker). The fix
+  is to add the anchor + manifest row + marker, or -- for a true
+  refactor / perf rewrite / internal cleanup with no observable
+  behaviour delta -- add a single line `apm-spec-waiver: <one-line
+  rationale, >= 16 chars>` to the PR body or a commit message. The
+  waiver is echoed verbatim to the CI log and is reviewer-auditable.
+  The critical-path allowlist itself lives at
+  `tests/spec_conformance/critical_paths.txt`; edits to it are
+  themselves critical-path edits.
+- **Mode C (stale spec)** -- the spec prose is wrong about APM's
+  intended behaviour. Amend the anchor + Appendix C row + manifest
+  entry. The same PR carries both the spec edit and the test that
+  proves it.
+
+Choosing between modes is a human call. The harness exposes the
+choice; it does not pick.
 
 ## License
 

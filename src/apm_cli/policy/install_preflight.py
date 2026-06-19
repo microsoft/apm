@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional, Tuple  # noqa: F401, UP035
 
 # #832: Canonical exception type lives in ``apm_cli.install.errors``.
 # ``PolicyBlockError`` remains as an alias re-exported below so external
@@ -23,10 +22,8 @@ from typing import Optional, Tuple  # noqa: F401, UP035
 from apm_cli.install.errors import PolicyViolationError
 
 from .discovery import PolicyFetchResult, discover_policy_with_chain
-from .models import CIAuditResult  # noqa: F401
 from .outcome_routing import route_discovery_outcome
 from .policy_checks import run_dependency_policy_checks
-from .schema import ApmPolicy  # noqa: F401
 
 # Deprecated alias kept for backward compatibility (#832).  New code
 # should ``raise``/``except`` :class:`PolicyViolationError` directly.
@@ -71,6 +68,7 @@ def run_policy_preflight(
     no_policy: bool = False,
     logger,
     dry_run: bool = False,
+    registries: dict[str, str] | None = None,
 ) -> tuple[PolicyFetchResult | None, bool]:
     """Discover + enforce policy for a non-pipeline command site.
 
@@ -143,12 +141,18 @@ def run_policy_preflight(
         return fetch_result, False
 
     # -- Enforcement (warn or block) -----------------------------------
+    # ``apm_deps`` here is always the direct-deps list from the caller
+    # (manifest or MCP path) -- forward as direct_dep_keys so the
+    # require_pinned_constraint check skips transitives (#1494 Copilot review).
+    apm_deps_list = list(apm_deps) if apm_deps is not None else []
     audit_result = run_dependency_policy_checks(
-        apm_deps if apm_deps is not None else [],
+        apm_deps_list,
         lockfile=None,
         policy=policy,
         mcp_deps=mcp_deps,
         fail_fast=(enforcement == "block"),
+        registries=registries,
+        direct_dep_keys={d.get_unique_key() for d in apm_deps_list},
     )
 
     if not audit_result.passed:

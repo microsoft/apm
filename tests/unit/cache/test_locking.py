@@ -1,6 +1,5 @@
 """Tests for cache locking and atomic landing primitives."""
 
-import os
 import threading
 from pathlib import Path
 
@@ -44,9 +43,12 @@ class TestStagePath:
     """Test staging path generation."""
 
     def test_format_contains_pid(self, tmp_path: Path) -> None:
+        # Marker no longer encodes pid (shortened for Windows MAX_PATH).
+        # Verify the staged name is unique vs the final name.
         final = tmp_path / "final_dir"
         staged = stage_path(final)
-        assert str(os.getpid()) in staged.name
+        assert staged.name != final.name
+        assert staged.name.startswith(final.name + ".inc.")
 
     def test_same_parent_as_final(self, tmp_path: Path) -> None:
         final = tmp_path / "final_dir"
@@ -56,7 +58,7 @@ class TestStagePath:
     def test_contains_incomplete_marker(self, tmp_path: Path) -> None:
         final = tmp_path / "final_dir"
         staged = stage_path(final)
-        assert ".incomplete." in staged.name
+        assert ".inc." in staged.name
 
 
 class TestAtomicLand:

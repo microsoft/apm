@@ -104,6 +104,39 @@ class TestSetupEnvironment:
         assert env["GIT_CONFIG_GLOBAL"] == "/dev/null"
 
 
+class TestSetupEnvironmentWin32:
+    """Cover the win32 branch in setup_environment (lines 66-74)."""
+
+    def test_win32_creates_empty_gitconfig_and_sets_global(self, monkeypatch):
+        """Lines 66-72: on win32, a temp empty gitconfig file is created and
+        GIT_CONFIG_GLOBAL is pointed at it."""
+        tm = _FakeTokenManager()
+
+        # Patch sys.platform globally (monkeypatch restores automatically).
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
+
+        with patch("apm_cli.config.get_apm_temp_dir", return_value=None):
+            env = GitAuthEnvBuilder(tm).setup_environment()
+
+        cfg_path = env.get("GIT_CONFIG_GLOBAL", "")
+        assert cfg_path.endswith(".apm_empty_gitconfig"), cfg_path
+        assert os.path.isfile(cfg_path)
+
+    def test_win32_uses_get_apm_temp_dir_when_available(self, monkeypatch, tmp_path):
+        """get_apm_temp_dir() return value is preferred over tempfile.gettempdir()."""
+        tm = _FakeTokenManager()
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
+
+        with patch("apm_cli.config.get_apm_temp_dir", return_value=str(tmp_path)):
+            env = GitAuthEnvBuilder(tm).setup_environment()
+
+        expected = os.path.join(str(tmp_path), ".apm_empty_gitconfig")
+        assert env["GIT_CONFIG_GLOBAL"] == expected
+        assert os.path.isfile(expected)
+
+
 # ---------------------------------------------------------------------------
 # noninteractive_env
 # ---------------------------------------------------------------------------

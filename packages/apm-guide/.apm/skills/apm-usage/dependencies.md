@@ -19,9 +19,17 @@ dependencies:
     - git@github.com:microsoft/apm-sample-package.git
     - git@gitlab.com:group/subgroup/repo.git
 
+    # SSH with non-default user (EMU accounts, servers where login != "git")
+    - myuser@host.example.com:owner/repo.git
+    - ssh://myuser@host.example.com/owner/repo.git
+
     # Custom ports (e.g. Bitbucket Datacenter, self-hosted GitLab)
     - ssh://git@bitbucket.example.com:7999/project/repo.git
     - https://git.internal:8443/team/repo.git
+
+    # Bitbucket Data Center personal repos (~user) and Sourcehut
+    - https://bitbucket.example.com/scm/~jdoe/ml-utils.git
+    - https://git.sr.ht/~jdoe/dotfiles
 
     # FQDN shorthand (non-GitHub hosts keep the domain)
     - gitlab.com/acme/coding-standards
@@ -40,9 +48,18 @@ package is resolved relative to THAT package's own directory (npm/pip/cargo
 parity). Sibling layouts that resolve outside the consuming project root
 (e.g. `../sibling-pkg` from a local dep at the project edge) are
 supported -- the consuming developer authored the manifest chain and
-already trusts the layout. The actual security boundary is upstream:
-**remote-cloned packages cannot declare `local_path` deps at all**, since
-they have no business reaching into the consumer's filesystem.
+already trusts the layout.
+
+Remote-cloned packages may declare a relative `path:` only when it resolves
+inside the same authenticated remote repo root. APM expands that path to the
+parent's remote host/repo/ref and fetches the sibling from the same origin.
+Absolute paths, paths that escape the repo root, and cross-repo local paths
+are rejected.
+
+**GitLab `path:` fetch transport:** GitLab `path:` files are fetched over git
+transport, not the REST API, so self-hosted instances with the API disabled
+still install. Path containment is enforced on the materialized file to reject
+symlink or traversal escapes. For fallback token setup, see `authentication.md`.
 
 ### Custom git ports
 
@@ -53,6 +70,12 @@ fallback enabled with `--allow-protocol-fallback`).
 - Use the `ssh://` form to specify an SSH port
   (e.g. `ssh://git@host:7999/owner/repo.git`). The SCP shorthand
   `git@host:path` **cannot** carry a port -- the `:` is the path separator.
+- A non-`git` SSH user is honored when present in the dep URL
+  (e.g. `myuser@host:owner/repo.git` or `ssh://myuser@host/owner/repo.git`),
+  useful for EMU accounts or servers where the SSH login is not `git`.
+  Validated against `^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$` with a 64-char cap;
+  percent-encoded userinfo is rejected. The user is presentation-only and
+  not part of dependency identity (does not perturb lockfile dedup).
 - The lockfile records `port: <int>` (1-65535) only when a non-default port
   is set. Port is a transport detail, not part of the package identity --
   the same repo reachable on different ports dedupes to one entry.
@@ -103,6 +126,25 @@ both protocols.
 
 ## Object form (complex cases)
 
+Use the object form when the string shorthand cannot express what you need:
+nested-group repos with virtual paths, custom SSH ports, local path deps,
+aliases, or marketplace dependencies.
+
+Three mutually exclusive keys select the form: `git`, `path`, or `marketplace`.
+
+The legacy string suffix `@alias` is not supported; write `alias:` explicitly
+instead so `@` remains reserved for git usernames and version syntax.
+
+### Remote (`git`)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `git` | REQUIRED | Clone URL (HTTPS, SSH, or FQDN shorthand). The literal `parent` inherits the consuming package's repo. |
+| `path` | OPTIONAL | Subdirectory or file within the repo (virtual package). |
+| `ref` | OPTIONAL | Branch, tag, or commit SHA. |
+| `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
+| `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. Generic hosts do not receive APM-managed PATs on HTTP file reads. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys) for keying rules. |
+
 ```yaml
 - git: https://gitlab.com/acme/repo.git
   path: instructions/security                   # virtual sub-path
@@ -115,8 +157,120 @@ both protocols.
 - git: ssh://git@bitbucket.example.com:7999/project/repo.git   # custom SSH port
   ref: v1.0
 
-- path: ./packages/my-skills                    # local only
+- git: https://code.acme.com/platform/standards.git               # bespoke GitLab
+  type: gitlab
 ```
+
+### Local (`path`)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `path` | REQUIRED | Filesystem path (must start with `./`, `../`, `/`, or `~/`). |
+
+Local-path deps inside another local package resolve relative to that
+package's directory, not the project root.
+
+```yaml
+- path: ./packages/my-skills
+```
+
+### Marketplace (`name` + `marketplace`)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | REQUIRED | Plugin identifier within the marketplace (`^[a-zA-Z0-9._-]+$`). |
+| `marketplace` | REQUIRED | Registered marketplace name (`^[a-zA-Z0-9._-]+$`). |
+| `version` | OPTIONAL | Semver range or exact version (e.g. `~2.1.0`, `^2.0`, `>=1.4`, `2.1.0`). Resolved against `{name}--v{version}` git tags on the marketplace repo. |
+
+During resolution, marketplace entries are looked up in the marketplace's
+`marketplace.json` and replaced with concrete git coordinates. When `version`
+is a semver range or bare version number, the resolver lists git tags
+matching `{name}--v{version}`, filters by the constraint, and picks the
+highest matching tag. Raw git refs (e.g. `v2.0.0`, `main`) bypass tag
+resolution and override the source ref directly. The lockfile records the
+resolved ref, not the marketplace placeholder. Unknown keys in a marketplace
+entry are rejected.
+
+```yaml
+- name: sec-check
+  marketplace: acme-plugins
+
+- name: secrets-vault
+  marketplace: acme-plugins
+  version: "~2.1.0"
+```
+
+## Registry-sourced APM dependencies (experimental)
+
+Behind `apm experimental enable registries`. Registry deps resolve over the
+REST [Registry HTTP API](../../../../../docs/src/content/docs/reference/registry-http-api.md)
+alongside the Git resolver -- declare registries in `apm.yml` (or in
+`~/.apm/config.json`) and reference them from `dependencies.apm`. See
+`authentication.md` (Registry tokens) for `APM_REGISTRY_TOKEN_{NAME}`.
+
+```yaml
+registries:
+  jf-skills:
+    url: https://registry.example.com/apm/jf-skills
+  default: jf-skills                       # optional; routes shorthand deps
+
+dependencies:
+  apm:
+    # String shorthand -- requires a default registry; always needs a semver ref
+    - acme/foo#^1.2.3                      # semver range -> default registry
+    - acme/bar#1.4.0                       # exact semver -> default registry
+
+    # Object form -- whole package via the default registry
+    - id: acme/toolkit
+      version: ^2.0.0
+
+    # Object form -- explicit registry by name
+    - registry: jf-skills
+      id: acme/toolkit
+      version: ^2.0.0
+
+    # Object form -- virtual package (sub-path inside a published package)
+    - registry: jf-skills
+      id: acme/prompt-pack
+      path: prompts/review.prompt.md
+      version: 1.4.0
+      alias: review-prompt                 # optional local alias
+```
+
+Object-form fields:
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `id` | yes | `owner/repo` identity at the registry |
+| `version` | yes | Exact semver version or semver range (e.g. `1.4.0`, `^2.0.0`, `>=1.2.0 <2.0.0`). Non-semver refs (labels like `stable`/`latest`, `v`-prefixed tags, branch names, SHAs) are rejected when routed to a registry |
+| `registry` | no | Name from the merged registry map; defaults to the effective default |
+| `path` | no | Sub-path to a file or directory within the published package |
+| `alias` | no | Local alias controlling the install directory name |
+
+Routing rules when a default registry is active:
+
+| Entry form | Routed to |
+|------------|-----------|
+| `owner/repo#<any-ref>` | Default registry |
+| `- id:` object (no `registry:`) | Default registry |
+| `- registry:` object | Named registry |
+| `- git:` object | Git (explicit override) |
+| `- path:` object | Local filesystem |
+
+A shorthand entry with no ref (`acme/foo`) is **rejected** when routed to a
+registry -- a semver version selector is always required. Non-semver refs
+(labels, `v`-prefixed tags, branch names) are also rejected for registry
+sources; use `- git:` to keep a dep on Git when a default registry is
+active. Registry-routed deps add `source: registry`, `version`,
+`resolved_url`, and `resolved_hash` (sha256 of the archive bytes) to
+their lockfile entry, and the lockfile is promoted to
+`lockfile_version: "2"` when any dep is registry-sourced OR carries
+git-source semver resolution fields (`constraint` / `resolved_at`) or a
+revision-pin tag annotation (`resolved_tag`).
+
+The `acme/foo@registry-name#version` shorthand is **not supported** (deferred
+to v2) -- the `@` collides with npm/cargo/pip version syntax, with
+`git@host`, and with marketplace plugin shorthand. Use the object form.
 
 ## Virtual package types
 
@@ -129,7 +283,7 @@ Virtual packages reference a subset of a repository.
 
 Classification is by extension only. A path like `owner/repo/collections/security` (no extension) is a Subdirectory; the actual shape -- APM package (incl. dep-only `apm.yml` with no `.apm/`), skill bundle, or plugin -- is resolved at fetch time by probing for `apm.yml`.
 
-**Gitea and Gogs (self-hosted or vendor-hosted):** virtual packages resolve via the host's `/{owner}/{repo}/raw/{ref}/{path}` URL first, then fall back to the Contents API (v1 native, v3 Gogs-compat). GitLab nested-group repos (`group/subgroup/repo`) require the object form (`git: <full-url>`, `path: <virtual>`) -- shorthand is ambiguous on >2-segment paths.
+**Gitea and Gogs (self-hosted or vendor-hosted):** virtual packages resolve via the host's `/{owner}/{repo}/raw/{ref}/{path}` URL first, then fall back to the Contents API (v1 native, v3 Gogs-compat). Direct GitLab nested-group repos (`group/subgroup/repo`) require the object form (`git: <full-url>`, `path: <virtual>`) -- shorthand is ambiguous on >2-segment paths. **Exception:** when the dep routes through a registry proxy (explicit `host/artifactory/<key>/...` FQDN, or bare shorthand under `PROXY_REGISTRY_URL` + `PROXY_REGISTRY_ONLY=1`), the install-time boundary probe HEAD-walks the candidate splits against the proxy and locks in the first one whose archive responds, so nested-group shorthand works without the object form (#1472).
 
 > **Removed (#1094):** the legacy `.collection.yml` / `.collection.yaml` virtual-package form is no longer supported. Convert any `.collection.yml` to an `apm.yml` with a `dependencies:` section, then reference the resulting subdirectory as a regular subdirectory virtual package.
 
@@ -171,11 +325,15 @@ dependencies:
         # Env-var placeholders in headers/env values:
         #   ${VAR} or ${env:VAR}  -> Copilot CLI: preserved as ${VAR} and resolved
         #                            from host env at server-start (no plaintext on disk).
-        #                            VS Code: rewritten to ${env:VAR} and resolved at runtime.
+        #                            VS Code and JetBrains: rewritten to ${env:VAR}
+        #                            and resolved at runtime.
+        #                            Kiro: preserved as ${VAR} and resolved at runtime.
         #                            Cursor/Windsurf/OpenCode/Claude/Gemini: resolved at install time.
         #                            Codex: passed through unchanged.
         #   ${input:<id>}         -> VS Code prompts user at runtime
         #   <VAR>                 -> deprecated; auto-translated, emits a warning
+        # Registry-declared optional env/input fields are omitted when unset;
+        # see manifest-schema section 4.2.4 for reinstall preservation semantics.
         Authorization: "Bearer ${MY_TOKEN}"
       tools: ["repos", "issues"]
 
@@ -193,17 +351,88 @@ dependencies:
       registry: false
       transport: http
       url: "https://mcp.internal.example.com"
+
+    # Self-defined remote with harness-specific extra keys
+    # Unknown keys (e.g. oauth) are passthrough: preserved and written into
+    # the generated config for EVERY installed harness. Keys that collide with
+    # a modeled field (command/url/headers/env/...) are rejected with a warning.
+    - name: slack
+      registry: false
+      transport: http
+      url: https://mcp.slack.com/mcp
+      oauth:
+        clientId: "<pre-registered-client-id>"
+        callbackPort: 3118
 ```
+
+## LSP dependency formats
+
+LSP (Language Server Protocol) servers give supported runtimes real-time
+code intelligence. APM currently writes LSP config for Claude Code and
+GitHub Copilot CLI while keeping the dependency schema runtime-neutral.
+
+```yaml
+dependencies:
+  lsp:
+    # String reference (name only)
+    - gopls
+
+    # Full object
+    - name: pyright
+      command: pyright-langserver
+      args: ["--stdio"]
+      extensionToLanguage:
+        ".py": python
+        ".pyi": python
+      transport: stdio                          # stdio (default) | socket
+      env:
+        PYTHONPATH: "./src"
+      startupTimeout: 10000
+
+    - name: rust-analyzer
+      command: rust-analyzer
+      extensionToLanguage:
+        ".rs": rust
+      restartOnCrash: true
+      maxRestarts: 3
+```
+
+Required fields (object form): `name`, `command`, `extensionToLanguage`.
+
+Optional fields: `args`, `transport`, `env`, `initializationOptions`,
+`settings`, `workspaceFolder`, `startupTimeout`, `shutdownTimeout`,
+`restartOnCrash`, `maxRestarts`.
+
+`apm install` writes LSP config to the detected runtime targets:
+Claude Code uses `.lsp.json` or `~/.claude.json`, and GitHub Copilot CLI
+uses `.github/lsp.json` or `~/.copilot/lsp-config.json`. Copilot CLI
+uses `fileExtensions` on disk; manifests continue to use
+`extensionToLanguage`. Plugin `.lsp.json` files may use either a flat
+server map or a `{ "lspServers": { ... } }` envelope.
 
 ## Version pinning
 
 | Strategy | Syntax | When to use |
 |----------|--------|-------------|
 | Tag | `owner/repo#v1.0.0` | Production -- immutable reference |
+| Semver range | `owner/repo#^1.2.0` | Track patch/minor updates within a range; APM lists remote tags and pins the highest match in the lockfile |
 | Branch | `owner/repo#main` | Development -- tracks latest |
-| Commit SHA | `owner/repo#abc123d` | Maximum reproducibility |
+| Commit SHA | `owner/repo#abc123d` | Maximum reproducibility; `apm update` can move full 40-character SHA pins to the latest annotated semver tag SHA and annotate the line with `# <tag>` |
 | No ref | `owner/repo` | Resolves default branch at install time |
 | Marketplace ref | `plugin@marketplace#ref` | Override marketplace source ref |
+
+Semver ranges accept `^1.2.0`, `~1.4`, `>=2.0 <3`, or `1.5.x`. At
+install time APM runs `git ls-remote` against the dep and picks the
+highest tag matching the range; the resolved tag, commit SHA, version,
+and original constraint are pinned in the lockfile. Subsequent
+`apm install` runs replay the lockfile without network. Use
+`apm install --update` (or change the manifest constraint) to
+re-resolve against current remote tags. Tag patterns are tried in order:
+`v{version}`, `{name}--v{version}`, and `{name}-v{version}`, then a bare
+`{version}` fallback. For virtual subdirectory deps, `{name}` is the
+final path segment (for example `pkg-a` in `acme/mono/packages/pkg-a`). A
+malformed range-like ref is rejected; use a plain range such as `^1.2.0`
+or pin a literal tag such as `pkg-a-v1.2.0`.
 
 ## Marketplace ref override
 
@@ -253,3 +482,7 @@ enterprise security guide for the threat model.
 `apm.lock.yaml` records the exact commit SHA for every dependency, regardless
 of the ref format in apm.yml. Running `apm install` without `--update` always
 uses the locked SHA, ensuring reproducible installs across machines.
+
+Lockfile keys keep `github.com` implicit for migration stability while
+non-default hosts add the lowercased host segment. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys)
+for the full keying rules.

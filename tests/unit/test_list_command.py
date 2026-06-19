@@ -202,6 +202,39 @@ class TestListWithScripts:
         # Table + default note = 2 calls
         assert mock_console.print.call_count >= 2
 
+    def test_no_default_script_in_rich_table_prints_table_only(self):
+        """When no 'start' key, Rich table path prints once (no default note) — branch 73->exit."""
+        runner = CliRunner()
+        mock_console = MagicMock()
+        with (
+            patch(
+                "apm_cli.commands.list_cmd._list_available_scripts",
+                return_value=_SCRIPTS_NO_DEFAULT,
+            ),
+            patch("apm_cli.commands.list_cmd._get_console", return_value=mock_console),
+        ):
+            result = runner.invoke(list_command, obj={})
+        assert result.exit_code == 0
+        # Only the table itself — no second console.print for the default note
+        assert mock_console.print.call_count == 1
+
+    def test_no_default_script_in_rich_fallback_no_note(self):
+        """When no 'start' key and Rich raises, fallback skips default note — branch 84->exit."""
+        runner = CliRunner()
+        mock_console = MagicMock()
+        mock_console.print.side_effect = Exception("rich crash")
+        with (
+            patch(
+                "apm_cli.commands.list_cmd._list_available_scripts",
+                return_value=_SCRIPTS_NO_DEFAULT,
+            ),
+            patch("apm_cli.commands.list_cmd._get_console", return_value=mock_console),
+        ):
+            result = runner.invoke(list_command, obj={})
+        assert result.exit_code == 0
+        assert "build" in result.output
+        assert "default script" not in result.output
+
 
 # ---------------------------------------------------------------------------
 # Error handling

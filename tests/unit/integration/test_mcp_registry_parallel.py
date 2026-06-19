@@ -18,7 +18,7 @@ class TestParallelRegistryLookups:
     """Parallel batch lookups complete faster than serial."""
 
     def test_validate_servers_exist_parallel_wall_time(self) -> None:
-        """3 servers each sleeping 200ms: wall time < 500ms (not 600ms serial)."""
+        """3 servers each sleeping 500ms: wall time < 1.0s (vs 1.5s serial)."""
         ops = MCPServerOperations.__new__(MCPServerOperations)
         ops.registry_client = MagicMock()
 
@@ -28,7 +28,7 @@ class TestParallelRegistryLookups:
             import time as _t
 
             call_count["n"] += 1
-            _t.sleep(0.2)
+            _t.sleep(0.5)
             return {"id": f"uuid-{ref}", "name": ref}
 
         ops.registry_client.find_server_by_reference = slow_find
@@ -43,18 +43,21 @@ class TestParallelRegistryLookups:
         assert call_count["n"] == 3
         assert len(valid) == 3
         assert len(invalid) == 0
-        # Parallel: should complete in ~200ms, not 600ms
-        assert elapsed < 0.5, f"Wall time {elapsed:.3f}s >= 0.5s (not parallel)"
+        # Parallel: should complete in ~500ms, well under the 1500ms
+        # serial baseline. 1.0s budget absorbs scheduler jitter on
+        # slow CI runners (Windows can add hundreds of ms of
+        # thread-startup overhead on top of the nominal 500ms sleep).
+        assert elapsed < 1.0, f"Wall time {elapsed:.3f}s >= 1.0s (not parallel)"
 
     def test_check_servers_needing_installation_parallel_wall_time(self) -> None:
-        """3 servers each sleeping 200ms: wall time < 500ms (not 600ms serial)."""
+        """3 servers each sleeping 500ms: wall time < 1.0s (vs 1.5s serial)."""
         ops = MCPServerOperations.__new__(MCPServerOperations)
         ops.registry_client = MagicMock()
 
         def slow_find(ref: str):
             import time as _t
 
-            _t.sleep(0.2)
+            _t.sleep(0.5)
             return {"id": f"uuid-{ref}", "name": ref}
 
         ops.registry_client.find_server_by_reference = slow_find
@@ -74,8 +77,8 @@ class TestParallelRegistryLookups:
 
         # All need installation (none installed)
         assert set(result) == set(servers)
-        # Parallel: should complete in ~200ms, not 600ms
-        assert elapsed < 0.5, f"Wall time {elapsed:.3f}s >= 0.5s (not parallel)"
+        # Parallel: should complete in ~500ms, well under 1500ms serial.
+        assert elapsed < 1.0, f"Wall time {elapsed:.3f}s >= 1.0s (not parallel)"
 
     def test_validate_preserves_submission_order(self) -> None:
         """Results appear in the same order as the input list."""

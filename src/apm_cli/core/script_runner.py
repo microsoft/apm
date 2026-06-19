@@ -2,16 +2,13 @@
 
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Optional  # noqa: F401, UP035
-
-import yaml  # noqa: F401
 
 from ..output.script_formatters import ScriptExecutionFormatter
+from ..runtime.utils import find_runtime_binary
 from .token_manager import setup_runtime_environment
 
 
@@ -571,11 +568,13 @@ class ScriptRunner:
                 for line in env_lines:
                     print(line)
 
-        # Execute using argument list (no shell interpretation) with updated environment
-        # On Windows, resolve the executable via shutil.which() so that shell
-        # wrappers like copilot.cmd / copilot.ps1 are found without shell=True.
-        if sys.platform == "win32" and actual_command_args:
-            resolved = shutil.which(actual_command_args[0])
+        # Resolve the runtime binary to the APM-managed path (or fallback to PATH).
+        # This must happen here, not in _generate_runtime_command, so the command
+        # string stays parseable (bare names) by _detect_runtime / _transform_runtime_command.
+        # find_runtime_binary checks ~/.apm/runtimes/<name> first, then shutil.which(),
+        # which also covers Windows shell wrappers (.cmd / .ps1) via PATHEXT.
+        if actual_command_args:
+            resolved = find_runtime_binary(actual_command_args[0])
             if resolved:
                 actual_command_args[0] = resolved
         return subprocess.run(actual_command_args, check=True, env=env_vars)
@@ -921,13 +920,11 @@ class ScriptRunner:
         Raises:
             RuntimeError: If no compatible runtime is found
         """
-        import shutil
-
-        if shutil.which("copilot"):
+        if find_runtime_binary("copilot"):
             return "copilot"
-        elif shutil.which("codex"):
+        elif find_runtime_binary("codex"):
             return "codex"
-        elif shutil.which("gemini"):
+        elif find_runtime_binary("gemini"):
             return "gemini"
         else:
             raise RuntimeError(

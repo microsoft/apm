@@ -161,9 +161,7 @@ class TestGeminiMCPIntegration:
     def teardown_method(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_adds_server_preserving_existing_keys(self, monkeypatch):
-        monkeypatch.chdir(self.root)
-
+    def test_adds_server_preserving_existing_keys(self):
         settings = self.gemini_dir / "settings.json"
         settings.write_text(
             json.dumps(
@@ -175,7 +173,7 @@ class TestGeminiMCPIntegration:
             )
         )
 
-        adapter = GeminiClientAdapter.__new__(GeminiClientAdapter)
+        adapter = GeminiClientAdapter(project_root=self.root)
         adapter.update_config(
             {
                 "my-server": {
@@ -192,19 +190,70 @@ class TestGeminiMCPIntegration:
         assert result["theme"] == "dark"
         assert result["tools"] == {"enabled": True}
 
-    def test_creates_mcp_servers_key_if_missing(self, monkeypatch):
-        monkeypatch.chdir(self.root)
-
+    def test_creates_mcp_servers_key_if_missing(self):
         settings = self.gemini_dir / "settings.json"
         settings.write_text(json.dumps({"theme": "light"}))
 
-        adapter = GeminiClientAdapter.__new__(GeminiClientAdapter)
+        adapter = GeminiClientAdapter(project_root=self.root)
         adapter.update_config({"srv": {"command": "echo"}})
 
         result = json.loads(settings.read_text())
         assert "mcpServers" in result
         assert "srv" in result["mcpServers"]
         assert result["theme"] == "light"
+
+    def test_install_via_mcp_integrator_uses_project_root_not_cwd(self, monkeypatch):
+        """Regression for #1299: when ``MCPIntegrator.install`` is called
+        with ``project_root`` distinct from the current process cwd, the
+        Gemini opt-in detection gate must check ``project_root/.gemini/``
+        (not ``cwd/.gemini/``), and the MCP write must land at
+        ``project_root/.gemini/settings.json``.
+
+        Pre-fix: the detection gate at ``mcp_integrator.py`` read
+        ``Path.cwd() / .gemini`` for Gemini only (every other opt-in
+        runtime used ``project_root_path``), so when cwd lacked
+        ``.gemini/`` Gemini was excluded from ``installed_runtimes`` and
+        no write occurred even though ``project_root/.gemini/`` existed.
+        """
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+        from apm_cli.models.dependency.mcp import MCPDependency
+
+        # cwd is a fresh tmp dir with NO .gemini/ -- mirrors the issue's
+        # "checkout that is not the target project" premise.
+        other_cwd = tempfile.mkdtemp(prefix="apm-not-project-")
+        try:
+            monkeypatch.chdir(other_cwd)
+
+            dep = MCPDependency.from_dict(
+                {
+                    "name": "regression-1299-srv",
+                    "registry": False,
+                    "transport": "stdio",
+                    "command": "echo",
+                    "args": ["regression-1299"],
+                }
+            )
+
+            # Intentionally do NOT pass runtime= so the auto-detection
+            # block at mcp_integrator.py exercises the opt-in gate that
+            # was the bug site (Path.cwd() vs project_root_path).
+            MCPIntegrator.install(
+                [dep],
+                project_root=self.root,
+            )
+
+            settings = self.gemini_dir / "settings.json"
+            assert settings.exists(), (
+                "MCPIntegrator.install must write Gemini config at project_root/.gemini/, "
+                "not silently drop it because the cwd-based opt-in gate misclassified "
+                "Gemini as unavailable."
+            )
+            data = json.loads(settings.read_text())
+            assert "regression-1299-srv" in data.get("mcpServers", {}), (
+                "Self-defined MCP server should be written to project_root/.gemini/settings.json"
+            )
+        finally:
+            shutil.rmtree(other_cwd, ignore_errors=True)
 
 
 @pytest.mark.integration
@@ -248,10 +297,8 @@ class TestGeminiOptInBehavior:
         assert result.files_integrated == 0
         assert not (self.root / ".gemini").exists()
 
-    def test_mcp_update_noop_without_gemini_dir(self, monkeypatch):
-        monkeypatch.chdir(self.root)
-
-        adapter = GeminiClientAdapter.__new__(GeminiClientAdapter)
+    def test_mcp_update_noop_without_gemini_dir(self):
+        adapter = GeminiClientAdapter(project_root=self.root)
         adapter.update_config({"srv": {"command": "echo"}})
 
         assert not (self.root / ".gemini").exists()
@@ -468,3 +515,44 @@ class TestGeminiUninstallCleanup:
 
         assert stats["files_removed"] == 1
         assert not skill_dir.exists()
+
+
+@pytest.mark.integration
+class TestRemoveStaleGeminiUsesProjectRoot:
+    """Verify remove_stale reads .gemini/settings.json from project_root, not cwd."""
+
+    def setup_method(self):
+        self.tmp = tempfile.mkdtemp()
+        self.root = Path(self.tmp)
+        self.gemini_dir = self.root / ".gemini"
+        self.gemini_dir.mkdir()
+        self.settings_json = self.gemini_dir / "settings.json"
+
+    def teardown_method(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_remove_stale_gemini_uses_project_root_not_cwd(self, monkeypatch):
+        """remove_stale must resolve .gemini/settings.json via project_root,
+        not Path.cwd(), so stale cleanup works when cwd != project_root."""
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+
+        self.settings_json.write_text(
+            json.dumps(
+                {"mcpServers": {"stale-srv": {"command": "echo"}, "keep-srv": {"command": "cat"}}}
+            )
+        )
+
+        other_cwd = tempfile.mkdtemp(prefix="apm-not-project-")
+        try:
+            monkeypatch.chdir(other_cwd)
+            MCPIntegrator.remove_stale(
+                {"stale-srv"},
+                runtime="gemini",
+                project_root=self.root,
+            )
+        finally:
+            shutil.rmtree(other_cwd, ignore_errors=True)
+
+        data = json.loads(self.settings_json.read_text())
+        assert "stale-srv" not in data.get("mcpServers", {})
+        assert "keep-srv" in data.get("mcpServers", {})

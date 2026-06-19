@@ -22,8 +22,6 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-from collections.abc import Iterable  # noqa: F401
-from typing import Optional  # noqa: F401
 
 # F7: tokens that would be evaluated by a real shell but are NOT evaluated
 # when an MCP stdio server runs through ``execve``-style spawning.

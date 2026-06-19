@@ -164,9 +164,14 @@ class TestTargetProfileUserScope:
             "opencode",
             "codex",
             "gemini",
+            "antigravity",
             "windsurf",
+            "kiro",
             "copilot-cowork",
+            "copilot-app",
             "agent-skills",
+            "openclaw",
+            "hermes",
         }
         assert set(KNOWN_TARGETS.keys()) == expected
 
@@ -192,6 +197,10 @@ class TestTargetProfileUserScope:
         assert KNOWN_TARGETS["opencode"].user_root_dir == ".config/opencode"
         assert "hooks" in KNOWN_TARGETS["opencode"].unsupported_user_primitives
 
+    def test_kiro_is_supported_at_user_scope(self):
+        assert KNOWN_TARGETS["kiro"].user_supported is True
+        assert KNOWN_TARGETS["kiro"].user_root_dir == ".kiro"
+
     def test_copilot_user_root_dir(self):
         assert KNOWN_TARGETS["copilot"].user_root_dir == ".copilot"
 
@@ -200,8 +209,8 @@ class TestTargetProfileUserScope:
         assert KNOWN_TARGETS["claude"].user_root_dir is None
 
     def test_copilot_unsupported_user_primitives(self):
-        assert "prompts" in KNOWN_TARGETS["copilot"].unsupported_user_primitives
-        assert "instructions" in KNOWN_TARGETS["copilot"].unsupported_user_primitives
+        # Instructions are now supported at user scope via concat (#650).
+        assert "instructions" not in KNOWN_TARGETS["copilot"].unsupported_user_primitives
 
     def test_effective_root_project_scope(self):
         assert KNOWN_TARGETS["copilot"].effective_root(user_scope=False) == ".github"
@@ -217,10 +226,11 @@ class TestTargetProfileUserScope:
         assert KNOWN_TARGETS["claude"].supports_at_user_scope("commands") is True
 
     def test_supports_at_user_scope_partial(self):
-        # Copilot supports agents at user scope but not prompts or instructions
+        # Copilot supports agents, prompts, and instructions at user scope.
+        # Instructions are concatenated into copilot-instructions.md (#650).
         assert KNOWN_TARGETS["copilot"].supports_at_user_scope("agents") is True
-        assert KNOWN_TARGETS["copilot"].supports_at_user_scope("prompts") is False
-        assert KNOWN_TARGETS["copilot"].supports_at_user_scope("instructions") is False
+        assert KNOWN_TARGETS["copilot"].supports_at_user_scope("prompts") is True
+        assert KNOWN_TARGETS["copilot"].supports_at_user_scope("instructions") is True
 
     def test_supports_at_user_scope_cursor_partial(self):
         # Cursor supports agents at user scope but not instructions
@@ -242,11 +252,11 @@ class TestTargetProfileUserScope:
         assert "instructions" in KNOWN_TARGETS["windsurf"].unsupported_user_primitives
 
     def test_supports_at_user_scope_windsurf_partial(self):
-        # Windsurf supports skills, commands, hooks, agents at user scope but not instructions
+        # Windsurf supports skills, commands, hooks at user scope; agents (no native primitive) and instructions are unsupported
         assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("skills") is True
         assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("commands") is True
         assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("hooks") is True
-        assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("agents") is True
+        assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("agents") is False
         assert KNOWN_TARGETS["windsurf"].supports_at_user_scope("instructions") is False
 
     def test_windsurf_effective_root_project_scope(self):
@@ -294,8 +304,8 @@ class TestScopeWarnings:
 
     def test_warn_message_includes_unsupported_primitives(self):
         msg = warn_unsupported_user_scope()
-        # Copilot excludes prompts and instructions
-        assert "copilot (prompts, instructions)" in msg
+        # Copilot now supports instructions at user scope (#650); not in warning.
+        assert "copilot (instructions)" not in msg
         # Cursor excludes instructions
         assert "cursor (instructions)" in msg
         # OpenCode excludes hooks

@@ -15,12 +15,16 @@ from __future__ import annotations
 
 import pytest
 
+from apm_cli.adapters.client.antigravity import AntigravityClientAdapter
 from apm_cli.adapters.client.base import MCPClientAdapter
 from apm_cli.adapters.client.claude import ClaudeClientAdapter
 from apm_cli.adapters.client.codex import CodexClientAdapter
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
 from apm_cli.adapters.client.cursor import CursorClientAdapter
 from apm_cli.adapters.client.gemini import GeminiClientAdapter
+from apm_cli.adapters.client.hermes import HermesClientAdapter
+from apm_cli.adapters.client.intellij import IntelliJClientAdapter
+from apm_cli.adapters.client.kiro import KiroClientAdapter
 from apm_cli.adapters.client.opencode import OpenCodeClientAdapter
 from apm_cli.adapters.client.vscode import VSCodeClientAdapter
 from apm_cli.adapters.client.windsurf import WindsurfClientAdapter
@@ -41,20 +45,24 @@ _KNOWN_MCP_KEYS = {"mcpServers", "mcp_servers", "servers"}
 # Adapter target_names that are MCP-only pseudo-targets (no entry in
 # KNOWN_TARGETS).  Code that joins adapter -> profile must tolerate misses
 # for these.
-_MCP_ONLY_ADAPTER_NAMES = {"vscode"}
+_MCP_ONLY_ADAPTER_NAMES = {"vscode", "intellij"}
 
 # All adapter subclasses that ship in the repo.  The ``target_name`` on each
 # must round-trip to a ``KNOWN_TARGETS`` entry so ``MCPConflictDetector``
 # can resolve config metadata without sniffing class names.
 _ADAPTER_CLASSES = (
+    AntigravityClientAdapter,
     CopilotClientAdapter,
     ClaudeClientAdapter,
     CursorClientAdapter,
     CodexClientAdapter,
     GeminiClientAdapter,
+    IntelliJClientAdapter,
+    KiroClientAdapter,
     OpenCodeClientAdapter,
     VSCodeClientAdapter,
     WindsurfClientAdapter,
+    HermesClientAdapter,
 )
 
 

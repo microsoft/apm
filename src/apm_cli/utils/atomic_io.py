@@ -37,16 +37,22 @@ def atomic_write_text(path: Path, data: str, *, new_file_mode: int | None = None
     """
     existed = path.exists()
     fd, tmp_name = tempfile.mkstemp(prefix="apm-atomic-", dir=str(path.parent))
+    fd_wrapped = False
     try:
         if new_file_mode is not None and not existed and hasattr(os, "fchmod"):
             with contextlib.suppress(OSError):
                 os.fchmod(fd, new_file_mode)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh = os.fdopen(fd, "w", encoding="utf-8")
+        fd_wrapped = True
+        with fh:
             fh.write(data)
         os.replace(tmp_name, path)
     except Exception:
-        try:  # noqa: SIM105
+        if not fd_wrapped:
+            # fdopen never took ownership of the descriptor; close it so
+            # Windows can release its lock and the tmp file can be unlinked.
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with contextlib.suppress(OSError):
             os.unlink(tmp_name)
-        except OSError:
-            pass
         raise

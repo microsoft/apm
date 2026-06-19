@@ -12,9 +12,9 @@ Exit codes:
 """
 
 import dataclasses
+import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple  # noqa: F401, UP035
 
 import click
 
@@ -29,7 +29,6 @@ from ..utils.console import (
     _rich_echo,
     _rich_error,
     _rich_success,
-    _rich_warning,  # noqa: F401
 )
 
 # -- Shared config --------------------------------------------------
@@ -104,6 +103,39 @@ def _has_actionable_findings(
     )
 
 
+def _finding_source(finding: ScanFinding) -> str:
+    """Derive the scanner source from a finding's category prefix."""
+    if "/" in finding.category:
+        prefix = finding.category.split("/", 1)[0]
+        if prefix != "apm":
+            return prefix
+    return "apm"
+
+
+def _has_external_findings(rows: list[ScanFinding]) -> bool:
+    """Return True if any finding originates from an external scanner."""
+    return any(_finding_source(f) != "apm" for f in rows)
+
+
+def _source_counts(rows: list[ScanFinding]) -> dict[str, int]:
+    """Count findings by source for the table title."""
+    counts: dict[str, int] = {}
+    for f in rows:
+        src = _finding_source(f)
+        counts[src] = counts.get(src, 0) + 1
+    return counts
+
+
+def _findings_title(rows: list[ScanFinding], has_external: bool) -> str:
+    """Build the findings table title, with per-source counts when mixed."""
+    base = f"{STATUS_SYMBOLS['search']} Audit Findings"
+    if not has_external:
+        return f"{STATUS_SYMBOLS['search']} Content Scan Findings"
+    counts = _source_counts(rows)
+    parts = [f"{src}: {n}" for src, n in sorted(counts.items())]
+    return f"{base}  ({', '.join(parts)})"
+
+
 def _render_findings_table(
     findings_by_file: dict[str, list[ScanFinding]],
     verbose: bool = False,
@@ -125,6 +157,9 @@ def _render_findings_table(
     if not rows:
         return
 
+    has_external = _has_external_findings(rows)
+    title = _findings_title(rows, has_external)
+
     if console:
         try:
             from rich.table import Table
@@ -132,14 +167,19 @@ def _render_findings_table(
             from ..security.audit_report import relative_path_for_report
 
             table = Table(
-                title=f"{STATUS_SYMBOLS['search']} Content Scan Findings",
+                title=title,
                 show_header=True,
                 header_style="bold cyan",
             )
             table.add_column("Severity", style="bold", width=10)
+            if has_external:
+                table.add_column("Source", style="cyan", width=14)
             table.add_column("File", style="white")
             table.add_column("Location", style="dim", width=10)
-            table.add_column("Codepoint", style="bold white", width=10)
+            if has_external:
+                table.add_column("Category", style="bold white")
+            else:
+                table.add_column("Codepoint", style="bold white", width=10)
             table.add_column("Description", style="white")
 
             sev_styles = {
@@ -148,12 +188,26 @@ def _render_findings_table(
                 "info": "dim",
             }
             for f in rows:
+                category_or_codepoint = (
+                    f.category.split("/", 1)[1]
+                    if has_external and "/" in f.category
+                    else f.category
+                    if has_external
+                    else f.codepoint
+                )
+                row_cells = [f.severity.upper()]
+                if has_external:
+                    row_cells.append(_finding_source(f))
+                row_cells.extend(
+                    [
+                        relative_path_for_report(f.file),
+                        f"{f.line}:{f.column}",
+                        category_or_codepoint,
+                        f.description,
+                    ]
+                )
                 table.add_row(
-                    f.severity.upper(),
-                    relative_path_for_report(f.file),
-                    f"{f.line}:{f.column}",
-                    f.codepoint,
-                    f.description,
+                    *row_cells,
                     style=sev_styles.get(f.severity, "white"),
                 )
             console.print()
@@ -164,20 +218,63 @@ def _render_findings_table(
 
     # Fallback: plain text
     _rich_echo("")
-    _rich_echo(
-        f"{STATUS_SYMBOLS['search']} Content Scan Findings",
-        color="cyan",
-        bold=True,
-    )
+    _rich_echo(title, color="cyan", bold=True)
     for f in rows:
         sev_label = f.severity.upper()
         color = (
             "red" if f.severity == "critical" else ("yellow" if f.severity == "warning" else "dim")
         )
+        source_part = f" [{_finding_source(f)}]" if has_external else ""
+        detail = f.category if has_external else f.codepoint
         _rich_echo(
-            f"  {sev_label:<10} {f.file} {f.line}:{f.column}  {f.codepoint}  {f.description}",
+            f"  {sev_label:<10}{source_part} {f.file} {f.line}:{f.column}  {detail}  "
+            f"{f.description}",
             color=color,
         )
+
+
+def _deployed_canvas_bundles(project_root: Path, package_filter: str | None) -> list[str]:
+    """Return sorted canvas bundle roots deployed per apm.lock.yaml.
+
+    A canvas bundle is an executable Copilot extension (``extension.mjs``)
+    deployed under a client ``extensions/`` directory (``.github/extensions/``
+    project scope, ``.copilot/extensions/`` user scope). Surfacing them lets an
+    audit reader see at a glance that executable extension code is installed,
+    even when the content scan finds no hidden characters. Returns bundle roots
+    such as ``.copilot/extensions/widget`` (one entry per bundle).
+    """
+    from ..integration.canvas_integrator import is_canvas_bundle_path
+
+    lock = LockFile.read(get_lockfile_path(project_root))
+    if lock is None:
+        return []
+
+    roots: set[str] = set()
+    for dep_key, dep in lock.dependencies.items():
+        if package_filter and dep_key != package_filter:
+            continue
+        for rel in dep.deployed_files:
+            norm = rel.replace("\\", "/").strip("/")
+            if not norm or not is_canvas_bundle_path(norm):
+                continue
+            parts = norm.split("/")
+            for idx, seg in enumerate(parts):
+                if seg == "extensions" and idx + 1 < len(parts):
+                    roots.add("/".join(parts[: idx + 2]))
+                    break
+    return sorted(roots)
+
+
+def _render_canvas_note(project_root: Path, package_filter: str | None, logger) -> None:
+    """Emit an informational note listing deployed canvas extensions."""
+    bundles = _deployed_canvas_bundles(project_root, package_filter)
+    if not bundles:
+        return
+    logger.info(
+        f"{len(bundles)} executable canvas extension(s) deployed (experimental, trust-gated):"
+    )
+    for root in bundles:
+        logger.info(f"  {root}", symbol="info")
 
 
 def _render_summary(
@@ -333,7 +430,6 @@ def _preview_strip(
 
 def _render_ci_results(ci_result: "CIAuditResult") -> None:
     """Render CI check results as a Rich table (text format)."""
-    from ..policy.models import CIAuditResult  # noqa: F401
 
     console = _get_console()
 
@@ -604,6 +700,110 @@ def _audit_ci_gate(
     sys.exit(0 if ci_result.passed else 1)
 
 
+def _resolve_external_options(
+    external: tuple[str, ...],
+    external_llm: bool | None,
+    external_args: str | None,
+) -> "dict[str, object]":
+    """Resolve per-scanner :class:`ScannerOptions` from CLI + config layers.
+
+    Policy ``allow_args`` governance is applied at the install-time audit
+    phase (where org policy is already loaded), not in the interactive
+    ``apm audit`` path; the per-adapter allowlist still validates every token.
+    """
+    import shlex
+
+    from ..config import get_scanner_options
+    from ..security.external.options import resolve_scanner_options
+
+    if external_args is not None:
+        try:
+            cli_args: tuple[str, ...] | None = tuple(
+                shlex.split(external_args, posix=(os.name != "nt"))
+            )
+        except ValueError as exc:
+            raise click.UsageError(f"--external-args could not be parsed: {exc}") from exc
+    else:
+        cli_args = None
+    options_by_name: dict[str, object] = {}
+    for name in external:
+        config_llm, config_args = get_scanner_options(name)
+        options_by_name[name] = resolve_scanner_options(
+            cli_llm=external_llm,
+            cli_args=cli_args,
+            config_llm=config_llm,
+            config_args=config_args,
+            policy_allow_args=None,
+        )
+    return options_by_name
+
+
+def _run_external_scanners(
+    cfg: _AuditConfig,
+    external: tuple[str, ...],
+    external_sarif: str | None,
+    scan_paths: list[Path],
+    options_by_name: "dict[str, object] | None" = None,
+) -> dict[str, list[ScanFinding]]:
+    """Run opted-in external SARIF-native scanners and return merged findings.
+
+    Fail-closed: the ``external_scanners`` experimental flag must be enabled
+    (exit 2 otherwise) and each adapter must be available (exit 2 otherwise).
+    APM's own content scan is never weakened -- external findings are purely
+    additive.  The resolve/validate/run/merge loop is shared with the
+    install-time audit phase via
+    :func:`apm_cli.security.external.runner.run_external_scanners`.
+    """
+    from ..security.external.base import ExternalScanError
+    from ..security.external.gate import (
+        ExternalScannersFeatureDisabledError,
+        require_external_scanners_enabled,
+    )
+    from ..security.external.runner import run_external_scanners
+
+    logger = cfg.logger
+
+    try:
+        require_external_scanners_enabled("Ingesting external scanners with --external")
+    except ExternalScannersFeatureDisabledError as exc:
+        logger.error(str(exc))
+        sys.exit(3)
+
+    try:
+        return run_external_scanners(
+            external,
+            external_sarif,
+            scan_paths,
+            options_by_name=options_by_name,
+            logger=logger,
+        )
+    except ExternalScanError as exc:
+        logger.error(str(exc))
+        sys.exit(3)
+
+
+def _resolve_fail_on_drift(project_root: Path) -> bool:
+    """Return True when ``security.audit.fail_on_drift`` is enabled.
+
+    Respects ``APM_POLICY_DISABLE`` and fails open on any discovery error so a
+    transient policy-resolution failure never converts advisory drift into a
+    hard failure. Discovery is invoked by the caller only when drift was
+    actually detected, keeping the no-drift common path free of extra work.
+    """
+    if os.environ.get("APM_POLICY_DISABLE"):
+        return False
+    try:
+        from ..policy.discovery import discover_policy_with_chain
+
+        fetch_result = discover_policy_with_chain(project_root)
+    except Exception:
+        return False
+    policy = getattr(fetch_result, "policy", None)
+    if policy is None:
+        return False
+    return bool(policy.security.audit.fail_on_drift)
+
+
 def _audit_content_scan(
     cfg: _AuditConfig,
     package: str | None,
@@ -611,6 +811,10 @@ def _audit_content_scan(
     strip: bool,
     dry_run: bool,
     no_drift: bool = False,
+    external: tuple[str, ...] = (),
+    external_sarif: str | None = None,
+    external_llm: bool | None = None,
+    external_args: str | None = None,
 ) -> None:
     """Handle default ``apm audit`` -- content integrity scanning.
 
@@ -629,39 +833,56 @@ def _audit_content_scan(
 
     # --format json/sarif/markdown is incompatible with --strip / --dry-run
     if effective_format != "text" and (strip or dry_run):
-        logger.error(f"--format {effective_format} cannot be combined with --strip or --dry-run")
-        sys.exit(1)
+        raise click.UsageError(
+            f"--format {effective_format} cannot be combined with --strip or --dry-run"
+        )
 
     if file_path:
         # -- File mode: scan a single arbitrary file --
         findings_by_file, files_scanned = _scan_single_file(Path(file_path), logger)
+        scan_paths = [Path(file_path)]
     else:
+        scan_paths = [project_root]
         # -- Package mode: scan from lockfile --
         lockfile_path = get_lockfile_path(project_root)
         if not lockfile_path.exists():
-            logger.progress(
-                "No apm.lock.yaml found -- nothing to scan. Use --file to scan a specific file."
-            )
-            sys.exit(0)
-
-        if package:
-            logger.progress(f"Scanning package: {package}")
-        else:
-            logger.start("Scanning all installed packages...")
-
-        findings_by_file, files_scanned = scan_lockfile_packages(
-            project_root,
-            package_filter=package,
-        )
-
-        if files_scanned == 0:
-            if package:
-                logger.warning(
-                    f"Package '{package}' not found in apm.lock.yaml or has no deployed files"
+            if not external:
+                logger.progress(
+                    "No apm.lock.yaml found -- nothing to scan. Use --file to scan a specific file."
                 )
+                sys.exit(0)
+            # External scanners are an independent source: proceed with an
+            # empty native result set so their findings still surface.
+            findings_by_file, files_scanned = {}, 0
+        else:
+            if package:
+                logger.progress(f"Scanning package: {package}")
             else:
-                logger.progress("No deployed files found in apm.lock.yaml")
-            sys.exit(0)
+                logger.start("Scanning all installed packages...")
+
+            findings_by_file, files_scanned = scan_lockfile_packages(
+                project_root,
+                package_filter=package,
+            )
+
+            if files_scanned == 0 and not external:
+                if package:
+                    logger.warning(
+                        f"Package '{package}' not found in apm.lock.yaml or has no deployed files"
+                    )
+                else:
+                    logger.progress("No deployed files found in apm.lock.yaml")
+                sys.exit(0)
+
+    # -- External scanners (opt-in, additive) -----------------------
+    if external:
+        options_by_name = _resolve_external_options(external, external_llm, external_args)
+        external_findings = _run_external_scanners(
+            cfg, external, external_sarif, scan_paths, options_by_name
+        )
+        from ..security.external.runner import merge_findings
+
+        merge_findings(findings_by_file, external_findings)
 
     # -- Warn if --dry-run used without --strip --
     if dry_run and not strip:
@@ -746,10 +967,17 @@ def _audit_content_scan(
         all_findings = [f for ff in findings_by_file.values() for f in ff]
         exit_code = 1 if ContentScanner.has_critical(all_findings) else 2
 
-    # Note: bare `apm audit` is advisory for drift; drift findings are
-    # rendered (text/json/sarif) but DO NOT escalate the exit code. Use
-    # `apm audit --ci` (handled in _audit_ci_gate) to gate on drift.
-    _ = drift_failed  # retained for symmetry; gate path lives in --ci.
+    # Bare `apm audit` is advisory for drift by default: drift findings are
+    # rendered (text/json/sarif) but DO NOT escalate the exit code. When
+    # `security.audit.fail_on_drift` is enabled, any drift-check FAILURE
+    # escalates a clean run to exit 1 -- matching the `apm audit --ci` gate,
+    # which fails on the same `drift_check.passed is False` signal. That covers
+    # both detected drift AND a drift check that could not run (corrupt local
+    # graph, unsupported replay); an advisory cache-miss SKIP stays passed=True
+    # and does NOT gate. Policy is discovered only when a drift failure
+    # occurred, so the clean common case is unchanged.
+    if drift_failed and exit_code == 0 and _resolve_fail_on_drift(project_root):
+        exit_code = 1
 
     if effective_format == "text":
         if cfg.output_path:
@@ -761,6 +989,8 @@ def _audit_content_scan(
         if findings_by_file:
             _render_findings_table(findings_by_file, verbose=cfg.verbose)
         _render_summary(findings_by_file, files_scanned, logger)
+        if not file_path:
+            _render_canvas_note(cfg.project_root, package, logger)
         if drift_findings:
             from ..install.drift import render_drift_text
 
@@ -889,8 +1119,48 @@ def _audit_content_scan(
         "use only for performance-constrained CI loops."
     ),
 )
+@click.option(
+    "--external",
+    "external",
+    multiple=True,
+    metavar="NAME",
+    help=(
+        "Ingest findings from an external SARIF-native scanner "
+        "(repeatable). Names: skillspector, sarif. "
+        "Not supported with --ci. "
+        "Requires 'apm experimental enable external-scanners'. [experimental]"
+    ),
+)
+@click.option(
+    "--external-sarif",
+    "external_sarif",
+    type=click.Path(exists=False),
+    default=None,
+    help="SARIF file to ingest for '--external sarif'. [experimental]",
+)
+@click.option(
+    "--external-llm/--no-external-llm",
+    "external_llm",
+    default=None,
+    help=(
+        "Force LLM-powered analysis on/off for external scanners this run "
+        "(overrides config). LLM mode makes outbound API calls and needs an "
+        "API key. Requires --external. [experimental]"
+    ),
+)
+@click.option(
+    "--external-args",
+    "external_args",
+    default=None,
+    metavar="TEXT",
+    help=(
+        "Extra argv tokens for external scanners this run (shlex-split, "
+        "allowlist-validated per scanner). Overrides config args. "
+        "Requires --external. [experimental]"
+    ),
+)
 @click.pass_context
-def audit(
+def audit(  # noqa: PLR0913 -- Click handler
     ctx,
     package,
     file_path,
@@ -905,6 +1175,10 @@ def audit(
     no_policy,
     no_fail_fast,
     no_drift,
+    external,
+    external_sarif,
+    external_llm,
+    external_args,
 ):
     """Scan deployed prompt files for hidden Unicode characters.
 
@@ -927,6 +1201,8 @@ def audit(
            (including drift in --ci mode)
         2  Warning-only findings (suspicious but not critical), or
            usage error (mutually exclusive flags)
+        3  Configuration or infrastructure error (experimental feature
+           disabled, external scanner not installed or unavailable)
 
     \b
     Examples:
@@ -941,6 +1217,8 @@ def audit(
         apm audit --ci -f json         # JSON CI report
         apm audit --ci -f sarif        # SARIF for GitHub Code Scanning
         apm audit -o report.sarif      # Write SARIF to file
+        apm audit --external skillspector                    # SkillSpector
+        apm audit --external sarif --external-sarif r.sarif  # Any SARIF
     """
     project_root = Path.cwd()
     logger = CommandLogger("audit", verbose=verbose)
@@ -967,14 +1245,34 @@ def audit(
         if verbose:
             logger.warning("--verbose has no effect in --ci mode (output is structured)")
         if strip or dry_run or file_path or package:
-            logger.error("--ci cannot be combined with --strip, --dry-run, --file, or PACKAGE")
-            sys.exit(1)
+            raise click.UsageError(
+                "--ci cannot be combined with --strip, --dry-run, --file, or PACKAGE"
+            )
         if output_format == "markdown":
             logger.error("--ci does not support --format markdown. Use json or sarif.")
             sys.exit(1)
+        if external:
+            raise click.UsageError(
+                "--ci does not support --external scanners yet. "
+                "Run external scanners in bare 'apm audit' mode."
+            )
 
         _audit_ci_gate(cfg, policy_source, no_cache, no_policy, no_fail_fast, no_drift)
         return  # _audit_ci_gate calls sys.exit; return guards against fall-through
+
+    # -- External scanners are an additive, opt-in content-scan source.
+    # They cannot be combined with --strip/--dry-run (APM only knows how to
+    # strip the Unicode characters its own scanner detects).
+    if external and (strip or dry_run):
+        raise click.UsageError("--external cannot be combined with --strip or --dry-run")
+    if external_sarif and not external:
+        raise click.UsageError("--external-sarif requires '--external sarif'")
+    # Orphan-flag guards: scanner-config flags are meaningless without a
+    # scanner. UsageError yields exit 2 (usage error), matching --no-drift.
+    if external_llm is not None and not external:
+        raise click.UsageError("--external-llm/--no-external-llm requires '--external <name>'")
+    if external_args is not None and not external:
+        raise click.UsageError("--external-args requires '--external <name>'")
 
     # -- Content scan mode ------------------------------------------
     if policy_source:
@@ -983,4 +1281,15 @@ def audit(
             "Use 'apm audit --ci --policy <source>' to run policy checks."
         )
 
-    _audit_content_scan(cfg, package, file_path, strip, dry_run, no_drift)
+    _audit_content_scan(
+        cfg,
+        package,
+        file_path,
+        strip,
+        dry_run,
+        no_drift,
+        external,
+        external_sarif,
+        external_llm,
+        external_args,
+    )

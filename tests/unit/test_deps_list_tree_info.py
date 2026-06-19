@@ -201,11 +201,13 @@ class TestDepsListCommand(_DepsCmdBase):
 
             secure_dep = MagicMock()
             secure_dep.get_unique_key.return_value = "safeorg/saferepo"
+            secure_dep.get_canonical_dependency_string.return_value = "safeorg/saferepo"
             secure_dep.is_insecure = False
             secure_dep.resolved_by = None
 
             insecure_dep = MagicMock()
             insecure_dep.get_unique_key.return_value = "insecureorg/insecurerepo"
+            insecure_dep.get_canonical_dependency_string.return_value = "insecureorg/insecurerepo"
             insecure_dep.is_insecure = True
             insecure_dep.resolved_by = None
 
@@ -239,6 +241,7 @@ class TestDepsListCommand(_DepsCmdBase):
 
             insecure_dep = MagicMock()
             insecure_dep.get_unique_key.return_value = "childorg/childrepo"
+            insecure_dep.get_canonical_dependency_string.return_value = "childorg/childrepo"
             insecure_dep.is_insecure = True
             insecure_dep.resolved_by = "parentorg/parentrepo"
 
@@ -270,6 +273,7 @@ class TestDepsListCommand(_DepsCmdBase):
 
             secure_dep = MagicMock()
             secure_dep.get_unique_key.return_value = "safeorg/saferepo"
+            secure_dep.get_canonical_dependency_string.return_value = "safeorg/saferepo"
             secure_dep.is_insecure = False
             secure_dep.resolved_by = None
 

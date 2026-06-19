@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from apm_cli.deps.plugin_parser import (
+    PluginIntegrityError,
     _extract_mcp_servers,
     _generate_apm_yml,
     _map_plugin_artifacts,
@@ -967,3 +968,446 @@ class TestPathTraversalProtection:
         assert not agents_dir.exists() or not list(agents_dir.iterdir()), (
             "Symlinked default component dir must not be copied"
         )
+
+
+class TestMapPluginArtifactsPrePositioned:
+    """Regression: when plugin.json points to paths already inside .apm/,
+    _map_plugin_artifacts must NOT destroy the source before copying.
+
+    This reproduces the bug where APM packages with both apm.yml and
+    .claude-plugin/plugin.json had their .apm/agents/ and .apm/skills/
+    directories deleted during validate_apm_package -> normalize_plugin_directory.
+    """
+
+    def test_agents_inside_apm_are_preserved(self, tmp_path):
+        """Manifest agents pointing into .apm/ must not be rmtree'd."""
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        # Pre-position agents inside .apm/ (APM package layout)
+        apm_dir = plugin_dir / ".apm"
+        agents_dir = apm_dir / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "my-agent.agent.md").write_text("# Agent")
+
+        # Manifest points into .apm/
+        manifest = {"name": "test", "agents": [".apm/agents/my-agent.agent.md"]}
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest=manifest)
+
+        assert (agents_dir / "my-agent.agent.md").exists(), (
+            ".apm/agents/ content destroyed by _map_plugin_artifacts"
+        )
+        assert (agents_dir / "my-agent.agent.md").read_text() == "# Agent"
+
+    def test_skills_inside_apm_are_preserved(self, tmp_path):
+        """Manifest skills pointing into .apm/ must not be rmtree'd."""
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        apm_dir = plugin_dir / ".apm"
+        skill_dir = apm_dir / "skills" / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Skill")
+
+        manifest = {"name": "test", "skills": [".apm/skills/my-skill"]}
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest=manifest)
+
+        assert (skill_dir / "SKILL.md").exists(), (
+            ".apm/skills/ content destroyed by _map_plugin_artifacts"
+        )
+        assert (skill_dir / "SKILL.md").read_text() == "# Skill"
+
+    def test_commands_inside_apm_are_preserved(self, tmp_path):
+        """Manifest commands pointing into .apm/ must not be rmtree'd."""
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        apm_dir = plugin_dir / ".apm"
+        prompts_dir = apm_dir / "prompts"
+        prompts_dir.mkdir(parents=True)
+        (prompts_dir / "run.prompt.md").write_text("# Run")
+
+        manifest = {"name": "test", "commands": [".apm/prompts"]}
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest=manifest)
+
+        assert (prompts_dir / "run.prompt.md").exists(), (
+            ".apm/prompts/ content destroyed by _map_plugin_artifacts"
+        )
+
+    def test_hooks_inside_apm_are_preserved(self, tmp_path):
+        """Manifest hooks pointing into .apm/ must not be rmtree'd."""
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        apm_dir = plugin_dir / ".apm"
+        hooks_dir = apm_dir / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "pre-commit.json").write_text("{}")
+
+        manifest = {"name": "test", "hooks": ".apm/hooks"}
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest=manifest)
+
+        assert (hooks_dir / "pre-commit.json").exists(), (
+            ".apm/hooks/ content destroyed by _map_plugin_artifacts"
+        )
+
+    def test_hooks_config_file_inside_apm_is_preserved(self, tmp_path):
+        """Manifest `hooks: ".apm/hooks/hooks.json"` (config-file form)
+        must not raise SameFileError when src and dst are the same path."""
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        apm_dir = plugin_dir / ".apm"
+        hooks_dir = apm_dir / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "hooks.json").write_text('{"on": "pre-commit"}')
+
+        manifest = {"name": "test", "hooks": ".apm/hooks/hooks.json"}
+        # Must not raise SameFileError
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest=manifest)
+
+        assert (hooks_dir / "hooks.json").exists()
+        assert (hooks_dir / "hooks.json").read_text() == '{"on": "pre-commit"}'
+
+    def test_external_agents_still_copied(self, tmp_path):
+        """Non-.apm/ agents must still be copied into .apm/ (no regression)."""
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        # Agents at root level (standard plugin layout)
+        agents_dir = plugin_dir / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "helper.agent.md").write_text("# Helper")
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        _map_plugin_artifacts(plugin_dir, apm_dir)
+
+        assert (apm_dir / "agents" / "helper.agent.md").exists()
+        assert (apm_dir / "agents" / "helper.agent.md").read_text() == "# Helper"
+
+    def test_mixed_inside_and_external_agents_both_survive(self, tmp_path):
+        """Hybrid manifest mixing .apm/ paths and root-level paths:
+        the pre-positioned .apm/ agent must NOT be destroyed, AND the
+        external root-level agent must still be copied in.
+
+        Regression for the per-source overlap case raised in PR #1416 review.
+        """
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        # Pre-positioned agent inside .apm/
+        apm_dir = plugin_dir / ".apm"
+        apm_agents = apm_dir / "agents"
+        apm_agents.mkdir(parents=True)
+        (apm_agents / "pre.agent.md").write_text("# Pre")
+
+        # External agent at root level
+        root_agents = plugin_dir / "agents"
+        root_agents.mkdir()
+        (root_agents / "new.agent.md").write_text("# New")
+
+        manifest = {
+            "name": "test",
+            "agents": [".apm/agents/pre.agent.md", "agents/new.agent.md"],
+        }
+        _map_plugin_artifacts(plugin_dir, apm_dir, manifest=manifest)
+
+        # Pre-positioned survives
+        assert (apm_agents / "pre.agent.md").exists(), (
+            "pre-positioned .apm/ agent was destroyed in mixed-source case"
+        )
+        assert (apm_agents / "pre.agent.md").read_text() == "# Pre"
+
+        # External got copied in
+        assert (apm_agents / "new.agent.md").exists(), (
+            "external root-level agent was not copied in the mixed-source case"
+        )
+        assert (apm_agents / "new.agent.md").read_text() == "# New"
+
+    def test_dst_symlink_in_target_does_not_redirect_copy(self, tmp_path):
+        """Defense-in-depth: a malicious package shipping a symlinked
+        destination entry inside .apm/agents/ (or any target_*) must not
+        let shutil.copytree(..., dirs_exist_ok=True) follow the link and
+        write through it to an external sentinel path.
+
+        Regression trap for the dst-symlink-write-anywhere follow-up on
+        PR #1416. The pre-fix code dropped the unconditional rmtree but
+        left existing dst symlinks unvalidated; copytree(dirs_exist_ok=
+        True) would happily walk into a symlinked subdirectory.
+        """
+        # Sentinel external directory that MUST stay untouched.
+        sentinel = tmp_path / "sentinel_external"
+        sentinel.mkdir()
+        (sentinel / "MARKER.md").write_text("# untouched-sentinel")
+
+        plugin_dir = tmp_path / "pkg"
+        plugin_dir.mkdir()
+
+        # Package ships .apm/agents/<name> as a symlink pointing at the
+        # sentinel external directory. This is exactly what the panel
+        # called out: pre-existing dst symlinks left over from package
+        # extraction.
+        apm_dir = plugin_dir / ".apm"
+        target_agents = apm_dir / "agents"
+        target_agents.mkdir(parents=True)
+        malicious_link = target_agents / "linked"
+        try:
+            malicious_link.symlink_to(sentinel, target_is_directory=True)
+        except OSError:
+            pytest.skip("Symlinks not supported on this platform")
+
+        # Source agents at the standard layout, sharing the linked name
+        # so copytree would naturally descend into the same subdir.
+        agent_src = plugin_dir / "agents"
+        nested_src = agent_src / "linked"
+        nested_src.mkdir(parents=True)
+        (nested_src / "evil.md").write_text("# evil-payload")
+
+        with pytest.raises(PluginIntegrityError):
+            _map_plugin_artifacts(plugin_dir, apm_dir)
+
+        # The sentinel must be untouched: no evil.md should have been
+        # written through the symlink.
+        assert (sentinel / "MARKER.md").read_text() == "# untouched-sentinel"
+        assert not (sentinel / "evil.md").exists(), (
+            "copytree(dirs_exist_ok=True) followed a dst symlink and wrote outside the plugin root"
+        )
+
+
+# ------------------------------------------------------------------
+# Issue #1666 -- synthesize_apm_yml_from_plugin must preserve existing
+# apm.yml resolution-critical blocks when normalising a dual-format
+# package (plugin.json + apm.yml).
+# ------------------------------------------------------------------
+
+
+class TestSynthesizePreservesExistingManifest:
+    """Regression tests for #1666: manifest preservation during plugin normalisation."""
+
+    def _write_apm_yml(self, pkg_dir: Path, data: dict) -> Path:
+        """Helper: write an apm.yml from a dict."""
+        apm_yml = pkg_dir / "apm.yml"
+        apm_yml.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+        return apm_yml
+
+    def _write_plugin_json(self, pkg_dir: Path, data: dict) -> Path:
+        """Helper: write a plugin.json from a dict."""
+        pj = pkg_dir / "plugin.json"
+        pj.write_text(json.dumps(data))
+        return pj
+
+    def _read_apm_yml(self, pkg_dir: Path) -> dict:
+        """Helper: read the apm.yml back as a dict."""
+        return yaml.safe_load((pkg_dir / "apm.yml").read_text()) or {}
+
+    def test_preserves_existing_apm_dependencies(self, tmp_path):
+        """Existing dependencies.apm and dependencies.mcp must survive synthesis."""
+        self._write_apm_yml(
+            tmp_path,
+            {
+                "name": "my-pkg",
+                "version": "1.0.0",
+                "dependencies": {
+                    "apm": [
+                        "vercel-labs/agent-skills/skills/web-design-guidelines",
+                        {"git": "parent", "path": "packages/stack-js"},
+                    ],
+                    "mcp": ["io.github.ChromeDevTools/chrome-devtools-mcp"],
+                },
+            },
+        )
+        self._write_plugin_json(tmp_path, {"name": "my-pkg", "version": "1.0.0"})
+
+        synthesize_apm_yml_from_plugin(tmp_path, {"name": "my-pkg", "version": "1.0.0"})
+
+        result = self._read_apm_yml(tmp_path)
+        deps = result.get("dependencies", {})
+        assert "apm" in deps, "dependencies.apm was dropped"
+        assert len(deps["apm"]) == 2, f"Expected 2 apm deps, got {len(deps['apm'])}"
+        assert "mcp" in deps, "dependencies.mcp was dropped"
+        assert len(deps["mcp"]) == 1
+
+    def test_preserves_existing_apm_deps_loadable(self, tmp_path):
+        """After synthesis the manifest must be parseable by APMPackage."""
+        from apm_cli.models.apm_package import APMPackage
+
+        self._write_apm_yml(
+            tmp_path,
+            {
+                "name": "loadable-pkg",
+                "version": "2.0.0",
+                "dependencies": {
+                    "apm": ["owner/repo-a", "owner/repo-b"],
+                },
+            },
+        )
+        self._write_plugin_json(tmp_path, {"name": "loadable-pkg"})
+
+        synthesize_apm_yml_from_plugin(tmp_path, {"name": "loadable-pkg"})
+
+        pkg = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+        apm_deps = pkg.get_apm_dependencies()
+        assert len(apm_deps) == 2, f"Expected 2 parsed apm deps, got {len(apm_deps)}"
+
+    def test_merges_plugin_mcp_with_existing_deps(self, tmp_path):
+        """Plugin-derived MCP deps are unioned with existing apm.yml deps."""
+        self._write_apm_yml(
+            tmp_path,
+            {
+                "name": "merge-pkg",
+                "version": "1.0.0",
+                "dependencies": {
+                    "apm": ["foo/bar"],
+                    "mcp": ["existing-mcp-server"],
+                },
+            },
+        )
+        manifest = {"name": "merge-pkg", "_mcp_deps": ["plugin-mcp-server"]}
+
+        synthesize_apm_yml_from_plugin(tmp_path, manifest)
+
+        result = self._read_apm_yml(tmp_path)
+        deps = result.get("dependencies", {})
+        apm_deps = deps.get("apm", [])
+        mcp_deps = deps.get("mcp", [])
+        assert "foo/bar" in apm_deps, "Existing apm dep was dropped"
+        assert "existing-mcp-server" in mcp_deps, "Existing mcp dep was dropped"
+        assert "plugin-mcp-server" in mcp_deps, "Plugin mcp dep was not added"
+
+    def test_no_existing_apm_yml_unchanged_behaviour(self, tmp_path):
+        """Without a pre-existing apm.yml, behaviour is unchanged (no regression)."""
+        manifest = {
+            "name": "new-pkg",
+            "version": "0.1.0",
+            "description": "Fresh plugin",
+            "_mcp_deps": ["some-mcp"],
+        }
+
+        synthesize_apm_yml_from_plugin(tmp_path, manifest)
+
+        result = self._read_apm_yml(tmp_path)
+        assert result["name"] == "new-pkg"
+        assert result.get("dependencies", {}).get("mcp") == ["some-mcp"]
+
+    def test_preserves_dev_dependencies(self, tmp_path):
+        """devDependencies from existing apm.yml must survive synthesis."""
+        self._write_apm_yml(
+            tmp_path,
+            {
+                "name": "dev-pkg",
+                "version": "1.0.0",
+                "devDependencies": {
+                    "apm": ["test-utils/helpers"],
+                },
+            },
+        )
+
+        synthesize_apm_yml_from_plugin(tmp_path, {"name": "dev-pkg"})
+
+        result = self._read_apm_yml(tmp_path)
+        assert "devDependencies" in result, "devDependencies was dropped"
+        assert result["devDependencies"]["apm"] == ["test-utils/helpers"]
+
+    def test_preserves_registries_targets_scripts(self, tmp_path):
+        """Resolution-critical blocks (registries, targets, scripts) survive."""
+        self._write_apm_yml(
+            tmp_path,
+            {
+                "name": "full-pkg",
+                "version": "1.0.0",
+                "registries": {"my-reg": {"url": "https://example.com"}},
+                "targets": ["claude", "copilot"],
+                "scripts": {"postinstall": "echo done"},
+                "includes": {"patterns": ["*.md"]},
+            },
+        )
+
+        synthesize_apm_yml_from_plugin(tmp_path, {"name": "full-pkg"})
+
+        result = self._read_apm_yml(tmp_path)
+        assert "registries" in result, "registries was dropped"
+        assert "targets" in result, "targets was dropped"
+        assert "scripts" in result, "scripts was dropped"
+        assert "includes" in result, "includes was dropped"
+
+    def test_claude_plugin_dir_without_plugin_json_preserves_deps(self, tmp_path):
+        """A .claude-plugin/ dir (no plugin.json) must not strip apm.yml deps."""
+        self._write_apm_yml(
+            tmp_path,
+            {
+                "name": "claude-dir-pkg",
+                "version": "1.0.0",
+                "dependencies": {
+                    "apm": ["org/dep-a", "org/dep-b"],
+                },
+            },
+        )
+        # Create .claude-plugin directory (no plugin.json inside)
+        (tmp_path / ".claude-plugin").mkdir()
+
+        # This triggers MARKETPLACE_PLUGIN classification
+        normalize_plugin_directory(tmp_path, plugin_json_path=None)
+
+        result = self._read_apm_yml(tmp_path)
+        deps = result.get("dependencies", {})
+        assert "apm" in deps, "dependencies.apm was dropped with .claude-plugin/ dir"
+        assert len(deps["apm"]) == 2
+
+    def test_validate_apm_package_dual_format_preserves_deps(self, tmp_path):
+        """Full chain: validate_apm_package on a dual-format package keeps deps."""
+        from apm_cli.models.validation import validate_apm_package
+
+        self._write_apm_yml(
+            tmp_path,
+            {
+                "name": "dual-pkg",
+                "version": "1.0.0",
+                "description": "Dual-format package",
+                "dependencies": {
+                    "apm": ["owner/transitive-dep"],
+                    "mcp": ["some-mcp-server"],
+                },
+            },
+        )
+        self._write_plugin_json(
+            tmp_path,
+            {"name": "dual-pkg", "version": "1.0.0", "description": "Dual-format"},
+        )
+
+        result = validate_apm_package(tmp_path)
+        assert result.is_valid, f"Validation failed: {result.errors}"
+        assert result.package is not None
+
+        apm_deps = result.package.get_apm_dependencies()
+        assert len(apm_deps) >= 1, (
+            f"Transitive deps lost after validation; got {len(apm_deps)} apm deps"
+        )
+
+    def test_malformed_apm_yml_fallback_surfaces_warning(self, tmp_path):
+        """A malformed existing apm.yml must not fail silently (#1666 trap).
+
+        When the existing apm.yml cannot be parsed, synthesis falls back to
+        plugin-only metadata -- which drops any transitive deps the file may
+        have declared. That data loss must be surfaced to the user via
+        ``_surface_warning`` rather than swallowed, otherwise the malformed
+        file re-creates the exact #1666 symptom with zero diagnostic output.
+        """
+        from unittest.mock import patch
+
+        # Write syntactically invalid YAML (unbalanced bracket triggers a
+        # yaml.YAMLError inside load_yaml).
+        (tmp_path / "apm.yml").write_text("name: bad\ndependencies: [unterminated\n")
+        self._write_plugin_json(tmp_path, {"name": "bad-pkg", "version": "1.0.0"})
+
+        with patch("apm_cli.deps.plugin_parser._surface_warning") as mock_warn:
+            synthesize_apm_yml_from_plugin(tmp_path, {"name": "bad-pkg", "version": "1.0.0"})
+
+        assert mock_warn.called, "Malformed apm.yml fallback did not surface a warning"
+        warning_text = " ".join(str(call.args[0]) for call in mock_warn.call_args_list)
+        assert "apm.yml" in warning_text
+        assert "transitive" in warning_text.lower()
+
+        # Fallback still produces a usable apm.yml from plugin metadata.
+        result = self._read_apm_yml(tmp_path)
+        assert result["name"] == "bad-pkg"

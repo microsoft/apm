@@ -25,7 +25,7 @@ apm targets
 
 If the active list is empty, no harness was detected and no `target:` was pinned. APM has nothing to write against. Either:
 
-- Create one of the canonical signals (`.claude/`, `.github/copilot-instructions.md`, `.cursor/`, `.codex/`, `.gemini/` or `GEMINI.md`, `.opencode/`, `.windsurf/`).
+- Create one of the canonical signals (`.claude/`, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.cursor/`, `.codex/`, `.gemini/` or `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`).
 - Pin targets in `apm.yml` (`target: [claude, copilot]`) or pass `--target` to `apm compile`.
 
 See [`apm targets`](../reference/cli/targets/) and the [manifest schema](../reference/manifest-schema/).
@@ -33,7 +33,7 @@ See [`apm targets`](../reference/cli/targets/) and the [manifest schema](../refe
 ### 2. Confirm primitives are discovered
 
 ```bash
-apm deps
+apm deps list
 ```
 
 Each installed package row shows per-type counts (`Prompts`, `Instructions`, `Agents`, `Skills`, `Hooks`). If every column is `-`, the project ships nothing to compile. Either you haven't installed a package yet, or your local `.apm/` tree is empty.
@@ -83,10 +83,10 @@ See [policy schema](../reference/policy-schema/).
 
 ```bash
 apm targets        # what will be written to?
-apm deps           # is the skill counted?
+apm deps list      # is the skill counted?
 ```
 
-If `apm targets` is empty, the project has no detected harness -- create `.claude/` (or any canonical dir) or pin `target:` in `apm.yml`. If `apm deps` shows the skill but compile still emits nothing, every active target lacks `skills` support (rare -- most targets do support skills via `.agents/SKILL.md`).
+If `apm targets` is empty, the project has no detected harness -- create `.claude/` (or any canonical dir) or pin `target:` in `apm.yml`. If `apm deps list` shows the skill but compile still emits nothing, every active target lacks `skills` support (rare -- most targets do support skills via `.agents/SKILL.md`).
 
 ### "I targeted `cursor` but my command files don't appear"
 

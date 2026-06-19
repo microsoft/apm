@@ -24,6 +24,8 @@ if (Test-Path $tokenHelperPath) {
 
 # Configuration
 $CodexRepo = "openai/codex"
+# Last Codex minor version that works with GitHub Models without wire_api=chat (#605)
+$LastCompatVersionMinor = 115
 
 function Install-Codex {
     Write-Info "Setting up Codex runtime..."
@@ -85,6 +87,7 @@ function Install-Codex {
         }
 
         Write-Info "Using Codex release: $latestTag"
+        $Version = $latestTag
         $downloadUrl = "https://github.com/$CodexRepo/releases/download/$latestTag/codex-$codexPlatform.exe.tar.gz"
     } else {
         $downloadUrl = "https://github.com/$CodexRepo/releases/download/$Version/codex-$codexPlatform.exe.tar.gz"
@@ -168,6 +171,21 @@ wire_api = "responses"
 
         Write-Success "Codex configuration created at $codexConfig"
         Write-Info "Using Codex $Version."
+
+        # Version compatibility check
+        if ($Version -match '^rust-v0\.(\d+)') {
+            $codexMinor = [int]$Matches[1]
+            if ($codexMinor -gt $LastCompatVersionMinor) {
+                Write-Host ""
+                Write-Warning "codex >= v0.116 requires wire_api=chat configuration for GitHub Models compatibility."
+                Write-Warning "The generated config uses wire_api=responses, which returns 404 with GitHub Models."
+                Write-Warning "To fix, update wire_api in ${codexConfig}:"
+                Write-Warning "  wire_api = `"chat`""
+                Write-Warning "Or install an older compatible version: apm runtime setup codex --version rust-v0.115.0"
+                Write-Host ""
+            }
+        }
+
         Write-Info "Override with: apm runtime setup codex --version <version> (e.g. 'latest')"
     } else {
         Write-Info "Vanilla mode: Skipping APM configuration"

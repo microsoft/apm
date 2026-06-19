@@ -54,7 +54,7 @@ jobs:
       run: |
         # Ruff has no max-module-lines rule. This check prevents new files from
         # exceeding the current worst case. Tighten the threshold over time.
-        MAX_LINES=2450   # current max: 2404 (github_downloader.py)
+        MAX_LINES=2100   # Stage 1 (was 2450); target 1400 deferred to Stage 2
         VIOLATIONS=$(find src/ -name '*.py' -print0 | xargs -0 -I{} awk -v max="$MAX_LINES" \
           'END { if (NR > max) printf "%s: %d lines (max %d)\n", FILENAME, NR, max }' {})
         if [ -n "$VIOLATIONS" ]; then
@@ -71,13 +71,169 @@ jobs:
           exit 1
         fi
 
+    - name: Code duplication guardrail (pylint R0801)
+      run: |
+        uv run --extra dev python -m pylint \
+          --disable=all --enable=R0801 \
+          --min-similarity-lines=10 \
+          --fail-on=R0801 \
+          src/apm_cli/
+
     - name: Lint - auth-protocol boundary (#1212 anti-regression)
       run: bash scripts/lint-auth-signals.sh
 
   # Linux-only for PR feedback. Full platform matrix (incl. macOS + Windows) runs post-merge in build-release.yml.
-  # Combines unit tests + binary build into a single job to eliminate runner re-provisioning overhead.
-  build-and-test:
-    name: Build & Test (Linux)
+  #
+  # Two-way sharded with pytest-split, mirroring the pattern proven in
+  # ci-integration.yml. Each shard is an independent runner; xdist inside
+  # each shard parallelises within.
+  #
+  # The shard jobs themselves are the required checks at PR time (see
+  # merge-gate.yml EXPECTED_CHECKS). An earlier iteration of this
+  # workflow used a fan-in `Build & Test (Linux)` job as the required
+  # check, but that re-added ~3 min of runner-allocation latency between
+  # the matrix `needs:` resolution and the dependent job's runner pickup,
+  # eating most of the sharding win. The fan-in survives as the
+  # non-required `coverage-combine` job below: it still combines and
+  # enforces the global 80% floor, just off the PR-time critical path,
+  # and is escalated to required on `merge_group`.
+  #
+  # First runs use pytest-split's naive file-based split (no .test_durations
+  # committed yet); commit a durations file in a follow-up PR after one
+  # green run to balance shards better.
+  build-and-test-shard:
+    name: Build & Test Shard ${{ matrix.shard }} (Linux)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+
+    # --extra build (PyInstaller + ~150MB of deps) is no longer pulled
+    # into the test path. Binary packaging signal is preserved by the
+    # parallel non-required `pr-binary-smoke` job below; the canonical
+    # binary build still runs in ci-integration.yml on merge_group and
+    # in build-release.yml on release.
+    - name: Install dependencies
+      run: uv sync --extra dev
+
+    # --splits 2 --group N matches the layout used by ci-integration.yml.
+    # -n 2 --dist worksteal parallelises within the shard.
+    #
+    # Per-shard floor of 60% catches regressions at PR time on roughly
+    # half the codebase (observed per-shard coverage today is ~65%).
+    # The global 80% floor declared in pyproject.toml runs after combine
+    # in the non-required `coverage-combine` job below, and is also
+    # enforced on `merge_group` via ci-integration.yml -- so the union
+    # gate is preserved on the path that actually merges to main.
+    - name: Run tests with coverage
+      run: |
+        uv run pytest tests/unit tests/test_console.py \
+          --splits 2 --group ${{ matrix.shard }} \
+          -n 2 --dist worksteal \
+          --cov --cov-report= --cov-fail-under=60
+
+    - name: Rename coverage data for shard
+      if: always()
+      run: |
+        if [ -f .coverage ]; then
+          mv .coverage .coverage.unit-shard-${{ matrix.shard }}
+        fi
+
+    - name: Upload coverage data
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-coverage-shard-${{ matrix.shard }}
+        path: .coverage.unit-shard-${{ matrix.shard }}
+        include-hidden-files: true
+        retention-days: 7
+        if-no-files-found: ignore
+
+  # Coverage combine + global 80% gate.
+  #
+  # NOT a required check. Earlier iterations of this workflow made the
+  # combined job required, but doing so re-added ~3 min of GitHub Actions
+  # runner-allocation latency between the matrix `needs:` resolution and
+  # this job's runner pickup, eating most of the sharding win. The shard
+  # jobs themselves are the required checks (see merge-gate.yml
+  # EXPECTED_CHECKS); this job exists so the global 80% coverage floor
+  # still surfaces as a red check on the PR if it drops, and the
+  # canonical merge-time enforcement runs in ci-integration.yml on
+  # `merge_group`.
+  coverage-combine:
+    name: Coverage Combine (Linux)
+    needs: [build-and-test-shard]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install coverage
+        run: pip install "coverage[toml]"
+
+      - name: Download shard coverage
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          pattern: unit-coverage-shard-*
+          path: coverage-shards/
+          merge-multiple: true
+
+      - name: Combine and summarise coverage
+        if: always()
+        run: |
+          if find coverage-shards -type f -name '.coverage*' 2>/dev/null | grep -q .; then
+            coverage combine coverage-shards/
+            coverage json -o coverage.json
+            python3 scripts/coverage-summary.py coverage.json --title "Unit Test Coverage"
+          else
+            echo "No coverage shard files found; skipping unit coverage summary."
+          fi
+
+      # Same 80% floor pyproject.toml declares. Non-blocking at PR time
+      # (this job is not in merge-gate.yml's EXPECTED_CHECKS), but the
+      # red check is visible in the PR UI. ci-integration.yml enforces
+      # the same floor on `merge_group`, which IS the merge gate.
+      - name: Enforce unit coverage gate
+        if: always()
+        run: |
+          if [ -f .coverage ]; then
+            coverage report --fail-under=80
+          else
+            echo "ERROR: No combined coverage data -- the 'Combine and summarise coverage' step must produce .coverage before the gate can run."
+            exit 1
+          fi
+
+  # Non-required parallel job that builds the PyInstaller binary at PR
+  # time so packaging regressions surface in review without gating the
+  # critical path. The canonical binary build still runs in
+  # ci-integration.yml on merge_group (used by smoke + integration jobs)
+  # and in build-release.yml on release.
+  pr-binary-smoke:
+    name: PR Binary Smoke (Linux)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -98,9 +254,6 @@ jobs:
     - name: Install dependencies
       run: uv sync --extra dev --extra build
 
-    - name: Run tests
-      run: uv run pytest tests/unit tests/test_console.py -n auto --dist worksteal
-
     - name: Install UPX
       run: |
         sudo apt-get update
@@ -111,30 +264,16 @@ jobs:
         chmod +x scripts/build-binary.sh
         uv run ./scripts/build-binary.sh
 
-    - name: Upload binary as workflow artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: apm-linux-x86_64
-        # Scripts are included to preserve the artifact root at ./ (not ./dist/).
-        # Without a sibling directory, upload-artifact strips the dist/ prefix,
-        # breaking download paths in ci-integration.yml which expects dist/$BINARY_NAME/apm.
-        path: |
-          ./dist/apm-linux-x86_64
-          ./dist/apm-linux-x86_64.sha256
-          ./scripts/test-release-validation.sh
-          ./scripts/github-token-helper.sh
-        include-hidden-files: true
-        retention-days: 30
-        if-no-files-found: error
-
   # Dogfood the audit-only CI gate we ship and document to users:
-  #   - Gate A (consumer-side): `apm audit --ci --no-drift` -- lockfile /
-  #     content-integrity check. setup-only: true keeps managed files
-  #     untouched so the SHA-256 content-integrity check can detect tampered
-  #     files. The drift check (install-replay comparison) is skipped
-  #     via --no-drift because there is no warm cache in a setup-only
-  #     run; content-integrity covers the same tamper signal.
-  # See microsoft/apm#883 for context. Tier 1 (no secrets needed).
+  #   - `apm audit --ci` -- the full producer+consumer gate. Runs the
+  #     lockfile / content-integrity checks AND the install-replay drift
+  #     check. The drift replay is cache-free here because every dependency
+  #     in apm.lock.yaml is local (self ``.apm/`` + in-repo ``packages/*``,
+  #     resolved from the checkout via path anchoring), so no warm cache or
+  #     prior ``apm install`` is required. setup-only: the committed managed
+  #     files are left untouched so both content-integrity (SHA-256 tamper)
+  #     and drift (replay vs committed tree, incl. ``.agents/skills/``) can
+  #     detect divergence. See microsoft/apm#883 and #1716. Tier 1.
   apm-self-check:
     name: APM Self-Check
     runs-on: ubuntu-24.04
@@ -143,35 +282,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Installs the APM CLI (latest stable) and adds `apm` to PATH.
-      # setup-only: true skips `apm install` so managed files on disk are
-      # not overwritten before the audit runs. This preserves the committed
-      # state so content-integrity can detect any tampered file hashes.
-      - uses: microsoft/apm-action@v1
+      # Dogfood the repo's OWN apm (built from this branch), not a published
+      # binary. A self-check that runs a stale released apm structurally
+      # cannot validate the fixes the repo ships: this repo's new local-path
+      # packages (./packages/*) depend on the local-dep source-tagging and
+      # transitive-resolution fixes that land IN this tree but predate any
+      # release. The published action (0.14.0 default; 0.16.1 too) false-flags
+      # those deps on ref-consistency and no-orphaned-packages. `uv run` syncs
+      # the project and runs the in-tree apm. No `apm install` is run, so the
+      # committed managed files are preserved: content-integrity detects
+      # tampered file hashes and the drift replay compares the committed tree
+      # (including .agents/skills/) against a fresh cache-free replay.
+      - uses: astral-sh/setup-uv@v6
         with:
-          setup-only: true
+          enable-cache: true
 
-      # Gate A: lockfile / install fidelity (consumer-side).
-      # Verifies every file in lockfile.deployed_files exists, ref consistency
-      # between apm.yml and apm.lock.yaml, no orphan packages, and
-      # content-integrity (SHA-256 hashes against deployed_file_hashes in the
-      # lockfile) on deployed package content. --no-drift skips the
-      # install-replay because there is no warm cache (setup-only did not
-      # run apm install); content-integrity still catches tampered files.
-      - name: apm audit --ci --no-drift
-        run: apm audit --ci --no-drift
+      # Full producer+consumer gate. Verifies every file in
+      # lockfile.deployed_files exists, ref consistency between apm.yml and
+      # apm.lock.yaml, no orphan packages, content-integrity (SHA-256 hashes
+      # against deployed_file_hashes in the lockfile) on deployed content, AND
+      # drift: a cache-free install-replay compared against the committed tree
+      # across every governed deploy root (.github AND .agents). The replay is
+      # cache-free because all deps are local (see job comment); dropping
+      # --no-drift is therefore safe and closes the gap where committed
+      # .agents/skills/ content could silently diverge from source (#1716).
+      - name: apm audit --ci
+        run: uv run apm audit --ci
 
-      # Gate B: regeneration drift (producer-side) -- legacy bash fallback.
-      # NOTE: With setup-only: true this step is a guaranteed no-op.
-      # apm install did not run and the working tree is unchanged, so the
-      # git status check always finds nothing. It is kept so the pattern is
-      # visible; a full install+audit workflow would rely on this step to
-      # detect hand-edits to regenerated .github/ files.
-      - name: Check APM integration drift (legacy bash fallback, see #1071)
-        run: |
-          if [ -n "$(git status --porcelain -- .github/ .claude/ .cursor/ .opencode/)" ]; then
-            echo "::error::APM integration files are out of date."
-            echo "Run 'apm install' locally (with .github/ present) and commit the result."
-            git --no-pager diff -- .github/ .claude/ .cursor/ .opencode/
-            exit 1
-          fi

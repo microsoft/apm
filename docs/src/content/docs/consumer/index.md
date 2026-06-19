@@ -17,7 +17,8 @@ You're here because you want to install someone else's APM packages and use them
 | You need org-private packages or your own marketplace                          | [Private and org packages](./private-and-org-packages/) |
 | You manage `apm.yml` and need lockfile / dependency commands                   | [Manage dependencies](./manage-dependencies/)           |
 | You want APM to wire MCP servers (GitHub, Atlassian, ...) into your tools      | [Install MCP servers](./install-mcp-servers/)           |
-| You received a local `.tar.gz` bundle and need to install it                   | [Deploy a local bundle](./deploy-a-bundle/)             |
+| You want APM to wire LSP servers into supported runtimes                       | [Install LSP servers](./install-lsp-servers/)           |
+| You received a local `.zip` or `.tar.gz` bundle and need to install it         | [Deploy a local bundle](./deploy-a-bundle/)             |
 | You hit `Drift detected` after a `git pull`                                    | [Drift and secure-by-default](./drift-and-secure-by-default/) |
 | Your org rolled out `apm-policy.yml` and your install is now blocked           | [Governance on the consumer ramp](./governance-on-the-consumer-ramp/) |
 

@@ -11,7 +11,7 @@ from apm_cli.marketplace.models import (
     MarketplaceSource,
 )
 from apm_cli.marketplace.validator import (
-    ValidationResult,  # noqa: F401
+    ValidationResult,
     validate_marketplace,
     validate_no_duplicate_names,
     validate_plugin_schema,
@@ -208,3 +208,67 @@ class TestValidateCommand:
         result = runner.invoke(marketplace, ["validate", "acme"])
         assert result.exit_code == 0
         assert "3 plugins" in result.output
+
+    @patch("apm_cli.marketplace.validator.validate_marketplace")
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.registry.get_marketplace_by_name")
+    def test_warnings_only_result_shown(self, mock_get, mock_fetch, mock_validate, runner):
+        """ValidationResult with warnings but no errors renders warning lines (lines 64-67)."""
+        from apm_cli.commands.marketplace import marketplace
+
+        mock_get.return_value = MarketplaceSource(name="acme", owner="acme-org", repo="plugins")
+        mock_fetch.return_value = _manifest(_plugin("a", "owner/a"))
+        mock_validate.return_value = [
+            ValidationResult(
+                check_name="Schema",
+                passed=True,
+                warnings=["minor warning here"],
+                errors=[],
+            ),
+        ]
+        result = runner.invoke(marketplace, ["validate", "acme"])
+        assert result.exit_code == 0
+        assert "minor warning here" in result.output
+
+    @patch("apm_cli.marketplace.validator.validate_marketplace")
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.registry.get_marketplace_by_name")
+    def test_errors_result_exits_1(self, mock_get, mock_fetch, mock_validate, runner):
+        """ValidationResult with errors causes sys.exit(1) (lines 68-74, 83)."""
+        from apm_cli.commands.marketplace import marketplace
+
+        mock_get.return_value = MarketplaceSource(name="acme", owner="acme-org", repo="plugins")
+        mock_fetch.return_value = _manifest(_plugin("a", "owner/a"))
+        mock_validate.return_value = [
+            ValidationResult(
+                check_name="Schema",
+                passed=False,
+                warnings=[],
+                errors=["critical error"],
+            ),
+        ]
+        result = runner.invoke(marketplace, ["validate", "acme"])
+        assert result.exit_code == 1
+        assert "critical error" in result.output
+
+    @patch("apm_cli.marketplace.validator.validate_marketplace")
+    @patch("apm_cli.marketplace.client.fetch_marketplace")
+    @patch("apm_cli.marketplace.registry.get_marketplace_by_name")
+    def test_errors_and_warnings_both_shown(self, mock_get, mock_fetch, mock_validate, runner):
+        """ValidationResult with both errors and warnings renders both (lines 68-74)."""
+        from apm_cli.commands.marketplace import marketplace
+
+        mock_get.return_value = MarketplaceSource(name="acme", owner="acme-org", repo="plugins")
+        mock_fetch.return_value = _manifest(_plugin("a", "owner/a"))
+        mock_validate.return_value = [
+            ValidationResult(
+                check_name="Schema",
+                passed=False,
+                warnings=["a warning"],
+                errors=["an error"],
+            ),
+        ]
+        result = runner.invoke(marketplace, ["validate", "acme"])
+        assert result.exit_code == 1
+        assert "an error" in result.output
+        assert "a warning" in result.output

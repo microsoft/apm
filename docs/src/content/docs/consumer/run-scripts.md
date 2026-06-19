@@ -35,7 +35,7 @@ scripts:
 
 Each value is a literal shell command. The canonical pattern is shelling
 out to a runtime CLI -- `copilot`, `claude`, `codex`, `cursor-agent`,
-`gemini`, `opencode`, `windsurf`, or `llm` -- with a prompt file argument.
+`gemini`, `opencode`, `windsurf`, `kiro`, or `llm` -- with a prompt file argument.
 APM does not bundle these runtimes; you install them yourself and APM
 invokes whichever the script names.
 
@@ -105,8 +105,8 @@ runtime CLI differs. APM compiles the `.prompt.md` once per invocation
 and hands the compiled text to whichever CLI the script names.
 
 See [primitives and targets](../../concepts/primitives-and-targets/) for
-how a single prompt reaches every harness, and the [agent workflows
-guide](../../guides/agent-workflows/) for end-to-end script patterns.
+how a single prompt reaches every harness, and [authoring prompts](../../producer/author-primitives/prompts/) for
+the prompt-file format that backs these scripts.
 
 :::note[Coming from npm?]
 The `scripts:` shape is intentionally identical to `package.json`. Bare
@@ -130,5 +130,5 @@ their authoring format and let the runtime see compiled text.
 ## Read more
 
 - Install primitives first: [install packages](../install-packages/)
-- Inspect what will execute: `apm preview` in the [CLI reference](../../reference/cli/install/)
+- Inspect what will execute: `apm preview` in the [CLI reference](../../reference/cli/preview/)
 - The portability promise: [the three promises](../../concepts/the-three-promises/)

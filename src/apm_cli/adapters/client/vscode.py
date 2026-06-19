@@ -6,14 +6,13 @@ https://code.visualstudio.com/docs/copilot/chat/mcp-servers
 """
 
 import json
-import os  # noqa: F401
 import re
 from pathlib import Path
 
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_warning
-from .base import _ENV_VAR_RE, _INPUT_VAR_RE, MCPClientAdapter
+from .base import _ENV_VAR_RE, _INPUT_VAR_RE, MCPClientAdapter, registry_field_is_required
 
 # Legacy ``<VAR>`` placeholder (Copilot CLI / Codex only). VS Code does not
 # resolve angle-bracket placeholders, so emitting them produces literal
@@ -174,8 +173,24 @@ class VSCodeClientAdapter(MCPClientAdapter):
                     f"Failed to retrieve server details for '{server_url}'. Server not found in registry."
                 )
 
+            # Use provided server name or fallback to server_url
+            config_key = server_name or server_url
+
+            # Get current config before formatting so optional registry fields
+            # that the user already edited can be preserved on reinstall.
+            current_config = self.get_current_config(logger=logger)
+            existing_servers = current_config.get("servers")
+            if not isinstance(existing_servers, dict):
+                existing_servers = {}
+            existing_server_config = existing_servers.get(config_key)
+
             # Generate server configuration
-            server_config, input_vars = self._format_server_config(server_info)
+            server_config, input_vars = self._format_server_config(
+                server_info,
+                runtime_vars=runtime_vars,
+                env_overrides=env_overrides,
+                existing_server_config=existing_server_config,
+            )
 
             if not server_config:
                 if logger:
@@ -184,16 +199,10 @@ class VSCodeClientAdapter(MCPClientAdapter):
                     print(f"Unable to configure server: {server_url}")
                 return False
 
-            # Use provided server name or fallback to server_url
-            config_key = server_name or server_url
-
-            # Get current config
-            current_config = self.get_current_config(logger=logger)
-
             # Ensure servers and inputs sections exist
-            if "servers" not in current_config:
+            if "servers" not in current_config or not isinstance(current_config["servers"], dict):
                 current_config["servers"] = {}
-            if "inputs" not in current_config:
+            if "inputs" not in current_config or not isinstance(current_config["inputs"], list):
                 current_config["inputs"] = []
 
             # Add the server configuration
@@ -228,11 +237,20 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 print(f"Error configuring MCP server: {e}")
             return False
 
-    def _format_server_config(self, server_info):
+    def _format_server_config(
+        self,
+        server_info,
+        runtime_vars=None,
+        env_overrides=None,
+        existing_server_config=None,
+    ):
         """Format server details into VSCode mcp.json compatible format.
 
         Args:
             server_info (dict): Server information from registry.
+            runtime_vars (dict, optional): Runtime variable substitutions.
+            env_overrides (dict, optional): Environment values collected at install time.
+            existing_server_config (dict, optional): Current config for this server.
 
         Returns:
             tuple: (server_config, input_vars) where:
@@ -263,6 +281,7 @@ class VSCodeClientAdapter(MCPClientAdapter):
                 input_vars.extend(
                     self._extract_input_variables(env_translated, server_info.get("name", ""))
                 )
+            self._merge_extra(server_config, server_info)
             return server_config, input_vars
 
         # Check for packages information
@@ -270,7 +289,9 @@ class VSCodeClientAdapter(MCPClientAdapter):
             package = self._select_best_package(server_info["packages"])
             runtime_hint = package.get("runtime_hint", "") if package else ""
             registry_name = self._infer_registry_name(package) if package else ""
-            pkg_args = self._extract_package_args(package) if package else []
+            pkg_args = (
+                self._extract_package_args(package, runtime_vars=runtime_vars) if package else []
+            )
 
             # Handle npm packages
             if runtime_hint == "npx" or registry_name == "npm":
@@ -323,30 +344,47 @@ class VSCodeClientAdapter(MCPClientAdapter):
 
                 server_config = {"type": "stdio", "command": runtime_hint, "args": args}
 
-            # Add environment variables if present
+            # Add environment variables if present. Optional registry env vars
+            # are emitted only when the user already has a value in config or
+            # install-time collection found one; otherwise they would create an
+            # unwanted VS Code prompt on every server start.
             env_vars = (
                 package.get("environment_variables") or package.get("environmentVariables") or []
             )
             if env_vars:
-                server_config["env"] = {}
+                env_config = {}
                 for env_var in env_vars:
-                    if "name" in env_var:
-                        # Convert variable name to lowercase and replace underscores with hyphens for VS Code convention
-                        input_var_name = env_var["name"].lower().replace("_", "-")
-
-                        # Create the input variable reference
-                        server_config["env"][env_var["name"]] = f"${{input:{input_var_name}}}"
-
-                        # Create the input variable definition
-                        input_var_def = {
-                            "type": "promptString",
-                            "id": input_var_name,
-                            "description": env_var.get(
-                                "description", f"{env_var['name']} for MCP server"
-                            ),
-                            "password": True,  # Default to True for security
-                        }
-                        input_vars.append(input_var_def)
+                    if "name" not in env_var:
+                        continue
+                    name = env_var["name"]
+                    input_var_name = name.lower().replace("_", "-")
+                    input_ref = f"${{input:{input_var_name}}}"
+                    env_value = self._value_for_declared_vscode_env(
+                        env_var,
+                        env_overrides=env_overrides,
+                        existing_server_config=existing_server_config,
+                        input_ref=input_ref,
+                    )
+                    if env_value is None:
+                        continue
+                    env_config[name] = env_value
+                    if env_value == input_ref:
+                        input_vars.append(
+                            {
+                                "type": "promptString",
+                                "id": input_var_name,
+                                "description": env_var.get("description", f"{name} for MCP server"),
+                                "password": True,
+                            }
+                        )
+                    else:
+                        input_vars.extend(
+                            self._extract_input_variables(
+                                {name: env_value}, server_info.get("name", "")
+                            )
+                        )
+                if env_config:
+                    server_config["env"] = env_config
 
         # If no server config was created from packages, check for other server types
         if not server_config:
@@ -411,7 +449,60 @@ class VSCodeClientAdapter(MCPClientAdapter):
                     f"Server: {server_info.get('name', 'unknown')}"
                 )
 
+        self._merge_extra(server_config, server_info)
         return server_config, input_vars
+
+    @staticmethod
+    def _has_value(value):
+        """Return True when a user/config value is present and non-empty."""
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        return True
+
+    @staticmethod
+    def _existing_mapping_value(existing_server_config, section, name):
+        """Return an existing server mapping value for *section[name]*, if any."""
+        if not isinstance(existing_server_config, dict):
+            return None
+        existing_mapping = existing_server_config.get(section)
+        if not isinstance(existing_mapping, dict):
+            return None
+        return existing_mapping.get(name)
+
+    @staticmethod
+    def _value_for_declared_vscode_env(
+        env_var,
+        *,
+        env_overrides=None,
+        existing_server_config=None,
+        input_ref,
+    ):
+        """Return the VS Code env value for a registry-declared env var.
+
+        Required variables keep the existing promptString behavior. Optional
+        variables are omitted unless a value was collected for this install or
+        the user already has an edited value in the existing config. Collected
+        optional values are emitted as ``${env:NAME}``, which VS Code resolves
+        from the VS Code process environment when the server starts.
+        """
+        name = env_var["name"]
+        if registry_field_is_required(env_var):
+            return input_ref
+
+        existing_value = VSCodeClientAdapter._existing_mapping_value(
+            existing_server_config, "env", name
+        )
+        if VSCodeClientAdapter._has_value(existing_value):
+            return existing_value
+
+        env_overrides = env_overrides or {}
+        override_value = env_overrides.get(name)
+        if VSCodeClientAdapter._has_value(override_value):
+            return f"${{env:{name}}}"
+
+        return None
 
     @staticmethod
     def _translate_env_vars_for_vscode(mapping):
@@ -496,16 +587,25 @@ class VSCodeClientAdapter(MCPClientAdapter):
         return result
 
     @staticmethod
-    def _extract_package_args(package):
+    def _extract_package_args(package, runtime_vars=None):
         """Extract positional arguments from a package entry.
 
         The MCP registry API uses ``package_arguments`` (with ``type``/``value``
         pairs).  Older or synthetic entries may use ``runtime_arguments``
-        (with ``is_required``/``value_hint``).  This method normalises both
-        formats into a flat list of argument strings.
+        (with ``is_required``/``value_hint``).  v0.1 registry format uses
+        ``runtime_arguments`` where a ``variables`` dict is a *sibling* of
+        ``value_hint``; the ``value_hint`` string contains ``{var_name}``
+        placeholders that are substituted at config-generation time.
+        This method normalises all formats into a flat list of argument strings.
 
         Args:
             package (dict): A single package entry.
+            runtime_vars (dict, optional): Runtime variable substitutions.
+                When a ``{var_name}`` placeholder is encountered in a v0.1
+                ``value_hint``, the corresponding value from ``runtime_vars``
+                is used.  For VS Code, ``workspaceFolder`` defaults to the
+                native ``${workspaceFolder}`` interpolation token when not
+                supplied via ``runtime_vars``.
 
         Returns:
             list[str]: Ordered argument strings, may be empty.
@@ -525,13 +625,32 @@ class VSCodeClientAdapter(MCPClientAdapter):
             if args:
                 return args
 
-        # Fall back to runtime_arguments (legacy / synthetic format)
+        # Fall back to runtime_arguments (legacy / synthetic format and v0.1 variables shape)
         rt_args = package.get("runtime_arguments") or []
         if rt_args:
             args = []
             for arg in rt_args:
                 if isinstance(arg, dict):
-                    if arg.get("is_required", False) and arg.get("value_hint"):
+                    if "variables" in arg and "value_hint" in arg:
+                        # v0.1 format: variables is a sibling of value_hint; the
+                        # value_hint string contains {var_name} placeholders.
+                        value = arg["value_hint"]
+                        for var_name in arg["variables"]:
+                            if runtime_vars and var_name in runtime_vars:
+                                replacement = runtime_vars[var_name]
+                            elif var_name == "workspaceFolder":
+                                # VS Code native variable substitution token
+                                replacement = "${workspaceFolder}"
+                            else:
+                                replacement = f"${{{var_name}}}"
+                            value = value.replace(f"{{{var_name}}}", replacement)
+                        if value:
+                            args.append(value)
+                    elif arg.get("is_required", False) and arg.get("value_hint"):
+                        # Legacy format: explicit is_required=True entries
+                        args.append(arg["value_hint"])
+                    elif "value_hint" in arg and arg["value_hint"] and "is_required" not in arg:
+                        # v0.1 format: plain value_hint entries without is_required
                         args.append(arg["value_hint"])
             if args:
                 return args

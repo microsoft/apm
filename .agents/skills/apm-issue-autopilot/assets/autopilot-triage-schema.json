@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "apm-issue-autopilot-triage-schema.json",
+  "title": "apm-issue-autopilot triage decision",
+  "description": "Return shape for a Phase 1 triage child. Extends the apm-triage-panel triage-decision contract with the autopilot gate fields (confidence, red_flags, implementation_brief).",
+  "type": "object",
+  "required": ["kind", "issue", "decision", "confidence", "red_flags"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "autopilot-triage-decision" },
+    "issue": { "type": "integer" },
+    "decision": {
+      "type": "string",
+      "enum": ["accept", "needs-design", "decline-with-reason", "duplicate-of", "defer-later", "auto-handle"]
+    },
+    "decision_detail": { "type": "string" },
+    "theme": { "type": ["string", "null"] },
+    "areas": { "type": "array", "items": { "type": "string" } },
+    "type": {
+      "type": "string",
+      "enum": ["type/bug", "type/feature", "type/docs", "type/refactor", "type/architecture", "type/automation", "type/release", "type/performance"]
+    },
+    "status": { "type": ["string", "null"] },
+    "priority": { "type": ["string", "null"] },
+    "preserved_labels": { "type": "array", "items": { "type": "string" } },
+    "milestone": { "type": ["string", "null"] },
+    "next_action": { "type": "string" },
+    "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+    "red_flags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["breaking-change", "auth-surface", "security-surface", "governance-surface", "schema-migration", "release-automation", "multi-subsystem", "unbounded-scope", "needs-design", "duplicate", "decline"]
+      }
+    },
+    "implementation_brief": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "deliverable": { "type": "string" },
+        "non_goals": { "type": "string" },
+        "acceptance_tests": { "type": "string" },
+        "docs_required": { "type": "string" },
+        "risk_surface": { "type": "string" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["decision"],
+        "properties": { "decision": { "const": "accept" } }
+      },
+      "then": {
+        "required": ["type", "implementation_brief"],
+        "properties": {
+          "implementation_brief": {
+            "type": "object",
+            "required": ["deliverable", "non_goals", "acceptance_tests", "docs_required", "risk_surface"]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -246,3 +246,46 @@ class TestDownloadPackageDelegation:
         )
         with pytest.raises(RuntimeError, match=r"404"):
             orch.download_package(dep, tmp_path / "pkg")
+
+
+# ---------------------------------------------------------------------------
+# ArtifactoryOrchestrator._split_owner_repo subgroup folding
+# ---------------------------------------------------------------------------
+
+
+class TestSplitOwnerRepoSubgroupFolding:
+    """``_split_owner_repo`` must fold every segment past the owner into ``repo``.
+
+    Regression trap for nested GitLab subgroup paths behind an Artifactory
+    proxy (#1498): a 4+ segment ``group/sub1/sub2/repo`` boundary -- as
+    rebuilt by the boundary resolver -- must produce ``owner=group`` and
+    ``repo=sub1/sub2/repo``.  Truncating to two segments here would silently
+    install the wrong upstream project.
+    """
+
+    @pytest.mark.parametrize(
+        "repo_url,expected_owner,expected_repo",
+        [
+            ("group/repo", "group", "repo"),
+            ("group/sub/repo", "group", "sub/repo"),
+            ("group/sub1/sub2/repo", "group", "sub1/sub2/repo"),
+            ("group/a/b/c/d/repo", "group", "a/b/c/d/repo"),
+        ],
+    )
+    def test_subgroup_folding(self, repo_url, expected_owner, expected_repo):
+        dep = DependencyReference.from_artifactory_boundary_probe(
+            host="art.example.com",
+            prefix="artifactory/apm",
+            owner=repo_url.split("/", 1)[0],
+            repo=repo_url.split("/", 1)[1],
+            virtual_path=None,
+            reference=None,
+        )
+        owner, repo = ArtifactoryOrchestrator._split_owner_repo(dep)
+        assert (owner, repo) == (expected_owner, expected_repo)
+
+    def test_single_segment_rejected(self):
+        """A bare repo with no owner segment is malformed and must raise."""
+        bad = types.SimpleNamespace(repo_url="onlyrepo")
+        with pytest.raises(ValueError, match=r"expected 'owner/repo' format"):
+            ArtifactoryOrchestrator._split_owner_repo(bad)

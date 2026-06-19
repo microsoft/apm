@@ -28,6 +28,7 @@ dependencies:
   require: []                           # required packages
   require_resolution: project-wins      # project-wins | policy-wins | block
   max_depth: 50                         # transitive depth limit
+  require_pinned_constraint: false      # when true, ban unbounded dep ranges (NO_REF, '*', bare branch, '>=X' without upper bound)
 
 mcp:
   allow: []                             # allowed server patterns
@@ -55,7 +56,145 @@ manifest:
 unmanaged_files:
   action: ignore                        # ignore | warn | deny
   directories: []                       # directories to scan
+  exclude: []                           # path globs to suppress (known harness-managed files)
+
+registry_source:                        # experimental: requires `apm experimental enable registries`
+  require: []                           # registry names that MUST be reachable in the merged registry map
+  allow_non_registry: true              # when false, blocks any dep not routed through a configured registry
+
+bin_deploy:                             # marketplace_plugin bin/ executable deployment (Claude, global installs)
+  deny_all: false                       # when true, suppress bin/ deploy for every plugin
+  deny: []                              # canonical strings (owner/name) whose bin/ must not deploy
 ```
+
+## Registry source governance (experimental)
+
+Gate dependency sources to REST-based APM registries declared via the
+`registries:` block in `apm.yml` (or in `~/.apm/config.json`). Applies
+to direct AND transitive dependencies.
+
+```yaml
+# .github/apm-policy.yml
+registry_source:
+  require:
+    - corp-main                         # this registry MUST be reachable
+  allow_non_registry: false             # block any dep not routed through a registry
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `require` | `[]` | Registry names that MUST appear in the merged registry map (project `apm.yml` + workspace `~/.apm/apm.yml` + `~/.apm/config.json`). Fail-closed if a listed name has no URL. |
+| `allow_non_registry` | `true` | When `false`, every dep MUST be routed through a configured registry; git-shorthand and `- git:` deps are blocked at install time. |
+
+The check fires from all four call sites (`policy_gate`,
+`policy_target_check`, `run_policy_checks`, `run_policy_preflight`) so
+`apm install`, `apm install <pkg>`, `apm deps update`, and
+`apm audit --ci` all enforce the same gate.
+
+## Integrity and drift enforcement
+
+Two additive, optional, default-off keys under the existing `security:`
+namespace, both backed by enforcement that exists today.
+
+```yaml
+# .github/apm-policy.yml
+security:
+  integrity:
+    require_hashes: true    # fail install closed if any locked entry lacks a hash
+  audit:
+    fail_on_drift: true     # `apm audit` exits non-zero on workspace drift
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `integrity.require_hashes` | `false` | When `true`, every non-local lockfile entry MUST carry a content hash; a missing or empty hash fails `apm install` closed. Asserts hash-presence on the freshly-built lockfile (no second hashing pass). Local deps are exempt. Logical OR on inheritance. |
+| `audit.fail_on_drift` | `false` | When `true`, a bare `apm audit` exits non-zero when workspace content drifts from the lockfile (default-off keeps drift advisory at exit 0). Only changes the exit code; `apm audit --ci` already gates on drift. Logical OR on inheritance. |
+
+## External scanner governance (experimental)
+
+Gate the behaviour of third-party SARIF scanners run by `apm audit
+--external <name>` (behind `apm experimental enable external-scanners`).
+The stance is **restrict-only**: policy can tighten scanner behaviour but
+never adds argv tokens itself and never forces LLM egress from an
+untrusted project-local policy.
+
+```yaml
+# .github/apm-policy.yml
+security:
+  audit:
+    external: [skillspector]              # scanners the org permits
+    scanners:                             # NEW, optional per-scanner governance
+      skillspector:
+        allow_args: false                 # strip all user/CLI extra-args (kill-switch)
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `scanners.<name>.allow_args` | unset (no opinion) | When `false`, all user/CLI `--external-args` and config `external.<name>.args` are stripped to an empty list before the scanner runs -- locks the scanner to its vetted invocation. AND-merged across inheritance: any ancestor setting `false` wins. |
+
+Notes:
+- Policy **never injects argv** -- only the local user contributes scanner
+  flags (via `--external-args` or `external.<name>.args`), and those are
+  allowlist-validated by the adapter.
+- `allow_args: false` is enforced at the **install-time** audit path (which
+  loads org policy). A bare `apm audit` does not load org policy, so it
+  relies on the adapter's allowlist for arg safety.
+- LLM mode is opt-in by the user only; a project-local policy cannot mandate
+  it (this avoids turning a checked-in policy file into a content-exfiltration
+  channel).
+
+## Plugin bin/ deployment governance
+
+When a `marketplace_plugin` package ships a `bin/` directory, a global
+install (`apm install -g`) deploys those executables into
+`~/.claude/skills/<name>/bin/` so Claude Code invokes them as bare
+commands (the skills-directory plugin contract). Deployment is
+Claude-only and user-scope only; project-scope installs never deploy
+executables.
+
+```yaml
+# .github/apm-policy.yml
+bin_deploy:
+  deny_all: true                        # block every plugin's bin/ deploy org-wide
+  # or target specific packages:
+  deny:
+    - myorg/untrusted-plugin            # canonical owner/name string
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `deny_all` | `false` | When `true`, suppresses bin/ deployment for every `marketplace_plugin`, regardless of `deny`. |
+| `deny` | `[]` | Canonical package strings (`owner/name`) whose bin/ executables must not deploy. |
+
+Deployed executables are placed on Claude Code's `PATH` and invoked
+without further confirmation, so use this field to opt out in
+environments where plugin executables are not trusted by default.
+
+## Canvas extension trust (experimental)
+
+Behind the `canvas` experimental flag, a package may ship a Copilot CLI canvas
+extension under `.apm/extensions/<name>/extension.mjs` (executable Node.js).
+Because a canvas from a dependency is arbitrary executable code, APM **blocks
+dependency-provided canvases by default**: the consumer must pass
+`--trust-canvas-extensions` to deploy them. A first-party canvas in the root
+package being installed deploys once the flag is on; dependency canvases always
+require the trust flag.
+
+At **project scope** a canvas deploys to `.github/extensions/<name>/`. With
+`--global`, a **dependency-provided** canvas deploys to
+`~/.copilot/extensions/<name>/` so it is available in every Copilot session;
+global install always requires `--trust-canvas-extensions` (full-account blast
+radius), supports only the default `~/.copilot` location (a non-default
+`$COPILOT_HOME` is refused), and does not deploy first-party root canvases
+(package them as a dependency instead). `apm uninstall --global` prunes the
+global canvas.
+
+The trust gate is enforced on every install path -- normal install, offline
+bundle install (`apm install <bundle>`), and `apm unpack` -- so a vendored
+bundle cannot smuggle an executable canvas past trust. The flag is a
+feature-availability toggle, not a security gate; the trust requirement holds
+regardless of the flag. An enterprise policy field for canvas trust is a
+deferred follow-up and is not part of this experimental release.
 
 ## Local content governance
 
@@ -90,6 +229,7 @@ list (removing entries the parent set). All other fields obey the rules below:
 | Deny lists | Union (child adds to parent). Omitting or `null` = transparent; `[]` = explicit empty override. |
 | `require` | Union (combines required packages). Omitting or `null` = transparent; `[]` = explicit empty override. |
 | `max_depth` | `min(parent, child)` |
+| `require_pinned_constraint` | Logical OR (once enabled, child cannot relax) |
 | `mcp.self_defined` | Escalates: `allow` < `warn` < `deny` |
 | `source_attribution` | `parent OR child` (either enables) |
 
@@ -382,6 +522,7 @@ Violation classes:
 | `denylist` | `dependencies.deny` match | Remove dep from `apm.yml`, request org-policy update, or `--no-policy` for one-off bypass |
 | `allowlist` | Dep not in non-empty `dependencies.allow` | Add to org allowlist or switch to an approved package |
 | `required` | Missing `dependencies.require` entry, or version-pin mismatch | Add the dep (and pin) to `apm.yml`. Pin mismatches downgrade to warn under `require_resolution: project-wins`; missing required deps still block |
+| `pinned-constraint` | `dependencies.require_pinned_constraint: true` + a direct dep with no ref, a wildcard, a bare branch, or a bare `>=X.Y` | Pin the dep to an exact version (`1.2.3` or npm/cargo-style `=1.2.3`; pip-style `==1.2.3` is not supported), caret/tilde/bounded semver range, literal `vX.Y.Z` tag, or a full SHA. Roll out enforcement with `warn` before `block`. |
 | `transport` | MCP transport not in `mcp.transport.allow` | Switch transport, or request `mcp.transport.allow` update |
 | `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | Re-run with `--target <allowed>`, or adjust `compilation.target` in `apm.yml` |
 | `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny` / `transport` / `self_defined` | Remove offending dep, request policy update, or set `mcp.trust_transitive: true` |

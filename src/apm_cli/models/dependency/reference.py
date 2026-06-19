@@ -17,6 +17,7 @@ from ...utils.github_host import (
     maybe_raise_bare_fqdn_github_gitlab_conflict,
     parse_artifactory_path,
     unsupported_host_error,
+    validate_ssh_user,
 )
 from ...utils.path_security import (
     PathTraversalError,
@@ -24,13 +25,25 @@ from ...utils.path_security import (
     validate_path_segments,
 )
 from ..validation import InvalidVirtualPackageExtensionError
+from .identity import (
+    _NON_ADO_PATH_SEGMENT_RE,
+    InvalidSemverRangeError,
+    _is_valid_registry_semver_range,
+    _looks_like_invalid_semver_range,
+    _path_segment_pattern,
+    build_canonical_dependency_string,
+    build_dependency_unique_key,
+)
 from .types import VirtualPackageType
 
+# Identity/semver helpers re-exported from .identity for back-compat imports.
 # Default ports per URI scheme -- used to normalise away redundant
 # explicit ports (e.g. https://host:443/...) so that lockfile keys
 # and error messages stay consistent regardless of how the user
 # spelled the URL.
 _DEFAULT_SCHEME_PORTS: dict[str, int] = {"https": 443, "http": 80, "ssh": 22}
+
+_REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
 
 
 @dataclass
@@ -39,6 +52,7 @@ class DependencyReference:
 
     repo_url: str  # e.g., "user/repo" for GitHub or "org/project/repo" for Azure DevOps
     host: str | None = None  # Optional host (github.com, dev.azure.com, or enterprise host)
+    host_type: str | None = None  # Explicit host kind override (currently: "gitlab")
     port: int | None = None  # Non-standard SSH/HTTPS port (e.g. 7999 for Bitbucket DC)
     explicit_scheme: str | None = (
         None  # User-stated transport: "ssh", "https", "http", or None for shorthand
@@ -69,6 +83,75 @@ class DependencyReference:
     # SKILL_BUNDLE subset selection (persisted in apm.yml `skills:` field)
     skill_subset: list[str] | None = None  # Sorted skill names, or None = all
 
+    # SSH username for SCP-shorthand or ``ssh://`` dependencies. ``None`` for
+    # non-SSH inputs. Defaults to ``"git"`` whenever an SSH form was parsed
+    # without an explicit user. Carried as auth/transport context, NOT
+    # baked into ``to_canonical()`` / ``get_identity()`` so dependency
+    # identity stays user-agnostic (lockfile pinning + dedup work the same
+    # whether a project uses ``git@`` or an EMU/custom SSH account).
+    ssh_user: str | None = None
+
+    # Registry resolver fields (optional; default to None/git semantics)
+    # source: which resolver should fetch this dep. None and "git" are equivalent
+    # (legacy default). Set to "registry" by the parser when an entry routes to
+    # a configured registry (via top-level registries: block or
+    # object-form `- registry:` / `- id:` discriminator), and to "local" when
+    # the entry is a local filesystem path (is_local=True) so every reader and
+    # the lockfile (which records source="local") agree on a local dep's source.
+    # registry_name: name of the registry from apm.yml's registries: block when
+    # source == "registry". Carried in-memory only; never serialized into the
+    # lockfile (the lockfile uses URL-based identity per design §6.1).
+    source: str | None = None
+    registry_name: str | None = None
+
+    # Marketplace dependency fields (parsed from plugin.json dict format)
+    is_marketplace: bool = False
+    marketplace_name: str | None = None
+    marketplace_plugin_name: str | None = None
+    marketplace_version_spec: str | None = None
+
+    @property
+    def ref_kind(self) -> str | None:
+        """Classify ``reference`` for routing purposes.
+
+        Returns one of:
+
+        * ``"semver"`` -- ``reference`` parses as a valid semver range
+          (``^1.2.0``, ``~2.1``, ``>=1.0 <2.0``, ``1.2.x``, exact ``1.2.3``).
+          The install pipeline resolves it against the remote's tags via
+          :class:`~apm_cli.deps.git_semver_resolver.GitSemverResolver`.
+        * ``"literal"`` -- ``reference`` is a non-empty string that does
+          NOT parse as semver (branch name, tag name with prefix, SHA).
+        * ``None`` -- ``reference`` is unset; downstream uses the remote's
+          default branch.
+
+        Semver routing is opt-in by syntax: any ``ref:`` value that
+        survives the literal-branch / literal-tag / SHA parse intact
+        bypasses the semver resolver, so existing dependencies on
+        ``ref: v1.2.3`` (literal tag with ``v`` prefix) keep their
+        existing behaviour.
+
+        Note: ``"1.2.3"`` (no ``v`` prefix) parses as a semver exact-version
+        constraint, NOT a literal tag.  The git-semver resolver's bare-
+        version fallback pattern covers the "literal ``1.2.3`` tag on the
+        remote" case without breaking semver routing for the same input.
+        """
+        if not self.reference:
+            return None
+        # ``v1.2.3``, ``main``, SHAs, anything-with-prefix is literal.
+        # Only inputs that parse as a *standalone* semver range are
+        # routed through the git-semver resolver.
+        if _is_valid_registry_semver_range(self.reference):
+            return "semver"
+        if _looks_like_invalid_semver_range(self.reference):
+            raise InvalidSemverRangeError(
+                f"Invalid semver range in ref {self.reference!r}. "
+                "The ref field expects a plain semver range. "
+                "Use a range like '^1.2.0' or pin a literal tag like "
+                "'pkg-a-v1.2.0'."
+            )
+        return "literal"
+
     # Supported file extensions for virtual packages
     VIRTUAL_FILE_EXTENSIONS = (
         ".prompt.md",
@@ -88,6 +171,22 @@ class DependencyReference:
 
     # First path segment after host that often starts in-repo virtual layout (GitLab heuristic).
     _GITLAB_VIRTUAL_ROOT_SEGMENTS = frozenset({"prompts", "instructions", "collections"})
+
+    # Known APM primitive directory names. Used to detect a subpath accidentally
+    # embedded inside an explicit git URL form (SCP/ssh://https://), which git
+    # would later reject with a cryptic "not a valid repository name" error.
+    _APM_PRIMITIVE_DIRS: frozenset[str] = frozenset(
+        {
+            "skills",
+            "agents",
+            "prompts",
+            "instructions",
+            "chatmodes",
+            "collections",
+            "contexts",
+            "memory",
+        }
+    )
 
     def is_artifactory(self) -> bool:
         """Check if this reference points to a JFrog Artifactory VCS repository."""
@@ -192,11 +291,15 @@ class DependencyReference:
         Returns:
             str: Unique key for this dependency
         """
-        if self.is_local and self.local_path:
-            return self.local_path
-        if self.is_virtual and self.virtual_path:
-            return f"{self.repo_url}/{self.virtual_path}"
-        return self.repo_url
+        return build_dependency_unique_key(
+            self.repo_url,
+            host=self.host,
+            source="local" if self.is_local else self.source,
+            local_path=self.local_path,
+            is_virtual=self.is_virtual,
+            virtual_path=self.virtual_path,
+            registry_prefix=self.artifactory_prefix,
+        )
 
     def to_canonical(self) -> str:
         """Return the canonical scheme-free identity string for this dependency.
@@ -292,11 +395,18 @@ class DependencyReference:
 
         For identity-based matching that includes non-default hosts, use get_identity().
         For the transport-aware apm.yml entry, use to_apm_yml_entry().
+        For the lockfile dedup key (host-qualified for non-default hosts), use get_unique_key().
 
         Returns:
             str: Host-blind canonical string (e.g., "owner/repo")
         """
-        return self.get_unique_key()
+        return build_canonical_dependency_string(
+            self.repo_url,
+            is_local=self.is_local,
+            local_path=self.local_path,
+            is_virtual=self.is_virtual,
+            virtual_path=self.virtual_path,
+        )
 
     def get_install_path(self, apm_modules_dir: Path) -> Path:
         """Get the canonical filesystem path where this package should be installed.
@@ -322,10 +432,17 @@ class DependencyReference:
             apm_modules_dir: Path to the apm_modules directory
 
         Raises:
+            ValueError: If this is an unresolved marketplace dependency
             PathTraversalError: If the computed path escapes apm_modules_dir
         Returns:
             Path: Absolute path to the package installation directory
         """
+        if self.is_marketplace:
+            raise ValueError(
+                f"Cannot compute install path for unresolved marketplace dependency "
+                f"'{self.marketplace_plugin_name}@{self.marketplace_name}'"
+            )
+
         if self.is_local and self.local_path:
             pkg_dir_name = Path(self.local_path).name
             validate_path_segments(
@@ -389,6 +506,40 @@ class DependencyReference:
         return result
 
     @staticmethod
+    def _reject_shorthand_alias(dependency_str: str) -> None:
+        """Reject bare-shorthand ``@alias`` with an actionable migration error.
+
+        Bare ``@alias`` is not part of the supported reference grammar (#340
+        retired the ``@`` separator to avoid the npm/go/cargo ``@version``
+        collision). The dedicated SSH parsers handle ``@`` in ``ssh://`` URLs
+        and SCP shorthand (``<user>@host:path``) as userinfo, not aliases; this
+        guard rejects ``@`` in the pre-fragment shorthand portion and keeps the
+        retired ``#ref@alias`` shape rejected, while version-style tag suffixes
+        such as ``owner/repo#package@v1.0.1`` remain valid literal refs.
+        """
+        stripped = dependency_str.strip()
+        if "@" not in stripped:
+            return
+        if stripped.lower().startswith(("https://", "http://", "ssh://")):
+            return
+        if SCP_LIKE_RE.match(stripped):
+            return
+        shorthand_part, _, ref_part = stripped.partition("#")
+        if "@" not in shorthand_part:
+            _, _, ref_suffix = ref_part.rpartition("@")
+            if _REF_VERSION_SUFFIX_RE.fullmatch(ref_suffix):
+                return
+        preview = "".join(ch if 32 <= ord(ch) <= 126 else "?" for ch in stripped)
+        if len(preview) > 160:
+            preview = f"{preview[:157]}..."
+        raise ValueError(
+            f"Shorthand '@alias' is not supported in '{preview}'. "
+            f"Use object form with 'git:', optional 'path:', and 'alias:' "
+            f"fields to install a dependency under a custom directory name. "
+            f"See: https://microsoft.github.io/apm/consumer/manage-dependencies/#reference-formats"
+        )
+
+    @staticmethod
     def _parse_ssh_protocol_url(url: str):
         """Parse an ``ssh://`` protocol URL using ``urllib.parse.urlparse``.
 
@@ -405,11 +556,26 @@ class DependencyReference:
             ssh://git@host/owner/repo.git@alias
 
         Returns:
-            ``(host, port, repo_url, reference, alias)`` or ``None`` if the
-            input is not an ``ssh://`` URL.
+            ``(host, port, repo_url, reference, alias, user)`` or ``None`` if
+            the input is not an ``ssh://`` URL. ``user`` defaults to ``"git"``
+            when no userinfo is present.
         """
         if not url.startswith("ssh://"):
             return None
+
+        # SECURITY: reject percent-encoded userinfo BEFORE urlparse decodes it.
+        # ``urlparse('ssh://%2DoProxyCommand=evil@host/repo').username`` returns
+        # ``-oProxyCommand=evil`` which would smuggle SSH options past the
+        # allowlist in validate_ssh_user. We inspect the raw substring between
+        # ``ssh://`` and the first ``@`` (which terminates the userinfo per
+        # RFC 3986) and reject any ``%`` there. There is no legitimate need for
+        # percent-encoding in a real SSH username.
+        userinfo_match = re.match(r"^ssh://([^@/?#]+)@", url)
+        if userinfo_match and "%" in userinfo_match.group(1):
+            raise ValueError(
+                "Percent-encoded characters are not allowed in SSH userinfo. "
+                "Use the literal username (e.g. 'ssh://myuser@host/...')."
+            )
 
         parsed = urllib.parse.urlparse(url)
         host = parsed.hostname or ""
@@ -419,6 +585,12 @@ class DependencyReference:
             port = None
         path = parsed.path.lstrip("/")
         fragment = parsed.fragment
+
+        # Userinfo: validate or default to "git". urlparse exposes ``username``
+        # already percent-decoded; the pre-check above guarantees no decoding
+        # actually happened, so what we see equals what was on the wire.
+        raw_user = parsed.username
+        ssh_user = validate_ssh_user(raw_user) if raw_user else "git"
 
         reference: str | None = None
         alias: str | None = None
@@ -445,7 +617,7 @@ class DependencyReference:
         # Security: reject traversal sequences in SSH repo paths
         validate_path_segments(repo_url, context="SSH repository path", reject_empty=True)
 
-        return host, port, repo_url, reference, alias
+        return host, port, repo_url, reference, alias, ssh_user
 
     @staticmethod
     def _normalize_parent_repo_decl_path(raw: str) -> str:
@@ -458,6 +630,83 @@ class DependencyReference:
         normalized = "/".join(segments)
         validate_path_segments(normalized, context="path")
         return normalized
+
+    @staticmethod
+    def _check_no_embedded_subpath(url: str) -> None:
+        """Guard: reject a subpath embedded in an explicit git URL form (#872).
+
+        Detects when a user writes, e.g.:
+            git: git@github.com:org/repo/skills/hello-world.git
+
+        Such URLs cause git to fail later with a cryptic
+        ``fatal: '...' does not appear to be a git repository`` message.
+        This guard fires early and points at the supported ``path:`` key.
+
+        The heuristic: for SCP (``git@host:path``), ``ssh://``, or
+        ``https://``/``http://`` URL forms, if any non-last path segment
+        matches a known APM primitive directory name (skills, agents, prompts,
+        etc.), the URL encodes a subpath that belongs in the ``path:`` key.
+
+        GitLab subgroups and Azure DevOps org/project paths do not use APM
+        primitive names (skills, agents, prompts, ...) as segment labels, so
+        the check produces no false positives for those legitimate forms.
+
+        Scoping (issue #1014 follow-up): the embedded-subpath shape is
+        ``org/repo`` followed by ``<primitive>/<name>``, so a primitive
+        segment is only treated as an embedded subpath when it is preceded
+        by a complete ``org/repo`` prefix (segment index >= 2). This avoids
+        a false positive for a GitLab subgroup literally named after a
+        primitive, e.g. ``git@gitlab.com:group/skills/repo.git`` (here
+        ``skills`` is a subgroup at index 1 and ``repo`` is the real
+        repository). A residual ambiguity remains for deep subgroups that
+        embed a primitive name at index >= 2 (e.g.
+        ``group/sub/skills/repo``); that shape is genuinely undecidable
+        without probing the host, so it is still treated as malformed.
+        """
+        raw = url.strip()
+
+        if SCP_LIKE_RE.match(raw):
+            colon_idx = raw.index(":")
+            path_part = raw[colon_idx + 1 :]
+        elif raw.lower().startswith(("ssh://", "https://", "http://")):
+            path_part = urllib.parse.urlparse(raw).path
+        else:
+            return  # bare shorthand or other form -- not in scope
+
+        # Strip fragment and query string, then remove trailing .git suffix
+        path_part = path_part.split("#")[0].split("?")[0]
+        if path_part.endswith(".git"):
+            path_part = path_part[:-4]
+
+        segments = [s for s in path_part.replace("\\", "/").split("/") if s]
+        if len(segments) < 3:
+            return  # too few segments to contain an interior primitive name
+
+        # Azure DevOps repo URLs carry the repository under a `_git` segment
+        # and legitimately encode a virtual path after it (e.g.
+        # dev.azure.com/org/proj/_git/repo/instructions/x). That is the
+        # supported ADO shorthand, not an embedded subpath, so skip the guard
+        # for any URL containing the ADO-specific `_git` marker (no GitHub or
+        # GitLab repo path uses `_git`, so real detection is unaffected).
+        if "_git" in segments:
+            return
+
+        # An embedded subpath is `org/repo` + `<primitive>/<name>`, so the
+        # primitive directory must be preceded by a complete org/repo prefix
+        # (index >= 2). Restricting to index >= 2 keeps the real malformed-URL
+        # detection (org/repo/skills/<name>) while not false-positiving on a
+        # subgroup literally named after a primitive at index 1
+        # (group/skills/repo, where `repo` is the actual repository).
+        for idx, seg in enumerate(segments[:-1]):
+            if idx >= 2 and seg in DependencyReference._APM_PRIMITIVE_DIRS:
+                raise ValueError(
+                    "A subpath cannot be embedded in a git URL. "
+                    f"Got: `{raw}`. "
+                    "Use the `path:` key instead: "
+                    "`git: <repo-url>` + `path: <primitive>/<name>` "
+                    "(or the shorthand `org/repo/<primitive>/<name>`). "
+                    "See https://microsoft.github.io/apm/consumer/manage-dependencies/"
+                )
 
     @classmethod
     def parse_from_dict(cls, entry: dict) -> "DependencyReference":
@@ -476,8 +725,19 @@ class DependencyReference:
 
             - path: ./packages/my-shared-skills
 
+        And marketplace dependency entries:
+
+            - name: gopls-lsp
+              marketplace: claude-plugins-official
+
+            - name: secrets-vault
+              marketplace: acme-tools
+              version: "~2.1.0"
+
         Args:
-            entry: Dictionary with 'git' or 'path' (required), plus optional fields
+            entry: Dictionary with 'git', 'path', or 'marketplace' key.
+                   Marketplace entries support 'name', 'marketplace', and
+                   optional 'version' (semver range) fields.
 
         Returns:
             DependencyReference: Parsed dependency reference
@@ -485,6 +745,64 @@ class DependencyReference:
         Raises:
             ValueError: If the entry is missing required fields or has invalid format
         """
+        # Support marketplace dependencies: { name: X, marketplace: Y, version: Z }
+        if "marketplace" in entry:
+            source_keys = {"git", "path", "registry", "id"}.intersection(entry)
+            if source_keys:
+                joined = "', '".join(sorted(source_keys))
+                raise ValueError(
+                    f"Ambiguous dependency: 'marketplace' cannot be combined with '{joined}'"
+                )
+            _MARKETPLACE_KEYS = {"name", "marketplace", "version"}
+            unknown = set(entry.keys()) - _MARKETPLACE_KEYS
+            if unknown:
+                raise ValueError(
+                    f"Unknown keys in marketplace dependency: {sorted(unknown)}. "
+                    f"Allowed keys: {sorted(_MARKETPLACE_KEYS)}"
+                )
+            name = entry.get("name")
+            marketplace = entry["marketplace"]
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("Marketplace dependency must have a non-empty 'name' field")
+            if not isinstance(marketplace, str) or not marketplace.strip():
+                raise ValueError("'marketplace' field must be a non-empty string")
+            name = name.strip()
+            marketplace = marketplace.strip()
+            if not re.match(r"^[a-zA-Z0-9._-]+$", name):
+                raise ValueError(
+                    f"Invalid marketplace plugin name: '{name}'. "
+                    "Names can only contain letters, numbers, dots, underscores, and hyphens"
+                )
+            if not re.match(r"^[a-zA-Z0-9._-]+$", marketplace):
+                raise ValueError(
+                    f"Invalid marketplace name: '{marketplace}'. "
+                    "Names can only contain letters, numbers, dots, underscores, and hyphens"
+                )
+            version_spec = entry.get("version")
+            if version_spec is not None:
+                if not isinstance(version_spec, str) or not version_spec.strip():
+                    raise ValueError("'version' field must be a non-empty string")
+                version_spec = version_spec.strip()
+            return cls(
+                repo_url=f"_marketplace/{marketplace}/{name}",
+                is_marketplace=True,
+                marketplace_name=marketplace,
+                marketplace_plugin_name=name,
+                marketplace_version_spec=version_spec,
+            )
+
+        # Object-form registry package — design §3.2.
+        # Discriminated by the ``registry:`` or ``id:`` key (``registry:`` is
+        # optional when a ``registries.default:`` is configured).  Mutually
+        # exclusive with ``git:``.
+        if "registry" in entry or "id" in entry:
+            if "git" in entry:
+                raise ValueError(
+                    "Object-style dependency cannot mix 'registry:'/'id:' and 'git:' "
+                    "keys — choose one resolver."
+                )
+            return cls._parse_registry_object_entry(entry)
+
         # Support dict-form local path: { path: ./local/dir }
         if "path" in entry and "git" not in entry:
             local = entry["path"]
@@ -500,14 +818,19 @@ class DependencyReference:
             return cls.parse(local)
 
         if "git" not in entry:
-            raise ValueError("Object-style dependency must have a 'git' or 'path' field")
+            raise ValueError(
+                "Object-style dependency must have a 'git', 'path', or 'registry' field"
+            )
 
         git_url = entry["git"]
         if not isinstance(git_url, str) or not git_url.strip():
             raise ValueError("'git' field must be a non-empty string")
+        host_type = cls._parse_host_type(entry.get("type"))
 
         # Monorepo parent inheritance (literal ``git: parent`` only; resolver expands)
         if git_url == "parent":
+            if host_type is not None:
+                raise ValueError("'type' is only supported for remote git dependencies")
             path_raw = entry.get("path")
             if path_raw is None:
                 raise ValueError(
@@ -565,7 +888,12 @@ class DependencyReference:
 
         # Parse the git URL using the standard parser
         dep = cls.parse(git_url)
+        dep.host_type = host_type
         dep.allow_insecure = allow_insecure
+        # Object-form ``- git:`` is an explicit Git resolver pin, even when
+        # a top-level ``registries.default`` is set. Mark source so the
+        # default-routing pass in apm_package.py leaves it alone.
+        dep.source = "git"
 
         # Apply overrides from the object fields
         if ref_override is not None:
@@ -613,6 +941,27 @@ class DependencyReference:
 
         return dep
 
+    @staticmethod
+    def _parse_host_type(raw: object) -> str | None:
+        """Parse the optional object-form ``type`` host-kind hint.
+
+        Currently only ``gitlab`` is accepted; any other value fails closed with
+        a ``ValueError``. This is a deliberate gate, not an oversight: future
+        host kinds (e.g. ``gitea``, ``bitbucket``) would extend the accepted set
+        here and thread a matching branch through ``AuthResolver.classify_host``
+        and ``host_backends.backend_for``. Until those backends exist, rejecting
+        unknown hints keeps classification explicit rather than silently
+        mis-routing a bespoke host to the GitHub path.
+        """
+        if raw is None:
+            return None
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError("'type' field must be a non-empty string")
+        value = raw.strip().lower()
+        if value != "gitlab":
+            raise ValueError(f"'type' field only supports 'gitlab'; got {raw!r}")
+        return value
+
     @classmethod
     def virtual_suffix_is_installable_shape(cls, virtual_path: str) -> bool:
         """Return whether *virtual_path* matches APM virtual package shape rules.
@@ -642,7 +991,7 @@ class DependencyReference:
     ) -> tuple[str, list[str], str | None] | None:
         """If *package* is bare host/path shorthand, return (host, path_segments, ref_str).
 
-        Returns ``None`` for ``https://``, ``git@``, or non–GitLab-class hosts.
+        Returns ``None`` for ``https://``, ``git@``, or non-GitLab-class hosts.
         """
         s = package.strip()
         ref_out: str | None = None
@@ -712,6 +1061,26 @@ class DependencyReference:
         )
 
     @classmethod
+    def from_artifactory_boundary_probe(
+        cls,
+        host: str,
+        prefix: str,
+        owner: str,
+        repo: str,
+        virtual_path: str | None,
+        reference: str | None,
+    ) -> "DependencyReference":
+        """Build a dependency ref for a resolved Artifactory boundary probe."""
+        return cls(
+            repo_url=f"{owner}/{repo}",
+            host=host,
+            reference=reference,
+            virtual_path=virtual_path,
+            is_virtual=bool(virtual_path),
+            artifactory_prefix=prefix,
+        )
+
+    @classmethod
     def _gitlab_shorthand_repo_segment_count(
         cls,
         path_segments: list[str],
@@ -754,6 +1123,131 @@ class DependencyReference:
             return 2
 
         return n
+
+    @classmethod
+    def _bare_shorthand_repo_segment_count(cls, path_segments: list[str]) -> int:
+        """Return how many leading segments belong to the repo path for bare shorthand.
+
+        For ``owner/repo[/...]`` shorthand without an FQDN, the default is 2
+        segments (GitHub convention).  When registry-only mode is active, the
+        proxy may be fronting a host that allows nested namespaces (GitLab
+        subgroups) -- parse defaults to **all-as-repo** so the deterministic
+        boundary probe in :mod:`apm_cli.install.artifactory_resolver` can
+        rebuild the dependency reference at the proxy-verified split.
+
+        The only parse-time inference kept is **structural**: a path whose
+        last segment ends in a virtual file extension
+        (``.prompt.md``/``.instructions.md``/``.chatmode.md``/``.agent.md``)
+        is by shape a virtual file dep -- the file is the last segment and
+        the repo is everything before it.  This is not a directory-marker
+        heuristic; the file extension is the type.  The shallower boundary
+        (when the file lives under a known directory like ``prompts/``) is
+        settled by the probe, not by a marker list.
+        """
+        n = len(path_segments)
+        if n < 3:
+            return 2
+
+        from ...deps.registry_proxy import is_enforce_only
+
+        if not is_enforce_only():
+            return 2
+
+        if any(path_segments[-1].endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
+            return n - 1
+        return n
+
+    @classmethod
+    def _parse_registry_object_entry(cls, entry: dict) -> "DependencyReference":
+        """Parse the object-form registry entry per §3.2.
+
+        Required keys:
+            id:       <owner>/<repo>   # package identity at the registry
+            version:  <any-string>      # opaque version string; registry resolves it
+
+        Optional:
+            registry: <name>           # routes to named registry; omit to use default
+            path:     prompts/foo.md   # virtual sub-path; omit to install the whole package
+            alias:    <name>           # same meaning as in other object forms
+        """
+        from ...deps.registry.feature_gate import require_package_registry_enabled
+
+        require_package_registry_enabled("Object-form registry dependencies")
+
+        _registry_raw = entry.get("registry")
+        registry_name: str | None = None
+        if _registry_raw is not None:
+            if not isinstance(_registry_raw, str) or not _registry_raw.strip():
+                raise ValueError(
+                    "Object-form registry entry: 'registry' must be a non-empty "
+                    "string (the name of an entry in the apm.yml registries: block)"
+                )
+            registry_name = _registry_raw.strip()
+
+        pkg_id = entry.get("id")
+        if not isinstance(pkg_id, str) or not pkg_id.strip():
+            raise ValueError(
+                "Object-form registry entry: 'id' is required and must be a "
+                "non-empty 'owner/repo' string"
+            )
+        pkg_id = pkg_id.strip()
+        if "/" not in pkg_id:
+            raise ValueError(
+                f"Object-form registry entry: 'id' must be 'owner/repo', got {pkg_id!r}"
+            )
+
+        raw_path = entry.get("path")
+        sub_path: str | None = None
+        if raw_path is not None:
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                raise ValueError(
+                    "Object-form registry entry: 'path' must be a non-empty string "
+                    "when provided (e.g. 'prompts/review.prompt.md')"
+                )
+            sub_path = raw_path.strip().strip("/").replace("\\", "/").strip("/")
+            validate_path_segments(sub_path, context="path")
+
+        version = entry.get("version")
+        if not isinstance(version, str) or not version.strip():
+            raise ValueError("Object-form registry entry: 'version' is required")
+        version = version.strip()
+
+        alias = entry.get("alias")
+        if alias is not None:
+            if not isinstance(alias, str) or not alias.strip():
+                raise ValueError("'alias' field must be a non-empty string")
+            alias = alias.strip()
+            if not re.match(r"^[a-zA-Z0-9._-]+$", alias):
+                raise ValueError(
+                    f"Invalid alias: {alias}. Aliases can only contain "
+                    f"letters, numbers, dots, underscores, and hyphens"
+                )
+
+        # Reject any unknown keys to catch typos early.
+        known = {"registry", "id", "path", "version", "alias"}
+        unknown = set(entry.keys()) - known
+        if unknown:
+            raise ValueError(
+                f"Object-form registry entry has unknown fields: "
+                f"{sorted(unknown)}. Known fields: {sorted(known)}"
+            )
+
+        owner_segments = pkg_id.split("/")
+        validate_path_segments(pkg_id, context="registry id")
+        for seg in owner_segments:
+            if not re.match(r"^[a-zA-Z0-9._-]+$", seg):
+                raise ValueError(f"Invalid registry id segment: {seg!r} in {pkg_id!r}")
+
+        return cls(
+            repo_url=pkg_id,
+            host=default_host(),
+            reference=version,
+            virtual_path=sub_path,
+            is_virtual=sub_path is not None,
+            alias=alias,
+            source="registry",
+            registry_name=registry_name,
+        )
 
     @classmethod
     def _detect_virtual_package(cls, dependency_str: str):
@@ -841,7 +1335,13 @@ class DependencyReference:
             else:
                 min_base_segments = len(path_segments)
         else:
-            min_base_segments = 2
+            # Bare shorthand (no FQDN).  Default GitHub-style: owner/repo plus
+            # any tail is treated as a virtual sub-path.  But when registry-only
+            # mode is active, the proxy may be fronting a GitLab instance where
+            # the project lives at an arbitrary subgroup depth -- fold non-marker
+            # segments into the repo path instead of mis-classifying them as
+            # virtual sub-paths (see issue: nested GitLab subgroup support).
+            min_base_segments = cls._bare_shorthand_repo_segment_count(path_segments)
 
         min_virtual_segments = min_base_segments + 1
 
@@ -953,7 +1453,8 @@ class DependencyReference:
         # Security: reject traversal sequences in SSH repo paths
         validate_path_segments(repo_url, context="SSH repository path", reject_empty=True)
 
-        return host, None, repo_url, reference, alias
+        ssh_user = validate_ssh_user(user)
+        return host, None, repo_url, reference, alias, ssh_user
 
     @classmethod
     def _resolve_virtual_shorthand_repo(cls, repo_url, validated_host, virtual_path=None):
@@ -1015,6 +1516,17 @@ class DependencyReference:
                         "Invalid Azure DevOps virtual package format: expected at least org/project/repo/path"
                     )
                 repo_url = "/".join(parts[:3])
+            elif validated_host is None and virtual_path:
+                # Bare shorthand under registry-only mode may carry a nested
+                # repo path (GitLab subgroup via proxy).  Trust the boundary
+                # already chosen by ``_bare_shorthand_repo_segment_count`` --
+                # everything before the virtual tail belongs to the repo.
+                vparts = [p for p in virtual_path.split("/") if p]
+                tail = len(vparts)
+                if tail > 0 and len(parts) > tail + 1:
+                    repo_url = "/".join(parts[: len(parts) - tail])
+                else:
+                    repo_url = "/".join(parts[:2])
             else:
                 repo_url = "/".join(parts[:2])
 
@@ -1063,6 +1575,10 @@ class DependencyReference:
                 user_repo = "/".join(parts[:3])
             elif host and not is_github_hostname(host) and not is_azure_devops_hostname(host):
                 user_repo = "/".join(parts)
+            elif len(parts) >= 3 and cls._bare_shorthand_repo_segment_count(parts) > 2:
+                # Registry-only mode allows nested-group repo paths
+                # (GitLab via proxy).  Keep the full multi-segment path.
+                user_repo = "/".join(parts[: cls._bare_shorthand_repo_segment_count(parts)])
             else:
                 user_repo = "/".join(parts[:2])
         else:
@@ -1089,7 +1605,7 @@ class DependencyReference:
         elif len(uparts) < 2:
             raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
 
-        allowed_pattern = r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
+        allowed_pattern = _path_segment_pattern(is_ado_host)
         validate_path_segments("/".join(uparts), context="repository path")
         for part in uparts:
             if not re.match(allowed_pattern, part.rstrip(".git")):
@@ -1195,6 +1711,14 @@ class DependencyReference:
                 raise ValueError(
                     f"Invalid repository path: expected at least 'user/repo', got '{path}'"
                 )
+            # Strip the Artifactory VCS prefix so ``repo_url`` is the bare
+            # ``owner/repo`` -- otherwise URL round-trip through
+            # ``to_github_url`` -> ``parse`` would carry the prefix in the
+            # repo_url and the orchestrator would double-prefix download URLs.
+            # The prefix itself is recovered separately via
+            # :meth:`_extract_artifactory_prefix`.
+            if is_artifactory_path(path_parts):
+                path_parts = path_parts[2:]
             for pp in path_parts:
                 if any(pp.endswith(ext) for ext in cls.VIRTUAL_FILE_EXTENSIONS):
                     raise ValueError(
@@ -1202,7 +1726,7 @@ class DependencyReference:
                         f"Use the dict format with 'path:' for virtual packages in HTTPS URLs"
                     )
 
-        allowed_pattern = r"^[a-zA-Z0-9._\- ]+$" if is_ado_host else r"^[a-zA-Z0-9._-]+$"
+        allowed_pattern = _path_segment_pattern(is_ado_host)
         validate_path_segments(
             "/".join(path_parts),
             context="repository URL path",
@@ -1309,7 +1833,7 @@ class DependencyReference:
         segments = repo_url.split("/")
         if len(segments) < 2:
             raise ValueError(f"Invalid repository format: {repo_url}. Expected 'user/repo'")
-        if not all(re.match(r"^[a-zA-Z0-9._-]+$", s) for s in segments):
+        if not all(re.match(_NON_ADO_PATH_SEGMENT_RE, s) for s in segments):
             raise ValueError(f"Invalid repository format: {repo_url}. Contains invalid characters")
         validate_path_segments(repo_url, context="repository path")
         for seg in segments:
@@ -1348,8 +1872,6 @@ class DependencyReference:
         - user/repo#v1.0.0
         - user/repo#commit_sha
         - github.com/user/repo#ref
-        - user/repo@alias
-        - user/repo#ref@alias
         - user/repo/path/to/file.prompt.md (virtual file package)
         - user/repo/skills/foo (virtual subdirectory package)
         - user/repo/collections/foo (virtual subdirectory package)
@@ -1399,6 +1921,7 @@ class DependencyReference:
                 repo_url=f"_local/{pkg_name}",
                 is_local=True,
                 local_path=local,
+                source="local",
             )
 
         if dependency_str.startswith("//"):
@@ -1406,7 +1929,14 @@ class DependencyReference:
                 unsupported_host_error("//...", context="Protocol-relative URLs are not supported")
             )
 
+        cls._reject_shorthand_alias(dependency_str)
+
         maybe_raise_bare_fqdn_github_gitlab_conflict(dependency_str)
+
+        # Guard: detect a subpath embedded in an explicit git URL form (#872).
+        # Fires before virtual-package detection so the user gets an actionable
+        # error rather than a cryptic downstream git failure.
+        cls._check_no_embedded_subpath(dependency_str)
 
         # Phase 1: detect virtual packages
         is_virtual_package, virtual_path, validated_host = cls._detect_virtual_package(
@@ -1416,14 +1946,15 @@ class DependencyReference:
         # Phase 2: parse SSH (ssh:// URL first -- it preserves port; then SCP
         # shorthand), otherwise fall back to HTTPS/shorthand parsing.
         explicit_scheme: str | None = None
+        ssh_user: str | None = None
         ssh_proto_result = cls._parse_ssh_protocol_url(dependency_str)
         if ssh_proto_result:
-            host, port, repo_url, reference, alias = ssh_proto_result
+            host, port, repo_url, reference, alias, ssh_user = ssh_proto_result
             explicit_scheme = "ssh"
         else:
             scp_result = cls._parse_ssh_url(dependency_str)
             if scp_result:
-                host, port, repo_url, reference, alias = scp_result
+                host, port, repo_url, reference, alias, ssh_user = scp_result
                 explicit_scheme = "ssh"
             else:
                 host, port, repo_url, reference, alias, is_virtual_package, virtual_path = (
@@ -1465,6 +1996,7 @@ class DependencyReference:
             ado_repo=ado_repo,
             artifactory_prefix=artifactory_prefix,
             is_insecure=urllib.parse.urlparse(dependency_str).scheme.lower() == "http",
+            ssh_user=ssh_user,
         )
 
     def to_apm_yml_entry(self):
@@ -1476,7 +2008,15 @@ class DependencyReference:
 
         Returns:
             str or dict: String for simple deps; dict for HTTP or skill-subset deps.
+
+        Raises:
+            ValueError: If this is an unresolved marketplace dependency.
         """
+        if self.is_marketplace:
+            raise ValueError(
+                f"Cannot serialize unresolved marketplace dependency "
+                f"'{self.marketplace_plugin_name}@{self.marketplace_name}'"
+            )
         if self.is_insecure:
             host = self.host or default_host()
             entry = {"git": f"http://{host}/{self.repo_url}"}

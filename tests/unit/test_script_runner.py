@@ -161,10 +161,10 @@ class TestScriptRunner:
         assert "codex exec" not in result
 
     @patch("subprocess.run")
-    @patch("apm_cli.core.script_runner.shutil.which", return_value=None)
+    @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
     @patch("apm_cli.core.script_runner.setup_runtime_environment")
     def test_execute_runtime_command_with_env_vars(
-        self, mock_setup_env, mock_which, mock_subprocess
+        self, mock_setup_env, mock_find_runtime, mock_subprocess
     ):
         """Test runtime command execution with environment variables."""
         mock_setup_env.return_value = {"EXISTING_VAR": "value"}
@@ -191,10 +191,10 @@ class TestScriptRunner:
         assert called_env["EXISTING_VAR"] == "value"  # Existing env should be preserved
 
     @patch("subprocess.run")
-    @patch("apm_cli.core.script_runner.shutil.which", return_value=None)
+    @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
     @patch("apm_cli.core.script_runner.setup_runtime_environment")
     def test_execute_runtime_command_multiple_env_vars(
-        self, mock_setup_env, mock_which, mock_subprocess
+        self, mock_setup_env, mock_find_runtime, mock_subprocess
     ):
         """Test runtime command execution with multiple environment variables."""
         mock_setup_env.return_value = {}
@@ -835,34 +835,30 @@ class TestScriptRunnerAutoInstall:
                 os.chdir(original_dir)
 
 
-class TestExecuteRuntimeCommandWindowsResolution:
-    """Test that _execute_runtime_command resolves executables on Windows."""
+class TestExecuteRuntimeCommandResolution:
+    """Test that _execute_runtime_command resolves executables on all platforms."""
 
     def setup_method(self):
         self.runner = ScriptRunner()
 
     @patch("apm_cli.core.script_runner.subprocess.run")
-    @patch("apm_cli.core.script_runner.shutil.which", return_value=r"C:\npm\copilot.cmd")
-    @patch("apm_cli.core.script_runner.sys")
-    def test_resolves_executable_on_windows(self, mock_sys, mock_which, mock_run):
-        """On win32, the executable should be resolved via shutil.which."""
-        mock_sys.platform = "win32"
+    @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=r"C:\npm\copilot.cmd")
+    def test_resolves_executable(self, mock_find_runtime, mock_run):
+        """The executable should be resolved via find_runtime_binary on all platforms."""
         mock_run.return_value = MagicMock(returncode=0)
 
         self.runner._execute_runtime_command(
             "copilot --log-level all", "prompt content", os.environ.copy()
         )
 
-        mock_which.assert_called_once_with("copilot")
+        mock_find_runtime.assert_called_once_with("copilot")
         call_args = mock_run.call_args[0][0]
         assert call_args[0] == r"C:\npm\copilot.cmd"
 
     @patch("apm_cli.core.script_runner.subprocess.run")
-    @patch("apm_cli.core.script_runner.shutil.which", return_value=None)
-    @patch("apm_cli.core.script_runner.sys")
-    def test_keeps_original_when_which_returns_none(self, mock_sys, mock_which, mock_run):
-        """If shutil.which can't find it, keep the original name."""
-        mock_sys.platform = "win32"
+    @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
+    def test_keeps_original_when_find_returns_none(self, mock_find_runtime, mock_run):
+        """If find_runtime_binary can't find it, keep the original name."""
         mock_run.return_value = MagicMock(returncode=0)
 
         self.runner._execute_runtime_command("copilot -p", "prompt content", os.environ.copy())
@@ -871,13 +867,11 @@ class TestExecuteRuntimeCommandWindowsResolution:
         assert call_args[0] == "copilot"
 
     @patch("apm_cli.core.script_runner.subprocess.run")
-    @patch("apm_cli.core.script_runner.shutil.which")
-    @patch("apm_cli.core.script_runner.sys")
-    def test_skips_resolution_on_non_windows(self, mock_sys, mock_which, mock_run):
-        """On non-Windows, shutil.which should not be called."""
-        mock_sys.platform = "linux"
+    @patch("apm_cli.core.script_runner.find_runtime_binary", return_value=None)
+    def test_resolves_on_non_windows(self, mock_find_runtime, mock_run):
+        """find_runtime_binary should be called on all platforms, not just Windows."""
         mock_run.return_value = MagicMock(returncode=0)
 
         self.runner._execute_runtime_command("copilot -p", "prompt content", os.environ.copy())
 
-        mock_which.assert_not_called()
+        mock_find_runtime.assert_called_once_with("copilot")

@@ -33,7 +33,7 @@ class TestRegistryHttpCache:
     def test_fresh_cache_hit_skips_network(self, isolated_cache):
         """A second list_servers() call within TTL must not hit the network."""
         client = SimpleRegistryClient("https://api.mcp.github.com")
-        body = b'{"servers": [{"name": "a"}], "metadata": {}}'
+        body = b'{"servers": [{"server": {"name": "a"}}], "metadata": {}}'
         resp = _mock_response(body=body, headers={"Cache-Control": "max-age=3600"})
 
         with mock.patch.object(client.session, "get", return_value=resp) as mocked:
@@ -45,7 +45,7 @@ class TestRegistryHttpCache:
     def test_etag_revalidation_on_304_reuses_body(self, isolated_cache):
         """When the cache is expired but server returns 304, the cached body is returned."""
         client = SimpleRegistryClient("https://api.mcp.github.com")
-        body = b'{"servers": [{"name": "etag"}], "metadata": {}}'
+        body = b'{"servers": [{"server": {"name": "etag"}}], "metadata": {}}'
 
         first = _mock_response(
             body=body,

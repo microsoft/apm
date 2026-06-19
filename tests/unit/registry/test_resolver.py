@@ -1,0 +1,392 @@
+"""End-to-end resolver tests with a fake HTTP client.
+
+Confirms the install-side orchestration: list_versions -> pick best -> download
+-> verify -> extract -> validate -> build PackageInfo. Failure paths checked:
+hash mismatch, no matching version, 401/403 surfaces remediation, 404 surfaces
+clear "no package" message.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import tarfile
+from unittest.mock import MagicMock
+
+import pytest
+
+from apm_cli.deps.registry.client import RegistryClient, RegistryError, VersionEntry
+from apm_cli.deps.registry.resolver import (
+    RegistryPackageResolver,
+    RegistryResolutionError,
+)
+from apm_cli.models.dependency.reference import DependencyReference
+
+
+def _make_apm_tarball(name: str = "acme-web-skills", version: str = "1.2.0"):
+    """Build a minimal valid APM package tarball + return (bytes, sha256_hex)."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        apm_yml = (f"name: {name}\nversion: {version}\ndescription: x\nauthor: a\n").encode()
+        ti = tarfile.TarInfo(name="apm.yml")
+        ti.size = len(apm_yml)
+        tar.addfile(ti, io.BytesIO(apm_yml))
+        keep = tarfile.TarInfo(name=".apm/.keep")
+        keep.size = 0
+        tar.addfile(keep, io.BytesIO(b""))
+    data = buf.getvalue()
+    return data, hashlib.sha256(data).hexdigest()
+
+
+def _make_apm_zip(name: str = "acme-skill", version: str = "1.0.0"):
+    """Build a minimal valid APM package zip + return (bytes, sha256_hex)."""
+    import zipfile as _zip
+
+    buf = io.BytesIO()
+    apm_yml = f"name: {name}\nversion: {version}\ndescription: x\nauthor: a\n"
+    with _zip.ZipFile(buf, mode="w", compression=_zip.ZIP_DEFLATED) as zf:
+        zf.writestr("apm.yml", apm_yml)
+        zf.writestr(".apm/.keep", "")
+    data = buf.getvalue()
+    return data, hashlib.sha256(data).hexdigest()
+
+
+def _make_resolver(client_double):
+    return RegistryPackageResolver(
+        {"corp-main": "https://reg.example.com/apm"},
+        client_factory=lambda url, auth: client_double,
+    )
+
+
+def _make_dep(version: str = "^1.2.0") -> DependencyReference:
+    return DependencyReference(
+        repo_url="acme/web-skills",
+        reference=version,
+        source="registry",
+        registry_name="corp-main",
+    )
+
+
+class TestHappyPath:
+    def test_install_full_package(self, tmp_path):
+        raw, digest = _make_apm_tarball()
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version="1.2.0", digest=f"sha256:{digest}", published_at="2026-01-01T00:00:00Z"
+            )
+        ]
+        fake.download_archive.return_value = (raw, "application/gzip")
+        fake.archive_url.return_value = (
+            "https://reg.example.com/apm/v1/packages/acme/web-skills/versions/1.2.0/download"
+        )
+
+        resolver = _make_resolver(fake)
+        target = tmp_path / "apm_modules" / "acme" / "web-skills"
+        info = resolver.download_package(_make_dep(), target)
+
+        assert info.install_path == target
+        assert (target / "apm.yml").exists()
+        assert (target / ".apm").is_dir()
+
+        res = resolver.last_resolutions[_make_dep().get_unique_key()]
+        assert res.version == "1.2.0"
+        assert res.resolved_hash == f"sha256:{digest}"
+        assert res.resolved_url.endswith("/versions/1.2.0/download")
+
+    def test_install_zip_archive(self, tmp_path):
+        # Anthropic skill format: zip with the same package shape.
+        raw, digest = _make_apm_zip()
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version="1.0.0", digest=f"sha256:{digest}", published_at="2026-01-01T00:00:00Z"
+            )
+        ]
+        fake.download_archive.return_value = (raw, "application/zip")
+        fake.archive_url.return_value = (
+            "https://reg.example.com/apm/v1/packages/acme/skill/versions/1.0.0/download"
+        )
+
+        resolver = _make_resolver(fake)
+        target = tmp_path / "apm_modules" / "acme" / "skill"
+        info = resolver.download_package(
+            DependencyReference(
+                repo_url="acme/skill",
+                reference="^1.0.0",
+                source="registry",
+                registry_name="corp-main",
+            ),
+            target,
+        )
+        assert (target / "apm.yml").exists()
+        assert (target / ".apm").is_dir()
+        assert info.install_path == target
+
+    def test_picks_highest_matching_version(self, tmp_path):
+        raw, digest = _make_apm_tarball(version="1.5.3")
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version="1.2.0", digest=f"sha256:{digest}", published_at="2026-01-01T00:00:00Z"
+            ),
+            VersionEntry(
+                version="1.5.3", digest=f"sha256:{digest}", published_at="2026-01-01T00:00:00Z"
+            ),
+            VersionEntry(
+                version="2.0.0", digest=f"sha256:{digest}", published_at="2026-01-01T00:00:00Z"
+            ),
+        ]
+        fake.download_archive.return_value = (raw, "application/gzip")
+        fake.archive_url.return_value = "https://x/download"
+
+        resolver = _make_resolver(fake)
+        target = tmp_path / "p"
+        resolver.download_package(_make_dep("^1.0.0"), target)
+
+        # Confirm download_archive was asked for the highest matching version.
+        fake.download_archive.assert_called_once_with("acme", "web-skills", "1.5.3")
+
+
+class TestFailurePaths:
+    def test_hash_mismatch_fails_closed(self, tmp_path):
+        raw, _ = _make_apm_tarball()
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version="1.2.0", digest="sha256:" + "0" * 64, published_at="2026-01-01T00:00:00Z"
+            )
+        ]
+        fake.download_archive.return_value = (raw, "application/gzip")
+        fake.archive_url.return_value = "https://x"
+
+        resolver = _make_resolver(fake)
+        with pytest.raises(Exception) as excinfo:
+            resolver.download_package(_make_dep(), tmp_path / "p")
+        # Either HashMismatchError or RegistryResolutionError wrapping it.
+        assert "mismatch" in str(excinfo.value).lower() or "Hash" in type(excinfo.value).__name__
+
+    def test_no_matching_version(self, tmp_path):
+        _, digest = _make_apm_tarball()
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version="2.0.0", digest=f"sha256:{digest}", published_at="2026-01-01T00:00:00Z"
+            )
+        ]
+        resolver = _make_resolver(fake)
+        with pytest.raises(RegistryResolutionError, match="no version"):
+            resolver.download_package(_make_dep("^1.0.0"), tmp_path / "p")
+
+    def test_empty_versions_list(self, tmp_path):
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = []
+        resolver = _make_resolver(fake)
+        with pytest.raises(RegistryResolutionError, match="no versions"):
+            resolver.download_package(_make_dep(), tmp_path / "p")
+
+    def test_401_includes_remediation(self, tmp_path):
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.side_effect = RegistryError(
+            "auth required",
+            status=401,
+            url="https://reg.example.com/apm/v1/packages/acme/web-skills/versions",
+        )
+        resolver = _make_resolver(fake)
+        with pytest.raises(RegistryResolutionError) as excinfo:
+            resolver.download_package(_make_dep(), tmp_path / "p")
+        msg = str(excinfo.value)
+        assert "APM_REGISTRY_TOKEN_<NAME>" in msg
+        assert "https://reg.example.com/apm" in msg
+
+    def test_404_clear_message(self, tmp_path):
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.side_effect = RegistryError(
+            "not found",
+            status=404,
+            url="https://reg.example.com/apm/v1/packages/acme/web-skills/versions",
+        )
+        resolver = _make_resolver(fake)
+        with pytest.raises(RegistryResolutionError) as excinfo:
+            resolver.download_package(_make_dep(), tmp_path / "p")
+        assert "no package" in str(excinfo.value)
+
+    def test_unconfigured_registry_name(self, tmp_path):
+        # Resolver knows about 'corp-main', dep references 'corp-other'.
+        fake = MagicMock(spec=RegistryClient)
+        resolver = RegistryPackageResolver(
+            {"corp-main": "https://reg.example.com/apm"},
+            client_factory=lambda url, auth: fake,
+        )
+        dep = DependencyReference(
+            repo_url="acme/x",
+            reference="1.0.0",
+            source="registry",
+            registry_name="corp-other",
+        )
+        with pytest.raises(RegistryResolutionError, match="not configured"):
+            resolver.download_package(dep, tmp_path / "p")
+
+    def test_non_registry_dep_rejected(self, tmp_path):
+        fake = MagicMock(spec=RegistryClient)
+        resolver = _make_resolver(fake)
+        dep = DependencyReference(repo_url="acme/x", reference="1.0.0", source="git")
+        with pytest.raises(RegistryResolutionError, match="non-registry"):
+            resolver.download_package(dep, tmp_path / "p")
+
+    def test_non_semver_ref_exact_matched(self, tmp_path):
+        # Per the registry HTTP API spec (section 1.3), a non-semver selector
+        # (branch name, opaque label) is matched EXACTLY against the published
+        # version list -- it is not rejected.
+        raw, digest = _make_apm_tarball()
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version="main", digest=f"sha256:{digest}", published_at="2026-01-01T00:00:00Z"
+            )
+        ]
+        fake.download_archive.return_value = (raw, "application/gzip")
+        fake.archive_url.return_value = (
+            "https://reg.example.com/apm/v1/packages/acme/x/versions/main/download"
+        )
+        resolver = _make_resolver(fake)
+        dep = DependencyReference(
+            repo_url="acme/x",
+            reference="main",
+            source="registry",
+            registry_name="corp-main",
+        )
+        target = tmp_path / "p"
+        resolver.download_package(dep, target)
+        assert (target / "apm.yml").exists()
+        assert resolver.last_resolutions[dep.get_unique_key()].version == "main"
+
+    def test_non_semver_ref_not_found_gives_clear_error(self, tmp_path):
+        # An exact selector with no matching published version reports
+        # "not found" with the available versions listed.
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version="1.0.0", digest="sha256:" + "0" * 64, published_at="2026-01-01T00:00:00Z"
+            )
+        ]
+        resolver = _make_resolver(fake)
+        dep = DependencyReference(
+            repo_url="acme/x",
+            reference="main",
+            source="registry",
+            registry_name="corp-main",
+        )
+        with pytest.raises(RegistryResolutionError, match="not found"):
+            resolver.download_package(dep, tmp_path / "p")
+
+    def test_malformed_range_ref_rejected_at_resolve(self, tmp_path):
+        # A range-shaped but malformed selector ('^1.0') is a user error, not a
+        # literal tag -- the resolver rejects it with a clear "invalid semver
+        # range" message rather than exact-matching it into a "not found".
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version="1.0.0", digest="sha256:" + "0" * 64, published_at="2026-01-01T00:00:00Z"
+            )
+        ]
+        resolver = _make_resolver(fake)
+        dep = DependencyReference(
+            repo_url="acme/x",
+            reference="^1.0",
+            source="registry",
+            registry_name="corp-main",
+        )
+        with pytest.raises(RegistryResolutionError, match="invalid semver range"):
+            resolver.download_package(dep, tmp_path / "p")
+
+
+class TestDownloadFromLockfile:
+    """``download_from_lockfile`` — npm-style lockfile replay path.
+
+    Verifies that the locked URL is fetched directly (no /versions call) and
+    the bytes are verified against the locked hash, not the API's digest.
+    """
+
+    def test_happy_path_skips_versions_api(self, tmp_path):
+        raw, digest = _make_apm_tarball()
+        locked_url = (
+            "https://reg.example.com/apm/v1/packages/acme/web-skills/versions/1.2.0/download"
+        )
+        locked_hash = f"sha256:{digest}"
+        fake = MagicMock(spec=RegistryClient)
+        fake.fetch_from_url.return_value = (raw, "application/gzip")
+
+        resolver = _make_resolver(fake)
+        target = tmp_path / "acme" / "web-skills"
+        info = resolver.download_from_lockfile(
+            _make_dep("^1.2.0"),
+            target,
+            resolved_url=locked_url,
+            resolved_hash=locked_hash,
+            version="1.2.0",
+        )
+
+        # Must NOT call list_versions
+        fake.list_versions.assert_not_called()
+        # Must call fetch_from_url with the locked URL
+        fake.fetch_from_url.assert_called_once_with(locked_url)
+        assert info.install_path == target
+        assert (target / "apm.yml").exists()
+
+    def test_last_resolutions_populated(self, tmp_path):
+        raw, digest = _make_apm_tarball()
+        locked_url = (
+            "https://reg.example.com/apm/v1/packages/acme/web-skills/versions/1.2.0/download"
+        )
+        fake = MagicMock(spec=RegistryClient)
+        fake.fetch_from_url.return_value = (raw, "application/gzip")
+
+        resolver = _make_resolver(fake)
+        dep = _make_dep("^1.2.0")
+        resolver.download_from_lockfile(
+            dep,
+            tmp_path / "p",
+            resolved_url=locked_url,
+            resolved_hash=f"sha256:{digest}",
+            version="1.2.0",
+        )
+
+        res = resolver.last_resolutions[dep.get_unique_key()]
+        assert res.version == "1.2.0"
+        assert res.resolved_url == locked_url
+        assert res.resolved_hash == f"sha256:{digest}"
+
+    def test_hash_mismatch_fails_closed(self, tmp_path):
+        raw, _ = _make_apm_tarball()
+        fake = MagicMock(spec=RegistryClient)
+        fake.fetch_from_url.return_value = (raw, "application/gzip")
+
+        resolver = _make_resolver(fake)
+        with pytest.raises(Exception) as excinfo:
+            resolver.download_from_lockfile(
+                _make_dep(),
+                tmp_path / "p",
+                resolved_url="https://reg.example.com/apm/v1/x/download",
+                resolved_hash="sha256:" + "0" * 64,  # wrong hash
+                version="1.2.0",
+            )
+        assert "mismatch" in str(excinfo.value).lower() or "Hash" in type(excinfo.value).__name__
+
+    def test_http_error_surfaces_as_resolution_error(self, tmp_path):
+        from apm_cli.deps.registry.client import RegistryError
+
+        fake = MagicMock(spec=RegistryClient)
+        fake.fetch_from_url.side_effect = RegistryError(
+            "not found", status=404, url="https://reg.example.com/x"
+        )
+
+        resolver = _make_resolver(fake)
+        with pytest.raises(RegistryResolutionError):
+            resolver.download_from_lockfile(
+                _make_dep(),
+                tmp_path / "p",
+                resolved_url="https://reg.example.com/x",
+                resolved_hash="sha256:" + "a" * 64,
+                version="1.2.0",
+            )

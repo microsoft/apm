@@ -1,6 +1,7 @@
 """Tests for git subprocess environment sanitization."""
 
 import os
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -107,3 +108,32 @@ class TestGitSubprocessEnv:
             env = git_subprocess_env()
             assert env["HOME"] == "/home/user"
             assert env["PATH"] == "/usr/bin"
+
+    def test_strips_pyinstaller_ld_library_path_when_frozen(self) -> None:
+        with (
+            patch.object(sys, "frozen", True, create=True),
+            patch.dict(os.environ, {"LD_LIBRARY_PATH": "/bundle/internal"}, clear=True),
+        ):
+            env = git_subprocess_env()
+            assert "LD_LIBRARY_PATH" not in env
+
+    def test_restores_original_ld_library_path_when_frozen(self) -> None:
+        with (
+            patch.object(sys, "frozen", True, create=True),
+            patch.dict(
+                os.environ,
+                {
+                    "LD_LIBRARY_PATH": "/bundle/internal",
+                    "LD_LIBRARY_PATH_ORIG": "/custom/lib",
+                },
+                clear=True,
+            ),
+        ):
+            env = git_subprocess_env()
+            assert env["LD_LIBRARY_PATH"] == "/custom/lib"
+            assert "LD_LIBRARY_PATH_ORIG" not in env
+
+    def test_preserves_ld_library_path_when_not_frozen(self) -> None:
+        with patch.dict(os.environ, {"LD_LIBRARY_PATH": "/custom/lib"}, clear=True):
+            env = git_subprocess_env()
+            assert env["LD_LIBRARY_PATH"] == "/custom/lib"

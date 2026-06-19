@@ -27,7 +27,6 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple  # noqa: F401, UP035
 from urllib.parse import urlparse
 
 import requests
@@ -1081,6 +1080,7 @@ def _policy_to_dict(policy: ApmPolicy) -> dict:
         "unmanaged_files": {
             "action": policy.unmanaged_files.action,
             "directories": list(policy.unmanaged_files.directories or ()),
+            "exclude": list(policy.unmanaged_files.exclude or ()),
         },
     }
 

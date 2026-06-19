@@ -18,7 +18,7 @@ apm audit [PACKAGE] [OPTIONS]
 - **Content scan mode** (default). Scans deployed prompt, instruction, skill, and rules files for hidden Unicode that can embed invisible instructions in agent context, and replays the install pipeline into a scratch tree to detect drift (hand-edits to deployed files, missing integrations, orphaned files vs the lockfile). Can also remediate findings with `--strip` or scan an arbitrary file with `--file`.
 - **CI gate mode** (`--ci`). Runs lockfile consistency checks plus drift in machine-readable form (text, JSON, or SARIF) suitable for branch-protection gates. Auto-discovers org policy from your project's git remote unless `--no-policy` is set.
 
-This is the explicit power tool. Built-in protection against critical Unicode findings already runs automatically in `apm install`, `apm compile`, and `apm unpack`; you do not need to call `apm audit` to be safe by default. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) for the consumer-side overview and [Enforce in CI](../../../enterprise/enforce-in-ci/) for the gating workflow.
+This is the explicit power tool. Built-in protection against critical Unicode findings already runs automatically in `apm install`, `apm compile`, and `apm unpack`; you do not need to call `apm audit` to be safe by default. See [Drift and secure by default](../../../consumer/drift-and-secure-by-default/) for the consumer-side overview and [Enforce in CI](../../../enterprise/enforce-in-ci/) for the gating workflow. For marketplace plugin transitive-dependency pinning, see [`apm marketplace audit`](../marketplace/#apm-marketplace-audit-name).
 
 `PACKAGE`, when supplied, is the lockfile package key (the repo URL) of a single installed dependency to scan. Omit it to scan every installed package plus local `.apm/` content.
 
@@ -33,6 +33,19 @@ This is the explicit power tool. Built-in protection against critical Unicode fi
 | `--dry-run` | off | Preview what `--strip` would remove without modifying files. |
 | `--no-drift` | off | Skip the install-replay drift check (reduces coverage). Mutually exclusive with `--strip` and `--file`. |
 | `--verbose`, `-v` | off | Show info-level findings and per-file detail. No effect in `--ci` mode. |
+
+### External scanners (experimental)
+
+Gated by the `external-scanners` experimental flag (`apm experimental enable external-scanners`). Folds findings from any SARIF 2.1.0 scanner into the report. CLI-driven and install-method-neutral — no pip extra; works with the APM binary. See [External scanners](../../../integrations/external-scanners/).
+
+| Flag | Default | Description |
+|---|---|---|
+| `--external NAME` | unset | Ingest findings from an external SARIF-native scanner (repeatable). Names: `skillspector` (invokes the CLI on `PATH`), `sarif` (ingests a file via `--external-sarif`). Cannot be combined with `--strip`, `--dry-run`, or `--ci`. |
+| `--external-sarif PATH` | unset | SARIF file to ingest for `--external sarif`. |
+| `--external-llm` / `--no-external-llm` | adapter default | Force a scanner's LLM-powered analysis on or off for this run (overrides config). SkillSpector default is offline `--no-llm`. LLM mode makes outbound API calls and needs `OPENAI_API_KEY` or `NVIDIA_INFERENCE_KEY`; missing the key fails closed. Requires `--external`. |
+| `--external-args TEXT` | unset | Extra scanner CLI flags as a single shlex-split string (e.g. `"--model gpt-4o"`). Allowlist-validated per adapter; secret-looking or out-of-cwd tokens are rejected fail-closed. Overrides config args. Requires `--external`. |
+
+When LLM mode is active APM prints a `[!]` egress banner before the scan noting that outbound API calls will be made. `--external-llm` / `--external-args` used without `--external <name>` raise a usage error (exit 2).
 
 ### Output
 
@@ -97,6 +110,22 @@ apm audit -f markdown -o "$GITHUB_STEP_SUMMARY"
 apm audit -o report.sarif
 ```
 
+### External scanners
+
+```bash
+# Invoke SkillSpector on PATH (offline by default)
+apm audit --external skillspector
+
+# Opt into LLM-powered analysis (needs an API key; makes network calls)
+apm audit --external skillspector --external-llm
+
+# Pass allowlisted scanner flags
+apm audit --external skillspector --external-args "--model gpt-4o"
+
+# Ingest a SARIF file from any scanner
+apm audit --external sarif --external-sarif report.sarif
+```
+
 ### CI gate
 
 ```bash
@@ -143,6 +172,7 @@ The default audit replays the install pipeline into a scratch tree and diffs the
 - `--no-drift` cannot be combined with `--strip` or `--file`.
 - `--ci` cannot be combined with `--strip`, `--dry-run`, `--file`, or `PACKAGE`.
 - `--ci` does not support `--format markdown`.
+- `--external` cannot be combined with `--strip`, `--dry-run`, or `--ci`; `--external-sarif` requires `--external sarif`; `--external-llm` / `--no-external-llm` and `--external-args` require `--external`.
 
 ## Exit codes
 
@@ -153,6 +183,7 @@ The default audit replays the install pipeline into a scratch tree and diffs the
 | `0` | Clean, info-only findings, drift-only (advisory) in bare audit, or successful `--strip`. |
 | `1` | Critical findings detected. |
 | `2` | Warning-only findings, or usage error (mutually exclusive flags). |
+| `3` | Configuration or infrastructure error (feature not enabled, scanner not found, malformed SARIF). |
 
 ### CI gate mode (`--ci`)
 

@@ -5,7 +5,12 @@ import tempfile
 import textwrap
 import unittest
 
-from apm_cli.policy.parser import PolicyValidationError, load_policy, validate_policy
+from apm_cli.policy.parser import (
+    PolicyValidationError,
+    _build_policy,
+    load_policy,
+    validate_policy,
+)
 from apm_cli.policy.schema import ApmPolicy
 
 
@@ -334,6 +339,50 @@ class TestLoadPolicyFromString(unittest.TestCase):
         self.assertEqual(policy.unmanaged_files.effective_action, "ignore")
         self.assertIsNone(policy.unmanaged_files.directories)
 
+    def test_unmanaged_exclude_null_is_transparent(self):
+        """`exclude: null` -> None (no opinion / transparent during merge)."""
+        yaml_str = textwrap.dedent("""
+            unmanaged_files:
+              action: warn
+              exclude: null
+        """)
+        policy, _ = load_policy(yaml_str)
+        self.assertIsNone(policy.unmanaged_files.exclude)
+
+    def test_unmanaged_exclude_empty_list_is_explicit(self):
+        """`exclude: []` -> empty tuple (explicit override, not transparent)."""
+        yaml_str = textwrap.dedent("""
+            unmanaged_files:
+              action: warn
+              exclude: []
+        """)
+        policy, _ = load_policy(yaml_str)
+        self.assertEqual(policy.unmanaged_files.exclude, ())
+
+    def test_unmanaged_exclude_list_parses_to_tuple(self):
+        """`exclude: [..]` -> tuple of globs."""
+        yaml_str = textwrap.dedent("""
+            unmanaged_files:
+              action: warn
+              exclude:
+                - .github/copilot-instructions.md
+                - .claude/settings.local.json
+        """)
+        policy, _ = load_policy(yaml_str)
+        self.assertEqual(
+            policy.unmanaged_files.exclude,
+            (".github/copilot-instructions.md", ".claude/settings.local.json"),
+        )
+
+    def test_unmanaged_exclude_absent_is_none(self):
+        """Key absent -> None (no opinion / transparent during merge)."""
+        yaml_str = textwrap.dedent("""
+            unmanaged_files:
+              action: warn
+        """)
+        policy, _ = load_policy(yaml_str)
+        self.assertIsNone(policy.unmanaged_files.exclude)
+
     def test_absent_dependencies_block_gives_none_deny_and_require(self):
         """Entirely absent dependencies: block -> deny=None, require=None (Fix 2)."""
         policy, _ = load_policy("name: p\nversion: '1'\nenforcement: warn\n")
@@ -392,6 +441,33 @@ class TestLoadPolicyFromFile(unittest.TestCase):
             self.assertEqual(policy.name, "pathlib-test")
         finally:
             os.unlink(str(path))
+
+
+class TestSecurityAuditParsing(unittest.TestCase):
+    """Validation + build for the security.audit policy section."""
+
+    def test_valid_security_audit(self):
+        data = {"security": {"audit": {"on_install": "block", "external": ["skillspector"]}}}
+        errors, _ = validate_policy(data)
+        self.assertEqual(errors, [])
+        policy = _build_policy(data)
+        self.assertEqual(policy.security.audit.on_install, "block")
+        self.assertEqual(policy.security.audit.external, ("skillspector",))
+
+    def test_invalid_on_install_value(self):
+        errors, _ = validate_policy({"security": {"audit": {"on_install": "nope"}}})
+        self.assertTrue(errors)
+        self.assertIn("on_install", errors[0])
+
+    def test_security_is_known_top_level_key(self):
+        # Should not surface an "unknown key" warning.
+        _, warnings = validate_policy({"security": {"audit": {"on_install": "warn"}}})
+        self.assertFalse(any("security" in w for w in warnings))
+
+    def test_missing_security_defaults_to_none(self):
+        policy = _build_policy({})
+        self.assertIsNone(policy.security.audit.on_install)
+        self.assertIsNone(policy.security.audit.external)
 
 
 if __name__ == "__main__":

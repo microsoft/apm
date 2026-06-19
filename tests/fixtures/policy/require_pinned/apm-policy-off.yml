@@ -1,0 +1,9 @@
+# Fixture: require_pinned_constraint explicitly disabled (default).
+# Used by tests/integration/policy/test_require_pinned_constraint_e2e.py
+# to verify backward-compat: even at enforcement=block, an unbounded
+# dep must NOT be flagged when the field is false.
+name: require-pinned-off-policy
+version: "1.0.0"
+enforcement: block
+dependencies:
+  require_pinned_constraint: false

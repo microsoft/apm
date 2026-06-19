@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Sequence  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Sequence  # noqa: UP035
 
 from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
 from .models import CheckResult, CIAuditResult
@@ -160,12 +160,18 @@ def _check_no_orphans(
     manifest: APMPackage,
     lock: LockFile,
 ) -> CheckResult:
-    """Verify no packages in lockfile are absent from manifest."""
+    """Verify no packages in lockfile are absent from manifest.
+
+    Only DIRECT dependencies (``depth == 1`` / no ``resolved_by``) are
+    candidates for orphan detection. Transitive deps belong to a
+    sub-package's manifest, not the root manifest, so the root manifest
+    cannot make them go away by editing its ``dependencies.apm`` list.
+    """
     manifest_keys = {dep.get_unique_key() for dep in manifest.get_apm_dependencies()}
     orphaned = [
         dep_key
-        for dep_key in lock.dependencies
-        if dep_key not in manifest_keys and dep_key != _SELF_KEY
+        for dep_key, locked_dep in lock.dependencies.items()
+        if dep_key not in manifest_keys and dep_key != _SELF_KEY and locked_dep.resolved_by is None
     ]
     if not orphaned:
         return CheckResult(
@@ -434,6 +440,7 @@ def _check_drift(
     fresh checkout that has never installed.
     """
     from ..deps.lockfile import get_lockfile_path
+    from ..deps.path_anchoring import LocalResolutionError
     from ..install.drift import (
         CacheMissError,
         CheckLogger,
@@ -453,6 +460,18 @@ def _check_drift(
 
     try:
         scratch = run_replay(config, logger)
+    except LocalResolutionError as exc:
+        return (
+            CheckResult(
+                name="drift",
+                passed=False,
+                message=(
+                    f"drift replay failed: corrupt local dependency graph in the "
+                    f"lockfile ({exc}). Fix the resolved_by chain or re-run 'apm install'."
+                ),
+            ),
+            [],
+        )
     except CacheMissError:
         return (
             CheckResult(
@@ -524,7 +543,7 @@ def run_baseline_checks(
     Returns :class:`CIAuditResult` with individual check results.
     """
     from ..deps.lockfile import LockFile, get_lockfile_path
-    from ..models.apm_package import APMPackage, clear_apm_yml_cache
+    from ._shared import _parse_apm_yml_safe
 
     result = CIAuditResult()
     apm_yml_path = project_root / "apm.yml"
@@ -532,20 +551,8 @@ def run_baseline_checks(
     # Parse manifest ONCE -- this function owns parse-error handling.
     manifest = None
     if apm_yml_path.exists():
-        import yaml
-
-        try:
-            clear_apm_yml_cache()
-            manifest = APMPackage.from_apm_yml(apm_yml_path)
-        except (ValueError, yaml.YAMLError, OSError) as exc:
-            result.checks.append(
-                CheckResult(
-                    name="manifest-parse",
-                    passed=False,
-                    message="Cannot parse apm.yml: %s -- fix the YAML syntax error in apm.yml and re-run."  # noqa: UP031
-                    % exc,
-                )
-            )
+        manifest = _parse_apm_yml_safe(apm_yml_path, result)
+        if manifest is None:
             return result
 
     # Check 1: Lockfile exists (manifest already parsed, pass it in)

@@ -1,0 +1,16 @@
+# Exercises: req-mf-006, req-mf-019, req-ext-001
+# Valid: unknown `x-*` extension keys at every mapping level
+# MUST be preserved byte-equivalent on round-trip.
+name: my-project
+version: "1.0.0"
+default_host: github.com
+x-acme-telemetry:
+  endpoint: https://telemetry.acme.example.com
+  sample-rate: 0.1
+dependencies:
+  apm:
+    - id: contoso/security-baseline
+      version: "^2.0.0"
+      x-acme-priority: high
+x-vendor-experimental:
+  feature-flag: true

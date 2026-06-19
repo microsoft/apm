@@ -10,13 +10,19 @@ import click
 from ...constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
-from ...models.apm_package import APMPackage, ValidationResult, validate_apm_package  # noqa: F401
-from .._helpers import _expand_with_ancestors, _standalone_installed_packages
+from ...models.apm_package import APMPackage
+from .._helpers import (
+    UnknownPackageError,
+    _expand_with_ancestors,
+    _standalone_installed_packages,
+    resolve_requested_packages,
+)
 from ._utils import (
     _count_primitives,
     _get_package_display_info,
     _is_nested_under_package,
 )
+from .why import why as _why_cmd
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -146,8 +152,13 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         if lockfile_path.exists():
             lockfile = LockFile.read(lockfile_path)
             for dep in lockfile.dependencies.values():
-                # Lockfile keys match declared_sources format (owner/repo)
-                dep_key = dep.get_unique_key()
+                # Orphan / source matching is host-blind: it compares against
+                # the apm.yml-derived keys above and the host-blind apm_modules/
+                # filesystem layout. get_unique_key() is the host-qualified
+                # lockfile dedup key (#773) and must NOT be used here, or a
+                # non-default-host dep never matches its installed directory
+                # (it would be wrongly flagged orphaned and lose its Source).
+                dep_key = dep.get_canonical_dependency_string()
                 if dep_key and dep_key not in declared_sources:
                     declared_sources[dep_key] = _deps_list_source_label(
                         dep.host,
@@ -256,6 +267,9 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
 def deps():
     """APM dependency management commands."""
     pass
+
+
+deps.add_command(_why_cmd)
 
 
 def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_only=False):
@@ -713,7 +727,7 @@ def clean(dry_run: bool, yes: bool):
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf (excludes agent-skills); combine with 'agent-skills' for both. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork').",
+    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, antigravity, windsurf, kiro, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'antigravity' (alias 'agy') deploys to .agents/ and is explicit-only -- not part of 'all'. 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro (excludes agent-skills and antigravity); combine with 'agent-skills' or 'antigravity' to add them. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork').",
 )
 @click.option(
     "--parallel-downloads",
@@ -757,10 +771,21 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
     """
     from ...core.auth import AuthResolver
     from ...core.command_logger import InstallLogger
+    from ...utils.console import _rich_warning
     from ..install import (
         _APM_IMPORT_ERROR,
         APM_DEPS_AVAILABLE,
         _install_apm_dependencies,
+    )
+
+    # Soft-deprecation (issue #1525): `apm update` is now a strict superset
+    # of this command. Kept working for one release; removed in the next
+    # breaking release.
+    _rich_warning(
+        "'apm deps update' is deprecated; use 'apm update' instead. "
+        "'apm update' now supports -g/--global, [PACKAGES]..., --force, and "
+        "--parallel-downloads, plus an interactive plan, --dry-run, and --yes.",
+        symbol="warning",
     )
 
     logger = InstallLogger(verbose=verbose, partial=bool(packages))
@@ -794,36 +819,14 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
         return
 
     # Validate and normalize requested packages to canonical dependency keys.
-    # The install engine matches only_packages by DependencyReference identity
-    # (e.g. "owner/repo"), so short names like "compliance-rules" must be
-    # mapped to their canonical form before calling the engine.
-    only_pkgs = None
-    if packages:
-        token_to_canonical: dict[str, str] = {}
-        for dep in all_deps:
-            canonical_key = dep.get_unique_key() or dep.repo_url or dep.get_display_name()
-            tokens = {canonical_key, dep.get_display_name(), dep.repo_url}
-            if hasattr(dep, "alias") and dep.alias:
-                tokens.add(dep.alias)
-            parts = dep.repo_url.split("/")
-            if len(parts) >= 2:
-                tokens.add(parts[-1])
-            for token in tokens:
-                if token and token not in token_to_canonical:
-                    token_to_canonical[token] = canonical_key
-
-        only_pkgs = []
-        seen: dict[str, bool] = {}
-        for pkg in packages:
-            canonical = token_to_canonical.get(pkg)
-            if not canonical:
-                available = ", ".join(dep.get_display_name() for dep in all_deps)
-                logger.error(f"Package '{pkg}' not found in {APM_YML_FILENAME}")
-                logger.progress(f"Available: {available}")
-                sys.exit(1)
-            if canonical not in seen:
-                seen[canonical] = True
-                only_pkgs.append(canonical)
+    # Shared with `apm update` (see commands/_helpers.py) so the two update
+    # surfaces resolve short names identically.
+    try:
+        only_pkgs = resolve_requested_packages(packages, all_deps)
+    except UnknownPackageError as e:
+        logger.error(f"Package '{e.token}' not found in {APM_YML_FILENAME}")
+        logger.progress(f"Available: {', '.join(e.available)}")
+        sys.exit(1)
 
     # Migrate legacy lockfile first, then snapshot SHAs for before/after diff
     from ...deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed

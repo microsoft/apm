@@ -1,17 +1,15 @@
-"""``apm marketplace doctor`` command."""
+"""``apm doctor`` command implementation."""
 
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
-
-import click
 
 from ...core.command_logger import CommandLogger
 from ...marketplace.errors import MarketplaceYmlError
 from ...marketplace.git_stderr import translate_git_stderr
 from ...marketplace.migration import ConfigSource, detect_config_source
+from ...marketplace.output_profiles import known_output_names
 from ...marketplace.yml_schema import (
     load_marketplace_from_apm_yml,
     load_marketplace_yml,
@@ -20,15 +18,16 @@ from . import (
     _DoctorCheck,
     _find_duplicate_names,
     _render_doctor_table,
-    marketplace,
 )
 
 
-@marketplace.command(help="Run environment diagnostics for marketplace publishing")
-@click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def doctor(verbose):
-    """Check git, network, auth, and marketplace config readiness."""
-    logger = CommandLogger("marketplace-doctor", verbose=verbose)
+def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
+    """Execute the doctor diagnostics and return an exit code.
+
+    Called by the top-level ``apm doctor`` command.
+    Returns ``0`` if all critical checks pass, ``1`` otherwise.
+    """
+    logger = CommandLogger(logger_name, verbose=verbose)
     checks = []
 
     # Check 1: git on PATH
@@ -117,38 +116,7 @@ def doctor(verbose):
         )
     )
 
-    # Check 4: gh CLI availability (informational; only needed for publish)
-    gh_ok = False
-    gh_detail = ""
-    try:
-        result = subprocess.run(
-            ["gh", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            gh_ok = True
-            gh_detail = result.stdout.strip().split("\n")[0]
-        else:
-            gh_detail = "gh CLI returned non-zero exit code"
-    except FileNotFoundError:
-        gh_detail = "gh CLI not found (install: https://cli.github.com/)"
-    except subprocess.TimeoutExpired:
-        gh_detail = "gh --version timed out"
-    except (subprocess.SubprocessError, OSError) as exc:
-        gh_detail = str(exc)[:60]
-
-    checks.append(
-        _DoctorCheck(
-            name="gh CLI",
-            passed=gh_ok,
-            detail=gh_detail,
-            informational=True,
-        )
-    )
-
-    # Check 5: marketplace config presence + parsability
+    # Check 4: marketplace config presence + parsability
     project_root = Path.cwd()
     apm_path = project_root / "apm.yml"
     legacy_path = project_root / "marketplace.yml"
@@ -190,6 +158,32 @@ def doctor(verbose):
         )
     )
 
+    # Check 5: format coverage (informational; only when config is present)
+    if yml_obj is not None:
+        configured = frozenset(getattr(yml_obj, "outputs", ()) or ())
+        supported = known_output_names()
+        missing = sorted(supported - configured)
+        configured_sorted = sorted(configured)
+        if not missing:
+            fc_detail = f"Publishing for all known formats: {', '.join(configured_sorted)}."
+            fc_passed = True
+        else:
+            fc_detail = (
+                f"Configured: {', '.join(configured_sorted) or '(none)'}. "
+                f"Also supported: {', '.join(missing)}. "
+                f"Add e.g. '{missing[0]}: {{}}' under 'marketplace.outputs' "
+                "in apm.yml to publish for more consumers."
+            )
+            fc_passed = True  # informational; never fails
+        checks.append(
+            _DoctorCheck(
+                name="format coverage",
+                passed=fc_passed,
+                detail=fc_detail,
+                informational=True,
+            )
+        )
+
     # Check 6: duplicate package names (defence-in-depth)
     if yml_obj is not None:
         dup_detail = _find_duplicate_names(yml_obj)
@@ -212,9 +206,41 @@ def doctor(verbose):
                 )
             )
 
+    # Check 7: version alignment (informational; only when config is present)
+    if yml_obj is not None and hasattr(yml_obj, "versioning"):
+        from ...marketplace.version_check import check_version_alignment
+
+        va_report = check_version_alignment(yml_obj, Path.cwd())
+        total = len(va_report.packages)
+        aligned = sum(1 for p in va_report.packages if p.ok)
+        if total == 0:
+            va_detail = f"strategy={va_report.strategy}, no local packages to align"
+            va_passed = True
+        elif va_report.ok:
+            va_detail = f"strategy={va_report.strategy}, {aligned}/{total} packages aligned"
+            va_passed = True
+        else:
+            misaligned = [p.path for p in va_report.packages if not p.ok]
+            misaligned_count = len(misaligned)
+            va_detail = (
+                f"strategy={va_report.strategy}, "
+                f"{misaligned_count}/{total} packages misaligned: "
+                f"{misaligned[0]}"
+            )
+            va_passed = False
+        checks.append(
+            _DoctorCheck(
+                name="version alignment",
+                passed=va_passed,
+                detail=va_detail,
+                informational=True,
+            )
+        )
+
     _render_doctor_table(logger, checks)
 
     # Exit: 0 if checks 1-2 pass; config checks are informational
     critical_checks = [c for c in checks if not c.informational]
     if any(not c.passed for c in critical_checks):
-        sys.exit(1)
+        return 1
+    return 0

@@ -15,14 +15,13 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
+from typing import Any
 
 import click
 
 from ..core.command_logger import CommandLogger
 from ..policy._help_text import POLICY_SOURCE_FORMS_HELP
 from ..policy.discovery import (
-    DEFAULT_CACHE_TTL,  # noqa: F401
     MAX_STALE_TTL,
     PolicyFetchResult,
     _read_cache_entry,
@@ -33,7 +32,6 @@ from ..policy.schema import ApmPolicy
 from ..utils.console import (
     RICH_AVAILABLE,
     _get_console,
-    _rich_echo,  # noqa: F401
     _rich_error,
     _rich_panel,
 )

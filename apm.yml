@@ -5,9 +5,28 @@ includes: auto
 author: Microsoft
 license: MIT
 
-# No external deps -- microsoft/apm is the package source itself.
+# Local-path manifest deps on the extracted skill packages.
+# Each was INLINE in .apm/skills/ until the v2 extraction.
+# Extraction unlocks consumer reuse of each primitive standalone
+# (consumers can install just a panel for single-PR review / single-
+# issue triage, or an orchestrator entrypoint which transitively
+# pulls its engine + panels).
+#
+# Only the two USER-FACING ORCHESTRATOR ENTRYPOINTS are declared
+# here. Everything else arrives transitively, so declaring it again
+# would be a redundant edge (apm 0.16 flags the double-deploy as
+# "skill replaced -- remove one"):
+#  - batch-bug-shepherd  -> shepherd-driver -> apm-review-panel
+#  - apm-issue-autopilot -> shepherd-driver -> apm-review-panel
+#                        -> apm-triage-panel
+# Net transitive closure deployed = all 5 first-party skills
+# (both orchestrators + shepherd-driver + both panels). shepherd-
+# driver stays transitive-only by design ("used only by a parent
+# orchestrator, never user-facing").
 dependencies:
-  apm: []
+  apm:
+    - ./packages/apm-issue-autopilot
+    - ./packages/batch-bug-shepherd
   mcp: []
 
 scripts: {}

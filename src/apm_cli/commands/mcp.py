@@ -16,12 +16,13 @@ MCP_REGISTRY_ENV = "MCP_REGISTRY_URL"
 
 
 def _build_registry_with_diag(console, logger):
-    """Construct ``RegistryIntegration`` honouring ``MCP_REGISTRY_URL``.
+    """Construct ``RegistryIntegration`` honouring the registry URL precedence chain.
 
+    Resolution order: MCP_REGISTRY_URL env > apm config mcp-registry-url > default.
     Emits a one-line diagnostic naming the resolved registry URL whenever
-    the env var is set, so enterprise users can confirm they are hitting
-    the override and not the public default. Stays silent for the default
-    public registry (defaults are quiet, overrides are visible).
+    a non-default source is in effect, so enterprise users can confirm they
+    are hitting the override and not the public default. Stays silent for the
+    default public registry (defaults are quiet, overrides are visible).
     """
     from ..registry.integration import RegistryIntegration
 
@@ -30,9 +31,18 @@ def _build_registry_with_diag(console, logger):
     if override:
         url = registry.client.registry_url
         if console:
-            console.print(f"[muted]Registry: {url}[/muted]")
+            console.print(f"[muted]Registry: {url} (from MCP_REGISTRY_URL)[/muted]")
         else:
-            logger.progress(f"Registry: {url}")
+            logger.progress(f"Registry: {url} (from MCP_REGISTRY_URL)")
+    else:
+        from ..config import get_mcp_registry_url as _get_mcp_registry_url
+
+        config_url = _get_mcp_registry_url()
+        if config_url:
+            if console:
+                console.print(f"[muted]Registry: {config_url} (from apm config)[/muted]")
+            else:
+                logger.progress(f"Registry: {config_url} (from apm config)")
     return registry
 
 
@@ -82,7 +92,7 @@ def mcp():
         "  apm mcp install api --transport http --url https://example.com/mcp"
     ),
     epilog=(
-        "Common options (see `apm install --mcp --help` for full list):\n"
+        "Common options (see `apm install --help` for full list):\n"
         "  --transport [stdio|http|sse|streamable-http]\n"
         "  --url URL           Server URL for remote transports\n"
         "  --env KEY=VALUE     Environment variable (repeatable)\n"

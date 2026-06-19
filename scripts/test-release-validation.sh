@@ -286,13 +286,19 @@ test_hero_guardrailing() {
         return 1
     fi
     
-    if [[ ! -f "AGENTS.md" ]]; then
-        log_error "AGENTS.md not created by compile"
+    # Copilot compile suppresses empty AGENTS.md shells when installed
+    # instructions already live under .github/instructions/ (the guardrail
+    # surface Copilot reads directly). Validate that compiled guardrails
+    # landed there rather than insisting on an AGENTS.md shell.
+    if [[ -f "AGENTS.md" ]]; then
+        log_success "Compiled to AGENTS.md (guardrails active)"
+    elif ls .github/instructions/*.md 1>/dev/null 2>&1; then
+        log_success "Compiled guardrails to .github/instructions/ (Copilot reads them directly)"
+    else
+        log_error "compile produced no guardrail surface (neither AGENTS.md nor .github/instructions/)"
         cd ..
         return 1
     fi
-    
-    log_success "Compiled to AGENTS.md (guardrails active)"
     
     # Step 5: apm run design-review (from installed package)
     # Gated by APM_RUN_INFERENCE_TESTS — live inference is decoupled from
@@ -399,8 +405,11 @@ APMYML
             exit 1
         fi
         
-        # Verify a bundle was produced
-        if ls build/*.tar.gz 1>/dev/null 2>&1; then
+        # Verify a bundle was produced. 'apm pack --archive' now emits .zip by
+        # default (legacy pipelines opt back in with --archive-format tar.gz),
+        # so accept either extension. Test each glob independently: a single
+        # `ls a b` exits non-zero when either pattern is unmatched.
+        if ls build/*.zip 1>/dev/null 2>&1 || ls build/*.tar.gz 1>/dev/null 2>&1; then
             echo "Bundle archive produced successfully"
         else
             echo "No bundle archive found in build/"

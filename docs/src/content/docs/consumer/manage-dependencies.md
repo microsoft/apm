@@ -54,30 +54,109 @@ parser. The supported forms:
 |---|---|---|
 | GitHub shorthand | `owner/repo` | Public GitHub repo, latest default branch. |
 | Pinned ref | `owner/repo#v1.0.0` | Pin to a tag, branch, or full commit SHA. |
-| Aliased | `owner/repo@my-alias` | Install under a custom directory name. |
-| Pinned + aliased | `owner/repo#v1.0.0@my-alias` | Combine the two. |
 | FQDN shorthand | `gitlab.com/acme/repo#v2.0` | Any git host, not just github.com. |
 | Virtual subdirectory | `owner/repo/skills/review` | Install one skill folder from a monorepo. |
 | Virtual file | `owner/repo/prompts/review.prompt.md` | Install a single primitive file. |
 | HTTPS git URL | `https://gitlab.com/acme/repo.git` | Explicit URL, any host. |
 | SSH SCP-style | `git@gitlab.com:acme/repo.git` | SSH with default port. |
 | SSH protocol | `ssh://git@gitlab.com/acme/repo.git` | SSH with explicit scheme or port. |
+| SSH with non-default user | `myuser@host:acme/repo.git` or `ssh://myuser@host/acme/repo.git` | Honors a non-`git` SSH user from the URL — useful for Enterprise Managed User (EMU) accounts or any server where the SSH login is not `git`. Username is validated against `^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$` (64-char cap); percent-encoded userinfo is rejected. The username is presentation-only and not part of dependency identity. |
 | Local path | `./packages/shared` or `/abs/path` | Sibling package on disk. |
-| Object form | `{ git: <url>, path: <subpath>, ref: <ref> }` | Escape hatch for nested groups, monorepo subpaths, or aliases that the string forms cannot express. |
+| Object form (git) | `{ git: <url>, path: <subpath>, ref: <ref>, alias: <name>, type: gitlab }` | Aliases, nested groups, monorepo subpaths, bespoke GitLab hosts, or anything string forms cannot express. |
+| Marketplace dict | `{ name: <plugin>, marketplace: <mkt>, version: <range> }` | Install a plugin from a registered marketplace. Optional `version` accepts a semver range (e.g. `~2.1.0`). Resolved to a concrete git ref at install time. |
+| Registry shorthand | `owner/repo#^2.0.0` with a default registry configured | Routes dep through the default registry instead of git. Default may come from `apm.yml` or `~/.apm/config.json`. Requires `registries` experimental flag. |
+| Registry object form | `{ id: owner/repo, version: ^2.0.0 }` | Explicit registry dep. `registry:` optional when a default registry is configured. Requires `registries` experimental flag. |
 
-Object form in YAML:
+
+Object form in YAML — three mutually exclusive keys select the variant
+(`git`, `path`, or `marketplace`):
 
 ```yaml
 dependencies:
   apm:
+    # Remote: git URL + optional sub-path, ref, alias
     - git: https://gitlab.com/acme/coding-standards.git
       path: instructions/security
       ref: v2.0
       alias: security
+
+    # Self-managed GitLab on a bespoke hostname
+    - git: https://code.acme.com/platform/standards.git
+      type: gitlab
+
+    # Local: filesystem path (development only)
+    - path: ./packages/shared-skills
+
+    # Remote monorepo sibling: inside owner/mono/packages/frontend/apm.yml
+    - path: ../shared
+
+    # Marketplace: resolved to a concrete git ref at install time
+    - name: sec-check
+      marketplace: acme-plugins
+
+    # Marketplace with version constraint (semver range)
+    - name: secrets-vault
+      marketplace: acme-plugins
+      version: "~2.1.0"
+
+    # Registry dep (experimental): whole package via default registry
+    - id: acme/code-review-prompts
+      version: ^2.0.0
+
+    # Registry dep (experimental): named registry, virtual sub-path
+    - registry: corp-main
+      id: acme/prompt-library
+      path: prompts/review.prompt.md
+      version: 1.4.0
+
 ```
+
+A `path:` declared inside a remote package is allowed only when the resolved
+path stays inside that same cloned repo. APM expands it to the parent's remote
+host/repo/ref and downloads the sibling from the same origin. Absolute paths,
+paths that escape the repo root, and cross-repo local paths are rejected.
+This is for same-repo monorepo siblings, not general workspace semantics.
+
+Use `type: gitlab` only on `git` object entries for self-managed GitLab
+instances whose hostname does not make the platform obvious:
+
+```yaml
+- git: https://code.acme.com/platform/standards.git
+  type: gitlab
+```
+
+That routes REST file reads and token lookup through the GitLab path without
+relying on hostname heuristics. For the token precedence chain, see
+[Authentication](../../getting-started/authentication/).
+
+Generic non-default hosts do not receive APM-managed GitHub or GitLab PATs on
+the HTTP file-read path. If a private host fails with 401/403, use a whole-repo
+git dependency for full clone auth support, or choose the supported HTTP backend
+signal (`type: gitlab` for GitLab-compatible hosts, `GITHUB_HOST` for GHES).
+
+**GitLab `path:` fetch transport:** GitLab `path:` files are fetched over
+git transport (not the REST API), so self-hosted instances with the API disabled
+still install. See [Authentication](../authentication/#gitlab-saas-or-self-managed).
 
 For private repos and non-GitHub hosts, see
 [Private and org packages](../private-and-org-packages/).
+
+:::caution[Alias migration]
+The shorthand `@alias` suffix is not supported on string references. Use
+object form instead:
+
+```yaml
+- git: https://github.com/owner/repo.git
+  path: skills/example
+  alias: my-name
+```
+
+Omit `path:` for whole-repo dependencies. Keeping aliases explicit reserves
+`@` for git usernames and future package-manager-compatible version syntax.
+:::
+
+For registry-sourced dependencies (internal packages on Artifactory or a custom registry), see
+[Registries](../../guides/registries/).
 
 ## Add a dependency
 
@@ -119,13 +198,91 @@ dependencies:
   apm:
     - microsoft/apm-sample-package#v1.0.0       # tag
     - acme/playbooks#main                       # branch (moves)
-    - acme/playbooks#a1b2c3d4e5f6...            # SHA (immutable)
+    - acme/playbooks#a1b2c3d4e5f6a7b8c9d0e1f234567890abcdef12  # SHA (immutable)
 ```
+
+For registry-sourced deps or when `policy.dependencies.require_pinned_constraint: true` is on, the ref slot also accepts semver constraints:
+
+| Form | Example | Meaning |
+|---|---|---|
+| Bare exact | `owner/repo#1.2.3` | Pinned to exactly 1.2.3. |
+| Explicit equality | `owner/repo#=1.2.3` | Same as bare exact (npm- and cargo-style). |
+| Caret range | `owner/repo#^1.2.3` | `>=1.2.3, <2.0.0`. |
+| Tilde range | `owner/repo#~1.2.3` | `>=1.2.3, <1.3.0`. |
+| Bounded range | `owner/repo#>=1.2.0 <2.0.0` | Explicit lower and upper bound. |
+
+Pip-style `==1.2.3` is not part of the node-semver grammar APM follows and is rejected as an unbounded ref under `require_pinned_constraint`. Use `=1.2.3` or the bare form instead.
 
 Branches move; tags and SHAs do not. For reproducibility, prefer tags or
 SHAs. The lockfile pins the resolved commit either way, so two clones
 running `apm install` get the same bytes -- but a branch ref will resolve
 to a new SHA on the next `apm update`.
+
+For SHA-pinned deps, think of `apm update` as Dependabot-style review
+for AI packages: the manifest stays pinned to a commit, while the comment
+shows the release tag. See [`apm update`](../../reference/cli/update/) for
+the full rewrite rules.
+
+```yaml
+dependencies:
+  apm:
+    - acme/playbooks#b1c2d3e4f5a6b7c8d9e0f1234567890abcdef123 # v2.0.0
+```
+
+`apm update --dry-run` previews the SHA/tag rewrite without changing the
+manifest. Branches and lightweight tags are not accepted as revision-pin
+update targets.
+
+### Marketplace ref override
+
+When installing from a marketplace via the CLI, append `#<ref>` to
+override the marketplace entry's default `source.ref`:
+
+```bash
+apm install plugin@marketplace#v2.0.0
+```
+
+In `apm.yml`, use the `version` field in the marketplace object form.
+Semver ranges and bare versions (e.g. `~2.1.0`, `^2.0`, `2.1.0`) are
+resolved against git tags matching `{name}--v{version}` on the
+marketplace repository. The highest matching tag is used.
+
+### Pin a semver range
+
+For git-source dependencies you can also pin a semver range as the ref.
+APM resolves the range against the remote's tags at install time and
+records the concrete tag in the lockfile:
+
+```yaml
+dependencies:
+  apm:
+    - acme/widget#^1.2.0      # any 1.x >= 1.2.0
+    - acme/widget#~1.4        # any 1.4.x
+    - acme/widget#>=2.0 <3    # explicit range
+    - acme/widget#1.5.x       # wildcard
+```
+
+APM matches tags against `v{version}`, `{name}--v{version}`, and
+`{name}-v{version}` patterns (with `{version}` as a bare-tag fallback) and
+picks the highest tag that satisfies the range. For virtual subdirectory
+deps, `{name}` is the final path segment (for example `pkg-a` in
+`acme/mono/packages/pkg-a`). The original constraint is preserved in the
+lockfile alongside the resolved tag, so `apm install` on a fresh clone
+replays the same tag deterministically. A malformed range-like ref is
+rejected; use a plain range such as `^1.2.0` or pin a literal tag such as
+`pkg-a-v1.2.0`. Only `apm update` (or legacy `apm install --update`) or a
+manifest change re-resolves to a newer tag.
+
+Marketplace object-form ranges use the marketplace package name in the tag
+pattern:
+
+```yaml
+dependencies:
+  apm:
+    - name: secrets-vault
+      marketplace: acme-tools
+      version: "~2.1.0"
+```
 
 ## Remove a dependency
 
@@ -176,3 +333,58 @@ too: `apm update` refreshes dependencies to the latest matching refs
 fail-on-drift install for CI (like `npm ci`). To upgrade the `apm` CLI
 binary itself, use `apm self-update`.
 :::
+
+## Explain a transitive dependency: `apm deps why`
+
+After `apm install`, `apm_modules/` may contain transitive packages that
+you did not declare directly. To answer "who pulled this in?", use
+`apm deps why <pkg>`:
+
+:::note[Coming from npm, yarn, or cargo?]
+`apm deps why` is the APM analogue of `npm why` / `yarn why` /
+`cargo tree -i`. Same mental model: ask the lockfile, get back the
+chain that explains why something is on disk.
+:::
+
+```bash
+$ apm deps why shared-utils
+$ apm deps why acme-org/shared-utils
+$ apm deps why acme-org/shared-utils --json
+$ apm deps why -g shared-utils
+```
+
+The [lockfile](#the-lockfile) is the source of truth -- the command is
+fully offline and walks the `resolved_by` parent chain bottom-up. The
+lockfile records a single resolved parent per package, so the output is
+one root-to-target chain (not a fan-out of every theoretical route):
+
+```
+[i] acme-org/shared-utils@1.4.2  (transitive)
+
+    acme-org/big-skills   [declared in apm.yml]
+    +-- acme-org/shared-utils
+```
+
+`<pkg>` accepts four identifier styles, tried in order: unique key
+(`acme-org_shared-utils`), full repo URL
+(`https://github.com/acme-org/shared-utils`), `owner/repo`, or bare
+basename (`shared-utils`) when unambiguous. An ambiguous bare name
+exits `1` and lists the candidates.
+
+Pass `--json` for scripting; the JSON document goes to stdout and all
+logs / hints go to stderr, so `apm deps why pkg --json | jq` is safe:
+
+```json
+{
+  "package": {"repo_url": "acme-org/shared-utils", "is_direct": false, "...": "..."},
+  "paths": [{"chain": [{"repo_url": "acme-org/big-skills", "is_direct": true}, ...]}]
+}
+```
+
+Exit codes: `0` on success, `1` when the package is not installed or the
+query is ambiguous, `2` when no lockfile exists yet (run `apm install`).
+
+See also: [`apm deps tree`](../../reference/cli/deps/#apm-deps-tree) for
+the top-down graph view, and
+[`apm deps info`](../../reference/cli/deps/#apm-deps-info) for full
+metadata of one package.
