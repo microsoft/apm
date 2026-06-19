@@ -17,6 +17,7 @@ from apm_cli.core.hook_executors import (
     _execute_http,
     _expand_env_vars,
     _get_hooks_log_path,
+    _redact_url_credentials,
     _resolve_cwd,
     execute_hook,
 )
@@ -390,3 +391,22 @@ class TestCommandExecutorLogging:
             _execute_command(hook, _make_event())
         content = (tmp_path / "logs" / "hooks.log").read_text()
         assert "status=timeout" in content
+
+
+# -- URL redaction -----------------------------------------------------------
+
+
+class TestRedactUrlCredentials:
+    def test_plain_url_unchanged(self) -> None:
+        assert _redact_url_credentials("https://example.com/hook") == "https://example.com/hook"
+
+    def test_strips_user_password(self) -> None:
+        result = _redact_url_credentials("https://user:secret@example.com/hook")
+        assert "user" not in result
+        assert "secret" not in result
+        assert "example.com/hook" in result
+
+    def test_strips_user_only(self) -> None:
+        result = _redact_url_credentials("https://user@example.com/hook")
+        assert "user" not in result
+        assert "example.com/hook" in result

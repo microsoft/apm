@@ -371,3 +371,18 @@ class TestConstants:
 
     def test_hook_types_tuple(self) -> None:
         assert set(HOOK_TYPES) == {"command", "http"}
+
+
+class TestHooksForEvent:
+    def test_returns_matching_hooks(self) -> None:
+        h1 = HookEntry(hook_type="command", event="post-install", bash="echo a")
+        h2 = HookEntry(hook_type="command", event="pre-install", bash="echo b")
+        h3 = HookEntry(hook_type="http", event="post-install", url="https://x.com")
+        runner = LifecycleHookRunner(hooks=[h1, h2, h3])
+        result = runner.hooks_for_event("post-install")
+        assert result == [h1, h3]
+
+    def test_returns_empty_for_unknown_event(self) -> None:
+        h = HookEntry(hook_type="command", event="post-install", bash="echo")
+        runner = LifecycleHookRunner(hooks=[h])
+        assert runner.hooks_for_event("pre-uninstall") == []
