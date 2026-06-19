@@ -233,6 +233,50 @@ def _render_findings_table(
         )
 
 
+def _deployed_canvas_bundles(project_root: Path, package_filter: str | None) -> list[str]:
+    """Return sorted canvas bundle roots deployed per apm.lock.yaml.
+
+    A canvas bundle is an executable Copilot extension (``extension.mjs``)
+    deployed under a client ``extensions/`` directory (``.github/extensions/``
+    project scope, ``.copilot/extensions/`` user scope). Surfacing them lets an
+    audit reader see at a glance that executable extension code is installed,
+    even when the content scan finds no hidden characters. Returns bundle roots
+    such as ``.copilot/extensions/widget`` (one entry per bundle).
+    """
+    from ..integration.canvas_integrator import is_canvas_bundle_path
+
+    lock = LockFile.read(get_lockfile_path(project_root))
+    if lock is None:
+        return []
+
+    roots: set[str] = set()
+    for dep_key, dep in lock.dependencies.items():
+        if package_filter and dep_key != package_filter:
+            continue
+        for rel in dep.deployed_files:
+            norm = rel.replace("\\", "/").strip("/")
+            if not norm or not is_canvas_bundle_path(norm):
+                continue
+            parts = norm.split("/")
+            for idx, seg in enumerate(parts):
+                if seg == "extensions" and idx + 1 < len(parts):
+                    roots.add("/".join(parts[: idx + 2]))
+                    break
+    return sorted(roots)
+
+
+def _render_canvas_note(project_root: Path, package_filter: str | None, logger) -> None:
+    """Emit an informational note listing deployed canvas extensions."""
+    bundles = _deployed_canvas_bundles(project_root, package_filter)
+    if not bundles:
+        return
+    logger.info(
+        f"{len(bundles)} executable canvas extension(s) deployed (experimental, trust-gated):"
+    )
+    for root in bundles:
+        logger.info(f"  {root}", symbol="info")
+
+
 def _render_summary(
     findings_by_file: dict[str, list[ScanFinding]],
     files_scanned: int,
@@ -738,6 +782,28 @@ def _run_external_scanners(
         sys.exit(3)
 
 
+def _resolve_fail_on_drift(project_root: Path) -> bool:
+    """Return True when ``security.audit.fail_on_drift`` is enabled.
+
+    Respects ``APM_POLICY_DISABLE`` and fails open on any discovery error so a
+    transient policy-resolution failure never converts advisory drift into a
+    hard failure. Discovery is invoked by the caller only when drift was
+    actually detected, keeping the no-drift common path free of extra work.
+    """
+    if os.environ.get("APM_POLICY_DISABLE"):
+        return False
+    try:
+        from ..policy.discovery import discover_policy_with_chain
+
+        fetch_result = discover_policy_with_chain(project_root)
+    except Exception:
+        return False
+    policy = getattr(fetch_result, "policy", None)
+    if policy is None:
+        return False
+    return bool(policy.security.audit.fail_on_drift)
+
+
 def _audit_content_scan(
     cfg: _AuditConfig,
     package: str | None,
@@ -901,10 +967,17 @@ def _audit_content_scan(
         all_findings = [f for ff in findings_by_file.values() for f in ff]
         exit_code = 1 if ContentScanner.has_critical(all_findings) else 2
 
-    # Note: bare `apm audit` is advisory for drift; drift findings are
-    # rendered (text/json/sarif) but DO NOT escalate the exit code. Use
-    # `apm audit --ci` (handled in _audit_ci_gate) to gate on drift.
-    _ = drift_failed  # retained for symmetry; gate path lives in --ci.
+    # Bare `apm audit` is advisory for drift by default: drift findings are
+    # rendered (text/json/sarif) but DO NOT escalate the exit code. When
+    # `security.audit.fail_on_drift` is enabled, any drift-check FAILURE
+    # escalates a clean run to exit 1 -- matching the `apm audit --ci` gate,
+    # which fails on the same `drift_check.passed is False` signal. That covers
+    # both detected drift AND a drift check that could not run (corrupt local
+    # graph, unsupported replay); an advisory cache-miss SKIP stays passed=True
+    # and does NOT gate. Policy is discovered only when a drift failure
+    # occurred, so the clean common case is unchanged.
+    if drift_failed and exit_code == 0 and _resolve_fail_on_drift(project_root):
+        exit_code = 1
 
     if effective_format == "text":
         if cfg.output_path:
@@ -916,6 +989,8 @@ def _audit_content_scan(
         if findings_by_file:
             _render_findings_table(findings_by_file, verbose=cfg.verbose)
         _render_summary(findings_by_file, files_scanned, logger)
+        if not file_path:
+            _render_canvas_note(cfg.project_root, package, logger)
         if drift_findings:
             from ..install.drift import render_drift_text
 

@@ -152,6 +152,29 @@ class TestCheckRegistryLockedDep:
         assert "(lockfile)" in result.source
 
     def test_unknown_when_invalid_manifest_range(self):
+        # A range-shaped but malformed ref ('^1.0') is genuinely invalid.
+        dep = DependencyReference(
+            repo_url="nadavy/e2e-demo",
+            reference="^1.0",
+            source="registry",
+            registry_name="test-reg",
+        )
+        ctx = RegistryOutdatedContext(
+            manifest_index={"nadavy/e2e-demo": dep},
+            registries={"test-reg": "https://reg.example.com/apm"},
+            default_registry="test-reg",
+        )
+        locked = _locked()
+
+        result = check_registry_locked_dep(locked, ctx)
+
+        assert result.status == "unknown"
+        assert "invalid manifest range" in result.source
+
+    def test_non_semver_ref_reported_as_pinned_not_invalid(self):
+        # A valid non-semver selector ('main') is a legitimate registry pin,
+        # not an invalid range -- it must not be mislabeled now that the
+        # resolver exact-matches such refs.
         dep = DependencyReference(
             repo_url="nadavy/e2e-demo",
             reference="main",
@@ -168,7 +191,8 @@ class TestCheckRegistryLockedDep:
         result = check_registry_locked_dep(locked, ctx)
 
         assert result.status == "unknown"
-        assert "invalid manifest range" in result.source
+        assert "invalid manifest range" not in result.source
+        assert "pinned ref" in result.source
 
     def test_unknown_when_registry_list_versions_fails(self):
         ctx = _ctx()

@@ -15,7 +15,7 @@ APM borrows the manifest-plus-lockfile shape from `npm`, `pip`, and `cargo` and 
 
 `apm.yml` is the manifest. It lists agentic dependencies (skills, prompts, agents, plugins, full APM packages) and MCP servers. `apm.lock.yaml` is the lockfile. It pins every resolved package to an exact source ref and content hash, so two developers running `apm install` against the same lockfile get byte-identical context. Source authoring lives in `.apm/` inside your repo.
 
-The compiled output lives in the directories each harness already reads: `.github/` for Copilot, `.claude/` for Claude Code, `.cursor/` for Cursor, `.codex/` and `AGENTS.md` for Codex, `.gemini/` for Gemini, `.opencode/` for OpenCode, `.windsurf/` for Windsurf, and `.kiro/` for Kiro. APM does not invent a runtime format. It writes the files each tool already understands and stays out of the way at agent runtime.
+The compiled output lives in the directories each harness already reads: `.github/` for Copilot, `.claude/` for Claude Code, `.cursor/` for Cursor, `.codex/` and `AGENTS.md` for Codex, `.gemini/` for Gemini, `.agents/` for Antigravity, `.opencode/` for OpenCode, `.windsurf/` for Windsurf, and `.kiro/` for Kiro. APM does not invent a runtime format. It writes the files each tool already understands and stays out of the way at agent runtime.
 
 ## What APM manages
 
@@ -36,7 +36,7 @@ For deeper definitions, see [Primitives and targets](../primitives-and-targets/)
 
 ## What APM is not
 
-- **Not a runtime.** APM ships context to the harness; the harness runs the agent. `apm install` writes files and exits.
+- **Not a runtime.** APM governs the install and integrity plane -- what reaches disk and whether it conforms to policy. It does not govern the runtime plane -- what a running agent may do, which permissions it holds, or how it is sandboxed. That responsibility belongs to your agent harness. The two planes do not overlap. For how policy coexists with harness-managed configuration, see [Governance overview](/apm/enterprise/governance-overview/#boundary-statement).
 - **Not an LLM gateway.** APM does not route, proxy, or meter model calls. It does not see your prompts at inference time.
 - **Not a fine-tuning tool.** APM versions context, not weights.
 - **Not a marketplace.** Any git repository is a valid APM package. Marketplaces are an optional discovery surface, not a requirement.
@@ -47,7 +47,7 @@ APM commits to three things. Each gets a one-paragraph summary here; the deep di
 
 ### Portable by manifest
 
-One `apm.yml`. Seven harnesses. Reproducible AI agent setup. Every developer who clones the repo runs `apm install` and gets the same skills, prompts, instructions, hooks, and MCP servers wired into Copilot, Claude, Cursor, OpenCode, Codex, Gemini, and Windsurf. The lockfile pins exact versions and content hashes.
+One `apm.yml`. Eight harnesses. Reproducible AI agent setup. Every developer who clones the repo runs `apm install` and gets the same skills, prompts, instructions, hooks, and MCP servers wired into Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Antigravity, and Windsurf. The lockfile pins exact versions and content hashes.
 
 ### Secure by default
 

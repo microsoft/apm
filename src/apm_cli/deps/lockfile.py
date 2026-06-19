@@ -95,6 +95,15 @@ class LockedDependency:
     constraint: str | None = None
     resolved_tag: str | None = None
     resolved_at: str | None = None
+
+    # Declared-license provenance (issue #1777, U6). The SPDX expression the
+    # dependency's manifest DECLARED at resolved_commit (apm.yml ``license:``
+    # or plugin.json ``license``). This is a passthrough of an author claim --
+    # APM never reads the LICENSE file text or concludes a license. Absence
+    # means "not declared" (unknown); it is OMITTED from the serialized entry
+    # rather than stored as a sentinel, so absence stays distinguishable from
+    # an explicit declaration.
+    declared_license: str | None = None
     # Forward-compat carrier: keys we don't recognise are preserved
     # through a from_dict / to_dict round-trip so an older APM build
     # reading a lockfile written by a newer build doesn't silently drop
@@ -192,6 +201,8 @@ class LockedDependency:
             result["resolved_tag"] = self.resolved_tag
         if self.resolved_at:
             result["resolved_at"] = self.resolved_at
+        if self.declared_license:
+            result["declared_license"] = self.declared_license
         # Replay forward-compat unknown fields LAST so they never shadow a
         # known field that this build understands.
         for k, v in self._unknown_fields.items():
@@ -264,6 +275,7 @@ class LockedDependency:
             "constraint",
             "resolved_tag",
             "resolved_at",
+            "declared_license",
             # legacy migration key handled above
             "deployed_skills",
         }
@@ -301,6 +313,7 @@ class LockedDependency:
             constraint=data.get("constraint"),
             resolved_tag=data.get("resolved_tag"),
             resolved_at=data.get("resolved_at"),
+            declared_license=data.get("declared_license"),
             _unknown_fields=unknown_fields,
         )
 

@@ -1,0 +1,76 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "pkg:generic/local-helper@sha256:aaa111",
+      "name": "acme/local-helper",
+      "purl": "pkg:generic/local-helper@sha256:aaa111",
+      "type": "library",
+      "version": "sha256:aaa111"
+    },
+    {
+      "bom-ref": "pkg:github/acme/dual@c0ffee00",
+      "licenses": [
+        {
+          "expression": "(MIT OR Apache-2.0)"
+        }
+      ],
+      "name": "acme/dual",
+      "purl": "pkg:github/acme/dual@c0ffee00",
+      "type": "library",
+      "version": "c0ffee00"
+    },
+    {
+      "bom-ref": "pkg:github/acme/git-utils@def789ghi012",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "name": "acme/git-utils",
+      "purl": "pkg:github/acme/git-utils@def789ghi012",
+      "type": "library",
+      "version": "def789ghi012"
+    },
+    {
+      "bom-ref": "pkg:github/acme/proprietary@abc123",
+      "licenses": [
+        {
+          "license": {
+            "name": "UNLICENSED"
+          }
+        }
+      ],
+      "name": "acme/proprietary",
+      "purl": "pkg:github/acme/proprietary@abc123",
+      "type": "library",
+      "version": "abc123"
+    },
+    {
+      "bom-ref": "pkg:oci/oci-tools@sha256:abc123",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "oci://registry.example.com/acme/oci-tools@sha256:abc123"
+        }
+      ],
+      "name": "acme/oci-tools",
+      "purl": "pkg:oci/oci-tools@sha256:abc123",
+      "type": "library",
+      "version": "sha256:abc123"
+    }
+  ],
+  "metadata": {
+    "timestamp": "2024-01-01T00:00:00+00:00",
+    "tools": [
+      {
+        "name": "apm lock export",
+        "vendor": "APM"
+      }
+    ]
+  },
+  "specVersion": "1.5",
+  "version": 1
+}

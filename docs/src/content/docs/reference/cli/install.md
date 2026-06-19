@@ -61,6 +61,7 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 | `--audit <off\|warn\|block>` | (config/policy) | Run a content audit over the files this install deploys. `warn` records findings in the summary; `block` halts the install on critical findings. Overrides your `audit-on-install` config but cannot relax an org policy floor. Requires the `external-scanners` experimental flag. |
 | `--no-audit` | off | Disable the install-time audit for this invocation (equivalent to `--audit off`). Cannot relax an org policy `block` floor. |
 | `--trust-transitive-mcp` | off | Trust self-defined MCP servers shipped by transitive packages without re-declaring them in your `apm.yml`. |
+| `--trust-canvas-extensions` | off | Trust executable canvas extensions (`extension.mjs`) shipped by dependencies. Required for dependency-provided canvases; first-party canvases deploy without it. Requires the `canvas` experimental flag. |
 | `--allow-insecure` | off | Permit direct `http://` (non-TLS) dependencies. |
 | `--allow-insecure-host HOSTNAME` | unset | Permit transitive `http://` dependencies from `HOSTNAME`. Repeatable. |
 
@@ -107,6 +108,7 @@ Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initi
 - **Enterprise marketplace gate.** When installing from a `*.ghe.com` marketplace, bare cross-repo `repo:` fields (e.g. `repo: owner/repo`) are refused before any network request runs, preventing dependency-confusion attacks. Host-qualify the field to proceed: `repo: corp.ghe.com/owner/repo` for an enterprise dep, or `repo: github.com/owner/repo` for a declared cross-host dep.
 - **Security scan.** Source files are scanned for hidden Unicode and other tag-character / bidi-override patterns before deployment. Critical findings block the package; the install exits `1`. Use `--force` to deploy anyway, or run `apm audit --strip` first to remediate.
 - **Diagnostic summary.** Output is grouped at the end (collisions, replacements, warnings, errors) instead of inline. Use `--verbose` to expand individual file paths.
+- **Default registry routing.** When a default registry is configured (project `registries.default` in `apm.yml` or `registry.<name>.default true` in `~/.apm/config.json`), unscoped `owner/repo#ref` shorthand deps passed to `apm install` route to the registry instead of GitHub. A `#<version>` selector is required; omitting it exits `1`. The selector may be a semver range (`^1.0.0`), an exact version (`1.2.3`), or a non-semver label (`main`, `stable`, `v1.4.2`) -- the registry exact-matches non-semver selectors against its published version list. GitHub probe is skipped for these deps; use the `git:` URL form in `apm.yml` to force the GitHub path (e.g., `- git: https://github.com/owner/repo.git`).
 
 ## Examples
 

@@ -11,6 +11,27 @@ The `apm-policy.yml` schema. One file per org or repo. Loaded by `apm install`, 
 
 For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../enterprise/apm-policy-getting-started/). For CLI usage of `apm policy status`, see [apm policy](./cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance overview](../enterprise/governance-overview/).
 
+## What apm-policy.yml governs
+
+`apm-policy.yml` is the **install policy** for agent primitives. In plain terms it decides:
+
+- **Which sources are trusted** -- which dependencies and MCP servers `apm install` will accept (the `allow` / `deny` / `registry_source` rules).
+- **Which versions install** -- whether refs must be pinned to bounded constraints, and how version conflicts on required packages resolve.
+- **What the lockfile records and verifies** -- which artifacts the lockfile records, and what the install-time audit pass checks over them once written.
+
+`apm install` enforces the dependency and MCP source rules during install; `apm audit --ci` evaluates every rule on this page. Together they govern what gets installed -- not what a running agent is later allowed to do.
+
+## What apm-policy.yml does NOT govern
+
+`apm-policy.yml` is not a runtime permission system. It does not control:
+
+- **Runtime permissions** -- what an agent may read, write, or call once it is running.
+- **Sandboxing** -- process isolation or resource limits for a running agent.
+- **Agent behavior** -- what a running agent actually does with the primitives it was given.
+- **Marketplace enablement** -- which tools or extensions a harness exposes to the agent.
+
+Those controls are owned by the **agent harness** that runs your agents, not by APM. APM stops at install: it decides what reaches disk, and the harness decides what runs.
+
 ## File location
 
 Discovery order, in priority:
@@ -68,6 +89,8 @@ Unknown top-level keys produce a warning, never an error -- so newer policy file
 ## dependencies
 
 Rules over the `dependencies:` and `mcp:` blocks declared in consumer `apm.yml` files.
+
+When a dependency matches `deny`, `apm install` will **not download or deploy that artifact**. With `enforcement: block`, the install aborts before the denied package is downloaded or deployed. `deny` is an install-time decision, not a runtime block: it stops a denied artifact from being installed, and does not constrain what an already-installed or otherwise-present artifact does at runtime.
 
 | Field                | Type                  | Default          | Notes                                                                                       |
 |----------------------|-----------------------|------------------|---------------------------------------------------------------------------------------------|
@@ -152,6 +175,22 @@ Files in primitive target directories that are not recorded in `apm.lock.yaml`.
 |---------------|----------------|----------|----------------------------------------------------------------------------------|
 | `action`      | enum           | `ignore` | `ignore` / `warn` / `deny`. `deny` blocks installs that would leave drift.      |
 | `directories` | list of paths  | `[]`     | Subset of target directories to check. Empty = all known target directories.     |
+| `exclude`     | list of globs  | `null`   | Workspace path globs to suppress from the report. Use to silence known harness-managed artifacts. Excluded paths are never reported. `null` = no opinion (transparent in the `extends:` merge); merges as a union down the chain. |
+
+Each reported file is a divergence-visibility finding, not a security verdict
+-- `apm.lock.yaml` is hand-editable YAML, so this surfaces drift rather than
+proving a supply-chain attack. Every finding is enriched in place:
+
+- a factual reason -- `not tracked in apm.lock.yaml`;
+- a lazy primitive-type tag (`[type: skill|agent|instruction|mcp]`) classified
+  only for the already-flagged file, never the whole tree;
+- a deny-conflict note -- `matches deny rule (<pattern>)` -- when the path
+  matches this policy's own `dependencies.deny` or `mcp.deny`. This is surfaced
+  for a human to resolve; APM never removes or blocks the file on this basis.
+
+```text
+[!] .github/agents/rogue.agent.md [type: agent] -- not tracked in apm.lock.yaml; matches deny rule (**/rogue*)
+```
 
 ## security
 
@@ -163,6 +202,8 @@ experimental flag to take effect; ignored otherwise.
 | `audit.on_install`   | enum or null    | `null`  | `off` / `warn` / `block`. Minimum install-time audit mode (a **floor**). `null` = no opinion. `warn` records findings; `block` halts installs on critical findings. |
 | `audit.external`     | list of strings | `null`  | External SARIF scanner names (e.g. `skillspector`) that MUST run during the install audit. A required scanner that is unavailable fails the install closed. |
 | `audit.scanners`     | mapping or null | `null`  | Per-scanner governance, keyed by scanner name. Each value accepts `allow_args` (boolean). **Restrict-only**: see below. Unknown scanner names are a warning, not an error (forward-compat). |
+| `audit.fail_on_drift` | boolean        | `false` | When `true`, a bare `apm audit` exits non-zero if the workspace content has drifted from the lockfile. Default-off keeps drift advisory (rendered, exit 0). Only changes the exit code -- the drift scan itself is unchanged. `apm audit --ci` already gates on drift regardless of this key. |
+| `integrity.require_hashes` | boolean   | `false` | When `true`, every non-local lockfile entry MUST carry a content hash; a missing or empty hash **fails the install closed**. Default-off preserves current behavior. Asserts hash-presence on the lockfile entry (no second hashing pass). Local dependencies are exempt (verified via deployed-file hashes). |
 
 ### Per-scanner governance (`audit.scanners`)
 
@@ -194,6 +235,23 @@ allowlist validation for arg safety.
 `apm install --audit` / `apm config audit-on-install`, never relax it. `apm
 install --force` downgrades a `block` to `warn` for that invocation; `apm
 install --no-policy` skips the policy floor entirely.
+
+### Integrity and drift enforcement
+
+```yaml
+security:
+  integrity:
+    require_hashes: true    # fail the install if any locked entry lacks a hash
+  audit:
+    fail_on_drift: true     # `apm audit` exits non-zero on workspace drift
+```
+
+Both keys are additive, optional, and default off. `require_hashes` is
+enforced during `apm install` (the lockfile must record a content hash for
+every non-local entry, or the install fails closed). `fail_on_drift` is
+enforced by `apm audit`: when drift is detected it escalates the exit code to
+`1`. Both keys only ever tighten -- a child policy cannot relax a parent that
+turned them on.
 
 ## Inheritance
 
@@ -227,9 +285,12 @@ inherited list (see the tri-state table below).
 | `mcp.trust_transitive`      | Logical AND (`true` only if both sides true).                                    |
 | `manifest.scripts`          | Stricter wins (`deny` > `allow`).                                                |
 | `unmanaged_files.action`    | Stricter wins (`deny` > `warn` > `ignore`).                                      |
+| `unmanaged_files.exclude`   | Union, deduplicated; additive-only. `null` and `[]` both preserve the parent list  --  unlike `deny`/`require`, a child cannot clear an inherited `exclude`. |
 | `security.audit.on_install` | Stricter wins (`block` > `warn` > `off`). `null` is transparent.                 |
 | `security.audit.external`   | Union, deduplicated. `null` is transparent.                                      |
 | `security.audit.scanners`   | Union of scanner names; per scanner `allow_args` is AND-merged (any ancestor `false` wins -- tightening). `null` is transparent.                  |
+| `security.audit.fail_on_drift` | Logical OR -- once a parent enables it, a child cannot relax.                  |
+| `security.integrity.require_hashes` | Logical OR -- once a parent enables it, a child cannot relax.             |
 | `compilation.*.enforce`     | First non-null wins (parent precedence).                                         |
 | `compilation.source_attribution` | Logical OR.                                                                 |
 
@@ -315,6 +376,8 @@ unmanaged_files:
   directories:
     - .github/instructions
     - .github/prompts
+  exclude:
+    - .github/copilot-instructions.md
 ```
 
 ## registry_source
@@ -366,6 +429,12 @@ bin_deploy:
   deny:
     - myorg/untrusted-plugin
 ```
+
+## FAQ
+
+**Does my harness's managed configuration replace APM?**
+
+No. apm-policy.yml controls what gets installed; your harness controls what runs; they do not overlap.
 
 ## See also
 

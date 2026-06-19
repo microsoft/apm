@@ -703,10 +703,18 @@ def _run_compilation(
                                     f"-- run 'apm audit --file {output_path}' to inspect"
                                 )
                         try:
-                            from ...compilation.output_writer import CompiledOutputWriter
+                            # Honour managed_section mode (issue #1764).
+                            if config.agents_md_mode == "managed_section":
+                                compiler._write_output_file_with_config(
+                                    str(output_path), final_content, config
+                                )
+                                if compiler.errors:
+                                    raise OSError(compiler.errors[-1])
+                            else:
+                                from ...compilation.output_writer import CompiledOutputWriter
 
-                            CompiledOutputWriter().write(output_path, final_content)
-                        except OSError as e:
+                                CompiledOutputWriter().write(output_path, final_content)
+                        except (OSError, ValueError) as e:
                             logger.error(f"Failed to write final AGENTS.md: {e}")
                             sys.exit(1)
                     else:
@@ -791,7 +799,7 @@ def _run_compilation(
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, windsurf, kiro, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro (excludes agent-skills); combine with 'agent-skills' for both.",
+    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, antigravity, windsurf, kiro, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'antigravity' (alias 'agy') deploys to .agents/ and is explicit-only -- not part of 'all'. 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro (excludes agent-skills and antigravity); combine with 'agent-skills' or 'antigravity' to add them.",
 )
 @click.option(
     "--dry-run",

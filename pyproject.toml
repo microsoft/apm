@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apm-cli"
-version = "0.20.0"
+version = "0.21.0"
 description = "MCP configuration tool"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -104,6 +104,9 @@ max-returns = 12       # Stage 1 (was 18)
 [tool.ruff.lint.mccabe]
 # Stage 1 (was 100). Stage 2 target: <=20 (McCabe industry standard).
 max-complexity = 50
+
+[tool.ruff.lint.isort]
+known-first-party = ["apm_cli"]
 
 [tool.ruff.lint.per-file-ignores]
 # Subprocess calls are intentional in a CLI tool

@@ -95,6 +95,8 @@ class LockfileBuilder:
             self._attach_skill_subset_override(lockfile)
             # Attach content hashes captured at download/verify time
             self._attach_content_hashes(lockfile)
+            # Attach declared-license provenance captured at acquire time (U6)
+            self._attach_declared_licenses(lockfile)
             # Attach marketplace provenance if available
             self._attach_marketplace_provenance(lockfile)
             # Selectively merge entries from the existing lockfile:
@@ -186,6 +188,18 @@ class LockfileBuilder:
         for dep_key, locked_dep in lockfile.dependencies.items():
             if dep_key in self.ctx.package_hashes:
                 locked_dep.content_hash = self.ctx.package_hashes[dep_key]
+
+    def _attach_declared_licenses(self, lockfile: LockFile) -> None:
+        """Attach DECLARED-license provenance captured at acquire time (U6).
+
+        Only deps that actually declared a license appear in
+        ``package_declared_licenses``; an absent key leaves ``declared_license``
+        as ``None`` so the lockfile OMITS it -- preserving "not declared"
+        (unknown) as distinct from an explicit declaration.
+        """
+        for dep_key, declared in self.ctx.package_declared_licenses.items():
+            if dep_key in lockfile.dependencies and declared:
+                lockfile.dependencies[dep_key].declared_license = declared
 
     def _attach_marketplace_provenance(self, lockfile: LockFile) -> None:
         if self.ctx.marketplace_provenance:

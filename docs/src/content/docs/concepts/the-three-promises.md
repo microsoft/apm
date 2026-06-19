@@ -92,6 +92,10 @@ dependencies. Tighten-only inheritance flows enterprise -> org ->
 repo. `apm audit --ci` wires the same checks into branch protection.
 This is the supply-chain check npm and pip cannot do.
 
+This governance covers the install and integrity plane -- what reaches
+disk and whether it conforms to policy. Runtime behavior governance
+belongs to your agent harness, not to APM.
+
 The 10-second demo:
 
 ```bash

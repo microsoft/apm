@@ -636,6 +636,134 @@ class TestTagPatternOverride:
 
 
 # ---------------------------------------------------------------------------
+# Monorepo name-scoped tag pattern (issue #1822)
+# ---------------------------------------------------------------------------
+
+
+class TestMonorepoNameScopedTagPattern:
+    """Regression tests for issue #1822 -- {name} must scope tag resolution per package.
+
+    When build.tagPattern (or entry-level tag_pattern) contains ``{name}``,
+    each package must resolve against its OWN tags only.  Before the fix,
+    ``build_tag_regex(pattern)`` was called without ``name=entry.name``,
+    making ``{name}`` a wildcard that matched all packages' tags, causing
+    every entry to resolve to the single highest version in the repo.
+    """
+
+    def test_two_packages_resolve_independently(self, tmp_path: Path) -> None:
+        """Each package resolves to its own highest matching tag, not the global maximum."""
+        yml = """\
+        name: test-mkt
+        description: Test
+        version: 1.0.0
+        owner:
+          name: Test
+        build:
+          tagPattern: "{name}-v{version}"
+        packages:
+          - name: pkg-a
+            source: acme/catalog
+            subdir: packages/pkg-a
+            version: ">=1.0.0"
+          - name: pkg-b
+            source: acme/catalog
+            subdir: packages/pkg-b
+            version: ">=1.0.0"
+        """
+        # pkg-a tagged at v1.0.0, pkg-b at v2.0.0 (higher global version).
+        # Before the fix, both packages resolved to pkg-b-v2.0.0 because
+        # {name} was treated as a wildcard [^/]+.
+        refs = {
+            "acme/catalog": _make_refs(
+                "pkg-a-v1.0.0",
+                "pkg-b-v2.0.0",
+            )
+        }
+        report = _build_with_mock(tmp_path, yml, refs)
+        resolved_by_name = {r.name: r.ref for r in report.resolved}
+        assert resolved_by_name["pkg-a"] == "pkg-a-v1.0.0"
+        assert resolved_by_name["pkg-b"] == "pkg-b-v2.0.0"
+
+    def test_two_packages_double_dash_pattern(self, tmp_path: Path) -> None:
+        """Canonical ``{name}--v{version}`` double-dash pattern also resolves per-package."""
+        yml = """\
+        name: test-mkt
+        description: Test
+        version: 1.0.0
+        owner:
+          name: Test
+        build:
+          tagPattern: "{name}--v{version}"
+        packages:
+          - name: pkg-a
+            source: acme/catalog
+            version: ">=1.0.0"
+          - name: pkg-b
+            source: acme/catalog
+            version: ">=1.0.0"
+        """
+        refs = {
+            "acme/catalog": _make_refs(
+                "pkg-a--v1.0.0",
+                "pkg-b--v2.0.0",
+            )
+        }
+        report = _build_with_mock(tmp_path, yml, refs)
+        resolved_by_name = {r.name: r.ref for r in report.resolved}
+        assert resolved_by_name["pkg-a"] == "pkg-a--v1.0.0"
+        assert resolved_by_name["pkg-b"] == "pkg-b--v2.0.0"
+
+    def test_per_entry_tag_pattern_scopes_to_name(self, tmp_path: Path) -> None:
+        """Per-entry ``tag_pattern`` containing ``{name}`` is also scoped correctly."""
+        yml = """\
+        name: test-mkt
+        description: Test
+        version: 1.0.0
+        owner:
+          name: Test
+        packages:
+          - name: pkg-a
+            source: acme/catalog
+            version: ">=1.0.0"
+            tag_pattern: "{name}-v{version}"
+          - name: pkg-b
+            source: acme/catalog
+            version: ">=1.0.0"
+            tag_pattern: "{name}-v{version}"
+        """
+        refs = {
+            "acme/catalog": _make_refs(
+                "pkg-a-v1.0.0",
+                "pkg-b-v2.0.0",
+            )
+        }
+        report = _build_with_mock(tmp_path, yml, refs)
+        resolved_by_name = {r.name: r.ref for r in report.resolved}
+        assert resolved_by_name["pkg-a"] == "pkg-a-v1.0.0"
+        assert resolved_by_name["pkg-b"] == "pkg-b-v2.0.0"
+
+    def test_no_match_when_only_other_package_tags_exist(self, tmp_path: Path) -> None:
+        """pkg-a with no matching tags raises NoMatchingVersionError (not pkg-b's tag)."""
+        yml = """\
+        name: test-mkt
+        description: Test
+        version: 1.0.0
+        owner:
+          name: Test
+        build:
+          tagPattern: "{name}-v{version}"
+        packages:
+          - name: pkg-a
+            source: acme/catalog
+            version: "^1.0.0"
+        """
+        # Only pkg-b tags present -- pkg-a should NOT pick these up
+        refs = {"acme/catalog": _make_refs("pkg-b-v1.0.0", "pkg-b-v2.0.0")}
+        with pytest.raises(NoMatchingVersionError):
+            _build_with_mock(tmp_path, yml, refs)
+
+
+# ---------------------------------------------------------------------------
 # No match error
 # ---------------------------------------------------------------------------
 

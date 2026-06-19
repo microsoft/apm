@@ -100,6 +100,7 @@ class InstallService:
             plan_callback=request.plan_callback,
             refresh=request.refresh,
             lockfile_only=request.lockfile_only,
+            trust_canvas=request.trust_canvas,
         )
 
         post_event = self._build_event("post-install", request)

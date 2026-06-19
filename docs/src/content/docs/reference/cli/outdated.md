@@ -59,6 +59,7 @@ Sample output:
   acme/lint-rules               v0.3.0    v0.3.0            up-to-date  git tags
   nadavy/e2e-demo               1.0.1     1.1.1            outdated    registry: corp
   microsoft/apm-review-panel    0.1.1     0.1.2            outdated    registry: corp (lockfile)
+  acme/deploy-helpers           stable    -                unknown     registry (pinned ref)
   pirate-skill@apm-marketplace  v0.2.1    v0.3.0 (...)     outdated    marketplace: apm-marketplace
 
   [!] 2 outdated dependencies found
@@ -98,6 +99,9 @@ Registry `Source` values:
 |---|---|
 | `registry: NAME` | Compared using the manifest semver range from `apm.yml` (root or an installed package). |
 | `registry: NAME (lockfile)` | No manifest range found; compared against the highest published version on the registry. |
+| `registry (pinned ref)` | Manifest carries a non-semver selector (e.g. `main`, `stable`, `v1.4.2`); the dep is exact-matched at install time. `apm outdated` reports `unknown` status since a pinned label is not a range and no higher version can be inferred. Previously, such deps reported perpetual `outdated`; this was a bug (the locked version always differed from a range comparison result). |
+| `registry (no version selector)` | Manifest dep has no `#<version>` selector; `apm install` rejects it. |
+| `registry (invalid manifest range)` | Manifest carries a malformed semver range (e.g. `^1.0` missing patch); `apm install` rejects it. |
 
 ## Exit codes
 
