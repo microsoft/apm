@@ -128,7 +128,20 @@ def run(ctx: InstallContext) -> None:
             prev_dep = existing_lockfile.get_dependency(dep_key)
             if not prev_dep:
                 continue  # new package this install -- nothing stale yet
-            stale = detect_stale_files(prev_dep.deployed_files, new_deployed)
+            stale = set(detect_stale_files(prev_dep.deployed_files, new_deployed))
+            if not stale:
+                continue
+
+            # Cross-package file protection (#1831): do not remove a file
+            # that another currently-installed package still deploys.
+            # Without this guard, updating pkg-a (which dropped shared.md)
+            # would delete the file even though pkg-b still deploys it.
+            other_deployed: set = set()
+            for other_key, other_files in package_deployed_files.items():
+                if other_key != dep_key:
+                    other_deployed.update(other_files)
+            stale = stale - other_deployed
+
             if not stale:
                 continue
 
