@@ -66,6 +66,16 @@
 #          target: copilot
 #          packages:
 #            - microsoft/apm-sample-package
+#
+# 5. Pin a specific apm CLI version (newer than the action's default):
+#
+#    imports:
+#      - uses: shared/apm.md
+#        with:
+#          apm-version: '0.20.0'
+#          target: copilot
+#          packages:
+#            - microsoft/apm-sample-package
 
 import-schema:
   packages:
@@ -157,6 +167,16 @@ import-schema:
       faster bundles. The shared workflow runs apm-action in isolated mode,
       so any apm.yml in the consumer repo is intentionally ignored -- this
       input is the sole target signal.
+
+  # apm CLI version (overrides apm-action's pinned default)
+  apm-version:
+    type: string
+    required: false
+    description: >
+      apm CLI version for apm-action to install (e.g. '0.20.0'). Omit to use
+      the action's pinned default. Pin explicitly for reproducibility. Applied
+      to both the Pack and Restore apm-action steps so the CLI version cannot
+      skew between packing and restoring.
 
 jobs:
   apm-prep:
@@ -370,6 +390,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token || secrets.GH_AW_PLUGINS_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
         with:
+          apm-version: ${{ github.aw.import-inputs.apm-version }}
           dependencies: ${{ steps.list.outputs.deps }}
           isolated: 'true'
           pack: 'true'
@@ -450,6 +471,7 @@ steps:
   - name: Restore APM packages (all bundles)
     uses: microsoft/apm-action@v1.7.2
     with:
+      apm-version: ${{ github.aw.import-inputs.apm-version }}
       bundles-file: /tmp/gh-aw/apm-bundle-list.txt
 ---
 
