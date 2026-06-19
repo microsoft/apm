@@ -191,12 +191,12 @@ class TestCommandExecutor:
 
 class TestExpandEnvVars:
     def test_expands_dollar_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("MY_TOKEN", "secret123")
-        assert _expand_env_vars("Bearer $MY_TOKEN") == "Bearer secret123"
+        monkeypatch.setenv("MY_HOST", "example.com")
+        assert _expand_env_vars("Host: $MY_HOST") == "Host: example.com"
 
     def test_expands_braced_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("MY_TOKEN", "secret456")
-        assert _expand_env_vars("Bearer ${MY_TOKEN}") == "Bearer secret456"
+        monkeypatch.setenv("MY_HOST", "example.com")
+        assert _expand_env_vars("Host: ${MY_HOST}") == "Host: example.com"
 
     def test_missing_var_becomes_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("NONEXISTENT", raising=False)
@@ -205,12 +205,40 @@ class TestExpandEnvVars:
     def test_no_vars_unchanged(self) -> None:
         assert _expand_env_vars("plain text") == "plain text"
 
+    def test_blocks_github_apm_pat(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GITHUB_APM_PAT", "ghp_secret123")
+        assert _expand_env_vars("Bearer ${GITHUB_APM_PAT}") == "Bearer "
+
+    def test_blocks_ado_apm_pat(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ADO_APM_PAT", "ado_secret")
+        assert _expand_env_vars("$ADO_APM_PAT") == ""
+
+    def test_blocks_token_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_tok")
+        assert _expand_env_vars("${GITHUB_TOKEN}") == ""
+
+    def test_blocks_secret_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MY_SECRET", "s3cr3t")
+        assert _expand_env_vars("$MY_SECRET") == ""
+
+    def test_blocks_password_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DB_PASSWORD", "pass123")
+        assert _expand_env_vars("${DB_PASSWORD}") == ""
+
+    def test_blocks_key_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("API_KEY", "key123")
+        assert _expand_env_vars("${API_KEY}") == ""
+
+    def test_allows_safe_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MY_HEADER_VALUE", "safe-value")
+        assert _expand_env_vars("${MY_HEADER_VALUE}") == "safe-value"
+
 
 # -- _build_hook_env --------------------------------------------------------
 
 
 class TestBuildHookEnv:
-    def test_inherits_parent_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_inherits_safe_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("MY_CUSTOM_VAR", "hello")
         hook = HookEntry(hook_type="command", event="post-install")
         env = _build_hook_env(hook)
@@ -220,6 +248,30 @@ class TestBuildHookEnv:
         hook = HookEntry(hook_type="command", event="post-install", env={"FOO": "bar"})
         env = _build_hook_env(hook)
         assert env.get("FOO") == "bar"
+
+    def test_strips_credential_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GITHUB_APM_PAT", "ghp_secret")
+        monkeypatch.setenv("ADO_APM_PAT", "ado_secret")
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_tok")
+        monkeypatch.setenv("MY_SECRET", "s3cr3t")
+        monkeypatch.setenv("DB_PASSWORD", "pass")
+        monkeypatch.setenv("API_KEY", "key")
+        monkeypatch.setenv("SAFE_VAR", "kept")
+        hook = HookEntry(hook_type="command", event="post-install")
+        env = _build_hook_env(hook)
+        assert "GITHUB_APM_PAT" not in env
+        assert "ADO_APM_PAT" not in env
+        assert "GITHUB_TOKEN" not in env
+        assert "MY_SECRET" not in env
+        assert "DB_PASSWORD" not in env
+        assert "API_KEY" not in env
+        assert env.get("SAFE_VAR") == "kept"
+
+    def test_preserves_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PATH", "/usr/bin:/bin")
+        hook = HookEntry(hook_type="command", event="post-install")
+        env = _build_hook_env(hook)
+        assert env.get("PATH") == "/usr/bin:/bin"
 
 
 # -- _resolve_cwd -----------------------------------------------------------

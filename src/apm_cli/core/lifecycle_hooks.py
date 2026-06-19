@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import platform
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -291,27 +292,33 @@ class LifecycleHookRunner:
         self._verbose = verbose
         self._project_root = project_root
 
-    def fire(self, event_name: str, event: LifecycleEvent) -> None:
+    def fire(self, event_name: str, event: LifecycleEvent) -> list[threading.Thread]:
         """Execute all hooks registered for *event_name*.
 
         Each hook runs in isolation -- a failure in one hook does not
         prevent subsequent hooks from running.
+
+        Returns a list of daemon threads started by HTTP hooks so
+        callers can optionally join them (e.g. for test/dry-run).
         """
         from apm_cli.core.hook_executors import execute_hook
 
         matching = [h for h in self._hooks if h.event == event_name]
         if not matching:
-            return
+            return []
 
+        threads: list[threading.Thread] = []
         for hook in matching:
             try:
-                execute_hook(
+                thread = execute_hook(
                     hook,
                     event,
                     logger=self._logger,
                     verbose=self._verbose,
                     project_root=self._project_root,
                 )
+                if thread is not None:
+                    threads.append(thread)
             except Exception:
                 # Fire-and-forget: swallow all errors.
                 _logger.debug(
@@ -324,6 +331,7 @@ class LifecycleHookRunner:
                     self._logger.verbose_detail(
                         f"[i] Lifecycle hook failed: {hook.hook_type} for {event_name}"
                     )
+        return threads
 
 
 # -- Convenience: build runner from file-based discovery -------------------

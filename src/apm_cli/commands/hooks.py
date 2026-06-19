@@ -71,7 +71,11 @@ def hooks(ctx: click.Context) -> None:
     try:
         from rich.table import Table
 
-        from apm_cli.utils.console import console
+        from apm_cli.utils.console import _get_console
+
+        console = _get_console()
+        if console is None:
+            raise ImportError("Rich console unavailable")
 
         table = Table(
             title="Lifecycle Hooks",
@@ -146,7 +150,11 @@ def hooks_test(event: str, verbose: bool) -> None:
         working_directory=project_root,
     )
 
-    runner.fire(event, synthetic_event)
+    threads = runner.fire(event, synthetic_event)
+
+    # Drain HTTP daemon threads so log entries are written before exit.
+    for t in threads:
+        t.join(timeout=15)
 
     _rich_success(
         f"'{event}' event fired. Check ~/.apm/logs/hooks.log for output.",
@@ -186,7 +194,11 @@ def hooks_init(force: bool) -> None:
     try:
         from rich.panel import Panel
 
-        from apm_cli.utils.console import console
+        from apm_cli.utils.console import _get_console
+
+        console = _get_console()
+        if console is None:
+            raise ImportError("Rich console unavailable")
 
         console.print(
             Panel(

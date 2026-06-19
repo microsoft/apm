@@ -37,6 +37,13 @@ _DEFAULT_COMMAND_TIMEOUT = 30
 # Pattern for $VAR or ${VAR} expansion in header values.
 _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
 
+# Credential variable denylist -- these must never be expanded into HTTP
+# headers or leaked to hook subprocesses. Matches names that END with these
+# suffixes (e.g. GITHUB_APM_PAT, API_KEY) but not unrelated names like PATH.
+_CREDENTIAL_DENYLIST = re.compile(
+    r"(?:_|^)(?:TOKEN|SECRET|PAT|KEY|PASSWORD|CREDENTIAL)(?:_|$)", re.IGNORECASE
+)
+
 
 # -- Hook output log -------------------------------------------------------
 
@@ -90,22 +97,35 @@ def execute_hook(
     logger: CommandLogger | None = None,
     verbose: bool = False,
     project_root: str | None = None,
-) -> None:
-    """Dispatch to the correct executor based on hook type."""
+) -> threading.Thread | None:
+    """Dispatch to the correct executor based on hook type.
+
+    Returns the daemon thread for HTTP hooks (so callers can optionally
+    join it), or None for command hooks and no-ops.
+    """
     if hook.hook_type == "http":
-        _execute_http(hook, event, logger=logger, verbose=verbose)
+        return _execute_http(hook, event, logger=logger, verbose=verbose)
     elif hook.hook_type == "command":
         _execute_command(hook, event, logger=logger, verbose=verbose, project_root=project_root)
+    return None
 
 
 # -- HTTP executor ----------------------------------------------------------
 
 
 def _expand_env_vars(value: str) -> str:
-    """Expand ``$VAR`` and ``${VAR}`` references in *value*."""
+    """Expand ``$VAR`` and ``${VAR}`` references in *value*.
+
+    Variables whose names match the credential denylist pattern
+    (TOKEN, SECRET, PAT, KEY, PASSWORD, CREDENTIAL) are never expanded
+    -- they resolve to an empty string to prevent accidental exfiltration.
+    """
 
     def _replace(match: re.Match) -> str:
         var_name = match.group(1) or match.group(2)
+        if _CREDENTIAL_DENYLIST.search(var_name):
+            _logger.debug("Blocked credential variable expansion: %s", var_name)
+            return ""
         return os.environ.get(var_name, "")
 
     return _ENV_VAR_PATTERN.sub(_replace, value)
@@ -117,19 +137,21 @@ def _execute_http(
     *,
     logger: CommandLogger | None = None,
     verbose: bool = False,
-) -> None:
+) -> threading.Thread | None:
     """Send an HTTP POST to the hook URL in a daemon thread.
+
+    Returns the started thread so callers can optionally join it.
 
     Security hardening:
     - HTTPS-only (rejects ``http://``)
     - No redirect following
     - Configurable timeout (default 10s)
-    - Header values support ``$ENV_VAR`` expansion
+    - Header values support ``$ENV_VAR`` expansion (credential vars blocked)
     """
     url = hook.url
     if not url:
         _logger.debug("HTTP hook has no URL, skipping")
-        return
+        return None
 
     parsed = urlparse(url)
     if parsed.scheme != "https":
@@ -138,11 +160,11 @@ def _execute_http(
                 f"[i] HTTP hook rejected: URL must use https (got {parsed.scheme}://)"
             )
         _logger.debug("Rejecting non-HTTPS hook URL: %s", url)
-        return
+        return None
 
     if not parsed.hostname:
         _logger.debug("HTTP hook URL has no hostname: %s", url)
-        return
+        return None
 
     # Build headers with env-var expansion.
     request_headers: dict[str, str] = {"Content-Type": "application/json"}
@@ -182,7 +204,9 @@ def _execute_http(
     thread.start()
 
     if verbose and logger:
-        logger.verbose_detail(f"[i] {event.event} event sent to {hostname}")
+        logger.verbose_detail(f"[i] {event.event} event dispatched to {hostname}")
+
+    return thread
 
 
 # -- Command executor -------------------------------------------------------
@@ -244,10 +268,11 @@ def _execute_command(
 def _build_hook_env(hook: HookEntry) -> dict[str, str]:
     """Build the environment dict for command hooks.
 
-    Inherits the current process environment and merges any extra
-    ``env`` entries from the hook definition.
+    Inherits the current process environment but strips any variables
+    whose names match the credential denylist (TOKEN, SECRET, PAT, KEY,
+    PASSWORD, CREDENTIAL) to prevent accidental exfiltration via hooks.
     """
-    env = dict(os.environ)
+    env = {k: v for k, v in os.environ.items() if not _CREDENTIAL_DENYLIST.search(k)}
     if hook.env:
         env.update(hook.env)
     return env

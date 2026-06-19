@@ -29,8 +29,8 @@ APM is a build-time dependency manager for AI agent configuration. It performs f
 APM has no runtime footprint. Once `apm install` or `apm compile` completes, the process exits.
 
 - **No runtime component.** APM generates files then terminates. It does not run alongside your application.
-- **No network calls after install.** All network activity (git clone/fetch) occurs during dependency resolution. There are no callbacks, webhooks, or phone-home requests.
-- **No arbitrary code execution.** APM does not execute scripts from packages, evaluate expressions in templates, or run downloaded code.
+- **No network calls after install (by default).** All network activity (git clone/fetch) occurs during dependency resolution. Opt-in [lifecycle hooks](/apm/enterprise/lifecycle-hooks/) may send HTTPS POST requests if explicitly configured by the user or policy administrator.
+- **No arbitrary code execution (by default).** APM does not execute scripts from packages, evaluate expressions in templates, or run downloaded code. Opt-in [lifecycle hooks](/apm/enterprise/lifecycle-hooks/) may execute shell commands if explicitly configured; credential variables are stripped from the hook environment.
 - **No access to application data.** APM never reads databases, API responses, application state, or user data.
 - **No persistent background processes.** APM does not install daemons, services, or scheduled tasks.
 - **No telemetry or data collection.** APM collects no usage data, analytics, or diagnostics. Nothing is transmitted to Microsoft or any third party.
