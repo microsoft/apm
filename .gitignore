@@ -86,3 +86,5 @@ server.pid
 build/apm-*/
 copilot-scratch/
 .local/
+# gh-aw audit/debug artifacts (downloaded by `gh aw audit`/`gh aw logs`)
+.github/aw/logs/
