@@ -124,6 +124,19 @@ harness, see [Primitives and targets](../../concepts/primitives-and-targets/).
 
 Rule sync to Cursor (`.cursor/rules/`), Claude Code (`.claude/rules/`), Windsurf (`.windsurf/rules/`), and Kiro (`.kiro/steering/`) is automatic and idempotent -- re-running `apm install` adopts unchanged rules without rewriting them.
 
+## What to commit
+
+Commit `apm.yml`, `apm.lock.yaml`, and every harness directory APM writes to
+(`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, `.windsurf/`,
+`.kiro/`). Committed deployed files give teammates and cloud Copilot instant agent
+context on clone, before they run `apm install`.
+
+Add `apm_modules/` to `.gitignore` -- it is the package cache and is rebuilt from
+the lockfile on every `apm install`. APM adds the entry automatically on first install.
+
+See the [Quickstart](../../quickstart/#what-to-commit) for the full table and
+rationale.
+
 ## Transitive dependencies and the lockfile
 
 `apm install` resolves the full dependency graph, not just your

@@ -131,7 +131,7 @@ def test_skill_subset_rejects_empty_strings(tmp_path):
 
 
 def test_skill_subset_deduplicates_preserving_order(tmp_path):
-    """Duplicate skill names are removed; first occurrence order is kept."""
+    """Duplicate skill names are removed; result is sorted."""
     apm_yml = tmp_path / "apm.yml"
     _make_apm_yml(apm_yml)
 
@@ -139,4 +139,4 @@ def test_skill_subset_deduplicates_preserving_order(tmp_path):
         apm_yml, skill_subset=("skill-b", "skill-a", "skill-b", "skill-a", "skill-c")
     )
 
-    assert dep_ref.skill_subset == ["skill-b", "skill-a", "skill-c"]
+    assert dep_ref.skill_subset == ["skill-a", "skill-b", "skill-c"]

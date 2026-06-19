@@ -339,6 +339,50 @@ class TestLoadPolicyFromString(unittest.TestCase):
         self.assertEqual(policy.unmanaged_files.effective_action, "ignore")
         self.assertIsNone(policy.unmanaged_files.directories)
 
+    def test_unmanaged_exclude_null_is_transparent(self):
+        """`exclude: null` -> None (no opinion / transparent during merge)."""
+        yaml_str = textwrap.dedent("""
+            unmanaged_files:
+              action: warn
+              exclude: null
+        """)
+        policy, _ = load_policy(yaml_str)
+        self.assertIsNone(policy.unmanaged_files.exclude)
+
+    def test_unmanaged_exclude_empty_list_is_explicit(self):
+        """`exclude: []` -> empty tuple (explicit override, not transparent)."""
+        yaml_str = textwrap.dedent("""
+            unmanaged_files:
+              action: warn
+              exclude: []
+        """)
+        policy, _ = load_policy(yaml_str)
+        self.assertEqual(policy.unmanaged_files.exclude, ())
+
+    def test_unmanaged_exclude_list_parses_to_tuple(self):
+        """`exclude: [..]` -> tuple of globs."""
+        yaml_str = textwrap.dedent("""
+            unmanaged_files:
+              action: warn
+              exclude:
+                - .github/copilot-instructions.md
+                - .claude/settings.local.json
+        """)
+        policy, _ = load_policy(yaml_str)
+        self.assertEqual(
+            policy.unmanaged_files.exclude,
+            (".github/copilot-instructions.md", ".claude/settings.local.json"),
+        )
+
+    def test_unmanaged_exclude_absent_is_none(self):
+        """Key absent -> None (no opinion / transparent during merge)."""
+        yaml_str = textwrap.dedent("""
+            unmanaged_files:
+              action: warn
+        """)
+        policy, _ = load_policy(yaml_str)
+        self.assertIsNone(policy.unmanaged_files.exclude)
+
     def test_absent_dependencies_block_gives_none_deny_and_require(self):
         """Entirely absent dependencies: block -> deny=None, require=None (Fix 2)."""
         policy, _ = load_policy("name: p\nversion: '1'\nenforcement: warn\n")

@@ -644,8 +644,8 @@ class TestRegistryPackageResolverPickVersion:
         with pytest.raises(RegistryResolutionError, match="no version constraint"):
             resolver._pick_version(dep_ref, versions)
 
-    def test_non_semver_constraint_raises(self) -> None:
-        """A non-semver reference raises RegistryResolutionError."""
+    def test_non_semver_constraint_raises_when_not_found(self) -> None:
+        """A non-semver reference that doesn't match any published version raises."""
         dep_ref = DependencyReference(
             repo_url="acme/tool",
             source="registry",
@@ -656,8 +656,24 @@ class TestRegistryPackageResolverPickVersion:
             VersionEntry(version="1.0.0", digest="sha256:a", published_at="2024-01-01T00:00:00Z")
         ]
         resolver = self._make_resolver()
-        with pytest.raises(RegistryResolutionError, match="not a valid semver range"):
+        with pytest.raises(RegistryResolutionError, match="not found"):
             resolver._pick_version(dep_ref, versions)
+
+    def test_non_semver_constraint_exact_matches(self) -> None:
+        """A non-semver reference that exactly matches a published version succeeds."""
+        dep_ref = DependencyReference(
+            repo_url="acme/tool",
+            source="registry",
+            registry_name="myregistry",
+            reference="stable",
+        )
+        versions = [
+            VersionEntry(version="stable", digest="sha256:a", published_at="2024-01-01T00:00:00Z"),
+            VersionEntry(version="1.0.0", digest="sha256:b", published_at="2024-01-02T00:00:00Z"),
+        ]
+        resolver = self._make_resolver()
+        result = resolver._pick_version(dep_ref, versions)
+        assert result.version == "stable"
 
     def test_no_matching_version_raises(self) -> None:
         """When no version matches the range, RegistryResolutionError is raised."""

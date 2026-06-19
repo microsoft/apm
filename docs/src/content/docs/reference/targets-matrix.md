@@ -24,13 +24,14 @@ see [Primitive types](./primitive-types/).
 | cursor          | `.cursor/`             |     [x]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [x]  | [x] |
 | codex           | `.codex/` + `.agents/` |     [ ]      |   [ ]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
+| antigravity     | `.agents/`             |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/`           |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | kiro            | `.kiro/`               |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
-Gemini, and Codex by default (see [Skills convergence](#skills-convergence)
+Gemini, Antigravity, and Codex by default (see [Skills convergence](#skills-convergence)
 below). Claude, Windsurf, and Kiro keep target-native skill directories.
 
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
@@ -64,9 +65,10 @@ list before `compile` or `install`.
 | windsurf | `.windsurf/` directory                        |
 | kiro     | `.kiro/` directory                            |
 
-`agent-skills` is never auto-detected but is a canonical target: select it
-with `--target` or list it in a project's `apm.yml` `targets:` field so
-contributors running plain `apm install` pick it up automatically.
+`agent-skills` and `antigravity` are never auto-detected but are canonical
+targets: select them with `--target` or list them in a project's `apm.yml`
+`targets:` field so contributors running plain `apm install` pick them up
+automatically.
 
 `copilot-cowork`, `copilot-app`, and `openclaw` are experimental targets
 that require `apm experimental enable <name>` before use. They are selected
@@ -145,6 +147,20 @@ Gemini CLI.
   - skills: `.agents/skills/<name>/SKILL.md`
   - hooks: merged into `.gemini/settings.json`
 - **Compile output.** `GEMINI.md`. Gemini CLI does not read per-file rules from `.gemini/rules/`, so `instructions` is compile-only.
+
+## antigravity
+
+Google Antigravity CLI (`agy`), successor to Gemini CLI.
+
+- **Detection.** None -- explicit-only. Antigravity shares the cross-tool `.agents/` root, so there is no unique auto-detect signal. Select it with `--target antigravity` or list it in `apm.yml` `targets:`. It is not part of `--target all`. Project-scope MCP writes are opt-in: `.agents/` must already exist (APM does not create it automatically for MCP).
+- **Deploy directory.** `.agents/` (project scope); `~/.gemini/` (user scope).
+- **Supported primitives.** instructions, skills, hooks, mcp.
+- **File conventions.**
+  - instructions: `.agents/rules/<name>.md`
+  - skills: `.agents/skills/<name>/SKILL.md`
+  - hooks: `.agents/hooks.json` (Antigravity's native schema: `PreToolUse`/`PostToolUse`/`PreInvocation`/`PostInvocation`/`Stop`)
+  - mcp: `.agents/mcp_config.json` (project; `mcpServers` key) or `~/.gemini/config/mcp_config.json` (user)
+- **Compile output.** `AGENTS.md`.
 
 ## opencode
 

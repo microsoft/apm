@@ -140,10 +140,15 @@ def detect_ref_change(
     # (the user expanded/contracted the range away from the locked
     # version and we need to re-resolve).
     if manifest_source == "registry":
-        return not _registry_range_covers_locked_version(
-            dep_ref.reference,
-            locked_dep.version,
-        )
+        from apm_cli.deps.registry.semver import is_semver_range
+
+        ref = dep_ref.reference
+        if not is_semver_range(ref or ""):
+            # Non-semver selector (branch/label/exact tag): the resolver
+            # exact-matches it, so drift is a literal mismatch -- not the
+            # range-coverage test, which only applies to semver ranges.
+            return ref != locked_dep.version
+        return not _registry_range_covers_locked_version(ref, locked_dep.version)
 
     # Git-source semver-range deps (issue #1488): the manifest carries
     # a semver range (``^1.2.0``) while the lockfile records the

@@ -37,6 +37,7 @@ from ..utils.github_host import default_host
 from ..utils.path_security import ensure_path_within
 from ._io import atomic_write
 from ._shared import iter_semver_tags
+from .auth_helpers import resolve_token_for_host
 from .diagnostics import BuildDiagnostic
 from .errors import (
     BuildError,
@@ -454,28 +455,21 @@ class MarketplaceBuilder:
             return resolver
 
     def _resolve_token_for_host(self, host: str, *, org: str | None = None) -> str | None:
-        """Resolve an auth token for *host* via ``AuthResolver``.
-
-        Returns ``None`` -- letting ``git`` fall back to ambient credentials
-        -- when offline, when no token is configured for the host, or when
-        ``AuthResolver`` raises.  Never raises.
-        """
+        """Resolve an auth token for *host* via the shared marketplace helper."""
         if self._options.offline:
             return None
-        try:
-            from ..core.auth import AuthResolver  # lazy import
+        from ..core.auth import AuthResolver  # lazy import
 
-            resolver = self._auth_resolver
-            if resolver is None:
-                resolver = AuthResolver()
-                self._auth_resolver = resolver
-            ctx = resolver.resolve(host) if org is None else resolver.resolve(host, org=org)
-            if ctx.token:
-                logger.debug("Resolved token for host %s (source=%s)", host, ctx.source)
-                return ctx.token
-        except Exception:
-            logger.debug("Could not resolve token for host %s", host, exc_info=True)
-        return None
+        resolver = self._auth_resolver
+        if resolver is None:
+            resolver = AuthResolver()
+            self._auth_resolver = resolver
+        return resolve_token_for_host(
+            host,
+            offline=self._options.offline,
+            org=org,
+            auth_resolver=resolver,
+        )
 
     def _ensure_auth(self) -> None:
         """Lazily resolve host classification and GitHub token.
@@ -722,7 +716,7 @@ class MarketplaceBuilder:
         # Determine tag pattern: entry > build > default
         pattern = entry.tag_pattern or yml.build.tag_pattern
 
-        tag_rx = build_tag_regex(pattern)
+        tag_rx = build_tag_regex(pattern, name=entry.name)
         refs = resolver.list_remote_refs(owner_repo)
 
         # Filter tags matching the pattern and extract versions

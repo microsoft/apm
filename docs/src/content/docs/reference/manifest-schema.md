@@ -115,7 +115,19 @@ Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm ini
 |---|---|
 | **Type** | `string` |
 | **Required** | OPTIONAL |
-| **Description** | SPDX license identifier (e.g. `MIT`, `Apache-2.0`). |
+| **Description** | SPDX license expression (e.g. `MIT`, `Apache-2.0`, `(MIT OR Apache-2.0)`) declaring the package license. |
+
+The value is recorded verbatim into a consumer's lockfile as
+[`declared_license`](../lockfile-spec/) at resolve time, syntax-validated
+offline against the bundled SPDX id set, and surfaced by
+[`apm lock export`](../cli/lock/#export-sbom-inventory). Special tokens
+(`UNLICENSED`, `SEE LICENSE IN <file>`) and unrecognized strings are accepted
+and recorded as a named license -- a declaration is never rejected and never
+blocks packing or publishing. APM records what the manifest *declares*; it
+never reads or concludes a license from `LICENSE` file text. When omitted, the
+SBOM marks the component unknown -- CycloneDX omits the license entry and SPDX
+writes the literal `NOASSERTION` -- and `apm pack` / `apm publish` print an
+actionable nudge (the authoring path only).
 
 ### 3.6. `target`
 
@@ -124,7 +136,7 @@ Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm ini
 | **Type** | `string` or `list<string>` |
 | **Required** | OPTIONAL |
 | **Default** | Auto-detect from folder presence (see below). |
-| **Allowed values** | `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `all` |
+| **Allowed values** | `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `all` |
 
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
@@ -157,6 +169,7 @@ A plural alias `targets:` (YAML list only) is also accepted and takes precedence
 | `opencode` | Emits to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/`. |
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/`. |
 | `gemini` | Emits `GEMINI.md` and deploys to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json`. |
+| `antigravity` | Emits `AGENTS.md` and deploys rules to `.agents/rules/`, skills to `.agents/skills/`, hooks to `.agents/hooks.json`, MCP to `.agents/mcp_config.json`. Explicit-only (not auto-detected; not part of `--target all`). |
 | `windsurf` | Emits `AGENTS.md` and deploys to `.windsurf/rules/`, `.windsurf/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json`. |
 | `kiro` | Emits `AGENTS.md` and deploys to `.kiro/steering/`, `.kiro/skills/`, `.kiro/hooks/`, `.kiro/settings/mcp.json`. |
 | `all` | All targets. Cannot be combined with other values in a list. |
@@ -502,6 +515,15 @@ A plain registry reference: `io.github.github/github-mcp-server`.
 | `url` | `string` | Conditional | | Endpoint URL. REQUIRED when `registry: false` and `transport` is `http`, `sse`, or `streamable-http`. |
 | `command` | `string` | Conditional | Single binary path; no embedded whitespace unless `args` is also present | Binary path. REQUIRED when `registry: false` and `transport` is `stdio`. |
 
+Any additional keys not listed above are preserved as **extra passthrough fields** and round-tripped verbatim into the generated target manifests. This allows harness-specific configuration (e.g. Claude Code's `oauth` block for remote-MCP OAuth client config) to be declared in `apm.yml` and appear in the generated config without modification. A warning is emitted at parse time naming each non-standard key.
+
+Two guardrails apply:
+
+- **Reserved keys are rejected.** A passthrough key whose name collides with a modeled field above -- `name`, `transport`/`type`, `command`, `url`, `headers`, `env`, `args`, `tools`, `version`, `registry`, `package` (and the Codex `http_headers` alias) -- is dropped with a warning. This prevents a passthrough value from shadowing or redirecting a modeled field. Extra keys also never overwrite a value the target adapter set itself.
+- **Extra keys broadcast to every target.** Passthrough keys are written uniformly into the generated config for **all** installed harnesses, not just the one that understands them. A Claude Code `oauth` block (`clientId`/`callbackPort`), for example, is emitted into every target's server entry; harnesses that do not recognise the key ignore it. Per-harness scoping is tracked as a future enhancement (see issue #1806).
+
+> A future release may require passthrough keys to be nested under an explicit `extra:` block and stop auto-capturing bare top-level keys (fail-closed), via a deprecation path. See issue #1806.
+
 #### 4.2.3. Validation Rules for Self-Defined Servers
 
 When `registry` is `false`, the following constraints apply:
@@ -531,6 +553,15 @@ dependencies:
       args: ["--port", "3000"]
       env:
         API_KEY: ${{ secrets.KEY }}
+
+    # Self-defined remote server with harness-specific extra keys
+    - name: slack
+      registry: false
+      transport: http
+      url: https://mcp.slack.com/mcp
+      oauth:
+        clientId: "<pre-registered-client-id>"
+        callbackPort: 3118
 ```
 
 #### 4.2.4. Variable References in `headers` and `env`
@@ -819,11 +850,13 @@ The first three `source` forms target a remote git host; the second and third na
 
 When `sourceBase` is set, relative package sources compose onto that base. For example, `sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace` plus `source: review` emits `https://gitlab.corp.example.com/platform/agent-marketplace/review`. This includes two-segment `owner/repo` values and deeper relative paths; only host-prefixed sources, full HTTPS URLs, and local `./` sources are overrides that ignore `sourceBase`. Without `sourceBase`, existing `owner/repo` behavior is unchanged and single-segment relative sources are rejected.
 
+`sourceBase` works with any supported host. An Azure DevOps base such as `sourceBase: https://dev.azure.com/contoso/platform/_git` plus `source: agent-skills` emits `https://dev.azure.com/contoso/platform/_git/agent-skills`; the `dev.azure.com` host is preserved through to the consumer, which resolves it as an Azure DevOps dependency rather than rewriting it onto the default host.
+
 A relative `source` may use arbitrary path depth. A value whose leading segments form a host-prefixed shape (`<host.tld>/<owner>/<repo>`) or a full `https://` URL is always treated as a per-entry override and ignores `sourceBase`. A value that looks like it is trying to name a host (a dotted, FQDN-like first segment) but does **not** form a valid override shape is rejected at parse time rather than silently composed onto the base -- this avoids a confused-deputy footgun. To target a different host, use an explicit host-prefixed override or a full `https://` URL instead of a relative source.
 
 `sourceBase` must start with `https://`, use a FQDN host, include at least one path segment, and omit userinfo, ports, query strings, fragments, and a trailing `.git`. Each path segment uses letters, digits, `.`, `_`, or `-`; empty, `.` and `..` segments are refused.
 
-Non-default hosts authenticate via the standard APM token chain -- see the [authentication guide](../getting-started/authentication/) for the per-host-class lookup order. A token resolved for the default host is never forwarded to a non-default host.
+Non-default hosts -- GitHub Enterprise, self-hosted GitLab, and Azure DevOps -- authenticate via the standard APM token chain -- see the [authentication guide](../getting-started/authentication/) for the per-host-class lookup order. A token resolved for the default host is never forwarded to a non-default host (an Azure DevOps `ADO_APM_PAT`, for example, is only ever offered to `dev.azure.com`).
 
 ### 7.6. Complete Marketplace Block
 

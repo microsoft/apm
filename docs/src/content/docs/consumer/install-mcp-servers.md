@@ -43,7 +43,24 @@ dependencies:
       url: https://mcp.linear.app/sse
       headers:
         Authorization: "Bearer ${LINEAR_TOKEN}"
+
+    # 4. Self-defined remote with harness-specific extra keys
+    - name: slack
+      registry: false
+      transport: http
+      url: https://mcp.slack.com/mcp
+      oauth:
+        clientId: "<pre-registered-client-id>"
+        callbackPort: 3118
 ```
+
+Unknown keys like `oauth` above are **passthrough fields**: they are
+preserved and written into the generated config for every harness you
+install (so a Claude Code `oauth` block reaches all targets; harnesses
+that do not recognise it ignore it). Keys that collide with a modeled
+field (`command`, `url`, `headers`, `env`, ...) are rejected with a
+warning so they cannot redirect a server. See
+[Manifest Schema](../../reference/manifest-schema/) for the full rules.
 
 The full grammar (overlays, `${input:...}` variables, `tools:`
 allowlists, `package:` selection) is in
@@ -89,6 +106,7 @@ for the full required-vs-optional runtime config rule.
 | Cursor | `.cursor/mcp.json` | project (only if `.cursor/` exists) | JSON `mcpServers` |
 | Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `~/.codex/config.toml` (`-g`) | both | TOML `[mcp_servers.*]` |
 | Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
+| Antigravity CLI | `.agents/mcp_config.json` (project, only if `.agents/` exists) or `~/.gemini/config/mcp_config.json` (`-g`) | both | JSON `mcpServers` |
 | OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
 | Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
@@ -129,7 +147,7 @@ declare one in `apm.yml`. (#1335)
 `apm install -g --mcp NAME` is a deliberate carve-out: it routes the
 write to each runtime's user-scope MCP config (for example, Copilot CLI to
 `~/.copilot/mcp-config.json`, Claude Code to `~/.claude.json`, Codex CLI to
-`~/.codex/config.toml`, Gemini CLI to `~/.gemini/settings.json`, Windsurf to
+`~/.codex/config.toml`, Gemini CLI to `~/.gemini/settings.json`, Antigravity CLI to `~/.gemini/config/mcp_config.json`, Windsurf to
 `~/.codeium/windsurf/mcp_config.json`, Kiro to `~/.kiro/settings/mcp.json`,
 and JetBrains Copilot to its OS-specific user config). It does not consult
 the project-scope `targets:` whitelist -- user-scope writes are by

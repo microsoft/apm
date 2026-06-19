@@ -15,7 +15,7 @@ apm publish [OPTIONS]
 
 `apm publish` uploads a package version to a configured registry via `PUT /v1/packages/{owner}/{repo}/versions/{version}`.
 
-By default the command **auto-packs** a flat registry archive in the project root (`{name}-{version}.tar.gz`) containing `apm.yml`, `.apm/`, and standard root-level documentation files (`README.md`, `CHANGELOG.md`, `LICENSE` / `LICENCE`, matched case-insensitively) at the tarball root. Symlinks are excluded. This is **not** the plugin bundle layout from [`apm pack`](../pack/) (`{name}-{version}/plugin.json`).
+By default the command **auto-packs** a flat registry archive in the project root (`{name}-{version}.zip`) containing `apm.yml`, `.apm/`, and standard root-level documentation files (`README.md`, `CHANGELOG.md`, `LICENSE` / `LICENCE`, matched case-insensitively) at the archive root. Symlinks are excluded. This is **not** the plugin bundle layout from [`apm pack`](../pack/) (`{name}-{version}/plugin.json`).
 
 Requires the experimental `registries` feature:
 
@@ -31,30 +31,29 @@ The project's `apm.yml` must declare a `registries:` block with at least one reg
 |---|---|---|
 | `--registry NAME` | _(required when multiple registries configured)_ | Registry name from the `registries:` block. |
 | `--package OWNER/REPO` | _(required)_ | Package identity to publish as (e.g. `acme/my-skill`). |
-| `--tarball PATH` | auto-pack | Path to a pre-built `.tar.gz`. Skips auto-pack. |
+| `--zip PATH` | auto-pack | Path to a pre-built `.zip`. Skips auto-pack. (renamed from `--tarball` in v0.20.0) |
 | `--dry-run` | off | Print what would be uploaded; do not call the registry. |
-| `--verbose`, `-v` | off | Show auto-pack details (tarball path). |
+| `--verbose`, `-v` | off | Show auto-pack details (archive path). |
 
 ## Examples
 
 Auto-pack and publish when only one registry is configured:
 
 ```bash
-apm publish
+apm publish --package acme/my-skill
 ```
 
 Choose a registry and preview first:
 
 ```bash
-apm publish --registry corp-main --dry-run -v
-apm publish --registry corp-main
+apm publish --package acme/my-skill --registry corp-main --dry-run -v
+apm publish --package acme/my-skill --registry corp-main
 ```
 
-Publish a skill-only or custom tarball:
+Publish a pre-built zip:
 
 ```bash
-tar czf my-skill-0.0.1.tar.gz apm.yml SKILL.md
-apm publish --tarball my-skill-0.0.1.tar.gz
+apm publish --package acme/my-skill --zip ./build/my-skill-0.0.1.zip
 ```
 
 Specify the registry package identity explicitly:
@@ -68,9 +67,9 @@ apm publish --package acme/my-package --registry corp-main
 ### Successful publish
 
 ```
-[i] Publishing acme/my-package@1.2.3 to corp-main …
+[i] Publishing acme/my-package@1.2.3 to corp-main...
 [+] Published acme/my-package@1.2.3
-  digest      : sha256:abc123…
+  digest      : sha256:abc123...
   published_at: 2026-05-26T10:15:00Z
   registry    : https://registry.example.com/apm/corp-main
 ```
@@ -78,15 +77,15 @@ apm publish --package acme/my-package --registry corp-main
 With `--verbose`, auto-pack also prints:
 
 ```
-[i] Packing flat registry archive -> my-package-1.2.3.tar.gz
+[i] Packing flat registry archive -> my-package-1.2.3.zip
 ```
 
 ### Dry run
 
 ```
 [i] Would publish acme/my-package@1.2.3 to corp-main (https://registry.example.com/apm/corp-main)
-[i]   tarball : /path/to/project/my-package-1.2.3.tar.gz  (12,345 bytes)
-[i] (dry-run — nothing uploaded)
+[i]   archive : /path/to/project/my-package-1.2.3.zip  (12,345 bytes)
+[i] (dry-run -- nothing uploaded)
 ```
 
 ### Common errors
@@ -95,12 +94,12 @@ With `--verbose`, auto-pack also prints:
 |---|---|
 | `requires the experimental registries feature` | Run `apm experimental enable registries`. |
 | `apm.yml not found` | Run from the package root. |
-| `requires a flat APM package (.apm/ directory)` | Add `.apm/` or pass `--tarball`. |
+| `requires a flat APM package (.apm/ directory)` | Add `.apm/` or pass `--zip`. |
 | `Multiple registries configured` | Pass `--registry NAME`. |
-| `Version '…' already exists … immutable` | HTTP 409 — bump `version:` in `apm.yml`. |
-| `Registry rejected the package (validation failed)` | HTTP 422 — tarball layout invalid for the server. |
-| `Forbidden — your token does not have publish permission` | HTTP 403 — check `APM_REGISTRY_TOKEN_{NAME}`. |
-| `401` / credentials remediation | HTTP 401 — token missing or expired. |
+| `Version '...' already exists ... immutable` | HTTP 409 -- bump `version:` in `apm.yml`. |
+| `Registry rejected the package (validation failed)` | HTTP 422 -- archive layout invalid for the server. |
+| `Forbidden -- your token does not have publish permission` | HTTP 403 -- check `APM_REGISTRY_TOKEN_{NAME}`. |
+| `401` / credentials remediation | HTTP 401 -- token missing or expired. |
 
 Some registries return `201` with an empty body; APM still treats the upload as successful when the HTTP status is success-class.
 
@@ -114,7 +113,7 @@ Some registries return `201` with an empty body; APM still treats the upload as 
 
 ## Related
 
-- [Registries (guide)](../../../guides/registries/) — declare registries, auth, default routing, and policy.
-- [`apm pack`](../pack/) — plugin bundles and marketplace artifacts (different layout from registry publish).
-- [`apm install`](../install/) — consumer side; installs registry packages with `resolved_hash` verification.
-- [Registry HTTP API](../../registry-http-api/) — wire contract for `PUT …/versions/{version}`.
+- [Registries (guide)](../../../guides/registries/) -- declare registries, auth, default routing, and policy.
+- [`apm pack`](../pack/) -- plugin bundles and marketplace artifacts (different layout from registry publish).
+- [`apm install`](../install/) -- consumer side; installs registry packages with `resolved_hash` verification.
+- [Registry HTTP API](../../registry-http-api/) -- wire contract for `PUT .../versions/{version}`.

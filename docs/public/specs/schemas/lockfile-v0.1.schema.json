@@ -63,6 +63,7 @@
         "constraint": { "type": "string" },
         "resolved_tag": { "type": "string" },
         "resolved_at": { "type": "string" },
+        "declared_license": { "type": "string" },
         "attestations": { "type": "object" }
       },
       "patternProperties": { "^x-[a-z][a-z0-9-]*$": {} },
