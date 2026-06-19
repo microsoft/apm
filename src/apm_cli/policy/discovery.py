@@ -1113,10 +1113,17 @@ def _fetch_ado_contents(
     api_url = build_ado_api_url(org, project, repo, file_path, host=host)
     repo_ref = f"{host}/{org}/{project}/{repo}"
 
-    token = _get_token_for_host(host)
+    # ADO uses Basic auth with PAT (username empty, password is the PAT).
+    # Prefer ADO_APM_PAT env var, falling back to _get_token_for_host().
+    ado_pat = os.environ.get("ADO_APM_PAT", "")
     headers: dict[str, str] = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    if ado_pat:
+        basic_cred = base64.b64encode(f":{ado_pat}".encode()).decode()
+        headers["Authorization"] = f"Basic {basic_cred}"
+    else:
+        token = _get_token_for_host(host)
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
 
     try:
         resp = requests.get(api_url, headers=headers, timeout=10, allow_redirects=False)

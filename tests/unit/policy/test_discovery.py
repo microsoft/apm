@@ -820,9 +820,9 @@ class TestPolicyRepoCandidates(unittest.TestCase):
 class TestFetchAdoContents(unittest.TestCase):
     """Test _fetch_ado_contents for Azure DevOps Items API."""
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value="ado-token")
+    @patch.dict(os.environ, {"ADO_APM_PAT": "my-ado-pat"}, clear=False)
     @patch("apm_cli.policy.discovery.requests.get")
-    def test_success(self, mock_get, _mock_token):
+    def test_success(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = VALID_POLICY_YAML
@@ -831,10 +831,14 @@ class TestFetchAdoContents(unittest.TestCase):
         content, error = _fetch_ado_contents("contoso", "_apm", "_apm", "apm-policy.yml")
         self.assertIsNone(error)
         self.assertEqual(content, VALID_POLICY_YAML)
+        # Verify Basic auth header was sent with ADO_APM_PAT
+        call_kwargs = mock_get.call_args
+        headers = call_kwargs[1].get("headers", {})
+        self.assertIn("Basic", headers.get("Authorization", ""))
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value="ado-token")
+    @patch.dict(os.environ, {"ADO_APM_PAT": "my-ado-pat"}, clear=False)
     @patch("apm_cli.policy.discovery.requests.get")
-    def test_404_returns_error(self, mock_get, _mock_token):
+    def test_404_returns_error(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 404
         mock_get.return_value = mock_resp
@@ -843,9 +847,9 @@ class TestFetchAdoContents(unittest.TestCase):
         self.assertIsNone(content)
         self.assertIn("404", error)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value="ado-token")
+    @patch.dict(os.environ, {"ADO_APM_PAT": "my-ado-pat"}, clear=False)
     @patch("apm_cli.policy.discovery.requests.get")
-    def test_401_returns_error(self, mock_get, _mock_token):
+    def test_401_returns_error(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 401
         mock_get.return_value = mock_resp
@@ -854,9 +858,9 @@ class TestFetchAdoContents(unittest.TestCase):
         self.assertIsNone(content)
         self.assertIn("401", error)
 
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value="ado-token")
+    @patch.dict(os.environ, {"ADO_APM_PAT": "my-ado-pat"}, clear=False)
     @patch("apm_cli.policy.discovery.requests.get")
-    def test_redirect_rejected(self, mock_get, _mock_token):
+    def test_redirect_rejected(self, mock_get):
         mock_resp = MagicMock()
         mock_resp.status_code = 302
         mock_resp.headers = {"Location": "https://evil.example.com"}
@@ -866,6 +870,7 @@ class TestFetchAdoContents(unittest.TestCase):
         self.assertIsNone(content)
         self.assertIn("redirect", error.lower())
 
+    @patch.dict(os.environ, {"ADO_APM_PAT": ""}, clear=False)
     @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
     @patch("apm_cli.policy.discovery.requests.get")
     def test_no_auth_token_still_sends_request(self, mock_get, _mock_token):
@@ -881,6 +886,22 @@ class TestFetchAdoContents(unittest.TestCase):
         call_kwargs = mock_get.call_args
         headers = call_kwargs[1].get("headers", {})
         self.assertNotIn("Authorization", headers)
+
+    @patch.dict(os.environ, {"ADO_APM_PAT": ""}, clear=False)
+    @patch("apm_cli.policy.discovery._get_token_for_host", return_value="fallback-token")
+    @patch("apm_cli.policy.discovery.requests.get")
+    def test_fallback_to_bearer_when_no_ado_pat(self, mock_get, _mock_token):
+        """When ADO_APM_PAT is empty, falls back to Bearer via _get_token_for_host."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = VALID_POLICY_YAML
+        mock_get.return_value = mock_resp
+
+        _content, error = _fetch_ado_contents("contoso", "_apm", "_apm", "apm-policy.yml")
+        self.assertIsNone(error)
+        call_kwargs = mock_get.call_args
+        headers = call_kwargs[1].get("headers", {})
+        self.assertEqual(headers.get("Authorization"), "Bearer fallback-token")
 
 
 class TestGetTokenForHost(unittest.TestCase):
