@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import click
 
@@ -130,7 +131,7 @@ def hooks_test(event: str, verbose: bool) -> None:
     project_root = str(Path.cwd())
     runner = build_runner_from_context(project_root=project_root, verbose=verbose)
 
-    matching = [h for h in runner._hooks if h.event == event]
+    matching = runner.hooks_for_event(event)
     if not matching:
         _rich_warning(
             f"No hooks registered for '{event}'. Create one with: apm hooks init",
@@ -207,7 +208,7 @@ def hooks_init(force: bool) -> None:
                 "to add your hooks\n"
                 "  2. Run [cyan]apm hooks validate[/cyan] to check for errors\n"
                 "  3. Run [cyan]apm hooks test post-install[/cyan] to dry-run\n",
-                title="[i] Getting Started",
+                title="Getting Started",
                 style="cyan",
             )
         )
@@ -358,7 +359,11 @@ def _validate_hook_file(path: Path, source: str) -> list[str]:
                 url = entry.get("url")
                 if not url:
                     errors.append(f"{prefix}: http hook needs 'url' field")
-                elif not url.startswith("https://"):
-                    errors.append(f"{prefix}: URL must use https:// (got '{url[:30]}')")
+                else:
+                    parsed = urlparse(url)
+                    if parsed.scheme.lower() != "https":
+                        errors.append(f"{prefix}: URL must use https:// scheme")
+                    if parsed.username or parsed.password:
+                        errors.append(f"{prefix}: URL must not contain embedded credentials")
 
     return errors

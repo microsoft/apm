@@ -53,7 +53,7 @@ import copy
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 from git.exc import GitCommandError
@@ -81,6 +81,7 @@ from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, 
 from ._helpers import UnknownPackageError, _find_apm_yml, resolve_requested_packages
 
 if TYPE_CHECKING:
+    from ..core.command_logger import CommandLogger
     from ..models.dependency.reference import DependencyReference
 
 
@@ -615,9 +616,9 @@ def _run_dep_update(
 def _fire_update_hooks(
     event_name: str,
     *,
-    apm_package,
-    scope,
-    logger,
+    apm_package: Any,
+    scope: Any,
+    logger: CommandLogger | None,
     verbose: bool,
 ) -> None:
     """Build a hook runner and fire an update lifecycle event.

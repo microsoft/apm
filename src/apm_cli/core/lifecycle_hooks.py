@@ -140,7 +140,13 @@ class HookEntry:
 
     @property
     def effective_command(self) -> str | None:
-        """Resolve the command to run on the current platform."""
+        """Resolve the command to run on the current platform.
+
+        On Windows, prefer ``command`` (cross-platform) over ``bash``
+        because bash may not be available.  On Unix, prefer ``bash``.
+        """
+        if platform.system() == "Windows":
+            return self.command or self.bash
         return self.bash or self.command
 
     @property
@@ -332,6 +338,10 @@ class LifecycleHookRunner:
                         f"[i] Lifecycle hook failed: {hook.hook_type} for {event_name}"
                     )
         return threads
+
+    def hooks_for_event(self, event_name: str) -> list[HookEntry]:
+        """Return hooks registered for *event_name* (public API)."""
+        return [h for h in self._hooks if h.event == event_name]
 
 
 # -- Convenience: build runner from file-based discovery -------------------

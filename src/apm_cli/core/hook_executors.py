@@ -45,6 +45,20 @@ _CREDENTIAL_DENYLIST = re.compile(
 )
 
 
+def _redact_url_credentials(url: str) -> str:
+    """Strip ``user:password@`` from a URL before logging."""
+    try:
+        parsed = urlparse(url)
+        if not parsed.netloc or "@" not in parsed.netloc:
+            return url
+        host = parsed.hostname or ""
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+        return parsed._replace(netloc=host).geturl()
+    except (ValueError, TypeError):
+        return url
+
+
 # -- Hook output log -------------------------------------------------------
 
 
@@ -177,6 +191,7 @@ def _execute_http(
     hostname = parsed.hostname
 
     event_name = event.event
+    safe_url = _redact_url_credentials(url)
 
     def _send() -> None:
         try:
@@ -192,13 +207,13 @@ def _execute_http(
             _append_to_hook_log(
                 event_name,
                 "http",
-                url,
+                safe_url,
                 stdout=f"HTTP {resp.status_code}",
                 status="ok" if resp.ok else "error",
             )
         except Exception as exc:
-            _logger.debug("HTTP POST failed for %s", url, exc_info=True)
-            _append_to_hook_log(event_name, "http", url, stderr=str(exc), status="error")
+            _logger.debug("HTTP POST failed for %s", safe_url, exc_info=True)
+            _append_to_hook_log(event_name, "http", safe_url, stderr=str(exc), status="error")
 
     thread = threading.Thread(target=_send, daemon=True)
     thread.start()
@@ -220,7 +235,12 @@ def _execute_command(
     verbose: bool = False,
     project_root: str | None = None,
 ) -> None:
-    """Execute a shell command with the event payload on stdin."""
+    """Execute a shell command with the event payload on stdin.
+
+    Command hooks run synchronously (bounded by ``timeout``), unlike HTTP
+    hooks which fire in a background thread.  The timeout default is 30s
+    per hook -- multiple slow hooks can accumulate, but each is capped.
+    """
     cmd = hook.effective_command
     if not cmd:
         _logger.debug("Command hook has no command string, skipping")

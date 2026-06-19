@@ -210,6 +210,10 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
+| `apm hooks` | List all discovered lifecycle hooks (policy, user, project) | `--verbose` |
+| `apm hooks test EVENT` | Fire a synthetic event through matching hooks (dry-run) | `--verbose` |
+| `apm hooks init` | Scaffold a starter `.apm/hooks.json` file | `--force` to overwrite |
+| `apm hooks validate` | Validate all discovered hook files for schema errors | -- |
 | `apm config` | Show current configuration | -- |
 | `apm config get [KEY]` | Get a config value (`auto-integrate`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `copilot-cowork-skills-dir`, `mcp-registry-url`) | -- |
 | `apm config set KEY VALUE` | Set a config value (`auto-integrate`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `mcp-registry-url`; `copilot-cowork-skills-dir` requires `apm experimental enable copilot-cowork`) | -- |

@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from apm_cli.install.request import InstallRequest
 
 if TYPE_CHECKING:
+    from apm_cli.core.lifecycle_hooks import LifecycleEvent, LifecycleHookRunner
     from apm_cli.models.results import InstallResult
 
 
@@ -65,16 +66,16 @@ class InstallService:
         if request.frozen:
             self._enforce_frozen(request)
 
-        runner = self._build_hook_runner(request)
-        event = self._build_event("pre-install", request)
-        runner.fire("pre-install", event)
-
         # Local import keeps service module import-cheap and matches the
         # existing pipeline's lazy-import discipline.
         try:
             from apm_cli.install.pipeline import run_install_pipeline
         except ImportError as e:  # pragma: no cover -- defensive
             raise InstallNotAvailableError(f"APM dependency system not available: {e}") from e
+
+        runner = self._build_hook_runner(request)
+        event = self._build_event("pre-install", request)
+        runner.fire("pre-install", event)
 
         result = run_install_pipeline(
             request.apm_package,
@@ -111,7 +112,7 @@ class InstallService:
     # -- Lifecycle hook helpers ---------------------------------------------
 
     @staticmethod
-    def _build_hook_runner(request: InstallRequest):
+    def _build_hook_runner(request: InstallRequest) -> LifecycleHookRunner:
         """Build a :class:`LifecycleHookRunner` from the request context."""
         from apm_cli.core.lifecycle_hooks import build_runner_from_context
 
@@ -127,7 +128,7 @@ class InstallService:
         )
 
     @staticmethod
-    def _build_event(event_name: str, request: InstallRequest):
+    def _build_event(event_name: str, request: InstallRequest) -> LifecycleEvent:
         """Build a :class:`LifecycleEvent` from the request."""
         from apm_cli.core.lifecycle_hooks import LifecycleEvent, PackageInfo
 
