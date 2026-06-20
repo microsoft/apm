@@ -352,7 +352,8 @@ def _handle_global_flag(dry_run: bool) -> int:
         display_path = _display_user_path(apm_modules)
         _rich_error(
             f"User-scope apm_modules not found: {display_path}. "
-            "Run 'apm install -g <package>' to install packages globally."
+            "Run 'apm install -g <package>' to install packages globally.",
+            symbol="error",
         )
         return 1
 
@@ -399,11 +400,14 @@ def _handle_global_flag(dry_run: bool) -> int:
         changed_count = written_count + would_write_count
         if changed_count:
             verb = "Would compile" if dry_run else "Compiled"
-            _rich_success(
+            message = (
                 f"{verb} {changed_count} user-scope root context file(s); "
-                f"{unchanged_count} unchanged.",
-                symbol="check",
+                f"{unchanged_count} unchanged."
             )
+            if dry_run:
+                _rich_info(message, symbol="preview")
+            else:
+                _rich_success(message, symbol="check")
         else:
             _rich_info("No user-scope root context files changed.", symbol="info")
 
@@ -984,8 +988,9 @@ def _run_compilation(
     default=False,
     help=(
         "Compile user-scope root context files (~/.claude/CLAUDE.md, etc.) "
-        "from ~/.apm/apm_modules. Cannot be combined with --watch or --root; "
-        "use with --dry-run to preview changes."
+        "from ~/.apm/apm_modules. Cannot be combined with project-output "
+        "flags (--target, --all, --watch, --root, --output, etc.); use with "
+        "--dry-run to preview changes."
     ),
 )
 @click.pass_context
@@ -1053,39 +1058,34 @@ def compile(  # noqa: PLR0913 -- Click handler
     # --global: compile user-scope root context files from ~/.apm/apm_modules.
     # Must be checked before --watch / --root guards so we return early.
     if global_:
+        from click.core import ParameterSource
 
-        def _explicit_option(name: str) -> bool:
-            try:
-                from click.core import ParameterSource
-
-                return ctx.get_parameter_source(name) is not ParameterSource.DEFAULT
-            except Exception:
-                return False
-
-        invalid_options: list[tuple[object, str]] = [
-            (compile_all, "--all"),
-            (target, "--target"),
-            (_explicit_option("output"), "--output"),
-            (chatmode, "--chatmode"),
-            (validate, "--validate"),
-            (single_agents, "--single-agents"),
-            (local_only, "--local-only"),
-            (clean, "--clean"),
-            (no_dedup, "--no-dedup"),
-            (no_links, "--no-links"),
-            (_explicit_option("with_constitution"), "--with-constitution/--no-constitution"),
-            (legacy_skill_paths, "--legacy-skill-paths"),
-        ]
-        for value, flag in invalid_options:
-            if value:
-                raise click.UsageError(f"--global is not valid with {flag}")
-        if watch:
-            raise click.UsageError("--global is not valid with --watch")
-        if root:
-            raise click.UsageError("--global is not valid with --root")
+        allowed_with_global = {"global_", "dry_run"}
+        flag_names = {
+            "chatmode": "--chatmode",
+            "clean": "--clean",
+            "compile_all": "--all",
+            "legacy_skill_paths": "--legacy-skill-paths",
+            "local_only": "--local-only",
+            "no_dedup": "--no-dedup/--force-instructions",
+            "no_links": "--no-links",
+            "output": "--output",
+            "root": "--root",
+            "single_agents": "--single-agents",
+            "target": "--target",
+            "validate": "--validate",
+            "verbose": "--verbose",
+            "watch": "--watch",
+            "with_constitution": "--with-constitution/--no-constitution",
+        }
+        for name in sorted(set(ctx.params) - allowed_with_global):
+            if ctx.get_parameter_source(name) is ParameterSource.DEFAULT:
+                continue
+            flag = flag_names.get(name, f"--{name.replace('_', '-')}")
+            raise click.UsageError(f"--global is not valid with {flag}")
         rc = _handle_global_flag(dry_run=dry_run)
         if rc != 0:
-            sys.exit(rc)
+            ctx.exit(rc)
         return
 
     # --root + --watch is rejected: ``_watch_mode`` uses bare-relative

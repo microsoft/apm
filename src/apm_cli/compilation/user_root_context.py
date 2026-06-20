@@ -241,7 +241,7 @@ def compile_user_root_contexts(
                 results.append(UserRootCompileResult(scoped.name, output_path, f"error:{exc}"))
                 continue
 
-            if _COPILOT_ROOT_GENERATED_MARKER not in existing:
+            if not existing.lstrip().startswith(_COPILOT_ROOT_GENERATED_MARKER):
                 log.info(
                     "user_root_context: %s is hand-authored (no APM marker) -- not overwriting",
                     output_path,
@@ -263,6 +263,18 @@ def compile_user_root_contexts(
 
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
+            from ..security.gate import WARN_POLICY, SecurityGate
+
+            verdict = SecurityGate.scan_text(content, str(output_path), policy=WARN_POLICY)
+            actionable = verdict.critical_count + verdict.warning_count
+            if actionable:
+                log.warning(
+                    "user_root_context: %s contains %s hidden character(s) "
+                    "-- run 'apm audit --file %s' to inspect",
+                    output_path,
+                    actionable,
+                    output_path,
+                )
             output_path.write_text(content, encoding="utf-8")
             log.debug("user_root_context: wrote %s", output_path)
             results.append(UserRootCompileResult(scoped.name, output_path, "written"))

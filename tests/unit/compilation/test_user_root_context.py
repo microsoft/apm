@@ -252,6 +252,40 @@ class TestSkippedHandAuthored:
         existing = output_path.read_text()
         assert existing == "# My custom Claude context\nSome notes here.\n"
 
+    def test_hand_authored_marker_mention_not_first_line(self, tmp_path):
+        """A quoted marker in hand-authored content does not grant overwrite ownership."""
+        from apm_cli.compilation.agents_compiler import _COPILOT_ROOT_GENERATED_MARKER
+        from apm_cli.compilation.user_root_context import compile_user_root_contexts
+
+        source_root = tmp_path / "source"
+        source_root.mkdir()
+        apm_modules = source_root / "apm_modules"
+        apm_modules.mkdir()
+
+        deploy_root = tmp_path / ".claude"
+        deploy_root.mkdir(parents=True, exist_ok=True)
+        output_path = deploy_root / "CLAUDE.md"
+        original = (
+            "# My custom Claude context\n"
+            "Documenting APM marker behavior:\n"
+            f"{_COPILOT_ROOT_GENERATED_MARKER}\n"
+        )
+        output_path.write_text(original, encoding="utf-8")
+
+        target = _make_target("claude", "claude", deploy_root=deploy_root)
+        instr = _make_instruction("global", apply_to=None, content="Use type hints")
+        primitives = MagicMock()
+        primitives.instructions = [instr]
+
+        with patch(
+            "apm_cli.primitives.discovery.discover_primitives",
+            return_value=primitives,
+        ):
+            result = compile_user_root_contexts([target], source_root)
+
+        assert result[0].status == "skipped-hand-authored"
+        assert output_path.read_text(encoding="utf-8") == original
+
 
 # ---------------------------------------------------------------------------
 # test_written_new_file
