@@ -972,7 +972,7 @@ class TestUnpackBundle:
 
         output_dir = tmp_path / "output"
         output_dir.mkdir()
-        with pytest.raises(ValueError, match=r"symlink"):
+        with pytest.raises(ValueError, match=r"Symlinks and hard links are not supported"):
             unpack_bundle(tar_path, output_dir=output_dir)
 
     def test_unpack_legacy_lockfile_name(self, tmp_path: Path) -> None:

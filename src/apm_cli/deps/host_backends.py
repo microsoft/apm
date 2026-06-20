@@ -441,6 +441,7 @@ class GenericGitBackend:
     These hosts have heterogeneous APIs but support a common shape:
     HTTPS / SSH clones plus a Gitea-compatible Contents API at
     ``/api/v1/`` with a ``/api/v3/`` fallback for v3-only deployments.
+    GitLab-class hosts use :class:`GitLabBackend` instead.
     """
 
     host_info: HostInfo
@@ -521,6 +522,11 @@ _BACKEND_BY_KIND: dict[str, type] = {
 }
 
 
+def _host_type_for_backend_dispatch(dep_ref: DependencyReference | None) -> str | None:
+    """Return a structural host_type from dependency-like refs."""
+    return getattr(dep_ref, "host_type", None)
+
+
 def backend_for(
     dep_ref: DependencyReference | None,
     auth_resolver: AuthResolver,
@@ -546,6 +552,7 @@ def backend_for(
     Returns:
         The :class:`HostBackend` for the resolved host.
     """
+    host_type = _host_type_for_backend_dispatch(dep_ref)
     if dep_ref is not None and dep_ref.host:
         host = dep_ref.host
         port = getattr(dep_ref, "port", None)
@@ -559,7 +566,11 @@ def backend_for(
     if dep_ref is not None:
         try:
             if dep_ref.is_azure_devops():
-                info = auth_resolver.classify_host(host, port=port)
+                info = auth_resolver.classify_host(
+                    host,
+                    port=port,
+                    host_type=host_type,
+                )
                 if not isinstance(info, HostInfo):
                     info = HostInfo(
                         host=host,
@@ -572,7 +583,11 @@ def backend_for(
         except (AttributeError, TypeError):
             pass
 
-    info = auth_resolver.classify_host(host, port=port)
+    info = auth_resolver.classify_host(
+        host,
+        port=port,
+        host_type=host_type,
+    )
     cls: type | None = None
     if isinstance(info, HostInfo):
         cls = _BACKEND_BY_KIND.get(info.kind)

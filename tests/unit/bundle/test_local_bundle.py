@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import stat
 import tarfile
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -119,6 +121,24 @@ def _make_plugin_tarball(tmp_path: Path, bundle_dir: Path) -> Path:
     return archive_path
 
 
+def _make_plugin_zip(tmp_path: Path, bundle_dir: Path) -> Path:
+    """Archive a bundle directory into .zip."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    archive_path = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for fp in sorted(bundle_dir.rglob("*")):
+            if fp.is_symlink() or not fp.is_file():
+                continue
+            zf.write(fp, arcname=f"{bundle_dir.name}/{fp.relative_to(bundle_dir).as_posix()}")
+    return archive_path
+
+
+def _write_zip_member(archive_path: Path, member_name: str, data: bytes) -> None:
+    """Write a single file entry to a zip archive."""
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(member_name, data)
+
+
 # ---------------------------------------------------------------------------
 # Detection tests
 # ---------------------------------------------------------------------------
@@ -196,6 +216,67 @@ class TestDetectLocalBundle:
         assert result is None
         # No new apm-local-bundle-* directory left behind.
         assert after - before == set()
+
+
+class TestDetectZipBundleSecurity:
+    """Security regression tests for detect_local_bundle() zip extraction."""
+
+    def test_detect_zip_bundle(self, tmp_path: Path) -> None:
+        bundle = _make_plugin_bundle(tmp_path / "src")
+        archive = _make_plugin_zip(tmp_path / "archives", bundle)
+
+        result = detect_local_bundle(archive)
+
+        assert result is not None
+        assert result.is_archive is True
+        assert result.package_id == "test-plugin"
+
+    def test_detect_zip_path_traversal_rejected(self, tmp_path: Path) -> None:
+        archive = tmp_path / "evil.zip"
+        _write_zip_member(archive, "../escape.txt", b"x")
+
+        with pytest.raises(ValueError, match=r"path-traversal entry"):
+            detect_local_bundle(archive)
+
+    def test_detect_zip_absolute_path_rejected(self, tmp_path: Path) -> None:
+        archive = tmp_path / "evil.zip"
+        _write_zip_member(archive, "/escape.txt", b"x")
+
+        with pytest.raises(ValueError, match=r"path-traversal entry"):
+            detect_local_bundle(archive)
+
+    def test_detect_zip_symlink_rejected(self, tmp_path: Path) -> None:
+        archive = tmp_path / "evil.zip"
+        link_info = zipfile.ZipInfo("bundle/skills/link")
+        link_info.external_attr = (stat.S_IFLNK | 0o777) << 16
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr(link_info, "target")
+
+        with pytest.raises(ValueError, match=r"symlink"):
+            detect_local_bundle(archive)
+
+    def test_detect_zip_bomb_entries_rejected(self, tmp_path: Path, monkeypatch) -> None:
+        archive = tmp_path / "bomb.zip"
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("bundle/plugin.json", "{}")
+            zf.writestr("bundle/one.txt", "1")
+            zf.writestr("bundle/two.txt", "2")
+        monkeypatch.setattr("apm_cli.bundle.local_bundle._MAX_ZIP_ENTRIES", 2)
+
+        with pytest.raises(ValueError, match=r"entries"):
+            detect_local_bundle(archive)
+
+    def test_detect_zip_bomb_size_rejected_from_streamed_bytes(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        archive = tmp_path / "bomb.zip"
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("bundle/plugin.json", "{}")
+            zf.writestr("bundle/payload.txt", b"x" * 32)
+        monkeypatch.setattr("apm_cli.bundle.local_bundle._MAX_ZIP_UNCOMPRESSED", 16)
+
+        with pytest.raises(ValueError, match=r"uncompressed size"):
+            detect_local_bundle(archive)
 
 
 # ---------------------------------------------------------------------------

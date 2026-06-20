@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.integration.targets import RULE_FORMATS
+from apm_cli.utils.console import _rich_echo
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 from apm_cli.utils.patterns import parse_apply_to, yaml_double_quote
@@ -32,6 +34,16 @@ class InstructionIntegrator(BaseIntegrator):
     * Claude Code: ``.claude/rules/`` (``.md`` format, applyTo: -> paths:)
     * Gemini CLI: compile-only (GEMINI.md) -- no per-file rule deployment
     """
+
+    # Map format_id -> converter method.  Built once at class load time;
+    # avoids rebuilding the dict on every ``_render_instruction`` call.
+    _FORMAT_CONVERTERS: ClassVar[dict[str, str]] = {
+        "cursor_rules": "_convert_to_cursor_rules",
+        "claude_rules": "_convert_to_claude_rules",
+        "windsurf_rules": "_convert_to_windsurf_rules",
+        "kiro_steering": "_convert_to_kiro_steering",
+        "antigravity_rules": "_convert_to_antigravity_rules",
+    }
 
     def find_instruction_files(self, package_path: Path) -> list[Path]:
         """Find all .instructions.md files in a package.
@@ -53,6 +65,25 @@ class InstructionIntegrator(BaseIntegrator):
         content, links_resolved = self.resolve_links(content, source, target)
         target.write_text(content, encoding="utf-8")
         return links_resolved
+
+    def _render_instruction(self, source: Path, target: Path, fmt: str) -> tuple[str, int]:
+        """Render *source* to the content it would deploy for *fmt*, WITHOUT
+        writing. Returns ``(content, links_resolved)``.
+
+        Used both by the ``copy_instruction_*`` writers and by the rule-dir
+        deploy loop to decide adopt-vs-rewrite against the *transformed* output
+        (a format-transformed rule is never byte-identical to its source).
+
+        The transforming formats are exactly :data:`targets.RULE_FORMATS` --
+        the single home for "which formats transform".  Any ``fmt`` outside it
+        is copied verbatim (identity transform).
+        """
+        content = source.read_text(encoding="utf-8")
+        if fmt in RULE_FORMATS:
+            converter = getattr(self, self._FORMAT_CONVERTERS[fmt])
+            content = converter(content)
+        content, links_resolved = self.resolve_links(content, source, target)
+        return content, links_resolved
 
     # ------------------------------------------------------------------
     # Target-driven API (data-driven dispatch)
@@ -77,6 +108,13 @@ class InstructionIntegrator(BaseIntegrator):
         * ``claude_rules``    -- convert ``applyTo:`` to ``paths:`` frontmatter
         * ``windsurf_rules``  -- convert ``applyTo:`` to ``trigger: glob`` frontmatter
         * anything else       -- copy verbatim (identity transform)
+
+        ``managed_files`` is consulted for collision detection on identity
+        targets only.  For rule-dir targets (``mapping.output_compare``) it is
+        deliberately NOT consulted: those files are APM-owned per-file
+        (``target_name`` derives 1:1 from a source instruction), so an existing
+        file there is always APM's and is adopted-or-rewritten regardless of
+        whether it was recorded as managed (apm#1662).
         """
         mapping = target.primitives.get("instructions")
         if not mapping:
@@ -108,7 +146,12 @@ class InstructionIntegrator(BaseIntegrator):
                 pkg_source=getattr(getattr(package_info, "package", None), "source", None),
             )
 
-        needs_rename = fmt in ("cursor_rules", "claude_rules", "windsurf_rules")
+        # APM-owned rule dirs (.claude/rules, .cursor/rules, .windsurf/rules):
+        # the deployed file is a format-transform of its source and the target
+        # name derives 1:1 from the source, so APM owns it per-file. Gates both
+        # the filename rename and the output-comparison / collision-guard
+        # bypass. Single source of truth: mapping.output_compare (targets.py).
+        apm_owned_rule_dir = mapping.output_compare
 
         files_integrated = 0
         files_skipped = 0
@@ -117,7 +160,7 @@ class InstructionIntegrator(BaseIntegrator):
         total_links_resolved = 0
 
         for source_file in instruction_files:
-            if needs_rename:
+            if apm_owned_rule_dir:
                 stem = source_file.name
                 if stem.endswith(".instructions.md"):
                     stem = stem[: -len(".instructions.md")]
@@ -134,6 +177,41 @@ class InstructionIntegrator(BaseIntegrator):
 
             rel_path = portable_relpath(target_path, project_root)
 
+            if apm_owned_rule_dir:
+                # Path containment already validated by ensure_path_within above.
+                # Structural invariant: target_name derives 1:1 from source, so
+                # ANY existing file here is APM's -- must hold for every format
+                # with output_compare=True. managed_files is not consulted.
+                #
+                # The deployed file is format-transformed, so it is never
+                # byte-identical to the *source* -- the source-based adopt always
+                # misses, the file gets treated as a user-authored collision and
+                # skipped, and it falls out of ``local_deployed_files`` so later
+                # edits never propagate (apm#1662). Instead compare against the
+                # transformed *output*: adopt when up-to-date (no churn), else
+                # (re)write. Always record the path so it stays managed on the
+                # next run.
+                new_content, links_resolved = self._render_instruction(
+                    source_file, target_path, fmt
+                )
+                if (
+                    not force
+                    and target_path.exists()
+                    and target_path.read_text(encoding="utf-8") == new_content
+                ):
+                    files_adopted += 1
+                    target_paths.append(target_path)
+                    if diagnostics is not None and getattr(diagnostics, "verbose", False):
+                        _rich_echo(f"  [=] adopted-unchanged: {rel_path}", color="dim")
+                    continue
+                target_path.write_text(new_content, encoding="utf-8")
+                total_links_resolved += links_resolved
+                files_integrated += 1
+                target_paths.append(target_path)
+                if diagnostics is not None and getattr(diagnostics, "verbose", False):
+                    _rich_echo(f"  [*] rewritten: {rel_path}", color="dim")
+                continue
+
             skip, adopted = self._check_adopt_or_skip(
                 target_path, source_file, rel_path, managed_files, force, diagnostics, target_paths
             )
@@ -144,15 +222,7 @@ class InstructionIntegrator(BaseIntegrator):
                     files_skipped += 1
                 continue
 
-            if fmt == "cursor_rules":
-                links_resolved = self.copy_instruction_cursor(source_file, target_path)
-            elif fmt == "claude_rules":
-                links_resolved = self.copy_instruction_claude(source_file, target_path)
-            elif fmt == "windsurf_rules":
-                links_resolved = self.copy_instruction_windsurf(source_file, target_path)
-            else:
-                links_resolved = self.copy_instruction(source_file, target_path)
-
+            links_resolved = self.copy_instruction(source_file, target_path)
             total_links_resolved += links_resolved
             files_integrated += 1
             target_paths.append(target_path)
@@ -194,6 +264,9 @@ class InstructionIntegrator(BaseIntegrator):
             elif mapping.format_id == "claude_rules":
                 # Do not use a broad legacy glob for Claude rules to avoid
                 # deleting user-authored .md files under .claude/rules/.
+                legacy_pattern = None
+            elif mapping.format_id == "kiro_steering":
+                # Do not delete user-authored steering markdown under .kiro/steering/.
                 legacy_pattern = None
             else:
                 legacy_pattern = "*.instructions.md"
@@ -440,9 +513,7 @@ class InstructionIntegrator(BaseIntegrator):
 
         Converts ``applyTo:`` → ``globs:`` frontmatter and resolves links.
         """
-        content = source.read_text(encoding="utf-8")
-        content = self._convert_to_cursor_rules(content)
-        content, links_resolved = self.resolve_links(content, source, target)
+        content, links_resolved = self._render_instruction(source, target, "cursor_rules")
         target.write_text(content, encoding="utf-8")
         return links_resolved
 
@@ -539,11 +610,57 @@ class InstructionIntegrator(BaseIntegrator):
         Converts ``applyTo:`` to ``trigger: glob`` + ``globs:`` frontmatter
         and resolves links.
         """
-        content = source.read_text(encoding="utf-8")
-        content = self._convert_to_windsurf_rules(content)
-        content, links_resolved = self.resolve_links(content, source, target)
+        content, links_resolved = self._render_instruction(source, target, "windsurf_rules")
         target.write_text(content, encoding="utf-8")
         return links_resolved
+
+    # ------------------------------------------------------------------
+    # Kiro Steering (.md with inclusion frontmatter)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _convert_to_kiro_steering(content: str) -> str:
+        """Convert APM instructions to Kiro steering format.
+
+        Kiro steering files use ``inclusion: always`` for unconditional
+        guidance and ``inclusion: fileMatch`` plus ``fileMatchPattern`` for
+        path-scoped guidance. APM's ``applyTo`` frontmatter is the source of
+        truth for that scoping.
+        """
+        import yaml
+
+        body = content
+        apply_to = ""
+
+        fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
+        if fm_match:
+            body = content[fm_match.end() :]
+            try:
+                fm = yaml.safe_load(fm_match.group(1)) or {}
+            except Exception:
+                fm = {}
+            raw_apply_to = fm.get("applyTo", "")
+            if isinstance(raw_apply_to, list):
+                apply_to = ",".join(str(item) for item in raw_apply_to)
+            else:
+                apply_to = str(raw_apply_to).strip()
+
+        safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
+        globs = parse_apply_to(safe_apply_to)
+
+        parts = ["---"]
+        if globs:
+            parts.append("inclusion: fileMatch")
+            if len(globs) == 1:
+                parts.append(f"fileMatchPattern: {yaml_double_quote(globs[0])}")
+            else:
+                parts.append("fileMatchPattern:")
+                parts.extend(f"  - {yaml_double_quote(g)}" for g in globs)
+        else:
+            parts.append("inclusion: always")
+        parts.append("---")
+
+        return "\n".join(parts) + "\n\n" + body.lstrip("\n")
 
     # ------------------------------------------------------------------
     # Claude Code Rules (.md with paths: frontmatter)
@@ -585,14 +702,24 @@ class InstructionIntegrator(BaseIntegrator):
         # No applyTo -> unconditional rule, return body without frontmatter
         return body.lstrip("\n")
 
+    @staticmethod
+    def _convert_to_antigravity_rules(content: str) -> str:
+        """Convert APM instruction content to Antigravity CLI rules format.
+
+        Strips YAML frontmatter (Antigravity rules are plain markdown with
+        no frontmatter) and returns the body as-is.
+        """
+        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
+        if fm_match:
+            return fm_match.string[fm_match.end() :].lstrip("\n")
+        return content
+
     def copy_instruction_claude(self, source: Path, target: Path) -> int:
         """Copy instruction file converted to Claude Code rules format.
 
         Converts ``applyTo:`` to ``paths:`` frontmatter and resolves links.
         """
-        content = source.read_text(encoding="utf-8")
-        content = self._convert_to_claude_rules(content)
-        content, links_resolved = self.resolve_links(content, source, target)
+        content, links_resolved = self._render_instruction(source, target, "claude_rules")
         target.write_text(content, encoding="utf-8")
         return links_resolved
 

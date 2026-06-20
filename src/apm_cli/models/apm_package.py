@@ -157,6 +157,21 @@ def _parse_registries_block(data: dict, apm_yml_path: Path):
     return registries_map, default_name
 
 
+def routes_unscoped_to_registry(dep: Any) -> bool:
+    """True when *dep* is an unscoped shorthand a default registry would claim.
+
+    Single source of truth for the routing predicate, shared with the install
+    CLI's probe-skip gate (``should_skip_github_probe_for_dep``) so the two
+    cannot drift apart.
+
+    Objects that lack an ``is_local`` attribute are treated as local (returns
+    False) -- fail-closed for unknown dep types.
+    """
+    return getattr(dep, "source", None) not in {"git", "registry"} and not getattr(
+        dep, "is_local", True
+    )
+
+
 def _route_unscoped_to_default_registry(
     dep_list: list,
     default_registry: str,
@@ -169,17 +184,19 @@ def _route_unscoped_to_default_registry(
       the project-level ``registries.default``).
     * String-shorthand entries with any ref — when a default registry is
       configured, all shorthands route there regardless of whether the ref
-      looks like semver. Use the explicit ``- git:`` object form to pin a
-      dependency to Git when a default registry is active.
+      looks like semver. A semver-shaped but malformed ref (e.g. ``^1.0``) is
+      rejected later, at resolve time, so that read-only consumers of the
+      manifest (``apm compile``, ``apm outdated``) are not aborted by a load.
+      Use the explicit ``- git:`` object form to pin a dependency to Git when a
+      default registry is active.
     """
     for dep in dep_list:
         if not isinstance(dep, DependencyReference):
             continue
         if dep.source == "registry" and dep.registry_name is None:
             dep.registry_name = default_registry
-        elif dep.source not in {"git", "registry"} and not dep.is_local:
-            ref = dep.reference
-            if ref:
+        elif routes_unscoped_to_registry(dep):
+            if dep.reference:
                 dep.source = "registry"
                 dep.registry_name = default_registry
             else:
@@ -248,8 +265,15 @@ class APMPackage:
     # Top-level ``registries:`` block per docs/proposals/registry-api.md §3.1.
     # Maps registry name -> base URL. None when no ``registries:`` block is present.
     registries: dict[str, str] | None = None
-    # Value of ``registries.default:`` — routes unscoped deps to this registry.
+    # Value of ``registries.default:`` -- routes unscoped deps to this registry.
     default_registry: str | None = None
+
+    # Top-level ``allowExecutables:`` block -- per-package approval for
+    # executable primitives (hooks, MCP servers, bin/ executables).
+    # Mirrors npm v12's ``allowScripts`` in ``package.json``.
+    # Keys are package handles with pinned version; values map exec type
+    # to boolean (e.g. ``{"owner/repo#v1.0": {"hooks": true}}``).
+    allow_executables: dict[str, dict[str, bool]] | None = None
 
     @classmethod
     def _parse_dependency_dict(cls, raw_deps: dict, label: str = "") -> dict:
@@ -412,6 +436,11 @@ class APMPackage:
             for dep_list in _iter_apm_dependency_lists(dependencies, dev_dependencies):
                 _route_unscoped_to_default_registry(dep_list, default_registry)
 
+        # Parse allowExecutables block (npm v12-style approval gate).
+        from ..security.executables import parse_allow_executables
+
+        allow_executables = parse_allow_executables(data)
+
         # Parse package content type
         pkg_type = None
         if "type" in data and data["type"] is not None:
@@ -481,6 +510,7 @@ class APMPackage:
             includes=includes,
             registries=registries,
             default_registry=default_registry,
+            allow_executables=allow_executables,
         )
         _apm_yml_cache[cache_key] = result
         return result
@@ -519,6 +549,10 @@ class APMPackage:
             for dep in (self.dev_dependencies.get("mcp") or [])
             if isinstance(dep, MCPDependency)
         ]
+
+    def get_all_mcp_dependencies(self) -> list["MCPDependency"]:
+        """Get production and dev MCP dependencies in manifest order."""
+        return self.get_mcp_dependencies() + self.get_dev_mcp_dependencies()
 
     def get_lsp_dependencies(self) -> list["LSPDependency"]:
         """Get list of LSP dependencies."""

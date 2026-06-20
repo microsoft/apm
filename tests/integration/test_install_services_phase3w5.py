@@ -42,8 +42,14 @@ def make_mapping(
     deploy_root: str | None = None,
     subdir: str = "",
     format_id: str = "plain",
+    output_compare: bool = False,
 ) -> SimpleNamespace:
-    return SimpleNamespace(deploy_root=deploy_root, subdir=subdir, format_id=format_id)
+    return SimpleNamespace(
+        deploy_root=deploy_root,
+        subdir=subdir,
+        format_id=format_id,
+        output_compare=output_compare,
+    )
 
 
 def make_dispatch_entry(
@@ -299,6 +305,7 @@ class TestIntegratePackagePrimitives:
             "instructions": 0,
             "commands": 0,
             "hooks": 0,
+            "canvases": 0,
             "links_resolved": 0,
             "deployed_files": [],
         }
@@ -407,7 +414,11 @@ class TestIntegratePackagePrimitives:
 
     def test_instruction_cursor_rules_use_rule_label(self, tmp_path: Path) -> None:
         target = make_target(
-            primitives={"instructions": make_mapping(subdir="rules", format_id="cursor_rules")}
+            primitives={
+                "instructions": make_mapping(
+                    subdir="rules", format_id="cursor_rules", output_compare=True
+                )
+            }
         )
         entry = make_dispatch_entry(
             integrate_method="integrate_instructions_for_target",

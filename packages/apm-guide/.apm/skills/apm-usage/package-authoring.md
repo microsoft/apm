@@ -97,7 +97,9 @@ hooks:
 | `*-claude-hooks.json` | Claude Code only |
 | `*-codex-hooks.json` | Codex CLI only |
 | `*-gemini-hooks.json` | Gemini CLI only |
+| `*-antigravity-hooks.json` | Antigravity CLI only |
 | `*-windsurf-hooks.json` | Windsurf only |
+| `*-kiro-hooks.json` | Kiro only |
 | Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets |
 
 Example directory tree for a multi-target hook package:
@@ -109,19 +111,21 @@ my-hooks-pkg/
     copilot-hooks.json      # Copilot only
     cursor-hooks.json       # Cursor only
     claude-hooks.json       # Claude Code only
+    kiro-hooks.json         # Kiro only
 ```
 
 APM automatically normalises event names per target (e.g. `postToolUse`
 becomes `PostToolUse` in Claude) and rewrites path variables
 (`${PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`) to
-the correct target-specific form.
+the correct target-specific form. Kiro materializes one JSON document per
+hook action under `.kiro/hooks/`.
 
 ### Hook command paths: project-scope stays repo-relative
 
 `apm install` (project-scope, no `-g`) keeps hook `command` paths
 **repo-relative** in checked-in configs (`<repo>/.claude/settings.json`,
 `<repo>/.codex/hooks.json`, the `<repo>/.claude/apm-hooks.json`
-sidecar, and equivalents for Cursor / Gemini / Windsurf) so clones,
+sidecar, and equivalents for Cursor / Gemini / Antigravity / Windsurf / Kiro) so clones,
 contributors, and CI runners do not see the installer's machine-local
 absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
@@ -149,17 +153,47 @@ Both `apm.yml`'s `targets:`/`target:` and the `--target` CLI flag share the same
 | Form | Behaviour |
 |------|-----------|
 | `targets: [claude, copilot]` | Canonical list form; only listed targets are compiled/installed |
-| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `all` |
+| `target: copilot` | Singular sugar; allowed values: `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `all` |
 | `target: claude,copilot` | CSV-string sugar; parses identically to the list form (the shared validator splits on `,`) |
 | `targets:` and `target:` both set | **Parse error** -- pick one |
 | `targets: []` (empty list) | **Parse error** -- remove the line if you meant auto-detect |
-| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`) |
+| `targets:`/`target:` omitted | Resolution falls through to auto-detect from filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.cursorrules`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`) |
 | `target: bogus` (unknown token) | **Parse error** -- fix the typo |
 | `target: [all, claude]` (`all` mixed with other targets) | **Parse error** -- use `all` alone |
 
 Error messages always name the `apm.yml` path and the offending token, so the fix point is unambiguous. The list form (`targets: [a, b]`) is the recommended shape; the singular `target:` and CSV-string forms are supported indefinitely as sugar.
 
 The package-authored `targets:`/`target:` field overrides auto-detect but is itself overridden by an explicit `--target` flag at install/compile time. Run `apm targets` in the consumer's directory to see what the resolution chain produces.
+
+## Manifest fields: `license:` (declared license for SBOM)
+
+`apm.yml` accepts an optional top-level `license:` field -- an SPDX
+expression that *declares* the package's license:
+
+```yaml
+name: my-package
+version: 1.0.0
+license: MIT                 # or "(MIT OR Apache-2.0)", "Apache-2.0", ...
+```
+
+This records the package's own license **claim** -- an author assertion, not a
+conclusion drawn from the `LICENSE` file text. APM records the declared value
+into the consumer's `apm.lock.yaml` (`declared_license`) at resolve time and
+passes it through to `apm lock export` SBOMs. APM never reads or interprets the
+`LICENSE` file -- declared is not concluded.
+
+The value is syntax-validated **offline** against the bundled SPDX id set.
+An unrecognized string (or a special token like `UNLICENSED` or
+`SEE LICENSE IN <file>`) is **never** rejected -- it is recorded verbatim
+and emitted in the SBOM as a named license. Authoring never blocks on a
+license value.
+
+If you omit `license:`, `apm pack` and `apm publish` print an actionable
+warning (`No 'license:' field in apm.yml; the SBOM will record NOASSERTION
+for this package. Add a 'license:' field ...`). The SBOM still exports
+correctly -- the component just records NOASSERTION (genuinely unknown).
+This warning fires only on the **authoring** path (your own `apm.yml`);
+installing or exporting other people's dependencies is silent.
 
 ## The 7 primitive types
 
@@ -180,8 +214,8 @@ tags: [security, validation]
 accepted; when multiple sequence elements are given, the first is used.
 Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
 and are NOT separators -- only top-level commas split the list. On Copilot
-the value is preserved verbatim; on Claude/Cursor/Windsurf comma-lists are
-expanded to a YAML array under `paths:` / `globs:`.
+the value is preserved verbatim; on Claude/Cursor/Windsurf/Kiro comma-lists are
+expanded to a YAML array under `paths:` / `globs:` / `fileMatchPattern:`.
 
 ### 2. Chatmode (`*.chatmode.md`)
 
@@ -367,6 +401,61 @@ target is present. Authoring rules:
 - Governance: a `bin_deploy` policy rule can deny deployment per package.
   See the [policy schema](../../../../../docs/src/content/docs/reference/policy-schema.md#bin_deploy).
 
+## Canvas extensions (experimental, Copilot-only)
+
+Behind the `canvas` experimental flag (`apm experimental enable canvas`), a
+package may ship a GitHub Copilot CLI canvas extension. Place a directory bundle
+under `.apm/extensions/<name>/` with an `extension.mjs` entry file (executable
+Node.js) plus any sibling assets; a directory without `extension.mjs` is ignored.
+
+On `apm install --target copilot`, APM deploys it verbatim to
+`.github/extensions/<name>/`. The `<name>` segment is validated strictly
+(`[A-Za-z0-9._-]+`, no leading/trailing dot, no `..`, no separators, no reserved
+names). It is **Copilot-only**. Dependency-provided canvases are executable code
+and are blocked unless the consumer passes `--trust-canvas-extensions`; a
+first-party canvas in the root package deploys once the flag is on. With
+`--global`, a dependency canvas deploys to `~/.copilot/extensions/<name>/`
+(always requiring the trust flag; default `~/.copilot` only; first-party root
+canvases are project-scope only). `apm pack` preserves `.apm/extensions/`. See
+the [canvas integration guide](../../../../../docs/src/content/docs/integrations/canvas.md).
+
+## Marketplace source bases
+
+Marketplace publishers can declare `marketplace.sourceBase` when package
+repositories share an enterprise git base path:
+
+```yaml
+marketplace:
+  sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace
+  packages:
+    - name: review
+      source: review
+      ref: v1.0.0
+    - name: pinned
+      source: team/pinned
+      ref: main
+```
+
+Relative `packages[].source` values compose onto the base, including
+`owner/repo` shapes like `team/pinned`. Host-prefixed sources, full HTTPS
+URLs, and local `./` paths remain per-entry overrides. Without `sourceBase`,
+existing `owner/repo` source behavior is unchanged. The manifest schema
+Section 7.5 is canonical for the full validation and override rules.
+
+The base may target any supported host -- GitHub.com, GitHub Enterprise,
+self-hosted GitLab, or Azure DevOps. For Azure DevOps, use a
+`https://dev.azure.com/{org}/{project}/_git` base; the `dev.azure.com` host is
+preserved through to the consumer and authenticated with `ADO_APM_PAT`:
+
+```yaml
+marketplace:
+  sourceBase: https://dev.azure.com/contoso/platform/_git
+  packages:
+    - name: agent-skills
+      source: agent-skills          # -> contoso/platform/_git/agent-skills
+      ref: 3f2a9b1c
+```
+
 ## Step-by-step: create and publish
 
 ```bash
@@ -416,13 +505,13 @@ EOF
 export APM_REGISTRY_TOKEN_CORP_MAIN=eyJ...
 
 # 4. Preview then publish
-apm publish --registry corp-main --dry-run -v
-apm publish --registry corp-main
+apm publish --package acme/my-skill --registry corp-main --dry-run -v
+apm publish --package acme/my-skill --registry corp-main
 ```
 
 `apm publish` auto-packs a **flat registry archive** in the project root
-(`{name}-{version}.tar.gz`) containing `apm.yml` and `.apm/` at the
-tarball root. This layout differs from the plugin bundle that
+(`{name}-{version}.zip`) containing `apm.yml` and `.apm/` at the
+archive root. This layout differs from the plugin bundle that
 `apm pack` produces (`{name}-{version}/plugin.json`). Auto-pack skips
 macOS `._*` / `.DS_Store` sidecars.
 
@@ -431,12 +520,10 @@ Auto-pack requires:
   identity differs from the package name)
 - A `.apm/` directory with at least one primitive
 
-Skill-only or custom layouts: build the tarball yourself and pass
-`--tarball`:
+Custom layouts: build the zip yourself and pass `--zip`:
 
 ```bash
-tar czf my-skill-0.0.1.tar.gz apm.yml SKILL.md
-apm publish --tarball my-skill-0.0.1.tar.gz --registry corp-main
+apm publish --package acme/my-skill --zip ./build/my-skill-0.0.1.zip --registry corp-main
 ```
 
 Upload contract: `PUT /v1/packages/{owner}/{repo}/versions/{version}`.
@@ -607,7 +694,7 @@ is a hard error -- run `migrate` to consolidate.
 
 See [docs/guides/marketplace-authoring](../../../../../docs/src/content/docs/guides/marketplace-authoring.md)
 for the complete maintainer workflow (quickstart, version ranges, `check`,
-`doctor`, `outdated`, and `publish`).
+`doctor`, and `outdated`).
 
 ## Org-wide packages
 

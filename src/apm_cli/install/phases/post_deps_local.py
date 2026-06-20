@@ -107,10 +107,24 @@ def run(ctx: InstallContext) -> None:
 
     _lock_path = _get_lfp(ctx.apm_dir)
     _persist_lock = _LF.read(_lock_path) or _LF()
-    _persist_lock.local_deployed_files = sorted(ctx.local_deployed_files)
-    _persist_lock.local_deployed_file_hashes = _hash_deployed(
-        ctx.local_deployed_files, ctx.project_root
+    # Target-scoped union: preserve project-root files deployed by OTHER
+    # targets (a prior install) rather than clobbering them. Symmetric with
+    # the per-dependency reconciliation in phases/lockfile.py and with
+    # on-disk stale cleanup, so a multi-target deploy keeps content-integrity
+    # coverage for every committed deploy target (issue #1716).
+    from apm_cli.install.manifest_reconcile import union_preserving as _union
+
+    _current_files = sorted(ctx.local_deployed_files)
+    _current_hashes = _hash_deployed(ctx.local_deployed_files, ctx.project_root)
+    _files, _hashes = _union(
+        _current_files,
+        _current_hashes,
+        list(_persist_lock.local_deployed_files),
+        dict(_persist_lock.local_deployed_file_hashes),
+        ctx.targets,
     )
+    _persist_lock.local_deployed_files = sorted(_files)
+    _persist_lock.local_deployed_file_hashes = _hashes
     # Only write if changed.
     _existing_for_cmp = _LF.read(_lock_path)
     if not _existing_for_cmp or not _persist_lock.is_semantically_equivalent(_existing_for_cmp):

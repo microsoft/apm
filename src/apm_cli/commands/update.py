@@ -38,8 +38,8 @@ Flags
 * ``--parallel-downloads`` -- max concurrent package downloads
   (0 disables parallelism).
 * ``--target``/``-t`` -- agent harness(es) to deploy to (e.g.
-  ``claude``, ``copilot``, ``cursor``, ``windsurf``, ``codex``,
-  ``opencode``, ``gemini``); comma-separated for multiple targets.
+  ``claude``, ``copilot``, ``cursor``, ``windsurf``, ``kiro``,
+  ``codex``, ``opencode``, ``gemini``); comma-separated for multiple targets.
   Overrides ``apm.yml targets:`` and auto-detection.
 
 These flags make ``apm update`` a strict superset of the deprecated
@@ -49,13 +49,27 @@ swiss-army-knife escape hatch for the rest of the install surface.
 
 from __future__ import annotations
 
+import copy
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
+from git.exc import GitCommandError
 
+from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger
 from ..core.target_detection import TargetParamType
+from ..deps.github_downloader import GitHubPackageDownloader
+from ..deps.revision_pins import (
+    RemoteRefDownloader,
+    RevisionPinResolutionError,
+    RevisionPinUpdate,
+    apply_revision_pin_updates,
+    render_revision_pin_update_plan,
+    resolve_revision_pin_updates,
+)
 from ..install.errors import (
     AuthenticationError,
     DirectDependencyError,
@@ -65,6 +79,18 @@ from ..install.errors import (
 from ..install.plan import UpdatePlan, render_plan_text
 from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, _rich_warning
 from ._helpers import UnknownPackageError, _find_apm_yml, resolve_requested_packages
+
+if TYPE_CHECKING:
+    from ..models.dependency.reference import DependencyReference
+
+
+@dataclass
+class _UpdateRunState:
+    """Mutable state shared with the install plan callback."""
+
+    plan: UpdatePlan | None = None
+    proceeded: bool = False
+    revision_pins_applied: bool = False
 
 
 def _stdin_is_tty() -> bool:
@@ -78,6 +104,89 @@ def _stdin_is_tty() -> bool:
         return sys.stdin is not None and sys.stdin.isatty()
     except (AttributeError, ValueError):
         return False
+
+
+def _build_revision_pin_downloader() -> RemoteRefDownloader:
+    """Build the downloader used for authoritative revision-pin ref checks."""
+    return GitHubPackageDownloader(auth_resolver=AuthResolver())
+
+
+def _resolve_and_stage_revision_pin_updates(
+    *,
+    all_declared_deps: list[DependencyReference],
+    only_packages: list[str] | None,
+    logger: InstallLogger,
+    downloader: RemoteRefDownloader | None = None,
+    max_workers: int = 4,
+) -> list[RevisionPinUpdate]:
+    """Resolve SHA pins and stage their in-memory references for the plan.
+
+    The passed dependency references belong to a staged APMPackage copy, not to
+    the object parsed from disk. Mutating them lets the install pipeline resolve
+    against the new SHAs after the user's consent decision while dry-run and
+    decline paths leave the original manifest model untouched.
+    """
+    only_set = set(only_packages) if only_packages is not None else None
+    logger.progress("Checking upstream for revision-pin freshness...", symbol="running")
+
+    try:
+        # Authoritative round-trip (intentional, do NOT short-circuit): this
+        # bounded ls-remote pass resolves the latest annotated-tag SHA only to
+        # build the plan and rewrite apm.yml. The subsequent install pipeline
+        # independently re-resolves the freshly-written pin against upstream
+        # before downloading. Threading the SHA resolved here into install
+        # would collapse the authoritative-upstream fence.
+        updates = resolve_revision_pin_updates(
+            all_declared_deps,
+            downloader or _build_revision_pin_downloader(),
+            only_packages=only_set,
+            max_workers=max_workers,
+        )
+    except RevisionPinResolutionError as e:
+        logger.error(str(e))
+        sys.exit(1)
+    except (GitCommandError, OSError) as e:
+        logger.error(f"Failed to resolve revision pins: {e}")
+        if not logger.verbose:
+            logger.info("Run with --verbose for detailed diagnostics.")
+        sys.exit(1)
+
+    updates_by_key = {update.dep_key: update for update in updates}
+    for dep_ref in all_declared_deps:
+        update = updates_by_key.get(dep_ref.get_unique_key())
+        if update is not None:
+            dep_ref.reference = update.new_sha
+    return updates
+
+
+def _annotate_lockfile_revision_tags(project_root: Path, updates: list[RevisionPinUpdate]) -> None:
+    """Record resolved annotated tag names for updated SHA pins in the lockfile."""
+    if not updates:
+        return
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+    lockfile_path = get_lockfile_path(project_root)
+    lockfile = LockFile.read(lockfile_path)
+    if lockfile is None:
+        raise RuntimeError("Could not record revision-pin tags: apm.lock.yaml was not written")
+
+    changed = False
+    for update in updates:
+        locked = lockfile.get_dependency(update.dep_key)
+        if locked is None:
+            raise RuntimeError(
+                f"Could not record revision-pin tag for {update.display_name}: missing lockfile entry"
+            )
+        if (locked.resolved_commit or "").lower() != update.new_sha.lower():
+            raise RuntimeError(
+                f"Could not record revision-pin tag for {update.display_name}: "
+                "lockfile SHA does not match updated manifest"
+            )
+        if locked.resolved_tag != update.tag:
+            locked.resolved_tag = update.tag
+            changed = True
+    if changed:
+        lockfile.save(lockfile_path)
 
 
 @click.command(
@@ -142,7 +251,7 @@ def _stdin_is_tty() -> bool:
     default=None,
     help=(
         "Agent target(s) to update for "
-        "(e.g. claude, copilot, cursor, windsurf, codex, opencode, gemini). "
+        "(e.g. claude, copilot, cursor, windsurf, kiro, codex, opencode, gemini). "
         "Comma-separated for multiple: --target claude,cursor. "
         "Highest-priority entry in the resolution chain "
         "(--target > apm.yml targets: > auto-detect)."
@@ -312,12 +421,20 @@ def _run_dep_update(
         _rich_success("No APM dependencies declared in apm.yml -- nothing to update.")
         return
 
+    # Stage revision-pin rewrites on an owned package copy. The install
+    # pipeline must resolve against the new SHAs, but declined/dry-run paths
+    # should not mutate the APMPackage instance parsed from the on-disk manifest.
+    staged_apm_package = copy.deepcopy(apm_package)
+    all_declared_deps = (
+        staged_apm_package.get_apm_dependencies() + staged_apm_package.get_dev_apm_dependencies()
+    )
+
     # Map any positional [PACKAGES] to canonical dependency keys for the
     # engine's only_packages filter; None means "refresh everything".
     try:
         only_packages = resolve_requested_packages(
             packages,
-            apm_package.get_apm_dependencies() + apm_package.get_dev_apm_dependencies(),
+            all_declared_deps,
         )
     except UnknownPackageError as e:
         _rich_error(f"Package '{e.token}' not found in apm.yml")
@@ -326,33 +443,34 @@ def _run_dep_update(
 
     logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=bool(packages))
 
-    plan_state: dict[str, UpdatePlan | bool] = {"plan": None, "proceeded": False}
+    revision_pin_updates = _resolve_and_stage_revision_pin_updates(
+        all_declared_deps=all_declared_deps,
+        only_packages=only_packages,
+        logger=logger,
+        max_workers=parallel_downloads if parallel_downloads > 0 else 1,
+    )
 
-    def _plan_callback(plan: UpdatePlan) -> bool:
-        """Render plan, prompt, and decide whether to proceed."""
-        plan_state["plan"] = plan
+    plan_state = _UpdateRunState()
 
-        if not plan.has_changes:
-            _rich_success(
-                "All dependencies already at their latest matching refs.",
-                symbol="check",
-            )
-            return False
+    def _apply_revision_pin_manifest_updates() -> None:
+        """Persist staged revision-pin updates exactly once after consent."""
+        if not revision_pin_updates or plan_state.revision_pins_applied:
+            return
+        try:
+            apply_revision_pin_updates(Path("apm.yml"), revision_pin_updates)
+        except Exception as e:
+            _rich_error(f"Failed to update apm.yml revision pins: {e}")
+            sys.exit(1)
+        from apm_cli.models.apm_package import clear_apm_yml_cache
 
-        rendered = render_plan_text(plan, verbose=verbose)
-        if rendered:
-            _rich_echo(rendered)
-            _rich_echo("")
+        clear_apm_yml_cache()
+        plan_state.revision_pins_applied = True
 
-        if dry_run:
-            _rich_info(
-                "Dry run: no changes applied. Re-run without --dry-run to update.",
-                symbol="info",
-            )
-            return False
-
+    def _confirm_plan_application() -> bool:
+        """Run the single update consent gate."""
         if assume_yes:
-            plan_state["proceeded"] = True
+            _apply_revision_pin_manifest_updates()
+            plan_state.proceeded = True
             return True
 
         if not _stdin_is_tty():
@@ -363,14 +481,54 @@ def _run_dep_update(
             sys.exit(1)
 
         proceed = click.confirm("Apply these changes?", default=False, show_default=True)
-        plan_state["proceeded"] = proceed
+        plan_state.proceeded = proceed
         if not proceed:
             _rich_info("No changes applied.", symbol="info")
-        return proceed
+            return False
+        _apply_revision_pin_manifest_updates()
+        return True
+
+    def _plan_callback(plan: UpdatePlan) -> bool:
+        """Render plan, prompt, and decide whether to proceed."""
+        plan_state.plan = plan
+
+        revision_plan = render_revision_pin_update_plan(revision_pin_updates)
+        if revision_plan:
+            _rich_echo(revision_plan)
+            _rich_echo("")
+
+        if plan.has_changes:
+            rendered = render_plan_text(plan, verbose=verbose)
+            if rendered:
+                _rich_echo(rendered)
+                _rich_echo("")
+        elif not revision_pin_updates:
+            _rich_success(
+                "All dependencies already at their latest matching refs.",
+                symbol="check",
+            )
+            return False
+
+        if revision_pin_updates and plan.has_changes:
+            pin_count = len(revision_pin_updates)
+            dep_count = len(plan.entries)
+            pin_noun = "pin rewrite" if pin_count == 1 else "pin rewrites"
+            dep_noun = "dependency change" if dep_count == 1 else "dependency changes"
+            logger.info(f"Total: {pin_count} revision {pin_noun} + {dep_count} {dep_noun}.")
+            _rich_echo("")
+
+        if dry_run:
+            _rich_info(
+                "Dry run: no changes applied. Re-run without --dry-run to update.",
+                symbol="info",
+            )
+            return False
+
+        return _confirm_plan_application()
 
     try:
         result = _install_apm_dependencies(
-            apm_package,
+            staged_apm_package,
             update_refs=True,
             verbose=verbose,
             scope=scope,
@@ -407,16 +565,33 @@ def _run_dep_update(
             _rich_info("Run with --verbose for detailed diagnostics.")
         sys.exit(1)
 
-    plan = plan_state.get("plan")
+    plan = plan_state.plan
     if plan is None or not isinstance(plan, UpdatePlan):
         return
 
-    if plan_state.get("proceeded"):
+    if plan_state.proceeded:
+        if revision_pin_updates:
+            try:
+                _annotate_lockfile_revision_tags(Path.cwd(), revision_pin_updates)
+            except Exception as e:
+                _rich_error(f"Failed to record revision-pin tags in apm.lock.yaml: {e}")
+                sys.exit(1)
         installed = getattr(result, "installed_count", 0)
-        if installed:
+        if installed and revision_pin_updates:
+            count = len(revision_pin_updates)
+            dep_noun = "dependency" if installed == 1 else "dependencies"
+            pin_noun = "pin" if count == 1 else "pins"
+            _rich_success(
+                f"Updated {installed} APM {dep_noun} and {count} revision {pin_noun} in apm.yml."
+            )
+        elif installed:
             _rich_success(f"Updated {installed} APM dependencies.")
+        elif revision_pin_updates:
+            count = len(revision_pin_updates)
+            noun = "pin" if count == 1 else "pins"
+            _rich_success(f"Updated {count} revision {noun} in apm.yml.")
         else:
-            _rich_success("Update applied.")
+            _rich_success("No dependency changes were applied.")
 
 
 __all__ = ["update"]

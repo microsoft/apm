@@ -68,6 +68,19 @@ def _make_host(
         api_base="https://api.github.com",
     )
     auth.build_error_context.return_value = "Set GITHUB_APM_PAT."
+
+    def _is_generic_dep(dep_ref) -> bool:
+        dep_host = getattr(dep_ref, "host", None)
+        if not dep_host:
+            return False
+        return dep_host != "github.com" and not str(dep_host).endswith(".ghe.com")
+
+    host._resolve_dep_token.side_effect = lambda dep_ref=None: (
+        None if _is_generic_dep(dep_ref) else github_token
+    )
+    host._resolve_dep_auth_ctx.side_effect = lambda dep_ref=None: (
+        None if _is_generic_dep(dep_ref) else ctx
+    )
     host.auth_resolver = auth
     return host
 
@@ -889,6 +902,162 @@ class TestDownloadAdoFile:
         d = DownloadDelegate(host)
         resp = _fake_response(200, b"ok")
         host._resilient_get.return_value = resp
+        # Simulate auth_resolver.resolve() returning no token (no PAT, no bearer)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
+        d.download_ado_file(self._dep(), "apm.yml")
+        call_kwargs = host._resilient_get.call_args[1]
+        headers = call_kwargs.get("headers", {})
+        assert "Authorization" not in headers
+
+    # ------------------------------------------------------------------
+    # Regression tests for #1671: HTML sign-in page + bearer fallback
+    # ------------------------------------------------------------------
+
+    def test_html_200_response_raises_actionable_error(self) -> None:
+        """Regression #1671: ADO returns 200 + text/html when unauth; must fail-closed."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
+        host.auth_resolver.build_error_context.return_value = "Set ADO_APM_PAT or run 'az login'."
+        html_body = b"<!DOCTYPE html><html><head><title>Azure DevOps Services | Sign In</title></head></html>"
+        resp = _fake_response(200, html_body, headers={"Content-Type": "text/html; charset=utf-8"})
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        with pytest.raises(RuntimeError, match="sign-in page"):
+            d.download_ado_file(self._dep(), "apm.yml")
+
+    def test_html_200_response_writes_no_content(self) -> None:
+        """Mutation break: HTML sign-in detection must prevent content from being returned."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
+        host.auth_resolver.build_error_context.return_value = "Set ADO_APM_PAT."
+        html_body = b"<html><body>Sign In</body></html>"
+        resp = _fake_response(200, html_body, headers={"Content-Type": "text/html"})
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        # Assertions are placed OUTSIDE the pytest.raises block so they execute
+        # in the non-raising path; if the guard is removed, download_ado_file
+        # returns html_body and the assert below catches the regression.
+        raised = False
+        result = None
+        try:
+            result = d.download_ado_file(self._dep(), "apm.yml")
+        except RuntimeError:
+            raised = True
+        assert raised, "Expected RuntimeError for HTML sign-in page; guard may have been removed"
+        assert result is None, "Bug: HTML sign-in page was returned as file content"
+
+    def test_bearer_fallback_used_when_no_pat(self) -> None:
+        """Regression #1671: bearer token from auth_resolver used when no PAT present."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = "aad-bearer-jwt"
+        ctx.auth_scheme = "bearer"
+        host.auth_resolver.resolve.return_value = ctx
+        resp = _fake_response(
+            200, b"agent content", headers={"Content-Type": "application/octet-stream"}
+        )
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        result = d.download_ado_file(self._dep(), "apm.yml")
+        assert result == b"agent content"
+        call_kwargs = host._resilient_get.call_args[1]
+        headers = call_kwargs.get("headers", {})
+        assert headers.get("Authorization") == "Bearer aad-bearer-jwt"
+
+    def test_pat_path_unchanged_when_pat_present(self) -> None:
+        """PAT must remain the primary auth path; bearer is strictly the fallback."""
+        host = _make_host(ado_token="my-secret-pat")
+        resp = _fake_response(
+            200, b"file bytes", headers={"Content-Type": "application/octet-stream"}
+        )
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        result = d.download_ado_file(self._dep(), "apm.yml")
+        assert result == b"file bytes"
+        call_kwargs = host._resilient_get.call_args[1]
+        headers = call_kwargs.get("headers", {})
+        # PAT is used as Basic auth, bearer is NOT used
+        assert "Authorization" in headers
+        expected_auth = base64.b64encode(b":my-secret-pat").decode()
+        assert expected_auth in headers["Authorization"]
+        # auth_resolver.resolve() must NOT be called when PAT is present
+        host.auth_resolver.resolve.assert_not_called()
+
+    def test_bearer_auth_resolver_not_called_when_pat_present(self) -> None:
+        """Mutation break: resolver.resolve() is bypassed entirely when ado_token is set."""
+        host = _make_host(ado_token="pat-value")
+        resp = _fake_response(200, b"data", headers={"Content-Type": "application/json"})
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
+        d.download_ado_file(self._dep(), "apm.yml")
+        host.auth_resolver.resolve.assert_not_called()
+
+    def test_html_detection_on_fallback_ref_response(self) -> None:
+        """HTML sign-in detection fires on the main/master fallback response too."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
+        host.auth_resolver.build_error_context.return_value = "Set ADO_APM_PAT."
+        fail_resp = _fake_response(404, b"")
+        html_resp = _fake_response(
+            200,
+            b"<html>Sign In</html>",
+            headers={"Content-Type": "text/html"},
+        )
+        host._resilient_get.side_effect = [fail_resp, html_resp]
+        d = DownloadDelegate(host)
+        with pytest.raises(RuntimeError, match="sign-in page"):
+            d.download_ado_file(self._dep(), "apm.yml", ref="main")
+
+    def test_404_with_html_content_type_does_not_trigger_sign_in_detection(self) -> None:
+        """Regression lock: 404 response with text/html body must NOT fire the HTML sign-in guard.
+
+        ADO can return 404 pages as text/html.  _check_html_signin must only fire
+        on 200 responses so 404s fall through to raise_for_status and then to the
+        main/master ref fallback path rather than raising a misleading 'sign-in page'
+        error.  This test proves the status-code guard added in the HTML detection fix.
+        """
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = None
+        ctx.auth_scheme = "basic"
+        host.auth_resolver.resolve.return_value = ctx
+        # First call: 404 with text/html (an ADO error page)
+        # Second call (fallback): 200 with real content
+        html_404 = _fake_response(
+            404, b"<html>Not Found</html>", headers={"Content-Type": "text/html"}
+        )
+        ok_resp = _fake_response(
+            200, b"file-bytes", headers={"Content-Type": "application/octet-stream"}
+        )
+        host._resilient_get.side_effect = [html_404, ok_resp]
+        d = DownloadDelegate(host)
+        # Should succeed via the main->master fallback, NOT raise "sign-in page"
+        result = d.download_ado_file(self._dep(), "apm.yml", ref="main")
+        assert result == b"file-bytes"
+        assert host._resilient_get.call_count == 2
+
+    def test_bearer_fallback_skipped_when_scheme_not_bearer(self) -> None:
+        """When auth_resolver returns a non-bearer scheme, no Authorization header is injected."""
+        host = _make_host(ado_token=None)
+        ctx = MagicMock()
+        ctx.token = "some-token"
+        ctx.auth_scheme = "basic"  # non-bearer scheme -> must not inject as Bearer
+        host.auth_resolver.resolve.return_value = ctx
+        resp = _fake_response(200, b"content", headers={"Content-Type": "application/octet-stream"})
+        host._resilient_get.return_value = resp
+        d = DownloadDelegate(host)
         d.download_ado_file(self._dep(), "apm.yml")
         call_kwargs = host._resilient_get.call_args[1]
         headers = call_kwargs.get("headers", {})
@@ -1056,12 +1225,23 @@ class TestDownloadGitlabFile:
         host._resilient_get.return_value = resp
         callback = MagicMock()
 
-        with patch(
-            "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
-            return_value={},
+        with (
+            patch(
+                "apm_cli.deps.download_strategies.AuthResolver.gitlab_rest_headers",
+                return_value={},
+            ),
+            patch(
+                "apm_cli.deps.download_strategies.GitSparseFileTransport",
+                return_value=MagicMock(
+                    fetch_file=MagicMock(side_effect=RuntimeError("git transport unavailable"))
+                ),
+            ),
         ):
             d.download_gitlab_file(self._dep(), "apm.yml", verbose_callback=callback)
-        callback.assert_called_once()
+        # The mocked git failure drives the REST fallback path without spawning
+        # subprocess/network work. Verbose output stays transport-agnostic.
+        assert callback.called
+        assert any("Downloaded file:" in str(c.args[0]) for c in callback.call_args_list)
 
 
 # ---------------------------------------------------------------------------

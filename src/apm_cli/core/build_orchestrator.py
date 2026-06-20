@@ -41,6 +41,7 @@ class BuildOptions:
     bundle_format: str = "plugin"
     bundle_target: Any = None
     bundle_archive: bool = False
+    bundle_archive_format: str = "zip"
     bundle_output: Path | None = None
     bundle_force: bool = False
     # Marketplace-only options
@@ -105,6 +106,7 @@ class BundleProducer:
                 fmt=options.bundle_format,
                 target=options.bundle_target,
                 archive=options.bundle_archive,
+                archive_format=options.bundle_archive_format,
                 dry_run=options.dry_run,
                 force=options.bundle_force,
                 logger=logger,

@@ -56,6 +56,7 @@ manifest:
 unmanaged_files:
   action: ignore                        # ignore | warn | deny
   directories: []                       # directories to scan
+  exclude: []                           # path globs to suppress (known harness-managed files)
 
 registry_source:                        # experimental: requires `apm experimental enable registries`
   require: []                           # registry names that MUST be reachable in the merged registry map
@@ -89,6 +90,25 @@ The check fires from all four call sites (`policy_gate`,
 `policy_target_check`, `run_policy_checks`, `run_policy_preflight`) so
 `apm install`, `apm install <pkg>`, `apm deps update`, and
 `apm audit --ci` all enforce the same gate.
+
+## Integrity and drift enforcement
+
+Two additive, optional, default-off keys under the existing `security:`
+namespace, both backed by enforcement that exists today.
+
+```yaml
+# .github/apm-policy.yml
+security:
+  integrity:
+    require_hashes: true    # fail install closed if any locked entry lacks a hash
+  audit:
+    fail_on_drift: true     # `apm audit` exits non-zero on workspace drift
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `integrity.require_hashes` | `false` | When `true`, every non-local lockfile entry MUST carry a content hash; a missing or empty hash fails `apm install` closed. Asserts hash-presence on the freshly-built lockfile (no second hashing pass). Local deps are exempt. Logical OR on inheritance. |
+| `audit.fail_on_drift` | `false` | When `true`, a bare `apm audit` exits non-zero when workspace content drifts from the lockfile (default-off keeps drift advisory at exit 0). Only changes the exit code; `apm audit --ci` already gates on drift. Logical OR on inheritance. |
 
 ## External scanner governance (experimental)
 
@@ -149,6 +169,32 @@ bin_deploy:
 Deployed executables are placed on Claude Code's `PATH` and invoked
 without further confirmation, so use this field to opt out in
 environments where plugin executables are not trusted by default.
+
+## Canvas extension trust (experimental)
+
+Behind the `canvas` experimental flag, a package may ship a Copilot CLI canvas
+extension under `.apm/extensions/<name>/extension.mjs` (executable Node.js).
+Because a canvas from a dependency is arbitrary executable code, APM **blocks
+dependency-provided canvases by default**: the consumer must pass
+`--trust-canvas-extensions` to deploy them. A first-party canvas in the root
+package being installed deploys once the flag is on; dependency canvases always
+require the trust flag.
+
+At **project scope** a canvas deploys to `.github/extensions/<name>/`. With
+`--global`, a **dependency-provided** canvas deploys to
+`~/.copilot/extensions/<name>/` so it is available in every Copilot session;
+global install always requires `--trust-canvas-extensions` (full-account blast
+radius), supports only the default `~/.copilot` location (a non-default
+`$COPILOT_HOME` is refused), and does not deploy first-party root canvases
+(package them as a dependency instead). `apm uninstall --global` prunes the
+global canvas.
+
+The trust gate is enforced on every install path -- normal install, offline
+bundle install (`apm install <bundle>`), and `apm unpack` -- so a vendored
+bundle cannot smuggle an executable canvas past trust. The flag is a
+feature-availability toggle, not a security gate; the trust requirement holds
+regardless of the flag. An enterprise policy field for canvas trust is a
+deferred follow-up and is not part of this experimental release.
 
 ## Local content governance
 

@@ -1,5 +1,6 @@
 """Unit tests for AuthResolver, HostInfo, and AuthContext."""
 
+import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -80,6 +81,22 @@ class TestClassifyHost:
             hi = AuthResolver.classify_host("git.corp.example.com")
             assert hi.kind == "gitlab"
             assert hi.api_base == "https://git.corp.example.com/api/v4"
+
+    def test_host_type_gitlab_reclassifies_bespoke_host(self):
+        hi = AuthResolver.classify_host("Code.Acme.COM", host_type="gitlab")
+        assert hi.kind == "gitlab"
+        assert hi.api_base == "https://code.acme.com/api/v4"
+
+    def test_unsupported_host_type_lists_supported_values(self):
+        with pytest.raises(ValueError, match="Supported values: gitlab"):
+            AuthResolver.classify_host("code.acme.com", host_type="gitea")
+
+    def test_gitlab_host_type_hint_reuses_gitlab_cache_entry(self):
+        with patch.dict(os.environ, {}, clear=True):
+            resolver = AuthResolver()
+            ctx_a = resolver.resolve("gitlab.com")
+            ctx_b = resolver.resolve("gitlab.com", host_type="gitlab")
+        assert ctx_a is ctx_b
 
     def test_gitlab_self_managed_apm_gitlab_hosts_env(self):
         with patch.dict(
@@ -211,13 +228,36 @@ class TestResolve:
             assert ctx.source == "GITHUB_APM_PAT"
 
     def test_no_token_returns_none(self):
-        """No tokens at all → token is None."""
+        """No tokens at all -> token is None."""
         with patch.dict(os.environ, {}, clear=True):
             with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
                 resolver = AuthResolver()
                 ctx = resolver.resolve("github.com")
                 assert ctx.token is None
                 assert ctx.source == "none"
+
+    def test_allow_external_fallback_false_skips_gh_cli_and_git_credentials(self):
+        """Disabled external fallback never probes gh CLI or git credentials."""
+        with patch.dict(os.environ, {}, clear=True):
+            with (
+                patch.object(
+                    GitHubTokenManager,
+                    "resolve_credential_from_gh_cli",
+                    side_effect=AssertionError("gh cli should not be probed"),
+                ) as mock_gh_cli,
+                patch.object(
+                    GitHubTokenManager,
+                    "resolve_credential_from_git",
+                    side_effect=AssertionError("git credentials should not be probed"),
+                ) as mock_git,
+            ):
+                resolver = AuthResolver(allow_external_fallback=False)
+                ctx = resolver.resolve("github.com", org="microsoft")
+
+        assert ctx.token is None
+        assert ctx.source == "none"
+        mock_gh_cli.assert_not_called()
+        mock_git.assert_not_called()
 
     def test_caching(self):
         """Second call returns cached result."""
@@ -1373,3 +1413,248 @@ class TestGhCliShortCircuitsCredentialFill:
 
             assert result == "ok:gho_from_gh_cli"
             mock_cred_fill.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# TestCredentialFallbackOrderRegressionTrap
+# ---------------------------------------------------------------------------
+
+
+class TestCredentialFallbackOrderRegressionTrap:
+    """Regression trap: the credential-resolution priority order for GitHub-class
+    hosts must not silently change.
+
+    Issue #935: while auditing silent except clauses we locked in the current
+    cascade order so any future refactor that shifts priorities is forced to
+    update this test explicitly.
+
+    Priority order (per-org PAT -> global PAT -> GITHUB_TOKEN -> GH_TOKEN ->
+    gh CLI -> git credential fill) is verified by observing which token reaches
+    the operation callable first across a series of isolated env configurations.
+    """
+
+    def _run_op(self, resolver, token_seen, org=None):
+        """Helper: run try_with_fallback and capture the token passed to op."""
+
+        def op(token, env):
+            token_seen.append(token)
+            return "ok"
+
+        return resolver.try_with_fallback("github.com", op, path="owner/repo", org=org)
+
+    def test_per_org_pat_beats_global_pat(self):
+        org = "owner"
+        per_org_key = f"GITHUB_APM_PAT_{org.upper()}"
+        with patch.dict(
+            os.environ,
+            {per_org_key: "per-org-token", "GITHUB_APM_PAT": "global-token"},
+            clear=True,
+        ):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                seen = []
+                resolver = AuthResolver()
+                self._run_op(resolver, seen, org=org)
+        assert seen[0] == "per-org-token", (
+            "per-org PAT must be tried before global PAT; cascade order changed"
+        )
+
+    def test_global_pat_beats_github_token(self):
+        with patch.dict(
+            os.environ,
+            {"GITHUB_APM_PAT": "global-pat", "GITHUB_TOKEN": "gh-token"},
+            clear=True,
+        ):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                seen = []
+                resolver = AuthResolver()
+                self._run_op(resolver, seen)
+        assert seen[0] == "global-pat", (
+            "GITHUB_APM_PAT must be tried before GITHUB_TOKEN; cascade order changed"
+        )
+
+    def test_github_token_beats_gh_token(self):
+        with patch.dict(
+            os.environ,
+            {"GITHUB_TOKEN": "gh-token-env", "GH_TOKEN": "gh-token-alt"},
+            clear=True,
+        ):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                seen = []
+                resolver = AuthResolver()
+                self._run_op(resolver, seen)
+        assert seen[0] == "gh-token-env", (
+            "GITHUB_TOKEN must be tried before GH_TOKEN; cascade order changed"
+        )
+
+    def test_gh_cli_token_beats_git_credential_fill(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(
+                GitHubTokenManager,
+                "resolve_credential_from_gh_cli",
+                return_value="gho_cli",
+            ):
+                with patch.object(
+                    GitHubTokenManager, "resolve_credential_from_git"
+                ) as mock_git_cred:
+                    seen = []
+                    resolver = AuthResolver()
+                    self._run_op(resolver, seen)
+        assert seen[0] == "gho_cli", (
+            "gh CLI token must be tried before git credential fill; cascade order changed"
+        )
+        mock_git_cred.assert_not_called()
+
+    def test_no_token_falls_back_to_unauthenticated(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                seen = []
+                resolver = AuthResolver()
+                self._run_op(resolver, seen)
+        assert seen[0] is None, (
+            "When no token is available, unauthenticated access (None) must be tried"
+        )
+
+    def test_cascade_exception_emits_debug_log(self, caplog):
+        """Debug logging fires when the initial op raises (fallback triggered) -- #935."""
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "test-token"}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+
+                def op_fail_on_token(token, env):
+                    if token is not None:
+                        raise Exception("simulated token rejection")
+                    return "ok"
+
+                with caplog.at_level(logging.DEBUG, logger="apm_cli.core.auth"):
+                    resolver.try_with_fallback("github.com", op_fail_on_token, path="owner/repo")
+
+        debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
+        assert debug_msgs, (
+            "Expected at least one debug log during cascade fallback; none emitted (#935)"
+        )
+
+    def test_debug_logs_do_not_contain_token_values(self, caplog):
+        """Credential values must not appear in debug log output -- security guard (#935)."""
+        sentinel = "ghp_SENTINEL_TOKEN_DO_NOT_LOG_12345"
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": sentinel}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+
+                def op_fail_on_token(token, env):
+                    if token is not None:
+                        raise Exception("simulated token rejection")
+                    return "ok"
+
+                with caplog.at_level(logging.DEBUG, logger="apm_cli.core.auth"):
+                    resolver.try_with_fallback("github.com", op_fail_on_token, path="owner/repo")
+
+        full_log = " ".join(r.message for r in caplog.records)
+        assert sentinel not in full_log, "Credential values must not appear in debug log output"
+
+    def test_ado_attempts_bearer_before_raising(self):
+        """ADO: when PAT fails with auth signal, bearer MUST be attempted before raising.
+
+        Regression trap -- if the _try_ado_bearer_fallback() call is removed from the
+        ADO branch of try_with_fallback, this test fails because get_bearer_token() is
+        never called and the original PAT exception propagates without the bearer attempt.
+        """
+        from apm_cli.core.azure_cli import AzureCliBearerError
+
+        bearer_calls = []
+
+        with patch.dict(os.environ, {"ADO_APM_PAT": "stale-pat"}, clear=True):
+            with patch("apm_cli.core.azure_cli.AzureCliBearerProvider") as mock_cls:
+                mock_provider = mock_cls.return_value
+                mock_provider.is_available.return_value = True
+
+                def _get_bearer():
+                    bearer_calls.append(1)
+                    raise AzureCliBearerError("no az login")
+
+                mock_provider.get_bearer_token.side_effect = _get_bearer
+
+                resolver = AuthResolver()
+
+                def ado_op(token, env):
+                    raise RuntimeError("401 unauthorized")
+
+                with pytest.raises(RuntimeError, match="401 unauthorized"):
+                    resolver.try_with_fallback("dev.azure.com", ado_op)
+
+        assert bearer_calls, (
+            "ADO bearer must be attempted before re-raising original PAT error; "
+            "cascade order changed (regression trap #935)"
+        )
+
+    def test_ghe_cloud_never_falls_back_to_unauth(self):
+        """ghe_cloud: unauthenticated fallback must NEVER be attempted.
+
+        GitHub Enterprise Cloud has no public repos; passing None as the token
+        would expose a useless attempt and violate the auth-only contract.
+        This regression trap verifies that `None` is never sent to the operation
+        callable for a ghe_cloud host, even when the authenticated attempt fails.
+        """
+        tokens_seen = []
+
+        with patch.dict(os.environ, {"GITHUB_APM_PAT": "ghe-pat"}, clear=True):
+            with patch.object(GitHubTokenManager, "resolve_credential_from_git", return_value=None):
+                resolver = AuthResolver()
+
+                def op_capture(token, env):
+                    tokens_seen.append(token)
+                    raise RuntimeError("ghe_cloud op always fails")
+
+                with pytest.raises(RuntimeError):
+                    resolver.try_with_fallback("contoso.ghe.com", op_capture)
+
+        assert None not in tokens_seen, (
+            "ghe_cloud must never fall back to unauthenticated (None token) access; "
+            "contract violated (regression trap #935)"
+        )
+        assert tokens_seen, "Operation was never called -- test is mis-wired"
+
+    def test_token_in_exception_message_is_redacted(self, caplog):
+        """A secret pattern embedded in an exception message must be stripped from debug output.
+
+        Supply-chain hardening (#935): HTTP client libraries sometimes embed auth
+        headers or token values in their exception messages.  SecretRedactionFilter
+        must intercept those before they reach any log handler.
+        """
+        from apm_cli.core.auth import SecretRedactionFilter
+
+        sentinel = "ghp_EMBEDDED_SECRET_IN_EXC_99999"
+        auth_logger = logging.getLogger("apm_cli.core.auth")
+        redaction_filter = SecretRedactionFilter()
+        auth_logger.addFilter(redaction_filter)
+
+        try:
+            with patch.dict(os.environ, {"GITHUB_APM_PAT": "safe-outer-token"}, clear=True):
+                with patch.object(
+                    GitHubTokenManager, "resolve_credential_from_git", return_value=None
+                ):
+                    resolver = AuthResolver()
+
+                    def op_embed_secret(token, env):
+                        if token is not None:
+                            # Simulates an HTTP library embedding a bearer token in
+                            # the exception message (the real supply-chain risk).
+                            raise RuntimeError(f"Bearer {sentinel} was rejected by server")
+                        return "ok"
+
+                    with caplog.at_level(logging.DEBUG, logger="apm_cli.core.auth"):
+                        resolver.try_with_fallback("github.com", op_embed_secret, path="owner/repo")
+        finally:
+            auth_logger.removeFilter(redaction_filter)
+
+        full_log = " ".join(r.message for r in caplog.records)
+        assert sentinel not in full_log, (
+            "Secret embedded in exception message must be redacted by SecretRedactionFilter"
+        )
+
+    @pytest.mark.parametrize("sentinel", ["github_pat_" + "A" * 24, "ghr_" + "B" * 24])
+    def test_bare_pat_like_token_is_redacted(self, sentinel):
+        from apm_cli.core.auth import _redact_secrets
+
+        redacted = _redact_secrets(f"git stderr leaked {sentinel} without a label")
+        assert sentinel not in redacted
+        assert "[REDACTED]" in redacted

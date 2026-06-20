@@ -48,9 +48,18 @@ package is resolved relative to THAT package's own directory (npm/pip/cargo
 parity). Sibling layouts that resolve outside the consuming project root
 (e.g. `../sibling-pkg` from a local dep at the project edge) are
 supported -- the consuming developer authored the manifest chain and
-already trusts the layout. The actual security boundary is upstream:
-**remote-cloned packages cannot declare `local_path` deps at all**, since
-they have no business reaching into the consumer's filesystem.
+already trusts the layout.
+
+Remote-cloned packages may declare a relative `path:` only when it resolves
+inside the same authenticated remote repo root. APM expands that path to the
+parent's remote host/repo/ref and fetches the sibling from the same origin.
+Absolute paths, paths that escape the repo root, and cross-repo local paths
+are rejected.
+
+**GitLab `path:` fetch transport:** GitLab `path:` files are fetched over git
+transport, not the REST API, so self-hosted instances with the API disabled
+still install. Path containment is enforced on the materialized file to reject
+symlink or traversal escapes. For fallback token setup, see `authentication.md`.
 
 ### Custom git ports
 
@@ -134,6 +143,7 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `path` | OPTIONAL | Subdirectory or file within the repo (virtual package). |
 | `ref` | OPTIONAL | Branch, tag, or commit SHA. |
 | `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
+| `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. Generic hosts do not receive APM-managed PATs on HTTP file reads. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys) for keying rules. |
 
 ```yaml
 - git: https://gitlab.com/acme/repo.git
@@ -146,6 +156,9 @@ instead so `@` remains reserved for git usernames and version syntax.
 
 - git: ssh://git@bitbucket.example.com:7999/project/repo.git   # custom SSH port
   ref: v1.0
+
+- git: https://code.acme.com/platform/standards.git               # bespoke GitLab
+  type: gitlab
 ```
 
 ### Local (`path`)
@@ -252,8 +265,8 @@ active. Registry-routed deps add `source: registry`, `version`,
 `resolved_url`, and `resolved_hash` (sha256 of the archive bytes) to
 their lockfile entry, and the lockfile is promoted to
 `lockfile_version: "2"` when any dep is registry-sourced OR carries
-git-source semver resolution fields (`constraint` / `resolved_tag` /
-`resolved_at`).
+git-source semver resolution fields (`constraint` / `resolved_at`) or a
+revision-pin tag annotation (`resolved_tag`).
 
 The `acme/foo@registry-name#version` shorthand is **not supported** (deferred
 to v2) -- the `@` collides with npm/cargo/pip version syntax, with
@@ -314,10 +327,13 @@ dependencies:
         #                            from host env at server-start (no plaintext on disk).
         #                            VS Code and JetBrains: rewritten to ${env:VAR}
         #                            and resolved at runtime.
+        #                            Kiro: preserved as ${VAR} and resolved at runtime.
         #                            Cursor/Windsurf/OpenCode/Claude/Gemini: resolved at install time.
         #                            Codex: passed through unchanged.
         #   ${input:<id>}         -> VS Code prompts user at runtime
         #   <VAR>                 -> deprecated; auto-translated, emits a warning
+        # Registry-declared optional env/input fields are omitted when unset;
+        # see manifest-schema section 4.2.4 for reinstall preservation semantics.
         Authorization: "Bearer ${MY_TOKEN}"
       tools: ["repos", "issues"]
 
@@ -335,6 +351,18 @@ dependencies:
       registry: false
       transport: http
       url: "https://mcp.internal.example.com"
+
+    # Self-defined remote with harness-specific extra keys
+    # Unknown keys (e.g. oauth) are passthrough: preserved and written into
+    # the generated config for EVERY installed harness. Keys that collide with
+    # a modeled field (command/url/headers/env/...) are rejected with a warning.
+    - name: slack
+      registry: false
+      transport: http
+      url: https://mcp.slack.com/mcp
+      oauth:
+        clientId: "<pre-registered-client-id>"
+        callbackPort: 3118
 ```
 
 ## LSP dependency formats
@@ -379,7 +407,8 @@ Optional fields: `args`, `transport`, `env`, `initializationOptions`,
 Claude Code uses `.lsp.json` or `~/.claude.json`, and GitHub Copilot CLI
 uses `.github/lsp.json` or `~/.copilot/lsp-config.json`. Copilot CLI
 uses `fileExtensions` on disk; manifests continue to use
-`extensionToLanguage`.
+`extensionToLanguage`. Plugin `.lsp.json` files may use either a flat
+server map or a `{ "lspServers": { ... } }` envelope.
 
 ## Version pinning
 
@@ -388,7 +417,7 @@ uses `fileExtensions` on disk; manifests continue to use
 | Tag | `owner/repo#v1.0.0` | Production -- immutable reference |
 | Semver range | `owner/repo#^1.2.0` | Track patch/minor updates within a range; APM lists remote tags and pins the highest match in the lockfile |
 | Branch | `owner/repo#main` | Development -- tracks latest |
-| Commit SHA | `owner/repo#abc123d` | Maximum reproducibility |
+| Commit SHA | `owner/repo#abc123d` | Maximum reproducibility; `apm update` can move full 40-character SHA pins to the latest annotated semver tag SHA and annotate the line with `# <tag>` |
 | No ref | `owner/repo` | Resolves default branch at install time |
 | Marketplace ref | `plugin@marketplace#ref` | Override marketplace source ref |
 
@@ -453,3 +482,7 @@ enterprise security guide for the threat model.
 `apm.lock.yaml` records the exact commit SHA for every dependency, regardless
 of the ref format in apm.yml. Running `apm install` without `--update` always
 uses the locked SHA, ensuring reproducible installs across machines.
+
+Lockfile keys keep `github.com` implicit for migration stability while
+non-default hosts add the lowercased host segment. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys)
+for the full keying rules.

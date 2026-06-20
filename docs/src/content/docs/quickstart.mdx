@@ -37,7 +37,7 @@ apm --version
 ```
 
 For Homebrew, Scoop, pip, air-gapped mirrors, or signed-archive install,
-see [Installation](./getting-started/installation/).
+see [Installation](../getting-started/installation/).
 
 ## 2. Initialize a project
 
@@ -146,6 +146,24 @@ APM's verbs match npm's semantics:
 
 For private packages, set `GITHUB_APM_PAT` -- see
 [private packages](/apm/consumer/private-and-org-packages/).
+:::
+
+## What to commit
+
+After `apm install` runs, three categories of files land in your project:
+
+| Path | Commit? | Why |
+|------|---------|-----|
+| `apm.yml` | Yes | Manifest -- declares dependencies, shared with the team |
+| `apm.lock.yaml` | Yes | Lockfile -- pins exact commits and content hashes for reproducible installs |
+| `.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, `.windsurf/`, `.kiro/` | Yes | Deployed agent context -- gives every contributor and cloud Copilot instant access on clone, before they run `apm install` |
+| `apm_modules/` | No | Package cache -- rebuilt from the lockfile on `apm install`. Add to `.gitignore` (APM does this automatically) |
+
+:::tip[Keeping deployed files in sync]
+When you update `apm.yml`, re-run `apm install` and commit the changed deployed files
+alongside the updated manifest and lockfile. A
+[CI drift check](../integrations/ci-cd/#verify-deployed-primitives) catches stale
+files automatically.
 :::
 
 ## What next

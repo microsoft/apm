@@ -47,7 +47,19 @@ For the org-private case, see [Private and org packages](../private-and-org-pack
 
 ## GitLab (SaaS or self-managed)
 
-If a dependency lives on `gitlab.com` or your self-hosted GitLab:
+**If `git clone` works, `apm install` works** -- no token is needed for GitLab `path:` files.
+
+APM fetches `path:`-specified files from GitLab dependencies via git
+sparse/partial checkout (the same transport used for the clone), so your
+existing SSH keys and git credential helpers work without any extra token.
+This is the default for all GitLab sources, including self-hosted instances
+where the REST API is restricted or returns 410 -- if `git clone` works, so
+does `apm install`. For self-hosted hosts, explicit `git:` / SSH URLs carry
+the host in the dependency. Set `GITLAB_HOST` (or `APM_GITLAB_HOSTS`) only
+when you want bare-host or shorthand forms to classify as GitLab.
+
+If you need to fall back to the GitLab REST API (for environments where git
+transport is not available), set `GITLAB_APM_PAT`:
 
 ```bash
 export GITLAB_APM_PAT=glpat_your_token

@@ -11,7 +11,7 @@ Exercises a guardrailing workflow with mixed package types:
 This validates that:
 - Multiple APM packages can be installed (full package + virtual instruction)
 - Compilation produces combined instructions from both packages (distributed
-  across AGENTS.md and .github/instructions/)
+  through Copilot-readable .github/instructions/ files)
 - Prompts from installed packages can be executed
 """
 
@@ -187,17 +187,22 @@ class TestGuardrailingHeroScenario:
             result = run_command(f"{apm_binary} compile", cwd=project_dir, show_output=True)
             assert result.returncode == 0, f"Compilation failed: {result.stderr}"
 
-            # Verify AGENTS.md was generated
+            # Copilot compile suppresses empty AGENTS.md shells when installed
+            # instructions already live under .github/instructions/.
             agents_md = project_dir / "AGENTS.md"
-            assert agents_md.exists(), "AGENTS.md not generated"
+            github_instructions = project_dir / ".github" / "instructions"
+            assert not agents_md.exists(), (
+                "AGENTS.md should not be generated for Copilot-only instructions"
+            )
+            assert github_instructions.is_dir(), ".github/instructions not generated"
+            assert list(github_instructions.glob("*.md")), "No Copilot instruction files generated"
 
             # The distributed-primitives compile model routes instruction content
             # into per-glob files under .github/instructions/ (and, when present,
-            # .github/copilot-instructions.md), leaving the root AGENTS.md as a thin
-            # stub. Aggregate the full compiled corpus so the assertions hold
-            # regardless of where each instruction lands.
-            compiled_sources = [agents_md, project_dir / ".github" / "copilot-instructions.md"]
-            compiled_sources.extend(sorted((project_dir / ".github" / "instructions").glob("*.md")))
+            # .github/copilot-instructions.md). Aggregate the full compiled corpus
+            # so the assertions hold regardless of where each instruction lands.
+            compiled_sources = [project_dir / ".github" / "copilot-instructions.md"]
+            compiled_sources.extend(sorted(github_instructions.glob("*.md")))
             compiled_content = "\n".join(
                 p.read_text() for p in compiled_sources if p.exists()
             ).lower()
@@ -210,8 +215,8 @@ class TestGuardrailingHeroScenario:
                 "Compiled instructions don't contain code-review content from awesome-copilot"
             )
 
-            agents_content = agents_md.read_text()
-            print(f"[OK] AGENTS.md generated ({len(agents_content)} bytes)")
+            compiled_bytes = sum(p.stat().st_size for p in compiled_sources if p.exists())
+            print(f"[OK] Copilot instructions generated ({compiled_bytes} bytes)")
             print("  Contains design instructions: [OK]")
             print("  Contains code-review instructions: [OK]")
 
@@ -283,7 +288,7 @@ class TestGuardrailingHeroScenario:
             print("\n=== 2-Minute Guardrailing Hero Scenario: PASSED ===")
             print("[OK] Project initialization")
             print("[OK] Multiple APM package installation")
-            print("[OK] AGENTS.md compilation with combined instructions")
+            print("[OK] Copilot instruction compilation with combined instructions")
             print("[OK] Prompt execution from installed package")
 
 

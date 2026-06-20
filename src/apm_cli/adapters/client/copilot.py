@@ -26,6 +26,7 @@ from .base import (
     _extract_legacy_angle_vars,
     _has_env_placeholder,
     _stringify_env_literal,
+    registry_field_is_required,
 )
 from .base import (
     _translate_env_placeholder as _translate_env_placeholder,
@@ -206,19 +207,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             # Generate server configuration with environment and runtime variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
 
-            # Determine the server name for configuration key
-            if server_name:
-                # Use explicitly provided server name
-                config_key = server_name
-            else:  # noqa: PLR5501
-                # Extract name from server_url (part after last slash)
-                # For URLs like "microsoft/azure-devops-mcp" -> "azure-devops-mcp"
-                # For URLs like "github/github-mcp-server" -> "github-mcp-server"
-                if "/" in server_url:  # noqa: SIM108
-                    config_key = server_url.split("/")[-1]
-                else:
-                    # Fallback to full server_url if no slash
-                    config_key = server_url
+            config_key = self._determine_config_key(server_url, server_name)
 
             # Update configuration using the chosen key
             self.update_config({config_key: server_config})
@@ -453,6 +442,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             tools_override = server_info.get("_apm_tools_override")
             if tools_override:
                 config["tools"] = tools_override
+            self._merge_extra(config, server_info)
             return config
 
         # Check for remote endpoints first (registry-defined priority)
@@ -495,6 +485,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             if tools_override:
                 config["tools"] = tools_override
 
+            self._merge_extra(config, server_info)
             return config
 
         # Get packages from server info
@@ -518,6 +509,7 @@ class CopilotClientAdapter(MCPClientAdapter):
         if tools_override:
             config["tools"] = tools_override
 
+        self._merge_extra(config, server_info)
         return config
 
     def _apply_auth_and_headers(
@@ -710,6 +702,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             return translated
 
         if self._supports_runtime_env_substitution:
+            env_overrides = env_overrides or {}
             resolved = {}
             placeholder_keys = []
             for env_var in env_vars:
@@ -718,12 +711,18 @@ class CopilotClientAdapter(MCPClientAdapter):
                 name = env_var.get("name", "")
                 if not name:
                     continue
+                required = registry_field_is_required(env_var)
+                override_value = env_overrides.get(name)
+                has_override = bool(
+                    override_value.strip() if isinstance(override_value, str) else override_value
+                )
                 if name in default_github_env:
                     # Non-secret literal default -- preserve as-is.
                     resolved[name] = default_github_env[name]
-                else:
+                elif required or has_override:
                     # Emit a runtime-substitution placeholder; APM never reads
-                    # or stores the value.
+                    # or stores the value. Optional variables are included only
+                    # when install-time collection observed a value.
                     resolved[name] = self._format_runtime_env_placeholder(name)
                     placeholder_keys.append(name)
             # Record for the post-install summary line and the

@@ -143,7 +143,7 @@ def find_unpinned_remote_deps(lockfile: LockFile) -> list[str]:
     """
     unpinned: list[str] = []
     for _key, dep in lockfile.dependencies.items():
-        if getattr(dep, "source", None) == "local":
+        if getattr(dep, "source", None) in {"local", "registry"}:
             continue
         commit = getattr(dep, "resolved_commit", None)
         if not isinstance(commit, str) or not commit:
@@ -200,7 +200,7 @@ def sync_markers_for_lockfile(
 
 def _is_markable(dep: LockedDependency) -> bool:
     """A dep is markable when it has a deterministic remote pin we can verify."""
-    if getattr(dep, "source", None) == "local":
+    if getattr(dep, "source", None) in {"local", "registry"}:
         return False
     commit = getattr(dep, "resolved_commit", None)
     return isinstance(commit, str) and bool(commit)

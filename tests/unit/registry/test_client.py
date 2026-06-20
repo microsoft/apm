@@ -343,6 +343,61 @@ class TestFetchFromUrl:
         assert ct == "application/gzip"
 
 
+class TestPublishVersion:
+    """publish_version must upload with Content-Type: application/zip."""
+
+    def _client(self, session):
+        return RegistryClient(
+            "https://r.example.com",
+            RegistryAuthContext(registry_name="x", token=None),
+            session=session,
+        )
+
+    def test_sends_application_zip_content_type(self):
+        session = _make_session(
+            _make_response(
+                status=201,
+                json_body={"package": "acme/skill", "version": "1.0.0", "digest": "sha256:abc"},
+            )
+        )
+        self._client(session).publish_version("acme", "skill", "1.0.0", b"PK\x03\x04fake")
+        _, kwargs = session.request.call_args
+        assert kwargs["headers"]["Content-Type"] == "application/zip"
+
+    def test_does_not_send_application_gzip(self):
+        session = _make_session(
+            _make_response(
+                status=201,
+                json_body={"package": "acme/skill", "version": "1.0.0", "digest": "sha256:abc"},
+            )
+        )
+        self._client(session).publish_version("acme", "skill", "1.0.0", b"PK\x03\x04fake")
+        _, kwargs = session.request.call_args
+        assert kwargs["headers"]["Content-Type"] != "application/gzip"
+
+    def test_409_raises_registry_error(self):
+        session = _make_session(
+            _make_response(
+                status=409,
+                json_body={"title": "Conflict", "detail": "version already exists"},
+            )
+        )
+        with pytest.raises(RegistryError) as excinfo:
+            self._client(session).publish_version("acme", "skill", "1.0.0", b"PK\x03\x04fake")
+        assert excinfo.value.status == 409
+        assert "already exists" in str(excinfo.value)
+
+    def test_empty_body_201_returns_publish_result_with_computed_digest(self):
+        """JFrog and some other registries return 201 with no body."""
+        import hashlib
+
+        archive = b"PK\x03\x04fake"
+        expected = f"sha256:{hashlib.sha256(archive).hexdigest()}"
+        session = _make_session(_make_response(status=201, body=b"", content_type=""))
+        result = self._client(session).publish_version("acme", "skill", "1.0.0", archive)
+        assert result.digest == expected
+
+
 class TestErrorMapping:
     def test_transport_error_wraps(self):
         session = MagicMock(spec=requests.Session)

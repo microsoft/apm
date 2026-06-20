@@ -996,6 +996,40 @@ class TestResolveGithubToken:
 
 
 class TestBuildPipeline:
+    def test_build_writes_source_base_composed_url_to_output_json(self, tmp_path):
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(
+            yaml.safe_dump(
+                {
+                    "name": "source-base-marketplace",
+                    "description": "Source base marketplace",
+                    "version": "1.0.0",
+                    "marketplace": {
+                        "owner": {"name": "ACME"},
+                        "sourceBase": "https://gitlab.example.com/platform/marketplaces",
+                        "claude": {"output": "marketplace.json"},
+                        "packages": [
+                            {
+                                "name": "tool",
+                                "source": "team/tool",
+                                "ref": "a" * 40,
+                            }
+                        ],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        builder = MarketplaceBuilder(apm_yml, options=BuildOptions(offline=True))
+
+        report = builder.build()
+
+        assert report.primary_output.errors == ()
+        output = json.loads((tmp_path / "marketplace.json").read_text(encoding="utf-8"))
+        source = output["plugins"][0]["source"]
+        assert source["source"] == "url"
+        assert source["url"] == "https://gitlab.example.com/platform/marketplaces/team/tool"
+
     def test_build_calls_resolve_and_write_output(self, tmp_path):
         yml = _make_marketplace_yml_file(tmp_path)
         builder = MarketplaceBuilder(yml)

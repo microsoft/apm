@@ -74,9 +74,15 @@ class SkillSpectorAdapter:
         if shutil.which(_BINARY) is None:
             return (
                 False,
-                "SkillSpector CLI not found on PATH. Install the 'skillspector' "
-                "tool, or use '--external sarif --external-sarif <file>' to ingest "
-                "a SARIF file from any scanner (works with the APM binary).",
+                "SkillSpector CLI not found on PATH.\n\n"
+                "To install it (requires Python >= 3.12):\n"
+                '  uv tool install "skillspector @ '
+                'git+https://github.com/NVIDIA/SkillSpector.git"\n'
+                '  pip install "skillspector @ '
+                'git+https://github.com/NVIDIA/SkillSpector.git"\n\n'
+                "After install, verify with: skillspector --version\n\n"
+                "Alternatively, generate SARIF from any scanner and ingest it:\n"
+                "  apm audit --external sarif --external-sarif report.sarif",
             )
         if options is not None and options.llm:
             if not any(os.environ.get(var) for var in _LLM_KEY_ENV_VARS):
@@ -101,8 +107,15 @@ class SkillSpectorAdapter:
         binary = shutil.which(_BINARY)
         if binary is None:
             raise ExternalScanError(
-                "SkillSpector CLI not found on PATH. Install the 'skillspector' "
-                "tool, or use '--external sarif --external-sarif <file>'."
+                "SkillSpector CLI not found on PATH.\n\n"
+                "To install it (requires Python >= 3.12):\n"
+                '  uv tool install "skillspector @ '
+                'git+https://github.com/NVIDIA/SkillSpector.git"\n'
+                '  pip install "skillspector @ '
+                'git+https://github.com/NVIDIA/SkillSpector.git"\n\n'
+                "After install, verify with: skillspector --version\n\n"
+                "Alternatively, generate SARIF from any scanner and ingest it:\n"
+                "  apm audit --external sarif --external-sarif report.sarif"
             )
 
         extra_args = validate_extra_args(

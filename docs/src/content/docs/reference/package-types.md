@@ -200,7 +200,9 @@ my-plugin/
 ```
 
 **What gets installed:** each artifact listed in `plugin.json` is mapped to
-the appropriate runtime directory via `_map_plugin_artifacts`.
+the appropriate runtime directory via `_map_plugin_artifacts`. Use `--skill`
+to cherry-pick plugin skills by leaf name or manifest path, such as
+`skills/productivity/grill-me`.
 
 **When to choose:** you already have a Claude plugin and want APM to
 consume it without restructuring.

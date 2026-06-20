@@ -414,6 +414,46 @@ class TestPromoteSubSkillsManagedFiles:
 class TestPromoteSubSkillsStandaloneDedup:
     """Second target with identical resolved path is logged+skipped."""
 
+    def test_plugin_manifest_subset_promotes_only_selected_nested_skill(
+        self, tmp_path: Path
+    ) -> None:
+        """--skill path filters plugin-manifest sub-skills during promotion."""
+        from apm_cli.deps.plugin_parser import _map_plugin_artifacts
+        from apm_cli.models.apm_package import PackageType
+
+        plugin_root = tmp_path / "skills-repo"
+        selected_skill = plugin_root / "skills" / "productivity" / "grill-me"
+        other_skill = plugin_root / "skills" / "writing" / "summarize-me"
+        selected_skill.mkdir(parents=True)
+        other_skill.mkdir(parents=True)
+        (selected_skill / "SKILL.md").write_text("# Grill Me", encoding="utf-8")
+        (other_skill / "SKILL.md").write_text("# Summarize Me", encoding="utf-8")
+
+        manifest = {
+            "name": "skills-repo",
+            "skills": [
+                "skills/productivity/grill-me",
+                "skills/writing/summarize-me",
+            ],
+        }
+        _map_plugin_artifacts(plugin_root, plugin_root / ".apm", manifest)
+
+        pkg_info = _make_package_info(plugin_root, package_type=PackageType.MARKETPLACE_PLUGIN)
+        target = _make_target(name="claude", root_dir=".claude", auto_create=True)
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        result = SkillIntegrator().integrate_package_skill(
+            pkg_info,
+            project_root,
+            targets=[target],
+            skill_subset=("skills/productivity/grill-me",),
+        )
+
+        assert result.sub_skills_promoted == 1
+        assert (project_root / ".claude" / "skills" / "grill-me" / "SKILL.md").exists()
+        assert not (project_root / ".claude" / "skills" / "summarize-me" / "SKILL.md").exists()
+
     def test_duplicate_target_skips_with_logger(self, tmp_path: Path) -> None:
         pkg_dir = tmp_path / "pkg"
         sub_skills = pkg_dir / ".apm" / "skills"

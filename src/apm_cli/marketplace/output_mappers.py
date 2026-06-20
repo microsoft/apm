@@ -88,48 +88,53 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
             plugin: dict[str, Any] = OrderedDict()
             plugin["name"] = pkg.name
 
+            meta = remote_metadata.get(pkg.name, {})
             if is_local:
-                if entry.description:
-                    plugin["description"] = entry.description
-                if entry.version:
-                    plugin["version"] = entry.version
+                if _apply_field_with_precedence(
+                    plugin,
+                    diagnostics,
+                    field="description",
+                    entry_value=entry.description,
+                    meta_value=meta.get("description"),
+                    pkg_name=pkg.name,
+                    source_label="package apm.yml",
+                ):
+                    override_count += 1
+                if _apply_field_with_precedence(
+                    plugin,
+                    diagnostics,
+                    field="version",
+                    entry_value=entry.version,
+                    meta_value=meta.get("version"),
+                    pkg_name=pkg.name,
+                    source_label="package apm.yml",
+                ):
+                    override_count += 1
             else:
-                meta = remote_metadata.get(pkg.name, {})
-                if entry and entry.description:
-                    plugin["description"] = entry.description
-                    remote_desc = meta.get("description", "")
-                    if remote_desc and remote_desc != entry.description:
-                        override_count += 1
-                        diagnostics.append(
-                            BuildDiagnostic(
-                                level="verbose",
-                                message=(
-                                    f"[i] Package '{pkg.name}': using curator "
-                                    f"description (remote: "
-                                    f"'{remote_desc[:40]}')"
-                                ),
-                            )
-                        )
-                elif meta.get("description"):
-                    plugin["description"] = meta["description"]
-
-                if entry and _is_display_version(entry.version):
-                    plugin["version"] = entry.version
-                    remote_ver = meta.get("version", "")
-                    if remote_ver and remote_ver != entry.version:
-                        override_count += 1
-                        diagnostics.append(
-                            BuildDiagnostic(
-                                level="verbose",
-                                message=(
-                                    f"[i] Package '{pkg.name}': using curator "
-                                    f"version '{entry.version}' "
-                                    f"(remote: '{remote_ver}')"
-                                ),
-                            )
-                        )
-                elif meta.get("version"):
-                    plugin["version"] = meta["version"]
+                entry_description = entry.description if entry else None
+                entry_version = (
+                    entry.version if entry and _is_display_version(entry.version) else None
+                )
+                if _apply_field_with_precedence(
+                    plugin,
+                    diagnostics,
+                    field="description",
+                    entry_value=entry_description,
+                    meta_value=meta.get("description"),
+                    pkg_name=pkg.name,
+                    source_label="remote",
+                ):
+                    override_count += 1
+                if _apply_field_with_precedence(
+                    plugin,
+                    diagnostics,
+                    field="version",
+                    entry_value=entry_version,
+                    meta_value=meta.get("version"),
+                    pkg_name=pkg.name,
+                    source_label="remote",
+                ):
+                    override_count += 1
 
             if entry and entry.author:
                 plugin["author"] = dict(entry.author)
@@ -178,16 +183,14 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
                 # URL so Claude Code can clone from a non-default host (e.g.
                 # GHE) -- the ``github`` shorthand only resolves to github.com.
                 source_obj: dict[str, Any] = OrderedDict()
+                remote_url = _remote_source_url(pkg)
                 if pkg.subdir:
                     source_obj["source"] = "git-subdir"
-                    if pkg.host:
-                        source_obj["url"] = f"https://{pkg.host}/{pkg.source_repo}"
-                    else:
-                        source_obj["url"] = pkg.source_repo
+                    source_obj["url"] = remote_url or pkg.source_repo
                     source_obj["path"] = pkg.subdir
-                elif pkg.host:
+                elif remote_url:
                     source_obj["source"] = "url"
-                    source_obj["url"] = f"https://{pkg.host}/{pkg.source_repo}"
+                    source_obj["url"] = remote_url
                 else:
                     source_obj["source"] = "github"
                     source_obj["repo"] = pkg.source_repo
@@ -203,8 +206,9 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
         if plugin_root and strip_count > 0:
             summary_parts.append(f"stripped from {strip_count} local source(s)")
         if override_count > 0:
+            field_label = "field override" if override_count == 1 else "field overrides"
             summary_parts.append(
-                f"{override_count} remote entry(ies) used curator-supplied overrides"
+                f"{override_count} curator-supplied {field_label} kept over package metadata"
             )
         if summary_parts:
             diagnostics.append(
@@ -267,6 +271,15 @@ MARKETPLACE_OUTPUT_MAPPERS: dict[str, MarketplaceOutputMapper] = {
 }
 
 
+def _remote_source_url(pkg: ResolvedPackage) -> str | None:
+    """Return the canonical URL for remote packages that cannot use github shorthand."""
+    if pkg.source_url:
+        return pkg.source_url
+    if pkg.host:
+        return f"https://{pkg.host}/{pkg.source_repo}"
+    return None
+
+
 def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
     if entry.is_local:
         return OrderedDict(
@@ -278,10 +291,7 @@ def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
     if pkg.subdir:
         source_obj: dict[str, Any] = OrderedDict()
         source_obj["source"] = "git-subdir"
-        if pkg.host:
-            source_obj["url"] = f"https://{pkg.host}/{pkg.source_repo}"
-        else:
-            source_obj["url"] = pkg.source_repo
+        source_obj["url"] = _remote_source_url(pkg) or pkg.source_repo
         source_obj["path"] = pkg.subdir
         if pkg.ref:
             source_obj["ref"] = pkg.ref
@@ -291,15 +301,68 @@ def _codex_source(entry: PackageEntry, pkg: ResolvedPackage) -> dict[str, Any]:
 
     source_obj = OrderedDict()
     source_obj["source"] = "url"
-    if pkg.host:
-        source_obj["url"] = f"https://{pkg.host}/{pkg.source_repo}"
-    else:
-        source_obj["url"] = pkg.source_repo
+    source_obj["url"] = _remote_source_url(pkg) or pkg.source_repo
     if pkg.ref:
         source_obj["ref"] = pkg.ref
     if pkg.sha:
         source_obj["sha"] = pkg.sha
     return source_obj
+
+
+def _apply_field_with_precedence(
+    plugin: dict[str, Any],
+    diagnostics: list[BuildDiagnostic],
+    *,
+    field: str,
+    entry_value: str | None,
+    meta_value: Any,
+    pkg_name: str,
+    source_label: str,
+) -> bool:
+    """Apply curator-wins metadata precedence and report override diagnostics."""
+    meta_text = meta_value if isinstance(meta_value, str) else ""
+    if entry_value:
+        plugin[field] = entry_value
+        if meta_text and meta_text != entry_value:
+            diagnostics.append(
+                BuildDiagnostic(
+                    level="verbose",
+                    message=_override_message(
+                        pkg_name=pkg_name,
+                        field=field,
+                        entry_value=entry_value,
+                        source_label=source_label,
+                        meta_value=meta_text,
+                    ),
+                )
+            )
+            return True
+    elif meta_text:
+        plugin[field] = meta_text
+    return False
+
+
+def _override_message(
+    *,
+    pkg_name: str,
+    field: str,
+    entry_value: str,
+    source_label: str,
+    meta_value: str,
+) -> str:
+    """Build a compact verbose diagnostic for curator override choices."""
+    field_detail = f"{field} '{entry_value}'" if field == "version" else field
+    return (
+        f"[i] Package '{pkg_name}': using curator {field_detail} "
+        f"({source_label}: '{_diagnostic_preview(meta_value)}')"
+    )
+
+
+def _diagnostic_preview(value: str, *, limit: int = 40) -> str:
+    """Return a compact diagnostic preview with an explicit truncation marker."""
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "..."
 
 
 def _duplicate_name_warnings(plugins: list[dict[str, Any]]) -> list[str]:

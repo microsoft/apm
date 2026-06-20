@@ -164,6 +164,11 @@ For CI gating that runs even when a developer passes `--no-policy`
 locally, wire `apm audit --ci --policy org` into your pipeline. See
 [../enforce-in-ci/](./enforce-in-ci/).
 
+APM policy governs install-time decisions only. If you need runtime
+permission controls, those belong in your harness configuration, not in
+`apm-policy.yml`. See
+[Governance overview](/apm/enterprise/governance-overview/#boundary-statement).
+
 ## 6. What a blocked install looks like
 
 When `enforcement: block` and a check fails, the user sees an inline

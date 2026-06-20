@@ -636,6 +636,134 @@ class TestTagPatternOverride:
 
 
 # ---------------------------------------------------------------------------
+# Monorepo name-scoped tag pattern (issue #1822)
+# ---------------------------------------------------------------------------
+
+
+class TestMonorepoNameScopedTagPattern:
+    """Regression tests for issue #1822 -- {name} must scope tag resolution per package.
+
+    When build.tagPattern (or entry-level tag_pattern) contains ``{name}``,
+    each package must resolve against its OWN tags only.  Before the fix,
+    ``build_tag_regex(pattern)`` was called without ``name=entry.name``,
+    making ``{name}`` a wildcard that matched all packages' tags, causing
+    every entry to resolve to the single highest version in the repo.
+    """
+
+    def test_two_packages_resolve_independently(self, tmp_path: Path) -> None:
+        """Each package resolves to its own highest matching tag, not the global maximum."""
+        yml = """\
+        name: test-mkt
+        description: Test
+        version: 1.0.0
+        owner:
+          name: Test
+        build:
+          tagPattern: "{name}-v{version}"
+        packages:
+          - name: pkg-a
+            source: acme/catalog
+            subdir: packages/pkg-a
+            version: ">=1.0.0"
+          - name: pkg-b
+            source: acme/catalog
+            subdir: packages/pkg-b
+            version: ">=1.0.0"
+        """
+        # pkg-a tagged at v1.0.0, pkg-b at v2.0.0 (higher global version).
+        # Before the fix, both packages resolved to pkg-b-v2.0.0 because
+        # {name} was treated as a wildcard [^/]+.
+        refs = {
+            "acme/catalog": _make_refs(
+                "pkg-a-v1.0.0",
+                "pkg-b-v2.0.0",
+            )
+        }
+        report = _build_with_mock(tmp_path, yml, refs)
+        resolved_by_name = {r.name: r.ref for r in report.resolved}
+        assert resolved_by_name["pkg-a"] == "pkg-a-v1.0.0"
+        assert resolved_by_name["pkg-b"] == "pkg-b-v2.0.0"
+
+    def test_two_packages_double_dash_pattern(self, tmp_path: Path) -> None:
+        """Canonical ``{name}--v{version}`` double-dash pattern also resolves per-package."""
+        yml = """\
+        name: test-mkt
+        description: Test
+        version: 1.0.0
+        owner:
+          name: Test
+        build:
+          tagPattern: "{name}--v{version}"
+        packages:
+          - name: pkg-a
+            source: acme/catalog
+            version: ">=1.0.0"
+          - name: pkg-b
+            source: acme/catalog
+            version: ">=1.0.0"
+        """
+        refs = {
+            "acme/catalog": _make_refs(
+                "pkg-a--v1.0.0",
+                "pkg-b--v2.0.0",
+            )
+        }
+        report = _build_with_mock(tmp_path, yml, refs)
+        resolved_by_name = {r.name: r.ref for r in report.resolved}
+        assert resolved_by_name["pkg-a"] == "pkg-a--v1.0.0"
+        assert resolved_by_name["pkg-b"] == "pkg-b--v2.0.0"
+
+    def test_per_entry_tag_pattern_scopes_to_name(self, tmp_path: Path) -> None:
+        """Per-entry ``tag_pattern`` containing ``{name}`` is also scoped correctly."""
+        yml = """\
+        name: test-mkt
+        description: Test
+        version: 1.0.0
+        owner:
+          name: Test
+        packages:
+          - name: pkg-a
+            source: acme/catalog
+            version: ">=1.0.0"
+            tag_pattern: "{name}-v{version}"
+          - name: pkg-b
+            source: acme/catalog
+            version: ">=1.0.0"
+            tag_pattern: "{name}-v{version}"
+        """
+        refs = {
+            "acme/catalog": _make_refs(
+                "pkg-a-v1.0.0",
+                "pkg-b-v2.0.0",
+            )
+        }
+        report = _build_with_mock(tmp_path, yml, refs)
+        resolved_by_name = {r.name: r.ref for r in report.resolved}
+        assert resolved_by_name["pkg-a"] == "pkg-a-v1.0.0"
+        assert resolved_by_name["pkg-b"] == "pkg-b-v2.0.0"
+
+    def test_no_match_when_only_other_package_tags_exist(self, tmp_path: Path) -> None:
+        """pkg-a with no matching tags raises NoMatchingVersionError (not pkg-b's tag)."""
+        yml = """\
+        name: test-mkt
+        description: Test
+        version: 1.0.0
+        owner:
+          name: Test
+        build:
+          tagPattern: "{name}-v{version}"
+        packages:
+          - name: pkg-a
+            source: acme/catalog
+            version: "^1.0.0"
+        """
+        # Only pkg-b tags present -- pkg-a should NOT pick these up
+        refs = {"acme/catalog": _make_refs("pkg-b-v1.0.0", "pkg-b-v2.0.0")}
+        with pytest.raises(NoMatchingVersionError):
+            _build_with_mock(tmp_path, yml, refs)
+
+
+# ---------------------------------------------------------------------------
 # No match error
 # ---------------------------------------------------------------------------
 
@@ -1756,6 +1884,163 @@ class TestFetchRemoteMetadata:
         call_args = mock_open.call_args
         req = call_args[0][0]
         assert req.get_header("Authorization") is None
+
+
+# ---------------------------------------------------------------------------
+# _fetch_local_metadata tests
+# ---------------------------------------------------------------------------
+
+
+class TestFetchLocalMetadata:
+    """Tests for best-effort local apm.yml metadata reads."""
+
+    def _make_pkg(
+        self,
+        *,
+        name: str = "local-tool",
+        subdir: str | None = "./packages/local-tool",
+    ) -> ResolvedPackage:
+        return ResolvedPackage(
+            name=name,
+            source_repo="",
+            subdir=subdir,
+            ref="",
+            sha="",
+            requested_version=None,
+            tags=(),
+            is_prerelease=False,
+        )
+
+    def _make_builder(self, tmp_path: Path) -> MarketplaceBuilder:
+        yml_path = _write_yml(tmp_path, _BASIC_YML)
+        return MarketplaceBuilder(yml_path)
+
+    def test_reads_description_and_version_from_apm_yml(self, tmp_path: Path) -> None:
+        """File on disk with both fields -> both returned."""
+        pkg_dir = tmp_path / "packages" / "local-tool"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text(
+            "name: local-tool\ndescription: A local tool\nversion: 1.2.3\n",
+            encoding="utf-8",
+        )
+        builder = self._make_builder(tmp_path)
+        result = builder._fetch_local_metadata(self._make_pkg())
+        assert result is not None
+        assert result["description"] == "A local tool"
+        assert result["version"] == "1.2.3"
+
+    def test_description_only(self, tmp_path: Path) -> None:
+        """File with description but no version -> only description returned."""
+        pkg_dir = tmp_path / "packages" / "local-tool"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text(
+            "name: local-tool\ndescription: Only desc\n",
+            encoding="utf-8",
+        )
+        builder = self._make_builder(tmp_path)
+        result = builder._fetch_local_metadata(self._make_pkg())
+        assert result is not None
+        assert result["description"] == "Only desc"
+        assert "version" not in result
+
+    def test_missing_apm_yml_returns_none(self, tmp_path: Path) -> None:
+        """Subdir exists but has no apm.yml -> None, no crash."""
+        (tmp_path / "packages" / "local-tool").mkdir(parents=True)
+        builder = self._make_builder(tmp_path)
+        result = builder._fetch_local_metadata(self._make_pkg())
+        assert result is None
+
+    def test_missing_subdir_returns_none(self, tmp_path: Path) -> None:
+        """Subdir does not exist -> None, no crash."""
+        builder = self._make_builder(tmp_path)
+        result = builder._fetch_local_metadata(self._make_pkg())
+        assert result is None
+
+    def test_path_escapes_project_root_returns_none(self, tmp_path: Path) -> None:
+        """A subdir that resolves outside the project root is skipped."""
+        builder = self._make_builder(tmp_path)
+        pkg = self._make_pkg(subdir="../escape")
+        result = builder._fetch_local_metadata(pkg)
+        assert result is None
+
+    def test_subdir_resolves_to_project_root_returns_none(self, tmp_path: Path) -> None:
+        """Source that resolves to project root reads the marketplace's own
+        apm.yml, not a package manifest -- skip rather than emit the
+        marketplace description as a package description.
+        """
+        builder = self._make_builder(tmp_path)
+        pkg = self._make_pkg(subdir="./")
+        result = builder._fetch_local_metadata(pkg)
+        assert result is None
+
+    def test_project_root_skip_uses_normalized_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Project-root skip compares the same normalized path shape."""
+        (tmp_path / "apm.yml").write_text(
+            "name: root-tool\ndescription: Root description\n",
+            encoding="utf-8",
+        )
+        builder = self._make_builder(tmp_path)
+
+        class ExtendedProjectRoot:
+            def __truediv__(self, other: str) -> Path:
+                return tmp_path / other
+
+            def resolve(self) -> Path:
+                return Path(f"\\\\?\\{tmp_path.resolve()}")
+
+        def fake_ensure_path_within(_path: Any, _base_dir: Any) -> Path:
+            return tmp_path.resolve()
+
+        monkeypatch.setattr(
+            "apm_cli.marketplace.builder.ensure_path_within",
+            fake_ensure_path_within,
+        )
+        builder._project_root = ExtendedProjectRoot()  # type: ignore[assignment]
+
+        pkg = self._make_pkg(subdir="./")
+        result = builder._fetch_local_metadata(pkg)
+
+        assert result is None
+
+    def test_apm_yml_symlink_escape_returns_none(self, tmp_path: Path) -> None:
+        """A symlinked package apm.yml that escapes the root is skipped."""
+        outside = tmp_path.parent / "outside-apm.yml"
+        outside.write_text(
+            "name: local-tool\ndescription: Outside description\n",
+            encoding="utf-8",
+        )
+        pkg_dir = tmp_path / "packages" / "local-tool"
+        pkg_dir.mkdir(parents=True)
+        try:
+            (pkg_dir / "apm.yml").symlink_to(outside)
+        except (NotImplementedError, OSError) as exc:
+            pytest.skip(f"symlink creation unavailable: {exc}")
+
+        builder = self._make_builder(tmp_path)
+        result = builder._fetch_local_metadata(self._make_pkg())
+
+        assert result is None
+
+    def test_malformed_yaml_returns_none(self, tmp_path: Path) -> None:
+        """Bad YAML -> None, no exception propagates."""
+        pkg_dir = tmp_path / "packages" / "local-tool"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "apm.yml").write_text(
+            "name: local-tool\ndescription: [unclosed",
+            encoding="utf-8",
+        )
+        builder = self._make_builder(tmp_path)
+        result = builder._fetch_local_metadata(self._make_pkg())
+        assert result is None
+
+    def test_empty_subdir_field_returns_none(self, tmp_path: Path) -> None:
+        """Defensive: a ResolvedPackage with subdir=None is skipped."""
+        builder = self._make_builder(tmp_path)
+        pkg = self._make_pkg(subdir=None)
+        result = builder._fetch_local_metadata(pkg)
+        assert result is None
 
 
 class _FakeHTTPResponse:

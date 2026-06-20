@@ -99,10 +99,10 @@ class TestSafeMCPInstaller(unittest.TestCase):
         def mock_check_exists(server_ref):
             return server_ref == "existing-server"
 
-        def mock_configure(server_ref):
+        def mock_configure(server_ref, **kwargs):
             if server_ref == "failing-server":
                 raise Exception("Configuration failed")
-            return server_ref == "new-server"
+            return server_ref == "new-server" and not kwargs
 
         self.mock_conflict_detector.check_server_exists.side_effect = mock_check_exists
         self.mock_adapter.configure_mcp_server.side_effect = mock_configure

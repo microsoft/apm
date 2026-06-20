@@ -67,6 +67,24 @@ def _as_yaml_targets(value: str | list[str] | None) -> list[str] | None:
     return parts or None
 
 
+def _normalize_runtime_target_aliases(tokens: Iterable[str]) -> list[str]:
+    """Map runtime aliases to canonical target names in first-seen order."""
+    from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        raw = str(token).strip()
+        if not raw:
+            continue
+        canonical = RUNTIME_TO_CANONICAL_TARGET.get(raw, raw)
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        normalized.append(canonical)
+    return normalized
+
+
 def _read_yaml_targets(ctx) -> list[str] | None:
     """Read targets/target from raw apm.yml using v2 parser.
 
@@ -134,6 +152,289 @@ def _create_target_dirs(
     return created
 
 
+def _check_openclaw_flag_gate(
+    explicit: str | list[str] | None,
+    targets: list,
+    ctx: InstallContext,
+) -> None:
+    """Emit an enable-hint when the user asks for openclaw but the flag is OFF."""
+    _check_experimental_target_hint(
+        explicit, targets, ctx, target_name="openclaw", flag_name="openclaw"
+    )
+
+
+def _check_hermes_flag_gate(
+    explicit: str | list[str] | None,
+    targets: list,
+    ctx: InstallContext,
+) -> None:
+    """Emit an enable-hint when the user asks for hermes but the flag is OFF."""
+    _check_experimental_target_hint(
+        explicit, targets, ctx, target_name="hermes", flag_name="hermes"
+    )
+
+
+def _check_experimental_target_hint(
+    explicit: str | list[str] | None,
+    targets: list,
+    ctx: InstallContext,
+    *,
+    target_name: str,
+    flag_name: str,
+) -> None:
+    """Emit an enable-hint when *target_name* is requested but its flag is OFF.
+
+    Shared by the simple experimental targets whose only gate is the
+    experimental flag (no extra environment requirement).
+    """
+    user_asked = False
+    if explicit:
+        if isinstance(explicit, list):
+            user_asked = target_name in explicit
+        else:
+            user_asked = explicit == target_name
+    if not user_asked:
+        return
+
+    resolved = any(t.name == target_name for t in targets)
+    if resolved:
+        return
+
+    from apm_cli.core.experimental import is_enabled
+
+    if not is_enabled(flag_name):
+        if ctx.logger:
+            ctx.logger.progress(
+                f"The '{target_name}' target requires an experimental flag. "
+                f"Run: apm experimental enable {flag_name}",
+                symbol="info",
+            )
+
+
+def _gate_cowork_target(
+    ctx: InstallContext,
+    targets: list,
+    explicit: str | list[str] | None,
+    is_user: bool,
+) -> None:
+    """Apply cowork-target gating rules.
+
+    Checks whether the user explicitly requested copilot-cowork and, if so,
+    whether the experimental flag is enabled and the target resolved.
+    Also enforces the project-scope gate (cowork requires ``--global``).
+    May call ``raise SystemExit(1)`` when a gate condition is violated.
+    """
+    user_asked_cowork = False
+    if explicit:
+        if isinstance(explicit, list):
+            user_asked_cowork = "copilot-cowork" in explicit
+        else:
+            user_asked_cowork = explicit == "copilot-cowork"
+
+    if user_asked_cowork:
+        _cowork_resolved = any(t.name == "copilot-cowork" for t in targets)
+        if not _cowork_resolved:
+            from apm_cli.core.experimental import is_enabled as _is_flag_on
+
+            if not _is_flag_on("copilot_cowork"):
+                if ctx.logger:
+                    ctx.logger.progress(
+                        "The 'copilot-cowork' target requires an experimental flag. "
+                        "Run: apm experimental enable copilot-cowork",
+                        symbol="info",
+                    )
+            else:
+                import sys as _sys
+
+                if _sys.platform.startswith("linux"):
+                    _cowork_msg = (
+                        "Cowork has no auto-detection on Linux.\n"
+                        "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
+                        "apm config set copilot-cowork-skills-dir <path>"
+                    )
+                else:
+                    _cowork_msg = (
+                        "Cowork: no OneDrive path detected.\n"
+                        "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
+                        "apm config set copilot-cowork-skills-dir <path>"
+                    )
+                if ctx.logger:
+                    ctx.logger.error(_cowork_msg, symbol="cross")
+                raise SystemExit(1)
+
+    # Amendment 5: project-scope gate for cowork target.
+    if not is_user:
+        _cowork_in_set = any(t.name == "copilot-cowork" for t in targets)
+        if _cowork_in_set:
+            if ctx.logger:
+                ctx.logger.error(
+                    "The 'copilot-cowork' target requires --global (user scope). "
+                    "Run: apm install --target copilot-cowork --global"
+                )
+            raise SystemExit(1)
+
+
+def _gate_copilot_app_target(
+    ctx: InstallContext,
+    targets: list,
+    explicit: str | list[str] | None,
+) -> None:
+    """Apply copilot-app target gating rules.
+
+    Checks whether the user explicitly requested copilot-app and, if so,
+    whether the experimental flag is enabled and the app is installed.
+    May call ``raise SystemExit(1)`` when a gate condition is violated.
+    """
+    user_asked_copilot_app = False
+    if explicit:
+        if isinstance(explicit, list):
+            user_asked_copilot_app = "copilot-app" in explicit
+        else:
+            user_asked_copilot_app = explicit == "copilot-app"
+
+    if not user_asked_copilot_app:
+        return
+
+    _copilot_app_resolved = any(t.name == "copilot-app" for t in targets)
+    if _copilot_app_resolved:
+        return
+
+    from apm_cli.core.experimental import is_enabled as _is_flag_on
+
+    if not _is_flag_on("copilot_app"):
+        if ctx.logger:
+            ctx.logger.progress(
+                "The 'copilot-app' target requires an experimental flag. "
+                "Run: apm experimental enable copilot-app",
+                symbol="info",
+            )
+    else:
+        _app_msg = (
+            "GitHub Copilot desktop App not detected.\n"
+            "Expected ~/.copilot/data.db but the file is missing.\n"
+            "Install the app, or omit '--target copilot-app'."
+        )
+        if ctx.logger:
+            ctx.logger.error(_app_msg, symbol="cross")
+        raise SystemExit(1)
+
+
+def _resolve_targets_by_scope(
+    ctx: InstallContext,
+    targets: list,
+    explicit: str | list[str] | None,
+    is_user: bool,
+) -> list:
+    """Resolve targets for either project scope (v2) or user scope (legacy).
+
+    For project scope, applies the v2 resolution algorithm with signal-based
+    provenance, replacing the legacy target list with the v2 list while
+    preserving any non-canonical targets (e.g. copilot-cowork).
+
+    For user scope, emits diagnostic logging and creates target directories
+    via :func:`_create_target_dirs`.
+
+    Returns the effective ``_targets`` list.
+    """
+    import click as _click
+
+    from apm_cli.core.target_detection import format_provenance
+    from apm_cli.core.target_detection import resolve_targets as _resolve_targets_v2
+
+    if is_user:
+        # User-scope: legacy target directory creation and logging.
+        if ctx.logger:
+            if targets:
+
+                def _fmt_target(t: Any) -> str:
+                    if t.resolved_deploy_root is not None:
+                        return f"{t.name} ({t.resolved_deploy_root})"
+                    return f"{t.name} (~/{t.root_dir}/)"
+
+                _target_names = ", ".join(_fmt_target(t) for t in targets)
+                ctx.logger.verbose_detail(f"Active global targets: {_target_names}")
+                from apm_cli.deps.lockfile import get_lockfile_path
+
+                ctx.logger.verbose_detail(f"Lockfile: {get_lockfile_path(ctx.apm_dir)}")
+            else:
+                ctx.logger.warning(
+                    "No global targets resolved -- nothing will be "
+                    "deployed. Check 'target:' in apm.yml or use --target."
+                )
+        _create_target_dirs(targets, ctx.project_root, explicit, ctx.logger)
+        return targets
+
+    # Project scope: v2 resolution.
+    from apm_cli.core.apm_yml import CANONICAL_TARGETS as _CANONICAL
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    _v2_flag: str | list[str] | None = None
+    if ctx.target_override:
+        raw_override = ctx.target_override
+        if isinstance(raw_override, str):
+            parts = [t.strip() for t in raw_override.split(",") if t.strip()]
+        else:
+            parts = list(raw_override)
+        # Multi-token CLI parsing returns runtime aliases; convert them before filtering.
+        parts = _normalize_runtime_target_aliases(parts)
+        parts = [p for p in parts if p in _CANONICAL]
+        if len(parts) == 1:
+            _v2_flag = parts[0]
+        elif len(parts) > 1:
+            _v2_flag = parts
+
+    _v2_yaml: list[str] | None = None
+    if _v2_flag is None and not ctx.target_override:
+        try:
+            _v2_yaml = _read_yaml_targets(ctx)
+        except _click.UsageError as exc:
+            _raise_target_usage_error(ctx, exc)
+
+    _skip_v2 = _v2_flag is None and _v2_yaml is None and ctx.target_override is not None
+    if _skip_v2:
+        return targets
+
+    try:
+        _resolved = _resolve_targets_v2(
+            ctx.project_root,
+            flag=_v2_flag,
+            yaml_targets=_v2_yaml,
+        )
+    except _click.UsageError as exc:
+        if ctx.logger:
+            ctx.logger.error(str(exc), symbol="")
+        raise SystemExit(2) from exc
+
+    from apm_cli.utils.console import _rich_info
+
+    _provenance_msg = format_provenance(_resolved)
+    _rich_info(_provenance_msg, symbol="info")
+
+    _v2_targets = []
+    for _tname in _resolved.targets:
+        _profile = KNOWN_TARGETS.get(_tname)
+        if _profile is None:
+            continue
+        _target_dir = ctx.project_root / _profile.root_dir
+        if not _target_dir.exists():
+            try:
+                _target_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                if ctx.logger:
+                    ctx.logger.error(
+                        f"Cannot create {_profile.root_dir}/ -- permission denied. "
+                        f"Check directory permissions or use a different --target."
+                    )
+                raise SystemExit(1) from None
+            if ctx.logger:
+                ctx.logger.verbose_detail(f"Created {_profile.root_dir}/ ({_tname} target)")
+        _v2_targets.append(_profile)
+
+    _v2_names = {t.name for t in _v2_targets}
+    _legacy_only = [t for t in targets if t.name not in _v2_names and t.name not in _CANONICAL]
+    return _v2_targets + _legacy_only
+
+
 def run(ctx: InstallContext) -> None:
     """Execute the targets phase.
 
@@ -145,20 +446,14 @@ def run(ctx: InstallContext) -> None:
     from apm_cli.core.scope import InstallScope
     from apm_cli.core.target_detection import (
         detect_target,
-        format_provenance,
-    )
-    from apm_cli.core.target_detection import (
-        resolve_targets as _resolve_targets_v2,
     )
     from apm_cli.integration import AgentIntegrator, PromptIntegrator
+    from apm_cli.integration.canvas_integrator import CanvasIntegrator
     from apm_cli.integration.command_integrator import CommandIntegrator
     from apm_cli.integration.copilot_cowork_paths import CoworkResolutionError
     from apm_cli.integration.hook_integrator import HookIntegrator
     from apm_cli.integration.instruction_integrator import InstructionIntegrator
     from apm_cli.integration.skill_integrator import SkillIntegrator
-    from apm_cli.integration.targets import (
-        KNOWN_TARGETS,
-    )
     from apm_cli.integration.targets import (
         resolve_targets as _resolve_targets_legacy,
     )
@@ -191,8 +486,6 @@ def run(ctx: InstallContext) -> None:
     _is_user = ctx.scope is InstallScope.USER
 
     # Determine active targets using the legacy resolver first.
-    # This preserves backward compatibility (cowork, user-scope, etc.)
-    # while v2 adds provenance and stricter error checking.
     try:
         _targets = _resolve_targets_legacy(
             ctx.project_root,
@@ -204,276 +497,14 @@ def run(ctx: InstallContext) -> None:
             ctx.logger.error(str(exc), symbol="cross")
         raise SystemExit(1) from exc
 
-    # ------------------------------------------------------------------
-    # Fix 2: explicit --target copilot-cowork with flag OFF must error.
-    # Fix 3: explicit --target copilot-cowork with flag ON but unresolvable
-    #         OneDrive must error.
-    # Only fire when the user explicitly asked for cowork. Auto-detect
-    # silently omits cowork when unavailable.
-    # ------------------------------------------------------------------
-    _user_asked_cowork = False
-    if _explicit:
-        if isinstance(_explicit, list):
-            _user_asked_cowork = "copilot-cowork" in _explicit
-        else:
-            _user_asked_cowork = _explicit == "copilot-cowork"
+    # Target gating: cowork, copilot-app, openclaw.
+    _gate_cowork_target(ctx, _targets, _explicit, _is_user)
+    _gate_copilot_app_target(ctx, _targets, _explicit)
+    _check_openclaw_flag_gate(_explicit, _targets, ctx)
+    _check_hermes_flag_gate(_explicit, _targets, ctx)
 
-    if _user_asked_cowork:
-        _cowork_resolved = any(t.name == "copilot-cowork" for t in _targets)
-        if not _cowork_resolved:
-            from apm_cli.core.experimental import is_enabled as _is_flag_on
-
-            if not _is_flag_on("copilot_cowork"):
-                if ctx.logger:
-                    ctx.logger.progress(
-                        "The 'copilot-cowork' target requires an experimental flag. "
-                        "Run: apm experimental enable copilot-cowork",
-                        symbol="info",
-                    )
-            else:
-                import sys as _sys
-
-                if _sys.platform.startswith("linux"):
-                    _cowork_msg = (
-                        "Cowork has no auto-detection on Linux.\n"
-                        "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
-                        "apm config set copilot-cowork-skills-dir <path>"
-                    )
-                else:
-                    _cowork_msg = (
-                        "Cowork: no OneDrive path detected.\n"
-                        "Set APM_COPILOT_COWORK_SKILLS_DIR or run: "
-                        "apm config set copilot-cowork-skills-dir <path>"
-                    )
-                if ctx.logger:
-                    ctx.logger.error(_cowork_msg, symbol="cross")
-                raise SystemExit(1)
-
-    # ------------------------------------------------------------------
-    # Amendment 5: project-scope gate for cowork target.
-    # `--target copilot-cowork` without `--global` is an error -- cowork is
-    # user-scope only.  Abort before any filesystem activity.
-    # ------------------------------------------------------------------
-    if not _is_user:
-        _cowork_in_set = any(t.name == "copilot-cowork" for t in _targets)
-        if _cowork_in_set:
-            if ctx.logger:
-                ctx.logger.error(
-                    "The 'copilot-cowork' target requires --global (user scope). "
-                    "Run: apm install --target copilot-cowork --global"
-                )
-            raise SystemExit(1)
-
-    # ------------------------------------------------------------------
-    # GitHub Copilot App target gating (mirrors cowork rules above):
-    # explicit --target copilot-app with flag OFF must hint at the
-    # experimental enable command; with flag ON but no ~/.copilot/data.db
-    # must error with an actionable install instruction; without --global
-    # must error because copilot-app is user-scope only.
-    # ------------------------------------------------------------------
-    _user_asked_copilot_app = False
-    if _explicit:
-        if isinstance(_explicit, list):
-            _user_asked_copilot_app = "copilot-app" in _explicit
-        else:
-            _user_asked_copilot_app = _explicit == "copilot-app"
-
-    if _user_asked_copilot_app:
-        _copilot_app_resolved = any(t.name == "copilot-app" for t in _targets)
-        if not _copilot_app_resolved:
-            from apm_cli.core.experimental import is_enabled as _is_flag_on
-
-            if not _is_flag_on("copilot_app"):
-                if ctx.logger:
-                    ctx.logger.progress(
-                        "The 'copilot-app' target requires an experimental flag. "
-                        "Run: apm experimental enable copilot-app",
-                        symbol="info",
-                    )
-            else:
-                _app_msg = (
-                    "GitHub Copilot desktop App not detected.\n"
-                    "Expected ~/.copilot/data.db but the file is missing.\n"
-                    "Install the app, or omit '--target copilot-app'."
-                )
-                if ctx.logger:
-                    ctx.logger.error(_app_msg, symbol="cross")
-                raise SystemExit(1)
-
-    # NOTE: copilot-app intentionally has no project-scope gate. The DB
-    # at ~/.copilot/data.db is a single user-scoped resource, but the
-    # *intent* to deploy can legitimately come from a project's apm.yml
-    # (a team-shared scheduled prompt belongs in the project that owns
-    # the prompt, not in every developer's user-scope manifest). The
-    # experimental flag (machine-level opt-in) is the consent envelope;
-    # the package-namespaced row id (apm--<owner>--<pkg>--<prompt>)
-    # prevents collisions across projects sharing the same package.
-    # Rows always arrive enabled=0; users grant the second consent in
-    # the App's Workflows tab before anything runs on a schedule.
-    #
-    # PR A (project-scoping): the integrator now auto-registers a row
-    # in the App's ``projects`` table for the current repository and
-    # stamps every workflow with that project_id, so workflows show up
-    # in the correct project's Workflows tab. On the *first* install
-    # into a repo, the App's webview does not always live-refresh on
-    # the externally-inserted ``projects`` row (see github/github-app
-    # #5483); the integrator emits a one-time restart hint so the user
-    # is not left wondering why the new project is missing from the UI.
-    # When the App is running, the integrator prefers the live
-    # WebSocket-IPC surface so the broadcast fires natively and no
-    # restart is needed; the SQLite path is the fallback for the
-    # App-closed case (still the common case during install).
-
-    # ------------------------------------------------------------------
-    # v2 resolution (#1154): signal-based provenance and strict errors.
-    # Runs AFTER the legacy resolver and cowork gates so existing
-    # behavior is preserved.  The v2 resolver validates signals and
-    # emits provenance; its target list REPLACES the legacy list for
-    # project-scope installs (three-guard collapse).
-    # ------------------------------------------------------------------
-    if not _is_user:
-        # Build flag from CLI --target override, filtering to canonical
-        # targets only. Non-canonical targets (copilot-cowork) are handled
-        # exclusively by the legacy resolver + gates above.
-        from apm_cli.core.apm_yml import CANONICAL_TARGETS as _CANONICAL
-
-        _v2_flag: str | list[str] | None = None
-        if ctx.target_override:
-            raw_override = ctx.target_override
-            if isinstance(raw_override, str):
-                parts = [t.strip() for t in raw_override.split(",") if t.strip()]
-            else:
-                parts = list(raw_override)
-            # Keep only canonical targets for v2
-            parts = [p for p in parts if p in _CANONICAL]
-            if len(parts) == 1:
-                _v2_flag = parts[0]
-            elif len(parts) > 1:
-                _v2_flag = parts
-            # If no canonical targets remain, skip v2 entirely
-            # (all targets were non-canonical like copilot-cowork)
-
-        # Read targets from apm.yml (supports both target: and targets:)
-        _v2_yaml: list[str] | None = None
-        if _v2_flag is None and not ctx.target_override:
-            try:
-                _v2_yaml = _read_yaml_targets(ctx)
-            except _click.UsageError as exc:
-                # ConflictingTargetsError (both target: and targets: in
-                # apm.yml) is a user error -- surface with exit code 2.
-                _raise_target_usage_error(ctx, exc)
-
-        # Skip v2 entirely when all override targets were non-canonical
-        # (e.g. copilot-cowork only).  Those are fully handled by the
-        # legacy resolver + cowork gates.
-        _skip_v2 = _v2_flag is None and _v2_yaml is None and ctx.target_override is not None
-
-        if not _skip_v2:
-            # Resolve: raises click.UsageError on no-harness, ambiguous,
-            # unknown target, or schema conflict.  When the legacy resolver
-            # already found targets and the v2 auto-detect disagrees (e.g.
-            # because the legacy fallback-to-copilot is disabled in v2),
-            # the v2 error takes precedence -- EXCEPT when the legacy
-            # targets include non-canonical entries (e.g. copilot-cowork)
-            # that v2 does not handle.
-            import click as _click
-
-            try:
-                _resolved = _resolve_targets_v2(
-                    ctx.project_root,
-                    flag=_v2_flag,
-                    yaml_targets=_v2_yaml,
-                )
-            except _click.UsageError as exc:
-                # v2 target-resolution errors (NoHarnessError,
-                # AmbiguousHarnessError, etc.) are intentionally
-                # STRICTER than the legacy resolver.  They always
-                # take precedence -- the whole point of the overhaul
-                # is to stop silently falling back to copilot.
-                #
-                # The ONLY exception: if ALL legacy targets are
-                # non-canonical (e.g. copilot-cowork) and v2 was
-                # invoked without any canonical flag/yaml, the error
-                # is a false positive because v2 does not handle
-                # non-canonical targets.  That case is already
-                # guarded by ``_skip_v2`` above, so it never reaches
-                # this except block.  The renderer already emits a
-                # leading "[x]"; pass an empty symbol so logger.error
-                # doesn't double-prefix.
-                if ctx.logger:
-                    ctx.logger.error(str(exc), symbol="")
-                raise SystemExit(2) from exc
-
-            # Emit provenance BEFORE any mutation. Route via _rich_info so
-            # the line picks up consistent symbol + color treatment and so
-            # automated tests can rely on the canonical "[i] Targets: ..."
-            # rendering (convergence item 1).
-            from apm_cli.utils.console import _rich_info
-
-            _provenance_msg = format_provenance(_resolved)
-            _rich_info(_provenance_msg, symbol="info")
-
-            # Map resolved v2 target names to TargetProfile objects,
-            # materializing deploy directories (three-guard collapse:
-            # auto_create unconditionally post-resolution).
-            _v2_targets = []
-            for _tname in _resolved.targets:
-                _profile = KNOWN_TARGETS.get(_tname)
-                if _profile is None:
-                    continue
-                _target_dir = ctx.project_root / _profile.root_dir
-                if not _target_dir.exists():
-                    try:
-                        _target_dir.mkdir(parents=True, exist_ok=True)
-                    except PermissionError:
-                        if ctx.logger:
-                            ctx.logger.error(
-                                f"Cannot create {_profile.root_dir}/ -- permission denied. "
-                                f"Check directory permissions or use a different --target."
-                            )
-                        raise SystemExit(1) from None
-                    if ctx.logger:
-                        ctx.logger.verbose_detail(f"Created {_profile.root_dir}/ ({_tname} target)")
-                # NOTE: do NOT set resolved_deploy_root on static targets.
-                # That field is reserved for dynamic-root targets (cowork)
-                # and is treated as the final deploy destination by
-                # skill_integrator and base_integrator. Static targets must
-                # follow the standard primitive-mapping path so that
-                # ``deploy_root`` (e.g. .agents) and ``subdir`` (e.g. skills)
-                # are honored.
-                _v2_targets.append(_profile)
-
-            # Replace legacy targets with v2 targets for project-scope.
-            # Keep any legacy-only targets (e.g. copilot-cowork) that v2
-            # doesn't handle.
-            _v2_names = {t.name for t in _v2_targets}
-            _legacy_only = [
-                t for t in _targets if t.name not in _v2_names and t.name not in _CANONICAL
-            ]
-            _targets = _v2_targets + _legacy_only
-
-    else:
-        # User-scope: legacy target directory creation and logging.
-        if ctx.logger:
-            if _targets:
-
-                def _fmt_target(t):
-                    if t.resolved_deploy_root is not None:
-                        return f"{t.name} ({t.resolved_deploy_root})"
-                    return f"{t.name} (~/{t.root_dir}/)"
-
-                _target_names = ", ".join(_fmt_target(t) for t in _targets)
-                ctx.logger.verbose_detail(f"Active global targets: {_target_names}")
-                from apm_cli.deps.lockfile import get_lockfile_path
-
-                ctx.logger.verbose_detail(f"Lockfile: {get_lockfile_path(ctx.apm_dir)}")
-            else:
-                ctx.logger.warning(
-                    "No global targets resolved -- nothing will be "
-                    "deployed. Check 'target:' in apm.yml or use --target."
-                )
-
-        _create_target_dirs(_targets, ctx.project_root, _explicit, ctx.logger)
+    # Resolve v2 targets for project scope, or set up user-scope dirs.
+    _targets = _resolve_targets_by_scope(ctx, _targets, _explicit, _is_user)
 
     # Legacy detect_target call -- return values are not consumed by any
     # downstream code but the call is preserved for behaviour parity with
@@ -506,6 +537,7 @@ def run(ctx: InstallContext) -> None:
         "command": CommandIntegrator(),
         "hook": HookIntegrator(),
         "instruction": InstructionIntegrator(),
+        "canvas": CanvasIntegrator(),
     }
 
 
@@ -541,9 +573,10 @@ def run_targets_phase(ctx) -> None:
         if isinstance(ctx.target_override, str):
             # Handle CSV form
             parts = [t.strip() for t in ctx.target_override.split(",") if t.strip()]
-            flag = parts if len(parts) > 1 else parts[0] if parts else None
         else:
-            flag = ctx.target_override
+            parts = list(ctx.target_override)
+        parts = _normalize_runtime_target_aliases(parts)
+        flag = parts if len(parts) > 1 else parts[0] if parts else None
 
     # Get yaml_targets from apm_package.
     try:

@@ -4,16 +4,16 @@ description: >-
   Use this skill to run a multi-persona expert advisory review on a labelled
   pull request in microsoft/apm. The panel fans out to five mandatory
   specialists plus a test-coverage specialist (active on every PR that
-  touches src/) plus two conditional specialists (auth, doc-writer),
-  all running in their own agent threads, and a CEO
+  touches src/) plus three conditional specialists (auth, doc-writer,
+  performance-expert), all running in their own agent threads, and a CEO
   synthesizer. The orchestrator is the sole writer to the PR: ONE
   recommendation comment, no verdict labels, no merge gating. The panel
   is advisory -- it surfaces findings, prioritizes follow-ups, and renders
   a ship-recommendation that the maintainer and author weigh. Activate
   when a non-trivial PR needs a cross-cutting recommendation
   (architecture, CLI logging, DevX UX, supply-chain security,
-  growth/positioning, optionally auth, docs, and test coverage, with CEO
-  arbitration).
+  growth/positioning, optionally auth, docs, perf, and test coverage,
+  with CEO arbitration).
 ---
 
 # APM Review Panel - Fan-Out Advisory Review
@@ -58,6 +58,24 @@ surfaces findings; the maintainer and the PR author decide ship.
 - **Single-emission discipline.** Exactly one comment per panel run,
   rendered from `assets/recommendation-template.md` after all subagents
   return.
+- **Non-empty turn exit (the run's hard contract).** gh-aw decides
+  success by inspecting `agent_output` AFTER your turn ends: a turn that
+  ends with zero safe outputs (`agent_output = {"items":[]}`) is detected
+  as a failure, the safe-output detection job is skipped, the
+  `add-comment` job never runs, and the workflow opens a "No Safe Outputs
+  Generated" issue. Therefore your turn MUST end with at least one safe
+  output -- the rendered comment on success (step 7), or an explicit
+  `noop` if the run genuinely cannot produce one. NEVER end the turn
+  empty.
+- **Synchronous fan-out -- never spawn-and-forget.** Every `task` spawn
+  (each panelist AND the CEO synthesizer) is BLOCKING: spawn it, WAIT for
+  its JSON return, then continue. Use the `task` tool's synchronous mode;
+  do NOT use its background/detached mode -- the variant that returns an
+  `agent_id` immediately and runs the subagent in the background -- for
+  any panelist or the CEO. Their returns are LOAD-BEARING: the comment
+  cannot be rendered without them. Spawning the CEO (or a panelist)
+  detached and then ending the turn while it is still running is the
+  documented cause of the empty-output failure above.
 
 ## Agent roster
 
@@ -71,6 +89,7 @@ surfaces findings; the maintainer and the PR author decide ship.
 | [Auth Expert](../../agents/auth-expert.agent.md) | Auth / Token Reviewer | Conditional (see below) |
 | [Doc Writer](../../agents/doc-writer.agent.md) | Documentation Reviewer | Conditional (see below) |
 | [Test Coverage Expert](../../agents/test-coverage-expert.agent.md) | Test-Presence Reviewer (paired with DevX UX) | Yes (skipped only on docs-only PRs -- see below) |
+| [Performance Expert](../../agents/performance-expert.agent.md) | Package-Manager Performance Reviewer | Conditional (see below) |
 | [APM CEO](../../agents/apm-ceo.agent.md) | Strategic Arbiter / Synthesizer | Yes |
 
 ## Topology
@@ -113,10 +132,10 @@ surfaces findings; the maintainer and the PR author decide ship.
 
 ## Conditional panelists
 
-Two personas are conditional (auth, doc-writer). A third
-(test-coverage) is mandatory on every PR that touches `src/` and only
-skipped on documentation-only PRs -- see its section below for why.
-The orchestrator ALWAYS spawns ALL three tasks to keep the schema
+Three personas are conditional (auth, doc-writer, performance-expert). A
+fourth (test-coverage) is mandatory on every PR that touches `src/` and
+only skipped on documentation-only PRs -- see its section below for why.
+The orchestrator ALWAYS spawns ALL four tasks to keep the schema
 return shape uniform; the prompt instructs the subagent to set
 `active: false` with an `inactive_reason` if the condition does not
 hold.
@@ -167,6 +186,35 @@ prerequisites), (d) discoverability (cross-links, sidebar order if
 Starlight content). When the doc-writer is active because of code
 changes that SHOULD have updated docs but did not, the persona surfaces
 that gap as a finding.
+
+### Performance Expert
+
+Activate when the PR changes any of:
+- `src/apm_cli/cache/**`
+- `src/apm_cli/deps/**`
+- `src/apm_cli/install/phases/**`
+- `src/apm_cli/install/pipeline.py`
+- `src/apm_cli/install/resolve.py`
+- `scripts/perf/**`
+- `src/apm_cli/core/command_logger.py` (when the diff adds perf-instrumentation logs)
+
+Also activate when the PR description claims a performance win
+(speedup ratio, latency reduction, bytes-on-disk reduction, throughput
+improvement) or attaches a perf-harness measurement table.
+
+Fallback self-check (when no fast-path file matched): "Does this PR
+change the hot path for dependency download, materialization, cache
+layout, transport (git protocol, partial clone, sparse checkout),
+parallelism, or any user-visible install/update wall-time? If unsure,
+answer YES."
+
+When active, the performance-expert reviews against the package-manager
+performance playbook: transport minimization (depth, filter, sparse
+scope), cache layering and dedup keys, parallelism and lock contention,
+working-tree materialization cost, perf-harness methodology (cache
+wipe, warm/cold separation, statistical noise), and pervasive
+application of the chosen technique across install / update / run
+surfaces (not just the one path the PR exercises).
 
 ### Test Coverage Expert
 
@@ -224,7 +272,11 @@ every mandatory persona always runs. Routing is a CEO synthesis hint.
 ## Execution checklist
 
 Work through these steps in order. Do not skip ahead. Do not emit any
-output to the PR before step 6.
+output to the PR before step 6. Every `task` spawn below is BLOCKING:
+wait for the subagent to return before continuing, and never end your
+turn while a panelist or the CEO synthesizer is still running. The turn
+ends only after the comment (step 7) and label sweep (step 8) -- or, if
+no comment can be rendered, an explicit `noop` (step 9) -- are emitted.
 
 1. **Read PR context** (the orchestrating workflow already fetched it
    via `gh pr view` / `gh pr diff`). Identify changed files for the
@@ -249,6 +301,7 @@ output to the PR before step 6.
    - `auth-expert` (always - active per step 2)
    - `doc-writer` (always - active per step 2)
    - `test-coverage-expert` (always - active per step 2)
+   - `performance-expert` (always - active per step 2)
 
    Each task prompt MUST:
    - Reference its persona file by relative path so the subagent loads
@@ -279,7 +332,12 @@ output to the PR before step 6.
 
 5. **Spawn the CEO synthesizer task.** Pass the full set of validated
    panelist JSON returns to a `task` invocation that loads
-   `../../agents/apm-ceo.agent.md`. The prompt MUST:
+   `../../agents/apm-ceo.agent.md`. Run it as a BLOCKING task and WAIT
+   for its JSON return -- do NOT spawn it detached (background mode that
+   returns an `agent_id`) and do NOT end your turn while it runs. Its
+   return is required to render the comment; ending the turn here is the
+   exact cause of the "No Safe Outputs Generated" failure. The prompt
+   MUST:
    - Provide all panelist returns as structured input.
    - Ask for: headline, arbitration prose, principle alignment (only
      applicable principles), curated recommended_followups (prioritized
@@ -348,6 +406,17 @@ output to the PR before step 6.
    sweeping all three on every run is safe and self-healing. NO
    verdict labels are applied.
 
+9. **Guarantee a non-empty exit.** Your final action this turn MUST be a
+   safe output. In the normal path that is the single `add-comment` from
+   step 7 (the `remove-labels` sweep alone does NOT count -- it is not
+   the run's required output). Before ending the turn, confirm step 7
+   actually issued the `add-comment` call and it did not error. If, after
+   every subagent has returned, you genuinely cannot render a comment
+   (e.g. a fatal upstream error), call `noop` so the run records an
+   intentional no-action rather than an empty `agent_output`. Ending the
+   turn with zero safe outputs is a FAILURE, not a success -- see the
+   "Non-empty turn exit" architecture invariant.
+
 ## Output contract (non-negotiable)
 
 - Exactly ONE comment per panel run, rendered from
@@ -409,6 +478,16 @@ output to the PR before step 6.
   each `.agent.md` plus the `safe-outputs.add-comment.max: 2`
   fail-soft. If a subagent ever tries to post a comment, the cap
   catches it.
+- **Empty-safe-output failure (background spawn-and-forget).** The single
+  most common way this panel "succeeds" yet posts nothing is spawning the
+  CEO synthesizer (or a panelist) as a background/detached task and then
+  ending the turn while it is still running. The harness exits with
+  `agent_output = {"items":[]}`, gh-aw skips safe-output detection, the
+  `add-comment` job never runs, and the workflow opens a "No Safe Outputs
+  Generated" issue. Every `task` spawn MUST be awaited to completion, and
+  the turn MUST end with a safe output -- the comment, or an explicit
+  `noop`. See the "Synchronous fan-out" and "Non-empty turn exit"
+  architecture invariants and step 9.
 - **No verdict-label reset workflow.** The previous regime had a
   companion workflow `pr-panel-label-reset.yml` that stripped verdict
   labels on every push. The advisory regime has no verdict labels to

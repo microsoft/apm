@@ -1,0 +1,12 @@
+name: apm-contributor-dashboard
+version: 0.1.0
+description: >
+  Live contributor dashboard canvas for the microsoft/apm repository.
+  Tracks issues, PRs, CI pipelines, and panel reviews in a single
+  interactive panel with real-time GitHub data, collaborative comment
+  drafting with Copilot, and permission-aware action buttons.
+  Scoped to microsoft/apm; not yet configurable for other repositories.
+author: microsoft
+license: MIT
+targets:
+  - copilot

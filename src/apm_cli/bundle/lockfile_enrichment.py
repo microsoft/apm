@@ -51,6 +51,12 @@ _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
     "agent-skills": {
         ".github/skills/": ".agents/skills/",
     },
+    "openclaw": {
+        ".github/skills/": ".agents/skills/",
+    },
+    "hermes": {
+        ".github/skills/": ".agents/skills/",
+    },
 }
 
 

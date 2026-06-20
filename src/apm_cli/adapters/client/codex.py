@@ -150,19 +150,7 @@ class CodexClientAdapter(MCPClientAdapter):
             if server_info is None:
                 return False
 
-            # Determine the server name for configuration key
-            if server_name:
-                # Use explicitly provided server name
-                config_key = server_name
-            else:  # noqa: PLR5501
-                # Extract name from server_url (part after last slash)
-                # For URLs like "microsoft/azure-devops-mcp" -> "azure-devops-mcp"
-                # For URLs like "github/github-mcp-server" -> "github-mcp-server"
-                if "/" in server_url:  # noqa: SIM108
-                    config_key = server_url.split("/")[-1]
-                else:
-                    # Fallback to full server_url if no slash
-                    config_key = server_url
+            config_key = self._determine_config_key(server_url, server_name)
 
             # Generate server configuration with environment variable resolution
             server_config = self._format_server_config(server_info, env_overrides, runtime_vars)
@@ -231,6 +219,7 @@ class CodexClientAdapter(MCPClientAdapter):
                 return self.normalize_project_arg(arg)
 
             config["args"] = [_process_stdio_arg(arg) for arg in raw.get("args") or []]
+            self._merge_extra(config, server_info)
             return config
 
         # Remote MCP handling.
@@ -285,6 +274,7 @@ class CodexClientAdapter(MCPClientAdapter):
             if http_headers:
                 remote_config["http_headers"] = http_headers
                 self._warn_input_variables(http_headers, server_name, "Codex CLI")
+            self._merge_extra(remote_config, server_info)
             return remote_config
 
         if not packages:
@@ -373,6 +363,7 @@ class CodexClientAdapter(MCPClientAdapter):
                         resolved_env,
                     )
 
+        self._merge_extra(config, server_info)
         return config
 
     def _process_arguments(  # pylint: disable=duplicate-code  # structural similarity with copilot adapter is intentional

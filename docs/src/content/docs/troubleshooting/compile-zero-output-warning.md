@@ -25,7 +25,7 @@ apm targets
 
 If the active list is empty, no harness was detected and no `target:` was pinned. APM has nothing to write against. Either:
 
-- Create one of the canonical signals (`.claude/`, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.cursor/`, `.codex/`, `.gemini/` or `GEMINI.md`, `.opencode/`, `.windsurf/`).
+- Create one of the canonical signals (`.claude/`, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/`, `.cursor/`, `.codex/`, `.gemini/` or `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`).
 - Pin targets in `apm.yml` (`target: [claude, copilot]`) or pass `--target` to `apm compile`.
 
 See [`apm targets`](../reference/cli/targets/) and the [manifest schema](../reference/manifest-schema/).

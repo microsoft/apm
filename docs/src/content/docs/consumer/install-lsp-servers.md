@@ -165,9 +165,10 @@ See the [Lockfile specification](../../reference/lockfile-spec/).
 
 When APM installs a plugin that contains `lspServers` in `plugin.json`
 or a `.lsp.json` file, the LSP servers are automatically extracted and
-wired into the install pipeline. The `${CLAUDE_PLUGIN_ROOT}` placeholder
-in server configs is replaced with the absolute plugin path for legacy
-Claude Code plugin compatibility.
+wired into the install pipeline. Plugin `.lsp.json` files may use either
+a flat server map or a `{ "lspServers": { ... } }` envelope. The
+`${CLAUDE_PLUGIN_ROOT}` placeholder in server configs is replaced with
+the absolute plugin path for legacy Claude Code plugin compatibility.
 
 ## Runtime support
 

@@ -579,13 +579,13 @@ class TestFQDNVirtualPaths:
         assert dep.reference == "v2.0"
 
     def test_https_url_with_path_rejected(self):
-        """HTTPS git URLs can't embed virtual paths — use dict format instead."""
-        with pytest.raises(ValueError, match="virtual file extension"):
+        """HTTPS git URLs can't embed virtual paths -- use dict format with path: instead."""
+        with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
             DependencyReference.parse("https://gitlab.com/acme/repo/prompts/file.prompt.md")
 
     def test_ssh_url_with_path_rejected(self):
-        """SSH git URLs can't embed virtual paths — use dict format instead."""
-        with pytest.raises(ValueError, match="virtual file extension"):
+        """SSH git URLs can't embed virtual paths -- use dict format with path: instead."""
+        with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
             DependencyReference.parse("git@gitlab.com:acme/repo/prompts/code-review.prompt.md")
 
 
@@ -1229,3 +1229,173 @@ class TestDefaultPortNormalisation:
         dep_bare = DependencyReference.parse("https://github.com/owner/repo")
         assert dep_with_port.port == dep_bare.port
         assert dep_with_port.to_canonical() == dep_bare.to_canonical()
+
+
+class TestGHESFQDNSubpathParsing:
+    """GHES hosts configured via GITHUB_HOST get owner/repo + virtual-path split (#1673)."""
+
+    def test_ghes_subpath_split(self, monkeypatch):
+        """FQDN shorthand with subpath on configured GHES splits at owner/repo."""
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        dep = DependencyReference.parse("ghe.example.com/org/repo/packages/skill")
+        assert dep.host == "ghe.example.com"
+        assert dep.repo_url == "org/repo"
+        assert dep.virtual_path == "packages/skill"
+        assert dep.is_virtual is True
+
+    def test_ghes_subpath_with_ref(self, monkeypatch):
+        """GHES FQDN shorthand with ref correctly splits subpath and ref."""
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        dep = DependencyReference.parse("ghe.example.com/org/repo/packages/skill#v1.0")
+        assert dep.host == "ghe.example.com"
+        assert dep.repo_url == "org/repo"
+        assert dep.virtual_path == "packages/skill"
+        assert dep.reference == "v1.0"
+
+    def test_ghes_owner_repo_only(self, monkeypatch):
+        """GHES FQDN shorthand without subpath is a normal repo reference."""
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        dep = DependencyReference.parse("ghe.example.com/org/repo")
+        assert dep.host == "ghe.example.com"
+        assert dep.repo_url == "org/repo"
+        assert dep.virtual_path is None
+        assert dep.is_virtual is False
+
+    def test_ghes_deep_subpath(self, monkeypatch):
+        """GHES FQDN shorthand with multiple subpath segments."""
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        dep = DependencyReference.parse("ghe.example.com/org/repo/skills/security/audit")
+        assert dep.host == "ghe.example.com"
+        assert dep.repo_url == "org/repo"
+        assert dep.virtual_path == "skills/security/audit"
+
+    def test_generic_host_unchanged_without_ghes_env(self, monkeypatch):
+        """Without GITHUB_HOST, generic hosts still treat all segments as repo path."""
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        dep = DependencyReference.parse("ghe.example.com/org/repo/packages/skill")
+        assert dep.host == "ghe.example.com"
+        assert dep.repo_url == "org/repo/packages/skill"
+        assert dep.is_virtual is False
+
+    def test_existing_generic_host_unaffected_by_different_ghes(self, monkeypatch):
+        """A generic host that is NOT GITHUB_HOST keeps all-segments-as-repo."""
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        dep = DependencyReference.parse("git.company.internal/team/skills/brand-guidelines")
+        assert dep.host == "git.company.internal"
+        assert dep.repo_url == "team/skills/brand-guidelines"
+        assert dep.is_virtual is False
+
+    def test_ghes_virtual_file_extension(self, monkeypatch):
+        """GHES FQDN shorthand with virtual file extension splits correctly."""
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        dep = DependencyReference.parse("ghe.example.com/org/repo/prompts/review.prompt.md")
+        assert dep.host == "ghe.example.com"
+        assert dep.repo_url == "org/repo"
+        assert dep.virtual_path == "prompts/review.prompt.md"
+        assert dep.is_virtual is True
+
+
+class TestEmbeddedSubpathInGitUrl:
+    """Friendly error when an APM primitive subpath is embedded in an explicit git URL (#872).
+
+    git/ssh/https URL forms with a known primitive directory name as an interior
+    segment are unambiguously malformed (git would reject the repo locator with
+    a cryptic error). APM detects this early and points at the `path:` key.
+    """
+
+    # ------------------------------------------------------------------
+    # Error cases: subpath embedded in explicit git URL form
+    # ------------------------------------------------------------------
+
+    def test_scp_url_with_skills_subpath_raises_friendly_error(self) -> None:
+        """git@github.com:org/repo/skills/hello-world.git must raise before git runs."""
+        with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
+            DependencyReference.parse("git@github.com:org/repo/skills/hello-world.git")
+
+    def test_ssh_protocol_url_with_skills_subpath_raises_friendly_error(self) -> None:
+        """ssh://git@github.com/org/repo/skills/hello-world.git must raise."""
+        with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
+            DependencyReference.parse("ssh://git@github.com/org/repo/skills/hello-world.git")
+
+    def test_https_url_with_skills_subpath_raises_friendly_error(self) -> None:
+        """https://github.com/org/repo/skills/hello-world.git must raise."""
+        with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
+            DependencyReference.parse("https://github.com/org/repo/skills/hello-world.git")
+
+    def test_error_message_mentions_path_key(self) -> None:
+        """Error must mention the `path:` key as the supported alternative."""
+        with pytest.raises(ValueError, match=r"path:"):
+            DependencyReference.parse("git@github.com:org/repo/prompts/review.prompt.md.git")
+
+    def test_error_message_wraps_input_in_backticks(self) -> None:
+        """Error context should avoid Python repr quoting for user input."""
+        with pytest.raises(ValueError) as exc_info:
+            DependencyReference.parse("git@github.com:org/repo/prompts/review.prompt.md.git")
+
+        message = str(exc_info.value)
+        assert "Got: `git@github.com:org/repo/prompts/review.prompt.md.git`" in message
+
+    def test_scp_agents_subpath_raises(self) -> None:
+        """Primitive 'agents' embedded in SCP URL also raises."""
+        with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
+            DependencyReference.parse("git@github.com:org/repo/agents/coder.git")
+
+    def test_parse_from_dict_scp_raises_friendly_error(self) -> None:
+        """parse_from_dict with git: key containing embedded subpath raises."""
+        with pytest.raises(ValueError, match=r"A subpath cannot be embedded in a git URL"):
+            DependencyReference.parse_from_dict(
+                {"git": "git@github.com:org/repo/skills/hello-world.git"}
+            )
+
+    # ------------------------------------------------------------------
+    # No-regression cases: supported shapes must still parse fine
+    # ------------------------------------------------------------------
+
+    def test_bare_shorthand_with_skills_subpath_still_works(self) -> None:
+        """org/repo/skills/hello-world is the SUPPORTED virtual-path shorthand."""
+        dep = DependencyReference.parse("org/repo/skills/hello-world")
+        assert dep.is_virtual
+        assert dep.virtual_path == "skills/hello-world"
+
+    def test_bare_shorthand_with_prompts_file_still_works(self) -> None:
+        """owner/repo/prompts/x.prompt.md is the SUPPORTED virtual-file shorthand."""
+        dep = DependencyReference.parse("owner/repo/prompts/x.prompt.md")
+        assert dep.is_virtual
+        assert dep.virtual_path == "prompts/x.prompt.md"
+
+    def test_gitlab_subgroup_no_false_positive(self) -> None:
+        """git@gitlab.com:group/subgroup/repo.git has no primitive segment -- must parse."""
+        dep = DependencyReference.parse("git@gitlab.com:group/subgroup/repo.git")
+        assert dep.host == "gitlab.com"
+        assert dep.repo_url == "group/subgroup/repo"
+
+    def test_gitlab_subgroup_named_after_primitive_no_false_positive(self) -> None:
+        """git@gitlab.com:group/skills/repo.git: `skills` is a subgroup, `repo` the repository.
+
+        Regression trap for the #1014 DevX follow-up: a GitLab subgroup
+        literally named after an APM primitive (here `skills` at index 1)
+        must NOT trip the embedded-subpath guard. The embedded-subpath shape
+        is `org/repo` + `<primitive>/<name>`, so a primitive segment only
+        counts when preceded by a complete org/repo prefix (index >= 2).
+        """
+        dep = DependencyReference.parse("git@gitlab.com:group/skills/repo.git")
+        assert dep.host == "gitlab.com"
+        assert dep.repo_url == "group/skills/repo"
+
+    def test_plain_scp_url_no_false_positive(self) -> None:
+        """git@github.com:org/repo.git (plain, no subpath) must parse fine."""
+        dep = DependencyReference.parse("git@github.com:org/repo.git")
+        assert dep.host == "github.com"
+        assert dep.repo_url == "org/repo"
+
+    def test_plain_https_url_no_false_positive(self) -> None:
+        """https://gitlab.com/acme/coding-standards.git must parse fine."""
+        dep = DependencyReference.parse("https://gitlab.com/acme/coding-standards.git")
+        assert dep.host == "gitlab.com"
+        assert dep.repo_url == "acme/coding-standards"
+
+    def test_plain_ssh_protocol_no_false_positive(self) -> None:
+        """ssh://git@host/owner/repo.git (plain, no subpath) must parse fine."""
+        dep = DependencyReference.parse("ssh://git@gitlab.com/owner/repo.git")
+        assert dep.host == "gitlab.com"
+        assert dep.repo_url == "owner/repo"

@@ -8,11 +8,16 @@ Strategy: hermetic -- mocks registry, runtime, console.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
+from click.testing import CliRunner
 
+from apm_cli.cli import cli
 from apm_cli.core.null_logger import NullCommandLogger
+from apm_cli.deps.lockfile import LockFile
 from apm_cli.integration.mcp_integrator_install import run_mcp_install
 
 # ---------------------------------------------------------------------------
@@ -45,6 +50,48 @@ def _make_self_defined_dep(
     dep.transport = transport
     dep.env = env or {}
     return dep
+
+
+def test_install_restores_dev_mcp_dependencies_to_lockfile_and_config(tmp_path, monkeypatch):
+    """apm install restores dev MCP servers to runtime config and lockfile."""
+    monkeypatch.chdir(tmp_path)
+    LockFile().write(tmp_path / "apm.lock.yaml")
+    (tmp_path / "apm.yml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "dev-mcp-project",
+                "version": "0.0.1",
+                "target": "copilot",
+                "dependencies": {"apm": [], "mcp": []},
+                "devDependencies": {
+                    "mcp": [
+                        {
+                            "name": "dev-server",
+                            "registry": False,
+                            "transport": "stdio",
+                            "command": "python",
+                            "args": ["-m", "dev_server"],
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(cli, ["install", "--runtime", "vscode", "--target", "copilot"])
+
+    assert result.exit_code == 0, result.output
+    config = json.loads((tmp_path / ".vscode" / "mcp.json").read_text(encoding="utf-8"))
+    assert config["servers"]["dev-server"] == {
+        "type": "stdio",
+        "command": "python",
+        "args": ["-m", "dev_server"],
+    }
+    lockfile = LockFile.read(tmp_path / "apm.lock.yaml")
+    assert lockfile is not None
+    assert lockfile.mcp_servers == ["dev-server"]
+    assert lockfile.mcp_configs["dev-server"]["command"] == "python"
 
 
 # ---------------------------------------------------------------------------

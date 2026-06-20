@@ -30,7 +30,7 @@ APM has no runtime footprint. Once `apm install` or `apm compile` completes, the
 
 - **No runtime component.** APM generates files then terminates. It does not run alongside your application.
 - **No network calls after install.** All network activity (git clone/fetch) occurs during dependency resolution. There are no callbacks, webhooks, or phone-home requests.
-- **No arbitrary code execution.** APM does not execute scripts from packages, evaluate expressions in templates, or run downloaded code.
+- **No arbitrary code execution.** APM does not execute scripts from packages, evaluate expressions in templates, or run downloaded code. (**Canvas exception:** the experimental `canvas` primitive deploys executable `extension.mjs` (Node.js) code to `.github/extensions/` or `~/.copilot/extensions/`; this surface is gated by both the `canvas` experimental flag and `--trust-canvas-extensions` for dependency-provided canvases. See [Canvas extensions](/apm/integrations/canvas/).)
 - **No access to application data.** APM never reads databases, API responses, application state, or user data.
 - **No persistent background processes.** APM does not install daemons, services, or scheduled tasks.
 - **No telemetry or data collection.** APM collects no usage data, analytics, or diagnostics. Nothing is transmitted to Microsoft or any third party.
@@ -48,14 +48,14 @@ lockfile_version: "1"
 dependencies:
   - repo_url: owner/repo
     host: github.com
-    resolved_commit: a1b2c3d4e5f6...
+    resolved_commit: a1b2c3d4e5f6a7b8c9d0e1f234567890abcdef12
     resolved_ref: main
     depth: 1
     deployed_files:
       - .github/skills/example/skill.md
 ```
 
-The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated.
+The `resolved_commit` field is a full 40-character SHA, not a branch name or tag. Subsequent `apm install` calls resolve to the same commit unless the lock file is explicitly updated. For manifest entries that are themselves pinned to a full SHA, `apm update` resolves only annotated semver tags from the authoritative upstream; branches and lightweight tags are not accepted for this revision-pin update path. See [`apm update`](../reference/cli/update/) for the rewrite mechanics.
 
 ### Registry security model
 
@@ -189,7 +189,7 @@ APM computes a SHA-256 hash of each downloaded package's file tree and stores it
 # apm.lock.yaml
 dependencies:
   - repo_url: https://github.com/acme-corp/security-baseline
-    resolved_commit: a1b2c3d4e5f6...
+    resolved_commit: a1b2c3d4e5f6a7b8c9d0e1f234567890abcdef12
     content_hash: "sha256:9f86d081884c7d659a2feaa0c55ad015..."
 ```
 
@@ -208,14 +208,14 @@ APM deploys files only to controlled subdirectories within the project root.
 All deploy paths are validated before any file operation:
 
 1. **No `..` segments.** Any path containing `..` is rejected outright.
-2. **Allowed prefixes only.** Paths must start with an allowed target-integrator prefix (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`, `.agents/`). In addition, the local-bundle install path stages instructions for compile-only targets under `apm_modules/<slug>/.apm/instructions/` with its own containment check (the resolved path must remain within `apm_modules/`) and `<slug>` validation rejecting traversal sequences and characters outside `[A-Za-z0-9._-]`.
+2. **Allowed prefixes only.** Paths must start with an allowed target-integrator prefix (`.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.codex/`, `.gemini/`, `.windsurf/`, `.kiro/`, `.agents/`). In addition, the local-bundle install path stages instructions for compile-only targets under `apm_modules/<slug>/.apm/instructions/` with its own containment check (the resolved path must remain within `apm_modules/`) and `<slug>` validation rejecting traversal sequences and characters outside `[A-Za-z0-9._-]`.
 3. **Resolution containment.** The fully resolved path must remain within the project root directory.
 
 A path must pass all three checks. Failure on any check prevents the file from being written.
 
 ### Local bundle install trust model
 
-`apm install <bundle>` accepts a directory or `.tar.gz` produced by `apm pack`. Bundles are imperative (no policy / dependency-resolver / network) and target-agnostic; the consumer's project drives where files land. Trust boundaries:
+`apm install <bundle>` accepts a directory or `.zip` (or legacy `.tar.gz`) produced by `apm pack`. Bundles are imperative (no policy / dependency-resolver / network) and target-agnostic; the consumer's project drives where files land. Trust boundaries:
 
 1. **`bundle_files` keys are untrusted.** They come from the bundle's own `apm.lock.yaml` and are validated for traversal sequences before any filesystem path is constructed; resolved destinations must remain within the deploy root. Unsafe entries are skipped with a warning.
 2. **`plugin.json` is bundle metadata, never deployed.** It is recognized case-insensitively and skipped in both the manifest-driven deploy loop and the lockfile-less fallback walk so case-folding filesystems (HFS+, NTFS) cannot smuggle a renamed file past the skip.
@@ -224,18 +224,47 @@ A path must pass all three checks. Failure on any check prevents the file from b
 
 ### Symlink handling
 
-Symlinks are never followed during file discovery or artifact operations:
+Symlinks are rejected in most APM operations; the only context where in-package
+symlinks are followed is local-path install, under a per-symlink containment
+check (see below):
 
 - **Primitive discovery** (instructions, agents, prompts, contexts, skills) rejects symlinked files during glob-based file enumeration. Symlinks are silently skipped.
 - **Prompt resolution** (`apm preview`, `apm run`) rejects symlinked `.prompt.md` files with an explicit error message.
 - **Integrator file discovery** (agents, instructions, prompts, skills, hooks) rejects symlinked files via `is_symlink()` checks in `find_files_by_glob` and `find_hook_files`.
-- **Tree copy operations** skip symlinks entirely -- they are excluded from the copy via an ignore filter.
+- **Deploy tree copy operations** skip symlinks entirely -- they are excluded from the copy via an ignore filter.
 - **MCP configuration files** that are symlinks are rejected with a warning and not parsed.
 - **Manifest parsing** requires files to pass both `.is_file()` and `not .is_symlink()` checks.
 - **Manifest integrity** -- a malformed `apm.yml` (invalid YAML or non-mapping content) triggers a failing `manifest-parse` audit check. Policy and baseline CI checks never silently pass when the manifest cannot be parsed. If this check fires, fix the YAML syntax error in your `apm.yml` and re-run the audit.
 - **Archive creation** -- `apm pack` excludes symlinks from bundled archives. Packaged artifacts contain no symbolic links, preventing symlink-based escape attacks in distributed bundles.
 
-This prevents symlink-based attacks that could escape allowed directories or cause APM to read or write outside the project root.
+#### Local-install symlink dereference and containment guarantee
+
+When installing a local-path dependency (`apm install /path/to/pkg`), APM
+dereferences in-package symlinks so that the staged copy in `apm_modules/`
+contains regular files, giving local and remote installs the same deployed
+output for in-package shared references.
+
+**Threat model.** A symlink inside a local package could point to a file
+outside the package root, giving a malicious package a path-traversal vector.
+APM prevents this with a per-symlink containment check (see also
+[Path traversal prevention](#path-traversal-prevention)):
+
+1. Each symlink is resolved per-file (resolve -> validate -> copy2) before that
+   symlink target is copied into the staging tree.
+2. The resolved target is verified to remain inside the package root using
+   the `ensure_path_within()` containment helper.
+3. If a symlink is broken or unresolvable, APM **hard-fails the install** with a
+   `PathTraversalError` instead of staging a dangling reference.
+4. If the resolved target escapes the package root, APM **hard-fails the
+   install** with a `PathTraversalError` and a human-readable message naming
+   the offending link. No warn-and-skip; no silent follow.
+5. Only symlinks that resolve within the package root are dereferenced and
+   copied as regular files. External symlinks are never followed.
+6. Circular directory-symlink chains are detected deterministically with an
+   explicit visited-set guard, independent of OS-level ELOOP limits.
+7. An unreadable package directory (e.g. a `PermissionError` while listing its
+   entries) hard-fails the install with a `PathTraversalError` rather than
+   leaking a bare OS error up the install stack.
 
 ### Collision detection
 

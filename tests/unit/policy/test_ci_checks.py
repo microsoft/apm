@@ -488,6 +488,67 @@ class TestContentIntegrity:
             result.details
         )
 
+    def test_agents_skill_tamper_fails_content_integrity(self, tmp_path):
+        # Trap A (issue #1716): a deployed skill under the copilot skills
+        # deploy_root (.agents/skills/<s>/SKILL.md) must be covered by the
+        # per-file content-integrity manifest. Tampering the deployed file
+        # without re-installing has to fail `apm audit --ci --no-drift`.
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        rel = ".agents/skills/demo/SKILL.md"
+        _make_deployed_file(tmp_path, rel, "---\nname: demo\n---\nOriginal skill\n")
+        recorded_hash = compute_file_hash(tmp_path / rel)
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent(f"""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: owner/repo
+                    deployed_files:
+                      - .agents/skills/demo
+                      - {rel}
+                    deployed_file_hashes:
+                      {rel}: '{recorded_hash}'
+            """),
+        )
+        # Tamper the deployed skill after install (no re-deploy).
+        (tmp_path / rel).write_text("---\nname: demo\n---\nTampered skill\n", encoding="utf-8")
+
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_content_integrity(tmp_path, lock)
+        assert not result.passed
+        assert any("hash-drift" in d and rel in d for d in result.details), result.details
+
+    def test_agents_skill_clean_passes_content_integrity(self, tmp_path):
+        # Companion to Trap A: an untampered deployed skill hashes clean.
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        rel = ".agents/skills/demo/SKILL.md"
+        _make_deployed_file(tmp_path, rel, "---\nname: demo\n---\nOriginal skill\n")
+        recorded_hash = compute_file_hash(tmp_path / rel)
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent(f"""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: owner/repo
+                    deployed_files:
+                      - .agents/skills/demo
+                      - {rel}
+                    deployed_file_hashes:
+                      {rel}: '{recorded_hash}'
+            """),
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_content_integrity(tmp_path, lock)
+        assert result.passed, result.details
+
     def test_hash_skips_missing_file(self, tmp_path):
         # Lockfile records a file with a hash, but the file is missing on
         # disk -- _check_deployed_files_present owns that signal, so

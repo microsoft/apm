@@ -316,6 +316,46 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             _trace(f"Preflight: {host_display} -- accepted")
 
 
+def _enforce_require_hashes(ctx) -> None:
+    """Fail closed when ``security.integrity.require_hashes`` is enabled.
+
+    Reads the freshly-written lockfile and asserts every non-local entry has a
+    content hash. No-op when policy is disabled (``--no-policy``), no policy was
+    resolved, or the key is off -- preserving today's default behavior. Raises
+    :class:`~apm_cli.install.phases.policy_gate.PolicyViolationError` so the
+    failure routes through the pipeline's existing policy-violation handling.
+    """
+    if getattr(ctx, "no_policy", False):
+        return
+    policy_fetch = getattr(ctx, "policy_fetch", None)
+    policy = getattr(policy_fetch, "policy", None) if policy_fetch else None
+    if policy is None:
+        return
+    if not policy.security.integrity.require_hashes:
+        return
+
+    from ..deps.lockfile import LockFile, get_lockfile_path
+    from .integrity import enforce_require_hashes
+    from .phases.policy_gate import PolicyViolationError
+
+    apm_dir = getattr(ctx, "apm_dir", None) or ctx.project_root
+    lockfile_path = get_lockfile_path(apm_dir)
+    lockfile = LockFile.read(lockfile_path)
+    if lockfile is None:
+        # Fail closed: require_hashes is on but the freshly-written lockfile is
+        # missing or unreadable. Returning here would silently defeat the gate,
+        # so surface it as a policy violation instead of letting install pass.
+        raise PolicyViolationError(
+            "security.integrity.require_hashes is enabled but the lockfile at "
+            f"{lockfile_path} could not be read (missing or corrupt); "
+            "failing closed. Re-run 'apm install' to regenerate it."
+        )
+    try:
+        enforce_require_hashes(lockfile.get_package_dependencies(), enabled=True)
+    except RuntimeError as exc:
+        raise PolicyViolationError(str(exc)) from exc
+
+
 def _write_empty_lockfile_only(apm_dir: Path) -> None:
     """Materialise an empty ``apm.lock.yaml`` for a depless ``apm lock`` run.
 
@@ -378,6 +418,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     plan_callback=None,
     refresh: bool = False,
     lockfile_only: bool = False,
+    trust_canvas: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -507,6 +548,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         legacy_skill_paths=legacy_skill_paths,
         refresh=refresh,
         lockfile_only=lockfile_only,
+        trust_canvas=trust_canvas,
     )
 
     # ------------------------------------------------------------------
@@ -571,7 +613,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
 
         # Populate direct MCP deps from the manifest so the policy gate
         # can enforce MCP allow/deny rules on them (S2 fix).
-        ctx.direct_mcp_deps = apm_package.get_mcp_dependencies()
+        ctx.direct_mcp_deps = apm_package.get_all_mcp_dependencies()
 
         # Populate direct LSP deps from the manifest for LSP integration.
         ctx.direct_lsp_deps = apm_package.get_lsp_dependencies()
@@ -826,6 +868,12 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         from .phases.lockfile import LockfileBuilder
 
         LockfileBuilder(ctx).build_and_save()
+
+        # Fail-closed integrity gate: when security.integrity.require_hashes is
+        # on, every non-local lockfile entry must carry a content hash. A
+        # missing hash stops the install (the key only asserts hash-presence on
+        # the freshly-built lockfile; it does not add a second hashing pass).
+        _enforce_require_hashes(ctx)
 
         # ------------------------------------------------------------------
         # Phase: Post-deps local .apm/ content.

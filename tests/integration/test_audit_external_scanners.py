@@ -2,7 +2,7 @@
 
 Exercises the full CLI path with a real fixture SARIF file (no network, no
 vendor binary):
-  - flag-off -> exit 2 with actionable message; native behavior unchanged.
+  - flag-off -> exit 3 with actionable message; native behavior unchanged.
   - flag-on  -> external findings merge into the report and drive exit code.
   - flag-on, info-only external findings -> non-gating exit 0.
 """
@@ -71,14 +71,14 @@ def _write_sarif(path: Path, level: str = "error") -> None:
     )
 
 
-def test_flag_off_exits_2(runner, monkeypatch, tmp_path):
+def test_flag_off_exits_3(runner, monkeypatch, tmp_path):
     _inject_flag(monkeypatch, enabled=False)
     sarif = tmp_path / "r.sarif"
     _write_sarif(sarif)
     result = runner.invoke(
         audit, ["--external", "sarif", "--external-sarif", str(sarif), "-f", "json"]
     )
-    assert result.exit_code == 2
+    assert result.exit_code == 3
     assert "external-scanners feature" in result.output
 
 
@@ -142,7 +142,7 @@ def test_unknown_scanner_name(runner, monkeypatch, tmp_path):
     _inject_flag(monkeypatch, enabled=True)
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(audit, ["--external", "bogus", "-f", "json"])
-    assert result.exit_code == 2
+    assert result.exit_code == 3
     assert "Unknown external scanner" in result.output
 
 
@@ -262,7 +262,7 @@ def test_missing_sarif_file_gives_actionable_error(runner, monkeypatch, tmp_path
     result = runner.invoke(
         audit, ["--external", "sarif", "--external-sarif", str(tmp_path / "no.sarif")]
     )
-    assert result.exit_code == 2
+    assert result.exit_code == 3
     assert "not found" in result.output.lower()
     assert "Traceback" not in result.output
 
@@ -274,7 +274,7 @@ def test_malformed_sarif_gives_actionable_error(runner, monkeypatch, tmp_path):
     bad.write_text('{"version":"2.1.0"}', encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(audit, ["--external", "sarif", "--external-sarif", str(bad)])
-    assert result.exit_code == 2
+    assert result.exit_code == 3
     assert "not a SARIF" in result.output
     assert "missing 'runs'" in result.output
     assert "Traceback" not in result.output
@@ -288,7 +288,7 @@ def test_skillspector_not_on_path_gives_actionable_error(runner, monkeypatch, tm
     monkeypatch.setattr(_shutil, "which", lambda _name: None)
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(audit, ["--external", "skillspector"])
-    assert result.exit_code == 2
+    assert result.exit_code == 3
     assert "not found on PATH" in result.output or "unavailable" in result.output.lower()
     assert "--external sarif" in result.output
 

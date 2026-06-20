@@ -67,6 +67,25 @@ def _format_package_type_label(pkg_type) -> str | None:
     }.get(pkg_type)
 
 
+def _record_declared_license(ctx, dep_key: str, install_path) -> None:
+    """Backfill ctx.package_declared_licenses from the resolved dep's manifest.
+
+    Reads the DECLARED license (apm.yml ``license:`` or plugin.json
+    ``license``) at the install path. APM never reads the LICENSE file text or
+    concludes a license -- this is a passthrough of an author claim. When no
+    manifest declares one, the key is left ABSENT (not declared == unknown);
+    no sentinel is stored. Best-effort: any read error leaves the key absent.
+    """
+    try:
+        from apm_cli.export.declared_license import read_declared_license
+
+        declared = read_declared_license(install_path)
+    except Exception:
+        declared = None
+    if declared:
+        ctx.package_declared_licenses[dep_key] = declared
+
+
 def _rebuild_cached_semver_resolution(dep_locked_chk: Any) -> Any:
     """Rebuild a ``GitSemverResolution`` from a cached lockfile entry.
 
@@ -295,6 +314,7 @@ class LocalDependencySource(DependencySource):
 
         if local_info.package_type:
             ctx.package_types[dep_key] = local_info.package_type.value
+        _record_declared_license(ctx, dep_key, install_path)
 
         return Materialization(
             package_info=local_info,
@@ -530,6 +550,7 @@ class CachedDependencySource(DependencySource):
             ctx.package_hashes[dep_key] = _compute_hash(install_path)
         if cached_package_info.package_type:
             ctx.package_types[dep_key] = cached_package_info.package_type.value
+        _record_declared_license(ctx, dep_key, install_path)
 
         # Return without deploying integration files when the target set is empty.
         if not ctx.targets:
@@ -801,6 +822,7 @@ class FreshDependencySource(DependencySource):
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value
+            _record_declared_license(ctx, dep_key, install_path)
 
             if hasattr(package_info, "package_type"):
                 package_type = package_info.package_type

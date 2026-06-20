@@ -26,7 +26,7 @@ Pack distributable artifacts from your APM project.
 
 Reads apm.yml to decide what to produce:
 
-  dependencies: block  ->  bundle (directory or .tar.gz)
+  dependencies: block  ->  bundle (directory or archive; see --archive and --archive-format)
   marketplace: block   ->  selected marketplace artifacts
   target: / targets:   ->  ecosystem-specific plugin.json (claude/copilot)
   both blocks present  ->  bundle plus selected marketplace artifacts
@@ -168,7 +168,23 @@ def _parse_marketplace_filter(
     "--archive",
     is_flag=True,
     default=False,
-    help="Produce a .tar.gz archive instead of a directory.",
+    help=(
+        "Produce a .zip archive instead of a directory (previous default: .tar.gz; "
+        "use --archive-format tar.gz for legacy CI pipelines)."
+    ),
+)
+@click.option(
+    "--archive-format",
+    "archive_format",
+    type=click.Choice(["zip", "tar.gz"]),
+    default="zip",
+    show_default=True,
+    help=(
+        "Archive format when --archive is set. "
+        "'zip' (default) is Claude Code and plugin-host compatible and matches apm publish output. "
+        "'tar.gz' is typically smaller for text-heavy bundles and preserves the previous "
+        "default for CI pipelines that rely on it."
+    ),
 )
 @click.option(
     "-o",
@@ -267,6 +283,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     fmt,
     target,
     archive,
+    archive_format,
     output,
     dry_run,
     force,
@@ -287,6 +304,16 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
 
     logger = CommandLogger("pack", verbose=verbose, dry_run=dry_run)
 
+    # Error when --archive-format is explicitly set but --archive is not.
+    if (
+        not archive
+        and ctx.get_parameter_source("archive_format") is click.core.ParameterSource.COMMANDLINE
+    ):
+        raise click.UsageError(
+            f"--archive-format has no effect without --archive;"
+            f" add --archive to produce a .{archive_format} archive."
+        )
+
     # -- Parse --marketplace-path overrides --
     path_overrides_result = _parse_path_overrides(marketplace_path_overrides, ctx, json_output)
     if path_overrides_result is None:
@@ -297,6 +324,12 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
     marketplace_formats = _parse_marketplace_filter(marketplace_filter, ctx, json_output)
     # _parse_marketplace_filter raises/exits on error via _emit_json_error_or_raise
     project_root = Path(".").resolve()
+    # Authoring-path nudge (#1777): warn when the author's own package declares
+    # no license. Suppressed under --json (machine output). Never blocks pack.
+    if not json_output:
+        from ..export.authoring import warn_if_license_undeclared
+
+        warn_if_license_undeclared(project_root / "apm.yml", logger.warning)
     # Issue #1207 D1: when --target is not given, detect the project's
     # actual target so the embedded ``pack.target`` reflects what was
     # tested rather than a hardcoded "copilot".  ``pack.target`` is now
@@ -324,6 +357,7 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
         bundle_format=fmt,
         bundle_target=effective_target,
         bundle_archive=archive,
+        bundle_archive_format=archive_format,
         bundle_output=Path(output),
         bundle_force=force,
         marketplace_offline=offline,
@@ -485,7 +519,19 @@ def pack_cmd(  # noqa: PLR0913 -- Click handler, one param per CLI option
 
     for sub in result.producer_results:
         if sub.kind is OutputKind.BUNDLE:
-            _render_bundle_result(logger, sub.payload, fmt, target, dry_run)
+            _render_bundle_result(
+                logger,
+                sub.payload,
+                fmt,
+                target,
+                dry_run,
+                show_zip_migration_notice=(
+                    archive
+                    and archive_format == "zip"
+                    and ctx.get_parameter_source("archive_format")
+                    is not click.core.ParameterSource.COMMANDLINE
+                ),
+            )
         elif sub.kind is OutputKind.MARKETPLACE:
             _render_marketplace_result(logger, sub.payload, dry_run, sub.warnings, sub.outputs)
 
@@ -520,7 +566,30 @@ def _emit_drift_recipe(logger, out_path: str) -> None:
     logger.info("    enforces that the checked-in copy matches the apm.yml source of truth.")
 
 
-def _render_bundle_result(logger, pack_result, fmt, target, dry_run):
+def _bundle_size_suffix(bundle_path) -> str:
+    """Return a small size suffix for existing archive files."""
+    if not bundle_path:
+        return ""
+    path = Path(bundle_path)
+    if not path.is_file():
+        return ""
+    size = path.stat().st_size
+    if size < 1024:
+        return f" ({size} bytes)"
+    if size < 1024 * 1024:
+        return f" ({size / 1024:.1f} KiB)"
+    return f" ({size / (1024 * 1024):.1f} MiB)"
+
+
+def _render_bundle_result(
+    logger,
+    pack_result,
+    fmt,
+    target,
+    dry_run,
+    *,
+    show_zip_migration_notice: bool = False,
+):
     """Mirror the legacy ``apm pack`` output for the bundle producer."""
     if pack_result is None:
         return
@@ -552,9 +621,20 @@ def _render_bundle_result(logger, pack_result, fmt, target, dry_run):
     if not pack_result.files:
         _warn_empty(logger, target, pack_result)
     else:
-        logger.success(f"Packed {len(pack_result.files)} file(s) -> {pack_result.bundle_path}")
+        size_suffix = _bundle_size_suffix(pack_result.bundle_path)
+        logger.success(
+            f"Packed {len(pack_result.files)} file(s) -> {pack_result.bundle_path}{size_suffix}"
+        )
         for f in pack_result.files:
             logger.verbose_detail(f"    {f}")
+        if show_zip_migration_notice and str(pack_result.bundle_path).endswith(".zip"):
+            logger.info(
+                "Note: --archive now produces .zip by default. "
+                "Use --archive-format tar.gz to restore the previous format for legacy pipelines."
+            )
+            logger.verbose_detail(
+                "    Tip: use --archive-format tar.gz for smaller archives on text-heavy bundles."
+            )
         if fmt == "plugin":
             logger.progress(
                 "Plugin bundle ready -- contains plugin.json plus "
@@ -667,9 +747,17 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
     default=False,
     help="Deploy despite critical hidden-character findings.",
 )
+@click.option(
+    "--trust-canvas-extensions",
+    is_flag=True,
+    default=False,
+    help="Deploy executable canvas extensions (.github/extensions/) from the bundle.",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed unpacking information")
 @click.pass_context
-def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
+def unpack_cmd(
+    ctx, bundle_path, output, skip_verify, dry_run, force, trust_canvas_extensions, verbose
+):
     """Extract an APM bundle into the project."""
     logger = CommandLogger("unpack", verbose=verbose, dry_run=dry_run)
     logger.warning(
@@ -685,10 +773,29 @@ def unpack_cmd(ctx, bundle_path, output, skip_verify, dry_run, force, verbose):
             skip_verify=skip_verify,
             dry_run=dry_run,
             force=force,
+            trust_canvas=trust_canvas_extensions,
         )
 
         # Surface bundle metadata and warn on target mismatch
         _log_bundle_meta(result, Path(output), logger)
+
+        if result.canvas_blocked > 0:
+            from apm_cli.core.experimental import is_enabled
+
+            if is_enabled("canvas"):
+                logger.warning(
+                    f"Blocked {result.canvas_blocked} canvas extension file(s): canvas "
+                    "extensions are executable code and are not unpacked by default. "
+                    "Re-run with '--trust-canvas-extensions' to deploy them to "
+                    ".github/extensions/."
+                )
+            else:
+                logger.warning(
+                    f"Blocked {result.canvas_blocked} canvas extension file(s): canvas "
+                    "extensions are an experimental feature and are disabled. Enable "
+                    "them with 'apm experimental enable canvas' (then re-run with "
+                    "'--trust-canvas-extensions' to deploy executable canvas code)."
+                )
 
         if dry_run:
             logger.dry_run_notice("No files written")

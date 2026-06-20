@@ -4,7 +4,7 @@
 
 Think `package.json`, `requirements.txt`, or `Cargo.toml` — but for AI agent configuration.
 
-GitHub Copilot · Claude Code · Cursor · OpenCode · Codex · Gemini · Windsurf
+GitHub Copilot · Claude Code · Cursor · OpenCode · Codex · Gemini · Windsurf · Kiro
 
 **[Documentation](https://microsoft.github.io/apm/)** · **[Quick Start](https://microsoft.github.io/apm/getting-started/quick-start/)** · **[CLI Reference](https://microsoft.github.io/apm/reference/cli-commands/)** · **[Roadmap](https://github.com/orgs/microsoft/projects/2304)**
 
@@ -67,7 +67,7 @@ One command, no configuration -- VS Code and GitHub Copilot read the file automa
 
 One `apm.yml` describes every primitive your agents need — instructions, skills, prompts, agents, hooks, plugins, MCP servers — and `apm install` reproduces the exact same setup across every client on every machine. `apm.lock.yaml` pins the resolved tree the way `package-lock.json` does for npm.
 
-- **[One manifest for everything](https://microsoft.github.io/apm/reference/primitive-types/)** — declared once, deployed across Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Windsurf
+- **[One manifest for everything](https://microsoft.github.io/apm/reference/primitive-types/)** — declared once, deployed across Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Windsurf, Kiro
 - **[Install from anywhere](https://microsoft.github.io/apm/guides/dependencies/)** — GitHub, GitLab, Bitbucket, Azure DevOps, GitHub Enterprise, Gitea, Gogs, any git host
 - **[Transitive dependencies](https://microsoft.github.io/apm/guides/dependencies/)** — packages can depend on packages; APM resolves the full tree
 - **[Author plugins](https://microsoft.github.io/apm/guides/plugins/)** — build Copilot, Claude, and Cursor plugins with dependency management, then export standard `plugin.json`
@@ -81,12 +81,15 @@ Agent context is executable in effect — a prompt is a program for an LLM. APM 
 
 - **[Content security](https://microsoft.github.io/apm/enterprise/security/)** — `apm install` blocks compromised packages before agents read them; `apm audit` runs the same checks on demand
 - **[Lockfile integrity](https://microsoft.github.io/apm/enterprise/governance/)** — `apm.lock` records resolved sources and content hashes for full provenance
+- **[SBOM export](https://microsoft.github.io/apm/reference/cli/lock/)** — `apm lock export --format cyclonedx|spdx` emits a standard inventory of what reached disk, straight from the lockfile — provenance for procurement, not a compliance attestation
 - **[Drift detection](https://microsoft.github.io/apm/guides/drift-detection/)** — `apm audit` rebuilds your agent context in scratch and diffs it against your working tree to catch hand-edits before they ship
 - **[MCP trust boundaries](https://microsoft.github.io/apm/guides/mcp-servers/)** — transitive MCP servers require explicit consent
 
 ### 3. Governed by policy
 
 `apm-policy.yml` lets a security team say *"these are the only sources, scopes, and primitives this org will allow"* and have every `apm install` enforce it — with tighten-only inheritance from enterprise to org to repo, a published bypass contract, and audit-mode CI gates.
+
+apm-policy.yml governs what gets installed; your agent harness governs what runs. The two planes do not overlap.
 
 - **[Governance Guide](https://microsoft.github.io/apm/enterprise/governance-guide/)** — the canonical enterprise reference: enforcement points, bypass contract, air-gapped story, failure semantics, rollout playbook
 - **[Policy reference](https://microsoft.github.io/apm/enterprise/policy-reference/)** — every check, every field, every default
@@ -146,7 +149,7 @@ apm marketplace add github/awesome-copilot
 apm install azure-cloud-development@awesome-copilot
 ```
 
-Or add an MCP server (wired into Copilot, Claude, Cursor, Codex, OpenCode, Gemini, and Windsurf):
+Or add an MCP server (wired into Copilot, Claude, Cursor, Codex, OpenCode, Gemini, Windsurf, and Kiro):
 
 ```bash
 apm install --mcp io.github.github/github-mcp-server --transport http   # connects over HTTPS

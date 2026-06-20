@@ -4,8 +4,9 @@ import os
 import re
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
+from ...models.dependency.mcp import _RESERVED_EXTRA_KEYS
 from ...utils.console import _rich_error, _rich_warning
 
 _INPUT_VAR_RE = re.compile(r"\$\{input:([^}]+)\}")
@@ -27,6 +28,20 @@ _ENV_PLACEHOLDER_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>|" + _ENV_VAR_RE.pattern)
 # Detects the legacy ``<VAR>`` placeholder syntax only. Used to aggregate
 # deprecation warnings across all servers in a single install run.
 _LEGACY_ANGLE_VAR_RE = re.compile(r"<([A-Z_][A-Z0-9_]*)>")
+
+# Config keys that ``_extra`` passthrough must NEVER set on a rendered harness
+# config. Covers the modeled MCP fields (imported single-source from the model)
+# plus harness-specific aliases that mirror a modeled field under a different
+# name -- e.g. Codex emits ``http_headers`` for remote auth headers, which must
+# not be injectable via passthrough. Enforced unconditionally per adapter path
+# (NOT guarded by "key absent from config"), so it also closes paths that do not
+# pre-set the key. Security boundary for PR #1765 / issue #1670.
+_EXTRA_DENYLIST = _RESERVED_EXTRA_KEYS | frozenset({"http_headers"})
+
+
+def registry_field_is_required(field: dict[str, Any]) -> bool:
+    """Return True unless registry metadata explicitly marks a field optional."""
+    return field.get("required", field.get("is_required", True)) is not False
 
 
 def _translate_env_placeholder(value):
@@ -112,6 +127,29 @@ class MCPClientAdapter(ABC):
     # primitive-focused) and applies uniformly to MCP-only adapters
     # (e.g. ``VSCodeClientAdapter``) that have no ``KNOWN_TARGETS`` entry.
     mcp_servers_key: str = ""
+
+    @staticmethod
+    def _merge_extra(config: dict, server_info: dict) -> dict:
+        """Merge harness-specific ``_extra`` keys from server_info into config.
+
+        Two guards apply:
+
+        * Denylist (unconditional): a key naming a modeled MCP field -- or a
+          harness alias of one (see ``_EXTRA_DENYLIST``) -- is dropped on EVERY
+          path, even when the config does not already carry it. This stops a
+          passthrough value from shadowing/redirecting a modeled field on
+          adapter paths that start empty or set only a subset of keys.
+        * Shadow guard: a non-reserved key is appended only when absent, so it
+          never overwrites a value the adapter set itself.
+        """
+        extra = server_info.get("_extra")
+        if extra and isinstance(extra, dict):
+            for k, v in extra.items():
+                if k in _EXTRA_DENYLIST:
+                    continue
+                if k not in config:
+                    config[k] = v
+        return config
 
     # Whether this adapter's config path is user/global-scoped (e.g.
     # ``~/.copilot/``) rather than workspace-scoped (e.g. ``.vscode/``).
@@ -481,7 +519,7 @@ class MCPClientAdapter(ABC):
             name = env_var.get("name", "")
             if not name:
                 continue
-            required = env_var.get("required", True)
+            required = registry_field_is_required(env_var)
 
             value = env_overrides.get(name) or os.getenv(name)
             if not value and required and not skip_prompting:
@@ -633,22 +671,25 @@ class MCPClientAdapter(ABC):
         return server_info
 
     @staticmethod
-    def _determine_config_key(server_url: str, server_name: str) -> str:
+    def _determine_config_key(server_url: str, server_name: str | None) -> str:
         """Return the configuration key to use for *server_url*/*server_name*.
 
-        The caller-supplied *server_name* takes precedence; if empty the last
-        path segment of *server_url* is used as a fallback, which mirrors the
-        convention ``owner/repo -> repo``.
+        The caller-supplied *server_name* takes precedence. If it is absent,
+        preserve npm-style scoped names such as ``@scope/name`` (one slash by
+        npm convention) while keeping the historical ``owner/repo -> repo``
+        fallback for registry paths.
 
         Args:
             server_url: Registry reference used as fallback source.
-            server_name: Explicit caller-supplied name (may be empty string).
+            server_name: Explicit caller-supplied name, if any.
 
         Returns:
             Non-empty configuration key string.
         """
         if server_name:
             return server_name
+        if server_url.startswith("@") and server_url.count("/") == 1:
+            return server_url
         if "/" in server_url:
             return server_url.split("/")[-1]
         return server_url
@@ -794,12 +835,15 @@ class MCPClientAdapter(ABC):
         )
 
         # First pass: identify variables with empty values to warn the user.
-        empty_value_vars = [ev for ev in env_vars if ev.get("required") and not ev.get("value")]
+        empty_value_vars = [
+            ev for ev in env_vars if registry_field_is_required(ev) and not ev.get("value")
+        ]
         if empty_value_vars and skip_prompting:
             var_names = [ev.get("name") for ev in empty_value_vars]
             _rich_warning(
-                f"Warning: The following required environment variables have no default "
-                f"value and cannot be prompted in non-interactive mode: {var_names}"
+                f"Required environment variables have no default value and cannot be "
+                f"prompted in non-interactive mode: {var_names}. Set them in your "
+                "environment and rerun `apm install`."
             )
 
         for env_var in env_vars:
@@ -834,9 +878,9 @@ class MCPClientAdapter(ABC):
 
             # Priority 4: interactive prompt
             default_value = env_var.get("value", "")
-            required = env_var.get("required", False)
+            required = registry_field_is_required(env_var)
 
-            if not skip_prompting:
+            if not skip_prompting and required:
                 from rich.prompt import Prompt
 
                 description = env_var.get("description", "")
@@ -856,11 +900,10 @@ class MCPClientAdapter(ABC):
                 resolved[name] = default_value
             elif required:
                 _rich_warning(
-                    f"Warning: Required environment variable '{name}' could not be resolved. "
-                    f"The MCP server may not function correctly."
+                    f"Required environment variable '{name}' could not be resolved. "
+                    f"The MCP server may not function correctly. Set {name} in your "
+                    "environment and rerun `apm install`."
                 )
                 resolved[name] = ""
-            else:
-                resolved[name] = default_value
 
         return resolved

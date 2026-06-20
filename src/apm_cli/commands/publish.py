@@ -1,4 +1,4 @@
-"""``apm publish`` command — upload a packed tarball to a registry.
+"""``apm publish`` command -- upload a packed zip archive to a registry.
 
 Implements docs/proposals/registry-api.md §5.3:
 ``PUT /v1/packages/{owner}/{repo}/versions/{version}``
@@ -10,20 +10,21 @@ resolver (``apm experimental enable registries``).
 from __future__ import annotations
 
 import re
-import tarfile
+import zipfile
 from pathlib import Path
 
 import click
 
 from ..core.command_logger import CommandLogger
 from ..deps.registry.feature_gate import require_package_registry_enabled
+from ..utils.paths import portable_relpath
 
 _PUBLISH_HELP = """\
 Publish a package to a registry.
 
-Reads apm.yml for the package name/version, packs a flat registry archive
-(``apm.yml`` + ``.apm/`` at the tarball root — not ``apm pack`` plugin bundles),
-or uses a pre-built tarball via --tarball, then uploads to the registry via
+Reads apm.yml for the package name/version, packs a flat registry zip archive
+(``apm.yml`` + ``.apm/`` at the archive root -- not ``apm pack`` plugin bundles),
+or uses a pre-built zip via --zip, then uploads to the registry via
 PUT /v1/packages/{owner}/{repo}/versions/{version}.
 
 Requires the 'registries' experimental feature:
@@ -32,16 +33,16 @@ Requires the 'registries' experimental feature:
 Examples:
 
   # Auto-pack and publish to the only configured registry:
-  apm publish
+  apm publish --package acme/my-skill
 
   # Choose a registry when multiple are configured:
-  apm publish --registry corp-main
+  apm publish --package acme/my-skill --registry corp-main
 
-  # Publish a pre-built tarball (skip the pack step):
-  apm publish --tarball ./build/my-package-1.0.0.tar.gz
+  # Publish a pre-built zip (skip the pack step):
+  apm publish --package acme/my-skill --zip ./build/my-package-1.0.0.zip
 
   # Preview what would be uploaded:
-  apm publish --dry-run
+  apm publish --package acme/my-skill --dry-run
 """
 
 
@@ -60,16 +61,16 @@ Examples:
     help="Package identity to publish as (owner/repo, e.g. acme/my-skill).",
 )
 @click.option(
-    "--tarball",
-    "tarball_path",
+    "--zip",
+    "zip_path",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a pre-built .tar.gz tarball. Skips the pack step.",
+    help="Path to a pre-built .zip archive. Skips the pack step.",
 )
 @click.option("--dry-run", is_flag=True, default=False, help="Preview without uploading.")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output.")
 @click.pass_context
-def publish_cmd(ctx, registry_name, package_id, tarball_path, dry_run, verbose):
+def publish_cmd(ctx, registry_name, package_id, zip_path, dry_run, verbose):
     """Publish a package version to a registry."""
     require_package_registry_enabled("apm publish")
 
@@ -92,6 +93,12 @@ def publish_cmd(ctx, registry_name, package_id, tarball_path, dry_run, verbose):
     if not version:
         raise click.ClickException("apm.yml must declare a 'version:' field to publish.")
 
+    # Authoring-path nudge (#1777): warn when the author's own package declares
+    # no license. Silent on the consuming path; never blocks publish.
+    from ..export.authoring import warn_if_license_undeclared
+
+    warn_if_license_undeclared(apm_yml_path, logger.warning)
+
     # ----------------------------------------------------------- owner/repo
     owner, repo = _resolve_package_id(package_id)
 
@@ -100,19 +107,19 @@ def publish_cmd(ctx, registry_name, package_id, tarball_path, dry_run, verbose):
     registry_name = _resolve_registry_name(registry_name, registries)
     base_url = registries[registry_name]
 
-    # ----------------------------------------------------------- tarball
-    if tarball_path:
-        tarball = Path(tarball_path)
+    # ----------------------------------------------------------- zip archive
+    if zip_path:
+        archive = Path(zip_path)
     else:
-        tarball = _pack_archive(project_root, apm_yml_path, pkg, logger, verbose)
+        archive = _pack_archive(project_root, apm_yml_path, pkg, logger, verbose)
 
-    tarball_size = tarball.stat().st_size
+    archive_size = archive.stat().st_size
 
     # ----------------------------------------------------------- dry-run
     if dry_run:
         logger.info(f"Would publish {owner}/{repo}@{version} to {registry_name} ({base_url})")
-        logger.info(f"  tarball : {tarball}  ({tarball_size:,} bytes)")
-        logger.info("(dry-run — nothing uploaded)")
+        logger.info(f"  archive : {archive}  ({archive_size:,} bytes)")
+        logger.info("(dry-run -- nothing uploaded)")
         return
 
     # ----------------------------------------------------------- upload
@@ -122,11 +129,11 @@ def publish_cmd(ctx, registry_name, package_id, tarball_path, dry_run, verbose):
     auth = make_auth_context(registry_name)
     client = RegistryClient(base_url, auth)
 
-    logger.info(f"Publishing {owner}/{repo}@{version} to {registry_name} …")
+    logger.info(f"Publishing {owner}/{repo}@{version} to {registry_name}...")
 
-    tarball_bytes = tarball.read_bytes()
+    archive_bytes = archive.read_bytes()
     try:
-        result = client.publish_version(owner, repo, version, tarball_bytes)
+        result = client.publish_version(owner, repo, version, archive_bytes)
     except RegistryError as exc:
         _handle_publish_error(exc, owner, repo, version, registry_name, base_url)
 
@@ -184,14 +191,14 @@ def _resolve_registry_name(name: str | None, registries: dict[str, str]) -> str:
 
 
 def _pack_archive(project_root: Path, apm_yml_path: Path, pkg, logger, verbose: bool) -> Path:
-    """Build a flat registry tarball (``apm.yml`` + ``.apm/`` at archive root).
+    """Build a flat registry zip archive (``apm.yml`` + ``.apm/`` at archive root).
 
     Also includes ``README.md``, ``CHANGELOG.md``, and ``LICENSE`` (case-
     insensitive, no extension required for LICENSE) when present — matching
     npm's behaviour of bundling standard root-level documentation files.
 
     Registry servers and ``apm install`` expect the APM source layout at the
-    tarball root — not the ``apm pack --archive`` plugin bundle wrapper
+    archive root — not the ``apm pack --archive`` plugin bundle wrapper
     (``{name}-{version}/plugin.json``). See registry HTTP API §6.
     """
     apm_dir = project_root / ".apm"
@@ -199,10 +206,10 @@ def _pack_archive(project_root: Path, apm_yml_path: Path, pkg, logger, verbose: 
         raise click.ClickException(
             "Registry publish requires a flat APM package (.apm/ directory).\n"
             "Add .apm/ with your primitives (skills, instructions, etc.), "
-            "or pass --tarball with a pre-built flat archive."
+            "or pass --zip with a pre-built flat archive."
         )
 
-    archive_name = f"{pkg.name}-{pkg.version}.tar.gz"
+    archive_name = f"{pkg.name}-{pkg.version}.zip"
     dest = project_root / archive_name
     if dest.exists():
         dest.unlink()
@@ -210,21 +217,20 @@ def _pack_archive(project_root: Path, apm_yml_path: Path, pkg, logger, verbose: 
     if verbose:
         logger.info(f"Packing flat registry archive -> {dest.name}")
 
-    def _tar_filter(ti: tarfile.TarInfo) -> tarfile.TarInfo | None:
-        # Skip macOS AppleDouble sidecars (._*) that break registry validation.
-        if any(part.startswith("._") for part in Path(ti.name).parts):
-            return None
-        if Path(ti.name).name == ".DS_Store":
-            return None
-        return ti
+    def _should_skip(path: Path) -> bool:
+        # Skip macOS AppleDouble sidecars (._*) and .DS_Store that break registry validation.
+        return any(part.startswith("._") for part in path.parts) or path.name == ".DS_Store"
 
     # Standard root-level doc files included when present (npm parity).
     # Matched case-insensitively; LICENSE has no required extension.
     _DOC_CANDIDATES = ("README.md", "CHANGELOG.md", "LICENSE", "LICENCE")
 
-    with tarfile.open(dest, mode="w:gz") as tar:
-        tar.add(apm_yml_path, arcname="apm.yml", filter=_tar_filter, recursive=False)
-        tar.add(apm_dir, arcname=".apm", filter=_tar_filter)
+    with zipfile.ZipFile(dest, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        if not _should_skip(apm_yml_path):
+            zf.write(apm_yml_path, arcname="apm.yml")
+        for file in sorted(apm_dir.rglob("*")):
+            if file.is_file() and not file.is_symlink() and not _should_skip(file):
+                zf.write(file, arcname=portable_relpath(file, project_root))
         for candidate in _DOC_CANDIDATES:
             # Case-insensitive match against actual filenames in project root.
             match = next(
@@ -235,8 +241,8 @@ def _pack_archive(project_root: Path, apm_yml_path: Path, pkg, logger, verbose: 
                 ),
                 None,
             )
-            if match:
-                tar.add(match, arcname=match.name, filter=_tar_filter, recursive=False)
+            if match and not _should_skip(match):
+                zf.write(match, arcname=match.name)
                 if verbose:
                     logger.info(f"  bundling {match.name}")
 
@@ -269,7 +275,7 @@ def _handle_publish_error(
         from ..deps.registry.auth import registry_token_env_var
 
         raise click.ClickException(
-            f"Forbidden — your token does not have publish permission for "
+            f"Forbidden -- your token does not have publish permission for "
             f"{owner}/{repo} in {registry_name!r}.\n"
             f"Check the token configured via {registry_token_env_var(registry_name)}."
         )

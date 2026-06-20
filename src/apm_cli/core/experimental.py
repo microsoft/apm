@@ -94,6 +94,18 @@ FLAGS: dict[str, ExperimentalFlag] = {
         default=False,
         hint=("Use registries: in apm.yml. See https://microsoft.github.io/apm/guides/registries/"),
     ),
+    "canvas": ExperimentalFlag(
+        name="canvas",
+        description="Ship Copilot CLI canvas extensions via .apm/extensions/ bundles.",
+        default=False,
+        hint=(
+            "Author a canvas under .apm/extensions/<name>/extension.mjs, then "
+            "'apm install' deploys it to .github/extensions/. Dependency-provided "
+            "canvases are executable and blocked unless you pass "
+            "'--trust-canvas-extensions'. See "
+            "https://microsoft.github.io/apm/integrations/canvas/"
+        ),
+    ),
     "external_scanners": ExperimentalFlag(
         name="external_scanners",
         description="External SARIF scanner ingestion + optional audit at install time.",
@@ -105,6 +117,26 @@ FLAGS: dict[str, ExperimentalFlag] = {
             "'apm install' -- set the mode with 'apm config set audit-on-install "
             "warn|block' or an apm-policy.yml 'security.audit.on_install' rule. "
             "See https://microsoft.github.io/apm/integrations/external-scanners/"
+        ),
+    ),
+    "openclaw": ExperimentalFlag(
+        name="openclaw",
+        description="Deploy skills to OpenClaw agent runtime directories.",
+        default=False,
+        hint=(
+            "Use '--target openclaw' to deploy skills to your project, "
+            "or '--target openclaw --global' for your personal OpenClaw "
+            "skills at ~/.openclaw/skills/."
+        ),
+    ),
+    "hermes": ExperimentalFlag(
+        name="hermes",
+        description="Deploy skills, AGENTS.md, and MCP servers to the Hermes agent.",
+        default=False,
+        hint=(
+            "Use '--target hermes' to deploy skills + AGENTS.md to your "
+            "project, or '--target hermes --global' for your personal Hermes "
+            "home at ~/.hermes/ (skills + MCP servers in config.yaml)."
         ),
     ),
 }

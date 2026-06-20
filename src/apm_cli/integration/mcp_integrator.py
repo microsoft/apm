@@ -346,6 +346,10 @@ class MCPIntegrator:
         if dep.tools:
             info["_apm_tools_override"] = dep.tools
 
+        # Pass through harness-specific extra keys for adapters to merge
+        if dep.extra:
+            info["_extra"] = dict(dep.extra)
+
         return info
 
     @staticmethod
@@ -406,6 +410,10 @@ class MCPIntegrator:
         # Tools overlay: embed for adapters to pick up
         if dep.tools:
             info["_apm_tools_override"] = dep.tools
+
+        # Pass through harness-specific extra keys for adapters to merge
+        if dep.extra:
+            info["_extra"] = dict(dep.extra)
 
         # Warn about overlay fields not yet applied at install time
         if dep.version:
@@ -664,6 +672,24 @@ class MCPIntegrator:
                 use_rich=True,
             )
 
+        if "kiro" in target_runtimes:
+            from apm_cli.factory import ClientFactory
+
+            kiro_cfg = Path(
+                ClientFactory.create_client(
+                    "kiro",
+                    project_root=project_root_path,
+                    user_scope=user_scope or scope is InstallScope.USER,
+                ).get_config_path()
+            )
+            _clean_json_mcp_config(
+                kiro_cfg,
+                expanded_stale,
+                logger,
+                "Kiro MCP config",
+                use_rich=True,
+            )
+
         # Clean JetBrains Copilot user-scope mcp.json
         if "intellij" in target_runtimes:
             from apm_cli.adapters.client.intellij import _intellij_config_dir
@@ -711,6 +737,16 @@ class MCPIntegrator:
                 logger,
                 ".gemini/settings.json",
             )
+
+        # Clean .agents/mcp_config.json (only if .agents/ directory exists)
+        if "antigravity" in target_runtimes:
+            if (project_root_path / ".agents").is_dir():
+                _clean_json_mcp_config(
+                    project_root_path / ".agents" / "mcp_config.json",
+                    expanded_stale,
+                    logger,
+                    ".agents/mcp_config.json",
+                )
 
         # Clean Claude Code project .mcp.json (only if .claude/ directory exists)
         if clean_claude_project:
@@ -799,6 +835,10 @@ class MCPIntegrator:
                 detected.add("llm")
             if re.search(r"\bwindsurf\b", command):
                 detected.add("windsurf")
+            if re.search(r"\bkiro\b", command):
+                detected.add("kiro")
+            if re.search(r"\bantigravity\b|\bagy\b", command):
+                detected.add("antigravity")
 
         return builtins.list(detected)
 
@@ -917,10 +957,11 @@ class MCPIntegrator:
             logger.progress(f"Dependencies for {runtime}: {', '.join(mcp_deps)}")
             return False
         except ValueError as e:
+            from apm_cli.factory import ClientFactory
+
+            supported_runtimes = ", ".join(sorted(ClientFactory.supported_clients()))
             logger.warning(f"Runtime {runtime} not supported: {e}")
-            logger.progress(
-                "Supported runtimes: vscode, copilot, codex, cursor, opencode, gemini, claude, windsurf, intellij, llm"
-            )
+            logger.progress(f"Supported runtimes: {supported_runtimes}")
             return False
         except Exception as e:
             _log.debug("Unexpected error installing for runtime %s", runtime, exc_info=True)

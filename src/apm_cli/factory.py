@@ -2,12 +2,15 @@
 
 from pathlib import Path
 
+from .adapters.client.antigravity import AntigravityClientAdapter
 from .adapters.client.claude import ClaudeClientAdapter
 from .adapters.client.codex import CodexClientAdapter
 from .adapters.client.copilot import CopilotClientAdapter
 from .adapters.client.cursor import CursorClientAdapter
 from .adapters.client.gemini import GeminiClientAdapter
+from .adapters.client.hermes import HermesClientAdapter
 from .adapters.client.intellij import IntelliJClientAdapter
+from .adapters.client.kiro import KiroClientAdapter
 from .adapters.client.opencode import OpenCodeClientAdapter
 from .adapters.client.vscode import VSCodeClientAdapter
 from .adapters.client.windsurf import WindsurfClientAdapter
@@ -20,15 +23,18 @@ from .adapters.package_manager.default_manager import DefaultMCPPackageManager
 # lists (see ``mcp_integrator`` runtime loops for the canonical
 # consumers).
 _MCP_CLIENT_REGISTRY: dict[str, type] = {
+    "antigravity": AntigravityClientAdapter,
     "copilot": CopilotClientAdapter,
     "vscode": VSCodeClientAdapter,
     "codex": CodexClientAdapter,
     "cursor": CursorClientAdapter,
     "gemini": GeminiClientAdapter,
     "intellij": IntelliJClientAdapter,
+    "kiro": KiroClientAdapter,
     "opencode": OpenCodeClientAdapter,
     "windsurf": WindsurfClientAdapter,
     "claude": ClaudeClientAdapter,
+    "hermes": HermesClientAdapter,
 }
 
 

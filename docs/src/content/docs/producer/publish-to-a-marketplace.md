@@ -93,17 +93,20 @@ marketplace:
   codex:
     output: .agents/plugins/marketplace.json
 
+  # Optional: package sources can be relative to this git base.
+  sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace
+
   build:
     tagPattern: "v{version}"
 
   packages:
     - name: example-package
       description: Human-readable description consumers see
-      source: acme-org/example-package
+      source: example-package           # -> .../agent-marketplace/example-package
       version: "^1.0.0"
 
     - name: pinned-package
-      source: acme-org/pinned-package
+      source: acme-org/pinned-package   # -> .../agent-marketplace/acme-org/pinned-package
       ref: 3f2a9b1c
 
     - name: local-tool
@@ -116,6 +119,60 @@ The key in `apm.yml` is `packages:`. It becomes `plugins:` in the
 compiled `marketplace.json` -- that rename is the only structural
 transform `apm pack` performs. Strict schema: unknown keys raise an
 error, never silently ignored.
+
+Use `sourceBase` when packages live under the same enterprise git base.
+The base may target any supported host -- GitHub.com, GitHub Enterprise,
+self-hosted GitLab, or Azure DevOps. The host is preserved end to end, so a
+consumer installs from the same host you authored on. Any relative source
+composes onto the base, including two-segment values like
+`acme-org/pinned-package`. Host-prefixed sources like `github.com/acme/tool`,
+full HTTPS URLs, and local `./` paths remain per-entry overrides. If
+`sourceBase` is absent, existing `owner/repo` source behavior is unchanged.
+See the [manifest schema](../reference/manifest-schema/#75-marketplacepackages)
+for the full validation and override rules.
+
+For an Azure DevOps marketplace, point `sourceBase` at the
+`https://dev.azure.com/{org}/{project}/_git` base; relative sources compose
+onto it and the `dev.azure.com` host is kept on the consumer side:
+
+```yaml
+marketplace:
+  sourceBase: https://dev.azure.com/contoso/platform/_git
+  packages:
+    - name: agent-skills
+      source: agent-skills          # -> .../contoso/platform/_git/agent-skills
+      ref: 3f2a9b1c
+```
+
+Azure DevOps authentication uses `ADO_APM_PAT` (with an `az` CLI bearer
+fallback); see [authentication](../getting-started/authentication/#azure-devops).
+
+Before:
+
+```yaml
+marketplace:
+  packages:
+    - name: review
+      source: https://gitlab.corp.example.com/platform/agent-marketplace/review
+      ref: v1.0.0
+    - name: pinned
+      source: https://gitlab.corp.example.com/platform/agent-marketplace/acme-org/pinned-package
+      ref: main
+```
+
+After:
+
+```yaml
+marketplace:
+  sourceBase: https://gitlab.corp.example.com/platform/agent-marketplace
+  packages:
+    - name: review
+      source: review
+      ref: v1.0.0
+    - name: pinned
+      source: acme-org/pinned-package
+      ref: main
+```
 
 Add and edit packages without leaving the shell:
 
@@ -162,45 +219,12 @@ no `dependencies:` block produce only `marketplace.json`. See
 
 ```bash
 apm marketplace check        # every package's ref/range resolves
-apm marketplace doctor       # local environment diagnostics
+apm doctor                   # local environment diagnostics
 apm marketplace outdated     # packages with newer matching tags
 ```
 
 `check` is the gate to run in CI: a missing tag or unresolvable
 range exits non-zero before you push the release commit.
-
-## Publish updates to pinned consumers
-
-`apm marketplace publish` is the optional fan-out: it opens PRs
-against a list of consumer repos that pin the previous marketplace
-version, bumping each one to the version you just released.
-
-```yaml
-# consumer-targets.yml
-targets:
-  - repo: acme-org/service-a
-    branch: main
-  - repo: acme-org/service-b
-    branch: develop
-    path_in_repo: apm.yml      # default
-```
-
-```bash
-apm marketplace publish --dry-run    # preview
-apm marketplace publish --yes        # push branches and open PRs
-apm marketplace publish --no-pr      # push branches, skip gh PR creation
-```
-
-It clones each target, edits its `apm.yml` to point at the new
-marketplace ref, pushes a feature branch, and opens a PR via `gh`.
-State is journaled to `.apm/publish-state.json`. Failures in one
-target do not abort the others; the exit code is non-zero if any
-target failed.
-
-This flow assumes `gh` is authenticated and the runner has push
-access to every target -- it is targeted at internal/org marketplaces
-where you control both sides. Public marketplaces should rely on
-consumers running `apm install --update` on their own cadence.
 
 ## Pitfalls
 

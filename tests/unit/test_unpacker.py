@@ -1,6 +1,6 @@
 """Unit tests for apm_cli.bundle.unpacker."""
 
-import tarfile
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -34,10 +34,13 @@ def _build_bundle_dir(tmp_path: Path, deployed_files: list[str]) -> Path:
 
 
 def _archive_bundle(bundle_dir: Path, dest: Path) -> Path:
-    """Create a .tar.gz from a bundle directory."""
-    archive_path = dest / f"{bundle_dir.name}.tar.gz"
-    with tarfile.open(archive_path, "w:gz") as tar:
-        tar.add(bundle_dir, arcname=bundle_dir.name)
+    """Create a .zip from a bundle directory."""
+    archive_path = dest / f"{bundle_dir.name}.zip"
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for fp in sorted(bundle_dir.rglob("*")):
+            if fp.is_symlink() or not fp.is_file():
+                continue
+            zf.write(fp, arcname=f"{bundle_dir.name}/{fp.relative_to(bundle_dir).as_posix()}")
     return archive_path
 
 
@@ -530,3 +533,150 @@ class TestUnpackCmdLogging:
         assert ".github/agents/a.md" in result.output
         assert ".github/prompts/b.md" in result.output
         assert "Unpacked 2 file(s)" in result.output
+
+
+class TestUnpackCanvasTrust:
+    """Canvas extensions are executable code: unpack must enforce both gates.
+
+    Two independent gates must BOTH hold before a canvas unpacks: the
+    ``canvas`` experimental flag (feature availability) and ``trust_canvas``
+    (executable-code trust).  Missing either one blocks the canvas.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_config_cache(self):
+        from apm_cli.config import _invalidate_config_cache
+
+        _invalidate_config_cache()
+        yield
+        _invalidate_config_cache()
+
+    @pytest.fixture
+    def enable_canvas(self, monkeypatch):
+        import apm_cli.config as _conf
+
+        monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"canvas": True}})
+
+    def test_canvas_blocked_by_default(self, tmp_path):
+        deployed = [".github/agents/a.md", ".github/extensions/widget/extension.mjs"]
+        bundle = _build_bundle_dir(tmp_path, deployed)
+        output = tmp_path / "target"
+        output.mkdir()
+
+        result = unpack_bundle(bundle, output)
+
+        assert result.canvas_blocked == 1
+        assert ".github/extensions/widget/extension.mjs" not in result.files
+        assert ".github/agents/a.md" in result.files
+        assert not (output / ".github" / "extensions" / "widget").exists()
+        assert (output / ".github" / "agents" / "a.md").exists()
+
+    def test_canvas_deployed_with_trust_and_flag(self, tmp_path, enable_canvas):
+        deployed = [".github/agents/a.md", ".github/extensions/widget/extension.mjs"]
+        bundle = _build_bundle_dir(tmp_path, deployed)
+        output = tmp_path / "target"
+        output.mkdir()
+
+        result = unpack_bundle(bundle, output, trust_canvas=True)
+
+        assert result.canvas_blocked == 0
+        assert ".github/extensions/widget/extension.mjs" in result.files
+        assert (output / ".github" / "extensions" / "widget" / "extension.mjs").exists()
+
+    def test_canvas_blocked_when_trusted_but_flag_off(self, tmp_path):
+        """Trust alone is not enough: the experimental flag must also be on."""
+        deployed = [".github/extensions/widget/extension.mjs"]
+        bundle = _build_bundle_dir(tmp_path, deployed)
+        output = tmp_path / "target"
+        output.mkdir()
+
+        result = unpack_bundle(bundle, output, trust_canvas=True)
+
+        assert result.canvas_blocked == 1
+        assert ".github/extensions/widget/extension.mjs" not in result.files
+        assert not (output / ".github" / "extensions").exists()
+
+    def test_canvas_block_is_dry_run_visible(self, tmp_path):
+        deployed = [".github/extensions/widget/extension.mjs"]
+        bundle = _build_bundle_dir(tmp_path, deployed)
+        output = tmp_path / "target"
+        output.mkdir()
+
+        result = unpack_bundle(bundle, output, dry_run=True)
+
+        assert result.canvas_blocked == 1
+        assert result.files == []
+        assert not (output / ".github" / "extensions").exists()
+
+
+# ---------------------------------------------------------------------------
+# ZIP extraction security tests (mirrors the tar.gz equivalents in
+# tests/integration/test_wave4_pure_logic_coverage.py)
+# ---------------------------------------------------------------------------
+
+
+class TestUnpackZipSecurity:
+    """Verify the ZIP extraction path in unpack_bundle rejects malicious entries."""
+
+    def _make_zip_with_member(self, path, arcname: str, content: bytes = b"evil") -> None:
+        """Write a zip to *path* containing one entry named *arcname*."""
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr(arcname, content)
+
+    def test_zip_path_traversal_rejected(self, tmp_path):
+        """Zip entries with ``..`` path segments are rejected."""
+        zip_path = tmp_path / "evil.zip"
+        self._make_zip_with_member(zip_path, "../escaped.txt")
+        output = tmp_path / "output"
+        output.mkdir()
+        with pytest.raises((ValueError, FileNotFoundError)):
+            unpack_bundle(zip_path, output_dir=output)
+
+    def test_zip_absolute_path_rejected(self, tmp_path):
+        """Zip entries with absolute paths are rejected."""
+        zip_path = tmp_path / "evil.zip"
+        self._make_zip_with_member(zip_path, "/etc/passwd")
+        output = tmp_path / "output"
+        output.mkdir()
+        with pytest.raises((ValueError, FileNotFoundError)):
+            unpack_bundle(zip_path, output_dir=output)
+
+    def test_zip_symlink_entry_rejected(self, tmp_path):
+        """Zip entries with Unix symlink bit set in external_attr are rejected."""
+        zip_path = tmp_path / "symlink.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            info = zipfile.ZipInfo("link.txt")
+            # Set external_attr to Unix symlink mode (S_IFLNK = 0o120000)
+            info.external_attr = (0o120000 | 0o777) << 16
+            zf.writestr(info, "/etc/passwd")
+        output = tmp_path / "output"
+        output.mkdir()
+        with pytest.raises(ValueError, match="symlink"):
+            unpack_bundle(zip_path, output_dir=output)
+
+    def test_zip_bomb_too_many_entries_rejected(self, tmp_path, monkeypatch):
+        """ZIP with more entries than _MAX_ZIP_ENTRIES is rejected before extraction."""
+        from apm_cli.bundle import unpacker
+
+        monkeypatch.setattr(unpacker, "_MAX_ZIP_ENTRIES", 3)
+        zip_path = tmp_path / "bomb_entries.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            for i in range(4):
+                zf.writestr(f"file_{i}.txt", "x")
+        output = tmp_path / "output"
+        output.mkdir()
+        with pytest.raises(ValueError, match="entries"):
+            unpack_bundle(zip_path, output_dir=output)
+
+    def test_zip_bomb_uncompressed_size_rejected(self, tmp_path, monkeypatch):
+        """ZIP whose total uncompressed size exceeds _MAX_ZIP_UNCOMPRESSED is rejected."""
+        from apm_cli.bundle import unpacker
+
+        monkeypatch.setattr(unpacker, "_MAX_ZIP_UNCOMPRESSED", 50)
+        zip_path = tmp_path / "bomb_size.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("big.txt", "x" * 51)
+        output = tmp_path / "output"
+        output.mkdir()
+        with pytest.raises(ValueError, match="uncompressed size"):
+            unpack_bundle(zip_path, output_dir=output)

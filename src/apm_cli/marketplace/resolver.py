@@ -105,10 +105,24 @@ class MarketplacePluginResolution:
     plugin: MarketplacePlugin
     dependency_reference: DependencyReference | None = None
     cross_repo_misconfig_risk: CrossRepoMisconfigRisk | None = None
+    source_url: str = ""
+    source_digest: str = ""
 
     def __iter__(self) -> Iterator[str | MarketplacePlugin]:
         yield self.canonical
         yield self.plugin
+
+    def provenance(self, marketplace_name: str, plugin_name: str) -> dict[str, str]:
+        """Return lockfile provenance for this resolved marketplace plugin."""
+        data = {
+            "discovered_via": marketplace_name,
+            "marketplace_plugin_name": plugin_name,
+        }
+        if self.source_url:
+            data["source_url"] = self.source_url
+        if self.source_digest:
+            data["source_digest"] = self.source_digest
+        return data
 
 
 def _normalize_owner_repo_slug(repo: str) -> str:
@@ -789,6 +803,8 @@ def resolve_marketplace_plugin(
             plugin=plugin,
             dependency_reference=None,
             cross_repo_misconfig_risk=None,
+            source_url=manifest.source_url,
+            source_digest=manifest.source_digest,
         )
 
     canonical = resolve_plugin_source(
@@ -804,8 +820,16 @@ def resolve_marketplace_plugin(
             plugin, plugin_root=manifest.plugin_root
         )
         if in_repo_path:
+            # Fall back to the marketplace's registered ref when the plugin
+            # source itself declares no ref and no version_spec overrides it.
+            # "main" / "HEAD" are excluded because they represent the default
+            # branch -- appending them would be a no-op at best and misleading
+            # when the repo's actual default branch has a different name.
+            effective_ref = version_spec or path_ref
+            if not effective_ref and source.ref and source.ref not in ("main", "HEAD"):
+                effective_ref = source.ref
             dep_ref = _gitlab_in_marketplace_dependency_reference(
-                source, in_repo_path, version_spec or path_ref
+                source, in_repo_path, effective_ref
             )
             canonical = dep_ref.to_canonical()
 
@@ -841,6 +865,27 @@ def resolve_marketplace_plugin(
     cross_repo_misconfig_risk = _compute_cross_repo_misconfig_risk(
         plugin, source, canonical, dep_ref
     )
+
+    # ---- Propagate marketplace registered ref (#1811) ----
+    # When a marketplace is registered with ``--ref feat/xxx`` and the plugin
+    # uses a relative string source (e.g. ``"./plugins/my-plugin"``), the
+    # canonical built by ``resolve_plugin_source`` carries no ``#ref`` suffix.
+    # Without this block the plugin would resolve against the default branch
+    # instead of the registered ref.
+    # "main" / "HEAD" are excluded to avoid appending a no-op suffix; if the
+    # repo's actual default branch is not named "main" and the user pinned
+    # ``--ref main``, this condition silently drops the ref -- fixing that
+    # would require knowing the repo's real default branch which is not
+    # available at this stage.
+    if (
+        dep_ref is None
+        and not version_spec
+        and isinstance(plugin.source, str)
+        and "#" not in canonical
+        and source.ref
+        and source.ref not in ("main", "HEAD")
+    ):
+        canonical = f"{canonical}#{source.ref}"
 
     # ---- Version spec override ----
     # When version_spec is provided it either triggers semver-aware tag
@@ -950,4 +995,6 @@ def resolve_marketplace_plugin(
         plugin=plugin,
         dependency_reference=dep_ref,
         cross_repo_misconfig_risk=cross_repo_misconfig_risk,
+        source_url=manifest.source_url,
+        source_digest=manifest.source_digest,
     )

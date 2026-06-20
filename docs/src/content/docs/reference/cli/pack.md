@@ -15,7 +15,7 @@ apm pack [OPTIONS]
 
 `apm pack` produces distributable artifacts from the current APM project. It reads `apm.yml` to decide what to emit:
 
-- `dependencies:` block present -> a bundle (directory or `.tar.gz`).
+- `dependencies:` block present -> a bundle (directory by default, or archive with `--archive`; see `--archive-format`).
 - `marketplace:` block present -> selected marketplace artifacts.
 - `target:` (or `targets:`) field containing `claude` or `copilot` -> ecosystem-specific `plugin.json` files.
 - Both blocks present -> bundle plus selected marketplace artifacts in a single run.
@@ -29,7 +29,8 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | Flag | Default | Description |
 |---|---|---|
 | `--format plugin\|apm` | `plugin` | Bundle format. `plugin` emits a Claude Code plugin directory with `plugin.json` and plugin-native subdirs (`agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`). `apm` emits the legacy APM bundle layout, kept for tooling that still consumes it (e.g. `microsoft/apm-action@v1` restore mode). |
-| `--archive` | off | Produce a `.tar.gz` archive instead of a directory. Bundle only. |
+| `--archive` | off | Produce a `.zip` archive instead of a directory (previous default: `.tar.gz`; use `--archive-format tar.gz` for legacy CI pipelines). Bundle only. |
+| `--archive-format zip\|tar.gz` | `zip` | Archive format when `--archive` is set. `zip` is natively extractable on Windows and matches the format expected by Claude Code and plugin hosts. `tar.gz` is typically smaller for text-heavy bundles and preserves the previous default for pipelines that depend on it. |
 | `-o`, `--output PATH` | `./build` | Bundle output directory. Does not affect the `marketplace.json` path. |
 | `--force` | off | Allow overwriting on collision. In `plugin` bundle format, last writer wins instead of first; for generated `plugin.json` manifests, overwrites an existing file instead of preserving it. |
 | `--dry-run` | off | Print what would be packed without writing anything. |
@@ -44,13 +45,20 @@ Bundles are target-agnostic. The consumer's project decides where files land at 
 | `--check-clean` | off | Release gate: regenerate every configured marketplace output to a temp path and diff against the on-disk file. Exits `4` if the working tree is dirty (out-of-date `marketplace.json`). The gate itself never writes to disk. |
 | `--target`, `-t VALUE` | auto-detect | **Deprecated.** Recorded as informational `pack.target` metadata only; ignored by `apm install`. Will be removed in a future release. |
 
+:::caution[Migrating automation from `.tar.gz`?]
+`apm pack --archive` now produces `.zip`. If your CI release, checksum, or
+upload step still matches `build/*.tar.gz`, add `--archive-format tar.gz` or
+update the downstream glob to `.zip`.
+:::
+
 ## Examples
 
 ### Bundle only
 
 ```bash
 apm pack                              # plugin format (default), ./build/
-apm pack --archive                    # plugin bundle as .tar.gz
+apm pack --archive                    # plugin bundle as .zip (default)
+apm pack --archive --archive-format tar.gz  # legacy CI: produce .tar.gz instead
 apm pack --format apm -o ./dist       # legacy APM bundle layout
 ```
 
@@ -101,7 +109,7 @@ apm pack --archive --dry-run -v
 A Claude Code plugin directory under `--output`. Contains:
 
 - `plugin.json` -- schema-conformant manifest. Convention-dir keys are stripped because Claude Code auto-discovers them.
-- Plugin-native subdirs populated from your `.apm/` content and from installed dependencies: `agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`.
+- Plugin-native subdirs populated from your `.apm/` content and from installed dependencies: `agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`, `extensions/` (canvas extensions, when the `canvas` experimental flag is enabled).
 - A merged `hooks.json` when multiple sources contribute hooks.
 - `apm.lock.yaml` -- enriched copy with `pack:` metadata and a `bundle_files` map of per-file SHA-256 digests, used by `apm install` for install-time integrity verification.
 - `devDependencies` are excluded.
@@ -203,7 +211,7 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 ## Related
 
 - [`apm unpack`](../unpack/) -- inverse, deprecated; prefer `apm install <bundle>`.
-- [`apm install`](../install/) -- consumer side; installs a packed bundle directory or `.tar.gz`.
+- [`apm install`](../install/) -- consumer side; installs a packed bundle directory, `.zip`, or `.tar.gz`.
 - [Pack a bundle (producer guide)](../../../producer/pack-a-bundle/) -- task-oriented walkthrough.
 - [Publish to a marketplace](../../../producer/publish-to-a-marketplace/) -- end-to-end marketplace flow.
 - [Lockfile spec](../../lockfile-spec/) -- `pack:` metadata and `bundle_files` schema.

@@ -62,7 +62,7 @@ parser. The supported forms:
 | SSH protocol | `ssh://git@gitlab.com/acme/repo.git` | SSH with explicit scheme or port. |
 | SSH with non-default user | `myuser@host:acme/repo.git` or `ssh://myuser@host/acme/repo.git` | Honors a non-`git` SSH user from the URL — useful for Enterprise Managed User (EMU) accounts or any server where the SSH login is not `git`. Username is validated against `^[a-zA-Z0-9_][a-zA-Z0-9_.+-]*$` (64-char cap); percent-encoded userinfo is rejected. The username is presentation-only and not part of dependency identity. |
 | Local path | `./packages/shared` or `/abs/path` | Sibling package on disk. |
-| Object form (git) | `{ git: <url>, path: <subpath>, ref: <ref>, alias: <name> }` | Custom directory name (`alias`), nested groups, monorepo subpaths, or anything the string forms cannot express. |
+| Object form (git) | `{ git: <url>, path: <subpath>, ref: <ref>, alias: <name>, type: gitlab }` | Aliases, nested groups, monorepo subpaths, bespoke GitLab hosts, or anything string forms cannot express. |
 | Marketplace dict | `{ name: <plugin>, marketplace: <mkt>, version: <range> }` | Install a plugin from a registered marketplace. Optional `version` accepts a semver range (e.g. `~2.1.0`). Resolved to a concrete git ref at install time. |
 | Registry shorthand | `owner/repo#^2.0.0` with a default registry configured | Routes dep through the default registry instead of git. Default may come from `apm.yml` or `~/.apm/config.json`. Requires `registries` experimental flag. |
 | Registry object form | `{ id: owner/repo, version: ^2.0.0 }` | Explicit registry dep. `registry:` optional when a default registry is configured. Requires `registries` experimental flag. |
@@ -80,8 +80,15 @@ dependencies:
       ref: v2.0
       alias: security
 
+    # Self-managed GitLab on a bespoke hostname
+    - git: https://code.acme.com/platform/standards.git
+      type: gitlab
+
     # Local: filesystem path (development only)
     - path: ./packages/shared-skills
+
+    # Remote monorepo sibling: inside owner/mono/packages/frontend/apm.yml
+    - path: ../shared
 
     # Marketplace: resolved to a concrete git ref at install time
     - name: sec-check
@@ -103,6 +110,33 @@ dependencies:
       version: 1.4.0
 
 ```
+
+A `path:` declared inside a remote package is allowed only when the resolved
+path stays inside that same cloned repo. APM expands it to the parent's remote
+host/repo/ref and downloads the sibling from the same origin. Absolute paths,
+paths that escape the repo root, and cross-repo local paths are rejected.
+This is for same-repo monorepo siblings, not general workspace semantics.
+
+Use `type: gitlab` only on `git` object entries for self-managed GitLab
+instances whose hostname does not make the platform obvious:
+
+```yaml
+- git: https://code.acme.com/platform/standards.git
+  type: gitlab
+```
+
+That routes REST file reads and token lookup through the GitLab path without
+relying on hostname heuristics. For the token precedence chain, see
+[Authentication](../../getting-started/authentication/).
+
+Generic non-default hosts do not receive APM-managed GitHub or GitLab PATs on
+the HTTP file-read path. If a private host fails with 401/403, use a whole-repo
+git dependency for full clone auth support, or choose the supported HTTP backend
+signal (`type: gitlab` for GitLab-compatible hosts, `GITHUB_HOST` for GHES).
+
+**GitLab `path:` fetch transport:** GitLab `path:` files are fetched over
+git transport (not the REST API), so self-hosted instances with the API disabled
+still install. See [Authentication](../authentication/#gitlab-saas-or-self-managed).
 
 For private repos and non-GitHub hosts, see
 [Private and org packages](../private-and-org-packages/).
@@ -164,7 +198,7 @@ dependencies:
   apm:
     - microsoft/apm-sample-package#v1.0.0       # tag
     - acme/playbooks#main                       # branch (moves)
-    - acme/playbooks#a1b2c3d4e5f6...            # SHA (immutable)
+    - acme/playbooks#a1b2c3d4e5f6a7b8c9d0e1f234567890abcdef12  # SHA (immutable)
 ```
 
 For registry-sourced deps or when `policy.dependencies.require_pinned_constraint: true` is on, the ref slot also accepts semver constraints:
@@ -183,6 +217,21 @@ Branches move; tags and SHAs do not. For reproducibility, prefer tags or
 SHAs. The lockfile pins the resolved commit either way, so two clones
 running `apm install` get the same bytes -- but a branch ref will resolve
 to a new SHA on the next `apm update`.
+
+For SHA-pinned deps, think of `apm update` as Dependabot-style review
+for AI packages: the manifest stays pinned to a commit, while the comment
+shows the release tag. See [`apm update`](../../reference/cli/update/) for
+the full rewrite rules.
+
+```yaml
+dependencies:
+  apm:
+    - acme/playbooks#b1c2d3e4f5a6b7c8d9e0f1234567890abcdef123 # v2.0.0
+```
+
+`apm update --dry-run` previews the SHA/tag rewrite without changing the
+manifest. Branches and lightweight tags are not accepted as revision-pin
+update targets.
 
 ### Marketplace ref override
 

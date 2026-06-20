@@ -8,6 +8,9 @@ is checked against it before anything is written to disk. You did not
 write this file. Your platform or security team did. This page covers
 what that means for your day-to-day work.
 
+APM policy governs what gets installed, not what runs. For the full
+boundary explanation, see [What is APM](/apm/concepts/what-is-apm/#what-apm-is-not).
+
 ## Where the policy lives
 
 APM auto-discovers `apm-policy.yml` from your project's git remote. For
