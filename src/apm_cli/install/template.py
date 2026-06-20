@@ -18,6 +18,20 @@ from apm_cli.install.services import IntegratorBundle, integrate_package_primiti
 from apm_cli.install.sources import DependencySource, Materialization
 
 
+def _effective_allow(ctx) -> dict | None:
+    """Return the effective allowExecutables map for the install context.
+
+    Reads the gate opt-in signal from the project ``apm.yml`` via
+    ``ctx.apm_package.allow_executables`` and merges it with the
+    user-local approvals from ``~/.apm/approvals.yml``.  Returns
+    ``None`` when the gate is disabled (backward-compatible behaviour).
+    """
+    from apm_cli.security.executables import effective_allow_executables
+
+    project_val = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
+    return effective_allow_executables(project_val)
+
+
 def run_integration_template(
     source: DependencySource,
 ) -> dict[str, int] | None:
@@ -101,7 +115,7 @@ def _integrate_materialization(
                 else (tuple(dep_ref.skill_subset) if dep_ref.skill_subset else None)
             ),
             ctx=ctx,
-            allow_executables=getattr(getattr(ctx, "apm_package", None), "allow_executables", None),
+            allow_executables=_effective_allow(ctx),
         )
         mutation_keys = (
             "prompts",

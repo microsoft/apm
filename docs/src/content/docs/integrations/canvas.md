@@ -71,20 +71,26 @@ is not picked up mid-session.
 ## Trust gate for dependency canvases
 
 A canvas shipped by a **dependency** is arbitrary executable Node.js code. APM
-blocks dependency-provided canvases by default. To deploy them, add the package
-to the `allowExecutables` block in `apm.yml` and approve it:
+blocks dependency-provided canvases by default. To deploy them, the project must
+opt in to the executable gate and each developer must approve the package:
 
 ```yaml
-# apm.yml
-allowExecutables:
-  some-org/canvas-package:
-    canvas: true
+# apm.yml  (committed -- opts the project in to the gate)
+allowExecutables: {}
 ```
 
 ```bash
+# Run once per developer; approval is stored in ~/.apm/approvals.yml (NOT committed)
 apm approve some-org/canvas-package
 apm install --target copilot
 ```
+
+`apm approve` writes grants to `~/.apm/approvals.yml` -- a user-local file
+that is never committed to source control. This means cloning a project with
+`allowExecutables: {}` does **not** automatically grant trust to any package;
+each developer must explicitly approve packages they want to deploy. For
+automated CI pipelines, grants can alternatively be listed directly in
+`apm.yml` (committed, shared with the team).
 
 The trust gate is independent of the experimental flag:
 

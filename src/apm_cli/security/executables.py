@@ -449,6 +449,12 @@ def write_allow_executables(
 
     Reads the existing YAML, updates the ``allowExecutables`` key, and
     writes it back using the standard ``dump_yaml`` helper.
+
+    Note: individual package approvals should live in the user-local
+    ``~/.apm/approvals.yml`` (see :func:`save_user_approvals`), not in the
+    project manifest which is committed to source control.  This function is
+    retained for writing the gate opt-in signal (``allowExecutables: {}``) and
+    for CI/automated contexts that intentionally commit approvals.
     """
     from ..utils.yaml_io import dump_yaml, load_yaml
 
@@ -462,3 +468,79 @@ def write_allow_executables(
         del data["allowExecutables"]
 
     dump_yaml(data, manifest_path)
+
+
+# -------------------------------------------------------------------
+# User-local approvals store (~/.apm/approvals.yml)
+# -------------------------------------------------------------------
+
+
+def get_user_approvals_path() -> Path:
+    """Return the path to the user-local executable approvals file.
+
+    The file lives at ``~/.apm/approvals.yml`` and is never committed to
+    source control.  It stores the same ``allowExecutables`` mapping as the
+    project ``apm.yml`` but is scoped to the current user's machine, so
+    cloning a project does not implicitly grant trust to its dependencies.
+    """
+    return Path.home() / ".apm" / "approvals.yml"
+
+
+def load_user_approvals() -> dict[str, dict[str, bool]]:
+    """Load the user-local approvals from ``~/.apm/approvals.yml``.
+
+    Returns an empty dict when the file does not exist.  The file stores the
+    approvals mapping directly (package key -> exec-type booleans), without
+    the ``allowExecutables:`` YAML wrapper used in project ``apm.yml``.
+    """
+    path = get_user_approvals_path()
+    if not path.is_file():
+        return {}
+    from ..utils.yaml_io import load_yaml
+
+    data = load_yaml(path)
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def save_user_approvals(approvals: dict[str, dict[str, bool]]) -> None:
+    """Persist *approvals* to ``~/.apm/approvals.yml``.
+
+    Creates ``~/.apm/`` if it does not exist.  The file is written with
+    mode ``0o600`` (owner-only) to prevent other users on a shared system
+    from reading the approval list.
+    """
+    import contextlib
+
+    from ..utils.yaml_io import dump_yaml
+
+    path = get_user_approvals_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    dump_yaml(approvals, path)
+    with contextlib.suppress(NotImplementedError, OSError):
+        import os
+
+        os.chmod(path, 0o600)
+
+
+def effective_allow_executables(
+    project_allow_executables: dict[str, dict[str, bool]] | None,
+) -> dict[str, dict[str, bool]] | None:
+    """Return the effective allowExecutables map for an install run.
+
+    Merges the project-level gate signal with the user-local approvals:
+
+    - Returns ``None`` when the project has no ``allowExecutables`` block
+      (gate disabled -- backward-compatible behaviour, all executables
+      deployed).
+    - Returns a merged dict when the gate is enabled: project-level entries
+      (retained for CI / automated pipelines) are overlaid with user-local
+      approvals from ``~/.apm/approvals.yml``.  User approvals take
+      precedence so an ``apm approve`` decision is always honoured even if the
+      project entry is absent or stale.
+    """
+    if project_allow_executables is None:
+        return None
+    user = load_user_approvals()
+    return {**project_allow_executables, **user}

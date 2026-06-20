@@ -1874,28 +1874,34 @@ def _install_apm_packages(ctx, outcome):
     # the ``mcp`` exec type.  Direct MCP entries in apm.yml are assumed
     # intentional; only transitive/self-declared MCP servers from APM
     # dependency packages are subject to this gate.
-    _allow_execs = getattr(apm_package, "allow_executables", None)
-    if _allow_execs is not None and mcp_deps:
-        from ..security.executables import EXEC_TYPE_MCP, is_package_approved
+    _project_allow_execs = getattr(apm_package, "allow_executables", None)
+    if _project_allow_execs is not None:
+        from ..security.executables import (
+            EXEC_TYPE_MCP,
+            effective_allow_executables,
+            is_package_approved,
+        )
 
-        _filtered_mcp = []
-        for _mcp_dep in mcp_deps:
-            _pkg_slug = getattr(_mcp_dep, "source_package", None) or getattr(
-                _mcp_dep, "package_id", None
-            )
-            if _pkg_slug and not is_package_approved(_allow_execs, _pkg_slug, EXEC_TYPE_MCP):
-                logger.verbose_detail(
-                    f"Skipping MCP server from '{_pkg_slug}': not approved in allowExecutables. "
-                    f"Run 'apm approve {_pkg_slug}' to approve."
+        _allow_execs = effective_allow_executables(_project_allow_execs)
+        if _allow_execs is not None and mcp_deps:
+            _filtered_mcp = []
+            for _mcp_dep in mcp_deps:
+                _pkg_slug = getattr(_mcp_dep, "source_package", None) or getattr(
+                    _mcp_dep, "package_id", None
                 )
-            else:
-                _filtered_mcp.append(_mcp_dep)
-        if len(_filtered_mcp) < len(mcp_deps):
-            logger.warning(
-                f"Filtered {len(mcp_deps) - len(_filtered_mcp)} MCP server(s) not approved "
-                "in allowExecutables."
-            )
-        mcp_deps = _filtered_mcp
+                if _pkg_slug and not is_package_approved(_allow_execs, _pkg_slug, EXEC_TYPE_MCP):
+                    logger.verbose_detail(
+                        f"Skipping MCP server from '{_pkg_slug}': not approved in allowExecutables. "
+                        f"Run 'apm approve {_pkg_slug}' to approve."
+                    )
+                else:
+                    _filtered_mcp.append(_mcp_dep)
+            if len(_filtered_mcp) < len(mcp_deps):
+                logger.warning(
+                    f"Filtered {len(mcp_deps) - len(_filtered_mcp)} MCP server(s) not approved "
+                    "in allowExecutables."
+                )
+            mcp_deps = _filtered_mcp
 
     # The pipeline gate phase (policy_gate.py) checks direct APM deps
     # and direct MCP deps from apm.yml.  However, transitive MCP

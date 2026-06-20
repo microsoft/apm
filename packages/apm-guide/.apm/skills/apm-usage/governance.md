@@ -175,10 +175,18 @@ environments where plugin executables are not trusted by default.
 Behind the `canvas` experimental flag, a package may ship a Copilot CLI canvas
 extension under `.apm/extensions/<name>/extension.mjs` (executable Node.js).
 Because a canvas from a dependency is arbitrary executable code, APM **blocks
-dependency-provided canvases by default**: the consumer must declare the package
-in the `allowExecutables` block and run `apm approve <pkg>` to deploy it. A
-first-party canvas in the root package being installed deploys once the flag is
-on; dependency canvases always require explicit approval.
+dependency-provided canvases by default**: the project must opt in to the
+executable gate via `allowExecutables: {}` in `apm.yml` and each developer
+must run `apm approve <pkg>` to deploy it. A first-party canvas in the root
+package being installed deploys once the flag is on; dependency canvases always
+require explicit approval.
+
+Approvals recorded by `apm approve` are stored in **`~/.apm/approvals.yml`**
+(user-local, never committed to source control). Adding `allowExecutables: {}`
+to `apm.yml` enables the gate for the project, but does not grant trust to any
+package; every developer cloning the project must approve packages themselves.
+CI pipelines may commit specific grants directly in `apm.yml` to bypass
+interactive approval in automated environments.
 
 At **project scope** a canvas deploys to `.github/extensions/<name>/`. With
 `--global`, a **dependency-provided** canvas deploys to
