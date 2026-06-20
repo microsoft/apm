@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install <pkg>@<marketplace>` now preserves GitLab and other
+  non-GitHub hosts from url-type marketplace plugin sources, so auth
+  resolution no longer falls back to `github.com` for those installs.
+  (by @sergio-sisternes-epam; closes #1848) (#1853)
 - Registry deps with non-semver version selectors (e.g. `stable`, `main`) no longer report perpetual `outdated`. The drift check now uses literal equality for non-semver registry pins rather than range comparison, which always returned `True` against a semver range. (#1816)
 - Non-semver registry version selectors are now exact-matched against the registry's published version list at install time. Previously they were rejected with "not a valid semver range". (#1816)
 
