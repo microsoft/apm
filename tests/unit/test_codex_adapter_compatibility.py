@@ -92,6 +92,39 @@ class TestGetConfigPath:
         expected = str(home / ".codex" / "config.toml")
         assert adapter.get_config_path() == expected
 
+    def test_user_scope_honors_codex_home_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        custom_codex_home = tmp_path / "custom-codex"
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("CODEX_HOME", str(custom_codex_home))
+
+        adapter = _make_adapter(user_scope=True)
+
+        assert adapter._get_codex_dir() == custom_codex_home
+        assert adapter.get_config_path() == str(custom_codex_home / "config.toml")
+
+        monkeypatch.setenv("CODEX_HOME", "     ")
+        assert adapter._get_codex_dir() == home / ".codex"
+        assert adapter.get_config_path() == str(home / ".codex" / "config.toml")
+
+        monkeypatch.delenv("CODEX_HOME", raising=False)
+        assert adapter._get_codex_dir() == home / ".codex"
+        assert adapter.get_config_path() == str(home / ".codex" / "config.toml")
+
+    def test_user_scope_expands_codex_home_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("CODEX_HOME", "~/codex-config")
+
+        adapter = _make_adapter(user_scope=True)
+
+        expected = home / "codex-config" / "config.toml"
+        assert adapter.get_config_path() == str(expected)
+
     def test_config_path_ends_with_config_toml(self, tmp_path: Path) -> None:
         adapter = _make_adapter(project_root=tmp_path)
         assert adapter.get_config_path().endswith("config.toml")
