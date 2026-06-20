@@ -109,6 +109,25 @@ The dry-run output shows `[dry-run] would remove stale CLAUDE.md -- instructions
 | `--dry-run` | Show placement decisions without writing files. |
 | `-v, --verbose` | Show source attribution and optimizer analysis. |
 
+### Global compilation
+
+Global compilation keeps every supported AI tool on your machine in sync with
+globally installed instruction packages -- one command, no per-tool setup.
+
+| Flag | Description |
+|------|-------------|
+| `-g, --global` | Compile user-scope root context files from `~/.apm/apm_modules`. Reads globally installed packages and writes one root context file per supported user-scope target (e.g. `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`). Not valid with project-output flags such as `--target`, `--all`, `--watch`, `--root`, or `--output`. Exits non-zero if `~/.apm/apm_modules` does not exist. |
+
+`apm compile --global` is explicit. `apm install -g` does not run it; instead,
+when global instructions land on a root-context-only target, install prints a
+one-line hint pointing at `apm compile -g`. Run it manually after adding or
+removing global packages. Hand-authored files (files that do not carry the
+APM-generated marker) are never overwritten.
+
+```bash
+apm compile -g
+```
+
 ## Examples
 
 Compile for whatever the project is set up for:
