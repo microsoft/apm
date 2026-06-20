@@ -118,6 +118,10 @@ def run(ctx: InstallContext) -> None:
     # packages that left the manifest entirely.
     # ------------------------------------------------------------------
     if existing_lockfile and package_deployed_files:
+        all_deployed_files: set[str] = set()
+        for deployed_files in package_deployed_files.values():
+            all_deployed_files.update(deployed_files)
+
         for dep_key, new_deployed in package_deployed_files.items():
             # Skip packages whose integration reported errors this run --
             # a file that failed to re-deploy would look stale and get
@@ -134,13 +138,17 @@ def run(ctx: InstallContext) -> None:
 
             # Cross-package file protection (#1831): do not remove a file
             # that another currently-installed package still deploys.
-            # Without this guard, updating pkg-a (which dropped shared.md)
-            # would delete the file even though pkg-b still deploys it.
-            other_deployed: set = set()
-            for other_key, other_files in package_deployed_files.items():
-                if other_key != dep_key:
-                    other_deployed.update(other_files)
+            # package_deployed_files is integration outcome, not a security
+            # boundary; content-hash provenance remains the deletion gate.
+            other_deployed = all_deployed_files - set(new_deployed)
+            protected = stale & other_deployed
             stale = stale - other_deployed
+            if protected and logger:
+                for protected_path in sorted(protected):
+                    logger.verbose_detail(
+                        f"Kept stale file {protected_path} for {dep_key}; "
+                        "still deployed by another package"
+                    )
 
             if not stale:
                 continue

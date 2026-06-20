@@ -561,6 +561,9 @@ class TestCrossPackageProtection:
         stale_passed = call_args[0][0]
         assert ".github/agents/only-a.md" in stale_passed
         assert ".github/agents/shared.md" not in stale_passed
+        ctx.logger.verbose_detail.assert_called_once_with(
+            "Kept stale file .github/agents/shared.md for pkg-a; still deployed by another package"
+        )
 
     def test_file_removed_when_no_other_package_claims_it(self, tmp_path):
         """Normal case: stale file not claimed by any other package is removed."""
