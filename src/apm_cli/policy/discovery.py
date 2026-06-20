@@ -41,7 +41,11 @@ import requests
 import yaml
 
 from ..cache.url_normalize import SCP_LIKE_RE
-from ..utils.github_host import build_ado_api_url, is_azure_devops_hostname
+from ..utils.github_host import (
+    build_ado_api_url,
+    is_azure_devops_hostname,
+    is_visualstudio_legacy_hostname,
+)
 from ..utils.path_security import PathTraversalError, ensure_path_within
 from .parser import PolicyValidationError, load_policy
 from .project_config import (
@@ -668,6 +672,7 @@ def _auto_discover(
     is_ado = is_azure_devops_hostname(host)
 
     for candidate_repo in candidates:
+        logger.debug("Trying org policy repo candidate %s on host %s", candidate_repo, host)
         if is_ado:
             result = _fetch_from_ado_repo(
                 org=org,
@@ -688,6 +693,11 @@ def _auto_discover(
 
         # 404 / absent -> try the next candidate
         if result.outcome == "absent":
+            logger.debug(
+                "Policy repo candidate %s absent on host %s; trying next candidate",
+                candidate_repo,
+                host,
+            )
             continue
 
         # Any other outcome (found, error, malformed, etc.) -> return immediately
@@ -766,6 +776,8 @@ def _parse_remote_url(url: str) -> tuple[str, str] | None:
             parsed = urlparse(url)
             host = parsed.hostname or ""
             path_parts = parsed.path.strip("/").removesuffix(".git").rstrip("/").split("/")
+            if is_visualstudio_legacy_hostname(host):
+                return (host[: -len(".visualstudio.com")], host)
             if host and path_parts and path_parts[0]:
                 return (path_parts[0], host)
         except Exception:
@@ -1113,24 +1125,27 @@ def _fetch_ado_contents(
     api_url = build_ado_api_url(org, project, repo, file_path, host=host)
     repo_ref = f"{host}/{org}/{project}/{repo}"
 
-    # ADO uses Basic auth with PAT (username empty, password is the PAT).
-    # Prefer ADO_APM_PAT env var, falling back to _get_token_for_host().
-    ado_pat = os.environ.get("ADO_APM_PAT", "")
+    # ADO auth is centralized in AuthResolver: ADO_APM_PAT uses Basic auth,
+    # and az CLI AAD tokens use Bearer auth. No GitHub PATs are consulted.
+    from ..core.auth import AuthResolver
+
     headers: dict[str, str] = {}
-    if ado_pat:
-        basic_cred = base64.b64encode(f":{ado_pat}".encode()).decode()
-        headers["Authorization"] = f"Basic {basic_cred}"
-    else:
-        token = _get_token_for_host(host)
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+    auth_resolver = AuthResolver()
+    auth_ctx = auth_resolver.resolve(host, org=org)
+    if auth_ctx.token:
+        if auth_ctx.auth_scheme == "bearer":
+            headers["Authorization"] = f"Bearer {auth_ctx.token}"
+        else:
+            basic_cred = base64.b64encode(f":{auth_ctx.token}".encode()).decode()
+            headers["Authorization"] = f"Basic {basic_cred}"
 
     try:
         resp = requests.get(api_url, headers=headers, timeout=10, allow_redirects=False)
         if resp.status_code == 404:
             return None, "404: Policy file not found"
         if resp.status_code in (401, 403):
-            return None, f"{resp.status_code}: Access denied to {repo_ref}"
+            remediation = auth_resolver.build_error_context(host, "fetch org policy", org=org)
+            return None, (f"{resp.status_code}: Access denied to {repo_ref}{remediation}")
         if 300 <= resp.status_code < 400:
             location = resp.headers.get("Location", "<no Location header>")
             return None, (

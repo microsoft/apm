@@ -43,11 +43,11 @@ APM discovers your org-level policy by checking candidate repos in this order --
 
 | Priority | Repo name | Valid on |
 |----------|-----------|---------|
-| 1 | `.github` | GitHub, GitHub Enterprise, GitLab, other git hosts |
-| 2 | `.apm` | GitHub, GitHub Enterprise, GitLab, other git hosts |
-| 3 | `_apm` | All hosts including Azure DevOps |
+| 1 | `.github` | GitHub and GitHub API-compatible hosts |
+| 2 | `.apm` | GitHub and GitHub API-compatible hosts |
+| 3 | `_apm` | GitHub API-compatible hosts and Azure DevOps |
 
-Azure DevOps does not allow repository names starting or ending with a period, so only `_apm` is tried on ADO hosts. On ADO, the convention is a project named `_apm` containing a repo named `_apm`:
+Azure DevOps does not allow repository names starting or ending with a period, so only `_apm` is tried on ADO hosts. ADO requires repositories to live inside projects; the convention uses `_apm` for both the project and repo:
 
 ```
 <org>/
@@ -56,7 +56,7 @@ Azure DevOps does not allow repository names starting or ending with a period, s
       apm-policy.yml
 ```
 
-On GitHub and other hosts, the `.github` convention remains the recommended default:
+On GitHub and GitHub API-compatible hosts, the `.github` convention remains the recommended default:
 
 ```
 <org>/

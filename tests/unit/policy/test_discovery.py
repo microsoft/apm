@@ -21,6 +21,7 @@ from apm_cli.policy.discovery import (
     _cache_key,
     _extract_org_from_git_remote,
     _fetch_ado_contents,
+    _fetch_from_ado_repo,
     _fetch_from_repo,
     _fetch_from_url,
     _fetch_github_contents,
@@ -75,6 +76,10 @@ class TestParseRemoteUrl(unittest.TestCase):
     def test_https_trailing_slash(self):
         result = _parse_remote_url("https://github.com/contoso/my-project/")
         self.assertEqual(result, ("contoso", "github.com"))
+
+    def test_https_visualstudio_uses_org_subdomain(self):
+        result = _parse_remote_url("https://contoso.visualstudio.com/project/_git/repo")
+        self.assertEqual(result, ("contoso", "contoso.visualstudio.com"))
 
     def test_ssh_trailing_slash(self):
         result = _parse_remote_url("git@github.com:contoso/my-project/")
@@ -808,6 +813,10 @@ class TestPolicyRepoCandidates(unittest.TestCase):
         result = _policy_repo_candidates("dev.azure.com")
         self.assertEqual(result, ("_apm",))
 
+    def test_ado_ssh_dev_azure_com(self):
+        result = _policy_repo_candidates("ssh.dev.azure.com")
+        self.assertEqual(result, ("_apm",))
+
     def test_ado_visualstudio_com(self):
         result = _policy_repo_candidates("contoso.visualstudio.com")
         self.assertEqual(result, ("_apm",))
@@ -820,9 +829,22 @@ class TestPolicyRepoCandidates(unittest.TestCase):
 class TestFetchAdoContents(unittest.TestCase):
     """Test _fetch_ado_contents for Azure DevOps Items API."""
 
-    @patch.dict(os.environ, {"ADO_APM_PAT": "my-ado-pat"}, clear=False)
+    def _auth_context(self, token: str | None, scheme: str = "basic"):
+        ctx = MagicMock()
+        ctx.token = token
+        ctx.auth_scheme = scheme
+        return ctx
+
+    def _resolver(self, mock_resolver_cls, token: str | None, scheme: str = "basic"):
+        resolver = mock_resolver_cls.return_value
+        resolver.resolve.return_value = self._auth_context(token, scheme)
+        resolver.build_error_context.return_value = "\n    auth remediation"
+        return resolver
+
+    @patch("apm_cli.core.auth.AuthResolver")
     @patch("apm_cli.policy.discovery.requests.get")
-    def test_success(self, mock_get):
+    def test_success(self, mock_get, mock_resolver_cls):
+        resolver = self._resolver(mock_resolver_cls, "my-ado-pat")
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = VALID_POLICY_YAML
@@ -835,10 +857,12 @@ class TestFetchAdoContents(unittest.TestCase):
         call_kwargs = mock_get.call_args
         headers = call_kwargs[1].get("headers", {})
         self.assertIn("Basic", headers.get("Authorization", ""))
+        resolver.resolve.assert_called_once_with("dev.azure.com", org="contoso")
 
-    @patch.dict(os.environ, {"ADO_APM_PAT": "my-ado-pat"}, clear=False)
+    @patch("apm_cli.core.auth.AuthResolver")
     @patch("apm_cli.policy.discovery.requests.get")
-    def test_404_returns_error(self, mock_get):
+    def test_404_returns_error(self, mock_get, mock_resolver_cls):
+        self._resolver(mock_resolver_cls, "my-ado-pat")
         mock_resp = MagicMock()
         mock_resp.status_code = 404
         mock_get.return_value = mock_resp
@@ -847,9 +871,10 @@ class TestFetchAdoContents(unittest.TestCase):
         self.assertIsNone(content)
         self.assertIn("404", error)
 
-    @patch.dict(os.environ, {"ADO_APM_PAT": "my-ado-pat"}, clear=False)
+    @patch("apm_cli.core.auth.AuthResolver")
     @patch("apm_cli.policy.discovery.requests.get")
-    def test_401_returns_error(self, mock_get):
+    def test_401_returns_error(self, mock_get, mock_resolver_cls):
+        resolver = self._resolver(mock_resolver_cls, "my-ado-pat")
         mock_resp = MagicMock()
         mock_resp.status_code = 401
         mock_get.return_value = mock_resp
@@ -857,10 +882,15 @@ class TestFetchAdoContents(unittest.TestCase):
         content, error = _fetch_ado_contents("contoso", "_apm", "_apm", "apm-policy.yml")
         self.assertIsNone(content)
         self.assertIn("401", error)
+        self.assertIn("auth remediation", error)
+        resolver.build_error_context.assert_called_once_with(
+            "dev.azure.com", "fetch org policy", org="contoso"
+        )
 
-    @patch.dict(os.environ, {"ADO_APM_PAT": "my-ado-pat"}, clear=False)
+    @patch("apm_cli.core.auth.AuthResolver")
     @patch("apm_cli.policy.discovery.requests.get")
-    def test_redirect_rejected(self, mock_get):
+    def test_redirect_rejected(self, mock_get, mock_resolver_cls):
+        self._resolver(mock_resolver_cls, "my-ado-pat")
         mock_resp = MagicMock()
         mock_resp.status_code = 302
         mock_resp.headers = {"Location": "https://evil.example.com"}
@@ -870,11 +900,11 @@ class TestFetchAdoContents(unittest.TestCase):
         self.assertIsNone(content)
         self.assertIn("redirect", error.lower())
 
-    @patch.dict(os.environ, {"ADO_APM_PAT": ""}, clear=False)
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value=None)
+    @patch("apm_cli.core.auth.AuthResolver")
     @patch("apm_cli.policy.discovery.requests.get")
-    def test_no_auth_token_still_sends_request(self, mock_get, _mock_token):
+    def test_no_auth_token_still_sends_request(self, mock_get, mock_resolver_cls):
         """Unauthenticated requests are allowed (public ADO repos)."""
+        self._resolver(mock_resolver_cls, None)
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = VALID_POLICY_YAML
@@ -887,11 +917,11 @@ class TestFetchAdoContents(unittest.TestCase):
         headers = call_kwargs[1].get("headers", {})
         self.assertNotIn("Authorization", headers)
 
-    @patch.dict(os.environ, {"ADO_APM_PAT": ""}, clear=False)
-    @patch("apm_cli.policy.discovery._get_token_for_host", return_value="fallback-token")
+    @patch("apm_cli.core.auth.AuthResolver")
     @patch("apm_cli.policy.discovery.requests.get")
-    def test_fallback_to_bearer_when_no_ado_pat(self, mock_get, _mock_token):
-        """When ADO_APM_PAT is empty, falls back to Bearer via _get_token_for_host."""
+    def test_authresolver_bearer_token_uses_bearer_header(self, mock_get, mock_resolver_cls):
+        """ADO bearer tokens from AuthResolver use Bearer auth."""
+        self._resolver(mock_resolver_cls, "fallback-token", scheme="bearer")
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = VALID_POLICY_YAML
@@ -902,6 +932,104 @@ class TestFetchAdoContents(unittest.TestCase):
         call_kwargs = mock_get.call_args
         headers = call_kwargs[1].get("headers", {})
         self.assertEqual(headers.get("Authorization"), "Bearer fallback-token")
+
+
+class TestFetchFromAdoRepo(unittest.TestCase):
+    """Test _fetch_from_ado_repo orchestration around the ADO transport."""
+
+    @patch("apm_cli.policy.discovery._fetch_ado_contents")
+    def test_200_caches_result(self, mock_fetch):
+        mock_fetch.return_value = (VALID_POLICY_YAML, None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            result = _fetch_from_ado_repo(
+                org="contoso",
+                project="_apm",
+                repo="_apm",
+                host="dev.azure.com",
+                project_root=root,
+                no_cache=True,
+            )
+            self.assertTrue(result.found)
+            self.assertEqual(result.source, "org:dev.azure.com/contoso/_apm/_apm")
+            self.assertFalse(result.cached)
+
+    @patch("apm_cli.policy.discovery._fetch_ado_contents")
+    def test_404_no_error(self, mock_fetch):
+        mock_fetch.return_value = (None, "404: Policy file not found")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _fetch_from_ado_repo(
+                org="contoso",
+                project="_apm",
+                repo="_apm",
+                host="dev.azure.com",
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+            self.assertFalse(result.found)
+            self.assertEqual(result.outcome, "absent")
+            self.assertIsNone(result.error)
+
+    @patch("apm_cli.policy.discovery._fetch_ado_contents")
+    def test_api_error_uses_stale_cache(self, mock_fetch):
+        mock_fetch.return_value = (None, "Connection error fetching policy")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_ref = "dev.azure.com/contoso/_apm/_apm"
+            _write_cache(repo_ref, _make_test_policy(), root)
+            cache_dir = _get_cache_dir(root)
+            key = _cache_key(repo_ref)
+            meta_file = cache_dir / f"{key}.meta.json"
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            meta["cached_at"] = time.time() - DEFAULT_CACHE_TTL - 100
+            meta_file.write_text(json.dumps(meta), encoding="utf-8")
+
+            result = _fetch_from_ado_repo(
+                org="contoso",
+                project="_apm",
+                repo="_apm",
+                host="dev.azure.com",
+                project_root=root,
+            )
+            self.assertTrue(result.found)
+            self.assertTrue(result.cached)
+            self.assertEqual(result.outcome, "cached_stale")
+
+    @patch("apm_cli.policy.discovery._fetch_ado_contents")
+    def test_invalid_policy_yaml(self, mock_fetch):
+        mock_fetch.return_value = ("enforcement: bogus\n", None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _fetch_from_ado_repo(
+                org="contoso",
+                project="_apm",
+                repo="_apm",
+                host="dev.azure.com",
+                project_root=Path(tmpdir),
+                no_cache=True,
+            )
+            self.assertFalse(result.found)
+            self.assertIn("Invalid policy", result.error)
+
+    @patch("apm_cli.policy.discovery._fetch_ado_contents")
+    def test_hash_pin_mismatch(self, mock_fetch):
+        mock_fetch.return_value = (VALID_POLICY_YAML, None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = _fetch_from_ado_repo(
+                org="contoso",
+                project="_apm",
+                repo="_apm",
+                host="dev.azure.com",
+                project_root=Path(tmpdir),
+                no_cache=True,
+                expected_hash="sha256:" + ("0" * 64),
+            )
+            self.assertFalse(result.found)
+            self.assertEqual(result.outcome, "hash_mismatch")
 
 
 class TestGetTokenForHost(unittest.TestCase):
