@@ -19,7 +19,7 @@ namespace intercepts both call paths consistently.
 from __future__ import annotations
 
 import builtins
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +30,14 @@ if TYPE_CHECKING:
     from ..integration.base_integrator import BaseIntegrator
     from ..utils.diagnostics import DiagnosticCollector
 
+from ._services_helpers import _deployed_path_entry, _label_and_deploy_dir, _log_hooks_skip
+from .services_integrate import _log_hook_display_payloads as _log_hook_display_payloads
+from .services_integrate import (
+    _log_per_kind_results,
+    _log_skill_result,
+    _validate_bundle_slug,
+    _warn_cowork_nonsupported,
+)
 
 # CRITICAL: Shadow Python builtins that share names with Click commands so
 # ``set()`` / ``list()`` / ``dict()`` resolve to the builtins, not Click
@@ -45,7 +53,7 @@ class IntegratorBundle:
     """Groups the six primitive integrators passed to ``integrate_package_primitives``.
 
     Using a bundle reduces the public argument count of
-    ``integrate_package_primitives`` below the PLR0913 threshold (≤15) while
+    ``integrate_package_primitives`` below the PLR0913 threshold while
     keeping the integrator objects strongly typed and discoverable.
     """
 
@@ -60,126 +68,49 @@ class IntegratorBundle:
     # drift.py) pass a real CanvasIntegrator; when None the loop skips canvas.
     canvas: BaseIntegrator | None = None
 
+    @classmethod
+    def from_mapping(cls, integrators: dict[str, BaseIntegrator]) -> IntegratorBundle:
+        """Build a bundle from a ``ctx.integrators`` mapping.
 
-def _deployed_path_entry(
-    target_path: Path,
-    project_root: Path,
-    targets: Any,
-) -> str:
-    """Return the lockfile-safe path string for a deployed file."""
-
-    def _try_dynamic_root(tgts, *, strict: bool = False) -> str | None:
-        for _t in tgts:
-            if _t.resolved_deploy_root is None:
-                continue
-            if not strict:
-                try:
-                    target_path.relative_to(_t.resolved_deploy_root)
-                except ValueError:
-                    continue
-            if _t.name == "copilot-app":
-                from apm_cli.integration.copilot_app_db import to_lockfile_uri
-
-                return to_lockfile_uri(target_path.name)
-            from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
-
-            return to_lockfile_path(target_path, _t.resolved_deploy_root)
-        return None
-
-    if targets:
-        result = _try_dynamic_root(targets)
-        if result is not None:
-            return result
-    try:
-        return target_path.relative_to(project_root).as_posix()
-    except ValueError:
-        # Fallback: let to_lockfile_path run its own security
-        # validation (PathTraversalError) without pre-filtering.
-        if targets:
-            result = _try_dynamic_root(targets, strict=True)
-            if result is not None:
-                return result
-        raise RuntimeError(  # noqa: B904
-            f"Cannot translate {target_path!r} to a lockfile path: "
-            f"path is outside the project tree and no dynamic-root "
-            f"target matched. This is a bug -- please report it."
+        Centralises the six required integrators plus the optional canvas
+        so call sites (template.py, phases/integrate.py, drift.py) share a
+        single construction path instead of duplicating the kwargs block.
+        The ``canvas`` key is optional; when absent the field defaults to
+        ``None`` and the integration loop skips canvas deployment.
+        """
+        return cls(
+            prompt=integrators["prompt"],
+            agent=integrators["agent"],
+            skill=integrators["skill"],
+            instruction=integrators["instruction"],
+            command=integrators["command"],
+            hook=integrators["hook"],
+            canvas=integrators.get("canvas"),
         )
 
 
-def _skill_bundle_file_entries(
-    skill_dir: Path,
-    project_root: Path,
-    targets: Any,
-) -> list[str]:
-    """Expand a deployed skill directory into per-file lockfile entries."""
-    try:
-        if not (skill_dir.is_dir() and not skill_dir.is_symlink()):
-            return []
-    except OSError:
-        return []
-    entries: list[str] = []
-    for bundle_file in sorted(skill_dir.rglob("*")):
-        try:
-            if bundle_file.is_file() and not bundle_file.is_symlink():
-                entries.append(_deployed_path_entry(bundle_file, project_root, targets))
-        except OSError:
-            continue
-    return entries
+@dataclass(frozen=True)
+class IntegrationOptions:
+    """Optional configuration knobs for ``integrate_package_primitives``.
 
+    Grouping these advanced/optional parameters into a single object reduces
+    the public argument count of ``integrate_package_primitives`` without
+    losing expressiveness at call sites.
 
-def _log_hook_display_payloads(
-    payloads: list,
-    verbose: bool,
-    log_fn: Any,
-    logger: Any,
-) -> None:
-    """Emit per-hook-file action summaries for hook transparency."""
-    for _payload in payloads:
-        _src = _payload.get("source_hook_file", "hook file")
-        _actions = _payload.get("actions", [])
-        if _actions:
-            for _act in _actions:
-                log_fn(f"  |   {_act.get('event', '?')}: {_act.get('summary', '?')} ({_src})")
-        else:
-            log_fn(f"  |   Hook file integrated: {_src}")
-        if verbose and logger is not None:
-            _out_path = _payload.get("output_path", "")
-            logger.verbose_detail(f"  |   Hook JSON ({_src} -> {_out_path}):")
-            for _jline in _payload.get("rendered_json", "").splitlines():
-                logger.verbose_detail(f"  |     {_jline}")
+    Attributes
+    ----------
+    skill_subset:
+        When set, only skills whose names appear in this tuple are deployed.
+    scratch_root:
+        When set, the caller is replaying integration into an isolated
+        directory (drift-replay).  Must be a parent of *project_root*.
+    policy:
+        Enterprise security policy object forwarded to the skill integrator.
+    """
 
-
-def _label_and_deploy_dir(prim_name: str, mapping, target, deploy_dir: str) -> tuple[str, str]:
-    """Return ``(label, deploy_dir)`` for a per-kind integration line."""
-    if prim_name == "instructions" and mapping.output_compare:
-        # Rule-dir formats (cursor/claude/windsurf) are the output_compare
-        # set; derive the label from the same flag so a new rule format
-        # needs no edit here.
-        return "rule(s)", deploy_dir
-    if prim_name == "instructions":
-        return "instruction(s)", deploy_dir
-    if prim_name == "hooks":
-        if target.hooks_config_display:
-            deploy_dir = target.hooks_config_display
-        return "hook(s)", deploy_dir
-    if prim_name == "canvas":
-        return "canvas extension(s)", deploy_dir
-    return prim_name, deploy_dir
-
-
-def _emit_integration_hints(prim_name: str, info: dict, log_integration) -> None:
-    """Emit per-primitive 'next step' hints after an integration line."""
-    # copilot-app workflows arrive disabled: the row lands enabled=0 and the
-    # user must flip the toggle in the Copilot App's Workflows tab before the
-    # schedule fires.
-    if any(p.startswith("copilot-app/") for p in info["paths"]) and info["files"] > 0:
-        log_integration(
-            "  |-- workflows arrive disabled; enable from the Copilot App's Workflows tab"
-        )
-    # Canvas extensions are discovered by Copilot CLI at session start, so a
-    # freshly-deployed canvas is not picked up mid-session.
-    if prim_name == "canvas" and (info["files"] > 0 or info["adopted"] > 0):
-        log_integration("  |-- reload the Copilot session (/clear) or restart to load the canvas")
+    skill_subset: tuple | None = None
+    scratch_root: Path | None = None
+    policy: Any = field(default=None, compare=False)
 
 
 def _check_executable_approval(
@@ -195,38 +126,6 @@ def _check_executable_approval(
     return check_executable_approval(package_name, package_info, allow_executables, ctx=ctx)
 
 
-def _resolve_package_key(package_info: Any, package_name: str) -> str:
-    """Delegate to ``exec_gate.resolve_package_key``."""
-    from apm_cli.install.exec_gate import resolve_package_key
-
-    return resolve_package_key(package_info, package_name)
-
-
-def _log_hooks_skip(
-    package_name: str, package_info: Any, targets: Any, logger: InstallLogger | None
-) -> None:
-    """Warn about skipped hooks only when the package actually ships them.
-
-    Aligned with :meth:`HookIntegrator.find_hook_files`: checks for
-    ``*.json`` in ``.apm/hooks/`` and ``hooks/``.
-    """
-    _install = Path(package_info.install_path)
-    has_hooks = False
-    for hook_dir in [_install / ".apm" / "hooks", _install / "hooks"]:
-        if hook_dir.is_dir() and any(hook_dir.glob("*.json")):
-            has_hooks = True
-            break
-    if not has_hooks:
-        return
-    _pkg_label = package_name or getattr(package_info, "name", "unknown")
-    if logger:
-        logger.warning(
-            f"{_pkg_label}: hooks skipped (not approved in allowExecutables). "
-            f"Run 'apm approve {_pkg_label}' to approve.",
-            symbol="warning",
-        )
-
-
 def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -239,10 +138,8 @@ def integrate_package_primitives(  # noqa: PLR0913
     package_name: str = "",
     logger: InstallLogger | None = None,
     scope: InstallScope | None = None,
-    skill_subset: tuple | None = None,
     ctx: InstallContext | None = None,
-    scratch_root: Path | None = None,
-    policy: Any = None,
+    options: IntegrationOptions | None = None,
     is_first_party: bool = False,
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
 ) -> dict:
@@ -260,6 +157,9 @@ def integrate_package_primitives(  # noqa: PLR0913
     (Amendment 6) is emitted once per install run for packages that
     contain non-skill primitives when the cowork target is active.
 
+    Advanced options (skill filtering, drift-replay scratch root, policy)
+    are grouped in the optional *options* parameter.
+
     When *allow_executables* is provided, executable primitives (hooks,
     bin/) are only deployed for packages whose key appears in the dict
     with the matching type set to ``True``.  Local project content
@@ -270,6 +170,11 @@ def integrate_package_primitives(  # noqa: PLR0913
     from apm_cli.integration.dispatch import get_dispatch_table
 
     from ..core.scope import InstallScope
+
+    _opts = options or IntegrationOptions()
+    skill_subset = _opts.skill_subset
+    scratch_root = _opts.scratch_root
+    policy = _opts.policy
 
     _dispatch = get_dispatch_table()
     result = {
@@ -295,16 +200,11 @@ def integrate_package_primitives(  # noqa: PLR0913
     # the caller is replaying integration into an isolated directory.
     # We assert it exists and is NOT inside ``project_root`` to keep the
     # read-only contract of ``apm audit --check drift`` enforceable.
-    # The ``project_root`` passed in will already point at ``scratch_root``
-    # (so all writes redirect via target.deploy_path), so this check is
-    # purely defense-in-depth against accidental misuse.
     # ------------------------------------------------------------------
     if scratch_root is not None:
         from apm_cli.utils.path_security import ensure_path_within
 
         scratch_root = Path(scratch_root).resolve()
-        # ``project_root`` is the redirect target; it must equal scratch_root
-        # OR sit inside it.  ensure_path_within(child, parent) raises if not.
         ensure_path_within(Path(project_root).resolve(), scratch_root)
 
     # Executable approval gate (npm v12-style default-deny).
@@ -312,72 +212,12 @@ def integrate_package_primitives(  # noqa: PLR0913
         package_name, package_info, allow_executables, ctx=ctx
     )
 
-    # --- Amendment 6: cowork non-skill primitive warning (once per run) ---
-    _cowork_active = any(t.name == "copilot-cowork" for t in targets)
-    if _cowork_active and ctx is not None and not ctx.cowork_nonsupported_warned:
-        _apm_dir = Path(package_info.install_path) / ".apm"
-        _NON_SKILL_DIRS = {
-            "agents": "agents",
-            "prompts": "prompts",
-            "instructions": "instructions",
-            "hooks": "hooks",
-            # Commands live under ``.apm/prompts/`` and cannot be
-            # distinguished from general prompts at directory level
-            # without inspecting frontmatter.  Omitted to avoid
-            # misleading duplicate warnings.
-        }
-        _found_types = [
-            ptype
-            for ptype, subdir in _NON_SKILL_DIRS.items()
-            if (_apm_dir / subdir).is_dir() and any((_apm_dir / subdir).iterdir())
-        ]
-        if _found_types:
-            _pkg_label = package_name or getattr(package_info, "name", "unknown")
-            _types_str = ", ".join(sorted(builtins.set(_found_types)))
-            _warn_msg = (
-                f"copilot-cowork target only supports skills; "
-                f"non-skill primitives in {_pkg_label} "
-                f"({_types_str}) will not deploy to cowork"
-            )
-            if logger:
-                logger.warning(_warn_msg, symbol="warning")
-            diagnostics.warn(_warn_msg)
-            ctx.cowork_nonsupported_warned = True
+    # Amendment 6: cowork non-skill primitive warning (once per run).
+    _warn_cowork_nonsupported(targets, ctx, package_info, package_name, logger, diagnostics)
 
-    def _log_integration(msg):
+    def _log_integration(msg: str) -> None:
         if logger:
             logger.tree_item(msg)
-
-    def _format_target_collapse(paths: list[str], verbose: bool) -> tuple[str, list[str]]:
-        """Apply the 1/2/3+ multi-target collapse rule.
-
-        Returns a tuple ``(suffix, expansion_lines)``:
-
-        * ``suffix`` -- the text appended after ``-> `` on the aggregate line.
-        * ``expansion_lines`` -- extra ``  |     -> <path>`` lines emitted
-          AFTER the aggregate line when ``verbose`` is True. Empty list when
-          collapsed.
-
-        The rule:
-          1 target  -> ``<path1>``
-          2 targets -> ``<path1>, <path2>``
-          3+        -> ``N targets`` (verbose forces full enumeration)
-        """
-        deduped: list[str] = []
-        seen: set = builtins.set()
-        for p in paths:
-            if p not in seen:
-                seen.add(p)
-                deduped.append(p)
-        if verbose and len(deduped) >= 2:
-            return "", [f"  |     -> {p}" for p in deduped]
-        if len(deduped) == 0:
-            return "", []
-        if len(deduped) == 1:
-            return deduped[0], []
-        if len(deduped) == 2:
-            return f"{deduped[0]}, {deduped[1]}", []
-        return f"{len(deduped)} targets", []
 
     _verbose = bool(getattr(ctx, "verbose", False)) if ctx is not None else False
 
@@ -458,21 +298,11 @@ def integrate_package_primitives(  # noqa: PLR0913
             # Treat anything that is not a real int as 0 so we never
             # invent fake adopt counts.
             _adopted = _adopted_attr if isinstance(_adopted_attr, int) else 0
-            # Show the per-kind line whenever ANY work happened -- either
-            # a fresh integrate or a silent adopt of pre-existing
-            # byte-identical files. Adopt-only runs (e.g. re-install
-            # after lockfile wipe) used to print nothing here, which made
-            # the install summary look like a no-op even though the
-            # lockfile WAS being repopulated. Surfacing adopt counts
-            # restores operator trust in CI.
+            # Show the per-kind line whenever ANY work happened.
             if _int_result.files_integrated <= 0 and _adopted <= 0:
                 continue
             _agg_files += _int_result.files_integrated
             _agg_adopted += _adopted
-            # Only count fresh integrations against the package counter
-            # so totals like "3 prompts integrated" stay truthful;
-            # adopted files are surfaced separately in the per-kind
-            # line.
             result[_entry.counter_key] += _int_result.files_integrated
             _effective_root = _mapping.deploy_root or _target.root_dir
             _deploy_dir = (
@@ -496,44 +326,13 @@ def integrate_package_primitives(  # noqa: PLR0913
                 "hook_payloads": _agg_hook_payloads,
             }
 
-    # Emit aggregated per-kind lines in dispatch order so output is stable.
-    for _prim_name in _dispatch:
-        if _prim_name not in _per_kind:
-            continue
-        _info = _per_kind[_prim_name]
-        _suffix, _expansion = _format_target_collapse(_info["paths"], _verbose)
-        # Build the verb + count phrase. When at least one file was
-        # freshly integrated we lead with "N X integrated"; pure-adopt
-        # runs (no fresh writes) lead with "N X adopted" so the line
-        # still appears and the count is truthful.
-        _files = _info["files"]
-        _adopted = _info["adopted"]
-        if _files > 0:
-            _verb_phrase = f"{_files} {_info['label']} integrated"
-            if _adopted > 0:
-                _verb_phrase = f"{_verb_phrase} ({_adopted} adopted)"
-        else:
-            _verb_phrase = f"{_adopted} {_info['label']} adopted"
-        if _expansion:
-            _log_integration(f"  |-- {_verb_phrase}:")
-            for line in _expansion:
-                _log_integration(line)
-        else:
-            _log_integration(f"  |-- {_verb_phrase} -> {_suffix}")
-        # Emit per-hook-file action summaries for the hooks primitive.
-        # display_payloads reflects post-path-rewrite data (what is
-        # actually written to disk and executed), so this is faithful.
-        if _prim_name == "hooks" and _info["files"] > 0:
-            _hook_verbose = _verbose or (
-                bool(getattr(logger, "verbose", False)) if logger is not None else False
-            )
-            _log_hook_display_payloads(
-                _info.get("hook_payloads", []),
-                _hook_verbose,
-                _log_integration,
-                logger,
-            )
-        _emit_integration_hints(_prim_name, _info, _log_integration)
+    _log_per_kind_results(
+        _per_kind,
+        _dispatch,
+        _verbose,
+        logger,
+        log_integration=_log_integration,
+    )
 
     skill_result = integrators.skill.integrate_package_skill(
         package_info,
@@ -547,60 +346,25 @@ def integrate_package_primitives(  # noqa: PLR0913
         policy=policy,
         skip_bin=not _bin_approved,
     )
-    _skill_target_dirs: set = builtins.set()
-    for tp in skill_result.target_paths:
-        try:
-            rel = tp.relative_to(project_root)
-            if rel.parts:
-                _skill_target_dirs.add(rel.parts[0])
-        except ValueError:
-            # Dynamic-root target (copilot-cowork) -- path is outside project tree.
-            _skill_target_dirs.add("copilot-cowork")
-    _skill_target_paths = [f"{d}/skills/" for d in sorted(_skill_target_dirs)]
-    if not _skill_target_paths:
-        _skill_target_paths = ["skills/"]
-    _skill_suffix, _skill_expansion = _format_target_collapse(_skill_target_paths, _verbose)
-    if skill_result.skill_created:
-        result["skills"] += 1
-        if _skill_expansion:
-            _log_integration("  |-- Skill integrated:")
-            for line in _skill_expansion:
-                _log_integration(line)
-        else:
-            _log_integration(f"  |-- Skill integrated -> {_skill_suffix}")
-    if skill_result.sub_skills_promoted > 0:
-        result["sub_skills"] += skill_result.sub_skills_promoted
-        if _skill_expansion:
-            _log_integration(f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated:")
-            for line in _skill_expansion:
-                _log_integration(line)
-        else:
-            _log_integration(
-                f"  |-- {skill_result.sub_skills_promoted} skill(s) integrated -> {_skill_suffix}"
-            )
-    if skill_result.bin_deployed > 0 or skill_result.bin_skipped_reason:
-        from apm_cli.install.exec_gate import log_bin_status
+    _log_skill_result(
+        skill_result,
+        result,
+        project_root,
+        targets,
+        _verbose,
+        logger,
+        package_name=package_name,
+        package_info=package_info,
+        log_integration=_log_integration,
+    )
 
-        log_bin_status(skill_result, _skill_suffix, package_name, package_info, _log_integration)
-    for tp in skill_result.target_paths:
-        deployed.append(_deployed_path_entry(tp, project_root, targets))
-        # #1716: also record the bundle's contained files so per-file
-        # content hashes cover SKILL.md / assets / scripts. The directory
-        # entry above is retained (cleanup's directory-rejection gate and
-        # the manifest dir-exclusion contract depend on it); the file
-        # entries give ``content-integrity`` its per-file coverage so skill
-        # drift is caught under ``apm audit --ci --no-drift``.
-        deployed.extend(_skill_bundle_file_entries(tp, project_root, targets))
-
-    # A3: warm-cache visibility. If nothing was integrated for any kind AND
-    # no skill was created, emit one annotation so the user knows the dep
-    # was evaluated (the [+] header above already carries the SHA).
+    # A3: warm-cache visibility.
     _total_integrated = sum(_info["files"] for _info in _per_kind.values())
     _total_integrated += int(skill_result.skill_created)
     _total_integrated += int(skill_result.sub_skills_promoted)
     _total_integrated += int(skill_result.bin_deployed)
-    if _total_integrated == 0:
-        _log_integration("  |-- (files unchanged)")
+    if _total_integrated == 0 and logger:
+        logger.tree_item("  |-- (files unchanged)")
 
     return result
 
@@ -609,12 +373,7 @@ def integrate_local_content(
     project_root: Path,
     *,
     targets: Any,
-    prompt_integrator: Any,
-    agent_integrator: Any,
-    skill_integrator: Any,
-    instruction_integrator: Any,
-    command_integrator: Any,
-    hook_integrator: Any,
+    integrators: IntegratorBundle,
     force: bool,
     managed_files: Any,
     diagnostics: DiagnosticCollector,
@@ -637,6 +396,7 @@ def integrate_local_content(
         project_root: Deploy root -- where ``.claude/``, ``.codex/``,
             etc. are written.  Also used to compute relative paths for
             tracking deployed files.
+        integrators: Bundle of the six primitive integrators.
         source_root: Where to discover the synthetic local package's
             ``.apm/`` content.  Defaults to ``project_root`` when not
             provided.  When ``apm install --root`` is in play,
@@ -664,19 +424,22 @@ def integrate_local_content(
         package_type=PackageType.APM_PACKAGE,
     )
 
+    if integrators.canvas is None:
+        integrators = IntegratorBundle(
+            prompt=integrators.prompt,
+            agent=integrators.agent,
+            skill=integrators.skill,
+            instruction=integrators.instruction,
+            command=integrators.command,
+            hook=integrators.hook,
+            canvas=CanvasIntegrator(),
+        )
+
     return integrate_package_primitives(
         local_info,
         project_root,
         targets=targets,
-        integrators=IntegratorBundle(
-            prompt=prompt_integrator,
-            agent=agent_integrator,
-            skill=skill_integrator,
-            instruction=instruction_integrator,
-            command=command_integrator,
-            hook=hook_integrator,
-            canvas=CanvasIntegrator(),
-        ),
+        integrators=integrators,
         force=force,
         managed_files=managed_files,
         diagnostics=diagnostics,
@@ -699,7 +462,7 @@ _integrate_local_content = integrate_local_content
 # ---------------------------------------------------------------------------
 
 
-def integrate_local_bundle(
+def integrate_local_bundle(  # noqa: C901, PLR0912, PLR0915
     bundle_info: Any,
     project_root: Path,
     *,
@@ -901,41 +664,11 @@ def integrate_local_bundle(
             _rel_norm = rel.replace("\\", "/")
             _first_seg = _rel_norm.split("/", 1)[0] if "/" in _rel_norm else ""
             if _first_seg == "instructions" and "instructions" not in (target.primitives or {}):
-                # Slug must be safe for filesystem path construction --
-                # ``package_id`` originates from untrusted ``plugin.json``.
-                # Enforce a strict character whitelist documented in
-                # docs/src/content/docs/enterprise/security.md so
-                # forward slashes, null bytes, spaces, and other
-                # filesystem-significant characters are rejected before
-                # any path construction or resolution.
+                # Slug must be safe for filesystem path construction.
+                # CR1.5 (#1217 review): _validate_bundle_slug enforces the
+                # ASCII-only [A-Za-z0-9._-] whitelist and rejects traversal.
                 _slug_str = str(slug)
-                # CR1.5 (#1217 review): use ASCII-only validation, not
-                # ``str.isalnum`` (which accepts Unicode letters/digits
-                # like accented or non-Latin chars and would slip past
-                # the documented [A-Za-z0-9._-] whitelist).
-                _ALLOWED = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
-                _slug_ok = (
-                    bool(_slug_str)
-                    and all(c in _ALLOWED for c in _slug_str)
-                    and not _slug_str.startswith(".")
-                    and not _slug_str.endswith(".")
-                    and ".." not in _slug_str
-                )
-                if not _slug_ok:
-                    if logger is not None:
-                        logger.warning(
-                            f"Skipped instruction staging for unsafe slug {_slug_str!r}: "
-                            "slug must match [A-Za-z0-9._-]+ with no leading/trailing dot, no '..'"
-                        )
-                    skipped += 1
-                    continue
-                try:
-                    validate_path_segments(_slug_str, context="bundle slug")
-                except PathTraversalError as exc:
-                    if logger is not None:
-                        logger.warning(
-                            f"Skipped instruction staging for unsafe slug {_slug_str!r}: {exc}"
-                        )
+                if not _validate_bundle_slug(_slug_str, logger):
                     skipped += 1
                     continue
                 stage_root = project_root / "apm_modules" / slug / ".apm" / "instructions"
@@ -946,14 +679,7 @@ def integrate_local_bundle(
                         logger.warning(f"Skipped unsafe stage root for {slug!r}: {exc}")
                     skipped += 1
                     continue
-                # PR #1217 review: preserve nested subdirs under
-                # ``instructions/`` so two files with the same basename
-                # (e.g. ``instructions/a/x.md`` and
-                # ``instructions/b/x.md``) do not collide at the staged
-                # location.  ``rel`` already starts with
-                # ``instructions/`` so we strip that prefix before
-                # joining under the stage root (which itself ends in
-                # ``.apm/instructions``).
+                # Preserve nested subdirs under ``instructions/`` (PR #1217).
                 _rel_under_instructions = rel.split("/", 1)[1] if "/" in rel else Path(rel).name
                 dest = stage_root / _rel_under_instructions
                 deploy_root = stage_root

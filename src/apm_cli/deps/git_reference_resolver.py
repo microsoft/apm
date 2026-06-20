@@ -251,9 +251,10 @@ class GitReferenceResolver:
         host = self._host
 
         try:
-            if dep_ref.is_artifactory() or dep_ref.is_azure_devops():
-                return None
+            is_unsupported = dep_ref.is_artifactory() or dep_ref.is_azure_devops()
         except Exception:
+            is_unsupported = True
+        if is_unsupported:
             return None
 
         target_host = dep_ref.host or default_host()
@@ -287,14 +288,22 @@ class GitReferenceResolver:
         if token:
             headers["Authorization"] = f"token {token}"
 
+        return self._call_commits_api(api_url, headers, host)
+
+    def _call_commits_api(
+        self, api_url: str, headers: dict[str, str], host: _DownloaderContext
+    ) -> str | None:
+        """Execute the commits API call and return the validated 40-char SHA or None.
+
+        Extracted from :meth:`resolve_commit_sha_for_ref` to keep that method's
+        return-statement count within the PLR0911 limit.
+        """
         try:
             response = host._resilient_get(api_url, headers=headers, timeout=10)
             if response.status_code != 200:
                 return None
             body = (response.text or "").strip()
-            if re.match(r"^[a-f0-9]{40}$", body.lower()):
-                return body.lower()
-            return None
+            return body.lower() if re.match(r"^[a-f0-9]{40}$", body.lower()) else None
         except Exception:
             return None
 

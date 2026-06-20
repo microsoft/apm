@@ -652,9 +652,9 @@ class TestUnmanagedFiles:
 
     def test_rglob_cap_skips_check(self, tmp_path, monkeypatch):
         """When file count exceeds the safety cap, check passes with a warning."""
-        from apm_cli.policy import policy_checks
+        from apm_cli.policy import _policy_checks_unmanaged
 
-        monkeypatch.setattr(policy_checks, "_MAX_UNMANAGED_SCAN_FILES", 3)
+        monkeypatch.setattr(_policy_checks_unmanaged, "_MAX_UNMANAGED_SCAN_FILES", 3)
         gov = tmp_path / ".github" / "agents"
         gov.mkdir(parents=True)
         for i in range(5):

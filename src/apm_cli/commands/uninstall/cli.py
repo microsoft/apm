@@ -20,6 +20,58 @@ from .engine import (
 )
 
 
+def _collect_deployed_files(packages_to_remove, actual_orphans, lockfile):
+    """Collect deployed files for removed packages before lockfile mutation."""
+    from ...integration.base_integrator import BaseIntegrator
+
+    removed_keys = builtins.set()
+    for pkg in packages_to_remove:
+        try:
+            ref = _parse_dependency_entry(pkg)
+            removed_keys.add(ref.get_unique_key())
+        except (ValueError, TypeError, AttributeError, KeyError):
+            removed_keys.add(pkg)
+    removed_keys.update(actual_orphans)
+    all_deployed_files = builtins.set()
+    if lockfile:
+        for dep_key, dep in lockfile.dependencies.items():
+            if dep_key in removed_keys:
+                all_deployed_files.update(dep.deployed_files)
+    return BaseIntegrator.normalize_managed_files(all_deployed_files) or builtins.set()
+
+
+def _update_lockfile_after_remove(
+    lockfile, packages_to_remove, actual_orphans, lockfile_path, logger
+):
+    """Update or delete the lockfile after package removal."""
+    if not lockfile:
+        return
+    lockfile_updated = False
+    for pkg in packages_to_remove:
+        try:
+            ref = _parse_dependency_entry(pkg)
+            key = ref.get_unique_key()
+        except (ValueError, TypeError, AttributeError, KeyError):
+            key = pkg
+        if key in lockfile.dependencies:
+            del lockfile.dependencies[key]
+            lockfile_updated = True
+    for orphan_key in actual_orphans:
+        if orphan_key in lockfile.dependencies:
+            del lockfile.dependencies[orphan_key]
+            lockfile_updated = True
+    if lockfile_updated:
+        try:
+            if lockfile.dependencies:
+                lockfile.write(lockfile_path)
+            else:
+                lockfile_path.unlink(missing_ok=True)
+        except Exception:
+            logger.warning(
+                "Failed to update lockfile -- it may be out of sync with uninstalled packages."
+            )
+
+
 @click.command(help="Remove APM packages, their integrated files, and apm.yml entries")
 @click.argument("packages", nargs=-1, required=True)
 @click.option("--dry-run", is_flag=True, help="Show what would be removed without removing")
@@ -176,51 +228,12 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         removed_from_modules += orphan_removed
 
         # Step 7: Collect deployed files for removed packages (before lockfile mutation)
-        from ...integration.base_integrator import BaseIntegrator
-
-        removed_keys = builtins.set()
-        for pkg in packages_to_remove:
-            try:
-                ref = _parse_dependency_entry(pkg)
-                removed_keys.add(ref.get_unique_key())
-            except (ValueError, TypeError, AttributeError, KeyError):
-                removed_keys.add(pkg)
-        removed_keys.update(actual_orphans)
-        all_deployed_files = builtins.set()
-        if lockfile:
-            for dep_key, dep in lockfile.dependencies.items():
-                if dep_key in removed_keys:
-                    all_deployed_files.update(dep.deployed_files)
-        all_deployed_files = (
-            BaseIntegrator.normalize_managed_files(all_deployed_files) or builtins.set()
-        )
+        all_deployed_files = _collect_deployed_files(packages_to_remove, actual_orphans, lockfile)
 
         # Step 8: Update lockfile
-        if lockfile:
-            lockfile_updated = False
-            for pkg in packages_to_remove:
-                try:
-                    ref = _parse_dependency_entry(pkg)
-                    key = ref.get_unique_key()
-                except (ValueError, TypeError, AttributeError, KeyError):
-                    key = pkg
-                if key in lockfile.dependencies:
-                    del lockfile.dependencies[key]
-                    lockfile_updated = True
-            for orphan_key in actual_orphans:
-                if orphan_key in lockfile.dependencies:
-                    del lockfile.dependencies[orphan_key]
-                    lockfile_updated = True
-            if lockfile_updated:
-                try:
-                    if lockfile.dependencies:
-                        lockfile.write(lockfile_path)
-                    else:
-                        lockfile_path.unlink(missing_ok=True)
-                except Exception:
-                    logger.warning(
-                        "Failed to update lockfile -- it may be out of sync with uninstalled packages."
-                    )
+        _update_lockfile_after_remove(
+            lockfile, packages_to_remove, actual_orphans, lockfile_path, logger
+        )
 
         # Step 9: Sync integrations
         cleaned = {

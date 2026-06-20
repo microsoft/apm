@@ -14,7 +14,11 @@ This is the Template Method companion to the Strategy pattern in
 from __future__ import annotations
 
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
-from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
+from apm_cli.install.services import (
+    IntegrationOptions,
+    IntegratorBundle,
+    integrate_package_primitives,
+)
 from apm_cli.install.sources import DependencySource, Materialization
 
 
@@ -75,32 +79,21 @@ def _integrate_materialization(
             m.package_info,
             ctx.project_root,
             targets=ctx.targets,
-            integrators=IntegratorBundle(
-                prompt=ctx.integrators["prompt"],
-                agent=ctx.integrators["agent"],
-                skill=ctx.integrators["skill"],
-                instruction=ctx.integrators["instruction"],
-                command=ctx.integrators["command"],
-                hook=ctx.integrators["hook"],
-                canvas=ctx.integrators.get("canvas"),
-            ),
+            integrators=IntegratorBundle.from_mapping(ctx.integrators),
             force=ctx.force,
             managed_files=ctx.managed_files,
             diagnostics=diagnostics,
             package_name=dep_key,
             logger=logger,
             scope=ctx.scope,
-            # Per-package effective subset: CLI --skill overrides per-entry
-            # apm.yml skills:. When CLI is absent (bare reinstall), fall back
-            # to the dep_ref's persisted skill_subset.
-            # When CLI explicitly provided (even --skill '*'), use ctx value
-            # (which is None for '*' = install all).
-            skill_subset=(
-                ctx.skill_subset
-                if ctx.skill_subset_from_cli
-                else (tuple(dep_ref.skill_subset) if dep_ref.skill_subset else None)
-            ),
             ctx=ctx,
+            options=IntegrationOptions(
+                skill_subset=(
+                    ctx.skill_subset
+                    if ctx.skill_subset_from_cli
+                    else (tuple(dep_ref.skill_subset) if dep_ref.skill_subset else None)
+                ),
+            ),
             allow_executables=getattr(getattr(ctx, "apm_package", None), "allow_executables", None),
         )
         mutation_keys = (

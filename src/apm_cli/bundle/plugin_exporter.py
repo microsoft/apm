@@ -408,6 +408,35 @@ def _dep_install_path(dep: LockedDependency, apm_modules_dir: Path) -> Path:
     return dep_ref.get_install_path(apm_modules_dir)
 
 
+def _scan_bundle_source_files(file_map: dict, logger) -> None:
+    """Warn (never block) when source files contain hidden characters."""
+    from ..security.gate import WARN_POLICY, SecurityGate
+
+    total = 0
+    for _rel, (src, _owner) in file_map.items():
+        if src.is_symlink():
+            continue
+        if src.is_dir():
+            verdict = SecurityGate.scan_files(src, policy=WARN_POLICY)
+            total += len(verdict.all_findings)
+        elif src.is_file():
+            try:
+                text = src.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            verdict = SecurityGate.scan_text(text, str(src), policy=WARN_POLICY)
+            total += len(verdict.all_findings)
+    if total:
+        msg = (
+            f"Bundle contains {total} hidden character(s) across "
+            f"source files — run 'apm audit' to inspect before publishing"
+        )
+        if logger:
+            logger.warning(msg)
+        else:
+            _rich_warning(msg)
+
+
 # ---------------------------------------------------------------------------
 # Main exporter
 # ---------------------------------------------------------------------------
@@ -566,31 +595,7 @@ def export_plugin_bundle(
         return PackResult(bundle_path=bundle_path, files=output_files)
 
     # 10. Security scan (warn-only, never blocks)
-    from ..security.gate import WARN_POLICY, SecurityGate
-
-    scan_findings_total = 0
-    for _rel, (src, _owner) in file_map.items():
-        if src.is_symlink():
-            continue
-        if src.is_dir():
-            verdict = SecurityGate.scan_files(src, policy=WARN_POLICY)
-            scan_findings_total += len(verdict.all_findings)
-        elif src.is_file():
-            try:
-                text = src.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            verdict = SecurityGate.scan_text(text, str(src), policy=WARN_POLICY)
-            scan_findings_total += len(verdict.all_findings)
-    if scan_findings_total:
-        _warn_msg = (
-            f"Bundle contains {scan_findings_total} hidden character(s) across "
-            f"source files — run 'apm audit' to inspect before publishing"
-        )
-        if logger:
-            logger.warning(_warn_msg)
-        else:
-            _rich_warning(_warn_msg)
+    _scan_bundle_source_files(file_map, logger)
 
     # 11. Write files to output directory (clean slate to prevent symlink attacks)
     if bundle_dir.exists():

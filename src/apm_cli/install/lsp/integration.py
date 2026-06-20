@@ -4,12 +4,27 @@ Mirrors the MCP integration pattern with runtime-neutral target selection.
 """
 
 import builtins
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockFile
     from apm_cli.models.apm_package import APMPackage
+
+
+@dataclass(frozen=True)
+class LSPIntegrationContext:
+    """Lower-frequency context fields for :func:`run_lsp_integration`."""
+
+    user_scope: bool
+    should_install: bool
+    runtime: str | None = None
+    exclude: str | None = None
+    apm_config: dict | None = None
+    explicit_target: str | list[str] | None = None
+    scope: object = None
+    target_context: tuple | None = None
 
 
 def run_lsp_integration(
@@ -19,16 +34,9 @@ def run_lsp_integration(
     lock_path: Path,
     existing_lock: "LockFile | None",
     project_root: Path,
-    user_scope: bool,
-    should_install: bool,
     logger,
     diagnostics=None,
-    runtime: str | None = None,
-    exclude: str | None = None,
-    apm_config: dict | None = None,
-    explicit_target: str | list[str] | None = None,
-    scope=None,
-    target_context: tuple[dict | None, str | list[str] | None, object] | None = None,
+    ctx: LSPIntegrationContext,
 ) -> int:
     """Run LSP server integration after APM package installation.
 
@@ -46,22 +54,25 @@ def run_lsp_integration(
         lock_path: Path to apm.lock.yaml.
         existing_lock: Previously loaded lockfile (for old LSP state).
         project_root: Project root directory.
-        user_scope: If True, write to user-scope runtime config paths.
-        should_install: Whether LSP integration should run (same gate as MCP).
         logger: Install logger instance.
         diagnostics: Optional DiagnosticCollector.
-        runtime: Optional runtime override.
-        exclude: Optional runtime exclusion.
-        apm_config: Parsed apm.yml target metadata for project-scope gating.
-        explicit_target: Explicit target selected by CLI or manifest.
-        scope: Optional InstallScope for user/project filtering.
-        target_context: Compact `(apm_config, explicit_target, scope)` tuple
-            used by the install command to keep entry-point glue small.
+        ctx: Lower-frequency context fields (user_scope, should_install,
+            runtime, exclude, apm_config, explicit_target, scope,
+            target_context).
 
     Returns:
         Number of LSP servers configured.
     """
     from apm_cli.integration.lsp_integrator import LSPIntegrator
+
+    user_scope = ctx.user_scope
+    should_install = ctx.should_install
+    runtime = ctx.runtime
+    exclude = ctx.exclude
+    apm_config = ctx.apm_config
+    explicit_target = ctx.explicit_target
+    scope = ctx.scope
+    target_context = ctx.target_context
 
     lsp_deps = apm_package.get_lsp_dependencies()
 

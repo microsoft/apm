@@ -24,7 +24,6 @@ Design constraints (see ``WIP/drift/06-final-plan.md``):
 from __future__ import annotations
 
 import atexit
-import json
 import shutil
 import tempfile
 import tracemalloc
@@ -408,7 +407,11 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
         Surfaced verbatim when a locked dep is not in the cache.
     """
     from apm_cli.deps.lockfile import _SELF_KEY, LockFile
-    from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
+    from apm_cli.install.services import (
+        IntegrationOptions,
+        IntegratorBundle,
+        integrate_package_primitives,
+    )
     from apm_cli.integration.targets import resolve_targets
     from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -488,23 +491,15 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     package_info,
                     scratch_root,
                     targets=targets,
-                    integrators=IntegratorBundle(
-                        prompt=integrators["prompt"],
-                        agent=integrators["agent"],
-                        skill=integrators["skill"],
-                        instruction=integrators["instruction"],
-                        command=integrators["command"],
-                        hook=integrators["hook"],
-                    ),
+                    integrators=IntegratorBundle.from_mapping(integrators),
                     force=True,
                     managed_files=set(),
                     diagnostics=diagnostics,
                     package_name=dep_key,
                     logger=None,
                     scope=None,
-                    skill_subset=None,
                     ctx=None,
-                    scratch_root=scratch_root,
+                    options=IntegrationOptions(scratch_root=scratch_root),
                 )
                 replayed_count += 1
     finally:
@@ -719,88 +714,7 @@ def diff_scratch_against_project(
 # ---------------------------------------------------------------------------
 
 
-def render_drift_text(findings: list[DriftFinding], verbose: bool = False) -> str:
-    """Human-readable text rendering grouped by kind."""
-    if not findings:
-        return f"{STATUS_SYMBOLS['check']} No drift detected"
-
-    lines: list[str] = [
-        f"{STATUS_SYMBOLS['warning']} Drift detected: {len(findings)} file(s)",
-        "",
-    ]
-    by_kind: dict[str, list[DriftFinding]] = {}
-    for f in findings:
-        by_kind.setdefault(f.kind, []).append(f)
-
-    for kind in ("modified", "unintegrated", "orphaned"):
-        items = by_kind.get(kind, [])
-        if not items:
-            continue
-        lines.append(f"  {kind} ({len(items)}):")
-        for item in items:
-            suffix = f"  [{item.package}]" if item.package else ""
-            lines.append(f"    - {item.path}{suffix}")
-            if verbose and item.inline_diff:
-                lines.append(f"      {item.inline_diff}")
-        lines.append("")
-
-    lines.append(
-        f"  {STATUS_SYMBOLS['info']} Run 'apm install' to re-sync deployed files with the lockfile."
-    )
-
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def render_drift_json(findings: list[DriftFinding]) -> dict:
-    """Machine-readable JSON shape: ``{\"drift\": [...]}``."""
-    return {
-        "drift": [
-            {
-                "path": f.path,
-                "kind": f.kind,
-                "package": f.package,
-                "inline_diff": f.inline_diff,
-            }
-            for f in findings
-        ]
-    }
-
-
-def render_drift_sarif(findings: list[DriftFinding]) -> list[dict]:
-    """SARIF ``results`` array; rule IDs use ``apm/drift/<kind>``."""
-    results: list[dict] = []
-    for f in findings:
-        results.append(
-            {
-                "ruleId": f"apm/drift/{f.kind}",
-                "level": "warning" if f.kind != "modified" else "error",
-                "message": {"text": f"drift ({f.kind}): {f.path}"},
-                "locations": [
-                    {
-                        "physicalLocation": {
-                            "artifactLocation": {"uri": f.path},
-                        }
-                    }
-                ],
-                "properties": {"package": f.package},
-            }
-        )
-    return results
-
-
-# ---------------------------------------------------------------------------
-# CLI helper -- intentionally minimal so commands/audit.py can re-use it.
-# ---------------------------------------------------------------------------
-
-
-def render_drift(
-    findings: list[DriftFinding],
-    fmt: str = "text",
-    verbose: bool = False,
-) -> str:
-    """Single rendering entrypoint for callers that pick a format string."""
-    if fmt == "json":
-        return json.dumps(render_drift_json(findings), indent=2)
-    if fmt == "sarif":
-        return json.dumps({"results": render_drift_sarif(findings)}, indent=2)
-    return render_drift_text(findings, verbose=verbose)
+from ._drift_render import render_drift as render_drift  # noqa: E402
+from ._drift_render import render_drift_json as render_drift_json  # noqa: E402
+from ._drift_render import render_drift_sarif as render_drift_sarif  # noqa: E402
+from ._drift_render import render_drift_text as render_drift_text  # noqa: E402

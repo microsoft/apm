@@ -13,6 +13,7 @@ from apm_cli.install.mcp.conflicts import (
     MCP_REQUIRED_FLAGS,
     validate_mcp_conflicts,
 )
+from apm_cli.install.mcp.spec import MCPRequestSpec
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -21,24 +22,28 @@ from apm_cli.install.mcp.conflicts import (
 
 def _call(**overrides) -> None:
     """Call validate_mcp_conflicts with sensible defaults, allowing overrides."""
-    defaults: dict = dict(
+    spec_keys = {"mcp_name", "transport", "url", "mcp_version", "command_argv", "registry_url"}
+    spec_defaults: dict = dict(
         mcp_name="my-server",
-        packages=[],
-        pre_dash_packages=[],
         transport=None,
         url=None,
-        env={},
-        headers={},
         mcp_version=None,
         command_argv=None,
+        registry_url=None,
+    )
+    other_defaults: dict = dict(
+        packages=[],
+        pre_dash_packages=[],
+        env={},
+        headers={},
         global_=False,
         only=None,
         update=False,
         any_transport_flag=False,
-        registry_url=None,
     )
-    defaults.update(overrides)
-    validate_mcp_conflicts(**defaults)
+    spec_kwargs = {k: overrides.pop(k, spec_defaults[k]) for k in spec_keys}
+    other_defaults.update(overrides)
+    validate_mcp_conflicts(spec=MCPRequestSpec(**spec_kwargs), **other_defaults)
 
 
 # ---------------------------------------------------------------------------

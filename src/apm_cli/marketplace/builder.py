@@ -13,38 +13,51 @@ This module implements the full build pipeline:
 Hard rule: the output ``marketplace.json`` conforms byte-for-byte to
 Anthropic's schema.  No APM-specific keys, no extensions, no renamed
 fields.  ``packages`` in yml becomes ``plugins`` in json.
+
+Internal implementation is split across sibling leaf modules:
+
+* ``._builder_reports`` -- frozen result/report dataclasses + BuildOptions
+* ``._builder_resolve`` -- ``_BuilderResolveMixin`` (resolve + metadata fetch)
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import re
 import threading
 import urllib.error
-import urllib.request
+import urllib.request  # noqa: F401 -- patchable at apm_cli.marketplace.builder.urllib.request.urlopen
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-import yaml
 
 if TYPE_CHECKING:
     from ..core.auth import HostInfo
 
 from ..utils.github_host import default_host
 from ..utils.path_security import ensure_path_within
-from ._io import atomic_write
-from ._shared import iter_semver_tags
-from .auth_helpers import resolve_token_for_host
-from .diagnostics import BuildDiagnostic
-from .errors import (
-    BuildError,
-    HeadNotAllowedError,
-    NoMatchingVersionError,
-    RefNotFoundError,
+from ._builder_reports import (
+    BuildOptions as BuildOptions,
 )
+from ._builder_reports import (
+    BuildReport as BuildReport,
+)
+from ._builder_reports import (
+    MarketplaceOutputReport as MarketplaceOutputReport,
+)
+from ._builder_reports import (
+    ResolvedPackage as ResolvedPackage,
+)
+from ._builder_reports import (
+    ResolveResult as ResolveResult,
+)
+from ._builder_resolve import _BuilderResolveMixin
+from ._builder_resolve import _strip_ref_prefix as _strip_ref_prefix
+from ._io import atomic_write
+from .auth_helpers import resolve_token_for_host
+from .diagnostics import BuildDiagnostic as BuildDiagnostic
+from .errors import BuildError
 from .output_mappers import (
     MARKETPLACE_OUTPUT_MAPPERS,
     MapperResult,
@@ -61,11 +74,8 @@ from .output_profiles import (
     MarketplaceOutputProfile,
 )
 from .ref_resolver import RefResolver
-from .semver import SemVer, parse_semver, satisfies_range
-from .tag_pattern import build_tag_regex
 from .yml_schema import (
     MarketplaceYml,
-    PackageEntry,
     load_marketplace_yml,
     split_source_base,
 )
@@ -73,35 +83,6 @@ from .yml_schema import (
 logger = logging.getLogger(__name__)
 
 _LOCAL_METADATA_MAX_BYTES = 64 * 1024
-
-__all__ = [
-    "BuildDiagnostic",
-    "BuildOptions",
-    "BuildReport",
-    "MarketplaceBuilder",
-    "ResolveResult",
-    "ResolvedPackage",
-]
-
-# ---------------------------------------------------------------------------
-# Public dataclasses
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ResolvedPackage:
-    """A package entry after ref resolution."""
-
-    name: str
-    source_repo: str  # "owner/repo" only
-    subdir: str | None  # APM-only (used to compose the output ``source`` object)
-    ref: str  # resolved tag name, e.g. "v1.2.0"
-    sha: str  # 40-char git SHA
-    requested_version: str | None  # original APM-only range (for diagnostics)
-    tags: tuple[str, ...]
-    is_prerelease: bool  # True if the resolved ref was a prerelease semver
-    host: str | None = None  # non-default git host parsed from apm.yml source
-    source_url: str | None = None  # canonical URL for sourceBase-composed entries
 
 
 @dataclass(frozen=True)
@@ -118,177 +99,14 @@ class _SourceBaseCoords:
         return self.path_prefix.split("/", 1)[0]
 
 
-@dataclass(frozen=True)
-class ResolveResult:
-    """Result of resolving package refs in a marketplace build."""
-
-    entries: tuple[ResolvedPackage, ...]
-    errors: tuple[tuple[str, str], ...]  # (package name, error message) pairs
-
-    @property
-    def ok(self) -> bool:
-        """True when every package resolved without error."""
-        return len(self.errors) == 0
-
-
-@dataclass(frozen=True)
-class MarketplaceOutputReport:
-    """Summary for one generated marketplace output profile."""
-
-    profile: str
-    resolved: tuple[ResolvedPackage, ...]
-    errors: tuple[tuple[str, str], ...]  # (package name, error message) pairs
-    warnings: tuple[str, ...]  # non-fatal diagnostic messages
-    diagnostics: tuple[BuildDiagnostic, ...] = ()  # structured diagnostics
-    unchanged_count: int = 0
-    added_count: int = 0
-    updated_count: int = 0
-    removed_count: int = 0
-    output_path: Path = field(default_factory=lambda: Path("."))
-    dry_run: bool = False
-
-
-@dataclass(frozen=True)
-class BuildReport:
-    """Summary of a marketplace build run across one or more output profiles."""
-
-    outputs: tuple[MarketplaceOutputReport, ...]
-
-    @property
-    def primary_output(self) -> MarketplaceOutputReport:
-        """Return the first output report for legacy single-output callers."""
-        if not self.outputs:
-            return MarketplaceOutputReport(
-                profile="",
-                resolved=(),
-                errors=(),
-                warnings=(),
-            )
-        return self.outputs[0]
-
-    @property
-    def resolved(self) -> tuple[ResolvedPackage, ...]:
-        return self.primary_output.resolved
-
-    @property
-    def errors(self) -> tuple[tuple[str, str], ...]:
-        return self.primary_output.errors
-
-    @property
-    def warnings(self) -> tuple[str, ...]:
-        return tuple(warn for output in self.outputs for warn in output.warnings)
-
-    @property
-    def diagnostics(self) -> tuple[BuildDiagnostic, ...]:
-        return tuple(diag for output in self.outputs for diag in output.diagnostics)
-
-    @property
-    def unchanged_count(self) -> int:
-        return self.primary_output.unchanged_count
-
-    @property
-    def added_count(self) -> int:
-        return self.primary_output.added_count
-
-    @property
-    def updated_count(self) -> int:
-        return self.primary_output.updated_count
-
-    @property
-    def removed_count(self) -> int:
-        return self.primary_output.removed_count
-
-    @property
-    def output_path(self) -> Path:
-        return self.primary_output.output_path
-
-    @property
-    def dry_run(self) -> bool:
-        return any(output.dry_run for output in self.outputs)
-
-    def to_json_dict(self) -> dict[str, Any]:
-        """Serialize build report as the Section 4 JSON contract.
-
-        Shape: {ok, dry_run, warnings[], errors[],
-                marketplace: {outputs: [{format, path, added, updated,
-                unchanged, skipped}]}, bundle: null}
-        """
-        all_warnings = list(self.warnings)
-        all_errors: list[dict[str, str]] = []
-        output_entries: list[dict[str, Any]] = []
-
-        for out in self.outputs:
-            output_entries.append(
-                {
-                    "format": out.profile,
-                    "path": str(out.output_path),
-                    "added": out.added_count,
-                    "updated": out.updated_count,
-                    "unchanged": out.unchanged_count,
-                    "skipped": out.removed_count,
-                }
-            )
-            for pkg_name, err_msg in out.errors:
-                all_errors.append({"code": "build_error", "message": f"{pkg_name}: {err_msg}"})
-
-        ok = len(all_errors) == 0
-        return {
-            "ok": ok,
-            "dry_run": self.dry_run,
-            "warnings": all_warnings,
-            "errors": all_errors,
-            "marketplace": {
-                "outputs": output_entries,
-            },
-            "bundle": None,
-        }
-
-    @classmethod
-    def failure_to_json_dict(
-        cls,
-        *,
-        errors: list[dict[str, str]],
-        warnings: list[str] | None = None,
-        dry_run: bool = False,
-    ) -> dict[str, Any]:
-        """Produce the Section 4 JSON shape for a pre-build failure.
-
-        Used when the build cannot even start (e.g., config parse error,
-        unknown format filter).
-        """
-        return {
-            "ok": False,
-            "dry_run": dry_run,
-            "warnings": warnings or [],
-            "errors": errors,
-            "marketplace": {
-                "outputs": [],
-            },
-            "bundle": None,
-        }
-
-
-@dataclass
-class BuildOptions:
-    """Configuration knobs for MarketplaceBuilder."""
-
-    concurrency: int = 8
-    timeout_seconds: float = 10.0
-    include_prerelease: bool = False
-    allow_head: bool = False
-    continue_on_error: bool = False
-    offline: bool = False
-    # Backwards-compatible spelling for callers that predate ``apm pack``.
-    output_override: Path | None = None
-    dry_run: bool = False
-
-
-# ---------------------------------------------------------------------------
-# Builder
-# ---------------------------------------------------------------------------
-
-# 40-char hex SHA pattern
-_SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+__all__ = [
+    "BuildDiagnostic",
+    "BuildOptions",
+    "BuildReport",
+    "MarketplaceBuilder",
+    "ResolveResult",
+    "ResolvedPackage",
+]
 
 
 def _is_display_version(version: str | None) -> bool:
@@ -301,7 +119,7 @@ def _subtract_plugin_root(source: str, plugin_root: str) -> str:
     return _mapper_subtract_plugin_root(source, plugin_root)
 
 
-class MarketplaceBuilder:
+class MarketplaceBuilder(_BuilderResolveMixin):
     """Load marketplace.yml, resolve refs, compose and write marketplace.json.
 
     Parameters
@@ -328,7 +146,6 @@ class MarketplaceBuilder:
         self._yml: MarketplaceYml | None = None
         self._resolver: RefResolver | None = None
         self._auth_resolver = auth_resolver
-        # Resolved once per build, used by worker threads (read-only).
         self._github_token: str | None = None
         self._host: str = default_host() or "github.com"
         self._host_info: HostInfo | None = None
@@ -349,15 +166,7 @@ class MarketplaceBuilder:
         options: BuildOptions | None = None,
         auth_resolver: object | None = None,
     ) -> MarketplaceBuilder:
-        """Construct a builder from an already-loaded MarketplaceConfig.
-
-        Use this when the caller has already chosen between apm.yml and
-        the legacy ``marketplace.yml`` (typically via
-        ``migration.load_marketplace_config``).  ``project_root`` is the
-        directory output paths are resolved against.
-        """
-        # Use a synthetic path so legacy code paths that consult
-        # ``self._yml_path.parent`` still resolve to the project root.
+        """Construct a builder from an already-loaded MarketplaceConfig."""
         synthetic_path = project_root / (
             config.source_path.name if config.source_path is not None else "apm.yml"
         )
@@ -370,10 +179,6 @@ class MarketplaceBuilder:
 
     def _load_yml(self) -> MarketplaceYml:
         if self._yml is None:
-            # Shape-aware load: when the configured path is an apm.yml
-            # file, use the apm.yml loader; otherwise default to the
-            # legacy marketplace.yml loader.  Callers that have already
-            # loaded a config should use ``from_config`` to bypass this.
             from .yml_schema import load_marketplace_from_apm_yml
 
             if self._yml_path.name == "apm.yml":
@@ -411,12 +216,7 @@ class MarketplaceBuilder:
     def _effective_host(self, host: str | None) -> str | None:
         """Normalize ``host`` for marketplace.json emission.
 
-        Returns ``None`` when ``host`` matches the active default host so
-        an explicit ``github.com/owner/repo`` source in apm.yml emits the
-        same shorthand (``source: github``, ``repo: owner/repo``) shape as
-        the bare ``owner/repo`` form.  Non-default hosts pass through
-        unchanged and downstream mappers emit ``source: url`` /
-        ``source: git-subdir`` with the full HTTPS URL.
+        Returns ``None`` when ``host`` matches the active default host.
         """
         if host is None or host == self._host:
             return None
@@ -472,14 +272,7 @@ class MarketplaceBuilder:
         )
 
     def _ensure_auth(self) -> None:
-        """Lazily resolve host classification and GitHub token.
-
-        Short-circuits when already resolved (even if no token was found)
-        or when running in offline mode.  Offline mode is still marked as
-        resolved so repeated calls remain idempotent.  Called by
-        ``_get_resolver()`` so both ``resolve()`` and ``build()`` benefit
-        from authenticated ``git ls-remote`` when available.
-        """
+        """Lazily resolve host classification and GitHub token."""
         if self._auth_resolved:
             return
         if self._options.offline:
@@ -495,7 +288,6 @@ class MarketplaceBuilder:
             return self._options.output_override
         yml = self._load_yml()
         output_path = self._project_root / yml.claude.output
-        # Containment guard -- reject output paths that escape the project root.
         ensure_path_within(output_path, self._project_root)
         return output_path
 
@@ -530,497 +322,10 @@ class MarketplaceBuilder:
             remote_metadata=remote_metadata,
         )
 
-    # -- single-entry resolution --------------------------------------------
-
-    def _remote_source_coordinates(
-        self,
-        entry: PackageEntry,
-    ) -> tuple[str | None, str, str | None, str | None]:
-        """Return ``(host, repo_path, source_url, org_hint)`` for a remote entry."""
-        if entry.host:
-            return entry.host, entry.source, None, None
-        source_base_parts = self._get_source_base_parts()
-        if source_base_parts is not None:
-            repo_path = f"{source_base_parts.path_prefix}/{entry.source}"
-            source_url = f"{source_base_parts.source_base}/{entry.source}"
-            logger.debug(
-                "Composed marketplace source %r onto sourceBase %r as %r",
-                entry.source,
-                source_base_parts.source_base,
-                repo_path,
-            )
-            return source_base_parts.host, repo_path, source_url, source_base_parts.org_hint
-        return None, entry.source, None, None
-
-    def _resolved_output_host(
-        self,
-        *,
-        source_host: str | None,
-        source_url: str | None,
-    ) -> str | None:
-        """Return the host marker mappers should use for the resolved package."""
-        if source_url is not None:
-            return source_host
-        return self._effective_host(source_host)
-
-    def _resolve_entry(self, entry: PackageEntry) -> ResolvedPackage:
-        """Resolve a single package entry to a concrete tag + SHA."""
-        # Local-path packages skip git resolution entirely.
-        if entry.is_local:
-            return ResolvedPackage(
-                name=entry.name,
-                source_repo="",
-                subdir=entry.source,
-                ref="",
-                sha="",
-                requested_version=entry.version,
-                tags=tuple(entry.tags),
-                is_prerelease=False,
-            )
-        yml = self._load_yml()
-        source_host, owner_repo, source_url, source_org = self._remote_source_coordinates(entry)
-        if source_org is None:
-            resolver = self._get_resolver_for_host(source_host)
-        else:
-            resolver = self._get_resolver_for_host(source_host, org=source_org)
-
-        if entry.ref is not None:
-            return self._resolve_explicit_ref(
-                entry,
-                resolver,
-                owner_repo,
-                source_host=source_host,
-                source_url=source_url,
-            )
-        # version range resolution
-        return self._resolve_version_range(
-            entry,
-            resolver,
-            owner_repo,
-            yml,
-            source_host=source_host,
-            source_url=source_url,
-        )
-
-    def _resolve_explicit_ref(
-        self,
-        entry: PackageEntry,
-        resolver: RefResolver,
-        owner_repo: str,
-        *,
-        source_host: str | None = None,
-        source_url: str | None = None,
-    ) -> ResolvedPackage:
-        """Resolve an entry with an explicit ``ref:`` field."""
-        ref_text = entry.ref
-        assert ref_text is not None  # noqa: S101
-
-        # If it looks like a 40-char SHA, accept it directly
-        if _SHA40_RE.match(ref_text):
-            sv = parse_semver(ref_text.lstrip("vV"))
-            return ResolvedPackage(
-                name=entry.name,
-                source_repo=owner_repo,
-                subdir=entry.subdir,
-                ref=ref_text,
-                sha=ref_text,
-                requested_version=entry.version,
-                tags=entry.tags,
-                is_prerelease=sv.is_prerelease if sv else False,
-                host=self._resolved_output_host(source_host=source_host, source_url=source_url),
-                source_url=source_url,
-            )
-
-        refs = resolver.list_remote_refs(owner_repo)
-
-        # Try as tag first (only check tag refs)
-        for remote_ref in refs:
-            if not remote_ref.name.startswith("refs/tags/"):
-                continue
-            tag_name = _strip_ref_prefix(remote_ref.name)
-            if tag_name == ref_text:
-                sv = parse_semver(tag_name.lstrip("vV"))
-                return ResolvedPackage(
-                    name=entry.name,
-                    source_repo=owner_repo,
-                    subdir=entry.subdir,
-                    ref=tag_name,
-                    sha=remote_ref.sha,
-                    requested_version=entry.version,
-                    tags=entry.tags,
-                    is_prerelease=sv.is_prerelease if sv else False,
-                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
-                    source_url=source_url,
-                )
-
-        # Try as full refname
-        for remote_ref in refs:
-            if remote_ref.name == ref_text:
-                short = _strip_ref_prefix(remote_ref.name)
-                is_branch = remote_ref.name.startswith("refs/heads/")
-                if is_branch and not self._options.allow_head:
-                    raise HeadNotAllowedError(entry.name, short)
-                sv = parse_semver(short.lstrip("vV"))
-                return ResolvedPackage(
-                    name=entry.name,
-                    source_repo=owner_repo,
-                    subdir=entry.subdir,
-                    ref=short,
-                    sha=remote_ref.sha,
-                    requested_version=entry.version,
-                    tags=entry.tags,
-                    is_prerelease=sv.is_prerelease if sv else False,
-                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
-                    source_url=source_url,
-                )
-
-        # Try as branch name
-        for remote_ref in refs:
-            if remote_ref.name == f"refs/heads/{ref_text}":
-                if not self._options.allow_head:
-                    raise HeadNotAllowedError(entry.name, ref_text)
-                return ResolvedPackage(
-                    name=entry.name,
-                    source_repo=owner_repo,
-                    subdir=entry.subdir,
-                    ref=ref_text,
-                    sha=remote_ref.sha,
-                    requested_version=entry.version,
-                    tags=entry.tags,
-                    is_prerelease=False,
-                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
-                    source_url=source_url,
-                )
-
-        # HEAD special case
-        if ref_text.upper() == "HEAD":
-            if not self._options.allow_head:
-                raise HeadNotAllowedError(entry.name, "HEAD")
-
-        raise RefNotFoundError(entry.name, ref_text, owner_repo)
-
-    def _resolve_version_range(
-        self,
-        entry: PackageEntry,
-        resolver: RefResolver,
-        owner_repo: str,
-        yml: MarketplaceYml,
-        *,
-        source_host: str | None = None,
-        source_url: str | None = None,
-    ) -> ResolvedPackage:
-        """Resolve an entry using its ``version:`` semver range."""
-        version_range = entry.version
-        assert version_range is not None  # noqa: S101
-
-        # Determine tag pattern: entry > build > default
-        pattern = entry.tag_pattern or yml.build.tag_pattern
-
-        tag_rx = build_tag_regex(pattern, name=entry.name)
-        refs = resolver.list_remote_refs(owner_repo)
-
-        # Filter tags matching the pattern and extract versions
-        candidates: list[tuple[SemVer, str, str]] = []  # (semver, tag_name, sha)
-        for sv, tag_name, sha in iter_semver_tags(refs, tag_rx):
-            # Prerelease filter
-            include_pre = entry.include_prerelease or self._options.include_prerelease
-            if sv.is_prerelease and not include_pre:
-                continue
-
-            # Range filter
-            if satisfies_range(sv, version_range):
-                candidates.append((sv, tag_name, sha))
-
-        if not candidates:
-            raise NoMatchingVersionError(
-                entry.name,
-                version_range,
-                detail=f"pattern='{pattern}', remote='{owner_repo}'",
-            )
-
-        # Pick highest
-        candidates.sort(key=lambda c: c[0], reverse=True)
-        best_sv, best_tag, best_sha = candidates[0]
-
-        return ResolvedPackage(
-            name=entry.name,
-            source_repo=owner_repo,
-            subdir=entry.subdir,
-            ref=best_tag,
-            sha=best_sha,
-            requested_version=version_range,
-            tags=entry.tags,
-            is_prerelease=best_sv.is_prerelease,
-            host=self._resolved_output_host(source_host=source_host, source_url=source_url),
-            source_url=source_url,
-        )
-
-    # -- concurrent resolution ----------------------------------------------
-
-    def resolve(self) -> ResolveResult:
-        """Resolve every entry concurrently.
-
-        Returns
-        -------
-        ResolveResult
-            Contains resolved entries and any errors encountered.
-
-        Raises
-        ------
-        BuildError
-            On any resolution failure (unless ``continue_on_error``).
-        """
-        yml = self._load_yml()
-        entries = yml.packages
-        if not entries:
-            return ResolveResult(entries=(), errors=())
-
-        results: dict[int, ResolvedPackage] = {}
-        errors: list[tuple[str, str]] = []
-
-        # Eagerly resolve auth + create the shared RefResolver before
-        # spawning workers -- avoids a race on _ensure_auth() and
-        # matches the pattern used in _prefetch_metadata().
-        self._get_resolver()
-        # Pre-warm per-host resolvers on the main thread so workers never race
-        # to create the same resolver. Include the sourceBase host because
-        # base-relative entries derive their host during composition.
-        source_base_parts = self._get_source_base_parts()
-        if source_base_parts is not None:
-            self._get_resolver_for_host(source_base_parts.host, org=source_base_parts.org_hint)
-        for entry in entries:
-            if entry.host:
-                self._get_resolver_for_host(entry.host)
-
-        with ThreadPoolExecutor(max_workers=min(self._options.concurrency, len(entries))) as pool:
-            future_to_index = {
-                pool.submit(self._resolve_entry, entry): idx for idx, entry in enumerate(entries)
-            }
-            for future in as_completed(future_to_index):
-                idx = future_to_index[future]
-                entry = entries[idx]
-                try:
-                    resolved = future.result(timeout=self._options.timeout_seconds)
-                    results[idx] = resolved
-                except BuildError as exc:
-                    if self._options.continue_on_error:
-                        errors.append((entry.name, str(exc)))
-                    else:
-                        raise
-                except Exception as exc:
-                    logger.debug("Unexpected error resolving '%s'", entry.name, exc_info=True)
-                    if self._options.continue_on_error:
-                        errors.append((entry.name, str(exc)))
-                    else:
-                        raise BuildError(
-                            f"Unexpected error resolving '{entry.name}': {exc}",
-                            package=entry.name,
-                        ) from exc
-
-        # Return in yml order
-        ordered: list[ResolvedPackage] = []
-        for idx in range(len(entries)):
-            if idx in results:
-                ordered.append(results[idx])
-        return ResolveResult(entries=tuple(ordered), errors=tuple(errors))
-
-    # -- description/version metadata fetchers ------------------------------
-
-    def _fetch_local_metadata(self, pkg: ResolvedPackage) -> dict[str, str] | None:
-        """Best-effort: read ``description`` and ``version`` from a
-        local-path package's ``apm.yml`` on disk.
-
-        Local-path packages (``source: ./...``) record the curator's
-        ``source`` value on ``ResolvedPackage.subdir``; the package's
-        own ``apm.yml`` lives at ``<project_root>/<subdir>/apm.yml``.
-        Returns a dict with ``description`` and/or ``version`` keys, or
-        ``None`` when the file is missing or unreadable.  Mirrors
-        ``_fetch_remote_metadata``: cosmetic enrichment only, failures
-        are logged at debug level and never propagate.
-
-        The resolved path is constrained to ``self._project_root`` so a
-        curator entry pointing outside the tree is skipped.  A source
-        that resolves to the project root itself is also skipped -- that
-        file is the marketplace's own ``apm.yml``, not a package
-        manifest.
-        """
-        if not pkg.subdir:
-            return None
-        try:
-            project_root = ensure_path_within(self._project_root, self._project_root)
-            package_root = ensure_path_within(project_root / pkg.subdir, project_root)
-            if package_root == project_root:
-                return None
-            file_path = package_root / "apm.yml"
-            if not file_path.is_file():
-                return None
-            metadata_path = ensure_path_within(file_path, project_root)
-            with metadata_path.open("rb") as handle:
-                raw = handle.read(_LOCAL_METADATA_MAX_BYTES + 1)
-            if len(raw) > _LOCAL_METADATA_MAX_BYTES:
-                logger.debug(
-                    "Skipping local metadata for %s: apm.yml exceeds %d bytes",
-                    pkg.name,
-                    _LOCAL_METADATA_MAX_BYTES,
-                )
-                return None
-            data = yaml.safe_load(raw.decode("utf-8"))
-            if not isinstance(data, dict):
-                return None
-            result: dict[str, str] = {}
-            desc = data.get("description")
-            if isinstance(desc, str) and desc:
-                result["description"] = desc
-            ver = data.get("version")
-            if ver is not None:
-                ver_str = str(ver).strip()
-                if ver_str:
-                    result["version"] = ver_str
-            if result:
-                logger.debug(
-                    "Read local metadata for %s from %s: %s",
-                    pkg.name,
-                    file_path,
-                    ", ".join(result.keys()),
-                )
-                return result
-        except Exception:
-            logger.debug(
-                "Could not read local metadata for %s",
-                pkg.name,
-                exc_info=True,
-            )
-        return None
-
-    def _fetch_remote_metadata(self, pkg: ResolvedPackage) -> dict[str, str] | None:
-        """Best-effort: fetch ``description`` and ``version`` from the
-        package's remote ``apm.yml``.
-
-        Returns a dict with ``description`` and/or ``version`` keys, or
-        ``None`` on any error.  This is purely cosmetic enrichment --
-        failures are silently logged at debug level and never propagate.
-
-        When a token is available for the package's host, it is included
-        as an ``Authorization`` header so private repos can be accessed.
-        A token resolved for the builder's default host is never sent to
-        another host.
-
-        github.com packages use the fast raw.githubusercontent.com CDN
-        first, then fall back to the GitHub REST Contents endpoint when
-        raw returns 404 (the private / INTERNAL repository symptom).
-        GHES and GHE Cloud packages use the GitHub REST API on the
-        package's host.  For non-GitHub-class hosts, metadata enrichment
-        is skipped.
-        """
-        try:
-            path_prefix = f"{pkg.subdir}/" if pkg.subdir else ""
-            file_path = f"{path_prefix}apm.yml"
-
-            # Resolve the effective host for this package and its
-            # classification.  Falls back to the builder default when the
-            # package did not carry an explicit host override.
-            effective_host = pkg.host or self._host
-            if pkg.host is None or pkg.host == self._host:
-                host_info = self._host_info
-                token = self._github_token
-            else:
-                from ..core.auth import AuthResolver  # lazy import
-
-                try:
-                    host_info = AuthResolver.classify_host(effective_host)
-                except Exception:
-                    host_info = None
-                token = self._resolve_token_for_host(effective_host)
-
-            host_kind = host_info.kind if host_info else "github"
-
-            if host_kind not in ("github", "ghe_cloud", "ghes"):
-                # Non-GitHub hosts -- skip metadata enrichment
-                logger.debug(
-                    "Skipping metadata fetch for %s (non-GitHub host: %s)",
-                    pkg.name,
-                    effective_host,
-                )
-                return None
-
-            if host_kind == "ghe_cloud" and not token:
-                logger.debug(
-                    "Skipping metadata fetch for %s (GHE Cloud requires auth)",
-                    pkg.name,
-                )
-                return None
-
-            if effective_host == "github.com":
-                raw_url = (
-                    f"https://raw.githubusercontent.com/{pkg.source_repo}/{pkg.sha}/{file_path}"
-                )
-                req = urllib.request.Request(raw_url)  # noqa: S310
-                if token:
-                    req.add_header("Authorization", f"token {token}")
-                try:
-                    with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                        raw = resp.read().decode("utf-8")
-                except urllib.error.HTTPError as exc:
-                    if exc.code != 404:
-                        raise
-                    api_base = (
-                        host_info.api_base if host_info else None
-                    ) or "https://api.github.com"
-                    rest_url = (
-                        f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}?ref={pkg.sha}"
-                    )
-                    req = urllib.request.Request(rest_url)  # noqa: S310
-                    req.add_header("Accept", "application/vnd.github.raw")
-                    if token:
-                        req.add_header("Authorization", f"token {token}")
-                    with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                        raw = resp.read().decode("utf-8")
-            else:
-                api_base = (
-                    host_info.api_base if host_info else None
-                ) or f"https://{effective_host}/api/v3"
-                url = f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}?ref={pkg.sha}"
-                req = urllib.request.Request(url)  # noqa: S310
-                req.add_header("Accept", "application/vnd.github.raw")
-                if token:
-                    req.add_header("Authorization", f"token {token}")
-
-                with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                    raw = resp.read().decode("utf-8")
-            data = yaml.safe_load(raw)
-            if not isinstance(data, dict):
-                return None
-            result: dict[str, str] = {}
-            desc = data.get("description")
-            if isinstance(desc, str) and desc:
-                result["description"] = desc
-            ver = data.get("version")
-            if ver is not None:
-                ver_str = str(ver).strip()
-                if ver_str:
-                    result["version"] = ver_str
-            if result:
-                logger.debug(
-                    "Fetched metadata for %s from remote apm.yml: %s",
-                    pkg.name,
-                    ", ".join(result.keys()),
-                )
-                return result
-        except Exception:
-            logger.debug(
-                "Could not fetch remote metadata for %s",
-                pkg.name,
-                exc_info=True,
-            )
-        return None
+    # -- auth + metadata prefetch -------------------------------------------
 
     def _resolve_github_token(self) -> str | None:
-        """Resolve a GitHub token using ``AuthResolver``.
-
-        Called once before concurrent fetches.  Returns the token string
-        or ``None`` if no credentials are available.  Never raises --
-        auth failures are logged at debug and silently ignored.
-        """
+        """Resolve a GitHub token using ``AuthResolver``."""
         try:
             from ..core.auth import AuthResolver  # lazy import
 
@@ -1028,8 +333,6 @@ class MarketplaceBuilder:
             if resolver is None:
                 resolver = AuthResolver()
                 self._auth_resolver = resolver
-            # Always classify the host, regardless of token availability,
-            # so _fetch_remote_metadata() can branch on host kind.
             if self._host_info is None:
                 self._host_info = AuthResolver.classify_host(self._host)
             ctx = resolver.resolve(self._host)  # type: ignore[union-attr]
@@ -1092,21 +395,7 @@ class MarketplaceBuilder:
     # -- composition --------------------------------------------------------
 
     def compose_marketplace_json(self, resolved: list[ResolvedPackage]) -> dict[str, Any]:
-        """Produce an Anthropic-compliant marketplace.json dict.
-
-        All APM-only fields are stripped.  Key order follows the Anthropic
-        schema exactly.
-
-        Parameters
-        ----------
-        resolved:
-            List of resolved packages (from ``resolve()``).
-
-        Returns
-        -------
-        dict
-            An ``OrderedDict``-style dict ready to be serialised as JSON.
-        """
+        """Produce an Anthropic-compliant marketplace.json dict."""
         resolved_tuple = tuple(resolved)
         mapper_result = self._map_output(
             DEFAULT_MARKETPLACE_OUTPUT,
@@ -1202,36 +491,10 @@ class MarketplaceBuilder:
         if old_json is None:
             return (0, len(new_json.get("plugins", [])), 0, 0)
 
-        old_plugins: dict[str, str] = {}
-        for p in old_json.get("plugins", []):
-            name = p.get("name", "")
-            sha = ""
-            src = p.get("source", {})
-            if isinstance(src, dict):
-                # Accept both the new ``sha`` field (Claude-spec compliant)
-                # and the legacy ``commit`` field for backward-compatibility
-                # with marketplace.json files written before this PR.
-                sha = src.get("sha") or src.get("commit", "")
-            elif isinstance(src, str):
-                sha = src  # local-path packages: use the path string itself
-            old_plugins[name] = sha
+        old_plugins = _extract_plugin_shas(old_json)
+        new_plugins = _extract_plugin_shas(new_json)
 
-        new_plugins: dict[str, str] = {}
-        for p in new_json.get("plugins", []):
-            name = p.get("name", "")
-            sha = ""
-            src = p.get("source", {})
-            if isinstance(src, dict):
-                sha = src.get("sha") or src.get("commit", "")
-            elif isinstance(src, str):
-                sha = src
-            new_plugins[name] = sha
-
-        unchanged = 0
-        updated = 0
-        added = 0
-        removed = 0
-
+        unchanged = updated = added = removed = 0
         for name, sha in new_plugins.items():
             if name not in old_plugins:
                 added += 1
@@ -1239,11 +502,9 @@ class MarketplaceBuilder:
                 unchanged += 1
             else:
                 updated += 1
-
         for name in old_plugins:
             if name not in new_plugins:
                 removed += 1
-
         return (unchanged, added, updated, removed)
 
     # -- atomic write -------------------------------------------------------
@@ -1271,13 +532,7 @@ class MarketplaceBuilder:
     # -- full pipeline ------------------------------------------------------
 
     def build(self) -> BuildReport:
-        """Full pipeline: load -> resolve -> compose -> write.
-
-        Returns
-        -------
-        BuildReport
-            Summary including diff statistics.
-        """
+        """Full pipeline: load -> resolve -> compose -> write."""
         result = self.resolve()
         report = self.write_output(
             DEFAULT_MARKETPLACE_OUTPUT,
@@ -1291,32 +546,34 @@ class MarketplaceBuilder:
             ),
         )
 
-        # Cleanup default + per-host resolvers so long-lived builder
-        # instances do not leak caches or thread locks across builds.
         if self._resolver is not None:
             self._resolver.close()
         with self._host_resolvers_lock:
             for host_resolver in self._host_resolvers.values():
                 try:
                     host_resolver.close()
-                except Exception:  # pragma: no cover - close is best-effort
+                except Exception:  # pragma: no cover
                     logger.debug("Failed to close per-host RefResolver", exc_info=True)
             self._host_resolvers.clear()
 
-        return BuildReport(
-            outputs=report.outputs,
-        )
+        return BuildReport(outputs=report.outputs)
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Module-level helpers
 # ---------------------------------------------------------------------------
 
 
-def _strip_ref_prefix(refname: str) -> str:
-    """Strip ``refs/tags/`` or ``refs/heads/`` prefix."""
-    if refname.startswith("refs/tags/"):
-        return refname[len("refs/tags/") :]
-    if refname.startswith("refs/heads/"):
-        return refname[len("refs/heads/") :]
-    return refname
+def _extract_plugin_shas(doc: dict[str, Any]) -> dict[str, str]:
+    """Return {plugin_name: sha_or_path} from a marketplace.json document."""
+    plugins: dict[str, str] = {}
+    for p in doc.get("plugins", []):
+        name = p.get("name", "")
+        sha = ""
+        src = p.get("source", {})
+        if isinstance(src, dict):
+            sha = src.get("sha") or src.get("commit", "")
+        elif isinstance(src, str):
+            sha = src
+        plugins[name] = sha
+    return plugins

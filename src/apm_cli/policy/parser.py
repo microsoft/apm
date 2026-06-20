@@ -178,39 +178,45 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
             )
 
     # security.audit (install-time audit + external scanners)
-    security = data.get("security")
-    if security is not None and not isinstance(security, dict):
-        errors.append("security must be a YAML mapping")
-    elif isinstance(security, dict):
-        audit = security.get("audit")
-        if audit is not None and not isinstance(audit, dict):
-            errors.append("security.audit must be a YAML mapping")
-        elif isinstance(audit, dict):
-            on_install = audit.get("on_install")
-            if isinstance(on_install, bool):
-                on_install = _YAML_BOOL_COERCE.get(on_install, str(on_install))
-            if on_install is not None and on_install not in _VALID_AUDIT_ON_INSTALL:
-                errors.append(
-                    f"security.audit.on_install must be one of "
-                    f"{sorted(_VALID_AUDIT_ON_INSTALL)}, got '{on_install}'"
-                )
-            fail_on_drift = audit.get("fail_on_drift")
-            if fail_on_drift is not None and not isinstance(fail_on_drift, bool):
-                errors.append(
-                    f"security.audit.fail_on_drift must be a boolean, got '{fail_on_drift}'"
-                )
-            _validate_scanners(audit.get("scanners"), errors, warnings)
-        integrity = security.get("integrity")
-        if integrity is not None and not isinstance(integrity, dict):
-            errors.append("security.integrity must be a YAML mapping")
-        elif isinstance(integrity, dict):
-            require_hashes = integrity.get("require_hashes")
-            if require_hashes is not None and not isinstance(require_hashes, bool):
-                errors.append(
-                    f"security.integrity.require_hashes must be a boolean, got '{require_hashes}'"
-                )
+    _validate_security(data.get("security"), errors, warnings)
 
     return errors, warnings
+
+
+def _validate_security(security: object, errors: list[str], warnings: list[str]) -> None:
+    """Validate the ``security`` policy block (audit + integrity sub-blocks)."""
+    if security is None:
+        return
+    if not isinstance(security, dict):
+        errors.append("security must be a YAML mapping")
+        return
+
+    audit = security.get("audit")
+    if audit is not None and not isinstance(audit, dict):
+        errors.append("security.audit must be a YAML mapping")
+    elif isinstance(audit, dict):
+        on_install = audit.get("on_install")
+        if isinstance(on_install, bool):
+            on_install = _YAML_BOOL_COERCE.get(on_install, str(on_install))
+        if on_install is not None and on_install not in _VALID_AUDIT_ON_INSTALL:
+            errors.append(
+                f"security.audit.on_install must be one of "
+                f"{sorted(_VALID_AUDIT_ON_INSTALL)}, got '{on_install}'"
+            )
+        fail_on_drift = audit.get("fail_on_drift")
+        if fail_on_drift is not None and not isinstance(fail_on_drift, bool):
+            errors.append(f"security.audit.fail_on_drift must be a boolean, got '{fail_on_drift}'")
+        _validate_scanners(audit.get("scanners"), errors, warnings)
+
+    integrity = security.get("integrity")
+    if integrity is not None and not isinstance(integrity, dict):
+        errors.append("security.integrity must be a YAML mapping")
+    elif isinstance(integrity, dict):
+        require_hashes = integrity.get("require_hashes")
+        if require_hashes is not None and not isinstance(require_hashes, bool):
+            errors.append(
+                f"security.integrity.require_hashes must be a boolean, got '{require_hashes}'"
+            )
 
 
 def _build_policy(data: dict) -> ApmPolicy:

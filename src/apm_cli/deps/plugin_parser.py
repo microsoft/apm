@@ -14,7 +14,6 @@ Key spec rules:
 import json
 import logging
 import os
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +21,35 @@ import yaml
 
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within
+
+# Rule A re-export: implementations in plugin_server_helpers; names stay resolvable here.
+from .plugin_server_helpers import (
+    _extract_lsp_servers as _extract_lsp_servers,
+)
+from .plugin_server_helpers import (
+    _extract_mcp_servers as _extract_mcp_servers,
+)
+from .plugin_server_helpers import (
+    _lsp_servers_to_apm_deps as _lsp_servers_to_apm_deps,
+)
+from .plugin_server_helpers import (
+    _mcp_servers_to_apm_deps as _mcp_servers_to_apm_deps,
+)
+from .plugin_server_helpers import (
+    _read_lsp_file as _read_lsp_file,
+)
+from .plugin_server_helpers import (
+    _read_lsp_json as _read_lsp_json,
+)
+from .plugin_server_helpers import (
+    _read_mcp_file as _read_mcp_file,
+)
+from .plugin_server_helpers import (
+    _read_mcp_json as _read_mcp_json,
+)
+from .plugin_server_helpers import (
+    _substitute_plugin_root as _substitute_plugin_root,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -240,537 +268,161 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
     return apm_yml_path
 
 
-def _extract_mcp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
-    """Extract MCP server definitions from a plugin manifest.
+# ---------------------------------------------------------------------------
+# _map_plugin_artifacts sub-helpers (module-level so they can be tested
+# independently and to keep _map_plugin_artifacts below C901=35).
+# ---------------------------------------------------------------------------
 
-    Resolves ``mcpServers`` by type (per Claude Code spec):
-    - ``str``  -> read that file path relative to plugin root, parse JSON,
-      extract ``mcpServers`` key.
-    - ``list`` -> read each file path, merge (last-wins on name conflict).
-    - ``dict`` -> use directly as inline server definitions.
 
-    When ``mcpServers`` is absent and ``.mcp.json`` (or ``.github/.mcp.json``)
-    exists at plugin root, read it as the default (matches Claude Code
-    auto-discovery).
+def _resolve_plugin_sources(
+    plugin_path: Path, manifest: dict[str, Any], component: str, default_dir: str
+) -> list[Path]:
+    """Return list of existing source paths (dirs or files) for *component*.
 
-    Security: symlinks are skipped, JSON parse errors are logged as warnings.
-
-    ``${CLAUDE_PLUGIN_ROOT}`` in string values is replaced with the absolute
-    plugin path.
-
-    Args:
-        plugin_path: Root of the plugin directory.
-        manifest: Parsed plugin.json dict.
-
-    Returns:
-        dict mapping server name -> server config.  Empty on failure.
+    Uses ``manifest[component]`` when present (list or str), else falls
+    back to the ``default_dir`` directory inside *plugin_path*.  Every
+    path is verified to exist, not be a symlink, and resolve inside
+    *plugin_path* (path-traversal guard).
     """
-    logger = logging.getLogger("apm")
-    mcp_value = manifest.get("mcpServers")
-
-    if mcp_value is not None:
-        # Manifest explicitly defines mcpServers
-        if isinstance(mcp_value, dict):
-            servers = dict(mcp_value)
-        elif isinstance(mcp_value, str):
-            servers = _read_mcp_file(plugin_path, mcp_value, logger)
-        elif isinstance(mcp_value, list):
-            servers = {}
-            for entry in mcp_value:
-                if isinstance(entry, str):
-                    servers.update(_read_mcp_file(plugin_path, entry, logger))
-                else:
-                    logger.warning("Ignoring non-string entry in mcpServers array: %s", entry)
-        else:
-            logger.warning("Unsupported mcpServers type %s; ignoring", type(mcp_value).__name__)
-            return {}
-    else:
-        # Fall back to auto-discovery: .mcp.json then .github/.mcp.json
-        servers = {}
-        for fallback in (".mcp.json", ".github/.mcp.json"):
-            candidate = plugin_path / fallback
-            if candidate.exists() and candidate.is_file() and not candidate.is_symlink():
-                servers = _read_mcp_json(candidate, logger)
-                if servers:
-                    break
-
-    # Substitute ${CLAUDE_PLUGIN_ROOT} in all string values
-    if servers:
-        abs_root = str(plugin_path.resolve())
-        servers = _substitute_plugin_root(servers, abs_root, logger)
-
-    return servers
-
-
-def _read_mcp_file(plugin_path: Path, rel_path: str, logger: logging.Logger) -> dict[str, Any]:
-    """Read a JSON file relative to *plugin_path* and return its ``mcpServers`` dict."""
-    target = (plugin_path / rel_path).resolve()
-    # Security: must stay inside plugin_path and not be a symlink
-    try:
-        target.relative_to(plugin_path.resolve())
-    except ValueError:
-        logger.warning("MCP file path escapes plugin root: %s", rel_path)
-        return {}
-    candidate = plugin_path / rel_path
-    if not candidate.exists() or not candidate.is_file():
-        logger.warning("MCP file not found: %s", candidate)
-        return {}
-    if candidate.is_symlink():
-        logger.warning("Skipping symlinked MCP file: %s", candidate)
-        return {}
-    return _read_mcp_json(candidate, logger)
-
-
-def _read_mcp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
-    """Parse a JSON file and return the ``mcpServers`` mapping."""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to read MCP config %s: %s", path, exc)
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    servers = data.get("mcpServers", {})
-    return dict(servers) if isinstance(servers, dict) else {}
-
-
-def _substitute_plugin_root(
-    servers: dict[str, Any], abs_root: str, logger: logging.Logger
-) -> dict[str, Any]:
-    """Replace ``${CLAUDE_PLUGIN_ROOT}`` in server config string values."""
-    placeholder = "${CLAUDE_PLUGIN_ROOT}"
-    substituted = False
-
-    def _walk(obj: Any) -> Any:
-        nonlocal substituted
-        if isinstance(obj, str) and placeholder in obj:
-            substituted = True
-            return obj.replace(placeholder, abs_root)
-        if isinstance(obj, dict):
-            return {k: _walk(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [_walk(item) for item in obj]
-        return obj
-
-    result = {name: _walk(cfg) for name, cfg in servers.items()}
-    if substituted:
-        logger.info("Substituted ${CLAUDE_PLUGIN_ROOT} with %s", abs_root)
-    return result
-
-
-def _mcp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list[dict[str, Any]]:
-    """Convert raw MCP server configs to ``dependencies.mcp`` dicts.
-
-    Transport inference:
-    - ``command`` present -> stdio
-    - ``url`` present -> http (or ``type`` if it's a valid transport)
-    - Neither -> skipped with warning
-
-    Every entry gets ``registry: false`` (self-defined, not registry lookups).
-
-    All resulting entries are routed through ``MCPDependency.from_dict()``
-    so plugin-synthesized servers must clear the same security validation
-    chokepoint as CLI-authored or manually edited entries (name shape, URL
-    scheme allowlist, header CRLF, command path-traversal). Entries that
-    fail validation are skipped with a warning rather than crashing the
-    plugin install -- a single malformed server should not block the
-    whole plugin.
-
-    Args:
-        servers: Mapping of server name -> server config dict.
-        plugin_path: Plugin root (used for log context only).
-
-    Returns:
-        List of dicts consumable by ``MCPDependency.from_dict()``.
-    """
-    from ..models.dependency.mcp import MCPDependency
-
-    logger = logging.getLogger("apm")
-    deps: list[dict[str, Any]] = []
-
-    for name, cfg in servers.items():
-        if not isinstance(cfg, dict):
-            logger.warning("Skipping non-dict MCP server config '%s'", name)
-            continue
-
-        dep: dict[str, Any] = {"name": name, "registry": False}
-
-        if "command" in cfg:
-            dep["transport"] = "stdio"
-            dep["command"] = cfg["command"]
-            if "args" in cfg:
-                dep["args"] = cfg["args"]
-        elif "url" in cfg:
-            raw_type = cfg.get("type", "http")
-            valid_transports = {"http", "sse", "streamable-http"}
-            dep["transport"] = raw_type if raw_type in valid_transports else "http"
-            dep["url"] = cfg["url"]
-            if "headers" in cfg:
-                dep["headers"] = cfg["headers"]
-        else:
-            _surface_warning(
-                f"Skipping MCP server '{name}' from plugin "
-                f"'{plugin_path.name}': no 'command' or 'url'",
-                logger,
-            )
-            continue
-
-        if "env" in cfg:
-            dep["env"] = cfg["env"]
-        if "tools" in cfg:
-            dep["tools"] = cfg["tools"]
-
-        # Route through the validation chokepoint. Plugins are an ingress
-        # path: a malicious plugin could otherwise smuggle path traversal,
-        # CRLF, or unsafe URL schemes that bypass MCPDependency.validate().
-        # PR #809 follow-up: surface validation errors to the user via the
-        # rich console (stdlib logger has no handlers configured).
-        try:
-            MCPDependency.from_dict(dep)
-        except (ValueError, Exception) as exc:
-            _surface_warning(
-                f"Skipping invalid MCP server '{name}' from plugin '{plugin_path.name}': {exc}",
-                logger,
-            )
-            continue
-
-        deps.append(dep)
-
-    return deps
-
-
-def _extract_lsp_servers(plugin_path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
-    """Extract LSP server definitions from a plugin manifest.
-
-    Resolves ``lspServers`` by type (per Claude Code spec):
-    - ``str``  -> read that file path relative to plugin root, parse JSON.
-    - ``dict`` -> use directly as inline server definitions.
-
-    When ``lspServers`` is absent and ``.lsp.json`` exists at plugin root,
-    read it as the default (matches Claude Code auto-discovery).
-
-    Security: symlinks are skipped, JSON parse errors are logged as warnings.
-
-    ``${CLAUDE_PLUGIN_ROOT}`` in string values is replaced with the absolute
-    plugin path.
-
-    Args:
-        plugin_path: Root of the plugin directory.
-        manifest: Parsed plugin.json dict.
-
-    Returns:
-        dict mapping server name -> server config.  Empty on failure.
-    """
-    logger = logging.getLogger("apm")
-    lsp_value = manifest.get("lspServers")
-
-    if lsp_value is not None:
-        if isinstance(lsp_value, dict):
-            servers = dict(lsp_value)
-        elif isinstance(lsp_value, str):
-            servers = _read_lsp_file(plugin_path, lsp_value, logger)
-        else:
-            logger.warning("Unsupported lspServers type %s; ignoring", type(lsp_value).__name__)
-            return {}
-    else:
-        # Fall back to auto-discovery: .lsp.json
-        servers = {}
-        candidate = plugin_path / ".lsp.json"
-        if candidate.exists() and candidate.is_file() and not candidate.is_symlink():
-            servers = _read_lsp_json(candidate, logger)
-
-    # Substitute ${CLAUDE_PLUGIN_ROOT} in all string values
-    if servers:
-        abs_root = str(plugin_path.resolve())
-        servers = _substitute_plugin_root(servers, abs_root, logger)
-
-    return servers
-
-
-def _read_lsp_file(plugin_path: Path, rel_path: str, logger: logging.Logger) -> dict[str, Any]:
-    """Read a JSON file relative to *plugin_path* and return its LSP server dict."""
-    target = (plugin_path / rel_path).resolve()
-    try:
-        target.relative_to(plugin_path.resolve())
-    except ValueError:
-        logger.warning("LSP file path escapes plugin root: %s", rel_path)
-        return {}
-    candidate = plugin_path / rel_path
-    if not candidate.exists() or not candidate.is_file():
-        logger.warning("LSP file not found: %s", candidate)
-        return {}
-    if candidate.is_symlink():
-        logger.warning("Skipping symlinked LSP file: %s", candidate)
-        return {}
-    return _read_lsp_json(candidate, logger)
-
-
-def _read_lsp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
-    """Parse a JSON file and return the LSP servers mapping.
-
-    Accepts two formats:
-    - Flat: top-level keys are server names (e.g. ``{"pyright": {...}}``).
-    - Wrapped: a ``"lspServers"`` envelope wraps the servers
-      (e.g. ``{"lspServers": {"pyright": {...}}}``).
-
-    The wrapped format is standard in Copilot ``.github/lsp.json`` and
-    Claude ``~/.claude.json``.  Plugins may ship either variant.
-    """
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to read LSP config %s: %s", path, exc)
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    # Unwrap the { "lspServers": { ... } } envelope when present.
-    # Only unwrap when the inner value looks like a server *map* (all values
-    # are dicts).  A flat-format server literally named "lspServers" would
-    # have scalar values like "command", so the all-dicts check avoids
-    # mis-detecting it as an envelope.
-    lsp_inner = data.get("lspServers")
-    if (
-        isinstance(lsp_inner, dict)
-        and lsp_inner
-        and all(isinstance(v, dict) for v in lsp_inner.values())
-    ):
-        logger.debug("Unwrapped lspServers envelope in %s", path)
-        return dict(lsp_inner)
-    return dict(data)
-
-
-def _lsp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list[dict[str, Any]]:
-    """Convert raw LSP server configs to ``dependencies.lsp`` dicts.
-
-    Required fields per Claude Code spec:
-    - ``command``: binary to run
-    - ``extensionToLanguage``: mapping of file extensions to language IDs
-
-    All resulting entries are routed through ``LSPDependency.from_dict()``
-    for validation. Entries that fail validation are skipped with a warning.
-
-    Args:
-        servers: Mapping of server name -> server config dict.
-        plugin_path: Plugin root (used for log context only).
-
-    Returns:
-        List of dicts consumable by ``LSPDependency.from_dict()``.
-    """
-    from ..models.dependency.lsp import LSPDependency
-
-    logger = logging.getLogger("apm")
-    deps: list[dict[str, Any]] = []
-
-    for name, cfg in servers.items():
-        if not isinstance(cfg, dict):
-            logger.warning("Skipping non-dict LSP server config '%s'", name)
-            continue
-
-        dep: dict[str, Any] = {"name": name}
-
-        # Copy all recognized fields
-        for key in (
-            "command",
-            "args",
-            "extensionToLanguage",
-            "transport",
-            "env",
-            "initializationOptions",
-            "settings",
-            "workspaceFolder",
-            "startupTimeout",
-            "shutdownTimeout",
-            "restartOnCrash",
-            "maxRestarts",
-        ):
-            if key in cfg:
-                dep[key] = cfg[key]
-
-        # Route through the validation chokepoint
-        try:
-            LSPDependency.from_dict(dep)
-        except Exception as exc:
-            _surface_warning(
-                f"Skipping invalid LSP server '{name}' from plugin '{plugin_path.name}': {exc}",
-                logger,
-            )
-            continue
-
-        deps.append(dep)
-
-    return deps
-
-
-def _map_plugin_artifacts(
-    plugin_path: Path, apm_dir: Path, manifest: dict[str, Any] | None = None
-) -> None:
-    """Map plugin artifacts to .apm/ subdirectories and copy pass-through files.
-
-    Copies:
-    - agents/     -> .apm/agents/
-    - skills/     -> .apm/skills/
-    - commands/   -> .apm/prompts/  (*.md normalized to *.prompt.md)
-    - hooks/      -> .apm/hooks/    (directory, config file, or inline object)
-    - .mcp.json   -> .apm/.mcp.json  (MCP-based plugins need this to function)
-    - .lsp.json   -> .apm/.lsp.json
-    - settings.json -> .apm/settings.json
-
-    When the manifest specifies custom component paths (e.g. ``"agents": ["custom/"]``),
-    those paths are used instead of the defaults.
-
-    Symlinks are skipped entirely to prevent content exfiltration attacks.
-
-    Args:
-        plugin_path: Root of the plugin directory.
-        apm_dir: Path to the .apm/ directory.
-        manifest: Optional plugin.json metadata; used for custom component paths.
-    """
-    if manifest is None:
-        manifest = {}
-
-    from apm_cli.security.gate import ignore_non_content
-
-    # Resolve source paths  -- use manifest arrays if present, else defaults.
-    # Custom paths may be directories OR individual files.
-    #
-    # Security: every manifest-controlled path is verified to resolve
-    # inside *plugin_path* before it is copied.  Without this guard, a
-    # malicious plugin could set ``"commands": "/etc/passwd"`` or
-    # ``"agents": ["../../host"]`` and trick ``apm install`` into copying
-    # arbitrary host files into the project's ``.apm/`` tree (and from
-    # there into ``.github/prompts/`` via auto-integration).
-    def _resolve_sources(component: str, default_dir: str):
-        """Return list of existing source paths (dirs or files) for a component."""
-        custom = manifest.get(component)
-        if isinstance(custom, list):
-            paths = []
-            for p in custom:
-                raw = str(p)
-                src = plugin_path / raw
-                if (
-                    src.exists()
-                    and not src.is_symlink()
-                    and _is_within_plugin(src, plugin_path, component=component)
-                ):
-                    paths.append(src)
-            return paths
-        elif isinstance(custom, str):
-            src = plugin_path / custom
+    custom = manifest.get(component)
+    if isinstance(custom, list):
+        paths = []
+        for p in custom:
+            src = plugin_path / str(p)
             if (
                 src.exists()
                 and not src.is_symlink()
                 and _is_within_plugin(src, plugin_path, component=component)
             ):
-                return [src]
-            return []
-        default = plugin_path / default_dir
+                paths.append(src)
+        return paths
+    if isinstance(custom, str):
+        src = plugin_path / custom
         if (
-            default.exists()
-            and not default.is_symlink()
-            and default.is_dir()
-            and _is_within_plugin(default, plugin_path, component=component)
+            src.exists()
+            and not src.is_symlink()
+            and _is_within_plugin(src, plugin_path, component=component)
         ):
-            return [default]
+            return [src]
         return []
+    default = plugin_path / default_dir
+    if (
+        default.exists()
+        and not default.is_symlink()
+        and default.is_dir()
+        and _is_within_plugin(default, plugin_path, component=component)
+    ):
+        return [default]
+    return []
 
-    # Helper: True when *src* and *dst* resolve to the same filesystem path
-    # (e.g. a manifest entry pointing at a file already inside the target).
-    # Copying onto self raises ``shutil.SameFileError`` and ``shutil.copytree``
-    # over identical directories triggers it per-file, so callers must skip.
-    def _is_same_path(src: Path, dst: Path) -> bool:
-        try:
-            return src.resolve() == dst.resolve()
-        except OSError:
-            return False
 
-    # Map agents/
-    # Unlike skills (which are named directories containing SKILL.md), agents
-    # are flat files  -- each .md is one agent.  So we always merge directory
-    # contents directly into .apm/agents/ (no nesting by dir name).
-    agent_sources = _resolve_sources("agents", "agents")
-    if agent_sources:
-        target_agents = apm_dir / "agents"
-        _assert_no_symlink_descendants(target_agents)
-        agent_dirs = [s for s in agent_sources if s.is_dir()]
-        agent_files = [s for s in agent_sources if s.is_file()]
-        for d in agent_dirs:
-            if _is_same_path(d, target_agents):
-                continue
-            shutil.copytree(d, target_agents, dirs_exist_ok=True, ignore=ignore_non_content)
-        if agent_files:
-            target_agents.mkdir(parents=True, exist_ok=True)
-            for f in agent_files:
-                dst = target_agents / f.name
-                if _is_same_path(f, dst):
-                    continue
+def _is_same_path(src: Path, dst: Path) -> bool:
+    """Return True when *src* and *dst* resolve to the same filesystem path.
+
+    Copying onto self raises ``shutil.SameFileError``; callers must skip.
+    """
+    try:
+        return src.resolve() == dst.resolve()
+    except OSError:
+        return False
+
+
+def _copy_plugin_command_file(
+    source_file: Path, dest_dir: Path, rel_to: Path | None = None
+) -> None:
+    """Copy a command file into *dest_dir*, normalising ``.md`` -> ``.prompt.md``."""
+    if rel_to is not None:
+        relative_path = source_file.relative_to(rel_to)
+        target_path = dest_dir / relative_path
+    else:
+        target_path = dest_dir / source_file.name
+    if not source_file.name.endswith(".prompt.md") and source_file.suffix == ".md":
+        target_path = target_path.with_name(f"{source_file.stem}.prompt.md")
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    if _is_same_path(source_file, target_path):
+        return
+    import shutil
+
+    shutil.copy2(source_file, target_path)
+
+
+def _map_plugin_agents(agent_sources: list[Path], apm_dir: Path) -> None:
+    """Copy agent sources into ``.apm/agents/``."""
+    import shutil
+
+    from apm_cli.security.gate import ignore_non_content
+
+    target_agents = apm_dir / "agents"
+    _assert_no_symlink_descendants(target_agents)
+    agent_dirs = [s for s in agent_sources if s.is_dir()]
+    agent_files = [s for s in agent_sources if s.is_file()]
+    for d in agent_dirs:
+        if _is_same_path(d, target_agents):
+            continue
+        shutil.copytree(d, target_agents, dirs_exist_ok=True, ignore=ignore_non_content)
+    if agent_files:
+        target_agents.mkdir(parents=True, exist_ok=True)
+        for f in agent_files:
+            dst = target_agents / f.name
+            if not _is_same_path(f, dst):
                 shutil.copy2(f, dst)
 
-    # Map skills/
-    skill_sources = _resolve_sources("skills", "skills")
-    if skill_sources:
-        target_skills = apm_dir / "skills"
-        _assert_no_symlink_descendants(target_skills)
-        skill_dirs = [s for s in skill_sources if s.is_dir()]
-        skill_files = [s for s in skill_sources if s.is_file()]
 
-        is_custom_list = isinstance(manifest.get("skills"), list)
-        if is_custom_list and skill_dirs:
-            target_skills.mkdir(parents=True, exist_ok=True)
-            for d in skill_dirs:
-                nested = target_skills / d.name
-                if _is_same_path(d, nested):
-                    continue
-                shutil.copytree(
-                    d,
-                    nested,
-                    ignore=ignore_non_content,
-                    dirs_exist_ok=True,
-                )
-        elif skill_dirs:
-            for d in skill_dirs:
-                if _is_same_path(d, target_skills):
-                    continue
+def _map_plugin_skills(skill_sources: list[Path], apm_dir: Path, manifest: dict[str, Any]) -> None:
+    """Copy skill sources into ``.apm/skills/``."""
+    import shutil
+
+    from apm_cli.security.gate import ignore_non_content
+
+    target_skills = apm_dir / "skills"
+    _assert_no_symlink_descendants(target_skills)
+    skill_dirs = [s for s in skill_sources if s.is_dir()]
+    skill_files = [s for s in skill_sources if s.is_file()]
+    is_custom_list = isinstance(manifest.get("skills"), list)
+    if is_custom_list and skill_dirs:
+        target_skills.mkdir(parents=True, exist_ok=True)
+        for d in skill_dirs:
+            nested = target_skills / d.name
+            if not _is_same_path(d, nested):
+                shutil.copytree(d, nested, ignore=ignore_non_content, dirs_exist_ok=True)
+    elif skill_dirs:
+        for d in skill_dirs:
+            if not _is_same_path(d, target_skills):
                 shutil.copytree(d, target_skills, dirs_exist_ok=True, ignore=ignore_non_content)
-        if skill_files:
-            target_skills.mkdir(parents=True, exist_ok=True)
-            for f in skill_files:
-                dst = target_skills / f.name
-                if _is_same_path(f, dst):
-                    continue
+    if skill_files:
+        target_skills.mkdir(parents=True, exist_ok=True)
+        for f in skill_files:
+            dst = target_skills / f.name
+            if not _is_same_path(f, dst):
                 shutil.copy2(f, dst)
 
-    # Map commands/ -> .apm/prompts/ (normalize .md -> .prompt.md)
-    command_sources = _resolve_sources("commands", "commands")
-    if command_sources:
-        target_prompts = apm_dir / "prompts"
-        _assert_no_symlink_descendants(target_prompts)
-        target_prompts.mkdir(parents=True, exist_ok=True)
 
-        def _copy_command_file(source_file: Path, dest_dir: Path, rel_to: Path = None):  # noqa: RUF013
-            """Copy a command file, normalizing .md -> .prompt.md."""
-            if rel_to:
-                relative_path = source_file.relative_to(rel_to)
-                target_path = dest_dir / relative_path
-            else:
-                target_path = dest_dir / source_file.name
-            if not source_file.name.endswith(".prompt.md") and source_file.suffix == ".md":
-                target_path = target_path.with_name(f"{source_file.stem}.prompt.md")
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            if _is_same_path(source_file, target_path):
-                return
-            shutil.copy2(source_file, target_path)
+def _map_plugin_commands(command_sources: list[Path], apm_dir: Path) -> None:
+    """Copy command sources into ``.apm/prompts/``, normalising ``.md`` -> ``.prompt.md``."""
+    target_prompts = apm_dir / "prompts"
+    _assert_no_symlink_descendants(target_prompts)
+    target_prompts.mkdir(parents=True, exist_ok=True)
+    for source in command_sources:
+        if source.is_file() and not source.is_symlink():
+            _copy_plugin_command_file(source, target_prompts)
+        elif source.is_dir():
+            for source_file in source.rglob("*"):
+                if not source_file.is_file() or source_file.is_symlink():
+                    continue
+                _copy_plugin_command_file(source_file, target_prompts, rel_to=source)
 
-        for source in command_sources:
-            if source.is_file() and not source.is_symlink():
-                _copy_command_file(source, target_prompts)
-            elif source.is_dir():
-                for source_file in source.rglob("*"):
-                    if not source_file.is_file() or source_file.is_symlink():
-                        continue
-                    _copy_command_file(source_file, target_prompts, rel_to=source)
 
-    # Map hooks/  -- the spec allows a directory path, a config file path,
-    # or an inline object.  Handle all three forms.
+def _map_plugin_hooks(manifest: dict[str, Any], plugin_path: Path, apm_dir: Path) -> None:
+    """Map hooks into ``.apm/hooks/``.
+
+    The spec allows a directory path, a config file path, or an inline
+    object.  All three forms are handled.
+    """
+    import json
+    import shutil
+
+    from apm_cli.security.gate import ignore_non_content
+
     hooks_value = manifest.get("hooks")
     if isinstance(hooks_value, dict):
         # Inline hooks object -> write as .apm/hooks/hooks.json
@@ -781,9 +433,9 @@ def _map_plugin_artifacts(
     elif isinstance(hooks_value, str) and (plugin_path / hooks_value).is_file():
         # Config file path (e.g. "hooks": "hooks.json")
         src_file = plugin_path / hooks_value
-        if src_file.is_symlink() or not _is_within_plugin(src_file, plugin_path, component="hooks"):
-            pass
-        else:
+        if not src_file.is_symlink() and _is_within_plugin(
+            src_file, plugin_path, component="hooks"
+        ):
             target_hooks = apm_dir / "hooks"
             _assert_no_symlink_descendants(target_hooks)
             target_hooks.mkdir(parents=True, exist_ok=True)
@@ -792,16 +444,19 @@ def _map_plugin_artifacts(
                 shutil.copy2(src_file, dst)
     else:
         # Directory path(s)  -- standard flow
-        hook_sources = _resolve_sources("hooks", "hooks")
+        hook_sources = _resolve_plugin_sources(plugin_path, manifest, "hooks", "hooks")
         if hook_sources:
             target_hooks = apm_dir / "hooks"
             _assert_no_symlink_descendants(target_hooks)
             for d in hook_sources:
-                if _is_same_path(d, target_hooks):
-                    continue
-                shutil.copytree(d, target_hooks, dirs_exist_ok=True, ignore=ignore_non_content)
+                if not _is_same_path(d, target_hooks):
+                    shutil.copytree(d, target_hooks, dirs_exist_ok=True, ignore=ignore_non_content)
 
-    # Pass-through files required for MCP/LSP plugins to function
+
+def _copy_plugin_passthrough_files(plugin_path: Path, apm_dir: Path) -> None:
+    """Copy ``.mcp.json``, ``.lsp.json``, and ``settings.json`` into *apm_dir*."""
+    import shutil
+
     for passthrough in (".mcp.json", ".lsp.json", "settings.json"):
         source_file = plugin_path / passthrough
         if source_file.exists() and not source_file.is_symlink():
@@ -812,6 +467,49 @@ def _map_plugin_artifacts(
                 )
             if not _is_same_path(source_file, dst):
                 shutil.copy2(source_file, dst)
+
+
+def _map_plugin_artifacts(
+    plugin_path: Path, apm_dir: Path, manifest: dict[str, Any] | None = None
+) -> None:
+    """Map plugin artifacts to .apm/ subdirectories and copy pass-through files.
+
+    Copies:
+    - agents/     -> .apm/agents/
+    - skills/     -> .apm/skills/
+    - commands/   -> .apm/prompts/  (*.md normalised to *.prompt.md)
+    - hooks/      -> .apm/hooks/    (directory, config file, or inline object)
+    - .mcp.json   -> .apm/.mcp.json
+    - .lsp.json   -> .apm/.lsp.json
+    - settings.json -> .apm/settings.json
+
+    Symlinks are skipped entirely to prevent content exfiltration attacks.
+    Custom component paths from the manifest are security-validated to
+    resolve inside *plugin_path* before any copy is attempted.
+
+    Args:
+        plugin_path: Root of the plugin directory.
+        apm_dir: Path to the .apm/ directory.
+        manifest: Optional plugin.json metadata; used for custom component paths.
+    """
+    if manifest is None:
+        manifest = {}
+
+    agent_sources = _resolve_plugin_sources(plugin_path, manifest, "agents", "agents")
+    if agent_sources:
+        _map_plugin_agents(agent_sources, apm_dir)
+
+    skill_sources = _resolve_plugin_sources(plugin_path, manifest, "skills", "skills")
+    if skill_sources:
+        _map_plugin_skills(skill_sources, apm_dir, manifest)
+
+    command_sources = _resolve_plugin_sources(plugin_path, manifest, "commands", "commands")
+    if command_sources:
+        _map_plugin_commands(command_sources, apm_dir)
+
+    _map_plugin_hooks(manifest, plugin_path, apm_dir)
+
+    _copy_plugin_passthrough_files(plugin_path, apm_dir)
 
 
 def _generate_apm_yml(

@@ -307,6 +307,86 @@ class CanvasIntegrator(BaseIntegrator):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _plan_and_validate_bundle(
+        self,
+        bundle: Path,
+        extensions_dir: Path,
+        project_root: Path,
+        *,
+        managed: set[str],
+        force: bool,
+        diagnostics,
+        package_name: str,
+    ) -> list[tuple[Path, Path, str]] | None:
+        """Validate the bundle name/path and plan its file set.
+
+        Returns the planned ``(src, dest, rel)`` list on success, or ``None``
+        when the bundle should be skipped (each skip case emits a warning).
+        """
+        name = bundle.name
+        try:
+            self._validate_canvas_name(name)
+        except (PathTraversalError, ValueError) as exc:
+            self._warn(diagnostics, f"Skipping canvas '{name}': {exc}", package_name)
+            return None
+
+        canvas_root = extensions_dir / name
+        try:
+            ensure_path_within(canvas_root.parent.resolve() / name, extensions_dir.resolve())
+        except PathTraversalError as exc:
+            self._warn(
+                diagnostics, f"Rejected canvas target path for '{name}': {exc}", package_name
+            )
+            return None
+
+        planned = self._plan_bundle_files(
+            bundle, canvas_root, project_root, diagnostics, name, package_name
+        )
+        if planned is None:
+            return None
+        if not planned:
+            # Bundle had only the marker filtered out / no copyable content.
+            return None
+
+        # A planned destination that already exists as a directory (or other
+        # non-regular file) cannot be overwritten by ``shutil.copyfile`` --
+        # even under ``--force``.  Treat it as an unsafe collision and skip
+        # the whole bundle so we never crash mid-deploy and leave a
+        # half-written executable extension behind.
+        non_file = next(
+            (rel for _src, dest, rel in planned if dest.exists() and not dest.is_file()),
+            None,
+        )
+        if non_file is not None:
+            self._warn(
+                diagnostics,
+                f"Skipping canvas '{name}' -- a directory exists at {non_file} "
+                "where a file is expected; cannot overwrite safely.",
+                package_name,
+            )
+            return None
+
+        # Atomic collision pre-pass: a single unmanaged collision skips the
+        # entire bundle unless force is set.
+        collision = next(
+            (
+                rel
+                for _src, dest, rel in planned
+                if dest.exists() and rel not in managed and not force
+            ),
+            None,
+        )
+        if collision is not None:
+            self._warn(
+                diagnostics,
+                f"Skipping canvas '{name}' -- local file exists at {collision} "
+                "(not managed by APM). Use 'apm install --force' to overwrite.",
+                package_name,
+            )
+            return None
+
+        return planned
+
     def _deploy_bundle(
         self,
         bundle: Path,
@@ -327,66 +407,16 @@ class CanvasIntegrator(BaseIntegrator):
         bundle (unless *force*) so a half-new/half-old executable extension
         is never produced.
         """
-        name = bundle.name
-        try:
-            self._validate_canvas_name(name)
-        except (PathTraversalError, ValueError) as exc:
-            self._warn(diagnostics, f"Skipping canvas '{name}': {exc}", package_name)
-            return "skipped"
-
-        canvas_root = extensions_dir / name
-        try:
-            ensure_path_within(canvas_root.parent.resolve() / name, extensions_dir.resolve())
-        except PathTraversalError as exc:
-            self._warn(
-                diagnostics, f"Rejected canvas target path for '{name}': {exc}", package_name
-            )
-            return "skipped"
-
-        planned = self._plan_bundle_files(
-            bundle, canvas_root, project_root, diagnostics, name, package_name
+        planned = self._plan_and_validate_bundle(
+            bundle,
+            extensions_dir,
+            project_root,
+            managed=managed,
+            force=force,
+            diagnostics=diagnostics,
+            package_name=package_name,
         )
         if planned is None:
-            return "skipped"
-        if not planned:
-            # Bundle had only the marker filtered out / no copyable content.
-            return "skipped"
-
-        # A planned destination that already exists as a directory (or other
-        # non-regular file) cannot be overwritten by ``shutil.copyfile`` --
-        # even under ``--force``.  Treat it as an unsafe collision and skip
-        # the whole bundle so we never crash mid-deploy and leave a
-        # half-written executable extension behind.
-        non_file = next(
-            (rel for _src, dest, rel in planned if dest.exists() and not dest.is_file()),
-            None,
-        )
-        if non_file is not None:
-            self._warn(
-                diagnostics,
-                f"Skipping canvas '{name}' -- a directory exists at {non_file} "
-                "where a file is expected; cannot overwrite safely.",
-                package_name,
-            )
-            return "skipped"
-
-        # Atomic collision pre-pass: a single unmanaged collision skips the
-        # entire bundle unless force is set.
-        collision = next(
-            (
-                rel
-                for _src, dest, rel in planned
-                if dest.exists() and rel not in managed and not force
-            ),
-            None,
-        )
-        if collision is not None:
-            self._warn(
-                diagnostics,
-                f"Skipping canvas '{name}' -- local file exists at {collision} "
-                "(not managed by APM). Use 'apm install --force' to overwrite.",
-                package_name,
-            )
             return "skipped"
 
         # Adopt when every planned file already exists byte-identical: keep
@@ -396,6 +426,7 @@ class CanvasIntegrator(BaseIntegrator):
                 target_paths.append(dest)
             return "adopted"
 
+        name = bundle.name
         for src, dest, _rel in planned:
             dest.parent.mkdir(parents=True, exist_ok=True)
             # Guard: reject dest if it is a symlink (TOCTOU defence --

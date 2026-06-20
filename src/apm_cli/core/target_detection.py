@@ -27,6 +27,24 @@ from typing import Literal, Union
 
 import click
 
+from ._target_detection_helpers import _target_error as _target_error
+from ._target_detection_helpers import (
+    can_dedup_agents_md_instructions as can_dedup_agents_md_instructions,
+)
+from ._target_detection_helpers import format_provenance as format_provenance
+from ._target_detection_helpers import (
+    should_compile_agents_md as should_compile_agents_md,
+)
+from ._target_detection_helpers import (
+    should_compile_claude_md as should_compile_claude_md,
+)
+from ._target_detection_helpers import (
+    should_compile_copilot_instructions_md as should_compile_copilot_instructions_md,
+)
+from ._target_detection_helpers import (
+    should_compile_gemini_md as should_compile_gemini_md,
+)
+
 
 class AgentsTargetDeprecationWarning(DeprecationWarning):
     """Raised when the legacy ``--target agents`` alias is used.
@@ -107,7 +125,66 @@ UserTargetType = Literal[
 ]
 
 
-def detect_target(  # noqa: PLR0911
+# Maps an explicit/config target name to its internal canonical TargetType.
+# copilot/vscode/agents are aliases that all collapse to "vscode". "minimal"
+# is intentionally absent: an explicit/config "minimal" falls through to
+# folder auto-detection, matching the historical behaviour of the priority
+# chains this table replaced.
+_NAME_TO_CANONICAL: dict[str, TargetType] = {
+    "copilot": "vscode",
+    "vscode": "vscode",
+    "agents": "vscode",
+    "claude": "claude",
+    "cursor": "cursor",
+    "opencode": "opencode",
+    "codex": "codex",
+    "gemini": "gemini",
+    "antigravity": "antigravity",
+    "windsurf": "windsurf",
+    "kiro": "kiro",
+    "agent-skills": "agent-skills",
+    "all": "all",
+}
+
+# Ordered folder probes for Priority-3 auto-detection. Each entry pairs an
+# existence test with the label used in the reason string and the canonical
+# target a lone match resolves to. ".github"/".claude" use exists() (file or
+# dir) for backwards compatibility; the newer integrations require a real dir.
+_FOLDER_PROBES: tuple[tuple[str, bool, str, TargetType], ...] = (
+    (".github", False, ".github/", "vscode"),
+    (".claude", False, ".claude/", "claude"),
+    (".cursor", True, ".cursor/", "cursor"),
+    (".opencode", True, ".opencode/", "opencode"),
+    (".codex", True, ".codex/", "codex"),
+    (".gemini", True, ".gemini/", "gemini"),
+    (".windsurf", True, ".windsurf/", "windsurf"),
+    (".kiro", True, ".kiro/", "kiro"),
+)
+
+
+def _detect_from_folders(project_root: Path) -> tuple[TargetType, str]:
+    """Resolve a target from the integration folders present under *project_root*.
+
+    Two or more folders -> ``"all"``; exactly one -> that folder's target;
+    none -> ``"minimal"``. Folder order in :data:`_FOLDER_PROBES` is the
+    tie-break that never triggers for the single-match case but fixes the
+    label ordering in the multi-match reason string.
+    """
+    detected = [
+        (label, canonical)
+        for name, require_dir, label, canonical in _FOLDER_PROBES
+        if ((project_root / name).is_dir() if require_dir else (project_root / name).exists())
+    ]
+    if len(detected) >= 2:
+        labels = " and ".join(label for label, _ in detected)
+        return "all", f"detected {labels} folders"
+    if detected:
+        label, canonical = detected[0]
+        return canonical, f"detected {label} folder"
+    return "minimal", REASON_NO_TARGET_FOLDER
+
+
+def detect_target(
     project_root: Path,
     explicit_target: str | None = None,
     config_target: str | None = None,
@@ -124,215 +201,27 @@ def detect_target(  # noqa: PLR0911
         - target: The detected target type
         - reason: Human-readable explanation for the choice
     """
-    # Priority 1: Explicit --target flag
+    # Normalise: callers may pass a list when apm.yml has ``targets: [...]``.
+    # _NAME_TO_CANONICAL requires a hashable key; extract the first element.
+    if isinstance(explicit_target, list):
+        explicit_target = explicit_target[0] if explicit_target else None
+    if isinstance(config_target, list):
+        config_target = config_target[0] if config_target else None
+
+    # Priority 1: explicit --target flag (always wins when recognised).
     if explicit_target:
-        if explicit_target in ("copilot", "vscode", "agents"):
-            return "vscode", "explicit --target flag"
-        elif explicit_target == "claude":
-            return "claude", "explicit --target flag"
-        elif explicit_target == "cursor":
-            return "cursor", "explicit --target flag"
-        elif explicit_target == "opencode":
-            return "opencode", "explicit --target flag"
-        elif explicit_target == "codex":
-            return "codex", "explicit --target flag"
-        elif explicit_target == "gemini":
-            return "gemini", "explicit --target flag"
-        elif explicit_target == "antigravity":
-            return "antigravity", "explicit --target flag"
-        elif explicit_target == "windsurf":
-            return "windsurf", "explicit --target flag"
-        elif explicit_target == "kiro":
-            return "kiro", "explicit --target flag"
-        elif explicit_target == "agent-skills":
-            return "agent-skills", "explicit --target flag"
-        elif explicit_target == "all":
-            return "all", "explicit --target flag"
+        canonical = _NAME_TO_CANONICAL.get(explicit_target)
+        if canonical is not None:
+            return canonical, "explicit --target flag"
 
-    # Priority 2: apm.yml target setting
+    # Priority 2: apm.yml target setting.
     if config_target:
-        if config_target in ("copilot", "vscode", "agents"):
-            return "vscode", "apm.yml target"
-        elif config_target == "claude":
-            return "claude", "apm.yml target"
-        elif config_target == "cursor":
-            return "cursor", "apm.yml target"
-        elif config_target == "opencode":
-            return "opencode", "apm.yml target"
-        elif config_target == "codex":
-            return "codex", "apm.yml target"
-        elif config_target == "gemini":
-            return "gemini", "apm.yml target"
-        elif config_target == "antigravity":
-            return "antigravity", "apm.yml target"
-        elif config_target == "windsurf":
-            return "windsurf", "apm.yml target"
-        elif config_target == "kiro":
-            return "kiro", "apm.yml target"
-        elif config_target == "agent-skills":
-            return "agent-skills", "apm.yml target"
-        elif config_target == "all":
-            return "all", "apm.yml target"
+        canonical = _NAME_TO_CANONICAL.get(config_target)
+        if canonical is not None:
+            return canonical, "apm.yml target"
 
-    # Priority 3: Auto-detect from existing folders
-    github_exists = (project_root / ".github").exists()
-    claude_exists = (project_root / ".claude").exists()
-    cursor_exists = (project_root / ".cursor").is_dir()
-    opencode_exists = (project_root / ".opencode").is_dir()
-    codex_exists = (project_root / ".codex").is_dir()
-    gemini_exists = (project_root / ".gemini").is_dir()
-    windsurf_exists = (project_root / ".windsurf").is_dir()
-    kiro_exists = (project_root / ".kiro").is_dir()
-    detected = []
-    if github_exists:
-        detected.append(".github/")
-    if claude_exists:
-        detected.append(".claude/")
-    if cursor_exists:
-        detected.append(".cursor/")
-    if opencode_exists:
-        detected.append(".opencode/")
-    if codex_exists:
-        detected.append(".codex/")
-    if gemini_exists:
-        detected.append(".gemini/")
-    if windsurf_exists:
-        detected.append(".windsurf/")
-    if kiro_exists:
-        detected.append(".kiro/")
-
-    if len(detected) >= 2:
-        return "all", f"detected {' and '.join(detected)} folders"
-    elif github_exists:
-        return "vscode", "detected .github/ folder"
-    elif claude_exists:
-        return "claude", "detected .claude/ folder"
-    elif cursor_exists:
-        return "cursor", "detected .cursor/ folder"
-    elif opencode_exists:
-        return "opencode", "detected .opencode/ folder"
-    elif codex_exists:
-        return "codex", "detected .codex/ folder"
-    elif gemini_exists:
-        return "gemini", "detected .gemini/ folder"
-    elif windsurf_exists:
-        return "windsurf", "detected .windsurf/ folder"
-    elif kiro_exists:
-        return "kiro", "detected .kiro/ folder"
-    else:
-        return "minimal", REASON_NO_TARGET_FOLDER
-
-
-def should_compile_agents_md(target: CompileTargetType) -> bool:
-    """Check if AGENTS.md should be compiled.
-
-    AGENTS.md is generated for vscode, codex, gemini, all, and minimal
-    targets.  Gemini needs it because GEMINI.md imports AGENTS.md.
-
-    Args:
-        target: The detected or configured target. May be a string or a
-            frozenset of compiler families for multi-target lists.
-
-    Returns:
-        bool: True if AGENTS.md should be generated
-    """
-    if isinstance(target, frozenset):
-        return "agents" in target or "gemini" in target
-    return target in (
-        "vscode",
-        "opencode",
-        "codex",
-        "gemini",
-        "antigravity",
-        "windsurf",
-        "kiro",
-        "hermes",
-        "all",
-        "minimal",
-    )
-
-
-def should_compile_claude_md(target: CompileTargetType) -> bool:
-    """Check if CLAUDE.md should be compiled.
-
-    Args:
-        target: The detected or configured target. May be a string or a
-            frozenset of compiler families for multi-target lists.
-
-    Returns:
-        bool: True if CLAUDE.md should be generated
-    """
-    if isinstance(target, frozenset):
-        return "claude" in target
-    return target in ("claude", "all")
-
-
-def should_compile_gemini_md(target: CompileTargetType) -> bool:
-    """Check if GEMINI.md should be compiled.
-
-    Args:
-        target: The detected or configured target. May be a string or a
-            frozenset of compiler families for multi-target lists.
-
-    Returns:
-        bool: True if GEMINI.md should be generated
-    """
-    if isinstance(target, frozenset):
-        return "gemini" in target
-    return target in ("gemini", "all")
-
-
-def should_compile_copilot_instructions_md(target: CompileTargetType) -> bool:
-    """Check if .github/copilot-instructions.md should be compiled.
-
-    Only the Copilot-native targets (copilot/vscode/agents alias) and "all"
-    trigger generation.  cursor, opencode, and codex use their own native
-    configuration files and must NOT receive copilot-instructions.md, even
-    when combined in a multi-target list.
-
-    Args:
-        target: The detected or configured target. May be a string or a
-            frozenset of compiler families for multi-target lists.
-
-    Returns:
-        bool: True if Copilot root instructions should be generated
-    """
-    if isinstance(target, frozenset):
-        # "vscode" family is added to the frozenset by _resolve_compile_target()
-        # ONLY when copilot/vscode/agents was in the original list. Checking
-        # "agents" would over-fire because cursor/opencode/codex also map to
-        # the "agents" family for AGENTS.md generation.
-        return "vscode" in target
-    return target in ("vscode", "all")
-
-
-def can_dedup_agents_md_instructions(target: CompileTargetType) -> bool:
-    """Check if instruction dedup is safe for AGENTS.md.
-
-    Returns True only when every target that reads AGENTS.md also reads
-    ``.github/instructions/`` -- meaning instructions can safely be omitted
-    from AGENTS.md without losing context for any consumer.
-
-    Today only Copilot (vscode) reads both locations.  Codex, OpenCode,
-    Windsurf, and Gemini rely on AGENTS.md as their sole instruction source
-    and must always receive instruction content (issue #1678).
-
-    Args:
-        target: The detected or configured target.  May be a string or a
-            frozenset of compiler families for multi-target lists.
-
-    Returns:
-        bool: True if instructions can be omitted from AGENTS.md.
-    """
-    if isinstance(target, frozenset):
-        # Conservative policy: only dedup when the target set is exactly
-        # {"vscode"} (Copilot alone).  Any additional family -- including
-        # "agents" -- means at least one consumer that does not read
-        # .github/instructions/ may be present, so we keep instructions
-        # in AGENTS.md to be safe.
-        return target == frozenset({"vscode"})
-    # Single-string targets: only "vscode" reads .github/instructions/.
-    return target == "vscode"
+    # Priority 3: auto-detect from existing integration folders.
+    return _detect_from_folders(project_root)
 
 
 def get_target_description(target: UserTargetType) -> str:
@@ -606,13 +495,6 @@ def parse_target_field(
     return result
 
 
-def _target_error(message: str, source_path: Path | None) -> str:
-    """Format a target validation error, naming the source file when known."""
-    if source_path is not None:
-        return f"Invalid 'target' in {source_path}: {message}"
-    return f"Invalid target: {message}"
-
-
 class TargetParamType(click.ParamType):
     """Click parameter type accepting comma-separated target values.
 
@@ -836,16 +718,3 @@ def expand_all_targets(
         raise NoHarnessError(render_no_harness_error(project_root))
 
     return combined
-
-
-def format_provenance(resolved: ResolvedTargets) -> str:
-    """Format provenance line for CLI output.
-
-    Returns the message portion (without the [i] prefix, since
-    _rich_info adds it).
-
-    # Double-space between target list and metadata is intentional and
-    # canonical. Test assertions match this exact spacing. Do not collapse.
-    """
-    targets_csv = ", ".join(resolved.targets)
-    return f"Targets: {targets_csv}  (source: {resolved.source})"

@@ -20,6 +20,21 @@ from pathlib import Path
 _log = logging.getLogger(__name__)
 
 
+def _resolve_packed_ref(git_dir: Path, ref_target: str) -> str | None:
+    """Return the SHA for *ref_target* from packed-refs, or ``None``."""
+    packed = git_dir / "packed-refs"
+    if not packed.is_file():
+        return None
+    for raw in packed.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#", "^")):
+            continue
+        parts = line.split(maxsplit=1)
+        if len(parts) == 2 and parts[1] == ref_target:
+            return parts[0].lower()
+    return None
+
+
 def _read_head_sha(checkout_dir: Path) -> str | None:
     """Return the resolved 40-char SHA at HEAD, or None on any failure.
 
@@ -53,16 +68,7 @@ def _read_head_sha(checkout_dir: Path) -> str | None:
             ref_path = git_dir / ref_target
             if ref_path.is_file():
                 return ref_path.read_text(encoding="utf-8").strip().lower()
-            packed = git_dir / "packed-refs"
-            if packed.is_file():
-                for raw in packed.read_text(encoding="utf-8").splitlines():
-                    line = raw.strip()
-                    if not line or line.startswith(("#", "^")):
-                        continue
-                    parts = line.split(maxsplit=1)
-                    if len(parts) == 2 and parts[1] == ref_target:
-                        return parts[0].lower()
-            return None
+            return _resolve_packed_ref(git_dir, ref_target)
         if len(head_content) == 40 and all(c in "0123456789abcdef" for c in head_content.lower()):
             return head_content.lower()
         return None

@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from apm_cli.install.phases._redownload import _should_skip_redownload
 from apm_cli.install.phases._skip_logic import _compute_skip_download
 from apm_cli.install.phases.heal import run_heal_chain
-from apm_cli.install.services import integrate_local_content
+from apm_cli.install.services import IntegratorBundle, integrate_local_content
 from apm_cli.install.sources import make_dependency_source
 from apm_cli.install.template import run_integration_template
 
@@ -335,12 +335,7 @@ def _integrate_root_project(
         _root_result = integrate_local_content(
             ctx.project_root,
             targets=ctx.targets,
-            prompt_integrator=ctx.integrators["prompt"],
-            agent_integrator=ctx.integrators["agent"],
-            skill_integrator=ctx.integrators["skill"],
-            instruction_integrator=ctx.integrators["instruction"],
-            command_integrator=ctx.integrators["command"],
-            hook_integrator=ctx.integrators["hook"],
+            integrators=IntegratorBundle.from_mapping(ctx.integrators),
             force=ctx.force,
             managed_files=_local_managed,
             diagnostics=diagnostics,

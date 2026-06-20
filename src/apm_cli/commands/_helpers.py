@@ -745,3 +745,23 @@ def _find_apm_yml(start: Path | None = None) -> Path | None:
         if manifest.is_file():
             return manifest
     return None
+
+
+def _get_invocation_argv():
+    """Return the process invocation argv. Wrapped for test injection."""
+    import sys
+
+    return sys.argv
+
+
+def _split_argv_at_double_dash(argv):
+    """Return ``(clean_argv, command_argv_tuple)``.
+
+    If ``--`` is not present, ``command_argv_tuple`` is ``()``.
+    """
+    import builtins
+
+    if "--" not in argv:
+        return argv, ()
+    idx = argv.index("--")
+    return argv[:idx], builtins.tuple(argv[idx + 1 :])
