@@ -7,11 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Org-wide policy discovery now cascades through candidate repo names
+  (`.github`, then `.apm`, then `_apm`) and speaks the Azure DevOps Items
+  API, so Azure DevOps organizations -- which forbid repo names that begin
+  or end with `.` -- can host an APM governance policy repo for the first
+  time. (by @sergio-sisternes-epam; closes #1813) (#1830)
+
 ### Fixed
 
+- `apm install <pkg>@<marketplace>` now preserves GitLab and other
+  non-GitHub hosts from url-type marketplace plugin sources, so auth
+  resolution no longer falls back to `github.com` for those installs.
+  (by @sergio-sisternes-epam; closes #1848) (#1853)
+- `apm pack` no longer drops the per-plugin `version` field for INTERNAL or
+  private `github.com` marketplace repos; all GitHub host types now resolve
+  metadata through the REST Contents API instead of the raw CDN, which
+  returned 404 for private repos. (by @sergio-sisternes-epam) (#1854)
 - `apm audit --ci` no longer flags pinned remote dependencies declared by
   local-path sub-packages as orphaned when they are resolved transitively.
-  (closes #1846) (#1855)
+  (by @sergio-sisternes-epam; closes #1846) (#1855)
+- `apm update` stale-file cleanup no longer deletes a file when another
+  installed package also deploys one at the same path; a cross-package
+  ownership guard now excludes shared paths from the stale set.
+  (by @sergio-sisternes-epam; closes #1831) (#1856)
 - `apm install -g --target codex` now honors `CODEX_HOME` for user-scope
   Codex MCP config writes, falling back to `~/.codex/config.toml` when unset.
   (closes #1861) (#1863)
@@ -48,10 +68,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm install <pkg>@<marketplace>` now preserves GitLab and other
-  non-GitHub hosts from url-type marketplace plugin sources, so auth
-  resolution no longer falls back to `github.com` for those installs.
-  (by @sergio-sisternes-epam; closes #1848) (#1853)
 - Registry deps with non-semver version selectors (e.g. `stable`, `main`) no longer report perpetual `outdated`. The drift check now uses literal equality for non-semver registry pins rather than range comparison, which always returned `True` against a semver range. (#1816)
 - Non-semver registry version selectors are now exact-matched against the registry's published version list at install time. Previously they were rejected with "not a valid semver range". (#1816)
 - Cursor hook integration: emit required top-level `version: 1` in `.cursor/hooks.json`.
