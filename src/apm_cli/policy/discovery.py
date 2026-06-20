@@ -2,13 +2,21 @@
 
 Discovery flow:
 1. Extract org from git remote (github.com/contoso/my-project -> "contoso")
-2. Fetch <org>/.github/apm-policy.yml via GitHub API (Contents API)
-3. Resolve inheritance chain via resolve_policy_chain
-4. Cache the **merged effective policy** with chain metadata
-5. Parse and return ApmPolicy
+2. Determine host profile (default or ado) to select candidate repos
+3. Try candidate repos in precedence order (.github > .apm > _apm)
+4. Fetch apm-policy.yml via GitHub Contents API or ADO Items API
+5. Resolve inheritance chain via resolve_policy_chain
+6. Cache the **merged effective policy** with chain metadata
+7. Parse and return ApmPolicy
+
+Candidate repo precedence:
+- .github  -- GitHub convention (skipped on ADO)
+- .apm     -- cross-platform convention (skipped on ADO)
+- _apm     -- universal fallback (valid on every git host)
 
 Supports:
 - GitHub.com and GitHub Enterprise (*.ghe.com)
+- Azure DevOps (dev.azure.com, *.visualstudio.com)
 - Manual override via --policy <path|url>
 - Cache with TTL (default 1 hour), stale fallback up to MAX_STALE_TTL
 - Atomic cache writes (temp file + os.replace)
@@ -29,6 +37,16 @@ from urllib.parse import urlparse
 import requests
 
 from ..cache.url_normalize import SCP_LIKE_RE
+from ..utils.github_host import (
+    is_azure_devops_hostname,
+    is_visualstudio_legacy_hostname,
+)
+from ._discovery_ado import (
+    _fetch_ado_contents as _fetch_ado_contents,
+)
+from ._discovery_ado import (
+    _fetch_from_ado_repo as _fetch_from_ado_repo,
+)
 from ._discovery_cache import (
     CACHE_SCHEMA_VERSION as CACHE_SCHEMA_VERSION,
 )
@@ -109,6 +127,29 @@ from .project_config import (
 from .schema import ApmPolicy
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Policy repo discovery: cascading candidate repos per host profile
+# ---------------------------------------------------------------------------
+
+# Candidate repo names in precedence order (first valid policy wins).
+# Host profiles select which candidates are valid for a given git host.
+_DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github", ".apm", "_apm")
+_ADO_POLICY_REPOS: tuple[str, ...] = ("_apm",)
+
+# ADO project name for the policy repo (ADO requires a project container).
+ADO_POLICY_PROJECT = "_apm"
+
+
+def _policy_repo_candidates(host: str) -> tuple[str, ...]:
+    """Return candidate policy repo names for *host* in precedence order.
+
+    ADO hosts cannot have repo names starting/ending with ``.``, so only
+    ``_apm`` is valid.  All other hosts try the full cascade.
+    """
+    if is_azure_devops_hostname(host):
+        return _ADO_POLICY_REPOS
+    return _DEFAULT_POLICY_REPOS
 
 
 @dataclass
@@ -314,7 +355,17 @@ def _auto_discover(
     no_cache: bool = False,
     expected_hash: str | None = None,
 ) -> PolicyFetchResult:
-    """Auto-discover policy from org's .github repo."""
+    """Auto-discover policy by cascading through candidate repos.
+
+    1. Run git remote get-url origin
+    2. Parse org + host from URL
+    3. Select host profile to determine candidate repos
+    4. Try each candidate in precedence order (.github > .apm > _apm)
+       - 404/absent -> continue to next candidate
+       - Error (auth, timeout, malformed) -> fail-closed immediately
+       - Found -> return (first match wins)
+    5. All candidates exhausted -> outcome="absent"
+    """
     org_and_host = _extract_org_from_git_remote(project_root)
     if org_and_host is None:
         return PolicyFetchResult(
@@ -323,11 +374,46 @@ def _auto_discover(
         )
 
     org, host = org_and_host
-    repo_ref = f"{org}/.github"
-    if host and host != "github.com":
-        repo_ref = f"{host}/{repo_ref}"
+    candidates = _policy_repo_candidates(host)
+    is_ado = is_azure_devops_hostname(host)
 
-    return _fetch_from_repo(repo_ref, project_root, no_cache=no_cache, expected_hash=expected_hash)
+    for candidate_repo in candidates:
+        logger.debug("Trying org policy repo candidate %s on host %s", candidate_repo, host)
+        if is_ado:
+            result = _fetch_from_ado_repo(
+                org=org,
+                project=ADO_POLICY_PROJECT,
+                repo=candidate_repo,
+                host=host,
+                project_root=project_root,
+                no_cache=no_cache,
+                expected_hash=expected_hash,
+            )
+        else:
+            repo_ref = f"{org}/{candidate_repo}"
+            if host and host != "github.com":
+                repo_ref = f"{host}/{repo_ref}"
+            result = _fetch_from_repo(
+                repo_ref, project_root, no_cache=no_cache, expected_hash=expected_hash
+            )
+
+        # 404 / absent -> try the next candidate
+        if result.outcome == "absent":
+            logger.debug(
+                "Policy repo candidate %s absent on host %s; trying next candidate",
+                candidate_repo,
+                host,
+            )
+            continue
+
+        # Any other outcome (found, error, malformed, etc.) -> return immediately
+        return result
+
+    # All candidates exhausted: no policy published anywhere.
+    return PolicyFetchResult(
+        error=None,
+        outcome="absent",
+    )
 
 
 def _extract_org_from_git_remote(
@@ -384,14 +470,28 @@ def _parse_remote_url(url: str) -> tuple[str, str] | None:
             return None
 
     if "://" in url:
-        try:
-            parsed = urlparse(url)
-            host = parsed.hostname or ""
-            path_parts = parsed.path.strip("/").removesuffix(".git").rstrip("/").split("/")
-            if host and path_parts and path_parts[0]:
-                return (path_parts[0], host)
-        except Exception:
-            return None
+        return _parse_scheme_remote_url(url)
+
+    return None
+
+
+def _parse_scheme_remote_url(url: str) -> tuple[str, str] | None:
+    """Parse a scheme-style remote URL (``https://host/org/...``).
+
+    Azure DevOps legacy ``*.visualstudio.com`` hosts encode the org in the
+    hostname rather than the path, so they are handled before the generic
+    path-based extraction.
+    """
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        path_parts = parsed.path.strip("/").removesuffix(".git").rstrip("/").split("/")
+        if is_visualstudio_legacy_hostname(host):
+            return (host[: -len(".visualstudio.com")], host)
+        if host and path_parts and path_parts[0]:
+            return (path_parts[0], host)
+    except Exception:
+        return None
 
     return None
 

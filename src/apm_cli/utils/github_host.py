@@ -36,6 +36,8 @@ def is_azure_devops_hostname(hostname: str | None) -> bool:
     h = hostname.lower()
     if h == "dev.azure.com":
         return True
+    if h == "ssh.dev.azure.com":
+        return True
     return bool(h.endswith(".visualstudio.com"))
 
 
@@ -625,11 +627,16 @@ def build_ado_api_url(
     Returns:
         str: API URL for retrieving file contents
     """
+    api_host = "dev.azure.com" if host == "ssh.dev.azure.com" else host
     encoded_path = urllib.parse.quote(path, safe="")
+    quoted_org = urllib.parse.quote(org, safe="")
     quoted_project = urllib.parse.quote(project, safe="")
+    quoted_repo = urllib.parse.quote(repo, safe="")
+    quoted_ref = urllib.parse.quote(ref, safe="")
+    org_path = "" if is_visualstudio_legacy_hostname(api_host) else f"{quoted_org}/"
     return (
-        f"https://{host}/{org}/{quoted_project}/_apis/git/repositories/{repo}/items"
-        f"?path={encoded_path}&versionDescriptor.version={ref}&api-version=7.0"
+        f"https://{api_host}/{org_path}{quoted_project}/_apis/git/repositories/{quoted_repo}/items"
+        f"?path={encoded_path}&versionDescriptor.version={quoted_ref}&api-version=7.0"
     )
 
 
