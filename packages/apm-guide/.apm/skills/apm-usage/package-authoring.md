@@ -412,7 +412,8 @@ On `apm install --target copilot`, APM deploys it verbatim to
 `.github/extensions/<name>/`. The `<name>` segment is validated strictly
 (`[A-Za-z0-9._-]+`, no leading/trailing dot, no `..`, no separators, no reserved
 names). It is **Copilot-only**. Dependency-provided canvases are executable code
-and are blocked unless the consumer passes `--trust-canvas-extensions`; a
+and are blocked unless the consumer adds the package to `allowExecutables` and runs
+`apm approve <pkg>`; a
 first-party canvas in the root package deploys once the flag is on. With
 `--global`, a dependency canvas deploys to `~/.copilot/extensions/<name>/`
 (always requiring the trust flag; default `~/.copilot` only; first-party root

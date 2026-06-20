@@ -51,9 +51,9 @@ class TestExecutableDeclaration:
         assert decl.has_executables
 
     def test_has_executables_true_with_mcp_only(self) -> None:
-        """MCP-only packages are not flagged (MCP enforcement deferred)."""
+        """MCP-only packages are now flagged (MCP enforcement is active)."""
         decl = ExecutableDeclaration(package_key="a#1.0", package_name="a", mcp_count=1)
-        assert not decl.has_executables
+        assert decl.has_executables
 
     def test_has_executables_true_with_bin(self) -> None:
         decl = ExecutableDeclaration(package_key="a#1.0", package_name="a", bin_count=3)
@@ -64,7 +64,7 @@ class TestExecutableDeclaration:
         assert decl.exec_types == []
 
     def test_exec_types_all(self) -> None:
-        """exec_types only includes enforced types (hooks, bin); MCP is excluded."""
+        """exec_types includes all enforced types (hooks, mcp, bin, canvas)."""
         decl = ExecutableDeclaration(
             package_key="a#1.0",
             package_name="a",
@@ -72,7 +72,9 @@ class TestExecutableDeclaration:
             mcp_count=1,
             bin_count=1,
         )
-        assert decl.exec_types == [EXEC_TYPE_HOOKS, EXEC_TYPE_BIN]
+        assert EXEC_TYPE_HOOKS in decl.exec_types
+        assert EXEC_TYPE_BIN in decl.exec_types
+        assert EXEC_TYPE_MCP in decl.exec_types
 
     def test_exec_types_partial(self) -> None:
         decl = ExecutableDeclaration(
@@ -81,7 +83,7 @@ class TestExecutableDeclaration:
         assert decl.exec_types == [EXEC_TYPE_HOOKS, EXEC_TYPE_BIN]
 
     def test_summary_line(self) -> None:
-        """summary_line only shows enforced types (hooks, bin)."""
+        """summary_line shows all enforced types (hooks, mcp, bin, canvas)."""
         decl = ExecutableDeclaration(
             package_key="a#1.0",
             package_name="a",
@@ -91,7 +93,7 @@ class TestExecutableDeclaration:
         )
         summary = decl.summary_line()
         assert "2 hook(s)" in summary
-        assert "MCP" not in summary
+        assert "1 MCP server(s)" in summary
         assert "3 bin executable(s)" in summary
 
     def test_summary_line_hooks_only(self) -> None:
@@ -249,8 +251,8 @@ class TestScanPackageExecutables:
             )
             decl = scan_package_executables(Path(tmpdir), "mcp-pkg", "1.0")
             assert decl.mcp_count == 2
-            # MCP is scanned but not included in enforced exec_types.
-            assert EXEC_TYPE_MCP not in decl.exec_types
+            # MCP is now enforced so it appears in exec_types.
+            assert EXEC_TYPE_MCP in decl.exec_types
             assert "server-a" in decl.mcp_details
 
     def test_transitive_flag(self) -> None:

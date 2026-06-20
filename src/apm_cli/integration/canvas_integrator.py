@@ -10,11 +10,11 @@ Two independent gates protect this surface:
 
 * The ``canvas`` experimental feature flag turns the primitive ON at all
   (feature availability -- NOT a security gate).
-* A trust gate protects against arbitrary executable code: a canvas
+* A trust gate enforced via ``allowExecutables`` in ``apm.yml``: a canvas
   shipped by a *dependency* is blocked by default and requires the
-  operator to pass ``--trust-canvas-extensions``.  The author's own
-  first-party (root/local) ``.apm/extensions/`` deploys freely once the
-  experimental flag is on.
+  operator to declare it in the ``allowExecutables`` block (using
+  ``apm approve <pkg>``).  The author's own first-party (root/local)
+  ``.apm/extensions/`` deploys freely once the experimental flag is on.
 
 The integrator is Copilot-only.  At **project scope** a canvas deploys to
 ``.github/extensions/<name>/``.  At **user scope** (``apm install --global``)
@@ -23,9 +23,9 @@ it is available in every Copilot session; the canvas ``PrimitiveMapping`` lives
 solely on the ``copilot`` target.  Global canvas install is intentionally
 limited for the MVP: only dependency-provided canvases are supported (so the
 dependency lockfile tracks them and uninstall can prune them), the operator
-must always pass ``--trust-canvas-extensions`` (the blast radius is the whole
-account), and only the default ``~/.copilot`` location is honored (a custom
-``$COPILOT_HOME`` is refused).
+must approve the package via ``allowExecutables`` (the blast radius is the
+whole account), and only the default ``~/.copilot`` location is honored (a
+custom ``$COPILOT_HOME`` is refused).
 """
 
 from __future__ import annotations
@@ -171,14 +171,15 @@ class CanvasIntegrator(BaseIntegrator):
         Trust model:
 
         * **Project scope** -- a dependency-provided canvas requires
-          *trust_canvas*; a first-party (root/local) canvas deploys freely
-          once the flag is on.
+          *trust_canvas* (resolved via ``allowExecutables`` in the calling
+          service); a first-party (root/local) canvas deploys freely once the
+          flag is on.
         * **User scope** (``--global``) -- only *dependency-provided* canvases
-          deploy, and they ALWAYS require *trust_canvas* (full-account blast
-          radius). First-party user-scope canvases are refused because the
-          user-scope lockfile pipeline does not track them, so uninstall could
-          not prune the executable bundle. A non-default ``$COPILOT_HOME`` is
-          also refused (APM deploys global canvases to ``~/.copilot`` only).
+          deploy, and they ALWAYS require *trust_canvas*. First-party
+          user-scope canvases are refused because the user-scope lockfile
+          pipeline does not track them, so uninstall could not prune the
+          executable bundle. A non-default ``$COPILOT_HOME`` is also refused
+          (APM deploys global canvases to ``~/.copilot`` only).
         """
         empty = IntegrationResult(0, 0, 0, [])
 
@@ -471,8 +472,8 @@ class CanvasIntegrator(BaseIntegrator):
             message=(
                 f"Blocked {len(bundles)} canvas extension(s) ({names}) from '{pkg}': "
                 f"canvas extensions are executable {CANVAS_MARKER} code and are not "
-                f"deployed from dependencies by default. Re-run with "
-                f"'--trust-canvas-extensions' to deploy them to {deploy_dir}."
+                f"deployed from dependencies by default. Run 'apm approve {pkg}' to "
+                f"add '{pkg}' to allowExecutables and deploy them to {deploy_dir}."
             ),
             package=package_name or "",
         )

@@ -1,8 +1,8 @@
 """Executable primitive approval gate (npm v12-inspired opt-in model).
 
-APM packages can declare three kinds of executable primitives -- hooks,
-MCP servers, and bin/ executables -- that run arbitrary code on the
-developer's machine.  When the consuming project declares an
+APM packages can declare four kinds of executable primitives -- hooks,
+MCP servers, bin/ executables, and canvas extensions -- that run arbitrary
+code on the developer's machine.  When the consuming project declares an
 ``allowExecutables`` block in its ``apm.yml``, this module enforces a
 deny-by-default policy: none of these primitives are deployed unless
 explicitly approved.  Projects that omit the block entirely get
@@ -25,16 +25,15 @@ from typing import Any
 
 # Executable type constants used as keys in the allowExecutables block.
 EXEC_TYPE_HOOKS = "hooks"
-EXEC_TYPE_MCP = "mcp"  # Reserved for future enforcement.
+EXEC_TYPE_MCP = "mcp"
 EXEC_TYPE_BIN = "bin"
+EXEC_TYPE_CANVAS = "canvas"
 
-# Types with active enforcement in the install gate.  MCP is excluded
-# because MCPIntegrator does not yet honour the approval state --
-# surfacing it in the UI would create a false-assurance control.
-ENFORCED_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_BIN)
+# Types with active enforcement in the install gate.
+ENFORCED_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_BIN, EXEC_TYPE_MCP, EXEC_TYPE_CANVAS)
 
 # All recognised exec-type keys (for manifest validation).
-ALL_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_MCP, EXEC_TYPE_BIN)
+ALL_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_MCP, EXEC_TYPE_BIN, EXEC_TYPE_CANVAS)
 
 
 @dataclass(frozen=True)
@@ -51,9 +50,11 @@ class ExecutableDeclaration:
         hook_count: Number of hook files discovered.
         mcp_count: Number of MCP server entries discovered.
         bin_count: Number of bin/ executables discovered.
+        canvas_count: Number of canvas extensions discovered.
         hook_details: Per-hook summaries for ``inspect`` display.
         mcp_details: Per-MCP-server summaries.
         bin_details: Per-binary summaries.
+        canvas_details: Per-canvas summaries.
     """
 
     package_key: str
@@ -63,14 +64,18 @@ class ExecutableDeclaration:
     hook_count: int = 0
     mcp_count: int = 0
     bin_count: int = 0
+    canvas_count: int = 0
     hook_details: list[str] = field(default_factory=list)
     mcp_details: list[str] = field(default_factory=list)
     bin_details: list[str] = field(default_factory=list)
+    canvas_details: list[str] = field(default_factory=list)
 
     @property
     def has_executables(self) -> bool:
         """Return True if this package declares enforced executable primitives."""
-        return self.hook_count > 0 or self.bin_count > 0
+        return (
+            self.hook_count > 0 or self.bin_count > 0 or self.mcp_count > 0 or self.canvas_count > 0
+        )
 
     @property
     def exec_types(self) -> list[str]:
@@ -78,8 +83,12 @@ class ExecutableDeclaration:
         types: list[str] = []
         if self.hook_count > 0:
             types.append(EXEC_TYPE_HOOKS)
+        if self.mcp_count > 0:
+            types.append(EXEC_TYPE_MCP)
         if self.bin_count > 0:
             types.append(EXEC_TYPE_BIN)
+        if self.canvas_count > 0:
+            types.append(EXEC_TYPE_CANVAS)
         return types
 
     def summary_line(self) -> str:
@@ -87,8 +96,12 @@ class ExecutableDeclaration:
         parts: list[str] = []
         if self.hook_count:
             parts.append(f"{self.hook_count} hook(s)")
+        if self.mcp_count:
+            parts.append(f"{self.mcp_count} MCP server(s)")
         if self.bin_count:
             parts.append(f"{self.bin_count} bin executable(s)")
+        if self.canvas_count:
+            parts.append(f"{self.canvas_count} canvas extension(s)")
         return ", ".join(parts)
 
 
@@ -175,6 +188,8 @@ def scan_package_executables(
     - ``bin/`` directory -- bin executables
     - MCP is declared in the package's ``apm.yml`` under
       ``dependencies.mcp``, not as files -- so we parse that instead.
+    - ``.apm/extensions/<name>/extension.mjs`` -- canvas extension bundles
+      (mirrors :meth:`CanvasIntegrator.find_canvas_bundles`)
 
     Returns an :class:`ExecutableDeclaration` (may have zero counts if
     the package declares no executables).
@@ -233,6 +248,18 @@ def scan_package_executables(
         except Exception:
             pass  # Non-fatal: if we cannot parse, treat as zero MCP
 
+    # 4. Canvas extensions: .apm/extensions/<name>/extension.mjs
+    #    Mirrors CanvasIntegrator.find_canvas_bundles marker detection.
+    canvas_marker = "extension.mjs"
+    canvas_dirs: list[Path] = []
+    extensions_root = install_path / ".apm" / "extensions"
+    if extensions_root.is_dir():
+        for ext_dir in extensions_root.iterdir():
+            if ext_dir.is_dir() and (ext_dir / canvas_marker).is_file():
+                canvas_dirs.append(ext_dir)
+    canvas_dirs = sorted(canvas_dirs)
+    canvas_details = [d.name for d in canvas_dirs]
+
     return ExecutableDeclaration(
         package_key=key,
         package_name=package_name,
@@ -241,9 +268,11 @@ def scan_package_executables(
         hook_count=len(hook_files),
         mcp_count=mcp_count,
         bin_count=len(bin_files),
+        canvas_count=len(canvas_dirs),
         hook_details=hook_details,
         mcp_details=mcp_details,
         bin_details=bin_details,
+        canvas_details=canvas_details,
     )
 
 
@@ -381,7 +410,7 @@ def parse_allow_executables(data: dict[str, Any]) -> dict[str, dict[str, bool]] 
     if not isinstance(raw, dict):
         raise ValueError(
             "allowExecutables must be a mapping of "
-            "package keys to {hooks: bool, mcp: bool, bin: bool}"
+            "package keys to {hooks: bool, mcp: bool, bin: bool, canvas: bool}"
         )
 
     result: dict[str, dict[str, bool]] = {}

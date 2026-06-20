@@ -111,7 +111,7 @@ def _collect_apm_components(apm_dir: Path) -> list[tuple[Path, str]]:
     # extensions/ -> extensions/ (canvas extensions, experimental Copilot-only).
     # Preserved verbatim so an offline bundle can carry a canvas; the files are
     # inert until the consumer enables the ``canvas`` experimental flag AND
-    # passes ``--trust-canvas-extensions`` at install time.
+    # approves the package via allowExecutables / ``apm approve`` at install time.
     _collect_recursive(apm_dir / "extensions", "extensions", components)
 
     return components

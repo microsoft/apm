@@ -63,10 +63,6 @@ class InstallContext:
     verbose: bool = False
     refresh: bool = False
     dev: bool = False
-    # --trust-canvas-extensions: opt in to deploying dependency-provided
-    # canvas extensions (executable Node code). First-party (root project .apm/)
-    # canvases deploy without this; only dependency canvases are gated.
-    trust_canvas: bool = False
     only_packages: list[str] | None = None
     protocol_pref: Any = None  # ProtocolPreference (NONE/SSH/HTTPS) for shorthand transport
     allow_protocol_fallback: bool | None = None  # None => read APM_ALLOW_PROTOCOL_FALLBACK env

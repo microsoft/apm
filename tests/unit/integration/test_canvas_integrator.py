@@ -213,7 +213,7 @@ def test_dependency_blocked_without_trust(tmp_path: Path, enable_canvas):
     assert not (project / ".github" / "extensions").exists()
     messages = " ".join(d.message for d in diags._diagnostics)
     assert "widget" in messages
-    assert "--trust-canvas-extensions" in messages
+    assert "apm approve" in messages
 
 
 def test_dependency_deploys_with_trust(tmp_path: Path, enable_canvas):
@@ -327,7 +327,7 @@ def test_user_scope_dependency_requires_trust(tmp_path: Path, enable_canvas, mon
     assert result.files_integrated == 0
     assert not (home / ".copilot" / "extensions").exists()
     messages = " ".join(d.message for d in diags._diagnostics)
-    assert "--trust-canvas-extensions" in messages
+    assert "apm approve" in messages
 
 
 def test_user_scope_nondefault_copilot_home_blocked(tmp_path: Path, enable_canvas, monkeypatch):
@@ -567,6 +567,7 @@ def test_dispatch_dependency_named_local_is_not_first_party(tmp_path: Path, enab
     First-party status is decided by the call path (the ``is_first_party``
     kwarg), never inferred from the package name, so an attacker cannot
     bypass the trust gate by naming their package ``_local``.
+    Canvas blocking now requires allowExecutables enforcement (non-None dict).
     """
     from apm_cli.install.services import integrate_package_primitives
 
@@ -584,8 +585,10 @@ def test_dispatch_dependency_named_local_is_not_first_party(tmp_path: Path, enab
         managed_files=set(),
         diagnostics=diags,
         package_name="_local",
-        ctx=SimpleNamespace(trust_canvas=False, verbose=False),
+        ctx=SimpleNamespace(verbose=False),
         # is_first_party defaults to False (dependency call path)
+        # allow_executables enforcement active, canvas NOT approved for _local
+        allow_executables={"other/pkg": {"canvas": True}},
     )
 
     assert result["canvases"] == 0
@@ -610,7 +613,7 @@ def test_dispatch_first_party_flag_deploys(tmp_path: Path, enable_canvas):
         managed_files=set(),
         diagnostics=diags,
         package_name="owner/dep",
-        ctx=SimpleNamespace(trust_canvas=False, verbose=False),
+        ctx=SimpleNamespace(verbose=False),
         is_first_party=True,
     )
 
@@ -619,7 +622,7 @@ def test_dispatch_first_party_flag_deploys(tmp_path: Path, enable_canvas):
 
 
 def test_dispatch_dependency_deploys_with_trust(tmp_path: Path, enable_canvas):
-    """A dependency canvas deploys when the operator trusts canvas extensions."""
+    """A dependency canvas deploys when allowExecutables is None (no enforcement)."""
     from apm_cli.install.services import integrate_package_primitives
 
     _make_canvas(tmp_path, "widget")
@@ -636,7 +639,8 @@ def test_dispatch_dependency_deploys_with_trust(tmp_path: Path, enable_canvas):
         managed_files=set(),
         diagnostics=diags,
         package_name="owner/dep",
-        ctx=SimpleNamespace(trust_canvas=True, verbose=False),
+        ctx=SimpleNamespace(verbose=False),
+        # allow_executables=None means no enforcement; canvas deploys freely
     )
 
     assert result["canvases"] == 1
