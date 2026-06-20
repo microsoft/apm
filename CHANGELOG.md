@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install -g --target codex` now honors `CODEX_HOME` for user-scope
+  Codex MCP config writes, falling back to `~/.codex/config.toml` when unset.
+  (closes #1861) (#1863)
+
 ## [0.21.0] - 2026-06-19
 
 ### Added
@@ -39,13 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm pack` now preserves plugin metadata such as `version` for
-  INTERNAL/private `github.com` package repos by falling back from the raw
-  CDN to the GitHub Contents API when raw metadata returns 404.
-  (by @sergio-sisternes-epam; closes #1847) (#1854)
+- `apm install <pkg>@<marketplace>` now preserves GitLab and other
+  non-GitHub hosts from url-type marketplace plugin sources, so auth
+  resolution no longer falls back to `github.com` for those installs.
+  (by @sergio-sisternes-epam; closes #1848) (#1853)
 - Registry deps with non-semver version selectors (e.g. `stable`, `main`) no longer report perpetual `outdated`. The drift check now uses literal equality for non-semver registry pins rather than range comparison, which always returned `True` against a semver range. (#1816)
 - Non-semver registry version selectors are now exact-matched against the registry's published version list at install time. Previously they were rejected with "not a valid semver range". (#1816)
-
 - Cursor hook integration: emit required top-level `version: 1` in `.cursor/hooks.json`.
   Affected versions: v0.14.1-v0.20.0. Hooks were silently ignored by Cursor on those
   versions. Run `apm install` (or `apm install --target cursor`) to repair existing
