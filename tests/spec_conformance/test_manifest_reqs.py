@@ -1,6 +1,6 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
-Covers req-mf-001..021, req-ext-001..002, req-sc-001..008,
+Covers req-mf-001..021, req-ext-001..002, req-sc-001..010,
 req-tg-001..004, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
@@ -307,7 +307,22 @@ def test_consumer_should_refuse_credential_on_non_https_git_over_http():
     )
 
 
-# --- req-tg-001..004: targets -----------------------------------------
+@pytest.mark.req("req-sc-009")
+def test_consumer_must_deny_executable_primitive_without_allowexecutables_approval():
+    assert_spec_contains(
+        "deny deployment of any executable primitive",
+        "allowExecutables",
+        "fail closed",
+    )
+
+
+@pytest.mark.req("req-sc-010")
+def test_consumer_must_persist_approvals_user_locally_not_in_project_manifest():
+    assert_spec_contains(
+        "persist per-user approval decisions",
+        "isolated from the project manifest",
+        "MUST NOT write interactive approval decisions into the project",
+    )
 
 
 @pytest.mark.req("req-tg-001")
