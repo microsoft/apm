@@ -14,6 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.adapters.client.codex import CodexClientAdapter
+from apm_cli.utils.path_security import PathTraversalError
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -81,7 +82,10 @@ class TestInit:
 class TestGetConfigPath:
     """Tests for scope-aware config path resolution."""
 
-    def test_project_scope_uses_project_root(self, tmp_path: Path) -> None:
+    def test_project_scope_uses_project_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "ignored-codex-home"))
         adapter = _make_adapter(project_root=tmp_path, user_scope=False)
         expected = str(tmp_path / ".codex" / "config.toml")
         assert adapter.get_config_path() == expected
@@ -124,6 +128,16 @@ class TestGetConfigPath:
 
         expected = home / "codex-config" / "config.toml"
         assert adapter.get_config_path() == str(expected)
+
+    def test_user_scope_rejects_relative_codex_home_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CODEX_HOME", "relative-codex")
+
+        adapter = _make_adapter(user_scope=True)
+
+        with pytest.raises(PathTraversalError, match=r"CODEX_HOME.*non-absolute path"):
+            adapter.get_config_path()
 
     def test_config_path_ends_with_config_toml(self, tmp_path: Path) -> None:
         adapter = _make_adapter(project_root=tmp_path)

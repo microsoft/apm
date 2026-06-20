@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install -g --target codex` now honors `CODEX_HOME` for user-scope
+  Codex MCP config writes, falling back to `~/.codex/config.toml` when unset.
+  (closes #1861) (#1863)
+
 ## [0.21.0] - 2026-06-19
 
 ### Added

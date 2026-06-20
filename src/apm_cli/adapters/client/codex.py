@@ -10,6 +10,7 @@ import toml
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_success, _rich_warning
+from ...utils.path_security import PathTraversalError
 from ._mcp_runtime_args import process_v01_value_hint_arg
 from .base import MCPClientAdapter
 
@@ -54,7 +55,13 @@ class CodexClientAdapter(MCPClientAdapter):
         if self.user_scope:
             codex_home = os.environ.get("CODEX_HOME", "")
             if codex_home.strip():
-                return Path(codex_home).expanduser()
+                codex_home_path = Path(codex_home).expanduser()
+                if not codex_home_path.is_absolute():
+                    raise PathTraversalError(
+                        "CODEX_HOME is set to a non-absolute path; cannot locate the "
+                        "Codex CLI configuration directory."
+                    )
+                return codex_home_path
             return Path.home() / ".codex"
         return self.project_root / ".codex"
 
