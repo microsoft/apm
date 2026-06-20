@@ -71,6 +71,9 @@ def update_config(updates, *, remove_keys=()):
     """
     _invalidate_config_cache()
     config = get_config()
+    remove_keys = tuple(remove_keys)
+    if not updates and all(key not in config for key in remove_keys):
+        return
     for key in remove_keys:
         config.pop(key, None)
     config.update(updates)
@@ -151,8 +154,9 @@ def set_temp_dir(path: str) -> None:
 def _unset_config_key(key: str) -> None:
     """Remove *key* from the config file atomically.
 
-    No-op when *key* is not present.  Routes through ``update_config()``
-    so all config writes share the same read-modify-write path.
+    No-op when *key* is not present, including avoiding a config-file
+    rewrite.  Routes through ``update_config()`` so all config writes share
+    the same read-modify-write path.
 
     Args:
         key: The JSON key to remove from ``~/.apm/config.json``.

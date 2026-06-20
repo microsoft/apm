@@ -926,6 +926,8 @@ class SkillIntegrator(BaseIntegrator):
                 raise PathTraversalError(
                     f"Skill destination {target_skill_dir} is a symlink -- refusing to deploy"
                 )
+            # Cowork targets resolve to an explicit user-configured skills root;
+            # deploy_path() joins only the validated skill name below that root.
             if target.resolved_deploy_root is None:
                 ensure_path_within(target_skill_dir, target_skills_root)
 

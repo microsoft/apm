@@ -238,16 +238,16 @@ class TargetProfile:
             return False
         return primitive in self.primitives
 
-    def deploy_path(
-        self, project_root: Path, *parts: str, primitive: str | None = None
-    ) -> Path:
+    def deploy_path(self, project_root: Path, *parts: str, primitive: str | None = None) -> Path:
         """Return the filesystem path for deployment.
 
         When ``resolved_deploy_root`` is set (dynamic-root targets like
         cowork), the path is rooted there.  Otherwise falls back to the
         standard ``project_root / root_dir`` pattern.  When ``primitive``
         names a mapping with ``deploy_root``, that primitive-specific root is
-        used instead of ``root_dir``.
+        used instead of ``root_dir``.  ``primitive`` is not consulted when
+        ``resolved_deploy_root`` is set; the dynamic root already identifies
+        the complete deployment root.
 
         Args:
             project_root: Workspace or home directory root.

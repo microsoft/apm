@@ -21,6 +21,7 @@ from apm_cli.integration.skill_integrator import (
 )
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 from apm_cli.models.validation import PackageType
+from tests.unit._skill_integrator_target_helpers import attach_skill_deploy_path
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -42,6 +43,25 @@ def _make_skill_source(tmp_path: Path, name: str = "my-skill") -> Path:
     src.mkdir(parents=True)
     (src / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
     return src
+
+
+def _make_skill_target(
+    *,
+    supports_skills: bool = True,
+    root_dir: str | Path = ".github",
+    deploy_root: str | None = None,
+    resolved_deploy_root: Path | None = None,
+    auto_create: bool = True,
+) -> MagicMock:
+    target = MagicMock()
+    target.name = "copilot"
+    target.supports.return_value = supports_skills
+    target.user_root_resolver = None
+    target.primitives = {"skills": MagicMock(deploy_root=deploy_root, subdir="skills")}
+    target.root_dir = root_dir
+    target.resolved_deploy_root = resolved_deploy_root
+    target.auto_create = auto_create
+    return attach_skill_deploy_path(target)
 
 
 # ---------------------------------------------------------------------------
@@ -128,11 +148,7 @@ class TestCopySkillToTarget:
         link_target.mkdir()
         dest.symlink_to(link_target)
 
-        target = MagicMock()
-        target.supports.return_value = True
-        target.primitives = {"skills": MagicMock(deploy_root=None)}
-        target.root_dir = Path(".github")
-        target.auto_create = True
+        target = _make_skill_target()
 
         with patch(
             "apm_cli.integration.skill_integrator.should_install_skill",
@@ -155,8 +171,7 @@ class TestCopySkillToTarget:
         target_base = tmp_path / "project"
         target_base.mkdir()
 
-        target = MagicMock()
-        target.supports.return_value = False
+        target = _make_skill_target(supports_skills=False)
 
         with patch("apm_cli.integration.skill_integrator.should_install_skill", return_value=True):
             result = copy_skill_to_target(
@@ -174,11 +189,7 @@ class TestCopySkillToTarget:
         target_base = tmp_path / "project"
         target_base.mkdir()
 
-        target = MagicMock()
-        target.supports.return_value = True
-        target.primitives = {"skills": MagicMock(deploy_root=None)}
-        target.root_dir = Path(".missing-dir")
-        target.auto_create = False
+        target = _make_skill_target(root_dir=".missing-dir", auto_create=False)
 
         with patch("apm_cli.integration.skill_integrator.should_install_skill", return_value=True):
             result = copy_skill_to_target(
@@ -200,12 +211,7 @@ class TestCopySkillToTarget:
         skills_root = target_base / ".github" / "skills"
 
         def _make_target():
-            t = MagicMock()
-            t.supports.return_value = True
-            t.primitives = {"skills": MagicMock(deploy_root=None)}
-            t.root_dir = Path(".github")
-            t.auto_create = True
-            return t
+            return _make_skill_target()
 
         t1 = _make_target()
         t2 = _make_target()
@@ -565,12 +571,7 @@ class TestIntegrateSkillNameNormalization:
         integrator = SkillIntegrator()
         diag = MagicMock()
 
-        fake_target = MagicMock()
-        fake_target.supports.return_value = True
-        fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
-        fake_target.root_dir = Path(".github")
-        fake_target.resolved_deploy_root = None
-        fake_target.auto_create = True
+        fake_target = _make_skill_target()
 
         with (
             patch(
@@ -603,12 +604,7 @@ class TestIntegrateSkillNameNormalization:
         integrator = SkillIntegrator()
         logger = MagicMock()
 
-        fake_target = MagicMock()
-        fake_target.supports.return_value = True
-        fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
-        fake_target.root_dir = Path(".github")
-        fake_target.resolved_deploy_root = None
-        fake_target.auto_create = True
+        fake_target = _make_skill_target()
 
         with (
             patch(
@@ -654,11 +650,7 @@ class TestSyncIntegration:
         managed = {".github/skills/orphan-skill"}
 
         # We need a target that maps to .github/skills prefix
-        fake_target = MagicMock()
-        fake_target.supports.return_value = True
-        fake_target.user_root_resolver = None
-        fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
-        fake_target.root_dir = Path(".github")
+        fake_target = _make_skill_target()
 
         stats = integrator.sync_integration(
             apm_pkg,
@@ -678,11 +670,7 @@ class TestSyncIntegration:
         apm_pkg = self._make_apm_package()
         managed = {".github/skills/../../../etc/passwd"}
 
-        fake_target = MagicMock()
-        fake_target.supports.return_value = True
-        fake_target.user_root_resolver = None
-        fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
-        fake_target.root_dir = Path(".github")
+        fake_target = _make_skill_target()
 
         stats = integrator.sync_integration(
             apm_pkg,
@@ -703,11 +691,7 @@ class TestSyncIntegration:
         # This path is valid-looking but resolves outside
         managed = {".github/skills/../../../outside"}
 
-        fake_target = MagicMock()
-        fake_target.supports.return_value = True
-        fake_target.user_root_resolver = None
-        fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
-        fake_target.root_dir = Path(".github")
+        fake_target = _make_skill_target()
 
         stats = integrator.sync_integration(
             apm_pkg,
@@ -731,11 +715,7 @@ class TestSyncIntegration:
 
         integrator = SkillIntegrator()
 
-        fake_target = MagicMock()
-        fake_target.supports.return_value = True
-        fake_target.user_root_resolver = None
-        fake_target.primitives = {"skills": MagicMock(deploy_root=None)}
-        fake_target.root_dir = Path(".github")
+        fake_target = _make_skill_target()
 
         stats = integrator.sync_integration(
             apm_pkg,
@@ -756,8 +736,7 @@ class TestSyncIntegration:
 
         integrator = SkillIntegrator()
 
-        fake_target = MagicMock()
-        fake_target.supports.return_value = False
+        fake_target = _make_skill_target(supports_skills=False)
 
         stats = integrator.sync_integration(
             apm_pkg,
