@@ -299,11 +299,11 @@ may use. This section covers how that contract is enforced at `apm install` time
 
 ### 2. Discovery and applicability
 
-APM auto-discovers policy from `<org>/.github/apm-policy.yml` for any GitHub
-remote  --  both `github.com` and GitHub Enterprise (GHE). Non-GitHub remotes (ADO,
-GitLab, plain git) currently fall through with no policy applied; tracked as a
-follow-up. Repositories with no detectable git remote (unpacked bundles, temp
-dirs) emit an explicit "could not determine org" line and skip discovery.
+APM auto-discovers org policy from the project's git remote by checking
+`.github`, `.apm`, and `_apm` policy repos in order on GitHub API-compatible
+hosts. Azure DevOps hosts use `_apm` only, because ADO rejects dot-prefixed
+repository names. Repositories with no detectable git remote (unpacked bundles,
+temp dirs) emit an explicit "could not determine org" line and skip discovery.
 
 The `--policy <override>` flag is **audit-only today**  --  it works on
 `apm audit --ci` but is not yet wired through `apm install`.
@@ -545,7 +545,8 @@ as `[x]` errors and exit `1`.
 
 Checklist to publish a policy:
 
-1. Create `<org>/.github/apm-policy.yml` in the org's `.github` repository.
+1. Create `apm-policy.yml` in the org policy repo (`.github` on GitHub, `_apm`
+   project/repo on Azure DevOps).
 2. Start from the recommended starter below and trim to the minimum reflecting
    your governance posture.
 3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming
