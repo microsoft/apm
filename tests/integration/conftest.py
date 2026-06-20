@@ -222,6 +222,10 @@ def _is_network_integration() -> bool:
     return os.environ.get("APM_RUN_INTEGRATION_TESTS") == "1"
 
 
+def _has_live_generic_fixture() -> bool:
+    return bool(os.environ.get("APM_LIVE_GENERIC_PACKAGE", "").strip())
+
+
 def _is_inference_mode() -> bool:
     return os.environ.get("APM_RUN_INFERENCE_TESTS") == "1"
 
@@ -257,6 +261,10 @@ _MARKER_CHECKS: dict[str, tuple[Callable[[], bool], str]] = {
         "APM_RUN_INTEGRATION_TESTS=1 not set",
     ),
     "requires_windows": (_is_windows, "Windows required"),
+    "requires_live_generic_fixture": (
+        _has_live_generic_fixture,
+        "APM_LIVE_GENERIC_PACKAGE not set (example: gitlab.com/<group>/<repo>)",
+    ),
     "requires_apm_binary": (
         _has_apm_binary,
         "apm binary not found on PATH (set APM_BINARY_PATH or build via scripts/build-binary.sh)",
