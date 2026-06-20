@@ -335,7 +335,7 @@ def _resolve_effective_target(
     return detected_target, detection_reason, config_target
 
 
-def _handle_global_flag(dry_run: bool) -> int:
+def _handle_global_flag(dry_run: bool, logger: CommandLogger | None = None) -> int:
     """Handle --global compilation of user-scope root context files.
 
     Returns 0 on success, 1 on error (for sys.exit).
@@ -346,11 +346,24 @@ def _handle_global_flag(dry_run: bool) -> int:
     from ...integration.targets import KNOWN_TARGETS
     from ...utils.console import _rich_error, _rich_info, _rich_success
 
+    if logger is None:
+
+        class _RichLogger:
+            def error(self, message: str, symbol: str = "error") -> None:
+                _rich_error(message, symbol=symbol)
+
+            def info(self, message: str, symbol: str = "info") -> None:
+                _rich_info(message, symbol=symbol)
+
+            def success(self, message: str, symbol: str = "check") -> None:
+                _rich_success(message, symbol=symbol)
+
+        logger = _RichLogger()
     source_root = get_apm_dir(InstallScope.USER)
     apm_modules = source_root / "apm_modules"
     if not apm_modules.is_dir():
         display_path = _display_user_path(apm_modules)
-        _rich_error(
+        logger.error(
             f"User-scope apm_modules not found: {display_path}. "
             "Run 'apm install -g <package>' to install packages globally.",
             symbol="error",
@@ -365,9 +378,10 @@ def _handle_global_flag(dry_run: bool) -> int:
     )
 
     if not results:
-        _rich_info(
+        logger.info(
             "No user-scope targets produced output -- run 'apm install -g <package>' "
-            "to add global instructions."
+            "to add global instructions.",
+            symbol="info",
         )
         return 0
 
@@ -380,20 +394,20 @@ def _handle_global_flag(dry_run: bool) -> int:
         tname = entry.target
         path = entry.path
         if status == "written":
-            _rich_success(f"{tname}: wrote {path}", symbol="check")
+            logger.success(f"{tname}: wrote {path}", symbol="check")
             written_count += 1
         elif status == "would-write":
-            _rich_info(f"{tname}: would write {path} (dry-run)", symbol="preview")
+            logger.info(f"{tname}: would write {path} (dry-run)", symbol="preview")
             would_write_count += 1
         elif status == "unchanged":
-            _rich_info(f"{tname}: unchanged {path}", symbol="info")
+            logger.info(f"{tname}: unchanged {path}", symbol="info")
             unchanged_count += 1
         elif status == "skipped-hand-authored":
-            _rich_info(f"{tname}: skipped (hand-authored) {path}", symbol="info")
+            logger.info(f"{tname}: skipped (hand-authored) {path}", symbol="info")
         elif status == "skipped-no-instructions":
-            _rich_info(f"{tname}: skipped (no global instructions)", symbol="info")
+            logger.info(f"{tname}: skipped (no global instructions)", symbol="info")
         elif status.startswith("error:"):
-            _rich_error(f"{tname}: {status[6:]}", symbol="error")
+            logger.error(f"{tname}: {status[6:]}", symbol="error")
             has_error = True
 
     if not has_error:
@@ -405,11 +419,11 @@ def _handle_global_flag(dry_run: bool) -> int:
                 f"{unchanged_count} unchanged."
             )
             if dry_run:
-                _rich_info(message, symbol="preview")
+                logger.info(message, symbol="preview")
             else:
-                _rich_success(message, symbol="check")
+                logger.success(message, symbol="check")
         else:
-            _rich_info("No user-scope root context files changed.", symbol="info")
+            logger.info("No user-scope root context files changed.", symbol="info")
 
     return 1 if has_error else 0
 
@@ -988,7 +1002,7 @@ def _run_compilation(
     default=False,
     help=(
         "Compile user-scope root context files (~/.claude/CLAUDE.md, etc.) "
-        "from ~/.apm/apm_modules. Cannot be combined with project-output "
+        "from ~/.apm/apm_modules. Cannot be combined with project-scoped output "
         "flags (--target, --all, --watch, --root, --output, etc.); use with "
         "--dry-run to preview changes."
     ),
@@ -1060,7 +1074,7 @@ def compile(  # noqa: PLR0913 -- Click handler
     if global_:
         from click.core import ParameterSource
 
-        allowed_with_global = {"global_", "dry_run"}
+        allowed_with_global = {"global_", "dry_run", "verbose"}
         flag_names = {
             "chatmode": "--chatmode",
             "clean": "--clean",
@@ -1083,7 +1097,7 @@ def compile(  # noqa: PLR0913 -- Click handler
                 continue
             flag = flag_names.get(name, f"--{name.replace('_', '-')}")
             raise click.UsageError(f"--global is not valid with {flag}")
-        rc = _handle_global_flag(dry_run=dry_run)
+        rc = _handle_global_flag(dry_run=dry_run, logger=logger)
         if rc != 0:
             ctx.exit(rc)
         return
