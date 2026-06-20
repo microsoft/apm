@@ -692,8 +692,9 @@ class TestResolveMarketplacePluginGitLabMonorepo:
         assert result.dependency_reference is not None
         dep = result.dependency_reference
         assert dep.host == "gitlab.com"
-        assert "my-name/apm" in dep.repo_url or "my-name" in dep.repo_url
-        assert "gitlab.com" in result.canonical
+        assert dep.repo_url == "my-name/apm/my-first-skill"
+        assert dep.reference == "v1.0.0"
+        assert result.canonical == "gitlab.com/my-name/apm/my-first-skill#v1.0.0"
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")

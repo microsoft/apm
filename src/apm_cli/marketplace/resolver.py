@@ -833,7 +833,7 @@ def resolve_marketplace_plugin(
             )
             canonical = dep_ref.to_canonical()
 
-    # ---- Build dep_ref for url-type sources on non-GitHub-family hosts (#1848) ----
+    # ---- Build dep_ref for url-type sources on non-GitHub-family hosts ----
     # When the plugin declares a ``url`` source and the marketplace is on a
     # host that needs explicit git paths (GitLab, generic git), the URL
     # already carries the full clone target.  Build a structured dep_ref so
@@ -855,7 +855,7 @@ def resolve_marketplace_plugin(
                     dep_ref = DependencyReference.parse_from_dict(_entry)
                     canonical = dep_ref.to_canonical()
                     logger.debug(
-                        "Built dep_ref from url source for %s@%s -> %s (#1848)",
+                        "Built dep_ref from url source for %s@%s -> %s (non-github-host url source)",
                         plugin_name,
                         marketplace_name,
                         canonical,
