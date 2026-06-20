@@ -415,6 +415,13 @@ class _BuilderResolveMixin:
         """Best-effort: fetch ``description`` and ``version`` from the
         package's remote ``apm.yml``.
 
+        github.com packages use the fast raw.githubusercontent.com CDN
+        first, then fall back to the GitHub REST Contents endpoint when
+        raw returns 404 (the private / INTERNAL repository symptom).
+        GHES and GHE Cloud packages use the GitHub REST API on the
+        package's host.  For non-GitHub-class hosts, metadata enrichment
+        is skipped.
+
         urllib Rule B: ``urllib`` is accessed via ``_b.urllib`` (late import of
         ``builder`` module) so that test patches on
         ``apm_cli.marketplace.builder.urllib.request.urlopen`` remain effective.
@@ -457,10 +464,30 @@ class _BuilderResolveMixin:
             from apm_cli.marketplace import builder as _b
 
             if effective_host == "github.com":
-                url = f"https://raw.githubusercontent.com/{pkg.source_repo}/{pkg.sha}/{file_path}"
-                req = _b.urllib.request.Request(url)
+                raw_url = (
+                    f"https://raw.githubusercontent.com/{pkg.source_repo}/{pkg.sha}/{file_path}"
+                )
+                req = _b.urllib.request.Request(raw_url)
                 if token:
                     req.add_header("Authorization", f"token {token}")
+                try:
+                    with _b.urllib.request.urlopen(req, timeout=5) as resp:
+                        raw = resp.read().decode("utf-8")
+                except _b.urllib.error.HTTPError as exc:
+                    if exc.code != 404:
+                        raise
+                    api_base = (
+                        host_info.api_base if host_info else None
+                    ) or "https://api.github.com"
+                    rest_url = (
+                        f"{api_base}/repos/{pkg.source_repo}/contents/{file_path}?ref={pkg.sha}"
+                    )
+                    req = _b.urllib.request.Request(rest_url)
+                    req.add_header("Accept", "application/vnd.github.raw")
+                    if token:
+                        req.add_header("Authorization", f"token {token}")
+                    with _b.urllib.request.urlopen(req, timeout=5) as resp:
+                        raw = resp.read().decode("utf-8")
             else:
                 api_base = (
                     host_info.api_base if host_info else None
@@ -471,8 +498,8 @@ class _BuilderResolveMixin:
                 if token:
                     req.add_header("Authorization", f"token {token}")
 
-            with _b.urllib.request.urlopen(req, timeout=5) as resp:
-                raw = resp.read().decode("utf-8")
+                with _b.urllib.request.urlopen(req, timeout=5) as resp:
+                    raw = resp.read().decode("utf-8")
             data = yaml.safe_load(raw)
             if not isinstance(data, dict):
                 return None

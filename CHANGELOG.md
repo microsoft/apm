@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm audit --ci` no longer flags pinned remote dependencies declared by
+  local-path sub-packages as orphaned when they are resolved transitively.
+  (closes #1846) (#1855)
+- `apm install -g --target codex` now honors `CODEX_HOME` for user-scope
+  Codex MCP config writes, falling back to `~/.codex/config.toml` when unset.
+  (closes #1861) (#1863)
+
+## [0.21.0] - 2026-06-19
+
 ### Added
 
 - `apm audit` now surfaces unmanaged files in governance directories as a single enriched report: each finding states a factual reason (`not tracked in apm.lock.yaml`), a lazy primitive-type tag (`[type: skill|agent|instruction|mcp]`), and a deny-conflict note (`matches deny rule (<pattern>)`) when the path matches the policy's own `dependencies.deny` / `mcp.deny`. A new `unmanaged_files.exclude` policy key suppresses known harness-managed paths, and a symlink guard prevents following links out of the workspace. This is drift / divergence visibility, not supply-chain-attack prevention. (closes #1775) (#1793)
@@ -26,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Two additive, default-off policy keys under the existing `security:` namespace: `security.integrity.require_hashes` makes `apm install` fail closed when any non-local lockfile entry lacks a content hash, and `security.audit.fail_on_drift` makes `apm audit` exit non-zero when the workspace drifts from the lockfile. Both only tighten through policy inheritance. (#1794)
 - MCP dependencies can now carry harness-specific passthrough keys (for example Claude Code's remote-MCP `oauth` block with `clientId`/`callbackPort`); previously any key outside the modeled set was silently dropped on render. Passthrough keys round-trip into the generated config for every installed harness and cannot shadow a modeled field (`command`/`url`/`headers`/`env`/...), which are rejected with a warning. A future fail-closed tightening to an explicit `extra:` block is tracked in #1806. (closes #1670) (#1765)
 - `apm install owner/repo#ref` now routes to the configured default registry (project `registries.default` or `registry.<name>.default true` in `~/.apm/config.json`) instead of probing GitHub. A version selector (`#<ref>`) is required; omitting it exits `1`. Non-semver selectors (`stable`, `main`, a branch name, or any opaque string) are exact-matched against the registry's published version list. Use the `git:` URL form in `apm.yml` to force the GitHub path. (#1816)
+- `apm lock export --format cyclonedx|spdx` emits a standard SBOM inventory of installed packages, and a new declared-license recorder stores each package's manifest-declared license (`apm.yml` `license:` / `plugin.json`) in the lockfile after offline SPDX-id validation. APM records what a package declares -- it does not scan LICENSE text or gate installs on a license. (closes #1777) (#1820)
+- `apm install` / `apm pack` can now deploy an experimental Copilot-only `canvas` primitive: a package declaring `.apm/extensions/<name>/` ships verbatim to `.github/extensions/<name>/` (or `~/.copilot/extensions/<name>/` with `--global`), where Copilot CLI discovers it in-session. The surface is gated twice -- `apm experimental enable canvas` plus `--trust-canvas-extensions` for dependency-provided canvases -- and is fail-closed when the flag is off. (#1689)
+- `apm install` now blocks dependency-provided executables (hooks and `bin/`) by default, mirroring npm v12's default-deny model. A dependency's hooks or binaries deploy only after explicit approval in an `allowExecutables` block of `apm.yml`, managed via `apm approve` / `apm deny`; root-authored content and text-only primitives are unaffected. (#1723)
 
 ### Changed
 
@@ -42,9 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install <pkg>@<marketplace>` now preserves GitLab and other
+  non-GitHub hosts from url-type marketplace plugin sources, so auth
+  resolution no longer falls back to `github.com` for those installs.
+  (by @sergio-sisternes-epam; closes #1848) (#1853)
 - Registry deps with non-semver version selectors (e.g. `stable`, `main`) no longer report perpetual `outdated`. The drift check now uses literal equality for non-semver registry pins rather than range comparison, which always returned `True` against a semver range. (#1816)
 - Non-semver registry version selectors are now exact-matched against the registry's published version list at install time. Previously they were rejected with "not a valid semver range". (#1816)
-
 - Cursor hook integration: emit required top-level `version: 1` in `.cursor/hooks.json`.
   Affected versions: v0.14.1-v0.20.0. Hooks were silently ignored by Cursor on those
   versions. Run `apm install` (or `apm install --target cursor`) to repair existing
@@ -63,6 +80,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AGENTS.md` and `--single-agents` writes, preserving hand-authored
   content outside the APM markers. (closes #1764) (#1768)
 - `apm install` now removes orphaned skill directories when a package is uninstalled or its skills are renamed. Previously, individual files were deleted but the skill folder remained with a "Refused to remove directory entry" warning. (closes #1483) (#1767)
+- `apm install --skill <name>` now merges additively with skills already pinned for the same package in `apm.yml` instead of overwriting them, so installing a second skill subset no longer drops the first. (#1786)
+- `apm publish` and the registry resolver no longer emit stale `tar.gz` / `--tarball` references after the switch to zip-by-default; help text, docs, and extractor paths now match the actual artifact format. (#1779)
+- `apm marketplace` now propagates `--ref` to relative plugin sources, so pinning a marketplace ref resolves nested relative packages at that ref instead of the default branch. (closes #1811) (#1824)
+- `apm pack` now substitutes the `{name}` placeholder during marketplace version resolution; previously the literal `{name}` was left unresolved, breaking version lookups for templated entries. (closes #1822) (#1841)
+- `apm outdated` now degrades gracefully when a single dependency check fails, reporting the error for that entry instead of crashing the whole command. (#1836)
 
 ## [0.20.0] - 2026-06-11
 

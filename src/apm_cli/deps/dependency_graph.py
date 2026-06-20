@@ -80,21 +80,32 @@ class DependencyTree:
     _nodes_by_depth: dict[int, list[DependencyNode]] = field(
         default_factory=lambda: defaultdict(list)
     )
+    _nodes_by_unique_key: dict[str, DependencyNode] = field(default_factory=dict)
     max_depth: int = 0
     resolution_errors: list[str] = field(default_factory=list)
 
     def add_node(self, node: DependencyNode) -> None:
         """Add a node to the tree."""
         node_id = node.get_id()
+        unique_key = node.dependency_ref.get_unique_key()
         is_new = node_id not in self.nodes
         self.nodes[node_id] = node
         if is_new:
+            self._nodes_by_unique_key.setdefault(unique_key, node)
             self._nodes_by_depth[node.depth].append(node)
+        else:
+            self._nodes_by_unique_key[unique_key] = node
         self.max_depth = max(self.max_depth, node.depth)
 
     def get_node(self, unique_key: str) -> DependencyNode | None:
-        """Get a node by its unique key."""
-        return self.nodes.get(unique_key)
+        """Get a node by its unique key.
+
+        Looks up by ``DependencyReference.get_unique_key()`` which does
+        NOT include the ``#reference`` suffix.  The primary ``nodes``
+        dict is keyed by ``DependencyNode.get_id()`` which DOES include
+        it, so a plain ``dict.get`` would miss pinned deps (#1846).
+        """
+        return self._nodes_by_unique_key.get(unique_key) or self.nodes.get(unique_key)
 
     def get_nodes_at_depth(self, depth: int) -> list[DependencyNode]:
         """Get all nodes at a specific depth level."""
