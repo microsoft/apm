@@ -57,3 +57,15 @@ class TestDependencyTreeGetNode:
         assert found is not None
         assert found.parent is parent_node
         assert found.parent.dependency_ref.repo_url == "_local/agent-config"
+
+    def test_get_node_preserves_first_ref_for_same_unique_key(self):
+        """The unique-key index follows the graph's first-wins conflict policy."""
+        root = APMPackage(name="root", version="1.0.0")
+        tree = DependencyTree(root_package=root)
+
+        first_node = _make_node("owner/repo", reference="1111111")
+        second_node = _make_node("owner/repo", reference="2222222")
+        tree.add_node(first_node)
+        tree.add_node(second_node)
+
+        assert tree.get_node("owner/repo") is first_node

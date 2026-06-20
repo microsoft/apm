@@ -87,11 +87,14 @@ class DependencyTree:
     def add_node(self, node: DependencyNode) -> None:
         """Add a node to the tree."""
         node_id = node.get_id()
+        unique_key = node.dependency_ref.get_unique_key()
         is_new = node_id not in self.nodes
         self.nodes[node_id] = node
-        self._nodes_by_unique_key[node.dependency_ref.get_unique_key()] = node
         if is_new:
+            self._nodes_by_unique_key.setdefault(unique_key, node)
             self._nodes_by_depth[node.depth].append(node)
+        else:
+            self._nodes_by_unique_key[unique_key] = node
         self.max_depth = max(self.max_depth, node.depth)
 
     def get_node(self, unique_key: str) -> DependencyNode | None:

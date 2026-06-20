@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm audit --ci` no longer flags pinned remote dependencies declared by
+  local-path sub-packages as orphaned when they are resolved transitively.
+  (closes #1846) (#1855)
+
 ## [0.21.0] - 2026-06-19
 
 ### Added
