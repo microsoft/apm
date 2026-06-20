@@ -1259,26 +1259,10 @@ def install(  # noqa: PLR0913
             except ValueError as exc:
                 raise click.UsageError(f"Bundle security check failed: {exc}") from exc
             if _bundle_info is not None:
-                # Read allowExecutables from the project apm.yml (if present and
-                # enforcement is configured).  When not present (None), all
-                # executables including canvas are allowed from the bundle.
-                _allow_execs_for_bundle: builtins.dict | None = None
-                try:
-                    from ..security.executables import parse_allow_executables
-                    from ..utils.yaml_io import load_yaml as _load_yaml
+                # allowExecutables for bundle install gate.
+                from ..security.executables import read_bundle_allow_executables as _rbae
 
-                    _apm_yml_path = Path(root or ".") / "apm.yml"
-                    if _apm_yml_path.is_file():
-                        _apm_data = _load_yaml(_apm_yml_path)
-                        if isinstance(_apm_data, dict):
-                            _allow_execs_for_bundle = parse_allow_executables(_apm_data)
-                except Exception as _exc:
-                    logger.warning(
-                        f"Could not read allowExecutables from apm.yml: {_exc}. "
-                        "Treating as fully enforced with no approvals.",
-                        symbol="warning",
-                    )
-                    _allow_execs_for_bundle = {}
+                _allow_execs_for_bundle = _rbae(Path(root or ".") / "apm.yml", logger)
                 _install_lb(
                     bundle_info=_bundle_info,
                     bundle_arg=packages[0],
@@ -1873,38 +1857,10 @@ def _install_apm_packages(ctx, outcome):
             logger.verbose_detail(f"Collected {len(transitive_mcp)} transitive MCP dependency(ies)")
             mcp_deps = MCPIntegrator.deduplicate(mcp_deps + transitive_mcp)
 
-    # -- allowExecutables MCP gate -----------------------------------------
-    # When allowExecutables enforcement is active (block present in apm.yml),
-    # filter out MCP servers from packages that have NOT been approved for
-    # the ``mcp`` exec type.  Direct MCP entries in apm.yml are assumed
-    # intentional; only transitive/self-declared MCP servers from APM
-    # dependency packages are subject to this gate.
-    _project_allow_execs = getattr(apm_package, "allow_executables", None)
-    if _project_allow_execs is not None:
-        from ..security.executables import (
-            EXEC_TYPE_MCP,
-            effective_allow_executables,
-            is_package_approved,
-        )
+    # allowExecutables MCP gate.
+    from ..security.executables import filter_mcp_by_allow_executables as _fmcp
 
-        _allow_execs = effective_allow_executables(_project_allow_execs)
-        if _allow_execs is not None and mcp_deps:
-            _filtered_mcp = []
-            for _mcp_dep in mcp_deps:
-                _pkg_slug = _mcp_dep.name
-                if _pkg_slug and not is_package_approved(_allow_execs, _pkg_slug, EXEC_TYPE_MCP):
-                    logger.verbose_detail(
-                        f"Skipping MCP server from '{_pkg_slug}': not approved in allowExecutables. "
-                        f"Run 'apm approve {_pkg_slug}' to approve."
-                    )
-                else:
-                    _filtered_mcp.append(_mcp_dep)
-            if len(_filtered_mcp) < len(mcp_deps):
-                logger.warning(
-                    f"Filtered {len(mcp_deps) - len(_filtered_mcp)} MCP server(s) not approved "
-                    "in allowExecutables."
-                )
-            mcp_deps = _filtered_mcp
+    mcp_deps = _fmcp(mcp_deps, getattr(apm_package, "allow_executables", None), logger)
 
     # The pipeline gate phase (policy_gate.py) checks direct APM deps
     # and direct MCP deps from apm.yml.  However, transitive MCP

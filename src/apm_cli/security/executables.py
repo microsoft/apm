@@ -544,3 +544,52 @@ def effective_allow_executables(
         return None
     user = load_user_approvals()
     return {**project_allow_executables, **user}
+
+
+def filter_mcp_by_allow_executables(
+    mcp_deps: list,
+    project_allow_execs: dict | None,
+    logger: Any,
+) -> list:
+    """Filter MCP deps not approved in allowExecutables. Returns filtered list."""
+    if project_allow_execs is None or not mcp_deps:
+        return mcp_deps
+    _allow_execs = effective_allow_executables(project_allow_execs)
+    if _allow_execs is None:
+        return mcp_deps
+    _filtered = []
+    for _dep in mcp_deps:
+        _slug = _dep.name
+        if _slug and not is_package_approved(_allow_execs, _slug, EXEC_TYPE_MCP):
+            logger.verbose_detail(
+                f"Skipping MCP server from '{_slug}': not approved in allowExecutables. "
+                f"Run 'apm approve {_slug}' to approve."
+            )
+        else:
+            _filtered.append(_dep)
+    if len(_filtered) < len(mcp_deps):
+        logger.warning(
+            f"Filtered {len(mcp_deps) - len(_filtered)} MCP server(s) not approved "
+            "in allowExecutables."
+        )
+    return _filtered
+
+
+def read_bundle_allow_executables(apm_yml_path: Path, logger: Any) -> dict | None:
+    """Read allowExecutables from apm.yml for bundle install. Fail-closed on error."""
+    try:
+        from ..utils.yaml_io import load_yaml  # local import avoids circular at module init
+
+        if not apm_yml_path.is_file():
+            return None
+        data = load_yaml(apm_yml_path)
+        if isinstance(data, dict):
+            return parse_allow_executables(data)
+        return None
+    except Exception as exc:
+        logger.warning(
+            f"Could not read allowExecutables from apm.yml: {exc}. "
+            "Treating as fully enforced with no approvals.",
+            symbol="warning",
+        )
+        return {}
