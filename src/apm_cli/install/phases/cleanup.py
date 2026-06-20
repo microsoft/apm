@@ -19,8 +19,8 @@ Two distinct cleanup passes run in sequence:
     Failed deletions are re-inserted into ``ctx.package_deployed_files`` so
     the downstream lockfile phase records the retained paths.
 
-This module is a faithful extraction from ``commands/install.py`` --
-no behavioural changes.
+Originally extracted from ``commands/install.py``; later extended with
+cross-package file protection for stale cleanup (#1831).
 """
 
 from __future__ import annotations
