@@ -53,10 +53,12 @@ what the test family you want actually requires.
 | `requires_ado_pat` | Azure DevOps PAT for ADO host tests | `export ADO_APM_PAT=...` |
 | `requires_ado_bearer` | Azure CLI signed in + opt-in flag | `az login` and `export APM_TEST_ADO_BEARER=1` |
 | `requires_apm_binary` | A built `apm` binary on disk or `PATH` | `scripts/build-binary.sh` (or set `APM_BINARY_PATH`) |
+| `requires_live_generic_fixture` | A live non-GitHub/non-ADO git fixture package is configured | `export APM_LIVE_GENERIC_PACKAGE=gitlab.com/<group>/<repo>` and `export APM_LIVE_GENERIC_EXPECTED_SHA=<40-char-sha>` |
 | `requires_runtime_codex` | The `codex` runtime installed under `~/.apm/runtimes/` | `apm runtime setup codex` |
 | `requires_runtime_copilot` | The GitHub Copilot CLI runtime installed under `~/.apm/runtimes/` | `apm runtime setup copilot` |
 | `requires_runtime_llm` | The `llm` runtime installed under `~/.apm/runtimes/` | `apm runtime setup llm` |
-| `live` | Tests that hit real GitHub repos via cloning; deselected by default | Override the deselect: `pytest -m live tests/integration -v` |
+| `live` | Tests that hit real remote repos via live network cloning; deselected by default | Override the deselect: `pytest -m live tests/integration -v` |
+| `live_generic` | Live smoke tests for non-GitHub/non-ADO git-host install paths; deselected by default | Set the fixture env vars, then run `pytest -m live_generic tests/integration -v` |
 
 Without any of those env vars or runtimes a `pytest tests/integration`
 invocation is silent rather than red: every test is collected and
@@ -74,7 +76,19 @@ uv run pytest tests/integration/test_golden_scenario_e2e.py -v
 
 # Run only a marker family
 uv run pytest tests/integration -m requires_github_token -v
+
+# Run the live GitLab smoke after maintainers publish and pin the fixture
+export APM_RUN_INTEGRATION_TESTS=1
+export APM_LIVE_GENERIC_PACKAGE=gitlab.com/<group>/<repo>
+export APM_LIVE_GENERIC_EXPECTED_SHA=<40-char-sha>
+uv run pytest tests/integration/test_live_generic_gitlab_install.py -m live_generic -o addopts='' -v
 ```
+
+`APM_LIVE_GENERIC_HOST` is optional and defaults to `gitlab.com`. Set it only
+when validating the same live-generic fixture flow against another GitLab host.
+`APM_LIVE_GENERIC_EXPECTED_SHA` is required whenever
+`APM_LIVE_GENERIC_PACKAGE` is set, so the smoke test proves a known fixture
+commit rather than trusting whatever the remote default branch currently serves.
 
 ### Apm binary resolution
 

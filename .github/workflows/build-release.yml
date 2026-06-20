@@ -225,8 +225,10 @@ jobs:
         env:
           APM_E2E_TESTS: "1"
           APM_RUN_INTEGRATION_TESTS: "1"
-          APM_LIVE_GENERIC_HOST: gitlab.com
+          # Unset = collection-time skip. Set both vars after the public GitLab
+          # fixture exists; EXPECTED_SHA pins the fixture commit the smoke proves.
           APM_LIVE_GENERIC_PACKAGE: ${{ vars.APM_LIVE_GENERIC_PACKAGE }}
+          APM_LIVE_GENERIC_EXPECTED_SHA: ${{ vars.APM_LIVE_GENERIC_EXPECTED_SHA }}
         run: |
           uv run pytest tests/integration/test_live_generic_gitlab_install.py \
             -m live_generic \

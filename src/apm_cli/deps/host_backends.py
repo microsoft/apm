@@ -436,14 +436,11 @@ class GitLabBackend:
 
 @dataclass(frozen=True)
 class GenericGitBackend:
-    """Backend for non-GitHub non-ADO managed hosts (GitLab, Gitea, Gogs, Bitbucket).
+    """Backend for non-GitHub non-ADO generic hosts (Gitea, Gogs, Bitbucket).
 
     These hosts have heterogeneous APIs but support a common shape:
     HTTPS / SSH clones plus a Gitea-compatible Contents API at
     ``/api/v1/`` with a ``/api/v3/`` fallback for v3-only deployments.
-
-    GitLab is currently classified as ``"generic"`` and accessed via the
-    full repo URL (clone + sparse checkout), not the Contents API.
     """
 
     host_info: HostInfo
