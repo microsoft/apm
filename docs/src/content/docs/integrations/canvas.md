@@ -70,9 +70,10 @@ is not picked up mid-session.
 
 ## Trust gate for dependency canvases
 
-A canvas shipped by a **dependency** is arbitrary executable Node.js code. APM
-blocks dependency-provided canvases by default. To deploy them, the project must
-opt in to the executable gate and each developer must approve the package:
+A canvas shipped by a **dependency** is arbitrary executable Node.js code. When
+the project opts in to the executable gate (by adding `allowExecutables:` to
+`apm.yml`), APM blocks dependency-provided canvases unless the package has been
+explicitly approved. To deploy them:
 
 ```yaml
 # apm.yml  (committed -- opts the project in to the gate)

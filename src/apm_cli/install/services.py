@@ -231,9 +231,12 @@ def _log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger
     """Warn about skipped canvas extensions when the package ships them."""
     _install = Path(package_info.install_path)
     extensions_root = _install / ".apm" / "extensions"
-    has_canvas = extensions_root.is_dir() and any(
-        (d / "extension.mjs").is_file() for d in extensions_root.iterdir() if d.is_dir()
-    )
+    try:
+        has_canvas = extensions_root.is_dir() and any(
+            (d / "extension.mjs").is_file() for d in extensions_root.iterdir() if d.is_dir()
+        )
+    except OSError:
+        has_canvas = False
     if not has_canvas:
         return
     _pkg_label = package_name or getattr(package_info, "name", "unknown")

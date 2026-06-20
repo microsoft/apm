@@ -1272,8 +1272,13 @@ def install(  # noqa: PLR0913
                         _apm_data = _load_yaml(_apm_yml_path)
                         if isinstance(_apm_data, dict):
                             _allow_execs_for_bundle = parse_allow_executables(_apm_data)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.warning(
+                        f"Could not read allowExecutables from apm.yml: {_exc}. "
+                        "Treating as fully enforced with no approvals.",
+                        symbol="warning",
+                    )
+                    _allow_execs_for_bundle = {}
                 _install_lb(
                     bundle_info=_bundle_info,
                     bundle_arg=packages[0],
@@ -1886,9 +1891,7 @@ def _install_apm_packages(ctx, outcome):
         if _allow_execs is not None and mcp_deps:
             _filtered_mcp = []
             for _mcp_dep in mcp_deps:
-                _pkg_slug = getattr(_mcp_dep, "source_package", None) or getattr(
-                    _mcp_dep, "package_id", None
-                )
+                _pkg_slug = _mcp_dep.name
                 if _pkg_slug and not is_package_approved(_allow_execs, _pkg_slug, EXEC_TYPE_MCP):
                     logger.verbose_detail(
                         f"Skipping MCP server from '{_pkg_slug}': not approved in allowExecutables. "

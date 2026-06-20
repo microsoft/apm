@@ -174,9 +174,9 @@ environments where plugin executables are not trusted by default.
 
 Behind the `canvas` experimental flag, a package may ship a Copilot CLI canvas
 extension under `.apm/extensions/<name>/extension.mjs` (executable Node.js).
-Because a canvas from a dependency is arbitrary executable code, APM **blocks
-dependency-provided canvases by default**: the project must opt in to the
-executable gate via `allowExecutables: {}` in `apm.yml` and each developer
+Because a canvas from a dependency is arbitrary executable code, APM blocks
+dependency-provided canvases when the project opts in to the executable gate:
+the project must add `allowExecutables: {}` to `apm.yml` and each developer
 must run `apm approve <pkg>` to deploy it. A first-party canvas in the root
 package being installed deploys once the flag is on; dependency canvases always
 require explicit approval.
