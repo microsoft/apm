@@ -255,11 +255,12 @@ def _check_required_executable_untrusted(
         if pkg_name not in dep_names:
             continue  # presence is audited by required-packages / -deployed
         locked = lock_by_name.get(pkg_name)
-        # Trusted only when explicitly deployed. Absence of exec_status is
-        # treated as not-yet-trusted for a package the org MANDATES.
-        if locked is None or locked.exec_status not in (None, TRUST_DEPLOYED):
-            if locked is not None and locked.exec_status == TRUST_DEPLOYED:
-                continue
+        # Trusted when exec_status is absent (no executables declared) or when
+        # the executable gate recorded a deployed state. Gated or denied
+        # required executables are untrusted.
+        if locked is None or (
+            locked.exec_status is not None and locked.exec_status != TRUST_DEPLOYED
+        ):
             untrusted.append(pkg_name)
 
     if not untrusted:

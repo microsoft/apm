@@ -8,6 +8,8 @@ executable), so the field is OMITTED from the serialized entry when unset.
 
 from __future__ import annotations
 
+import pytest
+
 from apm_cli.deps.lockfile import LockedDependency
 
 
@@ -33,3 +35,8 @@ def test_exec_status_not_treated_as_unknown_forward_field():
     dep = LockedDependency.from_dict({"repo_url": "owner/repo", "exec_status": "deployed"})
     assert dep.exec_status == "deployed"
     assert "exec_status" not in dep._unknown_fields
+
+
+def test_invalid_exec_status_rejected():
+    with pytest.raises(ValueError, match="Unsupported lockfile exec_status"):
+        LockedDependency.from_dict({"repo_url": "owner/repo", "exec_status": "forged"})

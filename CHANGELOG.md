@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Executable Trust Governance v1 (#1873): organizations can now declare an
+- Executable Trust Governance v1 (#1873): executable trust is now one concept
+  with one resolver and deny-wins precedence. Organizations can now declare an
   `executables:` block in `apm-policy.yml` (`deny_all`, `deny`, `require`,
   `recommend`) that is carried through policy inheritance, closing the
   GRANT/MANDATE asymmetry where projects could allow executables but orgs
@@ -17,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`resolve_exec_decision`) is now shared by both the install gate and the
   `apm audit` policy checks, so the gate and the audit can never disagree.
   Precedence (first match wins): org `deny_all`/`deny` > user deny > project
-  allow > user allow > org `recommend` > default-deny. The lockfile records a
+  deny > project allow > user allow > org `recommend` > default-deny. The lockfile records a
   per-dependency `exec_status` (`deployed`, `gated_pending_approval`,
   `denied`, `absent`). No cryptographic signing or `enforce`-mandate
   execution is introduced in v1 (an unverified `enforce` rung fail-safe

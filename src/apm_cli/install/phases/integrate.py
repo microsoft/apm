@@ -16,6 +16,8 @@ remains a sibling helper here rather than a fourth ``DependencySource``.
 from __future__ import annotations
 
 import builtins
+import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -473,6 +475,25 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
     control) so the next install deploys them (#1873).
     """
     if not ctx.blocked_executables:
+        return
+
+    if os.environ.get("APM_NON_INTERACTIVE") or os.environ.get("CI") or not sys.stdin.isatty():
+        first = ctx.blocked_executables[0].package_name
+        msg = (
+            f"{len(ctx.blocked_executables)} package(s) have executable primitives "
+            "parked pending approval; install completed without deploying them."
+        )
+        remedy = (
+            f"Run 'apm policy explain {first}' for detail, then 'apm approve {first}' to trust it."
+        )
+        if ctx.logger:
+            ctx.logger.warning(msg, symbol="warning")
+            ctx.logger.info(remedy, symbol="info")
+        else:
+            from apm_cli.utils.console import _rich_info, _rich_warning
+
+            _rich_warning(msg)
+            _rich_info(remedy, symbol="info")
         return
 
     from apm_cli.security.executables import (

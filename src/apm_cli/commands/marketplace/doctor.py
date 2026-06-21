@@ -43,12 +43,12 @@ def _executable_trust_drift_check(project_root: Path) -> _DoctorCheck | None:
             resolve_exec_decision,
         )
         from ...utils.yaml_io import load_yaml
-        from ..approve import _load_org_policy, _scan_installed_packages
+        from ..approve import load_org_policy, scan_installed_executable_packages
 
         data = load_yaml(apm_path)
         project_data = data if isinstance(data, dict) else {}
         ctx = build_exec_trust_context(
-            policy=_load_org_policy(project_root), project_data=project_data
+            policy=load_org_policy(project_root), project_data=project_data
         )
     except Exception:
         return None
@@ -65,7 +65,7 @@ def _executable_trust_drift_check(project_root: Path) -> _DoctorCheck | None:
     allow_layers = (LAYER_PROJECT_ALLOW, LAYER_USER_ALLOW)
     conflicts: list[str] = []
     try:
-        for decl in _scan_installed_packages(apm_path):
+        for decl in scan_installed_executable_packages(apm_path):
             if not getattr(decl, "has_executables", False):
                 continue
             for exec_type in decl.exec_types:

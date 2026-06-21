@@ -63,7 +63,7 @@ def _save_store(
 
 
 def _store_label(user_scope: bool) -> str:
-    return "~/.apm/config.json" if user_scope else "apm.yml (executables)"
+    return "~/.apm/config.json" if user_scope else "apm.yml executables block"
 
 
 def _load_org_policy(project_root: Path):
@@ -81,6 +81,11 @@ def _load_org_policy(project_root: Path):
     return ApmPolicy()
 
 
+def load_org_policy(project_root: Path):
+    """Public wrapper for best-effort merged org policy loading."""
+    return _load_org_policy(project_root)
+
+
 @click.command("approve")
 @click.argument("packages", nargs=-1)
 @click.option("--pending", is_flag=True, help="List packages with unapproved executables.")
@@ -94,7 +99,7 @@ def _load_org_policy(project_root: Path):
     "--list",
     "list_decisions",
     is_flag=True,
-    help="List the effective trust decision and deciding layer per installed package.",
+    help="List effective trust decisions; fleet view for apm policy explain.",
 )
 @click.option(
     "--user",
@@ -191,12 +196,12 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
             # Allow denying a package that is not (or no longer) installed.
             deny[pkg] = {t: True for t in ("hooks", "mcp", "bin", "canvas")}
             allow.pop(_find_matching_key(allow, pkg) or pkg, None)
-            _rich_success(f"Denied {pkg} (all executable types)")
+            _rich_info(f"Denied {pkg} (all executable types)", symbol="info")
             changed += 1
             continue
         deny[decl.package_key] = {t: True for t in decl.exec_types}
         allow.pop(_find_matching_key(allow, decl.package_key) or decl.package_key, None)
-        _rich_success(f"Denied {decl.package_key}: {decl.summary_line()}")
+        _rich_info(f"Denied {decl.package_key}: {decl.summary_line()}", symbol="info")
         changed += 1
 
     if changed > 0:
@@ -247,15 +252,17 @@ def explain_decision(package: str) -> None:
         return
 
     _rich_echo(f"{decl.package_key}: {decl.summary_line()}")
-    has_block = False
-    for exec_type in decl.exec_types:
-        decision = resolve_exec_decision(ctx, decl.package_key, exec_type)
+    decisions = [
+        resolve_exec_decision(ctx, decl.package_key, exec_type) for exec_type in decl.exec_types
+    ]
+    has_block = any(not decision.allowed for decision in decisions)
+    verdict = "blocked" if has_block else "allowed"
+    _rich_echo(f"  verdict: {verdict}")
+    for exec_type, decision in zip(decl.exec_types, decisions, strict=True):
         state = "[+] allowed" if decision.allowed else "[x] blocked"
         _rich_echo(f"  {exec_type:<7} {state}  (layer: {decision.deciding_layer})")
         if decision.shadowed_layers:
             _rich_echo(f"          shadowed: {', '.join(decision.shadowed_layers)}")
-        if not decision.allowed:
-            has_block = True
     if has_block:
         _rich_info(
             f"To trust it: `apm approve {decl.package_name}` "
@@ -286,10 +293,27 @@ def _list_decisions(manifest: Path) -> None:
             symbol="info",
         )
 
+    rows: list[tuple[object, list[tuple[str, object]]]] = []
+    allowed_count = blocked_count = 0
     for decl in declarations:
-        states = []
+        row: list[tuple[str, object]] = []
         for exec_type in decl.exec_types:
             decision = resolve_exec_decision(ctx, decl.package_key, exec_type)
+            row.append((exec_type, decision))
+            if decision.allowed:
+                allowed_count += 1
+            else:
+                blocked_count += 1
+        rows.append((decl, row))
+
+    _rich_info(
+        f"{len(declarations)} package(s) with executables "
+        f"({allowed_count} allowed type(s), {blocked_count} blocked type(s)).",
+        symbol="info",
+    )
+    for decl, row in rows:
+        states = []
+        for exec_type, decision in row:
             mark = "+" if decision.allowed else "x"
             states.append(f"{exec_type}[{mark}:{decision.deciding_layer}]")
         _rich_echo(f"  {decl.package_key}: {' '.join(states)}")
@@ -417,7 +441,7 @@ def _approve_packages(
         _rich_info(f"Updated {_store_label(user_scope)} ({count} approved).", symbol="info")
 
 
-def _scan_installed_packages(manifest: Path) -> list:
+def scan_installed_executable_packages(manifest: Path) -> list:
     """Scan all installed packages under apm_modules/ for executables."""
     from ..security.executables import ExecutableDeclaration, scan_package_executables
 
@@ -455,6 +479,11 @@ def _scan_installed_packages(manifest: Path) -> list:
 
     _scan_dir(apm_modules)
     return results
+
+
+def _scan_installed_packages(manifest: Path) -> list:
+    """Compatibility wrapper for tests and older imports."""
+    return scan_installed_executable_packages(manifest)
 
 
 def _is_approved(

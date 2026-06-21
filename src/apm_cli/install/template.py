@@ -38,6 +38,9 @@ def _effective_allow(ctx) -> dict | None:
     )
     from apm_cli.utils.yaml_io import load_yaml
 
+    if getattr(ctx, "exec_trust_ctx", None) is not None:
+        return getattr(ctx, "exec_allow_map", None)
+
     project_data: dict | None = None
     manifest = getattr(ctx, "project_root", None)
     if manifest is not None:
@@ -56,11 +59,14 @@ def _effective_allow(ctx) -> dict | None:
 
     policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
     trust_ctx = build_exec_trust_context(policy=policy, project_data=project_data)
-    # Cache the resolved context so the gate can compute lockfile exec_status
-    # from the same precedence ladder (single source of truth).
+    allow_map = materialize_exec_map(trust_ctx)
+    # Cache the resolved context and allow map once per install so each
+    # dependency uses the same precedence ladder without re-reading policy files.
     if hasattr(ctx, "exec_trust_ctx"):
         ctx.exec_trust_ctx = trust_ctx
-    return materialize_exec_map(trust_ctx)
+    if hasattr(ctx, "exec_allow_map"):
+        ctx.exec_allow_map = allow_map
+    return allow_map
 
 
 def run_integration_template(

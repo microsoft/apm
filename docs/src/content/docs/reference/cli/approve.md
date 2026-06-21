@@ -85,7 +85,7 @@ The gate is enabled when any layer opts in: the project declares an
 | `--pending` | List all packages with unapproved executables. |
 | `--all` | Approve all currently blocked packages. |
 | `--recommended` | Bulk-accept the org `executables.recommend` set. |
-| `--list` | Show the effective trust decision and deciding layer per installed package. |
+| `--list` | Show the fleet-level effective trust decision and deciding layer per installed package. |
 | `--user` | Write the grant to `~/.apm/config.json` instead of `apm.yml`. |
 
 ### `apm deny`
@@ -142,9 +142,10 @@ The personal store uses the same shape under `executables` in
 **removed**; its contents are migrated into `~/.apm/config.json` automatically
 on first read.
 
-Version pinning means a grant keyed to `owner/repo#1.2.0` covers `owner/repo`
-regardless of version; pin the version in the key to scope a grant to one
-release.
+Grant keys are package-scoped in v1: a bare `owner/repo` key and a
+`owner/repo#1.2.0` key both match the package name regardless of the installed
+version. Use the versioned form for audit readability, not as a per-release
+trust boundary.
 
 ## Examples
 
@@ -160,10 +161,15 @@ Approve for this machine only:
 apm approve --user owner/repo
 ```
 
-Show all blocked packages, then approve everything:
+List packages awaiting approval:
 
 ```bash
 apm approve --pending
+```
+
+After review, approve everything still pending:
+
+```bash
 apm approve --all
 ```
 
@@ -188,9 +194,11 @@ apm deny evil/pkg
 ## Non-interactive / CI usage
 
 In CI environments (`CI=true`, `APM_NON_INTERACTIVE=1`, or when stdin is not a
-TTY), `apm install` fails if any dependency has unapproved executables.
-Pre-approve packages by committing them to the project `executables.allow`
-block (the way to share trust via source control):
+TTY), `apm install` parks unapproved executables and prints the approval
+remedy instead of prompting. Pre-approve packages by committing them to the
+project `executables.allow` block (the way to share trust via source control).
+Required-but-untrusted executables are enforced by `apm audit` through the
+`required-executable-untrusted` signal:
 
 ```yaml
 # apm.yml

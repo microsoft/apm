@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 _SELF_KEY = "."
 _ALLOWED_HOST_TYPES = {"gitlab"}
+_ALLOWED_EXEC_STATUS = {"deployed", "gated_pending_approval", "denied", "absent"}
 
 
 def _normalize_lockfile_host_type(raw: Any) -> str | None:
@@ -36,6 +37,21 @@ def _normalize_lockfile_host_type(raw: Any) -> str | None:
         raise ValueError(
             f"Unsupported lockfile host_type: {raw}. Supported values: "
             f"{', '.join(sorted(_ALLOWED_HOST_TYPES))}"
+        )
+    return value
+
+
+def _normalize_exec_status(raw: Any) -> str | None:
+    """Validate and normalize the optional executable-trust status."""
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("lockfile exec_status must be a non-empty string")
+    value = raw.strip()
+    if value not in _ALLOWED_EXEC_STATUS:
+        raise ValueError(
+            f"Unsupported lockfile exec_status: {raw}. Supported values: "
+            f"{', '.join(sorted(_ALLOWED_EXEC_STATUS))}"
         )
     return value
 
@@ -246,6 +262,7 @@ class LockedDependency:
                 port = _p_int
 
         host_type = _normalize_lockfile_host_type(data.get("host_type"))
+        exec_status = _normalize_exec_status(data.get("exec_status"))
 
         # Recognised keys this build knows about. Anything else is captured
         # as ``_unknown_fields`` so a re-emit preserves forward-introduced
@@ -323,7 +340,7 @@ class LockedDependency:
             resolved_tag=data.get("resolved_tag"),
             resolved_at=data.get("resolved_at"),
             declared_license=data.get("declared_license"),
-            exec_status=data.get("exec_status"),
+            exec_status=exec_status,
             _unknown_fields=unknown_fields,
         )
 

@@ -14,11 +14,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.exec_gate import (
     check_executable_approval,
     log_bin_status,
     resolve_package_key,
 )
+from apm_cli.install.phases.integrate import _run_executable_approval_prompt
+from apm_cli.install.phases.lockfile import LockfileBuilder
 from apm_cli.security.executables import (
     ALL_EXEC_TYPES,
     ENFORCED_EXEC_TYPES,
@@ -156,6 +159,39 @@ class TestScanPackageExecutablesIntegration:
         # Only the real file is counted
         assert decl.hook_count == 1
         assert decl.hook_details == ["real.json"]
+
+
+class TestLockfileExecStatusIntegration:
+    """Integration: install-phase trust state is serialized into the lockfile."""
+
+    def test_attach_exec_status_serializes_to_lockfile_yaml(self) -> None:
+        lockfile = LockFile()
+        lockfile.add_dependency(LockedDependency(repo_url="owner/repo"))
+        ctx = SimpleNamespace(package_exec_status={"owner/repo": "gated_pending_approval"})
+
+        LockfileBuilder(ctx)._attach_exec_status(lockfile)
+
+        assert lockfile.dependencies["owner/repo"].exec_status == "gated_pending_approval"
+        assert "exec_status: gated_pending_approval" in lockfile.to_yaml()
+
+
+class TestNonInteractiveExecutablePromptIntegration:
+    """Integration: CI installs park executables instead of aborting."""
+
+    def test_noninteractive_blocked_executables_warn_without_exit(self, monkeypatch) -> None:
+        decl = ExecutableDeclaration(
+            package_key="owner/repo#1.0", package_name="owner/repo", hook_count=1
+        )
+        logger = MagicMock()
+        ctx = SimpleNamespace(blocked_executables=[decl], logger=logger)
+
+        monkeypatch.setenv("APM_NON_INTERACTIVE", "1")
+
+        _run_executable_approval_prompt(ctx)
+
+        logger.warning.assert_called_once()
+        logger.info.assert_called_once()
+        assert "apm policy explain owner/repo" in logger.info.call_args.args[0]
 
 
 # -------------------------------------------------------------------

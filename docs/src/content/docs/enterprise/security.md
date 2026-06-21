@@ -327,7 +327,7 @@ first-match-wins ladder:
 
 - **Org** (`apm-policy.yml` `executables:`) is the ceiling on deny. It can
   `deny_all`, `deny` packages, `require` packages be present and trusted, and
-  `recommend` a vetted set. See [executables](/apm/reference/policy-schema/#executables) in the policy
+  `recommend` a vetted set. See [executables](../reference/policy-schema/#executables) in the policy
   schema.
 - **Project** (`apm.yml` `executables.{allow,deny}`) is committed admin trust,
   shared with the team.
@@ -347,7 +347,7 @@ For CI, `apm install` succeeds when a required package is present-but-parked and
 prints a one-command remedy (e.g. `apm approve <pkg>`); a separate audit signal,
 `required-executable-untrusted`, hard-fails when a required package's
 executables are untrusted. Manage trust with [`apm approve` / `apm
-deny`](/apm/reference/cli/approve/), inspect the deciding layer for one
+deny`](../reference/cli/approve/), inspect the deciding layer for one
 package with `apm policy explain <pkg>`, and surface fleet-wide layer
 conflicts with `apm doctor`.
 

@@ -15,7 +15,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from apm_cli.security.executables import ExecTrustContext
 
 
 @dataclass
@@ -156,7 +159,8 @@ class InstallContext:
     blocked_executables: list[Any] = field(default_factory=list)  # integrate
     # #1873 executable-trust: the resolved trust context (built once per
     # install) and the per-dependency lockfile exec_status computed at the gate.
-    exec_trust_ctx: Any = None  # ExecTrustContext, lazily built in template
+    exec_trust_ctx: ExecTrustContext | None = None  # lazily built in template
+    exec_allow_map: dict[str, dict[str, bool]] | None = None  # None means gate disabled
     package_exec_status: dict = field(default_factory=dict)  # dep_key -> exec_status
 
     # ------------------------------------------------------------------
