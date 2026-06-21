@@ -150,6 +150,196 @@ def is_any_type_approved(
 
 
 # -------------------------------------------------------------------
+# Unified executable-trust resolver (issue #1873)
+# -------------------------------------------------------------------
+#
+# One deny-wins, first-match-wins precedence ladder, shared by the
+# install gate AND the policy audit so the two never guess independently.
+
+# trust_state values (also the lockfile exec_status field domain).
+TRUST_DEPLOYED = "deployed"  # allowed and (will be) materialised
+TRUST_GATED = "gated_pending_approval"  # not yet approved; approvable
+TRUST_DENIED = "denied"  # an explicit deny rule forbids it
+TRUST_ABSENT = "absent"  # package not present at all (audit-only)
+
+# deciding_layer labels (which rung of the ladder decided).
+LAYER_GATE_DISABLED = "gate-disabled"
+LAYER_ORG_DENY_ALL = "org-deny-all"
+LAYER_ORG_DENY = "org-deny"
+LAYER_USER_DENY = "user-deny"
+LAYER_PROJECT_DENY = "project-deny"
+LAYER_ENFORCE_DEGRADED = "org-enforce-degraded"  # v2 mandate, v1 fail-safe
+LAYER_PROJECT_ALLOW = "project-allow"
+LAYER_USER_ALLOW = "user-allow"
+LAYER_ORG_RECOMMEND = "org-recommend"
+LAYER_DEFAULT_DENY = "default-deny"
+
+
+@dataclass(frozen=True)
+class ExecDecision:
+    """The resolved trust decision for one (package, exec_type) pair.
+
+    Attributes:
+        allowed: Whether the executable may run / be materialised.
+        deciding_layer: Which precedence rung decided (one of the
+            ``LAYER_*`` constants) -- surfaced by ``apm explain``.
+        trust_state: One of ``TRUST_*`` for the lockfile ``exec_status``.
+        shadowed_layers: Lower-authority layers that held a contrary
+            opinion but were overridden (for ``apm explain`` honesty).
+    """
+
+    allowed: bool
+    deciding_layer: str
+    trust_state: str
+    shadowed_layers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ExecTrustContext:
+    """Resolved trust inputs across the org / project / user layers.
+
+    The org fields are package-name sets (version-blind, mirroring the
+    package-level ``bin_deploy`` semantics). ``org_bin_deny*`` carry the
+    DEPRECATED ``bin_deploy`` block, honored as a ``bin``-scoped deny
+    alias for one minor cycle. The project / user maps keep the granular
+    ``{package_key: {exec_type: bool}}`` shape.
+    """
+
+    gate_enabled: bool
+    org_deny_all: bool
+    org_deny: frozenset[str]
+    org_require: frozenset[str]
+    org_recommend: frozenset[str]
+    org_enforce: frozenset[str]
+    org_bin_deny_all: bool
+    org_bin_deny: frozenset[str]
+    project_allow: dict[str, dict[str, bool]]
+    project_deny: dict[str, dict[str, bool]]
+    user_allow: dict[str, dict[str, bool]]
+    user_deny: dict[str, dict[str, bool]]
+
+
+def _strip_version(package_key: str) -> str:
+    """Return the version-blind canonical name from an approval key."""
+    return package_key.split("#", 1)[0]
+
+
+def _map_grants(
+    grant_map: dict[str, dict[str, bool]] | None,
+    package_key: str,
+    exec_type: str,
+) -> bool:
+    """Return True if *grant_map* grants *exec_type* for *package_key*.
+
+    Matches the exact key, the version-blind name, or any stored key that
+    shares the same version-blind name -- so approving ``owner/repo``
+    covers ``owner/repo#v1`` and vice-versa.
+    """
+    if not grant_map:
+        return False
+    name = _strip_version(package_key)
+    for stored_key, entry in grant_map.items():
+        if not isinstance(entry, dict):
+            continue
+        if (
+            stored_key == package_key
+            or stored_key == name
+            or _strip_version(stored_key) == name
+        ) and bool(entry.get(exec_type, False)):
+            return True
+    return False
+
+
+def _org_denies(ctx: ExecTrustContext, name: str, exec_type: str) -> tuple[bool, str | None]:
+    """Return ``(denied, layer)`` for the org DENY ceiling (rule 1)."""
+    if ctx.org_deny_all:
+        return True, LAYER_ORG_DENY_ALL
+    if exec_type == EXEC_TYPE_BIN and ctx.org_bin_deny_all:
+        return True, LAYER_ORG_DENY_ALL
+    if name in ctx.org_deny:
+        return True, LAYER_ORG_DENY
+    if exec_type == EXEC_TYPE_BIN and name in ctx.org_bin_deny:
+        return True, LAYER_ORG_DENY
+    return False, None
+
+
+def resolve_exec_decision(
+    ctx: ExecTrustContext,
+    package_key: str,
+    exec_type: str,
+) -> ExecDecision:
+    """Resolve the trust decision for one (package, exec_type) pair.
+
+    Implements the #1873 deny-wins, first-match-wins ladder:
+
+      1. ORG deny_all / deny           -> DENIED (absolute ceiling)
+      2. USER deny                     -> DENIED (narrowing)
+         PROJECT deny                  -> DENIED (committed narrowing)
+      3/4. ORG enforce                 -> v1 fail-safe degrade to recommend
+      5. PROJECT allow                 -> ALLOWED
+      6. USER allow                    -> ALLOWED
+      7. ORG recommend                 -> ALLOWED (user-overridable)
+      8. (no match)                    -> DENIED, secure-by-default (approvable)
+
+    v1 NEVER force-executes: ``enforce`` carries no provenance check and
+    degrades to ``recommend`` so it stays overridable by a USER deny.
+    """
+    if not ctx.gate_enabled:
+        return ExecDecision(True, LAYER_GATE_DISABLED, TRUST_DEPLOYED)
+
+    name = _strip_version(package_key)
+
+    # 1. ORG deny ceiling (absolute).
+    denied, layer = _org_denies(ctx, name, exec_type)
+    if denied:
+        return ExecDecision(False, layer, TRUST_DENIED, _shadowed_grants(ctx, name, exec_type))
+
+    # 2. USER deny / PROJECT deny (narrowing; both win over any grant).
+    if _map_grants(ctx.user_deny, package_key, exec_type):
+        return ExecDecision(
+            False, LAYER_USER_DENY, TRUST_DENIED, _shadowed_grants(ctx, name, exec_type)
+        )
+    if _map_grants(ctx.project_deny, package_key, exec_type):
+        return ExecDecision(
+            False, LAYER_PROJECT_DENY, TRUST_DENIED, _shadowed_grants(ctx, name, exec_type)
+        )
+
+    enforce_active = name in ctx.org_enforce
+
+    # 5. PROJECT allow (overridable only by an upstream deny, handled above).
+    if _map_grants(ctx.project_allow, package_key, exec_type):
+        return ExecDecision(True, LAYER_PROJECT_ALLOW, TRUST_DEPLOYED)
+
+    # 6. USER allow.
+    if _map_grants(ctx.user_allow, package_key, exec_type):
+        return ExecDecision(True, LAYER_USER_ALLOW, TRUST_DEPLOYED)
+
+    # 7. ORG recommend (or degraded enforce). Both default-allow, overridable.
+    if name in ctx.org_recommend or enforce_active:
+        layer = (
+            LAYER_ENFORCE_DEGRADED
+            if enforce_active and name not in ctx.org_recommend
+            else LAYER_ORG_RECOMMEND
+        )
+        return ExecDecision(True, layer, TRUST_DEPLOYED)
+
+    # 8. Secure-by-default: denied but approvable (gated, not hard-denied).
+    return ExecDecision(False, LAYER_DEFAULT_DENY, TRUST_GATED)
+
+
+def _shadowed_grants(ctx: ExecTrustContext, name: str, exec_type: str) -> tuple[str, ...]:
+    """Return lower-authority grant layers overridden by a deny decision."""
+    shadowed: list[str] = []
+    if _map_grants(ctx.project_allow, name, exec_type):
+        shadowed.append(LAYER_PROJECT_ALLOW)
+    if _map_grants(ctx.user_allow, name, exec_type):
+        shadowed.append(LAYER_USER_ALLOW)
+    if name in ctx.org_recommend or name in ctx.org_enforce:
+        shadowed.append(LAYER_ORG_RECOMMEND)
+    return tuple(shadowed)
+
+
+# -------------------------------------------------------------------
 # Approval key construction
 # -------------------------------------------------------------------
 
@@ -593,3 +783,243 @@ def read_bundle_allow_executables(apm_yml_path: Path, logger: Any) -> dict | Non
             symbol="warning",
         )
         return {}
+
+
+# -------------------------------------------------------------------
+# Unified vocabulary layer (issue #1873): one noun ``executables``
+# -------------------------------------------------------------------
+#
+# Project apm.yml: ``executables: {allow, deny}`` (the deprecated
+# ``allowExecutables`` block remains a read alias for one minor cycle).
+# Personal consent: ``~/.apm/config.json`` under ``executables:{allow,deny}``
+# (lowest authority). The standalone ``~/.apm/approvals.yml`` is migrated on
+# first read and DELETED -- net-new control-surface files = 0.
+
+
+def _parse_grant_block(
+    raw: Any,
+    *,
+    where: str,
+) -> dict[str, dict[str, bool]]:
+    """Validate and normalise a ``{package_key: {exec_type: bool}}`` map."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"{where} must be a mapping of package keys to "
+            "{hooks: bool, mcp: bool, bin: bool, canvas: bool}"
+        )
+    result: dict[str, dict[str, bool]] = {}
+    for pkg_key, entry in raw.items():
+        if not isinstance(pkg_key, str):
+            raise ValueError(f"{where} key must be a string, got {type(pkg_key).__name__}")
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"{where}[{pkg_key!r}] must be a mapping of exec types to "
+                f"booleans, got {type(entry).__name__}"
+            )
+        parsed: dict[str, bool] = {}
+        for exec_type, value in entry.items():
+            exec_type_str = str(exec_type)
+            if exec_type_str not in ALL_EXEC_TYPES:
+                raise ValueError(
+                    f"{where}[{pkg_key!r}]: unknown exec type {exec_type_str!r} "
+                    f"(valid: {', '.join(ALL_EXEC_TYPES)})"
+                )
+            if not isinstance(value, bool):
+                raise ValueError(
+                    f"{where}[{pkg_key!r}][{exec_type_str!r}] must be a boolean, "
+                    f"got {type(value).__name__}"
+                )
+            parsed[exec_type_str] = value
+        result[pkg_key] = parsed
+    return result
+
+
+def parse_project_executables(
+    data: dict[str, Any],
+) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]], bool]:
+    """Parse the project ``executables`` block from raw apm.yml data.
+
+    Returns ``(allow, deny, used_deprecated_alias)``. The deprecated
+    ``allowExecutables`` block is folded into ``allow`` (the new
+    ``executables.allow`` wins on a per-key conflict); when it is present the
+    boolean flag is ``True`` so callers can emit one deprecation warning.
+    """
+    used_alias = False
+    allow: dict[str, dict[str, bool]] = {}
+
+    alias_raw = data.get("allowExecutables")
+    if alias_raw is not None:
+        used_alias = True
+        allow.update(_parse_grant_block(alias_raw, where="allowExecutables"))
+
+    deny: dict[str, dict[str, bool]] = {}
+    block = data.get("executables")
+    if block is not None:
+        if not isinstance(block, dict):
+            raise ValueError("executables must be a mapping with 'allow' and/or 'deny' keys")
+        allow.update(_parse_grant_block(block.get("allow"), where="executables.allow"))
+        deny = _parse_grant_block(block.get("deny"), where="executables.deny")
+
+    return allow, deny, used_alias
+
+
+def project_executables_gate_enabled(data: dict[str, Any]) -> bool:
+    """Return True when the project opts into the gate (any block present)."""
+    return data.get("executables") is not None or data.get("allowExecutables") is not None
+
+
+def _user_config_file() -> Path:
+    """Return the path to the user-local JSON config (override seam in tests)."""
+    from .. import config
+
+    return Path(config.CONFIG_FILE)
+
+
+def _legacy_approvals_path() -> Path:
+    """Return the path to the deprecated ``~/.apm/approvals.yml`` store."""
+    return get_user_approvals_path()
+
+
+def _migrate_legacy_approvals(allow: dict[str, dict[str, bool]]) -> dict[str, dict[str, bool]]:
+    """Fold a legacy ``approvals.yml`` into *allow* and delete the file.
+
+    The legacy file stored a bare ``{package_key: {exec_type: bool}}`` map of
+    grants. Existing config entries win over legacy entries on conflict.
+    """
+    import contextlib
+
+    legacy = _legacy_approvals_path()
+    if not legacy.is_file():
+        return allow
+    from ..utils.yaml_io import load_yaml
+
+    legacy_data = load_yaml(legacy)
+    if isinstance(legacy_data, dict):
+        for pkg_key, entry in legacy_data.items():
+            if isinstance(entry, dict):
+                merged = {**{k: bool(v) for k, v in entry.items()}, **allow.get(pkg_key, {})}
+                allow[pkg_key] = merged
+    with contextlib.suppress(OSError):
+        legacy.unlink()
+    return allow
+
+
+def load_user_executables() -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]]]:
+    """Load personal executable consent from ``~/.apm/config.json``.
+
+    Returns ``(allow, deny)``. On first read, any legacy
+    ``~/.apm/approvals.yml`` is folded into ``allow`` and deleted, and the
+    migrated state is persisted back to the config so the fold happens once.
+    """
+    import json
+
+    cfg_path = _user_config_file()
+    cfg: dict[str, Any] = {}
+    if cfg_path.is_file():
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8")) or {}
+        except (OSError, ValueError):
+            cfg = {}
+    section = cfg.get("executables") if isinstance(cfg.get("executables"), dict) else {}
+    allow = dict(section.get("allow") or {})
+    deny = dict(section.get("deny") or {})
+
+    migrated = _migrate_legacy_approvals(allow)
+    if migrated != allow or (allow and "executables" not in cfg):
+        allow = migrated
+        save_user_executables(allow, deny)
+    else:
+        allow = migrated
+    return allow, deny
+
+
+def save_user_executables(
+    allow: dict[str, dict[str, bool]],
+    deny: dict[str, dict[str, bool]],
+) -> None:
+    """Persist personal executable consent into ``~/.apm/config.json``.
+
+    The config file is written owner-only (``0o600``) to keep the consent
+    list private on shared systems.
+    """
+    import contextlib
+    import json
+
+    cfg_path = _user_config_file()
+    cfg: dict[str, Any] = {}
+    if cfg_path.is_file():
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8")) or {}
+        except (OSError, ValueError):
+            cfg = {}
+    cfg["executables"] = {"allow": allow, "deny": deny}
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    with contextlib.suppress(NotImplementedError, OSError):
+        os.chmod(cfg_path, 0o600)
+
+
+def build_exec_trust_context(
+    *,
+    policy: Any | None,
+    project_data: dict[str, Any] | None,
+) -> ExecTrustContext:
+    """Assemble an :class:`ExecTrustContext` from org / project / user inputs.
+
+    Args:
+        policy: The merged org :class:`~apm_cli.policy.schema.ApmPolicy`
+            (or ``None`` when no policy applies).
+        project_data: Raw project ``apm.yml`` data (or ``None``).
+
+    The gate is enabled when ANY layer opts in: the project declares an
+    ``executables``/``allowExecutables`` block (even empty), or the org policy
+    carries a non-empty ``executables`` block, or a legacy ``bin_deploy`` deny.
+    """
+    data = project_data or {}
+    project_allow, project_deny, _alias = parse_project_executables(data)
+    user_allow, user_deny = load_user_executables()
+
+    org_deny_all = False
+    org_deny: frozenset[str] = frozenset()
+    org_require: frozenset[str] = frozenset()
+    org_recommend: frozenset[str] = frozenset()
+    org_enforce: frozenset[str] = frozenset()
+    org_bin_deny_all = False
+    org_bin_deny: frozenset[str] = frozenset()
+    org_signal = False
+
+    if policy is not None:
+        execs = getattr(policy, "executables", None)
+        if execs is not None:
+            org_deny_all = bool(getattr(execs, "deny_all", False))
+            org_deny = frozenset(getattr(execs, "deny", ()) or ())
+            org_require = frozenset(getattr(execs, "require", ()) or ())
+            org_recommend = frozenset(getattr(execs, "recommend", ()) or ())
+            org_enforce = frozenset(getattr(execs, "enforce", ()) or ())
+            org_signal = bool(
+                org_deny_all or org_deny or org_require or org_recommend or org_enforce
+            )
+        bin_deploy = getattr(policy, "bin_deploy", None)
+        if bin_deploy is not None:
+            org_bin_deny_all = bool(getattr(bin_deploy, "deny_all", False))
+            org_bin_deny = frozenset(getattr(bin_deploy, "deny", ()) or ())
+            org_signal = org_signal or org_bin_deny_all or bool(org_bin_deny)
+
+    gate_enabled = project_executables_gate_enabled(data) or org_signal
+
+    return ExecTrustContext(
+        gate_enabled=gate_enabled,
+        org_deny_all=org_deny_all,
+        org_deny=org_deny,
+        org_require=org_require,
+        org_recommend=org_recommend,
+        org_enforce=org_enforce,
+        org_bin_deny_all=org_bin_deny_all,
+        org_bin_deny=org_bin_deny,
+        project_allow=project_allow,
+        project_deny=project_deny,
+        user_allow=user_allow,
+        user_deny=user_deny,
+    )

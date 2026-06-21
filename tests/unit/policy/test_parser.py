@@ -123,6 +123,57 @@ class TestValidatePolicy(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("mapping", errors[0])
 
+    def test_executables_block_valid(self):
+        errors, warnings = validate_policy(  # noqa: RUF059
+            {
+                "executables": {
+                    "deny_all": False,
+                    "deny": ["bad/pkg"],
+                    "require": ["org/hook"],
+                    "recommend": ["org/vetted"],
+                    "enforce": ["org/mandated"],
+                }
+            }
+        )
+        self.assertEqual(errors, [])
+
+    def test_executables_deny_all_must_be_bool(self):
+        errors, _ = validate_policy({"executables": {"deny_all": "yes"}})
+        self.assertTrue(any("deny_all" in e for e in errors))
+
+    def test_executables_deny_must_be_list(self):
+        errors, _ = validate_policy({"executables": {"deny": "bad/pkg"}})
+        self.assertTrue(any("executables.deny" in e for e in errors))
+
+    def test_executables_must_be_mapping(self):
+        errors, _ = validate_policy({"executables": ["bad/pkg"]})
+        self.assertTrue(any("executables must be a YAML mapping" in e for e in errors))
+
+    def test_bin_deploy_emits_deprecation_warning(self):
+        _, warnings = validate_policy({"bin_deploy": {"deny_all": True}})
+        self.assertTrue(any("deprecated" in w and "bin_deploy" in w for w in warnings))
+
+    def test_build_executables_policy(self):
+        policy = _build_policy(
+            {
+                "executables": {
+                    "deny_all": True,
+                    "deny": ["bad/pkg"],
+                    "require": ["org/hook"],
+                    "recommend": ["org/vetted"],
+                }
+            }
+        )
+        self.assertTrue(policy.executables.deny_all)
+        self.assertEqual(policy.executables.deny, ("bad/pkg",))
+        self.assertEqual(policy.executables.require, ("org/hook",))
+        self.assertEqual(policy.executables.recommend, ("org/vetted",))
+
+    def test_build_executables_default_empty(self):
+        policy = _build_policy({"name": "x"})
+        self.assertFalse(policy.executables.deny_all)
+        self.assertEqual(policy.executables.deny, ())
+
     def test_multiple_errors(self):
         errors, warnings = validate_policy(  # noqa: RUF059
             {

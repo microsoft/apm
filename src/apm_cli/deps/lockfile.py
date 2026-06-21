@@ -104,6 +104,12 @@ class LockedDependency:
     # rather than stored as a sentinel, so absence stays distinguishable from
     # an explicit declaration.
     declared_license: str | None = None
+    # Resolved executable-trust state (issue #1873). One of ``deployed`` |
+    # ``gated_pending_approval`` | ``denied`` | ``absent``, mirroring the
+    # resolver ``trust_state``. Absence (``None``) means the package declared
+    # no executable primitive; it is OMITTED from the serialized entry so a
+    # never-gated package stays distinguishable from an explicitly-cleared one.
+    exec_status: str | None = None
     # Forward-compat carrier: keys we don't recognise are preserved
     # through a from_dict / to_dict round-trip so an older APM build
     # reading a lockfile written by a newer build doesn't silently drop
@@ -203,6 +209,8 @@ class LockedDependency:
             result["resolved_at"] = self.resolved_at
         if self.declared_license:
             result["declared_license"] = self.declared_license
+        if self.exec_status:
+            result["exec_status"] = self.exec_status
         # Replay forward-compat unknown fields LAST so they never shadow a
         # known field that this build understands.
         for k, v in self._unknown_fields.items():
@@ -276,6 +284,7 @@ class LockedDependency:
             "resolved_tag",
             "resolved_at",
             "declared_license",
+            "exec_status",
             # legacy migration key handled above
             "deployed_skills",
         }
@@ -314,6 +323,7 @@ class LockedDependency:
             resolved_tag=data.get("resolved_tag"),
             resolved_at=data.get("resolved_at"),
             declared_license=data.get("declared_license"),
+            exec_status=data.get("exec_status"),
             _unknown_fields=unknown_fields,
         )
 

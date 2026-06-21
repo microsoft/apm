@@ -20,6 +20,7 @@ _CHECK_ARTIFACT_MAP: dict[str, str] = {
     "dependency-denylist": "apm.yml",
     "required-packages": "apm.yml",
     "required-packages-deployed": "apm.lock.yaml",
+    "required-executable-untrusted": "apm.lock.yaml",
     "required-package-version": "apm.lock.yaml",
     "transitive-depth": "apm.lock.yaml",
     "mcp-allowlist": "apm.yml",

@@ -25,6 +25,7 @@ from apm_cli.policy.policy_checks import (
     _check_required_package_version,
     _check_required_packages,
     _check_required_packages_deployed,
+    _check_required_executable_untrusted,
     _check_scripts_policy,
     _check_source_attribution,
     _check_transitive_depth,
@@ -38,12 +39,12 @@ from apm_cli.policy.schema import (
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
     DependencyPolicy,
+    ExecutablesPolicy,
     ManifestPolicy,
     McpPolicy,
     McpTransportPolicy,
     UnmanagedFilesPolicy,
 )
-
 # -- Helpers --------------------------------------------------------
 
 
@@ -209,22 +210,25 @@ class TestRequiredPackagesDeployed:
         result = _check_required_packages_deployed(deps, lock, policy)
         assert result.passed
 
-    def test_fail_not_deployed(self):
+    def test_pass_present_but_parked(self):
+        """Gap B (#1873): a package present in the lockfile with NO deployed
+        files (executables gated pending approval) is PRESENT and must pass --
+        the old deployed_files test mis-fired on this healthy parked state."""
         deps = _make_dep_refs(["org/pkg"])
         lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
+        policy = DependencyPolicy(require=["org/pkg"])
+        result = _check_required_packages_deployed(deps, lock, policy)
+        assert result.passed
+
+    def test_fail_absent_from_lockfile(self):
+        """A required package in the manifest but absent from the lockfile is a
+        genuine presence failure and includes the --no-policy recovery hint."""
+        deps = _make_dep_refs(["org/pkg"])
+        lock = _make_lockfile([{"repo_url": "other/pkg", "deployed_files": ["x.md"]}])
         policy = DependencyPolicy(require=["org/pkg"])
         result = _check_required_packages_deployed(deps, lock, policy)
         assert not result.passed
         assert "org/pkg" in result.details[0]
-
-    def test_fail_message_includes_no_policy_hint(self):
-        """The error message includes a --no-policy recovery hint so users in
-        the catch-22 know how to self-heal without reading the docs."""
-        deps = _make_dep_refs(["org/pkg"])
-        lock = _make_lockfile([{"repo_url": "org/pkg", "deployed_files": []}])
-        policy = DependencyPolicy(require=["org/pkg"])
-        result = _check_required_packages_deployed(deps, lock, policy)
-        assert not result.passed
         assert "--no-policy" in result.message
 
     def test_skip_if_not_in_manifest(self):
@@ -233,6 +237,51 @@ class TestRequiredPackagesDeployed:
         lock = _make_lockfile([{"repo_url": "other/pkg", "deployed_files": ["x.md"]}])
         policy = DependencyPolicy(require=["org/missing"])
         result = _check_required_packages_deployed(deps, lock, policy)
+        assert result.passed
+
+
+# -- Check 4b: required-executable-untrusted ------------------------
+
+
+class TestRequiredExecutableUntrusted:
+    def test_pass_no_required_executables(self):
+        deps = _make_dep_refs(["org/pkg"])
+        lock = _make_lockfile([{"repo_url": "org/pkg"}])
+        result = _check_required_executable_untrusted(deps, lock, ExecutablesPolicy())
+        assert result.passed
+
+    def test_pass_required_executable_deployed(self):
+        deps = _make_dep_refs(["org/pkg"])
+        lock = _make_lockfile([{"repo_url": "org/pkg", "exec_status": "deployed"}])
+        result = _check_required_executable_untrusted(
+            deps, lock, ExecutablesPolicy(require=("org/pkg",))
+        )
+        assert result.passed
+
+    def test_fail_required_executable_parked(self):
+        deps = _make_dep_refs(["org/pkg"])
+        lock = _make_lockfile([{"repo_url": "org/pkg", "exec_status": "gated_pending_approval"}])
+        result = _check_required_executable_untrusted(
+            deps, lock, ExecutablesPolicy(require=("org/pkg",))
+        )
+        assert not result.passed
+        assert "org/pkg" in result.details
+        assert "apm approve" in result.message
+
+    def test_fail_required_executable_denied(self):
+        deps = _make_dep_refs(["org/pkg"])
+        lock = _make_lockfile([{"repo_url": "org/pkg", "exec_status": "denied"}])
+        result = _check_required_executable_untrusted(
+            deps, lock, ExecutablesPolicy(require=("org/pkg",))
+        )
+        assert not result.passed
+
+    def test_skip_if_not_in_manifest(self):
+        deps = _make_dep_refs(["other/pkg"])
+        lock = _make_lockfile([{"repo_url": "other/pkg", "exec_status": "deployed"}])
+        result = _check_required_executable_untrusted(
+            deps, lock, ExecutablesPolicy(require=("org/missing",))
+        )
         assert result.passed
 
 
@@ -1096,7 +1145,7 @@ class TestUnmanagedNonDuplication:
 # -- Integration: run_policy_checks ---------------------------------
 class TestRunPolicyChecks:
     def test_returns_all_18_checks(self, tmp_path):
-        """Full run should produce exactly 18 checks."""
+        """Full run should produce exactly 20 checks."""
         _write_apm_yml(
             tmp_path,
             {
@@ -1120,7 +1169,7 @@ class TestRunPolicyChecks:
 
         policy = ApmPolicy()
         result = run_policy_checks(tmp_path, policy)
-        assert len(result.checks) == 19
+        assert len(result.checks) == 20
         # Default policy = all checks pass
         assert result.passed
 

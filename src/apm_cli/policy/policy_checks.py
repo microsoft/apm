@@ -177,7 +177,16 @@ def _check_required_packages_deployed(
     lock: LockFile | None,
     policy: DependencyPolicy,
 ) -> CheckResult:
-    """Check 4: required packages appear in lockfile with deployed files."""
+    """Check 4: required packages are PRESENT in the lockfile (issue #1873, Gap B).
+
+    Asserts package PRESENCE, not materialised ``deployed_files``. A package
+    can be legitimately present-but-parked -- resolved and locked, with its
+    executable primitives gated pending approval (``exec_status =
+    gated_pending_approval``) and therefore zero deployed files yet. The old
+    ``not locked.deployed_files`` test mis-fired on exactly that healthy state
+    and blocked installs that should succeed. Executable trust is now audited
+    separately by ``required-executable-untrusted``.
+    """
     if not policy.effective_require or lock is None:
         return CheckResult(
             name="required-packages-deployed",
@@ -187,32 +196,87 @@ def _check_required_packages_deployed(
 
     dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
     lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
-    not_deployed: list[str] = []
+    not_present: list[str] = []
     for req in policy.effective_require:
         pkg_name = req.split("#")[0]
         if pkg_name not in dep_names:
             continue  # not in manifest -- check 3 handles this
 
-        # Find in lockfile by exact key match
-        locked = lock_by_name.get(pkg_name)
-        if not locked or not locked.deployed_files:
-            not_deployed.append(pkg_name)
+        # PRESENCE, not deployment: the package must appear in the lockfile.
+        if lock_by_name.get(pkg_name) is None:
+            not_present.append(pkg_name)
 
-    if not not_deployed:
+    if not not_present:
         return CheckResult(
             name="required-packages-deployed",
             passed=True,
-            message="All required packages deployed",
+            message="All required packages present in lockfile",
         )
     return CheckResult(
         name="required-packages-deployed",
         passed=False,
         message=(
-            f"{len(not_deployed)} required package(s) not deployed. "
+            f"{len(not_present)} required package(s) absent from the lockfile. "
             "Hint: run `apm install --no-policy` to repair the lockfile, "
             "then reinstall normally."
         ),
-        details=not_deployed,
+        details=not_present,
+    )
+
+
+def _check_required_executable_untrusted(
+    deps: list[DependencyReference],
+    lock: LockFile | None,
+    exec_policy: ExecutablesPolicy,
+) -> CheckResult:
+    """Check 4b: required-executable packages must be TRUSTED, not parked.
+
+    For every package in the org ``executables.require`` set, the lockfile's
+    ``exec_status`` must be ``deployed``. A present-but-parked package
+    (``gated_pending_approval``) or a denied one is a hard CI failure here --
+    the install itself SUCCEEDS so a developer can self-approve, but a fleet
+    that mandates the executable cannot ship it untrusted (issue #1873).
+    """
+    required = tuple(exec_policy.require or ())
+    if not required or lock is None:
+        return CheckResult(
+            name="required-executable-untrusted",
+            passed=True,
+            message="No required executables to verify",
+        )
+
+    from ..security.executables import TRUST_DEPLOYED
+
+    dep_names = {dep.get_canonical_dependency_string().split("#")[0] for dep in deps}
+    lock_by_name = {locked.get_unique_key(): locked for _key, locked in lock.dependencies.items()}
+    untrusted: list[str] = []
+    for req in required:
+        pkg_name = req.split("#")[0]
+        if pkg_name not in dep_names:
+            continue  # presence is audited by required-packages / -deployed
+        locked = lock_by_name.get(pkg_name)
+        # Trusted only when explicitly deployed. Absence of exec_status is
+        # treated as not-yet-trusted for a package the org MANDATES.
+        if locked is None or locked.exec_status not in (None, TRUST_DEPLOYED):
+            if locked is not None and locked.exec_status == TRUST_DEPLOYED:
+                continue
+            untrusted.append(pkg_name)
+
+    if not untrusted:
+        return CheckResult(
+            name="required-executable-untrusted",
+            passed=True,
+            message="All required executables are trusted",
+        )
+    return CheckResult(
+        name="required-executable-untrusted",
+        passed=False,
+        message=(
+            f"{len(untrusted)} required executable(s) present but untrusted. "
+            "Approve them to deploy: `apm approve --recommended` (org-vetted set) "
+            "or `apm approve <package>` per package."
+        ),
+        details=untrusted,
     )
 
 
@@ -1123,6 +1187,8 @@ def run_dependency_policy_checks(
     if _run(_check_required_packages(deps_list, policy.dependencies)):
         return result
     if _run(_check_required_packages_deployed(deps_list, lockfile, policy.dependencies)):
+        return result
+    if _run(_check_required_executable_untrusted(deps_list, lockfile, policy.executables)):
         return result
     if _run(_check_required_package_version(deps_list, lockfile, policy.dependencies)):
         return result
