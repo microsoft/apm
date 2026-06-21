@@ -18,7 +18,7 @@ from apm_cli.commands._helpers import (
     _check_and_notify_updates,
     print_version,
 )
-from apm_cli.commands.approve import approve_cmd, deny_cmd
+from apm_cli.commands.approve import approve_cmd, deny_cmd, explain_cmd
 from apm_cli.commands.audit import audit
 from apm_cli.commands.cache import cache
 from apm_cli.commands.compile import compile as compile_cmd
@@ -152,6 +152,7 @@ cli.add_command(approve_cmd, name="approve")
 cli.add_command(audit)
 cli.add_command(cache)
 cli.add_command(deny_cmd, name="deny")
+cli.add_command(explain_cmd, name="explain")
 cli.add_command(deps)
 cli.add_command(view_cmd)
 # Hidden backward-compatible alias: ``apm info`` → ``apm view``

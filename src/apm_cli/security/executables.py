@@ -1023,3 +1023,47 @@ def build_exec_trust_context(
         user_allow=user_allow,
         user_deny=user_deny,
     )
+
+
+def load_project_executables(
+    manifest_path: Path,
+) -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, bool]], bool]:
+    """Read the project ``executables`` block (and alias) from ``apm.yml``."""
+    from ..utils.yaml_io import load_yaml
+
+    if not manifest_path.is_file():
+        return {}, {}, False
+    data = load_yaml(manifest_path)
+    if not isinstance(data, dict):
+        return {}, {}, False
+    return parse_project_executables(data)
+
+
+def write_project_executables(
+    manifest_path: Path,
+    allow: dict[str, dict[str, bool]],
+    deny: dict[str, dict[str, bool]],
+) -> None:
+    """Persist project ``executables: {allow, deny}`` back to ``apm.yml``.
+
+    Migrates a legacy ``allowExecutables`` block into ``executables.allow`` on
+    write so a project converges on the unified noun. Empty ``allow``/``deny``
+    sub-blocks are omitted; an empty ``executables: {}`` is still written when
+    the gate was already opted-in so the signal is not lost.
+    """
+    from ..utils.yaml_io import dump_yaml, load_yaml
+
+    data = load_yaml(manifest_path)
+    if not isinstance(data, dict):
+        return
+
+    had_alias = data.pop("allowExecutables", None) is not None
+    block: dict[str, Any] = {}
+    if allow:
+        block["allow"] = allow
+    if deny:
+        block["deny"] = deny
+
+    if block or had_alias or "executables" in data:
+        data["executables"] = block
+    dump_yaml(data, manifest_path)
