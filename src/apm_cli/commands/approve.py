@@ -13,7 +13,7 @@ the commands two clearly-scoped destinations:
 
 The deny-wins precedence is resolved by
 :func:`apm_cli.security.executables.resolve_exec_decision`; ``--list`` and
-``apm explain`` surface the effective decision and the deciding layer.
+``apm policy explain`` surface the effective decision and the deciding layer.
 """
 
 from __future__ import annotations
@@ -204,18 +204,18 @@ def deny_cmd(packages: tuple[str, ...], user_scope: bool) -> None:
         _rich_info(f"Updated {_store_label(user_scope)} ({changed} denied).", symbol="info")
 
 
-@click.command("explain")
-@click.argument("package")
-def explain_cmd(package: str) -> None:
+def explain_decision(package: str) -> None:
     """Explain the effective executable-trust decision for a package.
 
     Shows, per executable type the package declares, whether it is allowed,
     which precedence layer decided, and which lower-authority layers were
     shadowed by that decision.
 
+    Backs the ``apm policy explain <pkg>`` subcommand.
+
     Example:
 
-        apm explain owner/repo
+        apm policy explain owner/repo
     """
     manifest = _find_manifest()
     from ..security.executables import build_exec_trust_context, resolve_exec_decision

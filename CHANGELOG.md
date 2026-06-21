@@ -9,11 +9,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Executable Trust Governance v1 (#1873): organizations can now declare an
+  `executables:` block in `apm-policy.yml` (`deny_all`, `deny`, `require`,
+  `recommend`) that is carried through policy inheritance, closing the
+  GRANT/MANDATE asymmetry where projects could allow executables but orgs
+  could not deny them. A single deny-wins precedence resolver
+  (`resolve_exec_decision`) is now shared by both the install gate and the
+  `apm audit` policy checks, so the gate and the audit can never disagree.
+  Precedence (first match wins): org `deny_all`/`deny` > user deny > project
+  allow > user allow > org `recommend` > default-deny. The lockfile records a
+  per-dependency `exec_status` (`deployed`, `gated_pending_approval`,
+  `denied`, `absent`). No cryptographic signing or `enforce`-mandate
+  execution is introduced in v1 (an unverified `enforce` rung fail-safe
+  degrades to `recommend`). (by @sergio-sisternes-epam) (#1873)
+- `apm policy explain <pkg>` prints the effective executable-trust decision
+  for a package: whether it is allowed, the deciding policy layer, and any
+  layers it shadows. `apm doctor` adds a fleet-level executable-trust drift
+  check that flags packages allowed locally but denied by org policy. (#1873)
+- `apm approve --recommended` bulk-accepts an organization's `recommend`
+  set, and `apm approve --list` shows the effective trust state of every
+  installed package with executables. (#1873)
 - Org-wide policy discovery now cascades through candidate repo names
   (`.github`, then `.apm`, then `_apm`) and speaks the Azure DevOps Items
   API, so Azure DevOps organizations -- which forbid repo names that begin
   or end with `.` -- can host an APM governance policy repo for the first
   time. (by @sergio-sisternes-epam; closes #1813) (#1830)
+
+### Changed
+
+- Executable-trust vocabulary is unified onto one noun, `executables`.
+  `apm approve` / `apm deny` now default to the project `apm.yml`
+  `executables: {allow, deny}` block (the committed, team-wide admin
+  decision); pass `--user` to write personal consent to
+  `~/.apm/config.json` (the lowest-authority, machine-local override that
+  can only narrow). (#1873)
+- The `required-packages-deployed` audit check now asserts package
+  PRESENCE in the lockfile rather than materialized `deployed_files`, so an
+  install SUCCEEDS when a required package is present-but-parked (its
+  executables gated pending approval) and prints a one-command remedy
+  instead of hard-failing. A separate `required-executable-untrusted`
+  signal hard-fails CI when a required package's executables are untrusted.
+  (#1873)
+
+### Deprecated
+
+- The project `allowExecutables:` block is deprecated in favor of
+  `executables.allow`. It remains a read alias for one minor cycle and is
+  migrated to `executables.allow` on the next `apm approve`/`apm deny`
+  write. The org `bin_deploy` deny policy is folded into
+  `executables.deny[bin]` as a deprecated alias. (#1873)
+
+### Removed
+
+- The standalone `~/.apm/approvals.yml` personal-consent file is removed;
+  its contents are migrated into `~/.apm/config.json` under
+  `executables: {allow, deny}` on first read (net-new control-surface
+  files = 0). (#1873)
 
 ### Fixed
 

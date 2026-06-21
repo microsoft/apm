@@ -398,8 +398,9 @@ target is present. Authoring rules:
 - Deployed executables land on Claude Code's PATH and are invoked
   **without per-call confirmation** -- treat them as trusted code and
   keep them minimal.
-- Governance: a `bin_deploy` policy rule can deny deployment per package.
-  See the [policy schema](../../../../../docs/src/content/docs/reference/policy-schema.md#bin_deploy).
+- Governance: the org `executables.deny` policy can deny deployment per
+  package (the legacy `bin_deploy` rule remains a deprecated alias).
+  See the [policy schema](../../../../../docs/src/content/docs/reference/policy-schema.md#executables).
 
 ## Canvas extensions (experimental, Copilot-only)
 
@@ -412,7 +413,8 @@ On `apm install --target copilot`, APM deploys it verbatim to
 `.github/extensions/<name>/`. The `<name>` segment is validated strictly
 (`[A-Za-z0-9._-]+`, no leading/trailing dot, no `..`, no separators, no reserved
 names). It is **Copilot-only**. Dependency-provided canvases are executable code
-and are blocked unless the consumer adds the package to `allowExecutables` and runs
+and are blocked unless the consumer adds the package to the `executables.allow`
+block in `apm.yml` (`allowExecutables` is a deprecated alias) and runs
 `apm approve <pkg>`; a
 first-party canvas in the root package deploys once the flag is on. With
 `--global`, a dependency canvas deploys to `~/.copilot/extensions/<name>/`

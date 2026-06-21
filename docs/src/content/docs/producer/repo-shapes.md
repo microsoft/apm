@@ -213,9 +213,10 @@ Claude Code skills target. Authoring rules:
   **without per-call confirmation**. Treat them as trusted code: keep
   them minimal, audited, and free of network side effects you would not
   want an agent to trigger unprompted.
-- Enterprises can deny deployment per-package or globally via the
-  `bin_deploy` policy rule -- see the
-  [policy schema](../../reference/policy-schema/#bin_deploy).
+- Enterprises can deny deployment per-package or globally via the org
+  `executables.deny` policy (the legacy `bin_deploy` rule remains a
+  deprecated alias) -- see the
+  [policy schema](../../reference/policy-schema/#executables).
 
 ## What to read next
 

@@ -17,8 +17,8 @@ from apm_cli.commands.approve import (
     _find_matching_key,
     approve_cmd,
     deny_cmd,
-    explain_cmd,
 )
+from apm_cli.commands.policy import policy as policy_group
 from apm_cli.policy.schema import ApmPolicy, ExecutablesPolicy
 
 # ---------------------------------------------------------------------------
@@ -267,7 +267,7 @@ class TestDenyCmd:
 
 
 # ---------------------------------------------------------------------------
-# explain_cmd
+# apm policy explain
 # ---------------------------------------------------------------------------
 
 
@@ -278,7 +278,7 @@ class TestExplainCmd:
             _write_manifest(".")
             Path("apm_modules").mkdir()
             with patch("apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()):
-                result = runner.invoke(explain_cmd, ["nonexistent"])
+                result = runner.invoke(policy_group, ["explain", "nonexistent"])
             assert result.exit_code == 0
             assert "not found" in result.output
 
@@ -289,7 +289,7 @@ class TestExplainCmd:
             _write_manifest(".", {"executables": {"allow": {}}})
             _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
             with patch("apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()):
-                result = runner.invoke(explain_cmd, ["hook-pkg"])
+                result = runner.invoke(policy_group, ["explain", "hook-pkg"])
             assert result.exit_code == 0
             assert "blocked" in result.output
             assert "default-deny" in result.output
@@ -304,7 +304,7 @@ class TestExplainCmd:
                 {"executables": {"allow": {"hook-pkg": {"hooks": True}}}},
             )
             with patch("apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()):
-                result = runner.invoke(explain_cmd, ["hook-pkg"])
+                result = runner.invoke(policy_group, ["explain", "hook-pkg"])
             assert result.exit_code == 0
             assert "allowed" in result.output
             assert "project-allow" in result.output

@@ -182,10 +182,10 @@ class ExecDecision:
     Attributes:
         allowed: Whether the executable may run / be materialised.
         deciding_layer: Which precedence rung decided (one of the
-            ``LAYER_*`` constants) -- surfaced by ``apm explain``.
+            ``LAYER_*`` constants) -- surfaced by ``apm policy explain``.
         trust_state: One of ``TRUST_*`` for the lockfile ``exec_status``.
         shadowed_layers: Lower-authority layers that held a contrary
-            opinion but were overridden (for ``apm explain`` honesty).
+            opinion but were overridden (for ``apm policy explain`` honesty).
     """
 
     allowed: bool

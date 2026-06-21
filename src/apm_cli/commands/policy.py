@@ -368,3 +368,22 @@ def status(policy_source, no_cache, as_json, output_format, check):
     if check and report["outcome"] != "found":
         sys.exit(1)
     sys.exit(0)
+
+
+@policy.command(
+    "explain",
+    help="Explain the effective executable-trust decision for a package",
+)
+@click.argument("package")
+def explain(package):
+    """Explain the effective executable-trust decision for PACKAGE.
+
+    Prints, per executable type the package declares, whether it is allowed,
+    the deciding precedence layer (org / project / user), and any
+    lower-authority layers that decision shadowed. This is the per-package
+    companion to ``apm policy status`` (the policy-chain view) and the
+    fleet-level executable-trust drift check in ``apm doctor``.
+    """
+    from .approve import explain_decision
+
+    explain_decision(package)

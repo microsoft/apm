@@ -21,6 +21,82 @@ from . import (
 )
 
 
+def _executable_trust_drift_check(project_root: Path) -> _DoctorCheck | None:
+    """Fleet-level executable-trust drift probe for ``apm doctor``.
+
+    Flags packages whose project/user *allow* is overridden by the org
+    *deny* ceiling -- a governance conflict an admin should reconcile. Best
+    effort and informational: any failure to resolve degrades to ``None`` so
+    doctor never hangs or hard-fails on policy discovery. Points the operator
+    at ``apm policy explain <pkg>`` for the per-package detail.
+    """
+    apm_path = project_root / "apm.yml"
+    if not apm_path.is_file():
+        return None
+    try:
+        from ...security.executables import (
+            LAYER_ORG_DENY,
+            LAYER_ORG_DENY_ALL,
+            LAYER_PROJECT_ALLOW,
+            LAYER_USER_ALLOW,
+            build_exec_trust_context,
+            resolve_exec_decision,
+        )
+        from ...utils.yaml_io import load_yaml
+        from ..approve import _load_org_policy, _scan_installed_packages
+
+        data = load_yaml(apm_path)
+        project_data = data if isinstance(data, dict) else {}
+        ctx = build_exec_trust_context(
+            policy=_load_org_policy(project_root), project_data=project_data
+        )
+    except Exception:
+        return None
+
+    if not ctx.gate_enabled:
+        return _DoctorCheck(
+            name="executable trust",
+            passed=True,
+            detail="Gate disabled (no executables: block in apm.yml)",
+            informational=True,
+        )
+
+    org_deny_layers = (LAYER_ORG_DENY_ALL, LAYER_ORG_DENY)
+    allow_layers = (LAYER_PROJECT_ALLOW, LAYER_USER_ALLOW)
+    conflicts: list[str] = []
+    try:
+        for decl in _scan_installed_packages(apm_path):
+            if not getattr(decl, "has_executables", False):
+                continue
+            for exec_type in decl.exec_types:
+                decision = resolve_exec_decision(ctx, decl.package_key, exec_type)
+                if decision.deciding_layer in org_deny_layers and any(
+                    layer in decision.shadowed_layers for layer in allow_layers
+                ):
+                    conflicts.append(decl.package_name)
+                    break
+    except Exception:
+        return None
+
+    if not conflicts:
+        return _DoctorCheck(
+            name="executable trust",
+            passed=True,
+            detail="No executable-trust layer conflicts",
+            informational=True,
+        )
+    first = conflicts[0]
+    return _DoctorCheck(
+        name="executable trust",
+        passed=False,
+        detail=(
+            f"{len(conflicts)} package(s) allowed locally but denied by org policy "
+            f"(e.g. {first}). Run 'apm policy explain {first}' for detail."
+        ),
+        informational=True,
+    )
+
+
 def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
     """Execute the doctor diagnostics and return an exit code.
 
@@ -236,6 +312,10 @@ def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
                 informational=True,
             )
         )
+
+    drift_check = _executable_trust_drift_check(Path.cwd())
+    if drift_check is not None:
+        checks.append(drift_check)
 
     _render_doctor_table(logger, checks)
 
