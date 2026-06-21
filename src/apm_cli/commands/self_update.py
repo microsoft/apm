@@ -108,7 +108,12 @@ def _get_installer_run_command(script_path: str) -> list[str]:
             raise FileNotFoundError("PowerShell executable not found in PATH")
         return [powershell_path, "-ExecutionPolicy", "Bypass", "-File", script_path]
 
-    shell_path = "/bin/sh" if os.path.exists("/bin/sh") else "sh"
+    shell_path = shutil.which("bash")
+    if not shell_path:
+        if os.path.exists("/bin/bash"):
+            shell_path = "/bin/bash"
+        else:
+            raise FileNotFoundError("bash executable not found; cannot run installer script")
     return [shell_path, script_path]
 
 
