@@ -490,10 +490,11 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
             ctx.logger.warning(msg, symbol="warning")
             ctx.logger.info(remedy, symbol="info")
         else:
-            from apm_cli.utils.console import _rich_info, _rich_warning
+            from apm_cli.core.command_logger import CommandLogger
 
-            _rich_warning(msg)
-            _rich_info(remedy, symbol="info")
+            logger = CommandLogger("install")
+            logger.warning(msg, symbol="warning")
+            logger.info(remedy, symbol="info")
         return
 
     from apm_cli.security.executables import (
