@@ -23,6 +23,7 @@ from apm_cli.security.executables import (
     ALL_EXEC_TYPES,
     ENFORCED_EXEC_TYPES,
     EXEC_TYPE_BIN,
+    EXEC_TYPE_CANVAS,
     EXEC_TYPE_HOOKS,
     EXEC_TYPE_MCP,
     ExecutableDeclaration,
@@ -131,9 +132,9 @@ class TestScanPackageExecutablesIntegration:
         decl = scan_package_executables(tmp_path, "mcp-pkg", "1.0")
 
         assert decl.mcp_count == 2
-        # MCP is not in enforced types
-        assert decl.has_executables is False
-        assert EXEC_TYPE_MCP not in decl.exec_types
+        # MCP is an enforced exec type (#1865 expanded the gate to MCP+canvas).
+        assert decl.has_executables is True
+        assert EXEC_TYPE_MCP in decl.exec_types
 
     def test_scan_package_key_format(self, tmp_path: Path) -> None:
         decl = scan_package_executables(tmp_path, "owner/repo", "v2.1.0")
@@ -307,33 +308,35 @@ class TestCheckExecutableApprovalIntegration:
 
     def test_local_always_approved(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "_local", "")
-        hooks_ok, bin_ok = check_executable_approval("_local", pkg_info, {"deny-all": {}})
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval(
+            "_local", pkg_info, {"deny-all": {}}
+        )
         assert hooks_ok is True
         assert bin_ok is True
 
     def test_none_allow_executables_means_all_approved(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "any-pkg", "1.0")
-        hooks_ok, bin_ok = check_executable_approval("any-pkg", pkg_info, None)
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval("any-pkg", pkg_info, None)
         assert hooks_ok is True
         assert bin_ok is True
 
     def test_empty_allow_executables_blocks_all(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
-        hooks_ok, bin_ok = check_executable_approval("pkg", pkg_info, {})
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval("pkg", pkg_info, {})
         assert hooks_ok is False
         assert bin_ok is False
 
     def test_approved_package_passes(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
         allow = {"pkg#1.0": {"hooks": True, "bin": True}}
-        hooks_ok, bin_ok = check_executable_approval("pkg", pkg_info, allow)
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval("pkg", pkg_info, allow)
         assert hooks_ok is True
         assert bin_ok is True
 
     def test_partial_approval(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
         allow = {"pkg#1.0": {"hooks": True, "bin": False}}
-        hooks_ok, bin_ok = check_executable_approval("pkg", pkg_info, allow)
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval("pkg", pkg_info, allow)
         assert hooks_ok is True
         assert bin_ok is False
 
@@ -344,7 +347,7 @@ class TestCheckExecutableApprovalIntegration:
         pkg_info.dependency_ref = dep_ref
 
         allow = {"github:owner/repo#v1.0": {"hooks": True, "bin": True}}
-        hooks_ok, bin_ok = check_executable_approval("pkg", pkg_info, allow)
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval("pkg", pkg_info, allow)
         assert hooks_ok is True
         assert bin_ok is True
 
@@ -356,7 +359,7 @@ class TestCheckExecutableApprovalIntegration:
 
         # Approved under name#version, not dep-ref
         allow = {"pkg#1.0": {"hooks": True, "bin": True}}
-        hooks_ok, bin_ok = check_executable_approval("pkg", pkg_info, allow)
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval("pkg", pkg_info, allow)
         assert hooks_ok is True
         assert bin_ok is True
 
@@ -507,8 +510,10 @@ class TestConstantsIntegration:
         for t in ENFORCED_EXEC_TYPES:
             assert t in ALL_EXEC_TYPES
 
-    def test_mcp_not_in_enforced(self) -> None:
-        assert EXEC_TYPE_MCP not in ENFORCED_EXEC_TYPES
+    def test_mcp_and_canvas_in_enforced(self) -> None:
+        # #1865 expanded the executable gate to cover MCP and canvas.
+        assert EXEC_TYPE_MCP in ENFORCED_EXEC_TYPES
+        assert EXEC_TYPE_CANVAS in ENFORCED_EXEC_TYPES
 
     def test_hooks_and_bin_in_enforced(self) -> None:
         assert EXEC_TYPE_HOOKS in ENFORCED_EXEC_TYPES
@@ -685,12 +690,12 @@ class TestApproveDenyCommandsIntegration:
         assert "Approved" in result.output
         assert "risky-pkg" in result.output
 
-        # Verify manifest was updated
+        # Verify manifest was updated (unified executables.allow noun)
         from apm_cli.utils.yaml_io import load_yaml
 
         data = load_yaml(project / "apm.yml")
-        assert "allowExecutables" in data
-        assert "risky-pkg#2.0.0" in data["allowExecutables"]
+        assert "executables" in data
+        assert "risky-pkg#2.0.0" in data["executables"]["allow"]
 
     def test_approve_all(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner
@@ -709,7 +714,7 @@ class TestApproveDenyCommandsIntegration:
         from apm_cli.utils.yaml_io import load_yaml
 
         data = load_yaml(project / "apm.yml")
-        allow = data["allowExecutables"]
+        allow = data["executables"]["allow"]
         assert "risky-pkg#2.0.0" in allow
         assert "tool-pkg#1.0.0" in allow
 
@@ -773,14 +778,17 @@ class TestApproveDenyCommandsIntegration:
         result = runner.invoke(deny_cmd, ["risky-pkg"])
 
         assert result.exit_code == 0
-        assert "Revoked" in result.output
+        assert "Denied" in result.output
 
         from apm_cli.utils.yaml_io import load_yaml
 
         data = load_yaml(manifest)
-        assert "risky-pkg#2.0.0" not in data.get("allowExecutables", {})
-        # tool-pkg should still be there
-        assert "tool-pkg#1.0.0" in data["allowExecutables"]
+        # deny migrates the legacy alias onto the unified noun
+        deny = data["executables"]["deny"]
+        assert "risky-pkg#2.0.0" in deny
+        # tool-pkg should remain allowed, not denied
+        assert "tool-pkg#1.0.0" in data["executables"]["allow"]
+        assert "tool-pkg#1.0.0" not in deny
 
     def test_deny_nonexistent_package(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner
@@ -796,7 +804,13 @@ class TestApproveDenyCommandsIntegration:
         result = runner.invoke(deny_cmd, ["missing"])
 
         assert result.exit_code == 0
-        assert "not found" in result.output
+        # deny may target a not-yet-installed package (a pre-emptive block)
+        assert "Denied missing" in result.output
+
+        from apm_cli.utils.yaml_io import load_yaml
+
+        data = load_yaml(manifest)
+        assert "missing" in data["executables"]["deny"]
 
     def test_approve_no_manifest_errors(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner

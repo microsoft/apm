@@ -25,6 +25,8 @@ from apm_cli.security.executables import (
     TRUST_DEPLOYED,
     TRUST_GATED,
     ExecTrustContext,
+    exec_status_for_declaration,
+    materialize_exec_map,
     resolve_exec_decision,
 )
 
@@ -192,3 +194,76 @@ class TestShadowedLayers:
             EXEC_TYPE_HOOKS,
         )
         assert LAYER_ORG_RECOMMEND in d.shadowed_layers
+
+
+# -------------------------------------------------------------------
+# materialize_exec_map: deny-wins effective allow-map (issue #1873)
+# -------------------------------------------------------------------
+
+
+class TestMaterializeExecMap:
+    def test_gate_disabled_returns_none(self):
+        assert materialize_exec_map(_ctx(gate_enabled=False)) is None
+
+    def test_project_allow_emits_key_and_versionblind_alias(self):
+        m = materialize_exec_map(_ctx(project_allow={PKG: {EXEC_TYPE_HOOKS: True}}))
+        assert m is not None
+        # exact key is present and allowed for hooks only
+        assert m[PKG] == {EXEC_TYPE_HOOKS: True}
+        # version-blind name alias is emitted so any installed version matches
+        assert m[NAME] == {EXEC_TYPE_HOOKS: True}
+
+    def test_org_deny_beats_project_allow_excluded_from_map(self):
+        # deny-wins: an org-denied package never lands in the allow-map.
+        m = materialize_exec_map(
+            _ctx(
+                project_allow={PKG: {EXEC_TYPE_HOOKS: True}},
+                org_deny=frozenset({NAME}),
+            )
+        )
+        # gate is enabled (project block present) but the denied pair is absent.
+        assert m is not None
+        assert EXEC_TYPE_HOOKS not in m.get(PKG, {})
+        assert EXEC_TYPE_HOOKS not in m.get(NAME, {})
+
+    def test_default_deny_yields_empty_map(self):
+        # gate enabled by a project deny entry, but nothing is allowed.
+        m = materialize_exec_map(_ctx(project_deny={PKG: {EXEC_TYPE_HOOKS: True}}))
+        assert m is not None
+        assert m == {}
+
+
+# -------------------------------------------------------------------
+# exec_status_for_declaration: lockfile worst-case folding (Gap B)
+# -------------------------------------------------------------------
+
+
+class TestExecStatusForDeclaration:
+    def test_no_exec_types_returns_none(self):
+        assert exec_status_for_declaration(_ctx(), [PKG], ()) is None
+
+    def test_gate_disabled_returns_none(self):
+        assert (
+            exec_status_for_declaration(_ctx(gate_enabled=False), [PKG], (EXEC_TYPE_HOOKS,)) is None
+        )
+
+    def test_all_allowed_is_deployed(self):
+        ctx = _ctx(project_allow={PKG: {EXEC_TYPE_HOOKS: True, EXEC_TYPE_BIN: True}})
+        status = exec_status_for_declaration(ctx, [PKG], (EXEC_TYPE_HOOKS, EXEC_TYPE_BIN))
+        assert status == TRUST_DEPLOYED
+
+    def test_any_denied_folds_to_denied(self):
+        ctx = _ctx(
+            project_allow={PKG: {EXEC_TYPE_HOOKS: True}},
+            org_deny=frozenset({NAME}),
+        )
+        # hooks denied by org ceiling -> worst-case denied even if others allow.
+        status = exec_status_for_declaration(ctx, [PKG], (EXEC_TYPE_HOOKS, EXEC_TYPE_BIN))
+        assert status == TRUST_DENIED
+
+    def test_unapproved_folds_to_gated(self):
+        # gate enabled via project deny entry on a different key; the declared
+        # package has no opinion -> default-deny -> gated_pending_approval.
+        ctx = _ctx(project_deny={"other/pkg": {EXEC_TYPE_HOOKS: True}})
+        status = exec_status_for_declaration(ctx, [PKG], (EXEC_TYPE_HOOKS,))
+        assert status == TRUST_GATED

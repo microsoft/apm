@@ -21,11 +21,11 @@ from apm_cli.policy.policy_checks import (
     _check_mcp_denylist,
     _check_mcp_self_defined,
     _check_mcp_transport,
+    _check_required_executable_untrusted,
     _check_required_manifest_fields,
     _check_required_package_version,
     _check_required_packages,
     _check_required_packages_deployed,
-    _check_required_executable_untrusted,
     _check_scripts_policy,
     _check_source_attribution,
     _check_transitive_depth,
@@ -45,6 +45,7 @@ from apm_cli.policy.schema import (
     McpTransportPolicy,
     UnmanagedFilesPolicy,
 )
+
 # -- Helpers --------------------------------------------------------
 
 

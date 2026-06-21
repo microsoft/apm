@@ -43,7 +43,7 @@ class TestParseProjectExecutables:
 
     def test_allow_executables_alias_sets_deprecation_flag(self):
         data = {"allowExecutables": {"owner/repo": {"hooks": True}}}
-        allow, deny, deprecated = parse_project_executables(data)
+        allow, _deny, deprecated = parse_project_executables(data)
         assert allow == {"owner/repo": {"hooks": True}}
         assert deprecated is True
 

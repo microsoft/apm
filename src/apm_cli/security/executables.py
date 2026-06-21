@@ -241,11 +241,9 @@ def _map_grants(
     for stored_key, entry in grant_map.items():
         if not isinstance(entry, dict):
             continue
-        if (
-            stored_key == package_key
-            or stored_key == name
-            or _strip_version(stored_key) == name
-        ) and bool(entry.get(exec_type, False)):
+        if (stored_key in (package_key, name) or _strip_version(stored_key) == name) and bool(
+            entry.get(exec_type, False)
+        ):
             return True
     return False
 
@@ -714,26 +712,113 @@ def save_user_approvals(approvals: dict[str, dict[str, bool]]) -> None:
         os.chmod(path, 0o600)
 
 
+def materialize_exec_map(ctx: ExecTrustContext) -> dict[str, dict[str, bool]] | None:
+    """Materialise the deny-wins effective allow-map from a trust context.
+
+    Returns ``None`` when the gate is disabled; otherwise every candidate
+    package key is run through :func:`resolve_exec_decision` and only ALLOWED
+    ``(key, exec_type)`` pairs are emitted, each also under its version-blind
+    name so the gate's exact-membership lookup matches any installed version.
+    """
+    if not ctx.gate_enabled:
+        return None
+
+    candidate_keys: set[str] = set()
+    candidate_keys |= set(ctx.project_allow) | set(ctx.project_deny)
+    candidate_keys |= set(ctx.user_allow) | set(ctx.user_deny)
+    candidate_keys |= set(ctx.org_recommend) | set(ctx.org_deny) | set(ctx.org_enforce)
+    candidate_keys |= set(ctx.org_bin_deny)
+
+    result: dict[str, dict[str, bool]] = {}
+    for key in candidate_keys:
+        for exec_type in ALL_EXEC_TYPES:
+            if not resolve_exec_decision(ctx, key, exec_type).allowed:
+                continue
+            result.setdefault(key, {})[exec_type] = True
+            name = _strip_version(key)
+            if name != key:
+                result.setdefault(name, {})[exec_type] = True
+    return result
+
+
+def exec_status_for_declaration(
+    ctx: ExecTrustContext,
+    candidate_keys: list[str],
+    exec_types: tuple[str, ...],
+) -> str | None:
+    """Return the lockfile ``exec_status`` for a package's declared executables.
+
+    Resolves every declared exec type across the candidate keys and folds the
+    decisions into ONE worst-case trust state for the lockfile field:
+
+    * any declared type hard-DENIED   -> ``denied``
+    * else any declared type not allowed -> ``gated_pending_approval``
+    * else (all declared types allowed)  -> ``deployed``
+
+    Returns ``None`` when the package declares no executables (the audit then
+    treats it as trusted) or when the gate is disabled.
+    """
+    if not exec_types or not ctx.gate_enabled:
+        return None
+
+    worst = TRUST_DEPLOYED
+    for exec_type in exec_types:
+        best = None
+        for key in candidate_keys:
+            decision = resolve_exec_decision(ctx, key, exec_type)
+            if decision.allowed:
+                best = TRUST_DEPLOYED
+                break
+            # Prefer the more severe of denied/gated across candidate keys.
+            if decision.trust_state == TRUST_DENIED:
+                best = TRUST_DENIED
+            elif best is None:
+                best = TRUST_GATED
+        if best == TRUST_DENIED:
+            return TRUST_DENIED
+        if best == TRUST_GATED:
+            worst = TRUST_GATED
+    return worst
+
+
+def build_effective_exec_map(
+    *,
+    policy: Any | None,
+    project_data: dict[str, Any] | None,
+) -> dict[str, dict[str, bool]] | None:
+    """Materialise the deny-wins effective allow-map consumed by the install gate.
+
+    This is the #1873 replacement for the legacy ``{**project, **user}``
+    user-wins merge. See :func:`materialize_exec_map` for the emission rules.
+
+    Returns ``None`` when the gate is disabled (backward-compatible: every
+    executable deploys), mirroring :attr:`ExecTrustContext.gate_enabled`.
+    """
+    ctx = build_exec_trust_context(policy=policy, project_data=project_data)
+    return materialize_exec_map(ctx)
+
+
 def effective_allow_executables(
     project_allow_executables: dict[str, dict[str, bool]] | None,
 ) -> dict[str, dict[str, bool]] | None:
-    """Return the effective allowExecutables map for an install run.
+    """Return the effective allow-map for an install run (deny-wins).
 
-    Merges the project-level gate signal with the user-local approvals:
+    Back-compat shim around :func:`build_effective_exec_map`: the historical
+    ``{**project, **user}`` user-wins merge is replaced by the #1873 deny-wins
+    precedence. Callers that only have the legacy ``allowExecutables`` block
+    (no org policy) reach the resolver through here; the install template uses
+    :func:`build_effective_exec_map` directly so the org-deny ceiling applies.
 
-    - Returns ``None`` when the project has no ``allowExecutables`` block
-      (gate disabled -- backward-compatible behaviour, all executables
-      deployed).
-    - Returns a merged dict when the gate is enabled: project-level entries
-      (retained for CI / automated pipelines) are overlaid with user-local
-      approvals from ``~/.apm/approvals.yml``.  User approvals take
-      precedence so an ``apm approve`` decision is always honoured even if the
-      project entry is absent or stale.
+    Returns ``None`` when the gate is disabled (no block), preserving the
+    backward-compatible "deploy everything" behaviour.
     """
-    if project_allow_executables is None:
-        return None
-    user = load_user_approvals()
-    return {**project_allow_executables, **user}
+    if isinstance(project_allow_executables, dict):
+        data: dict[str, Any] = {"allowExecutables": project_allow_executables}
+    else:
+        # ``allow_executables`` is ``dict | None`` by contract; any other shape
+        # (an absent/unparsed in-memory signal) means "no project layer".
+        data = {}
+    return build_effective_exec_map(policy=None, project_data=data)
 
 
 def filter_mcp_by_allow_executables(

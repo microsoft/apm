@@ -468,33 +468,35 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
     After the integration loop, any package that had hooks or bin/
     blocked is collected in ``ctx.blocked_executables``.  This function
     runs the interactive approval flow (or hard-errors in CI) and
-    persists approved entries to ``~/.apm/approvals.yml`` (user-local,
-    never committed to source control) so the next install deploys them.
+    persists approved entries to the personal ``~/.apm/config.json``
+    ``executables`` block (lowest authority, never committed to source
+    control) so the next install deploys them (#1873).
     """
     if not ctx.blocked_executables:
         return
 
     from apm_cli.security.executables import (
-        load_user_approvals,
+        load_user_executables,
         prompt_executable_approval,
-        save_user_approvals,
+        save_user_executables,
     )
 
-    # Seed the prompt with existing user-local approvals (not project entries,
+    # Seed the prompt with existing personal consent (not project entries,
     # which are read-only from the install pipeline's perspective).
-    allow_exec = load_user_approvals() or {}
+    allow_exec, deny_exec = load_user_executables()
 
     updated = prompt_executable_approval(
         ctx.blocked_executables,
         allow_executables=allow_exec,
     )
 
-    # Persist new approvals to user-local file if user approved anything new.
+    # Persist new approvals to the personal config if the user approved
+    # anything new.
     if updated and updated != allow_exec:
-        save_user_approvals(updated)
+        save_user_executables(updated, deny_exec)
         if ctx.logger:
             ctx.logger.info(
-                "Updated ~/.apm/approvals.yml. "
+                "Updated ~/.apm/config.json. "
                 "Run 'apm install' again to deploy approved executables.",
                 symbol="info",
             )

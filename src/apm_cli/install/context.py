@@ -154,6 +154,10 @@ class InstallContext:
     total_links_resolved: int = 0  # integrate
     direct_dep_failed: bool = False  # integrate -- set when any direct dep fails
     blocked_executables: list[Any] = field(default_factory=list)  # integrate
+    # #1873 executable-trust: the resolved trust context (built once per
+    # install) and the per-dependency lockfile exec_status computed at the gate.
+    exec_trust_ctx: Any = None  # ExecTrustContext, lazily built in template
+    package_exec_status: dict = field(default_factory=dict)  # dep_key -> exec_status
 
     # ------------------------------------------------------------------
     # policy_gate

@@ -19,17 +19,48 @@ from apm_cli.install.sources import DependencySource, Materialization
 
 
 def _effective_allow(ctx) -> dict | None:
-    """Return the effective allowExecutables map for the install context.
+    """Return the effective (deny-wins) allow-map for the install context.
 
-    Reads the gate opt-in signal from the project ``apm.yml`` via
-    ``ctx.apm_package.allow_executables`` and merges it with the
-    user-local approvals from ``~/.apm/approvals.yml``.  Returns
-    ``None`` when the gate is disabled (backward-compatible behaviour).
+    Builds the #1873 trust context from three layers and materialises the
+    decision map via the shared resolver:
+
+    * org policy -- ``ctx.policy_fetch.policy`` (the deny ceiling, Gap A);
+    * project ``apm.yml`` -- the ``executables`` block (or legacy
+      ``allowExecutables`` alias) read from disk;
+    * user consent -- ``~/.apm/config.json`` (lowest authority).
+
+    Returns ``None`` when the gate is disabled (backward-compatible: every
+    executable deploys).
     """
-    from apm_cli.security.executables import effective_allow_executables
+    from apm_cli.security.executables import (
+        build_exec_trust_context,
+        materialize_exec_map,
+    )
+    from apm_cli.utils.yaml_io import load_yaml
 
-    project_val = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
-    return effective_allow_executables(project_val)
+    project_data: dict | None = None
+    manifest = getattr(ctx, "project_root", None)
+    if manifest is not None:
+        manifest_path = manifest / "apm.yml"
+        if manifest_path.is_file():
+            data = load_yaml(manifest_path)
+            if isinstance(data, dict):
+                project_data = data
+
+    # Fall back to the in-memory gate signal when apm.yml is unreadable so a
+    # project that opted in via allowExecutables still gates.
+    if project_data is None:
+        project_val = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
+        if isinstance(project_val, dict):
+            project_data = {"allowExecutables": project_val}
+
+    policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
+    trust_ctx = build_exec_trust_context(policy=policy, project_data=project_data)
+    # Cache the resolved context so the gate can compute lockfile exec_status
+    # from the same precedence ladder (single source of truth).
+    if hasattr(ctx, "exec_trust_ctx"):
+        ctx.exec_trust_ctx = trust_ctx
+    return materialize_exec_map(trust_ctx)
 
 
 def run_integration_template(

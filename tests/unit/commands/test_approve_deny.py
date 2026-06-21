@@ -207,9 +207,7 @@ class TestApproveCmd:
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_manifest(".")
-            with patch(
-                "apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()
-            ):
+            with patch("apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()):
                 result = runner.invoke(approve_cmd, ["--recommended"])
             assert result.exit_code == 0
             assert "No org-recommended" in result.output
@@ -219,9 +217,7 @@ class TestApproveCmd:
         with runner.isolated_filesystem():
             _write_manifest(".", {"executables": {"allow": {}}})
             _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
-            with patch(
-                "apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()
-            ):
+            with patch("apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()):
                 result = runner.invoke(approve_cmd, ["--list"])
             assert result.exit_code == 0
             assert "hook-pkg" in result.output
@@ -281,9 +277,7 @@ class TestExplainCmd:
         with runner.isolated_filesystem():
             _write_manifest(".")
             Path("apm_modules").mkdir()
-            with patch(
-                "apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()
-            ):
+            with patch("apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()):
                 result = runner.invoke(explain_cmd, ["nonexistent"])
             assert result.exit_code == 0
             assert "not found" in result.output
@@ -294,9 +288,7 @@ class TestExplainCmd:
             # Gate enabled (executables block present) but nothing approved.
             _write_manifest(".", {"executables": {"allow": {}}})
             _create_pkg_with_hooks(Path("apm_modules"), "hook-pkg")
-            with patch(
-                "apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()
-            ):
+            with patch("apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()):
                 result = runner.invoke(explain_cmd, ["hook-pkg"])
             assert result.exit_code == 0
             assert "blocked" in result.output
@@ -311,9 +303,7 @@ class TestExplainCmd:
                 ".",
                 {"executables": {"allow": {"hook-pkg": {"hooks": True}}}},
             )
-            with patch(
-                "apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()
-            ):
+            with patch("apm_cli.commands.approve._load_org_policy", return_value=ApmPolicy()):
                 result = runner.invoke(explain_cmd, ["hook-pkg"])
             assert result.exit_code == 0
             assert "allowed" in result.output
