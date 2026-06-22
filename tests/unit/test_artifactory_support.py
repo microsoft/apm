@@ -335,6 +335,47 @@ class TestBuildArtifactoryArchiveUrl:
             "GitLab archive filename must use the repo basename, not the full slug"
         )
 
+    def test_gitlab_slash_ref_filename_normalised(self):
+        """GitLab archive filename must replace slashes with dashes for slash-containing refs.
+
+        A branch like ``feat/my-slash-branch`` must produce the URL
+        ``/-/archive/feat/my-slash-branch/repo-feat-my-slash-branch.zip``
+        — the slash stays in the *path segment* (how GitLab addresses the archive) but is
+        replaced with a dash in the *filename* (how GitLab names the zip).
+
+        Without this fix the filename would contain a literal slash
+        (``repo-feat/my-slash-branch.zip``) which is not a valid filename, causing
+        Artifactory to return 404 when ``PROXY_REGISTRY_ONLY=1`` suppresses the direct-API
+        fallback.
+        """
+        ref = "feat/my-slash-branch"
+        urls = build_artifactory_archive_url(
+            "art.example.com", "artifactory/gitlab", "owner", "repo", ref=ref
+        )
+        # The GitLab path segment must retain the slash (so Artifactory can proxy it).
+        assert any(f"/-/archive/{ref}/" in u for u in urls), (
+            "GitLab path segment must preserve the raw ref including the slash"
+        )
+        # The archive filename must have the slash replaced with a dash.
+        assert any(u.endswith("/-/archive/feat/my-slash-branch/repo-feat-my-slash-branch.zip") for u in urls), (
+            "GitLab archive filename must replace '/' with '-' in the ref portion"
+        )
+        # The GitHub-style candidates must be unchanged (slashes are valid there).
+        assert any("/archive/refs/heads/feat/my-slash-branch.zip" in u for u in urls), (
+            "GitHub-style /archive/refs/heads/{ref}.zip must be unchanged for slash refs"
+        )
+
+    def test_non_slash_ref_gitlab_filename_unchanged(self):
+        """Single-component refs (no slash) must produce the same GitLab filename as before."""
+        for ref in ("main", "v1.2.3", "my-feature"):
+            urls = build_artifactory_archive_url(
+                "art.example.com", "artifactory/github", "owner", "repo", ref=ref
+            )
+            safe_ref = ref.replace("/", "-")
+            assert any(f"/-/archive/{ref}/repo-{safe_ref}.zip" in u for u in urls), (
+                f"Non-slash ref '{ref}' must produce GitLab filename repo-{safe_ref}.zip"
+            )
+
 
 # ── apm_package.py: DependencyReference Artifactory parsing ──
 

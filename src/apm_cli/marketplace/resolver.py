@@ -792,8 +792,15 @@ def resolve_marketplace_plugin(
             plugin, plugin_root=manifest.plugin_root
         )
         if in_repo_path:
+            # Fall back to the marketplace's registered ref when neither a caller-supplied
+            # version_spec nor the plugin's own path_ref is available (string sources always
+            # return path_ref=None from _extract_in_repo_path_and_ref).  Exclude "main" /
+            # "HEAD" to match the GitHub-family propagation guard and avoid redundant refs.
+            _gitlab_ref = version_spec or path_ref or (
+                source.ref if source.ref not in ("main", "HEAD") else None
+            )
             dep_ref = _gitlab_in_marketplace_dependency_reference(
-                source, in_repo_path, version_spec or path_ref
+                source, in_repo_path, _gitlab_ref
             )
             canonical = dep_ref.to_canonical()
 
@@ -830,18 +837,42 @@ def resolve_marketplace_plugin(
         plugin, source, canonical, dep_ref
     )
 
-    # ---- Raw ref override ----
-    # When version_spec is provided it is treated as a raw git ref that
-    # overrides whatever ref came from the marketplace source field.
-    if version_spec and dep_ref is None:
-        base = canonical.split("#", 1)[0]
-        canonical = f"{base}#{version_spec}"
-        logger.debug(
-            "Using raw git ref '%s' for %s@%s",
-            version_spec,
-            plugin_name,
-            marketplace_name,
-        )
+    # ---- Ref override / propagation ----
+    # Priority:
+    #   1. Explicit version_spec from the caller (``apm install plugin@mkt#v2``) — always
+    #      wins; strips any existing embedded ref and replaces it.
+    #   2. Marketplace registered ``--ref`` propagated to in-marketplace *string* sources.
+    #      ``resolve_plugin_source`` has no knowledge of the marketplace's branch, so the
+    #      canonical for a relative string source (e.g. ``"./plugins/foo"``) carries no
+    #      ``#ref``.  Without this injection the downloader silently falls back to the
+    #      repo's default branch instead of the registered branch.
+    #      Guard: only when no ref is already embedded in the canonical (dict sources that
+    #      declare their own ref embed it during ``_resolve_github_source``), only for
+    #      in-marketplace string sources, and only for non-default refs (``main`` /
+    #      ``HEAD`` are implicit — embedding them would be redundant noise).
+    if dep_ref is None:
+        if version_spec:
+            base = canonical.split("#", 1)[0]
+            canonical = f"{base}#{version_spec}"
+            logger.debug(
+                "Using raw git ref '%s' for %s@%s (version_spec override)",
+                version_spec,
+                plugin_name,
+                marketplace_name,
+            )
+        elif (
+            "#" not in canonical
+            and isinstance(plugin.source, str)
+            and _is_in_marketplace_source(plugin, source)
+            and source.ref not in ("main", "HEAD")
+        ):
+            canonical = f"{canonical}#{source.ref}"
+            logger.debug(
+                "Propagated marketplace ref '%s' to string source canonical for %s@%s",
+                source.ref,
+                plugin_name,
+                marketplace_name,
+            )
 
     # ---- Ref immutability check (advisory) ----
     # Record the plugin -> ref mapping (scoped by version) and warn if
