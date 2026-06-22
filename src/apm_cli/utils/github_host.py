@@ -751,7 +751,7 @@ def build_artifactory_archive_url(
         # GitLab-style: /-/archive/{ref}/{basename}-{ref}.zip
         # GitLab keeps the raw ref (including slashes) as a path segment but replaces
         # slashes with dashes in the archive *filename*.  E.g. branch
-        # ``feat/my-feature`` → ``.../-/archive/feat/my-feature/repo-feat-my-feature.zip``.
+        # ``feat/my-feature`` -> ``.../-/archive/feat/my-feature/repo-feat-my-feature.zip``.
         f"{base}/-/archive/{ref}/{repo_basename}-{ref.replace('/', '-')}.zip",
         # GitHub-style tags fallback
         f"{base}/archive/refs/tags/{ref}.zip",

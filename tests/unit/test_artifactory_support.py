@@ -340,7 +340,7 @@ class TestBuildArtifactoryArchiveUrl:
 
         A branch like ``feat/my-slash-branch`` must produce the URL
         ``/-/archive/feat/my-slash-branch/repo-feat-my-slash-branch.zip``
-        — the slash stays in the *path segment* (how GitLab addresses the archive) but is
+        -- the slash stays in the *path segment* (how GitLab addresses the archive) but is
         replaced with a dash in the *filename* (how GitLab names the zip).
 
         Without this fix the filename would contain a literal slash
@@ -600,7 +600,7 @@ class TestRegistryOnlyNestedShorthand:
         assert dep.virtual_path == "some-subdir"
 
 
-# ── Artifactory boundary probe (mirrors native GitLab probing pattern) ──
+# -- Artifactory boundary probe (mirrors native GitLab probing pattern) --
 
 
 class TestArtifactoryBoundaryResolver:
@@ -780,7 +780,7 @@ class TestArtifactoryBoundaryResolver:
         assert resolved.is_artifactory() is False
 
 
-# ── ArtifactoryOrchestrator: multi-segment repo support ──
+# -- ArtifactoryOrchestrator: multi-segment repo support --
 
 
 class TestArtifactoryOrchestratorNestedRepo:
@@ -813,7 +813,7 @@ class TestArtifactoryOrchestratorNestedRepo:
         assert repo == "shared-modules/pkg-utils"
 
 
-# ── token_manager.py: Artifactory token support ──
+# -- token_manager.py: Artifactory token support --
 
 
 class TestArtifactoryTokenManager:

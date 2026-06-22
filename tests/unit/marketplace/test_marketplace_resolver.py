@@ -1439,7 +1439,7 @@ class TestMarketplaceRegisteredRefPropagation:
 
     When a marketplace is added with ``apm marketplace add --ref feat/x owner/repo``,
     subsequent ``apm install plugin@marketplace`` must download the plugin from
-    ``feat/x`` — not from the repo's default branch.  This applies to both:
+    ``feat/x`` -- not from the repo's default branch.  This applies to both:
 
     - GitHub-family marketplaces (no ``dependency_reference``; ref embedded in canonical)
     - GitLab / non-GitHub marketplaces (ref embedded in ``dependency_reference``)
@@ -1469,7 +1469,7 @@ class TestMarketplaceRegisteredRefPropagation:
     def _manifest(plugin: MarketplacePlugin) -> MarketplaceManifest:
         return MarketplaceManifest(name="my-marketplace", plugins=(plugin,), plugin_root="")
 
-    # ── GitHub-family: ref embedded in canonical ──────────────────────────────
+    # -- GitHub-family: ref embedded in canonical ---------------------------------
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
@@ -1542,7 +1542,7 @@ class TestMarketplaceRegisteredRefPropagation:
             "Explicit plugin ref must survive; marketplace ref must not overwrite it"
         )
 
-    # ── GitLab: ref embedded in dependency_reference ─────────────────────────
+    # -- GitLab: ref embedded in dependency_reference ----------------------------
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")

@@ -839,7 +839,7 @@ def resolve_marketplace_plugin(
 
     # ---- Ref override / propagation ----
     # Priority:
-    #   1. Explicit version_spec from the caller (``apm install plugin@mkt#v2``) — always
+    #   1. Explicit version_spec from the caller (``apm install plugin@mkt#v2``) -- always
     #      wins; strips any existing embedded ref and replaces it.
     #   2. Marketplace registered ``--ref`` propagated to in-marketplace *string* sources.
     #      ``resolve_plugin_source`` has no knowledge of the marketplace's branch, so the
@@ -849,7 +849,7 @@ def resolve_marketplace_plugin(
     #      Guard: only when no ref is already embedded in the canonical (dict sources that
     #      declare their own ref embed it during ``_resolve_github_source``), only for
     #      in-marketplace string sources, and only for non-default refs (``main`` /
-    #      ``HEAD`` are implicit — embedding them would be redundant noise).
+    #      ``HEAD`` are implicit -- embedding them would be redundant noise).
     if dep_ref is None:
         if version_spec:
             base = canonical.split("#", 1)[0]
