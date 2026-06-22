@@ -310,9 +310,11 @@ class TargetProfile:
         cowork), the path is rooted there.  Otherwise falls back to the
         standard ``project_root / root_dir`` pattern.  When ``primitive``
         names a mapping with ``deploy_root``, that primitive-specific root is
-        used instead of ``root_dir``.  ``primitive`` is not consulted when
-        ``resolved_deploy_root`` is set; the dynamic root already identifies
-        the complete deployment root.
+        used instead of ``root_dir``.  Unknown primitive names raise
+        ``KeyError`` instead of falling back to ``root_dir``.  For known
+        primitives, ``primitive`` is not consulted when ``resolved_deploy_root``
+        is set; the dynamic root already identifies the complete deployment
+        root.
 
         Args:
             project_root: Workspace or home directory root.
@@ -325,7 +327,7 @@ class TargetProfile:
                 ``root_dir`` via ``deploy_root`` and append its mapped
                 ``subdir``.
         """
-        mapping = self.primitives.get(primitive) if primitive is not None else None
+        mapping = self.primitives[primitive] if primitive is not None else None
         if self.resolved_deploy_root is not None:
             return (
                 self.resolved_deploy_root.joinpath(*parts) if parts else self.resolved_deploy_root

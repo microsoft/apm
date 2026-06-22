@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install -g --target codex` now honors `CODEX_HOME` for user-scope
   Codex MCP config writes, falling back to `~/.codex/config.toml` when unset.
   (closes #1861) (#1863)
+- Config unset helpers no longer rewrite `~/.apm/config.json` when the key is
+  already absent, preserving true no-op behavior for unset calls. (#1667)
 
 ## [0.21.0] - 2026-06-19
 

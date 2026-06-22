@@ -139,6 +139,19 @@ class TestDeployPath:
         result = copilot.deploy_path(tmp_path, "review", primitive="skills")
         assert result == tmp_path / ".agents" / "skills" / "review"
 
+    def test_deploy_path_cowork_known_primitive_uses_resolved_root(self, tmp_path: Path) -> None:
+        cowork = replace(
+            KNOWN_TARGETS["copilot-cowork"],
+            resolved_deploy_root=tmp_path,
+        )
+        result = cowork.deploy_path(Path("/unused"), "review", primitive="skills")
+        assert result == tmp_path / "review"
+
+    def test_deploy_path_unknown_primitive_raises(self, tmp_path: Path) -> None:
+        copilot = KNOWN_TARGETS["copilot"]
+        with pytest.raises(KeyError):
+            copilot.deploy_path(tmp_path, primitive="unknown")
+
 
 # ---------------------------------------------------------------------------
 # TestActiveTargetsGating

@@ -938,6 +938,16 @@ class SkillIntegrator(BaseIntegrator):
                 except ImportError:
                     pass  # CLI not available in tests
 
+        # Validate before target path construction so no invalid segment reaches
+        # deploy_path(), including cowork's dynamic-root branch.
+        from apm_cli.utils.path_security import (
+            PathTraversalError,
+            ensure_path_within,
+            validate_path_segments,
+        )
+
+        validate_path_segments(skill_name, context="skill name")
+
         # Deploy to all active targets that support skills.
         # When *targets* is provided (from --target), use it directly.
         # Otherwise auto-detect with copilot as the fallback.
@@ -970,13 +980,6 @@ class SkillIntegrator(BaseIntegrator):
             target_skill_dir = target.deploy_path(project_root, skill_name, primitive="skills")
 
             # Security: validate name + containment + symlink rejection.
-            from apm_cli.utils.path_security import (
-                PathTraversalError,
-                ensure_path_within,
-                validate_path_segments,
-            )
-
-            validate_path_segments(skill_name, context="skill name")
             if target_skill_dir.is_symlink():
                 raise PathTraversalError(
                     f"Skill destination {target_skill_dir} is a symlink -- refusing to deploy"
@@ -1156,9 +1159,7 @@ class SkillIntegrator(BaseIntegrator):
                 continue
 
             is_primary = idx == 0
-            skills_mapping = target.primitives["skills"]
-            effective_root = skills_mapping.deploy_root or target.root_dir
-            target_skills_root = project_root / effective_root / "skills"
+            target_skills_root = target.deploy_path(project_root, primitive="skills")
 
             # Dedup: skip if same resolved skills root already processed.
             resolved_root = target_skills_root.resolve()
