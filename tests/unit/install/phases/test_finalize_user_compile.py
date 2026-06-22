@@ -171,6 +171,59 @@ class TestHintGlobalRootContext:
 
         mock_info.assert_not_called()
 
+    def test_no_hint_for_user_scope_native_rules_target(self):
+        """Targets with native user-scope rules are ignored even if family is agents."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.finalize import _hint_global_root_context
+
+        ctx = _make_install_context(
+            scope=InstallScope.USER,
+            targets=[_make_target("cursor", "agents")],
+        )
+
+        with (
+            patch(
+                "apm_cli.core.scope.get_apm_dir",
+                return_value=Path.home() / ".apm",
+            ),
+            patch(
+                "apm_cli.compilation.user_root_context.discover_global_instructions",
+                return_value=[SimpleNamespace(apply_to=None)],
+            ),
+            patch("apm_cli.utils.console._rich_info") as mock_info,
+        ):
+            _hint_global_root_context(ctx)
+
+        mock_info.assert_not_called()
+
+    def test_hint_uses_context_logger_when_available(self):
+        """The install hint routes through the command logger when present."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.install.phases.finalize import _hint_global_root_context
+
+        logger = MagicMock()
+        ctx = _make_install_context(
+            scope=InstallScope.USER,
+            targets=[_make_target("Codex", "agents")],
+        )
+        ctx.logger = logger
+
+        with (
+            patch(
+                "apm_cli.core.scope.get_apm_dir",
+                return_value=Path.home() / ".apm",
+            ),
+            patch(
+                "apm_cli.compilation.user_root_context.discover_global_instructions",
+                return_value=[SimpleNamespace(apply_to=None)],
+            ),
+            patch("apm_cli.utils.console._rich_info") as mock_info,
+        ):
+            _hint_global_root_context(ctx)
+
+        logger.info.assert_called_once()
+        mock_info.assert_not_called()
+
     def test_no_hint_for_targets_without_user_scope(self):
         """Targets whose for_scope returns None are ignored."""
         from apm_cli.core.scope import InstallScope

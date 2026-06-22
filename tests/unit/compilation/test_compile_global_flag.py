@@ -24,9 +24,20 @@ from click.testing import CliRunner
 # ---------------------------------------------------------------------------
 
 
-def _make_result(target: str, path: str | None, status: str) -> SimpleNamespace:
+def _make_result(
+    target: str,
+    path: str | None,
+    status: str,
+    *,
+    has_critical_security: bool = False,
+) -> SimpleNamespace:
     """Create a result object as returned by compile_user_root_contexts."""
-    return SimpleNamespace(target=target, path=Path(path) if path else None, status=status)
+    return SimpleNamespace(
+        target=target,
+        path=Path(path) if path else None,
+        status=status,
+        has_critical_security=has_critical_security,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +148,7 @@ class TestHandleGlobalFlag:
         assert "[*]" in calls_str or "would" in calls_str.lower()
 
     def test_success_unchanged_status(self, tmp_path):
-        """Result with 'unchanged' status -> prints [i] and returns 0."""
+        """Result with 'unchanged' status -> returns 0 without default detail."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
         source_root = tmp_path / "source"
@@ -167,10 +178,10 @@ class TestHandleGlobalFlag:
 
         assert rc == 0
         calls_str = str(mock_rich_info.call_args_list)
-        assert "[i]" in calls_str or "unchanged" in calls_str.lower()
+        assert "unchanged" not in calls_str.lower()
 
     def test_success_skipped_no_instructions(self, tmp_path):
-        """Result with 'skipped-no-instructions' -> prints [i] and returns 0."""
+        """Result with 'skipped-no-instructions' -> returns 0 without default detail."""
         from apm_cli.commands.compile.cli import _handle_global_flag
 
         source_root = tmp_path / "source"
@@ -200,7 +211,7 @@ class TestHandleGlobalFlag:
 
         assert rc == 0
         calls_str = str(mock_rich_info.call_args_list)
-        assert "[i]" in calls_str or "skipped" in calls_str.lower()
+        assert "skipped" not in calls_str.lower()
 
     def test_success_skipped_hand_authored(self, tmp_path):
         """Result with 'skipped-hand-authored' -> prints [i] and returns 0."""
@@ -272,6 +283,36 @@ class TestHandleGlobalFlag:
         assert rc == 1
         # Should call _rich_error
         mock_rich_error.assert_called()
+
+    def test_critical_security_result_returns_1(self, tmp_path):
+        """Critical security result -> returns 1 even when status is written."""
+        from apm_cli.commands.compile.cli import _handle_global_flag
+
+        source_root = tmp_path / "source"
+        source_root.mkdir()
+        apm_modules = source_root / "apm_modules"
+        apm_modules.mkdir()
+
+        results = [
+            _make_result(
+                "claude",
+                str(tmp_path / ".claude/CLAUDE.md"),
+                "written",
+                has_critical_security=True,
+            )
+        ]
+
+        with (
+            patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
+            patch(
+                "apm_cli.compilation.compile_user_root_contexts",
+                return_value=results,
+            ),
+            patch("apm_cli.utils.console._rich_success"),
+        ):
+            rc = _handle_global_flag(dry_run=False)
+
+        assert rc == 1
 
     def test_multiple_results_mixed_status(self, tmp_path):
         """Multiple results with different status values."""

@@ -51,6 +51,7 @@ class UserRootCompileResult:
     target: str
     path: Path | None
     status: str
+    has_critical_security: bool = False
 
 
 def _resolve_deploy_root(profile: TargetProfile) -> Path:
@@ -263,9 +264,9 @@ def compile_user_root_contexts(
 
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            from ..security.gate import WARN_POLICY, SecurityGate
+            from ..security.gate import BLOCK_POLICY, SecurityGate
 
-            verdict = SecurityGate.scan_text(content, str(output_path), policy=WARN_POLICY)
+            verdict = SecurityGate.scan_text(content, str(output_path), policy=BLOCK_POLICY)
             actionable = verdict.critical_count + verdict.warning_count
             if actionable:
                 log.warning(
@@ -275,9 +276,26 @@ def compile_user_root_contexts(
                     actionable,
                     output_path,
                 )
+            if verdict.should_block:
+                results.append(
+                    UserRootCompileResult(
+                        scoped.name,
+                        output_path,
+                        "error:critical hidden characters in compiled output",
+                        has_critical_security=True,
+                    )
+                )
+                continue
             output_path.write_text(content, encoding="utf-8")
             log.debug("user_root_context: wrote %s", output_path)
-            results.append(UserRootCompileResult(scoped.name, output_path, "written"))
+            results.append(
+                UserRootCompileResult(
+                    scoped.name,
+                    output_path,
+                    "written",
+                    has_critical_security=verdict.has_critical,
+                )
+            )
         except OSError as exc:
             log.warning("user_root_context: failed to write %s: %s", output_path, exc)
             results.append(UserRootCompileResult(scoped.name, output_path, f"error:{exc}"))

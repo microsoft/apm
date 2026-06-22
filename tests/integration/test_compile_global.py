@@ -71,6 +71,49 @@ def test_compile_global_writes_claude_md_from_real_fixtures(tmp_path, monkeypatc
     assert "Use type hints in generated code." in content
 
 
+def test_compile_global_dry_run_writes_nothing(tmp_path, monkeypatch):
+    """Run apm compile --global --dry-run end-to-end with no writes."""
+    from apm_cli.commands.compile.cli import compile as compile_cmd
+    from apm_cli.primitives.discovery import clear_discovery_cache
+
+    home = tmp_path / "home"
+    apm_modules = home / ".apm" / "apm_modules"
+    instruction_dir = apm_modules / "demo" / ".apm" / "instructions"
+    instruction_dir.mkdir(parents=True)
+    (instruction_dir / "global.instructions.md").write_text(
+        "---\ndescription: Global test instructions\n---\nUse type hints in generated code.\n",
+        encoding="utf-8",
+    )
+
+    claude_config = home / "claude-config"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_config))
+    clear_discovery_cache()
+
+    result = CliRunner().invoke(compile_cmd, ["--global", "--dry-run"])
+
+    clear_discovery_cache()
+    assert result.exit_code == 0, result.output
+    assert not (claude_config / "CLAUDE.md").exists()
+    assert "would write" in result.output
+
+
+def test_compile_global_fails_when_no_apm_modules(tmp_path, monkeypatch):
+    """The full CLI exits 1 when no user-scope packages are installed."""
+    from apm_cli.commands.compile.cli import compile as compile_cmd
+    from apm_cli.primitives.discovery import clear_discovery_cache
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    clear_discovery_cache()
+
+    result = CliRunner().invoke(compile_cmd, ["--global"])
+
+    clear_discovery_cache()
+    assert result.exit_code == 1
+    assert "apm_modules not found" in result.output
+
+
 def test_compile_global_preserves_hand_authored_claude_md(tmp_path, monkeypatch):
     """The full CLI keeps an existing hand-authored user root context file."""
     from apm_cli.commands.compile.cli import compile as compile_cmd

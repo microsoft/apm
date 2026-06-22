@@ -246,10 +246,9 @@ you can omit `start_marker` and `end_marker` if you use those verbatim.
 
 ## Global compilation (-g)
 
-Install a package once globally and every AI tool on your machine can pick up
-its instructions without per-project setup. By default, `apm compile` reads
-instructions from your workspace and writes root context files to `.github/`,
-`.claude/`, etc. For user-scope instructions, use the `--global` or `-g` flag:
+Install a package once globally and root-context tools on your machine can pick
+up its instructions without per-project setup. For user-scope instructions, use
+the `--global` or `-g` flag:
 
 ```bash
 apm compile --global
@@ -257,10 +256,11 @@ apm compile -g --dry-run
 ```
 
 This reads **global instructions** from `~/.apm/apm_modules/` (instructions
-without `applyTo:` frontmatter) and writes user-scope root context files:
+without `applyTo:` frontmatter) and writes user-scope root context files for
+root-context targets:
 
 - `~/.claude/CLAUDE.md` (or `$CLAUDE_CONFIG_DIR/CLAUDE.md`)
-- `~/.codex/AGENTS.md`, `~/.copilot/AGENTS.md`, `~/.cursor/AGENTS.md`, etc.
+- `~/.codex/AGENTS.md` and other verified AGENTS.md user roots
 - `~/.gemini/GEMINI.md`
 
 ### Overwrite protection
@@ -277,6 +277,8 @@ be written without modifying files.
   instructions land on a root-context-only target.
 - `--global` cannot be combined with project-output flags such as `--target`,
   `--all`, `--watch`, `--root`, or `--output`.
+- Compiled output is security-scanned before it is written. Critical findings
+  stop the write and make `apm compile -g` exit non-zero.
 - Skills-only packages (no global instructions) do not write root files.
 
 ## Pitfalls

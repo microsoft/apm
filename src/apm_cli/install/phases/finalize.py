@@ -18,14 +18,14 @@ if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
     from apm_cli.models.results import InstallResult
 
-# compile_family values whose ONLY user-scope surface for global instructions
-# is a root context file (AGENTS.md / CLAUDE.md / GEMINI.md).  These targets
-# need the explicit ``apm compile -g`` transform to pick up global
-# instructions.  ``vscode`` (Copilot) is deliberately excluded: it deploys
-# global instructions natively to its user-scope instructions file on install,
-# so no transform is required.  Directory-native instruction surfaces are
-# likewise excluded.
+# compile_family values whose user-scope surface for global instructions can
+# require a root context file (AGENTS.md / CLAUDE.md / GEMINI.md).  The excluded
+# target names deploy user-scope instructions natively or have no verified
+# user-scope root-context reader, so they should not receive the hint.
 _ROOT_CONTEXT_ONLY_FAMILIES = frozenset({"agents", "claude", "gemini"})
+_ROOT_CONTEXT_HINT_EXCLUDED_TARGETS = frozenset(
+    {"antigravity", "copilot", "cursor", "kiro", "windsurf"}
+)
 
 
 def _hint_global_root_context(ctx: InstallContext) -> None:
@@ -60,6 +60,8 @@ def _hint_global_root_context(ctx: InstallContext) -> None:
         scoped = target.for_scope(user_scope=True)
         if scoped is None:
             continue
+        if scoped.name.lower() in _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS:
+            continue
         if scoped.compile_family not in _ROOT_CONTEXT_ONLY_FAMILIES:
             continue
         if scoped.name not in seen:
@@ -69,12 +71,11 @@ def _hint_global_root_context(ctx: InstallContext) -> None:
     if not target_names:
         return
 
-    _rich_info(
-        "Global instructions installed. Run 'apm compile -g' to surface them "
-        "in root context files (AGENTS.md/CLAUDE.md/GEMINI.md) for: "
-        f"{', '.join(target_names)}.",
-        symbol="info",
-    )
+    message = f"Global instructions installed. Run 'apm compile -g' for: {', '.join(target_names)}."
+    if ctx.logger:
+        ctx.logger.info(message, symbol="info")
+    else:
+        _rich_info(message, symbol="info")
 
 
 def run(ctx: InstallContext) -> InstallResult:

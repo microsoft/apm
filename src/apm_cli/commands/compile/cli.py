@@ -358,6 +358,9 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger | None = None) -> i
             def success(self, message: str, symbol: str = "check") -> None:
                 _rich_success(message, symbol=symbol)
 
+            def verbose_detail(self, _message: str) -> None:
+                return
+
         logger = _RichLogger()
     source_root = get_apm_dir(InstallScope.USER)
     apm_modules = source_root / "apm_modules"
@@ -393,21 +396,24 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger | None = None) -> i
         status = entry.status
         tname = entry.target
         path = entry.path
+        display_path = _display_user_path(path) if path is not None else None
         if status == "written":
-            logger.success(f"{tname}: wrote {path}", symbol="check")
+            logger.success(f"{tname}: wrote {display_path}", symbol="check")
             written_count += 1
         elif status == "would-write":
-            logger.info(f"{tname}: would write {path} (dry-run)", symbol="preview")
+            logger.info(f"{tname}: would write {display_path} (dry-run)", symbol="preview")
             would_write_count += 1
         elif status == "unchanged":
-            logger.info(f"{tname}: unchanged {path}", symbol="info")
+            logger.verbose_detail(f"{tname}: unchanged {display_path}")
             unchanged_count += 1
         elif status == "skipped-hand-authored":
-            logger.info(f"{tname}: skipped (hand-authored) {path}", symbol="info")
+            logger.info(f"{tname}: skipped (hand-authored) {display_path}", symbol="info")
         elif status == "skipped-no-instructions":
-            logger.info(f"{tname}: skipped (no global instructions)", symbol="info")
+            logger.verbose_detail(f"{tname}: skipped (no global instructions)")
         elif status.startswith("error:"):
             logger.error(f"{tname}: {status[6:]}", symbol="error")
+            has_error = True
+        if getattr(entry, "has_critical_security", False):
             has_error = True
 
     if not has_error:
@@ -1003,7 +1009,7 @@ def _run_compilation(
     help=(
         "Compile user-scope root context files (~/.claude/CLAUDE.md, etc.) "
         "from ~/.apm/apm_modules. Cannot be combined with project-scoped output "
-        "flags (--target, --all, --watch, --root, --output, etc.); use with "
+        "flags such as --target, --all, --watch, --root, or --output; use with "
         "--dry-run to preview changes."
     ),
 )
