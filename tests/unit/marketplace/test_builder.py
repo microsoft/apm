@@ -2402,6 +2402,86 @@ class TestFetchRemoteMetadataGHEHost:
         assert parsed.path.startswith("/api/v3/repos/")
         assert req.get_header("Accept") == "application/vnd.github.raw"
 
+    def test_metadata_fetch_github_com_falls_back_to_rest_api_on_raw_404(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """github.com raw 404 falls back to REST API for INTERNAL/private repos."""
+        import urllib.error
+
+        pkg = self._make_pkg(source_repo="acme/private-tools", subdir="plugins/core")
+        builder = self._make_builder(tmp_path)
+        builder._host = "github.com"
+        builder._github_token = "ghp_test_token"
+        builder._host_info = SimpleNamespace(
+            kind="github",
+            api_base="https://api.github.com",
+        )
+        raw_404 = urllib.error.HTTPError(
+            url="https://raw.githubusercontent.com/acme/private-tools/sha/plugins/core/apm.yml",
+            code=404,
+            msg="Not Found",
+            hdrs=None,
+            fp=None,  # type: ignore[arg-type]
+        )
+        yaml_body = b"description: Private tool\nversion: 2.1.0\n"
+        mock_resp = _FakeHTTPResponse(yaml_body)
+        with patch(
+            "apm_cli.marketplace.builder.urllib.request.urlopen",
+            side_effect=[raw_404, mock_resp],
+        ) as mock_open:
+            result = builder._fetch_remote_metadata(pkg)
+        assert result == {"description": "Private tool", "version": "2.1.0"}
+        raw_req = mock_open.call_args_list[0][0][0]
+        raw_parsed = urllib.parse.urlparse(raw_req.full_url)
+        assert raw_parsed.hostname == "raw.githubusercontent.com"
+        assert raw_parsed.path == (f"/acme/private-tools/{_SHA_A}/plugins/core/apm.yml")
+        assert raw_req.get_header("Authorization") == "token ghp_test_token"
+
+        rest_req = mock_open.call_args_list[1][0][0]
+        rest_parsed = urllib.parse.urlparse(rest_req.full_url)
+        assert rest_parsed.hostname == "api.github.com"
+        assert rest_parsed.path == ("/repos/acme/private-tools/contents/plugins/core/apm.yml")
+        assert rest_parsed.query == f"ref={_SHA_A}"
+        assert rest_req.get_header("Accept") == "application/vnd.github.raw"
+        assert rest_req.get_header("Authorization") == "token ghp_test_token"
+
+    def test_metadata_fetch_github_com_non_404_does_not_fallback(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """github.com raw non-404 errors do not trigger the REST fallback."""
+        import urllib.error
+
+        pkg = self._make_pkg(source_repo="acme/private-tools", subdir="plugins/core")
+        builder = self._make_builder(tmp_path)
+        builder._host = "github.com"
+        builder._github_token = "ghp_test_token"
+        builder._host_info = SimpleNamespace(
+            kind="github",
+            api_base="https://api.github.com",
+        )
+        raw_403 = urllib.error.HTTPError(
+            url="https://raw.githubusercontent.com/acme/private-tools/sha/plugins/core/apm.yml",
+            code=403,
+            msg="Forbidden",
+            hdrs=None,
+            fp=None,  # type: ignore[arg-type]
+        )
+        with patch(
+            "apm_cli.marketplace.builder.urllib.request.urlopen",
+            side_effect=raw_403,
+        ) as mock_open:
+            result = builder._fetch_remote_metadata(pkg)
+
+        assert result is None
+        assert mock_open.call_count == 1
+        req = mock_open.call_args[0][0]
+        parsed = urllib.parse.urlparse(req.full_url)
+        assert parsed.hostname == "raw.githubusercontent.com"
+        assert parsed.path == (f"/acme/private-tools/{_SHA_A}/plugins/core/apm.yml")
+        assert req.get_header("Authorization") == "token ghp_test_token"
+
     def test_metadata_fetch_non_github_skipped(self, tmp_path: Path) -> None:
         """Non-GitHub host (kind='generic') returns None without any HTTP request."""
         pkg = self._make_pkg()
@@ -2437,9 +2517,9 @@ class TestFetchRemoteMetadataGHEHost:
 
         Regression guard: previously ``_fetch_remote_metadata`` branched
         only on ``self._host``, so a GHE-hosted package would be fetched
-        from ``raw.githubusercontent.com`` -- potentially returning an
-        unrelated github.com repo's metadata.  After the fix, the
-        package's own host drives every decision.
+        from the wrong API endpoint -- potentially returning an
+        unrelated repo's metadata.  After the fix, the package's own
+        host drives every decision.
         """
         from unittest.mock import MagicMock
 

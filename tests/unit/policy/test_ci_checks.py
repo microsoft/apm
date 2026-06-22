@@ -310,6 +310,41 @@ class TestNoOrphans:
         result = _check_no_orphans(manifest, lock)
         assert result.passed, result.details
 
+    def test_remote_deps_of_local_path_subpackage_not_orphaned(self, tmp_path):
+        """Remote deps declared by a local-path sub-package are transitive.
+
+        Topology: root -> ./packages/agent-config (local-path) ->
+        prisma/skills (remote, pinned SHA). The lockfile should record
+        ``resolved_by: _local/agent-config`` for ``prisma/skills`` so
+        ``_check_no_orphans`` exempts it. Regression test for #1846.
+        """
+        _write_apm_yml(tmp_path, deps=["./packages/agent-config"])
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: _local/agent-config
+                    source: local
+                    local_path: ./packages/agent-config
+                    depth: 1
+                    deployed_files: []
+                  - repo_url: prisma/skills
+                    resolved_ref: 0b8e83cddde30b3e028fb4e0f6770948c6160e08
+                    depth: 2
+                    resolved_by: _local/agent-config
+                    deployed_files: []
+            """),
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
+
+        manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_no_orphans(manifest, lock)
+        assert result.passed, f"False positive orphan: {result.details}"
+
 
 # -- Config consistency ---------------------------------------------
 
