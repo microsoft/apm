@@ -265,14 +265,20 @@ function Install-ViaPip {
     }
     $pipIndexArgs = Get-PipIndexArgs
     try {
-        if ($pipCmd -like "* -m pip") {
-            $output = & $pythonCmd -m pip install --user @pipIndexArgs apm-cli 2>&1
-            $pipExitCode = $LASTEXITCODE
-            $output | Write-Host
-        } else {
-            $output = & $pipCmd install --user @pipIndexArgs apm-cli 2>&1
-            $pipExitCode = $LASTEXITCODE
-            $output | Write-Host
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            if ($pipCmd -like "* -m pip") {
+                $output = & $pythonCmd -m pip install --user @pipIndexArgs apm-cli 2>&1
+                $pipExitCode = $LASTEXITCODE
+                $output | Write-Host
+            } else {
+                $output = & $pipCmd install --user @pipIndexArgs apm-cli 2>&1
+                $pipExitCode = $LASTEXITCODE
+                $output | Write-Host
+            }
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
         }
         if ($pipExitCode -ne 0) {
             Write-ErrorText "pip install failed (exit code $pipExitCode)."
