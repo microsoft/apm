@@ -464,7 +464,19 @@ def run(ctx: InstallContext) -> None:
     except _click.UsageError as exc:
         _raise_target_usage_error(ctx, exc)
 
-    # Resolve effective explicit target: CLI --target wins, then apm.yml
+    default_target = None
+    if ctx.target_override is None and config_target is None:
+        from apm_cli.config import get_install_target
+
+        default_target = get_install_target()
+        if default_target is not None:
+            # Treat configured default target exactly like an explicit selector
+            # for this invocation so downstream phases and policy checks see
+            # the same effective value.
+            ctx.target_override = default_target
+
+    # Resolve effective explicit target: CLI --target wins, then apm.yml,
+    # then user-scoped config default target.
     _explicit = ctx.target_override or config_target or None
 
     # ------------------------------------------------------------------

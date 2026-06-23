@@ -126,6 +126,49 @@ def test_run_conflicting_target_fields_exits_with_usage_code(tmp_path: Path) -> 
     ctx.logger.error.assert_called_once()
 
 
+def test_config_default_target_used_when_cli_and_manifest_targets_absent(
+    tmp_path: Path,
+) -> None:
+    """Uses config target as fallback when no --target or apm.yml target is set."""
+    from apm_cli.install.phases.targets import run
+    from apm_cli.models.apm_package import APMPackage
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: demo\nversion: 0.1.0\n", encoding="utf-8")
+    ctx = _make_ctx(tmp_path)
+    ctx.project_root = project
+    ctx.apm_package = APMPackage.from_apm_yml(project / "apm.yml")
+
+    with patch("apm_cli.config.get_install_target", return_value="claude"):
+        run(ctx)
+
+    assert [target.name for target in ctx.targets] == ["claude"]
+    assert (project / ".claude").is_dir()
+
+
+def test_manifest_target_wins_over_config_default_target(tmp_path: Path) -> None:
+    """apm.yml target keeps precedence over config default target."""
+    from apm_cli.install.phases.targets import run
+    from apm_cli.models.apm_package import APMPackage
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text(
+        "name: demo\nversion: 0.1.0\ntarget: copilot\n",
+        encoding="utf-8",
+    )
+    ctx = _make_ctx(tmp_path)
+    ctx.project_root = project
+    ctx.apm_package = APMPackage.from_apm_yml(project / "apm.yml")
+
+    with patch("apm_cli.config.get_install_target", return_value="claude"):
+        run(ctx)
+
+    assert [target.name for target in ctx.targets] == ["copilot"]
+    assert (project / ".github").is_dir()
+
+
 # ---------------------------------------------------------------------------
 # TestProjectScopeGateForCowork
 # ---------------------------------------------------------------------------
