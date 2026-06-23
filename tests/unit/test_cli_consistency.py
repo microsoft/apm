@@ -6,6 +6,11 @@ import click
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.core.target_detection import (
+    TARGET_ALL_HELP_EXPANSION,
+    TARGET_HELP_EXAMPLE_CSV,
+    TARGET_HELP_VALUES_CSV,
+)
 from apm_cli.output.script_formatters import ScriptExecutionFormatter
 
 
@@ -16,6 +21,17 @@ def _walk_commands(group: click.Group, prefix: tuple[str, ...] = ()):
         yield path, cmd
         if isinstance(cmd, click.Group):
             yield from _walk_commands(cmd, path)
+
+
+def _option_help(path: tuple[str, ...], option_name: str) -> str:
+    command: click.Command = cli
+    for name in path:
+        assert isinstance(command, click.Group)
+        command = command.commands[name]
+    for param in command.params:
+        if isinstance(param, click.Option) and option_name in param.opts:
+            return param.help or ""
+    raise AssertionError(f"{' '.join(path)} is missing {option_name}")
 
 
 def test_every_registered_command_has_explicit_help():
@@ -117,6 +133,23 @@ def test_mcp_install_forwards_unknown_options_before_double_dash():
 
     assert result.exit_code == 0
     assert "would add MCP server 'myserver'" in result.output
+
+
+def test_target_help_uses_shared_display_fragments():
+    """Keep target help examples aligned with target_detection.py."""
+    for path in (("install",), ("compile",), ("deps", "update")):
+        help_text = _option_help(path, "--target")
+        assert TARGET_HELP_VALUES_CSV in help_text
+        assert TARGET_ALL_HELP_EXPANSION in help_text
+
+    install_help = _option_help(("install",), "--target")
+    assert "apm config target" in install_help
+
+    compile_help = _option_help(("compile",), "--target")
+    assert "'--target all' is deprecated; use '--all' instead" in compile_help
+
+    update_help = _option_help(("update",), "--target")
+    assert TARGET_HELP_EXAMPLE_CSV in update_help
 
 
 def test_pack_unpack_dry_run_help_has_no_trailing_period():

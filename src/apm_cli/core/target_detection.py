@@ -727,12 +727,28 @@ CANONICAL_TARGETS_ORDERED: list[str] = [
     "claude",
     "copilot",
     "cursor",
-    "codex",
-    "gemini",
-    "opencode",
     "windsurf",
     "kiro",
+    "codex",
+    "opencode",
+    "gemini",
 ]
+
+TARGET_HELP_EXAMPLE_CSV = ", ".join(CANONICAL_TARGETS_ORDERED)
+TARGET_HELP_VALUES_CSV = ", ".join(
+    [*CANONICAL_TARGETS_ORDERED, "antigravity", "agent-skills", "all"]
+)
+TARGET_ALL_HELP_EXPANSION = "+".join(CANONICAL_TARGETS_ORDERED)
+TARGET_HELP_DETAILS = (
+    f"Values: {TARGET_HELP_VALUES_CSV}. "
+    "'agent-skills' deploys to .agents/skills/ (cross-client). "
+    "'antigravity' (alias 'agy') deploys to .agents/ "
+    "(AGENTS.md + rules + skills + hooks.json + mcp_config.json) "
+    "and is explicit-only -- not part of 'all' or auto-detection. "
+    f"'all' = {TARGET_ALL_HELP_EXPANSION} "
+    "(excludes agent-skills and antigravity); combine with 'agent-skills' "
+    "or 'antigravity' to add them."
+)
 
 # Canonical deploy directories for each target.
 CANONICAL_DEPLOY_DIRS: dict[str, str] = {

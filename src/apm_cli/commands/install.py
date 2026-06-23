@@ -97,7 +97,11 @@ from ..constants import (
 )
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger, _ValidationOutcome
-from ..core.target_detection import TargetParamType, manifest_targets_from_target_option
+from ..core.target_detection import (
+    TARGET_HELP_DETAILS,
+    TargetParamType,
+    manifest_targets_from_target_option,
+)
 
 # MCP --mcp helpers (module-level re-exports for test patches); must stay at
 # import time per comments in the original mid-file block.
@@ -942,7 +946,20 @@ def _handle_mcp_install(
     "target",
     type=TargetParamType(),
     default=None,
-    help="Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Repeating the flag (e.g. '-t a -t b') is NOT supported -- only the last value wins; use commas. Highest-priority entry in the resolution chain (--target > apm.yml targets: > apm config target > auto-detect). Values: copilot, claude, cursor, opencode, codex, gemini, antigravity, windsurf, kiro, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'antigravity' (alias 'agy') deploys to .agents/ (AGENTS.md + rules + skills + hooks.json + mcp_config.json) and is explicit-only -- not part of 'all' or auto-detection. 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro (excludes agent-skills and antigravity); combine with 'agent-skills' or 'antigravity' to add them. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork'). 'copilot-app' is also accepted when the copilot-app experimental flag is enabled (run 'apm experimental enable copilot-app'). Note: '--target all' on 'apm compile' is deprecated; use 'apm compile --all' instead.",
+    help=(
+        "Target harness(es) to deploy to. Comma-separated for multiple: "
+        "--target claude,cursor. Repeating the flag (e.g. '-t a -t b') is "
+        "NOT supported -- only the last value wins; use commas. Highest-priority "
+        "entry in the resolution chain "
+        "(--target > apm.yml targets: > apm config target > auto-detect). "
+        f"{TARGET_HELP_DETAILS} "
+        "'copilot-cowork' is also accepted when the copilot-cowork experimental "
+        "flag is enabled (run 'apm experimental enable copilot-cowork'). "
+        "'copilot-app' is also accepted when the copilot-app experimental flag "
+        "is enabled (run 'apm experimental enable copilot-app'). Note: "
+        "'--target all' on 'apm compile' is deprecated; use 'apm compile --all' "
+        "instead."
+    ),
 )
 @click.option(
     "--allow-insecure",
