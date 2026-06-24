@@ -1018,25 +1018,19 @@ class MCPIntegrator:
         partial state, so we render the same red ``[x]`` voice and return
         an empty list (fail-closed-continue).
 
-        ``user_scope=True`` is a deliberate carve-out: user-scope writes
-        target ``~/.config`` paths the user owns globally, so the
-        project-level whitelist is irrelevant. Documented in the
-        consumer install-mcp-servers guide.
+        At user scope the package's declared ``targets:`` field and the
+        ``--target`` flag are still respected: a package that declares
+        ``targets: copilot`` is only installed for Copilot, even when
+        Kiro (or another runtime) is detected on the host.  When neither
+        the package nor the CLI restricts targets, all detected runtimes
+        pass through (backward-compatible).
         """
-        if user_scope:
-            return target_runtimes
-
         from apm_cli.core.apm_yml import (
             ConflictingTargetsError,
             EmptyTargetsListError,
             UnknownTargetError,
             parse_targets_field,
         )
-        from apm_cli.core.errors import (
-            AmbiguousHarnessError,
-            NoHarnessError,
-        )
-        from apm_cli.core.target_detection import resolve_targets
         from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
 
         # --- step 1: parse declared targets (fail-closed on any invalid form)
@@ -1050,11 +1044,6 @@ class MCPIntegrator:
                 EmptyTargetsListError,
                 UnknownTargetError,
             ) as exc:
-                # Voice mirrors the canonical `apm install` skills phase
-                # (install/phases/targets.py:213): red [x] lead-with-outcome,
-                # then the structured error body. symbol="" suppresses the
-                # auto-prefix on the body because the exception text already
-                # begins with "[x] ..." (see core/errors.py).
                 _rich_error(
                     "Skipping all MCP config writes -- apm.yml 'targets' field is invalid.",
                     symbol="error",
@@ -1067,32 +1056,56 @@ class MCPIntegrator:
                 return []
 
         # --- step 2: normalize CSV explicit_target sugar to a list -----
-        # `_wire_bundle_mcp_servers` historically passes a CSV string; the
-        # canonical-name validator inside _resolve_targets_v2 would reject
-        # the whole CSV as one unknown token. Normalize first.
         flag: str | list[str] | None
         if isinstance(explicit_target, str) and "," in explicit_target:
             flag = [t.strip() for t in explicit_target.split(",") if t.strip()]
         else:
             flag = explicit_target
 
-        # Apply the runtime->canonical-target alias BEFORE passing the flag
-        # to resolve_targets. The canonical-name validator inside the
-        # resolver only knows about CANONICAL_TARGETS (claude/copilot/...);
-        # it rejects runtime aliases (vscode/agents) as unknown tokens.
-        # The MCP gate, however, must accept those aliases because users
-        # naturally type `--target vscode` for the VS Code Copilot runtime.
         if flag is not None:
             tokens = [flag] if isinstance(flag, str) else list(flag)
             flag = [RUNTIME_TO_CANONICAL_TARGET.get(t, t) for t in tokens]
 
-        # --- step 3: delegate to the canonical v2 resolver -------------
-        # This is the same call the `apm install` skills phase makes at
-        # install/phases/targets.py:233. It enforces the strict
-        # flag > yaml > signals chain and raises NoHarnessError /
-        # AmbiguousHarnessError on greenfield / under-disambiguated
-        # projects -- the ASYMMETRY closed by this PR is that the gate
-        # used to silently fall back to [copilot] in those cases.
+        # --- step 2b: user-scope short path ----------------------------
+        # At user scope directory-signal detection is meaningless (there
+        # is no "project root" to probe).  If the package or the CLI
+        # restricts targets we filter here; otherwise every detected
+        # runtime passes through unchanged (backward-compatible default).
+        if user_scope:
+            # Collect the canonical target names from flag / yaml.
+            active: set[str] | None = None
+            if flag is not None:
+                active = set(flag) if isinstance(flag, list) else {flag}
+            elif yaml_targets is not None:
+                active = set(yaml_targets)
+
+            if active is None:
+                return target_runtimes
+
+            out = [
+                rt for rt in target_runtimes if RUNTIME_TO_CANONICAL_TARGET.get(rt, rt) in active
+            ]
+            dropped = sorted(set(target_runtimes) - set(out))
+            if dropped:
+                active_csv = ", ".join(sorted(active)) or "<none>"
+                _rich_info(
+                    f"Skipped MCP config for {', '.join(dropped)}  (active targets: {active_csv})",
+                    symbol="info",
+                )
+                _log.debug(
+                    "Active-targets gate dropped (user scope): %s (active=%s)",
+                    dropped,
+                    sorted(active),
+                )
+            return out
+
+        # --- step 3 (project scope): delegate to the v2 resolver -------
+        from apm_cli.core.errors import (
+            AmbiguousHarnessError,
+            NoHarnessError,
+        )
+        from apm_cli.core.target_detection import resolve_targets
+
         root = project_root or Path.cwd()
         try:
             resolved = resolve_targets(root, flag=flag, yaml_targets=yaml_targets)
@@ -1110,9 +1123,6 @@ class MCPIntegrator:
 
         active = set(resolved.targets)
 
-        # Runtime name "vscode" maps to canonical target "copilot" (same
-        # alias active_targets honors); shared table prevents drift with
-        # the alias resolution in integration/targets.py.
         out = [rt for rt in target_runtimes if RUNTIME_TO_CANONICAL_TARGET.get(rt, rt) in active]
         dropped = sorted(set(target_runtimes) - set(out))
         if dropped:
