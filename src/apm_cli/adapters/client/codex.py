@@ -10,6 +10,7 @@ import toml
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
 from ...utils.console import _rich_success, _rich_warning
+from ...utils.path_security import PathTraversalError
 from ._mcp_runtime_args import process_v01_value_hint_arg
 from .base import MCPClientAdapter
 
@@ -49,13 +50,22 @@ class CodexClientAdapter(MCPClientAdapter):
         self.registry_client = SimpleRegistryClient(registry_url)
         self.registry_integration = RegistryIntegration(registry_url)
 
-    def _get_codex_dir(self):
+    def _get_codex_dir(self) -> Path:
         """Return the root directory used for Codex config in the current scope."""
         if self.user_scope:
+            codex_home = os.environ.get("CODEX_HOME", "")
+            if codex_home.strip():
+                codex_home_path = Path(codex_home).expanduser()
+                if not codex_home_path.is_absolute():
+                    raise PathTraversalError(
+                        "CODEX_HOME is set to a non-absolute path; cannot locate the "
+                        "Codex CLI configuration directory."
+                    )
+                return codex_home_path
             return Path.home() / ".codex"
         return self.project_root / ".codex"
 
-    def get_config_path(self):
+    def get_config_path(self) -> str:
         """Get the path to the Codex CLI MCP configuration file.
 
         Returns:
@@ -322,7 +332,7 @@ class CodexClientAdapter(MCPClientAdapter):
                     all_args = processed_runtime_args + processed_package_args
                     if all_args:
                         # If runtime_arguments already include the package (bare or
-                        # versioned), use them as-is — they are authoritative from
+                        # versioned), use them as-is -- they are authoritative from
                         # the registry and may carry a version pin.
                         has_pkg = any(
                             a == package_name or a.startswith(f"{package_name}@") for a in all_args

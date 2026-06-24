@@ -19,7 +19,7 @@ This page is the mental model. For the full schema, see the [Policy Reference](.
 
 ## What it is
 
-One YAML file. Lives at `<org>/.github/apm-policy.yml`. Auto-discovered by `apm install` and `apm audit --ci --policy org` from your project's git remote.
+One YAML file. Lives in your org's policy repo (`apm-policy.yml`). Auto-discovered by `apm install` and `apm audit --ci --policy org` from your project's git remote.
 
 It declares:
 
@@ -39,7 +39,24 @@ The policy schema addresses install-time gates exclusively. It has no fields for
 
 ## Where it lives
 
-The canonical location is the `.github` repository under your org:
+APM discovers your org-level policy by checking candidate repos in this order -- the first one found wins:
+
+| Priority | Repo name | Valid on |
+|----------|-----------|---------|
+| 1 | `.github` | GitHub and GitHub API-compatible hosts |
+| 2 | `.apm` | GitHub and GitHub API-compatible hosts |
+| 3 | `_apm` | GitHub API-compatible hosts and Azure DevOps |
+
+Azure DevOps does not allow repository names starting or ending with a period, so only `_apm` is tried on ADO hosts. ADO requires repositories to live inside projects; the convention uses `_apm` for both the project and repo:
+
+```
+<org>/
+  _apm/              # ADO project
+    _apm/            # repo inside the project
+      apm-policy.yml
+```
+
+On GitHub and GitHub API-compatible hosts, the `.github` convention remains the recommended default:
 
 ```
 <org>/
@@ -47,7 +64,7 @@ The canonical location is the `.github` repository under your org:
     apm-policy.yml         # auto-discovered by every repo in <org>
 ```
 
-When `apm install` or `apm audit --ci --policy org` runs in a project, APM resolves the org from the project's git remote and fetches `<org>/.github/apm-policy.yml` (cached locally, default 1 hour TTL).
+When `apm install` or `apm audit --ci --policy org` runs in a project, APM resolves the org from the project's git remote and searches the candidate repos above (cached locally, default 1 hour TTL).
 
 Alternative sources, useful for testing or non-GitHub setups:
 
