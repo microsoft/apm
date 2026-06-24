@@ -146,6 +146,7 @@ def test_is_azure_devops_hostname():
     """Test Azure DevOps hostname detection."""
     # Valid Azure DevOps hosts
     assert github_host.is_azure_devops_hostname("dev.azure.com")
+    assert github_host.is_azure_devops_hostname("ssh.dev.azure.com")
     assert github_host.is_azure_devops_hostname("mycompany.visualstudio.com")
     assert github_host.is_azure_devops_hostname("contoso.visualstudio.com")
 
@@ -308,6 +309,25 @@ def test_build_ado_api_url():
     assert "path=apm.yml" in url
     assert "versionDescriptor.version=main" in url
     assert "api-version=7.0" in url
+
+    encoded_url = github_host.build_ado_api_url("my org", "My Project", "repo/name", "path/file.md")
+    assert "my%20org/My%20Project/_apis/git/repositories/repo%2Fname/items" in encoded_url
+    encoded_ref_url = github_host.build_ado_api_url(
+        "myorg", "project", "repo", "path/file.md", ref="feature/a&b"
+    )
+    assert "versionDescriptor.version=feature%2Fa%26b" in encoded_ref_url
+
+    legacy_url = github_host.build_ado_api_url(
+        "contoso", "_apm", "_apm", "apm-policy.yml", host="contoso.visualstudio.com"
+    )
+    assert legacy_url.startswith(
+        "https://contoso.visualstudio.com/_apm/_apis/git/repositories/_apm/items"
+    )
+
+    ssh_url = github_host.build_ado_api_url(
+        "contoso", "_apm", "_apm", "apm-policy.yml", host="ssh.dev.azure.com"
+    )
+    assert ssh_url.startswith("https://dev.azure.com/contoso/_apm/_apis/")
 
 
 def test_build_authorization_header_git_env_bearer():

@@ -351,6 +351,18 @@ dependencies:
       registry: false
       transport: http
       url: "https://mcp.internal.example.com"
+
+    # Self-defined remote with harness-specific extra keys
+    # Unknown keys (e.g. oauth) are passthrough: preserved and written into
+    # the generated config for EVERY installed harness. Keys that collide with
+    # a modeled field (command/url/headers/env/...) are rejected with a warning.
+    - name: slack
+      registry: false
+      transport: http
+      url: https://mcp.slack.com/mcp
+      oauth:
+        clientId: "<pre-registered-client-id>"
+        callbackPort: 3118
 ```
 
 ## LSP dependency formats

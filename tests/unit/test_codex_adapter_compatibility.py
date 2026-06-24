@@ -14,6 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from apm_cli.adapters.client.codex import CodexClientAdapter
+from apm_cli.utils.path_security import PathTraversalError
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -81,7 +82,10 @@ class TestInit:
 class TestGetConfigPath:
     """Tests for scope-aware config path resolution."""
 
-    def test_project_scope_uses_project_root(self, tmp_path: Path) -> None:
+    def test_project_scope_uses_project_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "ignored-codex-home"))
         adapter = _make_adapter(project_root=tmp_path, user_scope=False)
         expected = str(tmp_path / ".codex" / "config.toml")
         assert adapter.get_config_path() == expected
@@ -91,6 +95,49 @@ class TestGetConfigPath:
         home = Path.home()
         expected = str(home / ".codex" / "config.toml")
         assert adapter.get_config_path() == expected
+
+    def test_user_scope_honors_codex_home_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        custom_codex_home = tmp_path / "custom-codex"
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("CODEX_HOME", str(custom_codex_home))
+
+        adapter = _make_adapter(user_scope=True)
+
+        assert adapter._get_codex_dir() == custom_codex_home
+        assert adapter.get_config_path() == str(custom_codex_home / "config.toml")
+
+        monkeypatch.setenv("CODEX_HOME", "     ")
+        assert adapter._get_codex_dir() == home / ".codex"
+        assert adapter.get_config_path() == str(home / ".codex" / "config.toml")
+
+        monkeypatch.delenv("CODEX_HOME", raising=False)
+        assert adapter._get_codex_dir() == home / ".codex"
+        assert adapter.get_config_path() == str(home / ".codex" / "config.toml")
+
+    def test_user_scope_expands_codex_home_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("CODEX_HOME", "~/codex-config")
+
+        adapter = _make_adapter(user_scope=True)
+
+        expected = home / "codex-config" / "config.toml"
+        assert adapter.get_config_path() == str(expected)
+
+    def test_user_scope_rejects_relative_codex_home_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CODEX_HOME", "relative-codex")
+
+        adapter = _make_adapter(user_scope=True)
+
+        with pytest.raises(PathTraversalError, match=r"CODEX_HOME.*non-absolute path"):
+            adapter.get_config_path()
 
     def test_config_path_ends_with_config_toml(self, tmp_path: Path) -> None:
         adapter = _make_adapter(project_root=tmp_path)

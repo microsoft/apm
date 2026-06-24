@@ -673,6 +673,79 @@ class TestResolveMarketplacePluginGitLabMonorepo:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_url_source_on_gitlab_preserves_host(
+        self, mock_get, mock_fetch, gitlab_marketplace_source
+    ):
+        """#1848: url-type source on GitLab marketplace must preserve host in dep_ref."""
+        plugin = MarketplacePlugin(
+            name="my-first-skill",
+            source={
+                "source": "url",
+                "url": "https://gitlab.com/my-name/apm/my-first-skill",
+                "ref": "v1.0.0",
+            },
+        )
+        mock_get.return_value = gitlab_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("my-first-skill", "apm-reg")
+        assert result.dependency_reference is not None
+        dep = result.dependency_reference
+        assert dep.host == "gitlab.com"
+        assert dep.repo_url == "my-name/apm/my-first-skill"
+        assert dep.reference == "v1.0.0"
+        assert result.canonical == "gitlab.com/my-name/apm/my-first-skill#v1.0.0"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_url_source_on_gitlab_with_version_spec_override(
+        self, mock_get, mock_fetch, gitlab_marketplace_source
+    ):
+        """#1848: version_spec overrides the ref from the url source."""
+        plugin = MarketplacePlugin(
+            name="my-skill",
+            source={
+                "source": "url",
+                "url": "https://gitlab.com/org/repo",
+                "ref": "v1.0.0",
+            },
+        )
+        mock_get.return_value = gitlab_marketplace_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("my-skill", "apm-reg", version_spec="v2.0.0")
+        assert result.dependency_reference is not None
+        dep = result.dependency_reference
+        assert dep.host == "gitlab.com"
+        assert dep.reference == "v2.0.0"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_url_source_on_github_no_dep_ref(self, mock_get, mock_fetch):
+        """url-type source on github.com marketplace should NOT build dep_ref (existing behaviour)."""
+        github_source = MarketplaceSource(
+            name="gh-mkt",
+            owner="owner",
+            repo="marketplace-repo",
+            host="github.com",
+            branch="main",
+        )
+        plugin = MarketplacePlugin(
+            name="pkg",
+            source={
+                "source": "url",
+                "url": "https://github.com/other/repo",
+            },
+        )
+        mock_get.return_value = github_source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("pkg", "gh-mkt")
+        # github.com marketplace does not need explicit git path -> no dep_ref built
+        assert result.dependency_reference is None
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
     def test_external_gitlab_dict_type_no_monorepo_rule(
         self, mock_get, mock_fetch, gitlab_marketplace_source
     ):
@@ -1432,3 +1505,104 @@ class TestGitLabShorthandParseVsStructuredRef:
         assert good.is_virtual is True
         assert good.repo_url == "epm-ease/ai-apm-registry"
         assert good.virtual_path == "agents/reverse-architect"
+
+
+class TestMarketplaceRefPropagation:
+    """Registered --ref must propagate to relative string plugin sources (#1811)."""
+
+    @staticmethod
+    def _manifest_with_plugin(plugin: MarketplacePlugin) -> MarketplaceManifest:
+        return MarketplaceManifest(name="mkt", plugins=(plugin,), plugin_root="")
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_github_relative_source_propagates_registered_ref(self, mock_get, mock_fetch):
+        """A GitHub marketplace registered with --ref feat/xxx appends #feat/xxx."""
+        source = MarketplaceSource(
+            name="mkt",
+            owner="acme",
+            repo="catalog",
+            host="github.com",
+            ref="feat/my-feature",
+        )
+        plugin = MarketplacePlugin(name="my-plugin", source="./plugins/my-plugin")
+        mock_get.return_value = source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("my-plugin", "mkt")
+        assert result.canonical == "acme/catalog/plugins/my-plugin#feat/my-feature"
+        assert result.dependency_reference is None
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_github_relative_source_main_ref_not_appended(self, mock_get, mock_fetch):
+        """ref='main' is the default -- do not append #main to the canonical."""
+        source = MarketplaceSource(
+            name="mkt",
+            owner="acme",
+            repo="catalog",
+            host="github.com",
+            ref="main",
+        )
+        plugin = MarketplacePlugin(name="my-plugin", source="./plugins/my-plugin")
+        mock_get.return_value = source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("my-plugin", "mkt")
+        assert result.canonical == "acme/catalog/plugins/my-plugin"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_version_spec_overrides_registered_ref(self, mock_get, mock_fetch):
+        """Explicit version_spec takes precedence over registered ref."""
+        source = MarketplaceSource(
+            name="mkt",
+            owner="acme",
+            repo="catalog",
+            host="github.com",
+            ref="feat/my-feature",
+        )
+        plugin = MarketplacePlugin(name="my-plugin", source="./plugins/my-plugin")
+        mock_get.return_value = source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("my-plugin", "mkt", version_spec="v2.0.0")
+        assert result.canonical == "acme/catalog/plugins/my-plugin#v2.0.0"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_gitlab_relative_source_propagates_registered_ref(self, mock_get, mock_fetch):
+        """A GitLab marketplace registered with --ref feat/xxx sets ref in dep_ref."""
+        source = MarketplaceSource(
+            name="mkt",
+            owner="acme",
+            repo="catalog",
+            host="gitlab.com",
+            ref="feat/my-feature",
+        )
+        plugin = MarketplacePlugin(name="my-plugin", source="registry/my-plugin")
+        mock_get.return_value = source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("my-plugin", "mkt")
+        assert result.dependency_reference is not None
+        assert result.dependency_reference.reference == "feat/my-feature"
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_gitlab_relative_source_main_ref_not_propagated(self, mock_get, mock_fetch):
+        """ref='main' should not be propagated to the GitLab dep_ref."""
+        source = MarketplaceSource(
+            name="mkt",
+            owner="acme",
+            repo="catalog",
+            host="gitlab.com",
+            ref="main",
+        )
+        plugin = MarketplacePlugin(name="my-plugin", source="registry/my-plugin")
+        mock_get.return_value = source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        result = resolve_marketplace_plugin("my-plugin", "mkt")
+        assert result.dependency_reference is not None
+        assert result.dependency_reference.reference is None

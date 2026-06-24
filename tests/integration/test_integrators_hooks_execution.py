@@ -1010,6 +1010,7 @@ class TestIntegratePackageHooksCursor:
         assert hooks_json.exists()
         data = json.loads(hooks_json.read_text())
         assert "hooks" in data
+        assert data.get("version") == 1
 
 
 class TestIntegratePackageHooksCodex:

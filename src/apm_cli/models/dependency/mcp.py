@@ -23,8 +23,18 @@ _KNOWN_DICT_KEYS = frozenset(
         "tools",
         "url",
         "command",
+        "extra",  # explicit extra block is also a known key
     }
 )
+
+# Modeled-field names that an explicit ``extra:`` block must NEVER carry. A
+# passthrough value under one of these names could shadow or redirect a modeled
+# field (name/transport/command/url/headers/env/...) on adapter render paths
+# that do not pre-set the key (e.g. Codex remote_config, an empty VSCode
+# server_config). Reserved keys are stripped from ``extra`` with a warning so a
+# transitive dependency cannot smuggle a modeled field through passthrough.
+# Security boundary for PR #1765 / issue #1670.
+_RESERVED_EXTRA_KEYS = _KNOWN_DICT_KEYS - {"extra"}
 
 _NAME_REGEX = re.compile(r"^[a-zA-Z0-9@_][a-zA-Z0-9._@/:=-]{0,127}$")
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
@@ -53,6 +63,7 @@ class MCPDependency:
     tools: list[str] | None = None  # Restrict exposed tools (default is ["*"])
     url: str | None = None  # Required for self-defined http/sse transports
     command: str | None = None  # Required for self-defined stdio transports
+    extra: dict[str, Any] | None = None  # Harness-specific passthrough keys (e.g. oauth)
 
     @classmethod
     def from_string(cls, s: str) -> "MCPDependency":
@@ -72,11 +83,33 @@ class MCPDependency:
             raise ValueError("MCP dependency dict must contain 'name'")
 
         unknown = sorted(str(k) for k in d if k not in _KNOWN_DICT_KEYS)
+        extra: dict[str, Any] | None = None
+        # Merge unknown top-level keys with an explicit 'extra:' block
+        if unknown:
+            extra = {str(k): d[k] for k in d if str(k) in unknown}
+        explicit_extra = d.get("extra")
+        if isinstance(explicit_extra, dict):
+            # Strip reserved modeled-field names from the explicit block so a
+            # passthrough value cannot shadow/redirect a modeled field.
+            reserved = sorted(str(k) for k in explicit_extra if str(k) in _RESERVED_EXTRA_KEYS)
+            if reserved:
+                safe_name = ascii(str(d["name"]))[1:-1]
+                safe_reserved = ", ".join(ascii(k)[1:-1] for k in reserved)
+                _rich_warning(
+                    f"MCP dependency '{safe_name}': reserved key(s) ignored in 'extra' "
+                    f"(cannot override a modeled MCP field): {safe_reserved}",
+                    symbol="warning",
+                )
+            safe_explicit = {
+                str(k): v for k, v in explicit_extra.items() if str(k) not in _RESERVED_EXTRA_KEYS
+            }
+            if safe_explicit:
+                extra = {**(extra or {}), **safe_explicit}
         if unknown:
             safe_name = ascii(str(d["name"]))[1:-1]
             safe_keys = ", ".join(ascii(k)[1:-1] for k in unknown)
             _rich_warning(
-                f"MCP dependency '{safe_name}': unknown key(s) dropped: {safe_keys}",
+                f"MCP dependency '{safe_name}': unknown key(s) preserved in extra: {safe_keys}",
                 symbol="warning",
             )
 
@@ -94,6 +127,7 @@ class MCPDependency:
             tools=d.get("tools"),
             url=d.get("url"),
             command=d.get("command"),
+            extra=extra,
         )
 
         if instance.registry is False:
@@ -114,7 +148,11 @@ class MCPDependency:
         return self.registry is False
 
     def to_dict(self) -> dict:
-        """Serialize to dict, including only non-None fields."""
+        """Serialize to dict, including only non-None fields.
+
+        ``extra`` keys are merged at the top level but cannot shadow
+        known fields (known fields always win).
+        """
         result: dict[str, Any] = {"name": self.name}
         for field_name in (
             "transport",
@@ -131,6 +169,10 @@ class MCPDependency:
             value = getattr(self, field_name)
             if value is not None or (field_name == "registry" and value is False):
                 result[field_name] = value
+        if self.extra:
+            for k, v in self.extra.items():
+                if k not in result:
+                    result[k] = v
         return result
 
     _VALID_TRANSPORTS = frozenset({"stdio", "sse", "http", "streamable-http"})
@@ -169,6 +211,8 @@ class MCPDependency:
                 parts.append(f"command={preview!r}")
             else:
                 parts.append(f"command=<{type(self.command).__name__}>")
+        if self.extra:
+            parts.append(f"extra=<{len(self.extra)} key(s)>")
         return f"MCPDependency({', '.join(parts)})"
 
     def validate(self, strict: bool = True) -> None:

@@ -186,13 +186,33 @@ def check_registry_locked_dep(
     manifest_range: str | None = None
     if manifest_dep is not None:
         manifest_range = manifest_dep.reference
-        if not manifest_range or not is_semver_range(manifest_range):
+        if not manifest_range:
             return OutdatedRow(
                 package=package_name,
                 current=current or "(none)",
                 latest="-",
                 status="unknown",
-                source="registry (invalid manifest range)",
+                source="registry (no version selector)",
+            )
+        if not is_semver_range(manifest_range):
+            from apm_cli.models.dependency.identity import _looks_like_invalid_semver_range
+
+            if _looks_like_invalid_semver_range(manifest_range):
+                return OutdatedRow(
+                    package=package_name,
+                    current=current or "(none)",
+                    latest="-",
+                    status="unknown",
+                    source="registry (invalid manifest range)",
+                )
+            # Valid non-semver selector (branch/label/exact tag): pinned to an
+            # opaque version; range-based outdated detection does not apply.
+            return OutdatedRow(
+                package=package_name,
+                current=current or "(none)",
+                latest="-",
+                status="unknown",
+                source="registry (pinned ref)",
             )
 
     if not current:

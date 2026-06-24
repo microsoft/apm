@@ -28,6 +28,7 @@ from apm_cli.install.cache_pin import (
     MARKER_FILENAME,
     SCHEMA_VERSION,
     CachePinError,
+    find_unpinned_remote_deps,
     sync_markers_for_lockfile,
     verify_marker,
     write_marker,
@@ -260,3 +261,28 @@ def test_sync_markers_self_heals_caches_missing_marker(tmp_path: Path) -> None:
     written = sync_markers_for_lockfile(lockfile, tmp_path, apm_modules)
     assert written == 1
     verify_marker(pkg_dir, "cafebabe" * 5)
+
+
+def test_find_unpinned_remote_deps_skips_registry() -> None:
+    """Registry deps have no resolved_commit but must not trigger the warning.
+
+    Regression: before the fix, lockfile entries with source='registry'
+    were reported as unpinned -- registry deps pin by version+hash, not commit.
+    """
+    lockfile = LockFile()
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="acme/lib",
+            source="registry",
+            resolved_url="https://r.example.com/acme/lib/1.0.0.zip",
+            resolved_hash="sha256:abc",
+        )
+    )
+    lockfile.add_dependency(
+        LockedDependency(
+            repo_url="acme/git-dep",
+            host="github.com",
+            resolved_commit="deadbeef" * 5,
+        )
+    )
+    assert find_unpinned_remote_deps(lockfile) == []

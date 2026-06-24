@@ -820,10 +820,46 @@ def resolve_marketplace_plugin(
             plugin, plugin_root=manifest.plugin_root
         )
         if in_repo_path:
+            # Fall back to the marketplace's registered ref when the plugin
+            # source itself declares no ref and no version_spec overrides it.
+            # "main" / "HEAD" are excluded because they represent the default
+            # branch -- appending them would be a no-op at best and misleading
+            # when the repo's actual default branch has a different name.
+            effective_ref = version_spec or path_ref
+            if not effective_ref and source.ref and source.ref not in ("main", "HEAD"):
+                effective_ref = source.ref
             dep_ref = _gitlab_in_marketplace_dependency_reference(
-                source, in_repo_path, version_spec or path_ref
+                source, in_repo_path, effective_ref
             )
             canonical = dep_ref.to_canonical()
+
+    # ---- Build dep_ref for url-type sources on non-GitHub-family hosts ----
+    # When the plugin declares a ``url`` source and the marketplace is on a
+    # host that needs explicit git paths (GitLab, generic git), the URL
+    # already carries the full clone target.  Build a structured dep_ref so
+    # downstream auth resolves at the correct host instead of defaulting to
+    # github.com.
+    if dep_ref is None and _source_needs_explicit_git_path(source):
+        if isinstance(plugin.source, dict):
+            _src_type = _coerce_dict_plugin_type(plugin.source)
+            if _src_type == "url":
+                _url = (plugin.source.get("url", "") or "").strip()
+                if _url:
+                    _ref = plugin.source.get("ref", "")
+                    _effective_ref = version_spec or (
+                        _ref.strip() if isinstance(_ref, str) and _ref.strip() else ""
+                    )
+                    _entry: dict = {"git": _url}
+                    if _effective_ref:
+                        _entry["ref"] = _effective_ref
+                    dep_ref = DependencyReference.parse_from_dict(_entry)
+                    canonical = dep_ref.to_canonical()
+                    logger.debug(
+                        "Built dep_ref from url source for %s@%s -> %s (non-github-host url source)",
+                        plugin_name,
+                        marketplace_name,
+                        canonical,
+                    )
 
     # ---- Backfill host on canonical for GitHub-family enterprise hosts ----
     # ``*.ghe.com`` marketplaces keep virtual shorthand (no structured ``dep_ref``)
@@ -857,6 +893,27 @@ def resolve_marketplace_plugin(
     cross_repo_misconfig_risk = _compute_cross_repo_misconfig_risk(
         plugin, source, canonical, dep_ref
     )
+
+    # ---- Propagate marketplace registered ref (#1811) ----
+    # When a marketplace is registered with ``--ref feat/xxx`` and the plugin
+    # uses a relative string source (e.g. ``"./plugins/my-plugin"``), the
+    # canonical built by ``resolve_plugin_source`` carries no ``#ref`` suffix.
+    # Without this block the plugin would resolve against the default branch
+    # instead of the registered ref.
+    # "main" / "HEAD" are excluded to avoid appending a no-op suffix; if the
+    # repo's actual default branch is not named "main" and the user pinned
+    # ``--ref main``, this condition silently drops the ref -- fixing that
+    # would require knowing the repo's real default branch which is not
+    # available at this stage.
+    if (
+        dep_ref is None
+        and not version_spec
+        and isinstance(plugin.source, str)
+        and "#" not in canonical
+        and source.ref
+        and source.ref not in ("main", "HEAD")
+    ):
+        canonical = f"{canonical}#{source.ref}"
 
     # ---- Version spec override ----
     # When version_spec is provided it either triggers semver-aware tag

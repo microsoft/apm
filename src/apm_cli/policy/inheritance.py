@@ -4,7 +4,7 @@ Supports three-level chains: enterprise hub -> org -> repo.
 Each level can tighten but never relax the parent.
 
 extends: values:
-- "org"              -> same org's .github repo (repo-level override)
+- "org"              -> same org's policy repo (.github, .apm, or _apm)
 - "<owner>/<repo>"   -> cross-org reference (enterprise policy hub)
 - "https://..."      -> direct URL
 """

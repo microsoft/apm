@@ -234,9 +234,36 @@ class TestFailurePaths:
         with pytest.raises(RegistryResolutionError, match="non-registry"):
             resolver.download_package(dep, tmp_path / "p")
 
-    def test_invalid_semver_constraint_rejected_at_resolver(self, tmp_path):
-        # Defense in depth: if a "registry" dep slips past the parser with a
-        # branch name, the resolver still rejects it.
+    def test_non_semver_ref_exact_matched(self, tmp_path):
+        # Per the registry HTTP API spec (section 1.3), a non-semver selector
+        # (branch name, opaque label) is matched EXACTLY against the published
+        # version list -- it is not rejected.
+        raw, digest = _make_apm_tarball()
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version="main", digest=f"sha256:{digest}", published_at="2026-01-01T00:00:00Z"
+            )
+        ]
+        fake.download_archive.return_value = (raw, "application/gzip")
+        fake.archive_url.return_value = (
+            "https://reg.example.com/apm/v1/packages/acme/x/versions/main/download"
+        )
+        resolver = _make_resolver(fake)
+        dep = DependencyReference(
+            repo_url="acme/x",
+            reference="main",
+            source="registry",
+            registry_name="corp-main",
+        )
+        target = tmp_path / "p"
+        resolver.download_package(dep, target)
+        assert (target / "apm.yml").exists()
+        assert resolver.last_resolutions[dep.get_unique_key()].version == "main"
+
+    def test_non_semver_ref_not_found_gives_clear_error(self, tmp_path):
+        # An exact selector with no matching published version reports
+        # "not found" with the available versions listed.
         fake = MagicMock(spec=RegistryClient)
         fake.list_versions.return_value = [
             VersionEntry(
@@ -250,7 +277,27 @@ class TestFailurePaths:
             source="registry",
             registry_name="corp-main",
         )
-        with pytest.raises(RegistryResolutionError, match="not a valid semver"):
+        with pytest.raises(RegistryResolutionError, match="not found"):
+            resolver.download_package(dep, tmp_path / "p")
+
+    def test_malformed_range_ref_rejected_at_resolve(self, tmp_path):
+        # A range-shaped but malformed selector ('^1.0') is a user error, not a
+        # literal tag -- the resolver rejects it with a clear "invalid semver
+        # range" message rather than exact-matching it into a "not found".
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.return_value = [
+            VersionEntry(
+                version="1.0.0", digest="sha256:" + "0" * 64, published_at="2026-01-01T00:00:00Z"
+            )
+        ]
+        resolver = _make_resolver(fake)
+        dep = DependencyReference(
+            repo_url="acme/x",
+            reference="^1.0",
+            source="registry",
+            registry_name="corp-main",
+        )
+        with pytest.raises(RegistryResolutionError, match="invalid semver range"):
             resolver.download_package(dep, tmp_path / "p")
 
 
