@@ -222,6 +222,7 @@ def _reflink_copy_file(src: str, dst: str, *, follow_symlinks: bool = True) -> s
     try:
         if follow_symlinks and not os.path.islink(src):
             if clone_file(src, dst):
+                shutil.copystat(src, dst, follow_symlinks=follow_symlinks)
                 return dst
     except OSError:
         # Defensive: clone_file is documented as never-raises but the

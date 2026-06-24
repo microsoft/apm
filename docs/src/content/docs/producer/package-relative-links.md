@@ -44,8 +44,8 @@ primitive points back into it.
 
 ## What APM rewrites
 
-A markdown link `[text](path)` is rewritten only when **all** hold
-(`src/apm_cli/compilation/link_resolver.py:391-529`):
+A markdown link with text `[text]` and target `(path)` is rewritten only
+when **all** hold (`src/apm_cli/compilation/link_resolver.py:400-545`):
 
 1. The link is relative -- no URL scheme (`http:`, `mailto:`, ...), not
    protocol-relative (`//host`), not root-absolute (`/foo`), not a bare
@@ -118,4 +118,4 @@ The rewritten paths should point into `apm_modules/<owner>/my-pkg/`
 and the targets should exist.
 
 For the full reach map of which primitive lands where on each harness,
-see [Primitives and targets](../../concepts/primitives-and-targets/).
+see [Primitives and targets](../concepts/primitives-and-targets/).

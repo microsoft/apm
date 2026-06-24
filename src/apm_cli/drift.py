@@ -51,8 +51,9 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import replace as _dataclass_replace
-from pathlib import Path  # noqa: F401
 from typing import TYPE_CHECKING, Any
+
+from apm_cli.install.phases._skip_logic import _should_use_locked_ref
 
 if TYPE_CHECKING:
     from apm_cli.deps.lockfile import LockedDependency, LockFile
@@ -139,10 +140,15 @@ def detect_ref_change(
     # (the user expanded/contracted the range away from the locked
     # version and we need to re-resolve).
     if manifest_source == "registry":
-        return not _registry_range_covers_locked_version(
-            dep_ref.reference,
-            locked_dep.version,
-        )
+        from apm_cli.deps.registry.semver import is_semver_range
+
+        ref = dep_ref.reference
+        if not is_semver_range(ref or ""):
+            # Non-semver selector (branch/label/exact tag): the resolver
+            # exact-matches it, so drift is a literal mismatch -- not the
+            # range-coverage test, which only applies to semver ranges.
+            return ref != locked_dep.version
+        return not _registry_range_covers_locked_version(ref, locked_dep.version)
 
     # Git-source semver-range deps (issue #1488): the manifest carries
     # a semver range (``^1.2.0``) while the lockfile records the
@@ -337,8 +343,9 @@ def build_download_ref(
             reg_replay = _registry_replay_overrides_from_lock(locked_dep)
             if reg_replay is not None:
                 overrides.update(reg_replay)
-            # Use locked commit SHA for byte-for-byte reproducibility.
-            elif locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
+            # Use locked commit SHA for byte-for-byte reproducibility
+            # (bypassed during --update, also guarded by the helper itself).
+            elif _should_use_locked_ref(locked_dep.resolved_commit, update_refs):
                 overrides["reference"] = locked_dep.resolved_commit
             # For proxy deps without a commit SHA (Artifactory zip archives),
             # preserve the locked ref so we download the same ref on replay.

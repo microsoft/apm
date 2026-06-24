@@ -194,6 +194,7 @@ def _resolve_artifactory_boundary(
     verbose: bool = False,
     *,
     dep_ref: DependencyReference | None = None,
+    logger=None,
 ) -> DependencyReference:
     """Definitively resolve the (owner, repo, virtual_path) boundary on the proxy.
 
@@ -245,10 +246,18 @@ def _resolve_artifactory_boundary(
     for cand_prefix, cand_owner, cand_repo, cand_virtual in candidates:
         if verbose:
             path_suffix = f" [path: {cand_virtual}]" if cand_virtual else ""
-            print(
+            probe_msg = (
                 f"  artifactory-resolve: probing {host}/{cand_prefix}/{cand_owner}"
                 f"/{cand_repo}#{ref}{path_suffix}"
             )
+            # Route through CommandLogger when available so verbose output
+            # honors the shared console/theme path (verbose_detail self-gates
+            # on logger.verbose). Fall back to print for callers that pass
+            # verbose=True without a logger (e.g. legacy unit tests).
+            if logger is not None and hasattr(logger, "verbose_detail"):
+                logger.verbose_detail(probe_msg)
+            else:
+                print(probe_msg)
         status, exc = _candidate_archive_status(
             host, cand_prefix, cand_owner, cand_repo, ref, headers, verify, scheme=scheme
         )
@@ -281,8 +290,9 @@ def _resolve_artifactory_boundary(
         raise ValueError(
             f"Artifactory boundary probe could not reach the proxy for any "
             f"candidate (last error: {last_inconclusive_exc}). "
-            f"Verify network reachability and TLS trust to {host}. "
-            f"(package: {safe_package})"
+            f"Verify network reachability and TLS trust to {host}; the ``//`` "
+            f"notation can mark the repo/virtual boundary explicitly when the "
+            f"proxy is unavailable. (package: {safe_package})"
         )
     if all_auth:
         raise ValueError(f"{_ARTIFACTORY_BOUNDARY_AUTH} (package: {safe_package})")

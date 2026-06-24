@@ -107,6 +107,17 @@ class TestDepsUpdateCommand:
             assert result.exit_code == 1
             assert "No apm.yml found" in result.output
 
+    def test_deprecation_banner_points_to_apm_update(self):
+        """A deprecation banner pointing to `apm update` is printed (issue #1525).
+
+        Emitted before the apm.yml pre-flight check, so it shows even on the
+        no-manifest error path.
+        """
+        with self._chdir_tmp():
+            result = self.runner.invoke(cli, ["deps", "update"])
+            assert "deprecated" in result.output.lower()
+            assert "apm update" in result.output
+
     @patch(_PATCH_APM_PACKAGE)
     def test_no_deps_exits_0(self, mock_pkg_cls):
         """Exit 0 with informational message when apm.yml has no APM deps."""

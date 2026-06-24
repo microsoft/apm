@@ -1,0 +1,5 @@
+# Exercises: req-mf-002
+# Invalid: top-level mapping missing the required `name` field.
+# A conforming consumer MUST reject this manifest with a diagnostic.
+version: "1.0.0"
+description: Missing name; must be rejected.

@@ -21,14 +21,14 @@ VERSION="${VERSION:?VERSION must be set, e.g. v1.2.3}"
 
 apm pack --check-versions --check-clean --json > pack-report.json
 
-for f in build/*.tar.gz .claude-plugin/marketplace.json; do
+for f in build/*.zip .claude-plugin/marketplace.json; do
   [ -f "$f" ] || continue
   sha256sum "$f" > "${f}.sha256"
 done
 
 gh release create "$VERSION" \
-  build/*.tar.gz \
-  build/*.tar.gz.sha256 \
+  build/*.zip \
+  build/*.zip.sha256 \
   .claude-plugin/marketplace.json \
   .claude-plugin/marketplace.json.sha256 \
   --title "$VERSION" \
@@ -85,10 +85,17 @@ you need to customise any step.
 > **Reference deployment.** [`DevExpGbb/zava-agent-config`](https://github.com/DevExpGbb/zava-agent-config)
 > runs this exact pipeline. The
 > [v6.1.2 release](https://github.com/DevExpGbb/zava-agent-config/releases/tag/v6.1.2)
-> attaches 7 per-plugin tarballs + their `.sha256` companions +
+> attaches 7 per-plugin bundles + their `.sha256` companions +
 > `marketplace-6.1.2.json` (15 assets total) via the workflow in
 > [`.github/workflows/release.yml`](https://github.com/DevExpGbb/zava-agent-config/blob/main/.github/workflows/release.yml).
-> Apm `0.14.0` and apm-action `v1.9.1` or newer required.
+> APM `0.16.0` and apm-action `v1.9.1` or newer required.
+
+:::caution[Migrating release workflows from `.tar.gz`?]
+The examples below assume the new `.zip` default from `apm pack --archive`.
+If your release job still uploads or hashes `build/*.tar.gz`, either update
+those globs to `.zip` or add `--archive-format tar.gz` to preserve the previous
+artifact format.
+:::
 
 ```yaml
       - uses: actions/setup-python@v5
@@ -96,12 +103,12 @@ you need to customise any step.
       - run: pip install apm-cli
       - run: |
           apm pack --check-versions --check-clean --json > pack-report.json
-          for f in build/*.tar.gz .claude-plugin/marketplace.json; do
+          for f in build/*.zip .claude-plugin/marketplace.json; do
             [ -f "$f" ] || continue
             sha256sum "$f" > "${f}.sha256"
           done
           gh release create "${GITHUB_REF_NAME}" \
-            build/*.tar.gz build/*.tar.gz.sha256 \
+            build/*.zip build/*.zip.sha256 \
             .claude-plugin/marketplace.json* \
             --title "${GITHUB_REF_NAME}" --notes-file CHANGELOG.md
         env:
@@ -120,13 +127,13 @@ release:
     - pip install apm-cli
     - apm pack --check-versions --check-clean --json > pack-report.json
     - |
-      for f in build/*.tar.gz .claude-plugin/marketplace.json; do
+      for f in build/*.zip .claude-plugin/marketplace.json; do
         [ -f "$f" ] || continue
         sha256sum "$f" > "${f}.sha256"
       done
     - |
       glab release create "$CI_COMMIT_TAG" \
-        build/*.tar.gz build/*.tar.gz.sha256 \
+        build/*.zip build/*.zip.sha256 \
         .claude-plugin/marketplace.json* \
         --notes-file CHANGELOG.md
 ```
@@ -143,12 +150,12 @@ pipeline {
         sh '''
           pip install apm-cli
           apm pack --check-versions --check-clean --json > pack-report.json
-          for f in build/*.tar.gz .claude-plugin/marketplace.json; do
+          for f in build/*.zip .claude-plugin/marketplace.json; do
             [ -f "$f" ] || continue
             sha256sum "$f" > "${f}.sha256"
           done
           gh release create "${TAG_NAME}" \
-            build/*.tar.gz build/*.tar.gz.sha256 \
+            build/*.zip build/*.zip.sha256 \
             .claude-plugin/marketplace.json* \
             --notes-file CHANGELOG.md
         '''
@@ -171,13 +178,13 @@ steps:
   - script: pip install apm-cli
   - script: apm pack --check-versions --check-clean --json > pack-report.json
   - script: |
-      for f in build/*.tar.gz .claude-plugin/marketplace.json; do
+      for f in build/*.zip .claude-plugin/marketplace.json; do
         [ -f "$f" ] || continue
         sha256sum "$f" > "${f}.sha256"
       done
   - script: |
       gh release create "$(Build.SourceBranchName)" \
-        build/*.tar.gz build/*.tar.gz.sha256 \
+        build/*.zip build/*.zip.sha256 \
         .claude-plugin/marketplace.json* \
         --notes-file CHANGELOG.md
     env:
@@ -193,8 +200,8 @@ steps:
 | 0    | -                 | Pack succeeded; ship the artifacts.                                                              |
 | 1    | runtime           | Build or network error. Inspect the JSON report; rerun.                                          |
 | 2    | schema            | `apm.yml` is invalid. Fix the manifest before tagging.                                           |
-| 3    | `--check-versions`| Per-package versions disagree with `marketplace.versioning.strategy`. See [Versioning strategies](../versioning-strategies/). |
-| 4    | `--check-clean`   | Committed `marketplace.json` does not match a fresh pack. Run `apm pack` locally, commit the diff, re-tag. |
+| 3    | `--check-versions`| Per-package versions disagree with `marketplace.versioning.strategy`. See [Versioning strategies](./versioning-strategies/). |
+| 4    | `--check-clean`   | Committed `marketplace.json` does not match a fresh pack. Run `apm pack` locally, commit the diff (or `git commit --amend --no-edit` to fold into the current commit), then re-tag and push the updated tag (`git tag -f vX.Y.Z && git push --force-with-lease origin vX.Y.Z`). |
 
 The gates never write to disk -- they only refuse to release.
 Recover by running the same `apm pack` locally without `--check-*`,

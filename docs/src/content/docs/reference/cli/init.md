@@ -17,9 +17,9 @@ Creates a minimal `apm.yml` in the current directory or in a new
 `PROJECT_NAME` subdirectory. Auto-detects name, author, and description
 so you can start running `apm install` immediately.
 
-The legacy `--plugin` and `--marketplace` flags (which scaffolded a
+The legacy `--plugin` and `--marketplace` flags (which scaffold a
 plugin or marketplace authoring block alongside `apm.yml`) are
-deprecated and will be removed in v0.16; use [`apm plugin init`](../plugin/)
+deprecated but still accepted; use [`apm plugin init`](../plugin/)
 and [`apm marketplace init`](../marketplace/) instead.
 
 ## Arguments
@@ -33,9 +33,9 @@ and [`apm marketplace init`](../marketplace/) instead.
 | Flag | Default | Description |
 |---|---|---|
 | `-y`, `--yes` | off | Skip interactive prompts; use auto-detected defaults. Overwrites an existing `apm.yml` without confirmation. |
-| `--plugin` | off | **Deprecated (removed in v0.16).** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name must be kebab-case, max 64 chars. |
-| `--marketplace` | off | **Deprecated (removed in v0.16).** Use [`apm marketplace init`](../marketplace/) instead. Append a `marketplace:` authoring block to `apm.yml`. See [Publish to a marketplace](../../../producer/publish-to-a-marketplace/). |
-| `--target` | (prompt) | Comma-separated target list. Skips the interactive target prompt and writes targets directly. Valid values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`. |
+| `--plugin` | off | **Deprecated.** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name must be kebab-case, max 64 chars. |
+| `--marketplace` | off | **Deprecated.** Use [`apm marketplace init`](../marketplace/) instead. Append a `marketplace:` authoring block to `apm.yml`. See [Publish to a marketplace](../../../producer/publish-to-a-marketplace/). |
+| `--target` | (prompt) | Comma-separated target list. Skips the interactive target prompt and writes targets directly. Valid values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`. |
 | `-v`, `--verbose` | off | Show detailed output. |
 
 Target precedence: `--target` flag > interactive prompt > auto-detect at
@@ -104,16 +104,23 @@ $ apm init --yes --target copilot,claude,cursor
   pre-checks targets read from its existing `target:` field.
 - **Codex hint:** if `.codex/` is present, suggests
   `--target agent-skills` to also deploy skills to `.agents/skills/`.
+- **agentrc suggestion:** when no agent instruction files are found
+  (`.github/copilot-instructions.md`, `AGENTS.md`, `.github/instructions/`),
+  the Next Steps panel suggests generating agent instructions:
+  - `agentrc` in PATH: prepends `Generate agent instructions: agentrc init`
+    as the first next step.
+  - `agentrc` not in PATH: prints a tip line with a link to
+    `https://github.com/microsoft/agentrc`.
+  - Instructions already exist: no mention (suppressed entirely).
 - **Exit codes:** `0` on success or user-aborted prompt; `1` on invalid
   project or plugin name, or unhandled error.
 
 ## Deprecations
 
-The `--plugin` and `--marketplace` flags are deprecated and will be
-removed in **v0.16**. They remain functional during the deprecation
-window; each invocation prints a one-line warning to stderr pointing
-at the replacement command (`apm plugin init` or `apm marketplace
-init`). Migrate to:
+The `--plugin` and `--marketplace` flags are deprecated but remain
+functional for compatibility. Each invocation prints a one-line warning
+to stderr pointing at the replacement command (`apm plugin init` or
+`apm marketplace init`). Migrate to:
 
 - [`apm plugin init`](../plugin/) -- replaces `apm init --plugin`.
 - [`apm marketplace init`](../marketplace/) -- replaces

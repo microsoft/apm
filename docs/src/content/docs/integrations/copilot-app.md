@@ -19,15 +19,15 @@ See the [Experimental flags reference](../../reference/experimental/) for the fu
 Until the flag is enabled, the `copilot-app` target stays inert: it is hidden from auto-detection, and explicit `--target copilot-app` installs fail cleanly with the enable hint instead of touching the App's database.
 :::
 
-## What it does
+## What you get
 
-When `copilot-app` is enabled and a package ships a prompt with workflow frontmatter (any of `interval`, `schedule_hour`, `schedule_day` at the top level), `apm install --target copilot-app` inserts the prompt as a row in the GitHub Copilot desktop App's SQLite store at `~/.copilot/data.db`. Add `--global` to install from a user-scope `~/.apm/apm.yml`, or omit it to install from a project's `apm.yml` (typical for team-shared scheduled prompts). The App reads new rows on next launch (or refresh) and lists them under Workflows.
+Your APM workflows appear in the Copilot App's correct project tab automatically -- no manual workspace tagging. Ship a `.prompt.md` with workflow frontmatter (any of `interval`, `schedule_hour`, `schedule_day` at the top level), run `apm install --target copilot-app` inside the repo, and the App lists the workflow under that repo's Workflows tab on next launch. Add `--global` to install from a user-scope `~/.apm/apm.yml`; omit it for project-scoped, team-shared scheduled prompts.
 
-Prompts that do not carry workflow frontmatter are plain slash commands: they deploy to file-based targets (`copilot`, `vscode`, `claude`, ...) and APM hard-errors with an actionable diagnostic if you point them at `copilot-app` directly. A single `.prompt.md` belongs to exactly ONE surface — whichever its frontmatter shape selects.
+Prompts that do not carry workflow frontmatter are plain slash commands: they deploy to file-based targets (`copilot`, `vscode`, `claude`, ...) and APM hard-errors with an actionable diagnostic if you point them at `copilot-app` directly. A single `.prompt.md` belongs to exactly ONE surface -- whichever its frontmatter shape selects.
 
-## Why a new target
-
-The `copilot` target writes prompts as files (`.github/prompts/<name>.prompt.md`) for Copilot in IDEs. The desktop App stores workflows in a SQLite database, not on disk. They are different surfaces; `copilot-app` exists so that one APM install can serve both without leakage.
+:::note[How it works]
+The desktop App stores workflows in a SQLite database at `~/.copilot/data.db`, not as files on disk -- so `copilot-app` is a separate target from the file-based `copilot` integration. `apm install --target copilot-app` inserts one row per workflow prompt; the App picks them up on next launch or refresh. If a freshly installed workflow does not appear, restart the Copilot App once.
+:::
 
 ## Authoring a workflow prompt
 
@@ -132,7 +132,7 @@ There is none. The DB file is local; access is governed by your filesystem permi
 
 ## Schema compatibility
 
-APM guards writes with `PRAGMA user_version` and accepts the closed range `[13, 13]` today. If the App ships a newer schema, APM refuses to write and asks you to update APM rather than risk corruption.
+APM guards writes with `PRAGMA user_version`. Below the supported minimum (`13`) APM refuses to write, because the `workflows` table may not exist. Within the tested range (`13`–`15` today) writes proceed normally. Above the tested maximum APM warns once and continues -- additive schema bumps are forward-compatible against APM's narrow write surface (the `workflows` table), so a hard fail would block users unnecessarily. If a future schema is found to break reads, that specific version will be added to a known-breaking list and hard-fail again.
 
 ## Concurrency
 

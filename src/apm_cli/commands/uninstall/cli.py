@@ -3,11 +3,10 @@
 import builtins
 import sys
 import traceback
-from pathlib import Path  # noqa: F401
 
 import click
 
-from ...constants import APM_MODULES_DIR, APM_YML_FILENAME  # noqa: F401
+from ...constants import APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
 from ...models.apm_package import APMPackage
 from .engine import (
@@ -98,8 +97,20 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             data["dependencies"] = {}
         if "apm" not in data["dependencies"]:
             data["dependencies"]["apm"] = []
+        # Track whether devDependencies was synthesised so we don't leave
+        # an empty section behind for projects that never used --dev.
+        had_dev_section = "devDependencies" in data
+        if not had_dev_section:
+            data["devDependencies"] = {}
+        if "apm" not in data["devDependencies"]:
+            data["devDependencies"]["apm"] = []
 
-        current_deps = data["dependencies"]["apm"] or []
+        prod_deps = data["dependencies"]["apm"] or []
+        dev_deps = data["devDependencies"]["apm"] or []
+        # `apm install --dev <pkg>` writes under devDependencies.apm. Uninstall
+        # must scan both sections so dev-installed packages are removable
+        # (regression trap for #1549).
+        current_deps = list(prod_deps) + list(dev_deps)
 
         # Load lockfile early: used for marketplace ref resolution in Step 1
         # and reused for MCP state capture and transitive orphan cleanup below.
@@ -128,9 +139,21 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         # Step 3: Remove from apm.yml
         for package in packages_to_remove:
-            current_deps.remove(package)
-            logger.progress(f"Removed {package} from apm.yml")
-        data["dependencies"]["apm"] = current_deps
+            if package in dev_deps:
+                dev_deps.remove(package)
+                section = "devDependencies.apm"
+            elif package in prod_deps:
+                prod_deps.remove(package)
+                section = "dependencies.apm"
+            logger.progress(f"Removed {package} from {section} in apm.yml")
+        data["dependencies"]["apm"] = prod_deps
+        data["devDependencies"]["apm"] = dev_deps
+        # Drop empty devDependencies wrappers so the manifest stays clean
+        # for projects that never used --dev.
+        if not data["devDependencies"]["apm"]:
+            del data["devDependencies"]["apm"]
+            if not data["devDependencies"] and not had_dev_section:
+                del data["devDependencies"]
         try:
             dump_yaml(data, apm_yml_path)
             logger.success(f"Updated {apm_yml_path} (removed {len(packages_to_remove)} package(s))")

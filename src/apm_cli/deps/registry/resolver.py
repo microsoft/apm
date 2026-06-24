@@ -95,13 +95,13 @@ def _package_info_from_extracted_registry_tree(
     if not validation_result.is_valid:
         errs = "\n  - ".join(validation_result.errors)
         raise RegistryResolutionError(
-            f"registry tarball for {dep_ref.repo_url!r} did not validate "
+            f"registry archive for {dep_ref.repo_url!r} did not validate "
             f"as an APM package:\n  - {errs}"
         )
     package = validation_result.package
     if package is None:
         raise RegistryResolutionError(
-            f"registry tarball for {dep_ref.repo_url!r} validated but produced no package metadata"
+            f"registry archive for {dep_ref.repo_url!r} validated but produced no package metadata"
         )
     resolved_url = client.archive_url(owner, repo, chosen.version)
     package.source = resolved_url
@@ -216,15 +216,29 @@ class RegistryPackageResolver:
         if not spec:
             raise RegistryResolutionError(
                 f"registry-sourced dep {dep_ref.repo_url!r} has no version "
-                f"constraint (semver range required)"
-            )
-        if not is_semver_range(spec):
-            # The parser should have rejected this earlier; this is defense in
-            # depth for direct callers that bypass the parser.
-            raise RegistryResolutionError(
-                f"version constraint {spec!r} on {dep_ref.repo_url!r} is not a valid semver range"
+                f"constraint (version selector required)"
             )
         version_strings = [v.version for v in versions]
+        if not is_semver_range(spec):
+            from apm_cli.models.dependency.identity import _looks_like_invalid_semver_range
+
+            if _looks_like_invalid_semver_range(spec):
+                # A range-shaped but malformed selector ('^1.0') is a user error,
+                # not a literal tag -- reject it clearly instead of exact-matching.
+                raise RegistryResolutionError(
+                    f"invalid semver range {spec!r} on {dep_ref.repo_url!r}; "
+                    f"use a complete range like '^1.0.0' or a published version"
+                )
+            # Non-semver selector: exact match per the registry HTTP API spec
+            # (section 1.3 -- "Non-semver selectors are matched exactly").
+            chosen = next((v for v in versions if v.version == spec), None)
+            if chosen is None:
+                raise RegistryResolutionError(
+                    f"version {spec!r} not found for {dep_ref.repo_url!r} "
+                    f"in registry {dep_ref.registry_name!r} "
+                    f"(available: {', '.join(version_strings) or '<none>'})"
+                )
+            return chosen
         best = pick_best(spec, version_strings)
         if best is None:
             raise RegistryResolutionError(
@@ -290,8 +304,8 @@ class RegistryPackageResolver:
         _clear_install_target(target_path)
 
         # extract_archive dispatches on Content-Type (with magic-bytes
-        # fallback) — supports both tar.gz (default) and zip (Anthropic
-        # skills format). Hash check happens before any extraction.
+        # fallback) -- supports both zip (default) and legacy tar.gz.
+        # Hash check happens before any extraction.
         actual_hash = extract_archive(
             archive_bytes,
             chosen.digest,
@@ -360,13 +374,13 @@ class RegistryPackageResolver:
         if not validation_result.is_valid:
             errs = "\n  - ".join(validation_result.errors)
             raise RegistryResolutionError(
-                f"registry tarball for {dep_ref.repo_url!r} did not validate "
+                f"registry archive for {dep_ref.repo_url!r} did not validate "
                 f"as an APM package:\n  - {errs}"
             )
         package = validation_result.package
         if package is None:
             raise RegistryResolutionError(
-                f"registry tarball for {dep_ref.repo_url!r} validated but "
+                f"registry archive for {dep_ref.repo_url!r} validated but "
                 f"produced no package metadata"
             )
         package.source = resolved_url

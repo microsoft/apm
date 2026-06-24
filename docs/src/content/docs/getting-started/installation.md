@@ -89,15 +89,119 @@ jobs:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `APM_INSTALL_DIR` | `/usr/local/bin` (Unix) / `%LOCALAPPDATA%\Programs\apm\bin` (Windows) | Directory for the `apm` symlink / `apm.cmd` shim |
-| `APM_LIB_DIR` | `$(dirname APM_INSTALL_DIR)/lib/apm` | *(Unix only)* Directory for the full binary bundle |
-| `GITHUB_URL` | `https://github.com` | Base GitHub URL (asset downloads **and** API host: `api.github.com` on github.com, `{GITHUB_URL}/api/v3` on GHES). Must be `https://`. |
+| `APM_LIB_DIR` | `$(dirname APM_INSTALL_DIR)/lib/apm` | *(Unix only)* Directory for the full binary bundle. Must end with `/apm` (for example, `/lib/apm`). The installer rejects shared directories (e.g. `$HOME/.local/share`) to prevent accidental data loss. |
+| `GITHUB_URL` | `https://github.com` | Base GitHub URL (asset downloads **and** API host: `api.github.com` on github.com, `{GITHUB_URL}/api/v3` on GHES). Must be `https://` on Windows. |
 | `APM_REPO` | `microsoft/apm` | Repository as `owner/name` |
 | `VERSION` | *(latest)* | Pin a release tag (skips the **releases/latest** HTTP API). Must look like `v1.2.3` or `1.2.3`. |
+| `APM_RELEASE_METADATA_URL` | *(unset)* | Exact mirror URL for release metadata, usually `latest.json` with at least `{"tag_name":"vX.Y.Z"}`. |
+| `APM_RELEASE_BASE_URL` | *(unset)* | Base URL for release assets laid out as `{base}/{tag}/{asset}` and `{base}/{tag}/{asset}.sha256`. |
+| `APM_INSTALLER_BASE_URL` | *(unset)* | Base URL containing `install.sh` and `install.ps1`; used by `apm self-update` and by your bootstrap one-liner. |
+| `APM_PYPI_INDEX_URL` | *(unset)* | PyPI-compatible mirror used when the installer falls back to pip. |
+| `APM_NO_DIRECT_FALLBACK` | *(unset)* | Set to `1` to fail closed when a mirror is missing or unreachable instead of using public GitHub, `aka.ms`, or PyPI. |
 | `APM_SKIP_CHECKSUM` | *(unset)* | Windows only: set to `1` to skip `.sha256` verification on **pinned** installs (emergency only). |
 
-> **Note - Unix (`install.sh`):** Latest-release discovery still calls `https://api.github.com/repos/.../releases/latest` unless `VERSION` is set. For GHES or mirrors with no access to `api.github.com`, pin `VERSION` so the script never hits that endpoint.
->
-> **Note - Windows (`install.ps1`):** The **releases/latest** URL is derived from `GITHUB_URL`: `https://api.github.com` for GitHub.com, or `{GITHUB_URL}/api/v3` for GitHub Enterprise Server. Air-gapped runners should still set `VERSION` so the installer does not need the API at all. When `VERSION` is pinned, the release **`.sha256`** file is required unless you set **`APM_SKIP_CHECKSUM=1`** (emergency only).
+### Enterprise bootstrap mirror mode
+
+Mirror mode routes bootstrap traffic through internal hosts. Four URL variables point install and self-update at your mirror; `APM_NO_DIRECT_FALLBACK=1` fails closed so no request reaches a public host:
+
+```bash
+export APM_INSTALLER_BASE_URL="https://artifactory.mycorp.example/generic/apm-install"
+export APM_RELEASE_METADATA_URL="https://artifactory.mycorp.example/generic/apm-releases/latest.json"
+export APM_RELEASE_BASE_URL="https://artifactory.mycorp.example/generic/apm-releases"
+export APM_PYPI_INDEX_URL="https://artifactory.mycorp.example/api/pypi/python-proxy/simple"
+export APM_NO_DIRECT_FALLBACK=1
+
+curl -sSL "$APM_INSTALLER_BASE_URL/install.sh" | sh
+apm self-update --check
+```
+
+For Windows:
+
+```powershell
+$env:APM_INSTALLER_BASE_URL = "https://artifactory.mycorp.example/generic/apm-install"
+$env:APM_RELEASE_METADATA_URL = "https://artifactory.mycorp.example/generic/apm-releases/latest.json"
+$env:APM_RELEASE_BASE_URL = "https://artifactory.mycorp.example/generic/apm-releases"
+$env:APM_PYPI_INDEX_URL = "https://artifactory.mycorp.example/api/pypi/python-proxy/simple"
+$env:APM_NO_DIRECT_FALLBACK = "1"
+
+irm "$env:APM_INSTALLER_BASE_URL/install.ps1" | iex
+apm self-update --check
+```
+
+Mirror layout for binary releases:
+
+```text
+apm-releases/
+  latest.json
+  v0.19.0/
+    apm-linux-x86_64.tar.gz
+    apm-darwin-arm64.tar.gz
+    apm-windows-x86_64.zip
+    apm-windows-x86_64.zip.sha256
+```
+
+`APM_NO_DIRECT_FALLBACK=1` makes missing mirror settings and unreachable mirrors hard failures. It does not replace package-install proxying; keep using `PROXY_REGISTRY_URL` and `PROXY_REGISTRY_ONLY=1` for `apm install` dependencies.
+
+#### What fail-closed does and does not cover
+
+Fail-closed scoping keys off the public `github.com` default. The guard only blocks egress when the resolved host would be public GitHub (`github.com` / `api.github.com`), `aka.ms`, or public PyPI. It does **not** suppress egress to a custom `GITHUB_URL`: if you set a GHES host (for example `GITHUB_URL=https://github.corp.com`) together with `APM_NO_DIRECT_FALLBACK=1` and no release mirror, the installer still reaches that GHES host. This is intentional coexistence with GHES, but "no direct fallback" should not be read as "zero egress" -- it means "no fallback to public hosts". For true zero-egress, set the `APM_RELEASE_METADATA_URL` / `APM_RELEASE_BASE_URL` / `APM_INSTALLER_BASE_URL` / `APM_PYPI_INDEX_URL` mirrors so every request resolves to your internal hosts. When `APM_RELEASE_METADATA_URL` is unset, GHES metadata requests intentionally use the resolved GitHub token for that host; mirror metadata requests never receive it. The GitHub token is attached only when the request targets the canonical GitHub / configured GHES host, never a mirror host.
+
+Homebrew and Scoop mirror support is docs-only in this v0: mirror the tap or bucket with your package manager's normal enterprise controls, but the APM env vars above do not rewrite Homebrew or Scoop internals.
+
+### No-egress smoke test
+
+Run this on a disposable Linux or macOS runner. It starts a local mirror, wraps both `curl` and `pip` with deny-lists for public hosts, and expects the installer to fail only after downloading the fake archive. Any request to GitHub, `aka.ms`, PyPI, Homebrew, or Scoop fails the smoke test immediately. The `pip` wrapper makes the PyPI egress path explicit: pip fallback is gated by `APM_NO_DIRECT_FALLBACK` + `APM_PYPI_INDEX_URL`, so the wrapper proves pip cannot reach public PyPI even if the binary path falls back to it.
+
+```bash
+set -eu
+rm -rf .apm-mirror-smoke
+mkdir -p .apm-mirror-smoke/mirror/apm-install \
+  .apm-mirror-smoke/mirror/apm-releases/v9.9.9 \
+  .apm-mirror-smoke/bin
+cp install.sh .apm-mirror-smoke/mirror/apm-install/install.sh
+printf '{"tag_name":"v9.9.9"}\n' > .apm-mirror-smoke/mirror/apm-releases/latest.json
+printf 'not-a-real-archive\n' > .apm-mirror-smoke/mirror/apm-releases/v9.9.9/apm-linux-x86_64.tar.gz
+cat > .apm-mirror-smoke/bin/curl <<'SH'
+#!/bin/sh
+case " $* " in
+  *github.com*|*api.github.com*|*aka.ms*|*pypi.org*|*pythonhosted.org*|*brew.sh*|*scoop*)
+    echo "public egress blocked: $*" >&2
+    exit 70
+    ;;
+esac
+exec /usr/bin/curl "$@"
+SH
+cat > .apm-mirror-smoke/bin/pip <<'SH'
+#!/bin/sh
+# Deny public PyPI; allow only the configured mirror index.
+case " $* " in
+  *pypi.org*|*pythonhosted.org*)
+    echo "public pip egress blocked: $*" >&2
+    exit 70
+    ;;
+esac
+exec /usr/bin/pip "$@"
+SH
+cp .apm-mirror-smoke/bin/pip .apm-mirror-smoke/bin/pip3
+chmod +x .apm-mirror-smoke/bin/curl .apm-mirror-smoke/bin/pip .apm-mirror-smoke/bin/pip3
+python3 -m http.server 8765 --directory .apm-mirror-smoke/mirror > .apm-mirror-smoke/server.log 2>&1 &
+server_pid=$!
+trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+set +e
+PATH="$PWD/.apm-mirror-smoke/bin:$PATH" \
+  APM_INSTALLER_BASE_URL="http://127.0.0.1:8765/apm-install" \
+  APM_RELEASE_METADATA_URL="http://127.0.0.1:8765/apm-releases/latest.json" \
+  APM_RELEASE_BASE_URL="http://127.0.0.1:8765/apm-releases" \
+  APM_PYPI_INDEX_URL="http://127.0.0.1:8765/pypi/simple" \
+  APM_NO_DIRECT_FALLBACK=1 \
+  sh .apm-mirror-smoke/mirror/apm-install/install.sh
+status=$?
+set -e
+test "$status" -ne 0
+# Success: installer failed closed with an actionable error, as expected.
+```
+
+For `apm self-update`, run `apm self-update --check` with the same env vars and verify your proxy, firewall, or CI egress logs show only the mirror host. Use a disposable runner for a full `apm self-update` because it executes the mirrored installer.
 
 ## Package managers
 
@@ -216,6 +320,12 @@ Use `sudo` for system-wide installation, or install to a user-writable directory
 curl -sSL https://aka.ms/apm-unix | APM_INSTALL_DIR=$HOME/.local/bin sh
 ```
 
+> **Important:** The installer validates `APM_LIB_DIR` before writing any files.
+> See the `APM_LIB_DIR` row above for path rules. The installer also refuses to
+> delete an existing non-empty `APM_LIB_DIR` unless it looks like a prior APM
+> install. When you set `APM_INSTALL_DIR=$HOME/.local/bin`, the derived lib path
+> (`$HOME/.local/lib/apm`) is safe and does not require sudo.
+
 ### Binary install fails on older Linux (devcontainers, Debian-based images)
 
 On systems with a glibc version older than the minimum required by the pre-built
@@ -239,7 +349,7 @@ pip install --user apm-cli
 
 ### Authentication errors when installing packages
 
-See [Authentication -- Troubleshooting](../authentication/#troubleshooting) for token setup, SSO authorization, and diagnosing auth failures.
+See [Authentication -- Troubleshooting](./authentication/#troubleshooting) for token setup, SSO authorization, and diagnosing auth failures.
 
 ### File access errors on Windows (antivirus / endpoint protection)
 
@@ -278,4 +388,4 @@ pip install --user apm-cli
 
 ## Next steps
 
-See the [Quick Start](../quick-start/) to set up your first project.
+See the [Quickstart](/apm/quickstart/) to set up your first project.

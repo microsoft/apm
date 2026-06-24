@@ -124,7 +124,7 @@ class TestMixedDependencyCompile:
     """Test compiling projects with mixed dependencies."""
 
     def test_compile_with_mixed_deps_generates_agents_md(self, temp_project, apm_command):
-        """Compile should generate AGENTS.md from both package types."""
+        """Compile should keep Copilot instructions outside AGENTS.md."""
         # Install Claude Skill (most likely to succeed)
         subprocess.run(
             [apm_command, "install", "anthropics/skills/skills/brand-guidelines"],
@@ -134,7 +134,7 @@ class TestMixedDependencyCompile:
             timeout=120,
         )
 
-        # Create a local instruction to ensure AGENTS.md has content
+        # Create a local instruction to trigger Copilot AGENTS.md deduplication.
         instructions_dir = temp_project / ".github" / "instructions"
         instructions_dir.mkdir(parents=True, exist_ok=True)
         instruction = instructions_dir / "test.instructions.md"
@@ -153,9 +153,13 @@ This is a test.
 
         assert result.returncode == 0, f"Compile failed: {result.stderr}"
 
-        # Verify AGENTS.md was created
+        # Copilot compile suppresses empty AGENTS.md shells when instructions
+        # already live under .github/instructions/.
         agents_md = temp_project / "AGENTS.md"
-        assert agents_md.exists(), "AGENTS.md not generated"
+        assert not agents_md.exists(), (
+            "AGENTS.md should not be generated for Copilot-only instructions"
+        )
+        assert instruction.exists(), "Copilot instruction file not preserved"
 
         # Verify skill was integrated to .agents/skills/
         skill_integrated = temp_project / ".agents" / "skills" / "brand-guidelines" / "SKILL.md"

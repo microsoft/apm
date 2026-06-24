@@ -305,7 +305,7 @@ class TestDefaultRouting:
         pkg = APMPackage.from_apm_yml(p)
         d = pkg.dependencies["apm"][0]
         assert d.is_local
-        assert d.source is None
+        assert d.source == "local"
 
     def test_dev_dependencies_routed_too(self, write_yml):
         p = write_yml("""
@@ -382,7 +382,8 @@ class TestDefaultRoutingErrors:
 
     def test_non_semver_ref_routed_to_registry(self, write_yml):
         # Non-semver labels like branch names are valid registry version
-        # selectors — the registry decides what they resolve to.
+        # selectors -- the client matches them exactly against the registry's
+        # published version list.
         p = write_yml("""
             name: x
             version: 1.0.0
@@ -393,6 +394,30 @@ class TestDefaultRoutingErrors:
             dependencies:
               apm:
                 - acme/foo#develop
+            """)
+        pkg = APMPackage.from_apm_yml(p)
+        d = pkg.dependencies["apm"][0]
+        assert d.source == "registry"
+        assert d.registry_name == "corp"
+
+    def test_malformed_range_ref_routes_without_raising_at_load(self, write_yml):
+        # A malformed range-like ref ('^1.0' missing the patch) must NOT abort
+        # the manifest load -- read-only consumers (apm compile, apm outdated)
+        # load the manifest but never resolve, so a load-time raise would crash
+        # them for an unrelated dep. The ref still routes to the registry; it is
+        # rejected later, at resolve time (see the resolver tests). The CLI
+        # write gate (validate_registry_ref) rejects it before it is ever
+        # written to apm.yml.
+        p = write_yml("""
+            name: x
+            version: 1.0.0
+            registries:
+              corp:
+                url: https://corp.example.com/apm
+              default: corp
+            dependencies:
+              apm:
+                - acme/foo#^1.0
             """)
         pkg = APMPackage.from_apm_yml(p)
         d = pkg.dependencies["apm"][0]

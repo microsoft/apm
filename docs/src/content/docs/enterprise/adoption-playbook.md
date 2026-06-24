@@ -7,7 +7,7 @@ sidebar:
 
 This is the order to roll APM out. Five phases, each with a single owner,
 a deliverable, and a gate to clear before moving on. Read the
-[Governance overview](../governance-overview/) page first if you have not -- it is the
+[Governance overview](./governance-overview/) page first if you have not -- it is the
 contract this playbook operationalizes.
 
 | Phase | Duration | Owner | Gate to advance |
@@ -38,7 +38,7 @@ yet.
 - A first-pass inventory of MCP servers in scope.
 - Rough sizing: how many repos, how many primitives, how many distinct
   agent harnesses across the org. Use the
-  [primitives and targets](../../concepts/primitives-and-targets/) model
+  [primitives and targets](../concepts/primitives-and-targets/) model
   as the vocabulary.
 
 **How to run it:**
@@ -49,7 +49,7 @@ apm audit
 ```
 
 `--dry-run` reports what would change without writing. `apm audit` runs
-the [drift detection](../drift-detection/) and content scans
+the [drift detection](./drift-detection/) and content scans
 that are on by default.
 
 **Gate to advance:** the platform team can answer, in one slide: "what
@@ -73,15 +73,15 @@ and policy in `warn` mode. The platform team rides along.
 
 - `apm.yml` and `apm.lock.yaml` committed in the pilot repo.
 - An org policy file at `<org>/.github/apm-policy.yml` with
-  `enforcement: warn`. See [Get started with apm-policy.yml](../apm-policy-getting-started/) for the mental
-  model and [Policy Reference](../policy-reference/) for fields.
+  `enforcement: warn`. See [Get started with apm-policy.yml](./apm-policy-getting-started/) for the mental
+  model and [Policy Reference](./policy-reference/) for fields.
 - `apm audit --ci` wired into the pilot repo's required checks. See the
-  [CI Policy Enforcement](../enforce-in-ci/) guide.
+  [CI Policy Enforcement](./enforce-in-ci/) guide.
 - A weekly review of warnings the policy would have blocked.
 
 **Why `warn` first:** it lets you tune the allow-lists against real
 traffic without ever red-marking a PR. The
-[Governance overview](../governance-overview/) page documents the bypass surface so
+[Governance overview](./governance-overview/) page documents the bypass surface so
 you know exactly what `warn` mode does and does not promise.
 
 **Gate to advance:** two consecutive weeks where every pilot PR passes
@@ -112,9 +112,9 @@ something curated to install from.
   canary -- if its CI stays green for a week, the gate is real.
 - If your org standardizes on Artifactory or an equivalent: registry
   proxy live, with the bypass-prevention contract in
-  [Registry Proxy & Air-gapped](../registry-proxy/) verified.
+  [Registry Proxy & Air-gapped](./registry-proxy/) verified.
 - One or more org marketplaces published, replacing ad-hoc package
-  references. See [Publish to a marketplace](../../producer/publish-to-a-marketplace/) for
+  references. See [Publish to a marketplace](../producer/publish-to-a-marketplace/) for
   the authoring side.
 - A short internal page documenting which packages are blessed and how
   to request a new one.
@@ -143,7 +143,7 @@ to "self-service onboarding."
 **Deliverables:**
 
 - An onboarding doc that points new teams at the
-  [consumer ramp](../../consumer/install-packages/) for daily flow and
+  [consumer ramp](../consumer/install-packages/) for daily flow and
   this playbook's Phase 2 checklist for setup.
 - Adoption KPIs reported monthly:
   - Repos with `apm.yml` committed.
@@ -173,14 +173,14 @@ Steady-state operations.
 **Cadence:**
 
 - **Weekly:** triage `apm audit --ci` failures across the org. Most are
-  drift; the [Drift Detection](../drift-detection/) guide is
+  drift; the [Drift Detection](./drift-detection/) guide is
   the runbook.
 - **Monthly:** lockfile review on long-lived repos. Bump pinned
   versions of org-required packages; close drift findings older than
   one cycle.
 - **Quarterly:** marketplace refresh. Retire unused packages. Promote
   internal tools that have proven themselves into the org marketplace.
-  Re-read the [Governance overview](../governance-overview/) known-gaps section
+  Re-read the [Governance overview](./governance-overview/) known-gaps section
   against the current APM version.
 
 **Health signals to watch:**
@@ -200,13 +200,13 @@ threat model and the agent ecosystem move; the policy must too).
 
 ## Related
 
-- [Making the Case](../making-the-case/) -- the pitch deck inputs for
+- [Making the Case](./making-the-case/) -- the pitch deck inputs for
   Phase 1 stakeholder buy-in.
-- [Governance overview](../governance-overview/) -- the trust contract this playbook
+- [Governance overview](./governance-overview/) -- the trust contract this playbook
   operationalizes.
-- [Security and supply chain](../security-and-supply-chain/) -- the procurement-grade answer for
+- [Security and supply chain](./security-and-supply-chain/) -- the procurement-grade answer for
   Phase 1 review.
-- [Get started with apm-policy.yml](../apm-policy-getting-started/) and [Policy Reference](../policy-reference/)
+- [Get started with apm-policy.yml](./apm-policy-getting-started/) and [Policy Reference](./policy-reference/)
   -- what to put in `apm-policy.yml` for Phase 2 and Phase 3.
-- [Registry Proxy & Air-gapped](../registry-proxy/) -- Phase 3 proxy
+- [Registry Proxy & Air-gapped](./registry-proxy/) -- Phase 3 proxy
   rollout.

@@ -75,6 +75,7 @@ Sample output in a project with `CLAUDE.md` and `.cursor/`:
   gemini       inactive   needs GEMINI.md                          .gemini/
   opencode     inactive   needs .opencode/                         .opencode/
   windsurf     inactive   needs .windsurf/                         .windsurf/
+  kiro         inactive   needs .kiro/                             .kiro/
 ```
 
 Machine-readable form:
@@ -92,13 +93,14 @@ match per target is enough to activate it.
 | Target | Signal(s) APM looks for | Deploy directory |
 |--------|-------------------------|------------------|
 | `claude` | `.claude/` directory, or `CLAUDE.md` file | `.claude/` |
-| `copilot` | `.github/copilot-instructions.md` file | `.github/` |
+| `copilot` | `.github/copilot-instructions.md` file, or `.github/instructions/`, `.github/agents/`, `.github/prompts/`, or `.github/hooks/` directory | `.github/` |
 | `cursor` | `.cursor/` directory, or `.cursorrules` file (legacy) | `.cursor/` |
 | `codex` | `.codex/` directory | `.codex/` |
 | `gemini` | `.gemini/` directory, or `GEMINI.md` file | `.gemini/` |
 | `opencode` | `.opencode/` directory | `.opencode/` |
 | `windsurf` | `.windsurf/` directory | `.windsurf/` |
-| `agent-skills` | Meta-target; never auto-detected. Opt in via `targets:` in `apm.yml` or `--target agent-skills` on `apm compile`. | `.agents/skills/` |
+| `kiro` | `.kiro/` directory | `.kiro/` |
+| `agent-skills` | Meta-target; never auto-detected. Opt in via `targets:` in `apm.yml` or `--target agent-skills` on `apm install` / `apm deps update` (compile is a no-op for this target). | `.agents/` |
 
 Notes:
 

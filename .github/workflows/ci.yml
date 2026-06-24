@@ -54,7 +54,7 @@ jobs:
       run: |
         # Ruff has no max-module-lines rule. This check prevents new files from
         # exceeding the current worst case. Tighten the threshold over time.
-        MAX_LINES=2450   # current max: 2404 (github_downloader.py)
+        MAX_LINES=2100   # Stage 1 (was 2450); target 1400 deferred to Stage 2
         VIOLATIONS=$(find src/ -name '*.py' -print0 | xargs -0 -I{} awk -v max="$MAX_LINES" \
           'END { if (NR > max) printf "%s: %d lines (max %d)\n", FILENAME, NR, max }' {})
         if [ -n "$VIOLATIONS" ]; then
@@ -265,13 +265,15 @@ jobs:
         uv run ./scripts/build-binary.sh
 
   # Dogfood the audit-only CI gate we ship and document to users:
-  #   - Gate A (consumer-side): `apm audit --ci --no-drift` -- lockfile /
-  #     content-integrity check. setup-only: true keeps managed files
-  #     untouched so the SHA-256 content-integrity check can detect tampered
-  #     files. The drift check (install-replay comparison) is skipped
-  #     via --no-drift because there is no warm cache in a setup-only
-  #     run; content-integrity covers the same tamper signal.
-  # See microsoft/apm#883 for context. Tier 1 (no secrets needed).
+  #   - `apm audit --ci` -- the full producer+consumer gate. Runs the
+  #     lockfile / content-integrity checks AND the install-replay drift
+  #     check. The drift replay is cache-free here because every dependency
+  #     in apm.lock.yaml is local (self ``.apm/`` + in-repo ``packages/*``,
+  #     resolved from the checkout via path anchoring), so no warm cache or
+  #     prior ``apm install`` is required. setup-only: the committed managed
+  #     files are left untouched so both content-integrity (SHA-256 tamper)
+  #     and drift (replay vs committed tree, incl. ``.agents/skills/``) can
+  #     detect divergence. See microsoft/apm#883 and #1716. Tier 1.
   apm-self-check:
     name: APM Self-Check
     runs-on: ubuntu-24.04
@@ -280,35 +282,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Installs the APM CLI (latest stable) and adds `apm` to PATH.
-      # setup-only: true skips `apm install` so managed files on disk are
-      # not overwritten before the audit runs. This preserves the committed
-      # state so content-integrity can detect any tampered file hashes.
-      - uses: microsoft/apm-action@v1
+      # Dogfood the repo's OWN apm (built from this branch), not a published
+      # binary. A self-check that runs a stale released apm structurally
+      # cannot validate the fixes the repo ships: this repo's new local-path
+      # packages (./packages/*) depend on the local-dep source-tagging and
+      # transitive-resolution fixes that land IN this tree but predate any
+      # release. The published action (0.14.0 default; 0.16.1 too) false-flags
+      # those deps on ref-consistency and no-orphaned-packages. `uv run` syncs
+      # the project and runs the in-tree apm. No `apm install` is run, so the
+      # committed managed files are preserved: content-integrity detects
+      # tampered file hashes and the drift replay compares the committed tree
+      # (including .agents/skills/) against a fresh cache-free replay.
+      - uses: astral-sh/setup-uv@v6
         with:
-          setup-only: true
+          enable-cache: true
 
-      # Gate A: lockfile / install fidelity (consumer-side).
-      # Verifies every file in lockfile.deployed_files exists, ref consistency
-      # between apm.yml and apm.lock.yaml, no orphan packages, and
-      # content-integrity (SHA-256 hashes against deployed_file_hashes in the
-      # lockfile) on deployed package content. --no-drift skips the
-      # install-replay because there is no warm cache (setup-only did not
-      # run apm install); content-integrity still catches tampered files.
-      - name: apm audit --ci --no-drift
-        run: apm audit --ci --no-drift
+      # Full producer+consumer gate. Verifies every file in
+      # lockfile.deployed_files exists, ref consistency between apm.yml and
+      # apm.lock.yaml, no orphan packages, content-integrity (SHA-256 hashes
+      # against deployed_file_hashes in the lockfile) on deployed content, AND
+      # drift: a cache-free install-replay compared against the committed tree
+      # across every governed deploy root (.github AND .agents). The replay is
+      # cache-free because all deps are local (see job comment); dropping
+      # --no-drift is therefore safe and closes the gap where committed
+      # .agents/skills/ content could silently diverge from source (#1716).
+      - name: apm audit --ci
+        run: uv run apm audit --ci
 
-      # Gate B: regeneration drift (producer-side) -- legacy bash fallback.
-      # NOTE: With setup-only: true this step is a guaranteed no-op.
-      # apm install did not run and the working tree is unchanged, so the
-      # git status check always finds nothing. It is kept so the pattern is
-      # visible; a full install+audit workflow would rely on this step to
-      # detect hand-edits to regenerated .github/ files.
-      - name: Check APM integration drift (legacy bash fallback, see #1071)
-        run: |
-          if [ -n "$(git status --porcelain -- .github/ .claude/ .cursor/ .opencode/)" ]; then
-            echo "::error::APM integration files are out of date."
-            echo "Run 'apm install' locally (with .github/ present) and commit the result."
-            git --no-pager diff -- .github/ .claude/ .cursor/ .opencode/
-            exit 1
-          fi

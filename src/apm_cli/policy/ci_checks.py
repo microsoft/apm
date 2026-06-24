@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Sequence  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Sequence  # noqa: UP035
 
 from ..deps.lockfile import _SELF_KEY, LEGACY_LOCKFILE_NAME, LOCKFILE_NAME
 from .models import CheckResult, CIAuditResult
@@ -440,6 +440,7 @@ def _check_drift(
     fresh checkout that has never installed.
     """
     from ..deps.lockfile import get_lockfile_path
+    from ..deps.path_anchoring import LocalResolutionError
     from ..install.drift import (
         CacheMissError,
         CheckLogger,
@@ -459,6 +460,18 @@ def _check_drift(
 
     try:
         scratch = run_replay(config, logger)
+    except LocalResolutionError as exc:
+        return (
+            CheckResult(
+                name="drift",
+                passed=False,
+                message=(
+                    f"drift replay failed: corrupt local dependency graph in the "
+                    f"lockfile ({exc}). Fix the resolved_by chain or re-run 'apm install'."
+                ),
+            ),
+            [],
+        )
     except CacheMissError:
         return (
             CheckResult(

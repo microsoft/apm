@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import warnings
-from typing import Any, Dict, List, Optional, Tuple  # noqa: F401, UP035
+from typing import Any
 from urllib.parse import quote, urlparse
 
 import requests

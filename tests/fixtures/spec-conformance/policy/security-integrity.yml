@@ -1,0 +1,11 @@
+# Exercises: req-pl-013, req-pl-014
+# Opt-in, fail-closed integrity controls under the security: namespace.
+# req-pl-013: security.integrity.require_hashes fail-closed install.
+# req-pl-014: security.audit.fail_on_drift non-zero audit exit on drift.
+name: contoso-integrity-baseline
+enforcement: block
+security:
+  integrity:
+    require_hashes: true
+  audit:
+    fail_on_drift: true

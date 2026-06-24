@@ -13,45 +13,16 @@ Covers two code paths fixed in issue #548:
 
 import pytest
 
+from apm_cli.install.phases._skip_logic import (
+    _compute_skip_download,
+    _should_use_locked_ref,
+)
+
 # ---------------------------------------------------------------------------
-# Pure-logic helpers that mirror the two changed conditions in install.py.
-# Tested in isolation -- the full _install_apm_dependencies() stack is not
-# needed and would require network access / a real project root.
+# Both helpers are imported directly from the production module so that any
+# change to the real condition immediately surfaces as a test failure.
+# See issue #552 for the rationale.
 # ---------------------------------------------------------------------------
-
-
-def _should_use_locked_ref(locked_ref, update_refs):
-    """Mirror the locked-ref decision from download_callback (install.py ~L1268).
-
-    Returns True when the download should be pinned to the locked SHA from the
-    lockfile instead of using the manifest ref for re-resolution.
-
-    Condition verbatim from source:
-        if locked_ref and not update_refs:
-            download_dep = _dc_replace(dep_ref, reference=locked_ref)
-    """
-    return bool(locked_ref) and not update_refs
-
-
-def _compute_skip_download(
-    install_path_exists, is_cacheable, update_refs, already_resolved, lockfile_match
-):
-    """Mirror the skip_download expression from the sequential loop (install.py ~L1920).
-
-    Returns True when the loop should skip downloading a package.
-
-    Expression verbatim from source:
-        skip_download = install_path.exists() and (
-            (is_cacheable and not update_refs)
-            or (already_resolved and not update_refs)
-            or lockfile_match
-        )
-    """
-    return install_path_exists and (
-        (is_cacheable and not update_refs)
-        or (already_resolved and not update_refs)
-        or lockfile_match
-    )
 
 
 # ===========================================================================

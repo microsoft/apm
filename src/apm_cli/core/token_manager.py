@@ -24,7 +24,6 @@ import logging
 import os
 import subprocess
 import sys
-from typing import Dict, Optional, Tuple  # noqa: F401, UP035
 from urllib.parse import urlparse
 
 from apm_cli.utils.github_host import (
@@ -177,7 +176,7 @@ class GitHubTokenManager:
     def _get_credential_timeout(cls) -> int:
         """Return timeout (seconds) for ``git credential fill``.
 
-        Configurable via ``APM_GIT_CREDENTIAL_TIMEOUT`` (1–180).
+        Configurable via ``APM_GIT_CREDENTIAL_TIMEOUT`` (1-180).
         """
         raw = os.environ.get("APM_GIT_CREDENTIAL_TIMEOUT", "").strip()
         if not raw:

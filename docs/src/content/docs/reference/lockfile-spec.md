@@ -5,6 +5,8 @@ sidebar:
   order: 4
 ---
 
+> **Normative reference:** this page documents the v0.2 working-draft lockfile format as emitted by the current CLI. The normative, ratified contract for v0.1 is defined in [OpenAPM v0.1, Section 5 (Lockfile)](/apm/specs/openapm-v01/) and published as JSON Schema at [`lockfile-v0.1.schema.json`](/apm/specs/schemas/lockfile-v0.1.schema.json).
+
 `apm.lock.yaml` is the pinned record of every resolved dependency and every
 file APM deployed into the workspace. It is the source of truth for
 reproducible installs and for drift detection. Commit it.
@@ -82,6 +84,15 @@ mcp_configs:
     type: stdio
     command: docker
     args: ["run", "-i", "--rm", "ghcr.io/github/github-mcp-server"]
+lsp_servers:
+  - pyright
+lsp_configs:
+  pyright:
+    name: pyright
+    command: pyright-langserver
+    args: ["--stdio"]
+    extensionToLanguage:
+      ".py": python
 local_deployed_files:
   - .github/skills/my-local-skill/SKILL.md
 local_deployed_file_hashes:
@@ -96,6 +107,8 @@ local_deployed_file_hashes:
 | `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
 | `mcp_servers` | list of strings | no | Names of MCP servers declared in the manifest at install time. |
 | `mcp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect MCP drift. |
+| `lsp_servers` | list of strings | no | Names of LSP servers declared in the manifest at install time. |
+| `lsp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect LSP drift. |
 | `local_deployed_files` | list | no | Files this project itself contributes (sources its own primitives). See [self entry](#self-entry). |
 | `local_deployed_file_hashes` | map | no | `path -> sha256` for `local_deployed_files`. |
 
@@ -105,8 +118,9 @@ Each item in `dependencies` describes one resolved package.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `repo_url` | string | yes | Canonical repo URL (e.g. `github.com/owner/repo`). Unique key for the entry, except for virtual and local entries (see below). |
+| `repo_url` | string | yes | Canonical repository path or URL. Entry identity is derived from `repo_url`, `host`, and virtual/local markers; see [lockfile identity keys](#lockfile-identity-keys). |
 | `host` | string | no | FQDN when not inferable from `repo_url` (e.g. for registry proxies or non-GitHub hosts). |
+| `host_type` | string | no | Explicit host-kind hint, currently `gitlab`, copied from object-form `type: gitlab`. |
 | `port` | int | no | Non-standard SSH/HTTPS port. Validated to `1..65535` on read. |
 | `registry_prefix` | string | no | URL path prefix when resolved through a registry proxy (e.g. `artifactory/github`). |
 | `resolved_ref` | string | no | The user-supplied ref from `apm.yml` (`main`, `v1.2.0`, a SHA). |
@@ -116,7 +130,7 @@ Each item in `dependencies` describes one resolved package.
 | `is_virtual` | bool | no | `true` when the entry is a virtual subpath package. |
 | `depth` | int | no | Position in the dependency tree. `0` is the project itself, `1` is a direct dep, higher is transitive. Defaults to `1`. |
 | `resolved_by` | string | no | `repo_url` of the parent that pulled this transitive dep. Absent for direct deps. |
-| `package_type` | string | no | Kind of package: `apm`, `skill_bundle`, etc. Drives target placement. |
+| `package_type` | string | no | Kind of package: `apm_package`, `skill_bundle`, `claude_skill`, `hook_package`, `hybrid`, `marketplace_plugin`. Drives target placement. |
 | `skill_subset` | list of strings | no | For `skill_bundle` packages: the sorted subset of skill names the manifest selected. Empty means "all". |
 | `deployed_files` | list of strings | no | Project-relative paths APM wrote for this dep. Sorted. Powers `prune` and `audit`'s file-presence check. |
 | `deployed_file_hashes` | map | no | `path -> sha256` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Directory entries (trailing `/`) have no hash. |
@@ -128,14 +142,28 @@ Each item in `dependencies` describes one resolved package.
 | `is_dev` | bool | no | `true` when the dep was declared under `devDependencies`. |
 | `discovered_via` | string | no | Marketplace name that surfaced this package (provenance). |
 | `marketplace_plugin_name` | string | no | Plugin name as listed in that marketplace. |
+| `source_url` | string | no | Canonical marketplace source URL when the package came from a hosted `marketplace.json` catalog. |
+| `source_digest` | string | no | `sha256:<hex>` digest of the hosted `marketplace.json` bytes used for resolution. |
 | `is_insecure` | bool | no | `true` when the source URL was `http://`. |
 | `allow_insecure` | bool | no | `true` when the manifest explicitly opted in to the insecure source. |
 | `constraint` | string | git-source semver only | The original semver range from `apm.yml` (`^1.2.0`, `~1.4`). Present when `ref:` was a range; used by drift detection so a manifest range vs. a locked tag (`v1.5.3`) is not a false positive, and by lockfile replay to pin the resolved tag deterministically across installs. |
-| `resolved_tag` | string | git-source semver only | The concrete git tag (`v1.5.3`, `widget--v1.5.3`) that satisfied `constraint`. |
+| `resolved_tag` | string | git-source semver or SHA-pin updates | The concrete annotated git tag (`v1.5.3`, `widget--v1.5.3`) that satisfied `constraint` or justified the latest full-SHA revision-pin update. |
 | `resolved_at` | string | git-source semver only | RFC 3339 timestamp of the resolution. Surfaces "how stale is this pin?" in `apm why`. |
+| `declared_license` | string | no | The license the package *manifest declares* (`license:` in `apm.yml`, or `license` in a `plugin.json`), recorded verbatim at resolve time and syntax-validated offline against the bundled SPDX id set. An author **claim**, not a conclusion from `LICENSE` text -- APM never reads the license file. Omitted when undeclared (absence means unknown; no sentinel is stored). Surfaced by `apm lock export`. |
 
 Fields are emitted only when set. A minimal entry is just `repo_url` plus
 `resolved_commit`.
+
+## Lockfile identity keys
+
+Lockfile dependency keys keep `github.com` implicit for migration stability:
+existing `github.com` entries remain keyed as `owner/repo`. Local dependencies
+use `local_path` directly. Virtual dependencies append `virtual_path` to the
+base repo key. Entries for non-default hosts prefix the key with the lowercased
+host (`host/owner/repo`), so `github.com/team/skills` and
+`gitea.myorg.com/team/skills` can coexist without overwriting each other, and
+host casing cannot create duplicate keys. Registry-proxy entries keep the bare
+logical key because the proxy host is transport, not package identity.
 
 ## Self entry
 
@@ -175,7 +203,7 @@ dep added to the graph promotes the lockfile to `"2"`; if every registry dep is
 later removed, the next write demotes back to `"1"`. Both versions are valid
 on-disk formats; consumers MUST handle either.
 
-For the registry workflow this enables, see the [Registries guide](../../guides/registries/).
+For the registry workflow this enables, see the [Registries guide](../guides/registries/).
 
 ## Pack section
 
@@ -225,12 +253,12 @@ check maps to specific lockfile fields:
 | Check | Backed by |
 |---|---|
 | `lockfile-exists` | file presence at project root |
-| `dependency-refs-match` | `resolved_ref` per entry vs. `apm.yml` |
+| `ref-consistency` | `resolved_ref` per entry vs. `apm.yml` |
 | `deployed-files-present` | `deployed_files` per entry (and self entry) |
 | `content-integrity` | `deployed_file_hashes` (and `local_deployed_file_hashes`) |
-| `skill-subset-match` | `skill_subset` per `skill_bundle` entry |
-| `mcp-configs-match` | `mcp_servers` and `mcp_configs` |
-| `no-orphan-packages` | `dependencies` keys vs. `apm.yml` |
+| `skill-subset-consistency` | `skill_subset` per `skill_bundle` entry |
+| `config-consistency` | `mcp_servers` and `mcp_configs` |
+| `no-orphaned-packages` | `dependencies` keys vs. `apm.yml` |
 
 Files listed in `deployed_files` without a corresponding hash entry (typically
 directory markers ending in `/`) are skipped by content-integrity. Missing
@@ -248,8 +276,8 @@ Orphan detection works in two directions:
 
 `lockfile_version` is the schema version of the file format itself.
 
-- The current version is `"1"`.
-- APM additively extends entries within version `"1"` - new optional fields
+- The current versions are `"1"` and `"2"`; version `"2"` is emitted for registry-sourced or git-semver-resolved dependencies.
+- APM additively extends entries within each version - new optional fields
   may appear without bumping the version. Older APM clients ignore unknown
   fields.
 - Breaking changes (renames, removals, semantic shifts) require bumping
@@ -299,9 +327,9 @@ local_deployed_file_hashes:
 
 ## See also
 
-- [`apm install`](../cli/install/) - resolves and writes the lockfile
-- [`apm audit`](../cli/audit/) - validates the workspace against the lockfile
-- [`apm prune`](../cli/prune/) - removes orphan packages and files
-- [`apm view`](../cli/view/) - inspect resolved state (`--lock`)
-- [Baseline checks](../baseline-checks/) - the drift checks the lockfile feeds
-- [Manifest schema](../manifest-schema/) - the `apm.yml` it pins
+- [`apm install`](./cli/install/) - resolves and writes the lockfile
+- [`apm audit`](./cli/audit/) - validates the workspace against the lockfile
+- [`apm prune`](./cli/prune/) - removes orphan packages and files
+- [`apm view`](./cli/view/) - inspect resolved state (`--lock`)
+- [Baseline checks](./baseline-checks/) - the drift checks the lockfile feeds
+- [Manifest schema](./manifest-schema/) - the `apm.yml` it pins

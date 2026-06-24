@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Set  # noqa: F401, UP035
+from typing import TYPE_CHECKING
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 
 class PromptIntegrator(BaseIntegrator):
-    """Handles integration of APM package prompts into .github/prompts/."""
+    """Handles integration of APM package prompts into target prompt directories."""
 
     def find_prompt_files(self, package_path: Path) -> list[Path]:
         """Find all .prompt.md files in a package.
@@ -116,6 +116,7 @@ class PromptIntegrator(BaseIntegrator):
             force=force,
             managed_files=managed_files,
             diagnostics=diagnostics,
+            target=target,
         )
 
     def sync_for_target(
@@ -215,8 +216,9 @@ class PromptIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         logger=None,
+        target: TargetProfile | None = None,
     ) -> IntegrationResult:
-        """Integrate all prompts from a package into .github/prompts/.
+        """Integrate all prompts from a package into the target prompts directory.
 
         Deploys with clean filenames. Skips files that exist locally and
         are not tracked in any package's deployed_files (user-authored),
@@ -227,11 +229,20 @@ class PromptIntegrator(BaseIntegrator):
             project_root: Root directory of the project
             force: If True, overwrite user-authored files on collision
             managed_files: Set of relative paths known to be APM-managed
+            target: Target profile that determines the prompt deploy directory.
 
         Returns:
             IntegrationResult: Results of the integration operation
         """
         self.init_link_resolver(package_info, project_root)
+
+        if target is None:
+            from apm_cli.integration.targets import KNOWN_TARGETS
+
+            target = KNOWN_TARGETS["copilot"]
+        mapping = target.primitives.get("prompts")
+        if mapping is None:
+            return IntegrationResult(0, 0, 0, [])
 
         # Find all prompt files in the package
         prompt_files = self.find_prompt_files(package_info.install_path)
@@ -244,8 +255,8 @@ class PromptIntegrator(BaseIntegrator):
                 target_paths=[],
             )
 
-        # Create .github/prompts/ if it doesn't exist
-        prompts_dir = project_root / ".github" / "prompts"
+        effective_root = mapping.deploy_root or target.root_dir
+        prompts_dir = project_root / effective_root / mapping.subdir
         prompts_dir.mkdir(parents=True, exist_ok=True)
 
         # Process each prompt file
@@ -261,7 +272,7 @@ class PromptIntegrator(BaseIntegrator):
             # Skip workflow-shape prompts at file-based targets: an
             # author who added execution metadata (interval, mode, ...)
             # meant the Copilot App workflows table, NOT a slash command
-            # in .github/prompts/.  Without this guard, the same source
+            # in a file-based prompt directory.  Without this guard, the same source
             # file ships to both surfaces and the App-only metadata
             # leaks into a slash-command users would not expect.
             try:
@@ -290,10 +301,7 @@ class PromptIntegrator(BaseIntegrator):
                 continue
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.is_content_identical_to_source(target_path, source_file):
-                # Pre-existing file is byte-identical to source -- silently
-                # adopt. See BaseIntegrator.is_content_identical_to_source.
-                target_paths.append(target_path)
+            if self.try_adopt_identical(target_path, source_file, target_paths):
                 files_adopted += 1
                 continue
 

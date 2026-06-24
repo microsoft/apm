@@ -85,16 +85,19 @@ version: 1.0.0                     # SemVer string. Required.
 
 # Optional metadata
 description: Code review skills for Python services
-author: Jane Doe
+author: Jane Doe             # plain string, or {name, email?, url?} object
 license: MIT
+homepage: https://example.com/my-pkg
+repository: https://github.com/org/my-pkg
+keywords: [ai, review, python]
 
 # Optional content type: one of instructions, skill, hybrid, prompts.
 # Constrains what `.apm/` may contain. Useful for single-purpose packages.
 type: skill
 
 # Optional target list. Pins which harnesses this package compiles to.
-# Accepts a string ("copilot,claude") or a YAML list. Omit to target all.
-target:
+# Prefer plural targets: as a YAML list; legacy target: CSV is still accepted.
+targets:
   - copilot
   - claude
 
@@ -129,10 +132,13 @@ scripts:
 | `name`           | yes      | Package name.                                               |
 | `version`        | yes      | SemVer string.                                              |
 | `description`    | no       |                                                             |
-| `author`         | no       |                                                             |
+| `author`         | no       | Plain string or `{name, email?, url?}` object.              |
 | `license`        | no       | SPDX identifier recommended.                                |
+| `homepage`       | no       | URL; passed through to `plugin.json` by `apm pack`.         |
+| `repository`     | no       | URL; passed through to `plugin.json` by `apm pack`.         |
+| `keywords`       | no       | List of strings; passed through to `plugin.json` by `apm pack`. |
 | `type`           | no       | `instructions`, `skill`, `hybrid`, or `prompts`.            |
-| `target`         | no       | String or list of harness slugs.                            |
+| `targets` / `target` | no   | Preferred YAML list, or legacy string/list of harness slugs. |
 | `includes`       | no       | `"auto"` or list of repo paths.                             |
 | `dependencies`   | no       | Mapping with `apm:` and/or `mcp:` keys.                     |
 | `devDependencies`| no       | Same shape as `dependencies`. Excluded from `apm pack`.     |
@@ -155,7 +161,7 @@ by `apm install`; commit it.
 ```yaml
 lockfile_version: '1'
 generated_at: '2026-04-21T21:45:34.516938+00:00'
-apm_version: 0.10.0
+apm_version: 0.16.0
 
 dependencies:
   - repo_url: https://github.com/microsoft/apm-sample-package
@@ -228,9 +234,7 @@ Per-dependency fields:
 
 ## The `.apm/` directory
 
-`.apm/` is the source root. APM does not look elsewhere for primitives. Each
-subdirectory holds one primitive type; file naming conventions are
-documented per type.
+`.apm/` is the conventional source root for APM packages. APM also recognizes package forms such as root `SKILL.md`, `plugin.json`, and nested `skills/<name>/SKILL.md`. Each subdirectory holds one primitive type; file naming conventions are documented per type.
 
 - **`instructions/`** -- Always-on rules attached to file globs (e.g. "for
   every `*.py`, follow PEP 8"). One Markdown file per rule. Compiled into
@@ -247,8 +251,7 @@ documented per type.
   modes (e.g. Copilot Chat).
 - **`context/`** -- Shared context fragments that other primitives can
   reference. Not loaded standalone.
-- **`hooks/`** -- Lifecycle hooks fired on pre/post install, compile, or
-  run events.
+- **`hooks/`** -- Host-harness lifecycle hooks, such as tool-use or stop events.
 
 For what each primitive type can reach inside which harness, see
 [Primitives and targets](/apm/concepts/primitives-and-targets/).

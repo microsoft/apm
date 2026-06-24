@@ -12,8 +12,11 @@ Public API::
     yaml_to_str(data)      -- serialize dict -> YAML string
 """
 
+import os
+import secrets
+from contextlib import suppress
 from pathlib import Path
-from typing import Any, Dict, Optional, Union  # noqa: F401, UP035
+from typing import Any
 
 import yaml
 
@@ -53,3 +56,40 @@ def yaml_to_str(data: Any, *, sort_keys: bool = False) -> str:
     for later file writes or string returns.
     """
     return yaml.safe_dump(data, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
+
+
+def write_yaml_text_atomic(
+    path: str | Path,
+    content: str,
+    *,
+    tmp_suffix: str = ".tmp",
+) -> None:
+    """Atomically replace a YAML file with already-rendered text.
+
+    The replacement is written to a sibling file first and then moved into
+    place with ``os.replace``. If the write or replace fails, the original
+    file remains untouched.
+    """
+    target = Path(path)
+    tmp_path: Path | None = None
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        for _attempt in range(10):
+            candidate = target.with_name(f".{target.name}.{secrets.token_hex(8)}{tmp_suffix}")
+            try:
+                fd = os.open(candidate, flags, 0o600)
+            except FileExistsError:
+                continue
+            tmp_path = candidate
+            break
+        else:
+            raise FileExistsError(f"Could not create a unique temp file for {target}")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.replace(tmp_path, target)
+        tmp_path = None
+    except Exception:
+        if tmp_path is not None:
+            with suppress(OSError):
+                tmp_path.unlink()
+        raise

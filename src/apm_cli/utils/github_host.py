@@ -23,6 +23,8 @@ def is_azure_devops_hostname(hostname: str | None) -> bool:
     h = hostname.lower()
     if h == "dev.azure.com":
         return True
+    if h == "ssh.dev.azure.com":
+        return True
     return bool(h.endswith(".visualstudio.com"))
 
 
@@ -168,17 +170,36 @@ def maybe_raise_bare_fqdn_github_gitlab_conflict(raw: str) -> None:
 def is_github_hostname(hostname: str | None) -> bool:
     """Return True if hostname should be treated as GitHub (cloud or enterprise).
 
-    Accepts 'github.com' and hosts that end with '.ghe.com'.
+    Accepts ``github.com``, hosts that end with ``.ghe.com``, and any custom
+    GitHub Enterprise Server host configured via the ``GITHUB_HOST`` env var.
 
-    Note: This is primarily for internal hostname classification.
-    APM accepts any Git host via FQDN syntax without validation.
+    The ``GITHUB_HOST`` check mirrors the GHES detection in
+    :meth:`~apm_cli.core.auth.AuthResolver.classify_host` so that parse-time
+    host classification (used by ``_detect_virtual_package`` and
+    ``_resolve_shorthand_to_parsed_url``) agrees with install-time auth
+    routing.  Without this, FQDN shorthand with subpaths (e.g.
+    ``ghe.example.com/org/repo/packages/skill``) embeds the subpath into the
+    git URL instead of splitting into ``git:`` + ``path:``.
     """
     if not hostname:
         return False
     h = hostname.lower()
     if h == "github.com":
         return True
-    return bool(h.endswith(".ghe.com"))
+    if h.endswith(".ghe.com"):
+        return True
+    # GHES: GITHUB_HOST env var points to a custom GitHub Enterprise Server.
+    # Use the same normalization as AuthResolver.classify_host() (.lower()
+    # only, no .split("/")[0]) so both stages agree on which env values match.
+    ghes_host = os.environ.get("GITHUB_HOST", "").lower()
+    return bool(
+        ghes_host
+        and ghes_host == h
+        and ghes_host not in {"github.com", "gitlab.com"}
+        and not ghes_host.endswith(".ghe.com")
+        and not is_azure_devops_hostname(ghes_host)
+        and is_valid_fqdn(ghes_host)
+    )
 
 
 def is_supported_git_host(hostname: str | None) -> bool:
@@ -593,11 +614,16 @@ def build_ado_api_url(
     Returns:
         str: API URL for retrieving file contents
     """
+    api_host = "dev.azure.com" if host == "ssh.dev.azure.com" else host
     encoded_path = urllib.parse.quote(path, safe="")
+    quoted_org = urllib.parse.quote(org, safe="")
     quoted_project = urllib.parse.quote(project, safe="")
+    quoted_repo = urllib.parse.quote(repo, safe="")
+    quoted_ref = urllib.parse.quote(ref, safe="")
+    org_path = "" if is_visualstudio_legacy_hostname(api_host) else f"{quoted_org}/"
     return (
-        f"https://{host}/{org}/{quoted_project}/_apis/git/repositories/{repo}/items"
-        f"?path={encoded_path}&versionDescriptor.version={ref}&api-version=7.0"
+        f"https://{api_host}/{org_path}{quoted_project}/_apis/git/repositories/{quoted_repo}/items"
+        f"?path={encoded_path}&versionDescriptor.version={quoted_ref}&api-version=7.0"
     )
 
 

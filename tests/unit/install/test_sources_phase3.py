@@ -3,7 +3,7 @@
 Covers the DependencySource strategy classes and their helpers that are not
 yet reached by test_sources_classification.py:
 
-* Materialization dataclass – field defaults and custom deltas
+* Materialization dataclass - field defaults and custom deltas
 * LocalDependencySource.acquire
   - USER-scope + relative path → skip + return None
   - USER-scope + absolute path → allowed
@@ -589,7 +589,7 @@ class TestCachedDependencySourceAcquire:
             result = source.acquire()
 
         assert result is not None
-        # resolved_ref was None; the code builds a fallback – we just confirm no crash
+        # resolved_ref was None; the code builds a fallback - we just confirm no crash
 
     def test_unpinned_dep_sets_delta(self, tmp_path: Path) -> None:
         """dep_ref.reference=None → deltas['unpinned']=1."""

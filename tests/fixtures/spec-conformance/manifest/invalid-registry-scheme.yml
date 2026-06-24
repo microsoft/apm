@@ -1,0 +1,9 @@
+# req-mf-014, req-sc-007 (unknown / unsupported registry URL scheme)
+# Producer parsers MUST reject any registries.<name>.url whose scheme
+# is not http(s). This fixture uses ftp:// and MUST fail schema
+# validation at the `^https?://` pattern.
+name: invalid-scheme-project
+version: "1.0.0"
+registries:
+  evil:
+    url: ftp://registry.example.com

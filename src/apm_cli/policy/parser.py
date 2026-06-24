@@ -4,21 +4,26 @@ from __future__ import annotations
 
 import errno
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union  # noqa: F401, UP035
+from typing import Any
 
 import yaml
 
 from .schema import (
     ApmPolicy,
+    AuditPolicy,
+    BinDeployPolicy,
     CompilationPolicy,
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
     DependencyPolicy,
+    IntegrityPolicy,
     ManifestPolicy,
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
     RegistrySourcePolicy,
+    ScannerGovernance,
+    SecurityPolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -29,6 +34,7 @@ _VALID_REQUIRE_RESOLUTION = {"project-wins", "policy-wins", "block"}
 _VALID_SELF_DEFINED = {"deny", "warn", "allow"}
 _VALID_SCRIPTS = {"allow", "deny"}
 _VALID_UNMANAGED_ACTION = {"ignore", "warn", "deny"}
+_VALID_AUDIT_ON_INSTALL = {"off", "warn", "block"}
 
 # YAML 1.1 treats "off"/"on" as booleans — map them back to strings
 _YAML_BOOL_COERCE = {False: "off", True: "on"}
@@ -45,6 +51,8 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "compilation",
     "manifest",
     "unmanaged_files",
+    "security",
+    "bin_deploy",
 }
 
 
@@ -162,6 +170,45 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
                 f"unmanaged_files.action must be one of "
                 f"{sorted(_VALID_UNMANAGED_ACTION)}, got '{action}'"
             )
+        exclude = uf.get("exclude")
+        if exclude is not None and not isinstance(exclude, list):
+            errors.append(
+                "unmanaged_files.exclude must be a YAML list of path globs "
+                f"(got {type(exclude).__name__})"
+            )
+
+    # security.audit (install-time audit + external scanners)
+    security = data.get("security")
+    if security is not None and not isinstance(security, dict):
+        errors.append("security must be a YAML mapping")
+    elif isinstance(security, dict):
+        audit = security.get("audit")
+        if audit is not None and not isinstance(audit, dict):
+            errors.append("security.audit must be a YAML mapping")
+        elif isinstance(audit, dict):
+            on_install = audit.get("on_install")
+            if isinstance(on_install, bool):
+                on_install = _YAML_BOOL_COERCE.get(on_install, str(on_install))
+            if on_install is not None and on_install not in _VALID_AUDIT_ON_INSTALL:
+                errors.append(
+                    f"security.audit.on_install must be one of "
+                    f"{sorted(_VALID_AUDIT_ON_INSTALL)}, got '{on_install}'"
+                )
+            fail_on_drift = audit.get("fail_on_drift")
+            if fail_on_drift is not None and not isinstance(fail_on_drift, bool):
+                errors.append(
+                    f"security.audit.fail_on_drift must be a boolean, got '{fail_on_drift}'"
+                )
+            _validate_scanners(audit.get("scanners"), errors, warnings)
+        integrity = security.get("integrity")
+        if integrity is not None and not isinstance(integrity, dict):
+            errors.append("security.integrity must be a YAML mapping")
+        elif isinstance(integrity, dict):
+            require_hashes = integrity.get("require_hashes")
+            if require_hashes is not None and not isinstance(require_hashes, bool):
+                errors.append(
+                    f"security.integrity.require_hashes must be a boolean, got '{require_hashes}'"
+                )
 
     return errors, warnings
 
@@ -237,12 +284,47 @@ def _build_policy(data: dict) -> ApmPolicy:
         uf_data = raw_uf
         action = uf_data.get("action")
         directories = _parse_tuple(uf_data.get("directories")) if "directories" in uf_data else None
-        unmanaged_files = UnmanagedFilesPolicy(action=action, directories=directories)
+        exclude = (
+            None
+            if ("exclude" not in uf_data or uf_data["exclude"] is None)
+            else _parse_tuple(uf_data["exclude"])
+        )
+        unmanaged_files = UnmanagedFilesPolicy(
+            action=action, directories=directories, exclude=exclude
+        )
 
     reg_data = data.get("registry_source") or {}
     registry_source = RegistrySourcePolicy(
         require=_parse_tuple(reg_data.get("require")),
         allow_non_registry=bool(reg_data.get("allow_non_registry", True)),
+    )
+
+    sec_data = data.get("security") or {}
+    raw_audit = sec_data.get("audit")
+    audit_data = raw_audit if isinstance(raw_audit, dict) else {}
+    on_install = audit_data.get("on_install")
+    if isinstance(on_install, bool):
+        on_install = _YAML_BOOL_COERCE.get(on_install, str(on_install))
+    raw_integrity = sec_data.get("integrity")
+    integrity_data = raw_integrity if isinstance(raw_integrity, dict) else {}
+    security = SecurityPolicy(
+        audit=AuditPolicy(
+            on_install=on_install,
+            external=None
+            if "external" not in audit_data or audit_data["external"] is None
+            else _parse_tuple(audit_data["external"]),
+            scanners=_parse_scanners(audit_data.get("scanners")),
+            fail_on_drift=bool(audit_data.get("fail_on_drift", False)),
+        ),
+        integrity=IntegrityPolicy(
+            require_hashes=bool(integrity_data.get("require_hashes", False)),
+        ),
+    )
+
+    bd_data = data.get("bin_deploy") or {}
+    bin_deploy = BinDeployPolicy(
+        deny_all=bool(bd_data.get("deny_all", False)),
+        deny=_parse_tuple(bd_data.get("deny")) if bd_data.get("deny") is not None else (),
     )
 
     return ApmPolicy(
@@ -258,6 +340,8 @@ def _build_policy(data: dict) -> ApmPolicy:
         manifest=manifest,
         unmanaged_files=unmanaged_files,
         registry_source=registry_source,
+        security=security,
+        bin_deploy=bin_deploy,
     )
 
 
@@ -341,3 +425,51 @@ def _parse_tuple(val: Any) -> tuple[str, ...]:
     if isinstance(val, list):
         return tuple(val)
     return ()
+
+
+def _validate_scanners(scanners: Any, errors: list[str], warnings: list[str]) -> None:
+    """Validate the optional ``security.audit.scanners`` governance mapping.
+
+    Restrict-only: each scanner block may carry ``allow_args`` (bool). Unknown
+    scanner names are a warning (forward-compat), not a hard error.
+    """
+    if scanners is None:
+        return
+    if not isinstance(scanners, dict):
+        errors.append("security.audit.scanners must be a YAML mapping")
+        return
+    from ..security.external.registry import SUPPORTED_SCANNERS
+
+    for name, block in scanners.items():
+        if name not in SUPPORTED_SCANNERS:
+            warnings.append(
+                f"security.audit.scanners: unknown scanner '{name}' "
+                f"(supported: {', '.join(SUPPORTED_SCANNERS)})"
+            )
+        if block is None:
+            continue
+        if not isinstance(block, dict):
+            errors.append(f"security.audit.scanners.{name} must be a YAML mapping")
+            continue
+        allow_args = block.get("allow_args")
+        if allow_args is not None and not isinstance(allow_args, bool):
+            errors.append(
+                f"security.audit.scanners.{name}.allow_args must be a boolean, got '{allow_args}'"
+            )
+
+
+def _parse_scanners(scanners: Any) -> tuple[tuple[str, ScannerGovernance], ...] | None:
+    """Build the ``AuditPolicy.scanners`` tuple-of-pairs from validated data."""
+    if not isinstance(scanners, dict) or not scanners:
+        return None
+    pairs: list[tuple[str, ScannerGovernance]] = []
+    for name, block in scanners.items():
+        block_data = block if isinstance(block, dict) else {}
+        allow_args = block_data.get("allow_args")
+        pairs.append(
+            (
+                str(name),
+                ScannerGovernance(allow_args=allow_args if isinstance(allow_args, bool) else None),
+            )
+        )
+    return tuple(pairs)

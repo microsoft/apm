@@ -221,7 +221,7 @@ Cause: standard Click error. The subcommand does not exist, or you are on an old
 
 Fix: run `apm --help` for the current command list. Upgrade APM if the command was added in a newer release.
 
-See also: [../reference/cli/](../reference/cli/), [./migration/](./migration/)
+See also: [../reference/](../reference/), [./migration/](./migration/)
 
 ## Auth and network
 

@@ -3,11 +3,11 @@
 import builtins
 from pathlib import Path
 
-from ...constants import APM_MODULES_DIR, APM_YML_FILENAME  # noqa: F401
+from ...constants import APM_MODULES_DIR
 from ...core.command_logger import CommandLogger
 from ...deps.lockfile import LockFile
 from ...integration.mcp_integrator import MCPIntegrator
-from ...models.apm_package import APMPackage, DependencyReference  # noqa: F401
+from ...models.apm_package import DependencyReference
 from ...utils.path_security import PathTraversalError, safe_rmtree
 from ...utils.paths import portable_relpath
 
@@ -484,6 +484,14 @@ def _sync_integrations_after_uninstall(
     from ...integration.dispatch import get_dispatch_table
     from ...integration.targets import resolve_targets
     from ...models.apm_package import PackageInfo, validate_apm_package
+    from ...primitives.discovery import clear_discovery_cache
+
+    # Phase 2 re-integration walks the on-disk primitive set after Phase 1
+    # has removed the uninstalled package's files. The process-scoped
+    # discovery memo populated earlier in this CLI run would otherwise
+    # serve the pre-removal snapshot, causing deleted primitives to be
+    # re-integrated. See #1533 follow-up.
+    clear_discovery_cache()
 
     _dispatch = get_dispatch_table()
     _integrators = {name: entry.integrator_class() for name, entry in _dispatch.items()}
@@ -634,6 +642,10 @@ def _sync_integrations_after_uninstall(
     counts["hooks"] = result.get("files_removed", 0)
 
     # Phase 2: Re-integrate from remaining installed packages
+    # Re-clear the discovery memo: Phase 1 mutated the on-disk primitive
+    # set (removed files), so any cache snapshot taken between entry and
+    # here is stale. Integrator dispatch below walks discovery internally.
+    clear_discovery_cache()
     _targets = _resolved_targets
 
     for dep in apm_package.get_apm_dependencies():

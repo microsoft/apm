@@ -11,7 +11,7 @@ sidebar:
 <dt>Format</dt><dd>JSON over HTTPS</dd>
 </dl>
 
-This document is the wire-level contract. It is self-contained — a server implementer should be able to build a conformant registry from this doc alone. For the client side and how to declare registries in `apm.yml`, see the [Registries guide](../../guides/registries/).
+This document is the wire-level contract. It is self-contained — a server implementer should be able to build a conformant registry from this doc alone. For the client side and how to declare registries in `apm.yml`, see the [Registries guide](../guides/registries/).
 
 ::::caution[Experimental client support]
 The HTTP API contract is implementable, but APM client consumption of package registries is currently behind an experimental flag. Users must run `apm experimental enable registries` before installing from `registries:` entries.
@@ -243,7 +243,7 @@ ETag: "sha256:abc123..."
 
 **Body.** Raw archive bytes. The same bytes that hash to the `digest` advertised in `/versions`.
 
-**Format selection at publish time.** APM publishes via `apm pack` (tar.gz). Anthropic skills publish via standard zip. Servers store and return whatever was uploaded; format conversion is NOT a server responsibility.
+**Format selection at publish time.** `apm publish` sends `application/zip` by default (modern client). Legacy clients or manual uploads may use `application/gzip`. Servers store and replay whatever was uploaded; format conversion is NOT a server responsibility.
 
 **Errors**
 
@@ -267,7 +267,7 @@ Uploads a new version. Versions are immutable: re-publishing returns `409`.
 PUT /v1/packages/acme/web-skills/versions/1.2.0 HTTP/1.1
 Host: registry.example.com
 Authorization: Bearer <publish-token>
-Content-Type: application/gzip
+Content-Type: application/zip
 Content-Length: 24576
 
 <binary archive body>

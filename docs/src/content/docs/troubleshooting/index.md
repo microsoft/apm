@@ -24,7 +24,7 @@ If you're past the relevant page and still stuck, gather these and open an issue
 
 ```bash
 apm --version
-APM_DEBUG=1 apm <failing-command> --verbose 2>&1 | tee /tmp/apm-debug.log
+APM_DEBUG=1 apm <failing-command> --verbose 2>&1 | tee apm-debug.log
 apm cache info
 ```
 

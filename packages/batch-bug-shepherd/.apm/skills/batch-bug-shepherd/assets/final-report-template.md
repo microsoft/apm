@@ -1,15 +1,15 @@
 <!--
-batch-bug-shepherd - final report AND PR confirmation comment shapes.
+batch-bug-shepherd - final report shape (orchestrator -> user).
 
-Two templates in one file. The orchestrator renders the FINAL REPORT
-block at end of session. Completion subagents render the PR
-CONFIRMATION COMMENT block when CI is green.
+The orchestrator renders this FINAL REPORT block once at end of
+session. PR-side comments (advisory, supersede handoff, resolution
+confirmation) are NOT rendered here -- they are owned by the composed
+shepherd-driver skill (see ../shepherd-driver/assets/pr-comment-templates.md).
+The BBS orchestrator never posts to a PR directly.
 
 RENDERING RULES:
 - ASCII only.
 - Skip sections that are empty; do not emit placeholders.
-- The PR confirmation comment is exactly ONE per PR per completion
-  pass.
 - The final report is exactly ONE per orchestrator session.
 - No verdict labels are applied; this is advisory.
 -->
@@ -92,86 +92,10 @@ courtesy comment citing the principle below.
 ### Disciplines honored this run
 
 - Verify-before-fix: {{ triage_pass_count }} / {{ candidate_count }} verified on HEAD.
-- PR-in-flight cross-reference: {{ inflight_count }} community PR(s) shepherded; 0 community PRs duplicated.
+- PR-in-flight cross-reference: {{ inflight_count }} community PR(s) driven; 0 community PRs duplicated.
 - Mutation-break gate: {{ mutation_break_count }} regression-trap test(s) verified by guard deletion.
 - Lint contract: {{ lint_silent_count }} push(es) gated by silent ruff pair.
 - Strategic-alignment gate: {{ strategic_gate_count }} LEGIT row(s) inspected by `apm-ceo` against `PRINCIPLES.md`; {{ strategic_aligned_count }} aligned, {{ strategic_aligned_with_reservations_count }} aligned-with-reservations (surfaced downstream), {{ strategic_deferred_count }} demoted (out-of-scope / wrong-direction). Gate failed open on {{ strategic_failed_open_count }} row(s) under infrastructure failure.
 - Mergeability gate: {{ gate_run_count }} PR(s) re-probed against current main; {{ resolved_count }} rebased to MERGEABLE; {{ author_action_count }} surfaced to author; {{ human_judgment_count }} escalated to human judgment.
-- Two-comment-per-PR cap: at most one completion-confirmation comment + one resolution-confirmation comment.
+- Two-comment-per-PR cap: at most one shepherd-driver advisory comment + one resolution-confirmation comment (both posted by shepherd-driver, not the orchestrator).
 - Force-push hygiene: every rebase pushed with `--force-with-lease`, never bare `--force`.
-
----
-
-## PR CONFIRMATION COMMENT block (completion subagent -> PR)
-
-Follow-ups from the apm-review-panel pass have landed. Summary:
-
-{{#each resolved_followups}}
-- {{ id }}: {{ summary }} -- resolved in {{ commit_short_sha }}.
-{{/each}}
-
-{{#if mutation_break_evidence}}
-Regression-trap evidence (mutation-break gate):
-
-{{#each mutation_break_evidence}}
-- `{{ test }}` -- deleted `{{ guard_removed }}`; test FAILED as expected; guard restored.
-{{/each}}
-{{/if}}
-
-Lint contract: `uv run --extra dev ruff check src/ tests/` and
-`uv run --extra dev ruff format --check src/ tests/` both silent.
-
-CI: {{ ci_evidence }}
-
-Ready for maintainer review.
-
----
-
-## SUPERSEDE HANDOFF COMMENT block (completion subagent -> original PR)
-
-Thank you for the original work on this fix. To land it promptly we
-have opened a superseding PR (#{{ superseding_pr }}) under
-microsoft/apm that preserves your authorship via commit trailers and
-resolves the follow-ups surfaced by the apm-review-panel pass.
-
-Closing this PR in favor of #{{ superseding_pr }}. Your contribution
-is credited on every cherry-picked commit; the superseding PR's body
-links back here. Please do raise concerns on the superseding PR if
-the changes diverge from your intent -- we want your sign-off too.
-
----
-
-## RESOLUTION CONFIRMATION COMMENT block (conflict-resolution subagent -> PR)
-
-This is the SECOND-and-final comment per the two-comment-per-PR cap.
-Rendered only on `status=resolved`; the other three statuses route
-to the final report sections (`requires-author-action`,
-`requires-human-judgment`, `resolution-failed`) without a comment.
-
-Rebased onto current main at {{ base_sha }} -> {{ new_head_sha }}.
-
-{{#if conflicting_paths}}
-Conflicting paths resolved (faithful merge of both intents):
-
-{{#each conflicting_paths}}
-- `{{ this }}`
-{{/each}}
-{{/if}}
-
-{{#if rebase_touched_regression_test}}
-Regression-trap test re-verified post-rebase (mutation-break gate):
-
-{{#each mutation_break_evidence}}
-- `{{ test }}` -- deleted `{{ guard_removed }}`; test FAILED as expected; guard restored.
-{{/each}}
-{{/if}}
-
-Lint contract: `uv run --extra dev ruff check src/ tests/` and
-`uv run --extra dev ruff format --check src/ tests/` both silent
-post-rebase.
-
-Post-push mergeability: `gh pr view --json mergeStateStatus,mergeable`
-reports `{{ mergeStateStatus_post }} / MERGEABLE`. Push used
-`{{ push_command }}` (--force-with-lease, never bare --force).
-
-Ready for maintainer review.

@@ -1775,10 +1775,10 @@ class TestPackCmdMarketplaceFilter:
         result = runner.invoke(pack_cmd, ["--marketplace-path", "unknownfmt=out.json"])
         assert result.exit_code != 0
 
-    def test_deprecated_marketplace_output_flag(
+    def test_marketplace_output_flag_removed(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: Any
     ) -> None:
-        """--marketplace-output is deprecated, emits warning, translates to --marketplace-path."""
+        """--marketplace-output was removed; Click rejects it."""
         from apm_cli.commands.pack import pack_cmd
 
         monkeypatch.chdir(tmp_path)
@@ -1786,8 +1786,9 @@ class TestPackCmdMarketplaceFilter:
         (tmp_path / "apm.lock.yaml").write_text(_LOCKFILE_TEMPLATE, encoding="utf-8")
 
         result = runner.invoke(pack_cmd, ["--marketplace-output", "dist/marketplace.json"])
-        # Should warn about deprecation
-        assert "deprecated" in (result.output + (result.stderr or "")).lower()
+        assert result.exit_code != 0
+        assert "no such option" in (result.output or "").lower()
+        assert "--marketplace-output" in (result.output or "")
 
 
 class TestPackCmdJsonOutput:

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
+from typing import Any
 
 from ..factory import ClientFactory
 from ..utils.console import _rich_error, _rich_success, _rich_warning
@@ -119,6 +119,8 @@ class SafeMCPInstaller:
                     kwargs["server_info_cache"] = server_info_cache
                 if runtime_vars is not None:
                     kwargs["runtime_vars"] = runtime_vars
+                if server_ref.startswith("@") and server_ref.count("/") == 1:
+                    kwargs["server_name"] = server_ref
 
                 result = self.adapter.configure_mcp_server(server_ref, **kwargs)
 

@@ -1,8 +1,6 @@
 """Integration module for connecting registry client with package manager."""
 
-from typing import Any, Dict, List, Optional  # noqa: F401, UP035
-
-import requests  # noqa: F401
+from typing import Any
 
 from .client import SimpleRegistryClient
 

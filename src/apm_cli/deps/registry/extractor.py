@@ -8,8 +8,9 @@ this is the only security-critical check on the install path.
 Two archive formats are supported, dispatched by Content-Type from
 ``RegistryClient.download_archive``:
 
-- ``application/gzip`` — gzipped tar (default APM ``apm pack`` output)
-- ``application/zip``  — zip archive (Anthropic / open-claude-skills format)
+- ``application/zip``  -- zip archive (default; produced by ``apm pack --archive``
+  and ``apm publish``)
+- ``application/gzip`` -- gzipped tar (legacy; packages published before the zip default)
 
 The ``extract_archive`` dispatcher picks the right path and applies the same
 security gates to both: no absolute paths, no path traversal, no symlinks or
@@ -28,6 +29,8 @@ import tarfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from apm_cli.utils.archive import safe_extract_zip
 
 
 class HashMismatchError(Exception):
@@ -118,7 +121,7 @@ def verify_sha256(data: bytes, expected_digest: str) -> str:
     actual = hashlib.sha256(data).hexdigest()
     expected = _normalize_digest(expected_digest)
     if actual != expected:
-        raise HashMismatchError(f"tarball sha256 mismatch: expected {expected}, got {actual}")
+        raise HashMismatchError(f"archive sha256 mismatch: expected {expected}, got {actual}")
     return actual
 
 
@@ -199,37 +202,8 @@ def extract_tarball(
 
 
 def _safe_extract_zip(zf: zipfile.ZipFile, dest_root: Path) -> None:
-    """Extract *zf* into *dest_root* with the same gates as the tar path.
-
-    Reject absolute paths, path traversal, and any entry that would resolve
-    outside *dest_root*. Symlinks in zip files are encoded as a Unix mode bit
-    (S_IFLNK in ``external_attr``) — we reject those too.
-    """
-    dest_root.mkdir(parents=True, exist_ok=True)
-    for info in zf.infolist():
-        # Symlinks in zip: high 16 bits of external_attr carry Unix mode.
-        # 0xA000 == S_IFLNK. Refuse to extract any symlink-typed entry.
-        unix_mode = (info.external_attr >> 16) & 0xFFFF
-        if unix_mode and (unix_mode & 0xF000) == 0xA000:
-            raise UnsafeTarballError(f"unsupported zip entry type (symlink): {info.filename!r}")
-        target = _safe_member_path(info.filename, dest_root)
-        if target is None:
-            continue
-        if info.is_dir():
-            target.mkdir(parents=True, exist_ok=True)
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        # Stream content explicitly so we never call zf.extract() with the
-        # raw filename (avoids any zip-slip surprises in older Pythons).
-        with zf.open(info, "r") as src, open(target, "wb") as fh:
-            while True:
-                chunk = src.read(_READ_CHUNK_SIZE)
-                if not chunk:
-                    break
-                fh.write(chunk)
-        # Preserve mode bits if present, dropping setuid/setgid/sticky.
-        if unix_mode:
-            os.chmod(target, unix_mode & 0o755)
+    """Extract *zf* into *dest_root* with shared zip safety gates."""
+    safe_extract_zip(zf, dest_root, error_type=UnsafeTarballError)
 
 
 def extract_zip(

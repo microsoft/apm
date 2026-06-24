@@ -334,7 +334,11 @@ def _build_validation_attempts(
     is_insecure: bool = bool(getattr(dep_ref, "is_insecure", False))
     is_ado: bool = dep_ref.is_azure_devops()
     host_info = (
-        downloader.auth_resolver.classify_host(dep_ref.host, port=dep_ref.port)
+        downloader.auth_resolver.classify_host(
+            dep_ref.host,
+            port=dep_ref.port,
+            host_type=dep_ref.host_type,
+        )
         if getattr(dep_ref, "host", None)
         else None
     )

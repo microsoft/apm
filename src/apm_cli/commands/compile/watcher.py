@@ -9,6 +9,13 @@ from typing import TYPE_CHECKING, Any
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
+from ...primitives.discovery import PRIMITIVE_SUFFIXES, clear_discovery_cache
+from ...utils import perf_stats
+
+# Skill modules use a fixed filename (``SKILL.md``) rather than a suffix
+# pattern, so the watcher checks basename equality in addition to the
+# suffix membership test below.
+_SKILL_FILENAME = "SKILL.md"
 
 if TYPE_CHECKING:
     from ...core.target_detection import CompileTargetType
@@ -88,7 +95,21 @@ class APMFileHandler:
         if getattr(event, "is_directory", False):
             return
         src_path = getattr(event, "src_path", "")
-        if not src_path.endswith(".md") and not src_path.endswith(APM_YML_FILENAME):
+        # Smart filter: recompile only when the changed file is an APM
+        # primitive (matches one of LOCAL_PRIMITIVE_PATTERNS' suffixes, a
+        # SKILL.md basename, or the project manifest). Generic .md edits
+        # (README, CHANGELOG, AGENTS output) never affect compile output
+        # and would otherwise trigger a full discovery walk on every
+        # save. See #1533 follow-up.
+        basename = os.path.basename(src_path)
+        is_manifest = basename == APM_YML_FILENAME
+        is_skill = basename == _SKILL_FILENAME
+        is_primitive = any(src_path.endswith(suffix) for suffix in PRIMITIVE_SUFFIXES)
+        if not is_manifest and not is_primitive and not is_skill:
+            # Leave a verbose breadcrumb so --verbose watch sessions can
+            # see why an edit produced no recompile. Silent at default.
+            if src_path:
+                self.logger.verbose_detail(f"Skipping non-primitive change: {basename}")
             return
         current_time = time.time()
         if current_time - self.last_compile < self.debounce_delay:
@@ -101,6 +122,14 @@ class APMFileHandler:
         try:
             self.logger.progress(f"File changed: {changed_file}", symbol="eyes")
             self.logger.progress("Recompiling...", symbol="gear")
+
+            # The process-scoped discovery cache (populated by the previous
+            # compile pass) MUST be cleared before re-walking, otherwise
+            # subsequent recompiles serve the stale primitive set from
+            # before the edit. See #1533 follow-up. perf_stats counters
+            # are NOT reset here -- they accumulate across the watch
+            # session and are rendered once at teardown.
+            clear_discovery_cache()
 
             # When apm.yml itself was the trigger, re-resolve so a
             # mid-session edit to ``target:`` / ``targets:`` takes
@@ -231,6 +260,12 @@ def _watch_mode(
 
         logger.progress("Performing initial compilation...", symbol="gear")
 
+        # Watch mode is a long-lived process. Reset both the discovery
+        # cache and perf counters on entry so neither carries state from
+        # a sibling REPL/test run sharing this Python process.
+        clear_discovery_cache()
+        perf_stats.reset()
+
         config = CompilationConfig.from_apm_yml(
             output_path=output if output != AGENTS_MD_FILENAME else None,
             chatmode=chatmode,
@@ -241,6 +276,10 @@ def _watch_mode(
 
         compiler = AgentsCompiler(".")
         result = compiler.compile(config)
+
+        # NOTE: render_summary moved to the Ctrl+C teardown below so the
+        # watch session emits ONE aggregate perf block at exit instead of
+        # spamming a 5-6 line block after every recompile.
 
         if result.success:
             if dry_run:
@@ -261,6 +300,10 @@ def _watch_mode(
         except KeyboardInterrupt:
             observer.stop()
             logger.progress("Stopped watching for changes", symbol="info")
+            # Render aggregate perf counters accumulated across the
+            # session. Reset once at watch start (above), so this summary
+            # covers initial compile + every subsequent recompile.
+            perf_stats.render_summary(logger, project_root=".")
 
         observer.join()
 

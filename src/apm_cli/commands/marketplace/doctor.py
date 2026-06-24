@@ -1,12 +1,9 @@
-"""``apm marketplace doctor`` command."""
+"""``apm doctor`` command implementation."""
 
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
-
-import click
 
 from ...core.command_logger import CommandLogger
 from ...marketplace.errors import MarketplaceYmlError
@@ -21,15 +18,16 @@ from . import (
     _DoctorCheck,
     _find_duplicate_names,
     _render_doctor_table,
-    marketplace,
 )
 
 
-@marketplace.command(help="Run environment diagnostics for marketplace publishing")
-@click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
-def doctor(verbose):
-    """Check git, network, auth, and marketplace config readiness."""
-    logger = CommandLogger("marketplace-doctor", verbose=verbose)
+def run_doctor(verbose: bool, *, logger_name: str = "doctor") -> int:
+    """Execute the doctor diagnostics and return an exit code.
+
+    Called by the top-level ``apm doctor`` command.
+    Returns ``0`` if all critical checks pass, ``1`` otherwise.
+    """
+    logger = CommandLogger(logger_name, verbose=verbose)
     checks = []
 
     # Check 1: git on PATH
@@ -118,38 +116,7 @@ def doctor(verbose):
         )
     )
 
-    # Check 4: gh CLI availability (informational; only needed for publish)
-    gh_ok = False
-    gh_detail = ""
-    try:
-        result = subprocess.run(
-            ["gh", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            gh_ok = True
-            gh_detail = result.stdout.strip().split("\n")[0]
-        else:
-            gh_detail = "gh CLI returned non-zero exit code"
-    except FileNotFoundError:
-        gh_detail = "gh CLI not found (install: https://cli.github.com/)"
-    except subprocess.TimeoutExpired:
-        gh_detail = "gh --version timed out"
-    except (subprocess.SubprocessError, OSError) as exc:
-        gh_detail = str(exc)[:60]
-
-    checks.append(
-        _DoctorCheck(
-            name="gh CLI",
-            passed=gh_ok,
-            detail=gh_detail,
-            informational=True,
-        )
-    )
-
-    # Check 5: marketplace config presence + parsability
+    # Check 4: marketplace config presence + parsability
     project_root = Path.cwd()
     apm_path = project_root / "apm.yml"
     legacy_path = project_root / "marketplace.yml"
@@ -191,7 +158,7 @@ def doctor(verbose):
         )
     )
 
-    # Check 6: format coverage (informational; only when config is present)
+    # Check 5: format coverage (informational; only when config is present)
     if yml_obj is not None:
         configured = frozenset(getattr(yml_obj, "outputs", ()) or ())
         supported = known_output_names()
@@ -217,7 +184,7 @@ def doctor(verbose):
             )
         )
 
-    # Check 7: duplicate package names (defence-in-depth)
+    # Check 6: duplicate package names (defence-in-depth)
     if yml_obj is not None:
         dup_detail = _find_duplicate_names(yml_obj)
         if dup_detail:
@@ -239,7 +206,7 @@ def doctor(verbose):
                 )
             )
 
-    # Check 8: version alignment (informational; only when config is present)
+    # Check 7: version alignment (informational; only when config is present)
     if yml_obj is not None and hasattr(yml_obj, "versioning"):
         from ...marketplace.version_check import check_version_alignment
 
@@ -275,4 +242,5 @@ def doctor(verbose):
     # Exit: 0 if checks 1-2 pass; config checks are informational
     critical_checks = [c for c in checks if not c.informational]
     if any(not c.passed for c in critical_checks):
-        sys.exit(1)
+        return 1
+    return 0

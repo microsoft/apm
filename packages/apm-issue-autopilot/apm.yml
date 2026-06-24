@@ -1,0 +1,30 @@
+name: apm-issue-autopilot
+version: 0.1.0
+description: Drive any open issue (bug, feature, docs, refactor, perf) from intake to mergeable PR with triage as the central gate -- run apm-triage-panel per issue, present ONE consolidated review, escalate to the maintainer by default on doubt, then shepherd accepted issues to merge via shepherd-driver.
+author: Microsoft
+license: MIT
+
+# Manually-invoked orchestrator entrypoint (sibling of
+# batch-bug-shepherd). Composes three APM skills:
+#  - apm-triage-panel    : the per-issue triage rubric (central gate).
+#  - shepherd-driver     : the per-PR drive-to-merge engine
+#                          (transitively pulls apm-review-panel).
+#  - pr-description-skill : authors the anchored PR body at the
+#                          Phase 4 PR-open site (acceptance-observer).
+#
+# Belt + suspenders (genesis step 3.5 = BOTH): the manifest deps
+# below declare the edges (local-path keys resolve relative to THIS
+# package dir per apm-usage dependencies.md), and the SKILL.md body /
+# acceptance-observer asset keep a runtime probe for each at the
+# deploy site as a backstop. Real edges are declared because the
+# <= 0.14.1 orphaned-lockfile bug is fixed from 0.16 onward.
+# pr-description-skill is a DIRECT edge (not transitive via shepherd)
+# because acceptance-observer opens the Phase 4 PR itself.
+dependencies:
+  apm:
+    - ../shepherd-driver
+    - ../apm-triage-panel
+    - ../pr-description-skill
+  mcp: []
+
+scripts: {}

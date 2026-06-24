@@ -216,7 +216,7 @@ class TestRenderBundleResult:
     def test_live_apm_format_no_plugin_message(self) -> None:
         """'apm' format does NOT emit the plugin-ready progress message."""
         logger = _RecordingLogger()
-        result = _pack_result(files=["bundle.tar.gz"])
+        result = _pack_result(files=["bundle.zip"])
         _render_bundle_result(logger, result, "apm", None, False)
         assert not any("Plugin bundle ready" in p for p in logger.progresses)
 
@@ -226,6 +226,21 @@ class TestRenderBundleResult:
         result = _pack_result(files=["file.md"], bundle_path="build/my-bundle")
         _render_bundle_result(logger, result, "apm", None, False)
         assert any("apm install" in i for i in logger.infos)
+
+    def test_live_zip_archive_emits_migration_tip_when_requested(self) -> None:
+        logger = _RecordingLogger()
+        result = _pack_result(files=["file.md"], bundle_path="build/my-bundle.zip")
+        _render_bundle_result(logger, result, "plugin", None, False, show_zip_migration_notice=True)
+        assert any("--archive now produces .zip" in i for i in logger.infos)
+        assert any("--archive-format tar.gz" in i for i in logger.infos)
+
+    def test_live_zip_archive_suppresses_migration_tip_when_not_requested(self) -> None:
+        logger = _RecordingLogger()
+        result = _pack_result(files=["file.md"], bundle_path="build/my-bundle.zip")
+        _render_bundle_result(
+            logger, result, "plugin", None, False, show_zip_migration_notice=False
+        )
+        assert not any("--archive now produces .zip" in i for i in logger.infos)
 
     def test_live_no_bundle_path_skips_share_line(self) -> None:
         """When bundle_path is falsy, the share line is suppressed."""
@@ -459,6 +474,14 @@ class TestPackCmdFlags:
         for flag in ["--archive", "--format", "--dry-run", "--force", "--verbose", "--offline"]:
             assert flag in result.output
 
+    def test_archive_help_includes_migration_and_size_cues(self) -> None:
+        result = CliRunner().invoke(pack_cmd, ["--help"])
+        assert result.exit_code == 0
+        assert "previous default" in result.output
+        assert "--archive-format" in result.output
+        assert "tar.gz" in result.output
+        assert "smaller" in result.output
+
     def test_offline_flag_accepted(self, tmp_path: Path, monkeypatch) -> None:
         (tmp_path / "apm.yml").write_text(_APM_SIMPLE, encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -493,6 +516,30 @@ class TestPackCmdFlags:
         result = CliRunner().invoke(pack_cmd, ["--format", "invalid"])
         assert result.exit_code != 0
 
+    def test_archive_format_zip_accepted(self, tmp_path: Path, monkeypatch) -> None:
+        (tmp_path / "apm.yml").write_text(_APM_SIMPLE, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--dry-run", "--archive", "--archive-format", "zip"])
+        assert "Invalid value for '--archive-format'" not in (result.output or "")
+        assert result.exit_code in (0, 1)
+
+    def test_archive_format_tar_gz_accepted(self, tmp_path: Path, monkeypatch) -> None:
+        (tmp_path / "apm.yml").write_text(_APM_SIMPLE, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            pack_cmd, ["--dry-run", "--archive", "--archive-format", "tar.gz"]
+        )
+        assert "Invalid value for '--archive-format'" not in (result.output or "")
+        assert result.exit_code in (0, 1)
+
+    def test_archive_format_invalid_choice_fails(self) -> None:
+        """Click rejects unknown archive format values before the command runs."""
+        result = CliRunner().invoke(pack_cmd, ["--archive", "--archive-format", "bz2"])
+        assert result.exit_code != 0
+        assert (
+            "invalid" in (result.output or "").lower() or "error" in (result.output or "").lower()
+        )
+
     def test_deprecated_target_flag_emits_warning(self, tmp_path: Path, monkeypatch) -> None:
         (tmp_path / "apm.yml").write_text(_APM_SIMPLE, encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -513,10 +560,13 @@ class TestPackCmdFlags:
         result = CliRunner().invoke(pack_cmd, ["--dry-run", "--marketplace", "all"])
         assert "Unknown marketplace format 'all'" not in (result.output or "")
 
-    def test_marketplace_output_deprecated_flag_warning(self) -> None:
-        """--marketplace-output prints a deprecation warning."""
+    def test_marketplace_output_removed(self) -> None:
+        """--marketplace-output was removed in v0.16 (breaking change, #1318)."""
         result = CliRunner().invoke(pack_cmd, ["--marketplace-output", "out.json", "--dry-run"])
-        assert "deprecated" in (result.output or "").lower() or result.exit_code in (0, 1)
+        assert result.exit_code != 0
+        assert "no such option" in (result.output or "").lower() or isinstance(
+            result.exception, SystemExit
+        )
 
     def test_json_output_envelope_shape(self, tmp_path: Path, monkeypatch) -> None:
         """--json mode always returns a JSON envelope, even on no-op."""
@@ -527,6 +577,22 @@ class TestPackCmdFlags:
         for key in ("ok", "dry_run", "warnings", "errors", "marketplace", "bundle"):
             assert key in data, f"Missing key '{key}' in JSON envelope"
 
+    def test_archive_format_without_archive_is_usage_error(self) -> None:
+        """--archive-format without --archive must exit with a UsageError."""
+        result = CliRunner().invoke(pack_cmd, ["--archive-format", "tar.gz"])
+        assert result.exit_code != 0
+        assert "no effect without --archive" in (result.output or "")
+
+    def test_archive_format_default_without_archive_is_ok(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Omitting --archive-format entirely (default) without --archive is fine."""
+        (tmp_path / "apm.yml").write_text(_APM_SIMPLE, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(pack_cmd, ["--dry-run"])
+        # Not a UsageError; exit code from normal pack logic
+        assert "no effect without --archive" not in (result.output or "")
+
 
 # ===========================================================================
 # unpack_cmd tests
@@ -536,7 +602,7 @@ class TestPackCmdFlags:
 class TestUnpackCmd:
     def test_unpack_deprecation_warning(self, tmp_path: Path) -> None:
         """unpack always emits a deprecation warning."""
-        bundle = tmp_path / "bundle.tar.gz"
+        bundle = tmp_path / "bundle.zip"
         bundle.write_bytes(b"fake")
         result = CliRunner().invoke(
             unpack_cmd,
@@ -548,7 +614,7 @@ class TestUnpackCmd:
         """Passing a non-existent path exits non-zero."""
         result = CliRunner().invoke(
             unpack_cmd,
-            [str(tmp_path / "no-such-bundle.tar.gz"), "--dry-run"],
+            [str(tmp_path / "no-such-bundle.zip"), "--dry-run"],
         )
         assert result.exit_code != 0
 
@@ -557,3 +623,36 @@ class TestUnpackCmd:
         result = CliRunner().invoke(unpack_cmd, ["--help"])
         assert result.exit_code == 0
         assert "install" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# Authoring-path license warning asymmetry (#1777, U6)
+# WARN on `apm pack` (author's own manifest); SILENT on the consuming path.
+# ---------------------------------------------------------------------------
+
+
+def test_pack_warns_when_no_license_declared(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("apm.yml").write_text("name: demo\nversion: 1.0.0\n")
+        result = runner.invoke(pack_cmd, ["--dry-run"])
+        combined = result.output + (result.stderr or "")
+        assert "license:" in combined, combined
+
+
+def test_pack_silent_when_license_declared(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("apm.yml").write_text("name: demo\nversion: 1.0.0\nlicense: MIT\n")
+        result = runner.invoke(pack_cmd, ["--dry-run"])
+        combined = result.output + (result.stderr or "")
+        assert "the SBOM will record NOASSERTION" not in combined
+
+
+def test_pack_silent_under_json(tmp_path):
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("apm.yml").write_text("name: demo\nversion: 1.0.0\n")
+        result = runner.invoke(pack_cmd, ["--dry-run", "--json"])
+        combined = result.output + (result.stderr or "")
+        assert "the SBOM will record NOASSERTION" not in combined

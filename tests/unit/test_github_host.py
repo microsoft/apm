@@ -146,6 +146,7 @@ def test_is_azure_devops_hostname():
     """Test Azure DevOps hostname detection."""
     # Valid Azure DevOps hosts
     assert github_host.is_azure_devops_hostname("dev.azure.com")
+    assert github_host.is_azure_devops_hostname("ssh.dev.azure.com")
     assert github_host.is_azure_devops_hostname("mycompany.visualstudio.com")
     assert github_host.is_azure_devops_hostname("contoso.visualstudio.com")
 
@@ -309,6 +310,25 @@ def test_build_ado_api_url():
     assert "versionDescriptor.version=main" in url
     assert "api-version=7.0" in url
 
+    encoded_url = github_host.build_ado_api_url("my org", "My Project", "repo/name", "path/file.md")
+    assert "my%20org/My%20Project/_apis/git/repositories/repo%2Fname/items" in encoded_url
+    encoded_ref_url = github_host.build_ado_api_url(
+        "myorg", "project", "repo", "path/file.md", ref="feature/a&b"
+    )
+    assert "versionDescriptor.version=feature%2Fa%26b" in encoded_ref_url
+
+    legacy_url = github_host.build_ado_api_url(
+        "contoso", "_apm", "_apm", "apm-policy.yml", host="contoso.visualstudio.com"
+    )
+    assert legacy_url.startswith(
+        "https://contoso.visualstudio.com/_apm/_apis/git/repositories/_apm/items"
+    )
+
+    ssh_url = github_host.build_ado_api_url(
+        "contoso", "_apm", "_apm", "apm-policy.yml", host="ssh.dev.azure.com"
+    )
+    assert ssh_url.startswith("https://dev.azure.com/contoso/_apm/_apis/")
+
 
 def test_build_authorization_header_git_env_bearer():
     """Bearer scheme produces correct GIT_CONFIG_* env overlay."""
@@ -438,3 +458,47 @@ class TestIsSshAuthFailureSignal:
         assert not github_host.is_ssh_auth_failure_signal(
             "warning: remote HEAD refers to nonexistent ref, unable to checkout."
         )
+
+
+class TestIsGitHubHostnameGHES:
+    """is_github_hostname recognises custom GHES hosts via GITHUB_HOST env var."""
+
+    def test_ghes_host_via_env_var(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        assert github_host.is_github_hostname("ghe.example.com") is True
+
+    def test_ghes_host_case_insensitive(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "GHE.Example.COM")
+        assert github_host.is_github_hostname("ghe.example.com") is True
+
+    def test_ghes_host_not_matched_when_env_unset(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_HOST", raising=False)
+        assert github_host.is_github_hostname("ghe.example.com") is False
+
+    def test_ghes_host_does_not_claim_ado(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "dev.azure.com")
+        assert github_host.is_github_hostname("dev.azure.com") is False
+
+    def test_ghes_host_does_not_claim_visualstudio(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "myorg.visualstudio.com")
+        assert github_host.is_github_hostname("myorg.visualstudio.com") is False
+
+    def test_ghes_host_does_not_claim_gitlab_com(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "gitlab.com")
+        assert github_host.is_github_hostname("gitlab.com") is False
+
+    def test_github_com_still_works_with_ghes_env(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        assert github_host.is_github_hostname("github.com") is True
+
+    def test_ghe_cloud_still_works_with_ghes_env(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        assert github_host.is_github_hostname("corp.ghe.com") is True
+
+    def test_ghes_does_not_match_different_host(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "ghe.example.com")
+        assert github_host.is_github_hostname("git.other.com") is False
+
+    def test_ghes_rejects_invalid_fqdn(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_HOST", "not-a-fqdn")
+        assert github_host.is_github_hostname("not-a-fqdn") is False

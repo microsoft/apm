@@ -5,7 +5,7 @@ sidebar:
   order: 6
 ---
 
-This page covers migrations you hit while adopting APM or upgrading the CLI. For first-time setup of a brownfield project, start with [Existing Projects](../getting-started/) and come back here for upgrade-time issues.
+This page covers migrations you hit while adopting APM or upgrading the CLI. For first-time setup of a brownfield project, start with [Existing Projects](../getting-started/migration/) and come back here for upgrade-time issues.
 
 [i] Throughout: replace `<your-version>` with the version you currently have installed (`apm --version`) and `<target>` with the version you are moving to.
 
@@ -41,7 +41,7 @@ Migration steps:
    which awd && rm "$(which awd)"
    ```
 
-2. Install APM via the documented [installation flow](../getting-started/).
+2. Install APM via the documented [installation flow](../getting-started/installation/).
 
 3. In your scripts, CI workflows, and docs, replace `awd ` with `apm `. The subcommand surface (`init`, `install`, `compile`, `run`, `audit`) is the same.
 
@@ -155,7 +155,7 @@ If your project has a hand-edited `.mcp.json` (or VS Code `mcp.json`) declaring 
 3. Diff the generated MCP config against your previous hand-rolled version and reconcile any custom env vars or args using the marketplace package's documented inputs.
 4. Delete the legacy hand-rolled config once the APM-managed version is verified.
 
-For publishing your own marketplace entries, see [Marketplace authoring](../guides/pack-distribute/marketplace-authoring/).
+For publishing your own marketplace entries, see [Publish to a marketplace](../producer/publish-to-a-marketplace/).
 
 ## 8. Breaking-change checklist when upgrading APM
 

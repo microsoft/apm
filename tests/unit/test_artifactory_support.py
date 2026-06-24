@@ -600,7 +600,7 @@ class TestRegistryOnlyNestedShorthand:
         assert dep.virtual_path == "some-subdir"
 
 
-# -- Artifactory boundary probe (mirrors native GitLab probing pattern) --
+# ── Artifactory boundary probe (mirrors native GitLab probing pattern) ──
 
 
 class TestArtifactoryBoundaryResolver:
@@ -780,7 +780,7 @@ class TestArtifactoryBoundaryResolver:
         assert resolved.is_artifactory() is False
 
 
-# -- ArtifactoryOrchestrator: multi-segment repo support --
+# ── ArtifactoryOrchestrator: multi-segment repo support ──
 
 
 class TestArtifactoryOrchestratorNestedRepo:

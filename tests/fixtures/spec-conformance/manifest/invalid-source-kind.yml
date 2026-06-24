@@ -1,0 +1,10 @@
+# req-mf-012 (consumer rejects dep entry with unknown source kind)
+# The depEntry oneOf requires exactly one of `git`, `id`, `path`,
+# `registry`. An entry with only `unsupported_source_kind` is
+# malformed and MUST fail schema validation.
+name: invalid-source-kind
+version: "1.0.0"
+dependencies:
+  apm:
+    - unsupported_source_kind: foo
+      version: "1.0.0"

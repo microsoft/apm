@@ -43,7 +43,24 @@ dependencies:
       url: https://mcp.linear.app/sse
       headers:
         Authorization: "Bearer ${LINEAR_TOKEN}"
+
+    # 4. Self-defined remote with harness-specific extra keys
+    - name: slack
+      registry: false
+      transport: http
+      url: https://mcp.slack.com/mcp
+      oauth:
+        clientId: "<pre-registered-client-id>"
+        callbackPort: 3118
 ```
+
+Unknown keys like `oauth` above are **passthrough fields**: they are
+preserved and written into the generated config for every harness you
+install (so a Claude Code `oauth` block reaches all targets; harnesses
+that do not recognise it ignore it). Keys that collide with a modeled
+field (`command`, `url`, `headers`, `env`, ...) are rejected with a
+warning so they cannot redirect a server. See
+[Manifest Schema](../../reference/manifest-schema/) for the full rules.
 
 The full grammar (overlays, `${input:...}` variables, `tools:`
 allowlists, `package:` selection) is in
@@ -75,16 +92,24 @@ For every harness APM detects in your environment, `apm install`
 writes a runtime-specific MCP config file. The schemas differ; the
 `apm.yml` source of truth does not.
 
+Registry-declared environment variables honor the registry's
+`required` flag. Servers with optional auth install without token
+prompts until you choose to configure one. See the
+[manifest schema reference](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
+for the full required-vs-optional runtime config rule.
+
 | Harness | File | Scope | Format |
 |---|---|---|---|
 | GitHub Copilot CLI | `~/.copilot/mcp-config.json` | global | JSON `mcpServers` |
 | VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
 | Claude Code | `.mcp.json` (project) or `~/.claude.json` (`-g`) | both | JSON `mcpServers` |
 | Cursor | `.cursor/mcp.json` | project (only if `.cursor/` exists) | JSON `mcpServers` |
-| Codex CLI | `~/.codex/config.toml` | global | TOML `[mcp_servers.*]` |
+| Codex CLI | `.codex/config.toml` (project, only if `.codex/` exists) or `$CODEX_HOME/config.toml` (`-g`, when non-blank; otherwise `~/.codex/config.toml`) | both | TOML `[mcp_servers.*]` |
 | Gemini CLI | `.gemini/settings.json` (project, only if `.gemini/` exists) or `~/.gemini/settings.json` (`-g`) | both | JSON `mcpServers` |
+| Antigravity CLI | `.agents/mcp_config.json` (project, only if `.agents/` exists) or `~/.gemini/config/mcp_config.json` (`-g`) | both | JSON `mcpServers` |
 | OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
+| Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
 
 ## How `targets:` gates which configs get written
 
@@ -120,10 +145,12 @@ fails closed with the same `[x]` voice -- consistent with how
 declare one in `apm.yml`. (#1335)
 
 `apm install -g --mcp NAME` is a deliberate carve-out: it routes the
-write to each runtime's user-scope MCP config (Copilot CLI to
-`~/.copilot/mcp-config.json`, Codex CLI to `~/.codex/config.toml`,
-Gemini CLI to `~/.gemini/settings.json`) and does not consult the
-project-scope `targets:` whitelist -- user-scope writes are by
+write to each runtime's user-scope MCP config (for example, Copilot CLI to
+`~/.copilot/mcp-config.json`, Claude Code to `~/.claude.json`, Codex CLI to
+`$CODEX_HOME/config.toml` when `CODEX_HOME` is set to a non-whitespace value or `~/.codex/config.toml` otherwise, Gemini CLI to `~/.gemini/settings.json`, Antigravity CLI to `~/.gemini/config/mcp_config.json`, Windsurf to
+`~/.codeium/windsurf/mcp_config.json`, Kiro to `~/.kiro/settings/mcp.json`,
+and JetBrains Copilot to its OS-specific user config). It does not consult
+the project-scope `targets:` whitelist -- user-scope writes are by
 definition not project-bound. Workspace-only runtimes (VS Code,
 Cursor, OpenCode) are skipped at user scope.
 
@@ -156,16 +183,18 @@ When the Copilot CLI adapter writes a remote MCP config and the
 server is identified as the GitHub MCP server, APM resolves a token
 and adds an `Authorization: Bearer <token>` header.
 
-The server is identified as "GitHub" by **two** narrow checks
-([copilot.py:1208](https://github.com/microsoft/apm/blob/main/src/apm_cli/adapters/client/copilot.py#L1208)):
+The server is identified as "GitHub" only when it satisfies **both** of
+these narrow checks
+([copilot.py:1004](https://github.com/microsoft/apm/blob/main/src/apm_cli/adapters/client/copilot.py#L1004)):
 
 1. The server name (case-insensitive) is one of:
    `github-mcp-server`, `github`, `github-mcp`,
    `github-copilot-mcp-server`.
-2. Or the parsed URL hostname matches the GitHub host allowlist
-   (`github.com`, `api.github.com`, and registered GHES hostnames).
+2. **And** the parsed URL hostname matches the GitHub host allowlist
+   (`github.com`, `*.github.com`, `githubcopilot.com` hosts, and
+   registered GHES hostnames).
 
-This is an exact-match allowlist on hostname, not a substring check.
+This is a parsed-host allowlist on hostname, not a substring check.
 A URL like `https://github.com.evil.example` does not match because
 the parsed hostname is `github.com.evil.example`, not `github.com`.
 

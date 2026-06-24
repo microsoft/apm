@@ -236,7 +236,7 @@ class TestDircmpEqual:
         (a / "file.txt").write_text("hello")
         (b / "file.txt").write_text("hello")
 
-        assert SkillIntegrator._dirs_equal(a, b) is True
+        assert SkillIntegrator.is_skill_dir_identical_to_source(a, b) is True
 
     def test_different_content_returns_false(self, tmp_path):
         a = tmp_path / "a"
@@ -246,7 +246,7 @@ class TestDircmpEqual:
         (a / "file.txt").write_text("hello")
         (b / "file.txt").write_text("world")
 
-        assert SkillIntegrator._dirs_equal(a, b) is False
+        assert SkillIntegrator.is_skill_dir_identical_to_source(a, b) is False
 
     def test_extra_file_returns_false(self, tmp_path):
         a = tmp_path / "a"
@@ -257,7 +257,7 @@ class TestDircmpEqual:
         (b / "file.txt").write_text("hello")
         (b / "extra.txt").write_text("extra")
 
-        assert SkillIntegrator._dirs_equal(a, b) is False
+        assert SkillIntegrator.is_skill_dir_identical_to_source(a, b) is False
 
     def test_nested_identical_dirs_returns_true(self, tmp_path):
         """Lines 525-527: recursive subdirectory comparison."""
@@ -268,7 +268,7 @@ class TestDircmpEqual:
         (a / "sub" / "nested.md").write_text("same content")
         (b / "sub" / "nested.md").write_text("same content")
 
-        assert SkillIntegrator._dirs_equal(a, b) is True
+        assert SkillIntegrator.is_skill_dir_identical_to_source(a, b) is True
 
     def test_nested_different_dirs_returns_false(self, tmp_path):
         a = tmp_path / "a"
@@ -278,7 +278,7 @@ class TestDircmpEqual:
         (a / "sub" / "nested.md").write_text("version A")
         (b / "sub" / "nested.md").write_text("version B")
 
-        assert SkillIntegrator._dirs_equal(a, b) is False
+        assert SkillIntegrator.is_skill_dir_identical_to_source(a, b) is False
 
 
 # ---------------------------------------------------------------------------

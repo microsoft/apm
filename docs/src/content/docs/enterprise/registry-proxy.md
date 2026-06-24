@@ -19,8 +19,8 @@ The **registry proxy** documented here transparently fronts an upstream Git
 host (GitHub, GitLab) so dependency clones flow through your enterprise
 infrastructure. Configured per-machine via `PROXY_REGISTRY_*` env vars.
 
-A **dedicated registry** ([Registries guide](../../guides/registries/)) is a
-separate, additive package source that speaks the [Registry HTTP API](../../reference/registry-http-api/)
+A **dedicated registry** ([Registries guide](../guides/registries/)) is a
+separate, additive package source that speaks the [Registry HTTP API](../reference/registry-http-api/)
 directly — no Git host upstream. Configured per-project in `apm.yml` via the
 top-level `registries:` block, and currently requires `apm experimental enable registries`.
 
@@ -28,11 +28,11 @@ Both can be used together; they're orthogonal.
 :::
 
 For the *policy-cache* offline story (a different mechanism), see
-[Governance #9](../governance-guide/#9-air-gapped-and-offline).
+[Governance #9](./governance-guide/#9-air-gapped-and-offline).
 
 For consumer-side token setup, see
-[Authentication](../../consumer/authentication/) and
-[Private and org packages](../../consumer/private-and-org-packages/).
+[Authentication](../consumer/authentication/) and
+[Private and org packages](../consumer/private-and-org-packages/).
 
 ## When to use what
 
@@ -245,13 +245,13 @@ at one hosted on GHES, GHE.com, or GitLab self-managed:
 ```bash
 apm marketplace add acme-tools/agents \
   --host ghes.corp.example.com \
-  --branch main
+  --ref main
 ```
 
 The entry is stored in `~/.apm/marketplaces.json`. Auth uses the same
 PAT as private dependency installs (`GITHUB_APM_PAT`,
 `GITHUB_APM_PAT_<ORG>`, or the GitLab equivalent). See
-[Private and org packages](../../consumer/private-and-org-packages/).
+[Private and org packages](../consumer/private-and-org-packages/).
 
 ## Cache behavior
 
@@ -287,11 +287,11 @@ and `apm cache clean`.
 
 For fully disconnected CI (no proxy reach at all), build a bundle on a
 connected host with `apm pack` and restore offline. See
-[Pack and distribute](../../guides/pack-distribute/).
+[Pack and distribute](../producer/pack-a-bundle/).
 
 ## See also
 
-- [Authentication](../../consumer/authentication/) -- token resolution order
-- [Private and org packages](../../consumer/private-and-org-packages/) -- per-host PAT scoping
-- [Pack and distribute](../../guides/pack-distribute/) -- air-gapped bundle delivery
-- [Governance overview](../governance-overview/) -- policy-cache offline story
+- [Authentication](../consumer/authentication/) -- token resolution order
+- [Private and org packages](../consumer/private-and-org-packages/) -- per-host PAT scoping
+- [Pack and distribute](../producer/pack-a-bundle/) -- air-gapped bundle delivery
+- [Governance overview](./governance-overview/) -- policy-cache offline story

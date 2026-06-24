@@ -6,7 +6,7 @@ sidebar:
 
 APM manages LLM runtime installation and configuration automatically. This guide covers the supported runtimes, how to use them, and how to extend APM with additional runtimes.
 
-> **Note:** This page covers APM's experimental runtime management. See also the [Agent Workflows guide](../../guides/agent-workflows/) for running workflows locally.
+> **Note:** This page covers APM's experimental runtime management. See [`apm run`](../../reference/cli/run/) for executing scripts locally.
 
 ## Overview
 
@@ -58,7 +58,7 @@ This automatically:
 
 ### Usage
 
-APM executes scripts defined in your `apm.yml`. When scripts reference `.prompt.md` files, APM compiles them with parameter substitution. See [Prompts Guide](../../guides/prompts/) for details.
+APM executes scripts defined in your `apm.yml`. When scripts reference `.prompt.md` files, APM compiles them with parameter substitution. See [Prompts Guide](../../producer/author-primitives/prompts/) for details.
 
 ```bash
 # Run scripts (from apm.yml) with parameters
@@ -218,7 +218,7 @@ llm keys set anthropic  # Anthropic API key
 
 ### Usage
 
-APM executes scripts defined in your `apm.yml`. See [Prompts Guide](../../guides/prompts/) for details on prompt compilation.
+APM executes scripts defined in your `apm.yml`. See [Prompts Guide](../../producer/author-primitives/prompts/) for details on prompt compilation.
 
 ```bash
 # Run scripts that use LLM runtime

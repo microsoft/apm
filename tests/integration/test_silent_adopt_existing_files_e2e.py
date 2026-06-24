@@ -214,3 +214,12 @@ class TestSilentAdoptOfExistingFiles:
             "otherwise required-packages-deployed would block the next "
             "install (catch-22)."
         )
+
+        # Third run: full policy gate, no --no-policy flag. Proves the
+        # pipeline fully self-heals and the required-packages-deployed
+        # check passes because deployed_files was repopulated in run 2.
+        r3 = _run_apm(apm_command, ["install"], temp_project)
+        assert r3.returncode == 0, (
+            "Third install (with policy) must succeed -- catch-22 is broken. "
+            f"stderr: {r3.stderr}\nstdout: {r3.stdout}"
+        )

@@ -1,15 +1,22 @@
 """Bundle unpacker  -- extracts and verifies APM bundles."""
 
 import shutil
-import sys
-import tarfile
 import tempfile
+import zipfile
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
-from typing import Dict, List  # noqa: F401, UP035
+from pathlib import Path
 
 from ..deps.lockfile import LEGACY_LOCKFILE_NAME, LOCKFILE_NAME, LockFile
-from ..utils.path_security import PathTraversalError, validate_path_segments
+from ..utils.archive import (
+    MAX_ZIP_ENTRIES,
+    MAX_ZIP_UNCOMPRESSED,
+    ArchiveError,
+    _extract_tar_gz_file,
+    safe_extract_zip,
+)
+
+_MAX_ZIP_ENTRIES = MAX_ZIP_ENTRIES
+_MAX_ZIP_UNCOMPRESSED = MAX_ZIP_UNCOMPRESSED
 
 
 @dataclass
@@ -23,6 +30,7 @@ class UnpackResult:
     skipped_count: int = 0
     security_warnings: int = 0
     security_critical: int = 0
+    canvas_blocked: int = 0
     pack_meta: dict = field(default_factory=dict)
 
 
@@ -32,6 +40,7 @@ def unpack_bundle(
     skip_verify: bool = False,
     dry_run: bool = False,
     force: bool = False,
+    trust_canvas: bool = False,
 ) -> UnpackResult:
     """Extract and apply an APM bundle to a project directory.
 
@@ -40,11 +49,15 @@ def unpack_bundle(
     file has the same name as a bundle file, the bundle file wins (overwrite).
 
     Args:
-        bundle_path: Path to a ``.tar.gz`` archive or an unpacked bundle directory.
+        bundle_path: Path to a ``.zip`` (or legacy ``.tar.gz``) archive, or an unpacked bundle directory.
         output_dir: Target project directory to copy files into.
         skip_verify: If *True*, skip completeness verification against the lockfile.
         dry_run: If *True*, resolve the file list but write nothing to disk.
         force: If *True*, deploy even when critical hidden characters are found.
+        trust_canvas: If *True*, allow executable canvas extension files
+            (``.github/extensions/<name>/extension.mjs``) to be unpacked.
+            Defaults to *False* (fail closed) so a vendored bundle cannot
+            smuggle executable canvas code past the trust gate.
 
     Returns:
         :class:`UnpackResult` describing what was (or would be) extracted.
@@ -56,35 +69,44 @@ def unpack_bundle(
     """
     # 1. If archive, extract to temp dir
     cleanup_temp = False
-    if bundle_path.is_file() and bundle_path.name.endswith(".tar.gz"):
+    if bundle_path.is_file() and bundle_path.name.endswith(".zip"):
         from ..config import get_apm_temp_dir
 
         temp_dir = Path(tempfile.mkdtemp(prefix="apm-unpack-", dir=get_apm_temp_dir()))
         cleanup_temp = True
         try:
-            with tarfile.open(bundle_path, "r:gz") as tar:
-                # Security: prevent path traversal and special entries
-                for member in tar.getmembers():
-                    name = member.name
-                    if (
-                        name.startswith("/")
-                        or PureWindowsPath(name).drive
-                        or PureWindowsPath(name).is_absolute()
-                    ):
-                        raise ValueError(f"Refusing to extract path-traversal entry: {name}")
-                    try:
-                        validate_path_segments(name, context="tar member")
-                    except PathTraversalError:
-                        raise ValueError(
-                            f"Refusing to extract path-traversal entry: {name}"
-                        ) from None
-                    if member.issym() or member.islnk():
-                        raise ValueError(f"Refusing to extract symlink/hardlink: {name}")
-                # filter="data" was added in Python 3.12; use it when available
-                if sys.version_info >= (3, 12):
-                    tar.extractall(temp_dir, filter="data")
-                else:
-                    tar.extractall(temp_dir)  # noqa: S202
+            with zipfile.ZipFile(bundle_path, "r") as zf:
+                safe_extract_zip(
+                    zf,
+                    temp_dir,
+                    max_entries=_MAX_ZIP_ENTRIES,
+                    max_uncompressed=_MAX_ZIP_UNCOMPRESSED,
+                    error_type=ValueError,
+                )
+        except Exception:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
+
+        # Locate inner directory (the archive wraps a single top-level dir)
+        children = list(temp_dir.iterdir())
+        if len(children) == 1 and children[0].is_dir():  # noqa: SIM108
+            source_dir = children[0]
+        else:
+            source_dir = temp_dir
+    elif bundle_path.is_file() and bundle_path.name.endswith(".tar.gz"):
+        # Legacy .tar.gz support (backward compat)
+        from ..config import get_apm_temp_dir
+
+        temp_dir = Path(tempfile.mkdtemp(prefix="apm-unpack-", dir=get_apm_temp_dir()))
+        cleanup_temp = True
+        try:
+            _extract_tar_gz_file(bundle_path, str(temp_dir))
+        except ArchiveError as exc:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            msg = str(exc)
+            if "path" in msg or "Symlinks" in msg or "links" in msg:
+                raise ValueError(f"Refusing to extract path-traversal entry: {msg}") from exc
+            raise ValueError(msg) from exc
         except Exception:
             shutil.rmtree(temp_dir, ignore_errors=True)
             raise
@@ -147,6 +169,28 @@ def unpack_bundle(
             if dep_files:
                 dep_file_map[dep_key] = dep_files
 
+        # Security + feature gate: canvas extensions are executable Node
+        # bundles (``extension.mjs``).  ``apm unpack`` copies deployed files
+        # verbatim WITHOUT routing through ``CanvasIntegrator``, so neither
+        # the experimental feature flag nor its trust gate would otherwise
+        # apply.  Require BOTH gates -- the ``canvas`` experimental flag ON
+        # (feature availability) AND ``trust_canvas`` (executable-code trust)
+        # -- before unpacking canvas paths.  Fail closed: drop them when
+        # either gate is missing.
+        canvas_blocked = 0
+        from ..core.experimental import is_enabled
+        from ..integration.canvas_integrator import is_canvas_bundle_path
+
+        if not (is_enabled("canvas") and trust_canvas):
+            _blocked = {f for f in unique_files if is_canvas_bundle_path(f)}
+            if _blocked:
+                canvas_blocked = len(_blocked)
+                unique_files = [f for f in unique_files if f not in _blocked]
+                for _k in list(dep_file_map):
+                    dep_file_map[_k] = [f for f in dep_file_map[_k] if f not in _blocked]
+                    if not dep_file_map[_k]:
+                        del dep_file_map[_k]
+
         # 3. Verify completeness
         verified = True
         if not skip_verify:
@@ -195,6 +239,7 @@ def unpack_bundle(
                 dependency_files=dep_file_map,
                 security_warnings=security_warnings,
                 security_critical=security_critical,
+                canvas_blocked=canvas_blocked,
                 pack_meta=pack_meta,
             )
 
@@ -238,6 +283,7 @@ def unpack_bundle(
             skipped_count=skipped,
             security_warnings=security_warnings,
             security_critical=security_critical,
+            canvas_blocked=canvas_blocked,
             pack_meta=pack_meta,
         )
     finally:

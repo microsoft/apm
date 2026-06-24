@@ -17,7 +17,7 @@ apm audit                 # hidden Unicode + drift against the lockfile
 ```
 
 The recommended sequence is `compile --dry-run` -> `apm view` ->
-`apm audit` -> [`apm pack`](../pack-a-bundle/). Run it once at the end
+`apm audit` -> [`apm pack`](./pack-a-bundle/). Run it once at the end
 of every authoring session.
 
 ## apm compile --dry-run
@@ -28,7 +28,7 @@ apm compile --dry-run --target claude,cursor
 apm compile --validate
 ```
 
-Prints the placement decisions [`apm compile`](../compile/) would make
+Prints the placement decisions [`apm compile`](./compile/) would make
 without touching disk: which primitives go to which harness directory,
 which files would be overwritten, which targets would be skipped. Use
 it whenever you are not sure what your `apm.yml` and `.apm/` will
@@ -78,7 +78,7 @@ fast way to confirm your `scripts:` block is well-formed and your
 
 For a tree of installed dependencies (versions, sources, primitive
 counts), use `apm deps list` instead. See
-[CLI reference](../../reference/cli/install/) for both.
+[CLI reference](../reference/cli/install/) for both.
 
 ## apm outdated
 
@@ -118,7 +118,7 @@ file.
 
 For the conceptual model behind hidden-Unicode threats and the
 secure-by-default layer, see
-[Drift and secure-by-default](../../consumer/drift-and-secure-by-default/).
+[Drift and secure-by-default](../consumer/drift-and-secure-by-default/).
 
 ## The recommended verify sequence
 
@@ -132,6 +132,6 @@ apm pack                       # 6. ship it
 ```
 
 Steps 1-5 are read-only and safe to run in any order. Step 6 produces
-the bundle: see [Pack a bundle](../pack-a-bundle/) for the next step,
-then [Publish to a marketplace](../publish-to-a-marketplace/) to ship
+the bundle: see [Pack a bundle](./pack-a-bundle/) for the next step,
+then [Publish to a marketplace](./publish-to-a-marketplace/) to ship
 it.

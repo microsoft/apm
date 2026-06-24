@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from click.testing import CliRunner
 
 from apm_cli.commands.install import (
     _check_package_conflicts,
@@ -563,6 +564,7 @@ class TestInstallContextDefaults:
             protocol_pref=None,
             allow_protocol_fallback=False,
             trust_transitive_mcp=False,
+            trust_canvas=False,
             no_policy=False,
             install_mode=None,
             packages=(),
@@ -600,9 +602,49 @@ class TestInstallContextDefaults:
             protocol_pref=None,
             allow_protocol_fallback=False,
             trust_transitive_mcp=False,
+            trust_canvas=False,
             no_policy=False,
             install_mode=None,
             packages=(),
         )
         ctx.refresh = True
         assert ctx.refresh is True
+
+
+class TestInstallUpdatePackageScoping:
+    def test_update_existing_named_package_scopes_apm_install_to_that_package(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """--update for an already-declared package must not integrate every dep."""
+        from apm_cli.commands.install import install
+        from apm_cli.models.results import InstallResult
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(
+            "name: test\n"
+            "version: 0.1.0\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - owner/target\n"
+            "    - owner/other\n",
+            encoding="utf-8",
+        )
+
+        service_requests = []
+
+        def capture_request(_self, request):
+            service_requests.append(request)
+            return InstallResult(installed_count=1, diagnostics=None)
+
+        with (
+            patch(
+                "apm_cli.commands.install._get_invocation_argv",
+                return_value=["apm", "install", "--update", "owner/target"],
+            ),
+            patch("apm_cli.commands.install._validate_package_exists", return_value=True),
+            patch("apm_cli.install.service.InstallService.run", capture_request),
+        ):
+            result = CliRunner().invoke(install, ["--update", "owner/target"])
+
+        assert result.exit_code == 0, result.output
+        assert service_requests[0].only_packages == ["owner/target"]

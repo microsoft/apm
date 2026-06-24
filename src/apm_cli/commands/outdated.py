@@ -9,25 +9,96 @@ import logging
 import os
 import re
 import sys
-from typing import List  # noqa: F401, UP035
+from collections.abc import Iterable
 
 import click
 
 from ..deps.outdated_row import OutdatedRow
+from ..deps.revision_pins import (
+    RevisionPinResolutionError,
+    abbreviate_sha,
+    dependency_ref_from_locked,
+    find_latest_annotated_tag,
+    is_full_revision_pin,
+)
+from ..models.dependency.types import RemoteRef
 
 logger = logging.getLogger(__name__)
 
+# Fallback heuristic for _resolve_tag_pattern when inference misses plain tags.
 TAG_RE = re.compile(r"^v?\d+\.\d+\.\d+")
 
 
-def _is_tag_ref(ref: str) -> bool:
-    """Return True when *ref* looks like a semver tag (v1.2.3 or 1.2.3)."""
-    return bool(TAG_RE.match(ref)) if ref else False
+def _unknown_row(dep) -> OutdatedRow:
+    """Degraded row for a dependency whose check raised unexpectedly.
+
+    Keeps ``apm outdated`` from crashing when a single dependency check
+    fails; the dependency is surfaced as ``unknown`` instead.
+    """
+    return OutdatedRow(package=dep.get_unique_key(), current="(none)", latest="-", status="unknown")
+
+
+def _is_tag_ref(ref: str, package_name: str | None = None) -> bool:
+    """Return True when *ref* names a version tag (plain or patterned)."""
+    from ..marketplace.tag_pattern import is_version_tag_ref
+
+    return is_version_tag_ref(ref, package_name)
 
 
 def _strip_v(ref: str) -> str:
     """Strip leading 'v' prefix from a version string."""
     return ref[1:] if ref and ref.startswith("v") else (ref or "")
+
+
+def _package_basename(dep) -> str:
+    """Return the display name used in ``{name}`` tag patterns."""
+    if dep.marketplace_plugin_name:
+        return dep.marketplace_plugin_name
+    repo = dep.repo_url or ""
+    if not repo:
+        return ""
+    return repo.rstrip("/").split("/")[-1]
+
+
+def _resolve_tag_pattern(current_ref: str, package_name: str) -> str | None:
+    """Return the tag pattern for *current_ref*, or ``None`` if not a version tag."""
+    from ..marketplace.tag_pattern import infer_tag_pattern
+
+    inferred = infer_tag_pattern(current_ref, package_name)
+    if inferred:
+        logger.debug(
+            "Resolved tag pattern %r for %s from ref %s",
+            inferred,
+            package_name,
+            current_ref,
+        )
+        return inferred
+    if TAG_RE.match(current_ref or ""):
+        return "v{version}" if (current_ref or "").startswith("v") else "{version}"
+    return None
+
+
+def _semver_tag_candidates(tag_refs, pattern: str, package_name: str = ""):
+    """Return ``(SemVer, tag_name)`` pairs matching *pattern*, highest first."""
+    from ..marketplace.semver import SemVer, parse_semver
+    from ..marketplace.tag_pattern import build_tag_regex
+
+    tag_rx = (
+        build_tag_regex(pattern, name=package_name)
+        if "{name}" in pattern and package_name
+        else build_tag_regex(pattern)
+    )
+    candidates: list[tuple[SemVer, str]] = []
+    for remote_ref in tag_refs:
+        match = tag_rx.match(remote_ref.name)
+        if not match:
+            continue
+        version = match.group("version")
+        parsed = parse_semver(version)
+        if parsed is not None:
+            candidates.append((parsed, remote_ref.name))
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    return candidates
 
 
 def _find_remote_tip(ref_name, remote_refs):
@@ -147,6 +218,37 @@ def _check_marketplace_ref(dep, verbose):
     )
 
 
+def _check_revision_pin_ref(
+    *,
+    current_ref: str,
+    package_name: str,
+    package_basename: str,
+    remote_refs: Iterable[RemoteRef],
+) -> OutdatedRow | None:
+    """Return an outdated row for full-SHA pins, or None for other refs."""
+    if not is_full_revision_pin(current_ref):
+        return None
+    try:
+        latest = find_latest_annotated_tag(remote_refs, package_name=package_basename)
+    except RevisionPinResolutionError:
+        return OutdatedRow(
+            package=package_name,
+            current=abbreviate_sha(current_ref),
+            latest="-",
+            status="unknown",
+            source="git tags",
+        )
+    latest_display = f"{latest.tag} ({abbreviate_sha(latest.commit_sha)})"
+    status = "up-to-date" if latest.commit_sha.lower() == current_ref.lower() else "outdated"
+    return OutdatedRow(
+        package=package_name,
+        current=abbreviate_sha(current_ref),
+        latest=latest_display,
+        status=status,
+        source="git tags",
+    )
+
+
 def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
     """Check a single dependency against remote refs.
 
@@ -164,7 +266,6 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
     if marketplace_result is not None:
         return marketplace_result
 
-    from ..models.dependency.reference import DependencyReference
     from ..models.dependency.types import GitReferenceType
     from ..utils.version_checker import is_newer_version
 
@@ -174,23 +275,37 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
 
     # Build a DependencyReference to query remote refs
     try:
-        # Use parse() to correctly handle all host types (GitHub, ADO, etc.)
-        full_url = f"{dep.host}/{dep.repo_url}" if dep.host else dep.repo_url
-        dep_ref = DependencyReference.parse(full_url)
+        # Use the lockfile rebuild path to preserve host, port, virtual path,
+        # and insecure-transport metadata for authoritative upstream checks.
+        dep_ref = dependency_ref_from_locked(dep)
     except Exception:
         return OutdatedRow(
             package=package_name, current=current_ref or "(none)", latest="-", status="unknown"
         )
 
-    # Fetch remote refs
+    # Fetch only the ref families this comparison needs.
     try:
-        remote_refs = downloader.list_remote_refs(dep_ref)
+        if is_full_revision_pin(current_ref):
+            remote_refs = downloader.list_remote_tag_refs(dep_ref)
+        else:
+            remote_refs = downloader.list_remote_refs(dep_ref)
     except Exception:
         return OutdatedRow(
             package=package_name, current=current_ref or "(none)", latest="-", status="unknown"
         )
 
-    is_tag = _is_tag_ref(current_ref)
+    package_basename = _package_basename(dep)
+    revision_pin_row = _check_revision_pin_ref(
+        current_ref=current_ref,
+        package_name=package_name,
+        package_basename=package_basename,
+        remote_refs=remote_refs,
+    )
+    if revision_pin_row is not None:
+        return revision_pin_row
+
+    tag_pattern = _resolve_tag_pattern(current_ref, package_basename)
+    is_tag = tag_pattern is not None
 
     if is_tag:
         tag_refs = [r for r in remote_refs if r.ref_type == GitReferenceType.TAG]
@@ -203,12 +318,28 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
                 source="git tags",
             )
 
-        latest_tag = tag_refs[0].name
-        current_ver = _strip_v(current_ref)
-        latest_ver = _strip_v(latest_tag)
+        from ..marketplace.tag_pattern import parse_tag_version
+
+        candidates = _semver_tag_candidates(tag_refs, tag_pattern, package_basename)
+        if not candidates:
+            return OutdatedRow(
+                package=package_name,
+                current=current_ref,
+                latest="-",
+                status="unknown",
+                source="git tags",
+            )
+
+        _, latest_tag = candidates[0]
+        current_ver = parse_tag_version(
+            current_ref, tag_pattern, name=package_basename
+        ) or _strip_v(current_ref)
+        latest_ver = parse_tag_version(latest_tag, tag_pattern, name=package_basename) or _strip_v(
+            latest_tag
+        )
 
         if is_newer_version(current_ver, latest_ver):
-            extra = [r.name for r in tag_refs[:10]] if verbose else []
+            extra = [name for _, name in candidates[:10]] if verbose else []
             return OutdatedRow(
                 package=package_name,
                 current=current_ref,
@@ -499,7 +630,10 @@ def _check_deps_with_progress(
                 for dep in checkable:
                     short = dep.get_unique_key().split("/")[-1]
                     progress.update(task_id, description=f"Checking {short}")
-                    result = _check_one_dep(dep, downloader, verbose, registry_ctx)
+                    try:
+                        result = _check_one_dep(dep, downloader, verbose, registry_ctx)
+                    except Exception:
+                        result = _unknown_row(dep)
                     rows.append(result)
                     progress.advance(task_id)
     except ImportError:
@@ -515,7 +649,10 @@ def _check_deps_with_progress(
             )
         else:
             for dep in checkable:
-                rows.append(_check_one_dep(dep, downloader, verbose, registry_ctx))
+                try:
+                    rows.append(_check_one_dep(dep, downloader, verbose, registry_ctx))
+                except Exception:
+                    rows.append(_unknown_row(dep))
 
     return rows
 
@@ -547,8 +684,7 @@ def _check_parallel(
             try:
                 result = fut.result()
             except Exception:
-                pkg = dep.get_unique_key()
-                result = OutdatedRow(package=pkg, current="(none)", latest="-", status="unknown")
+                result = _unknown_row(dep)
             results[dep.get_unique_key()] = result
             progress.update(task_id, visible=False)
             progress.advance(overall_id)
@@ -573,8 +709,7 @@ def _check_parallel_plain(checkable, downloader, verbose, max_workers, registry_
             try:
                 result = fut.result()
             except Exception:
-                pkg = dep.get_unique_key()
-                result = OutdatedRow(package=pkg, current="(none)", latest="-", status="unknown")
+                result = _unknown_row(dep)
             results[dep.get_unique_key()] = result
 
     return [results[dep.get_unique_key()] for dep in checkable if dep.get_unique_key() in results]

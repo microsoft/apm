@@ -267,6 +267,7 @@ class TestResolveForDep:
         dep.host = host
         dep.repo_url = repo_url
         dep.port = port
+        dep.host_type = None
         return dep
 
     def test_resolve_for_dep_uses_host(self) -> None:

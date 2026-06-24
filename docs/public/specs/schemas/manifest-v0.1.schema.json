@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json",
+  "title": "OpenAPM Manifest (apm.yml) v0.1",
+  "description": "Normative JSON Schema (Draft 2020-12) for the OpenAPM v0.1 manifest. Where this schema and the prose of OpenAPM v0.1 disagree, the prose is authoritative.",
+  "type": "object",
+  "required": ["name", "version"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+    },
+    "description": { "type": "string" },
+    "author": { "type": "string" },
+    "license": { "type": "string" },
+    "default_host": { "type": "string", "minLength": 1 },
+    "target": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    },
+    "type": { "type": "string", "enum": ["instructions", "skill", "hybrid", "prompts"] },
+    "scripts": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "includes": {
+      "oneOf": [
+        { "const": "auto" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    },
+    "registries": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "required": ["url"],
+            "properties": {
+              "url": { "type": "string", "pattern": "^https?://" },
+              "insecure": { "type": "boolean" },
+              "aliases": { "type": "array", "items": { "type": "string" } }
+            },
+            "patternProperties": { "^x-[a-z][a-z0-9-]*$": {} },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "dependencies": { "$ref": "#/$defs/depsBlock" },
+    "devDependencies": { "$ref": "#/$defs/depsBlock" },
+    "compilation": { "type": "object" },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "hash": { "type": "string" },
+        "hash_algorithm": { "enum": ["sha256", "sha384", "sha512"] }
+      }
+    },
+    "marketplace": { "type": "object" }
+  },
+  "patternProperties": {
+    "^x-[a-z][a-z0-9-]*$": {}
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "depsBlock": {
+      "type": "object",
+      "properties": {
+        "apm": { "type": "array", "items": { "$ref": "#/$defs/depEntry" } },
+        "mcp": { "type": "array", "items": { "$ref": "#/$defs/depEntry" } },
+        "conflict_resolution": {
+          "enum": ["intersection-pick"],
+          "$comment": "v0.1 admits only `intersection-pick` (the default tri-modal policy clause per sec.7.2). The token `nest` is reserved for v0.2; consumers MUST refuse v0.1 manifests declaring `nest` per req-rs-013."
+        }
+      },
+      "patternProperties": { "^x-[a-z][a-z0-9-]*$": {} },
+      "additionalProperties": true
+    },
+    "depEntry": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "properties": {
+            "git": { "type": "string" },
+            "id": { "type": "string" },
+            "registry": { "type": "string" },
+            "version": { "type": "string" },
+            "ref": { "type": "string" },
+            "prerelease": { "type": "boolean" },
+            "path": { "type": "string" },
+            "alias": { "type": "string" },
+            "skills": { "type": "array", "items": { "type": "string" } }
+          },
+          "patternProperties": { "^x-[a-z][a-z0-9-]*$": {} },
+          "additionalProperties": true,
+          "oneOf": [
+            { "required": ["git"] },
+            { "required": ["id"] },
+            { "required": ["path"] },
+            { "required": ["registry"] }
+          ]
+        }
+      ]
+    }
+  }
+}

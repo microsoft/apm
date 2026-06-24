@@ -53,7 +53,7 @@ from apm_cli.marketplace.resolver import (
 )
 from apm_cli.models.dependency.mcp import MCPDependency
 from apm_cli.models.dependency.reference import DependencyReference
-from apm_cli.policy.models import CheckResult  # noqa: F401 – used implicitly
+from apm_cli.policy.models import CheckResult  # noqa: F401 - used implicitly
 from apm_cli.policy.policy_checks import (
     _INCLUDES_NOT_PROVIDED,
     _check_compilation_strategy,
@@ -680,7 +680,10 @@ class TestCheckUnmanagedFiles:
         policy = UnmanagedFilesPolicy(action="deny", directories=(".github/agents",))
         result = _check_unmanaged_files(tmp_path, None, policy)
         assert not result.passed
-        assert len(result.details) == 1
+        # details = one per-file line + a single trailing next-action hint.
+        file_details = [d for d in result.details if "not tracked in apm.lock.yaml" in d]
+        assert len(file_details) == 1
+        assert "stray.md" in file_details[0]
 
     def test_deployed_file_not_unmanaged(self, tmp_path):
         gov_dir = tmp_path / ".github" / "agents"
@@ -792,6 +795,35 @@ class TestRunDependencyPolicyChecks:
         names = [c.name for c in result.checks]
         assert "dependency-allowlist" in names
         assert "dependency-denylist" in names
+
+    def test_consolidated_tail_checks_cover_all_categories(self):
+        """Regression trap for the consolidated tail_checks loop (PR #1464).
+
+        Exercises compilation-target AND manifest-includes in a single
+        call together with an MCP denylist violation, confirming no check
+        category is silently dropped by the consolidated loop.
+        """
+        policy = ApmPolicy(
+            compilation=CompilationPolicy(
+                target=CompilationTargetPolicy(enforce="vscode"),
+            ),
+            manifest=ManifestPolicy(require_explicit_includes=True),
+            mcp=McpPolicy(deny=("evil-srv",)),
+        )
+        mcp = _mcp("evil-srv")
+        result = run_dependency_policy_checks(
+            [],
+            policy=policy,
+            fail_fast=False,
+            effective_target="claude",
+            manifest_includes=None,
+            mcp_deps=[mcp],
+        )
+        names = [c.name for c in result.checks]
+        assert "mcp-denylist" in names
+        assert "compilation-target" in names
+        assert "explicit-includes" in names
+        assert not result.passed
 
 
 _MINIMAL_APM_YML = dedent("""\
@@ -1122,7 +1154,7 @@ class TestMCPServerOperationsCollectEnvVars:
         result = ops.collect_environment_variables(["srv"], server_info_cache=cache)
         assert result.get("MY_TOKEN") == "secret-value"
 
-    def test_e2e_mode_detected(self, monkeypatch, _no_cache_env):
+    def test_e2e_mode_omits_optional_env_without_value(self, monkeypatch, _no_cache_env):
         from apm_cli.registry.operations import MCPServerOperations
 
         monkeypatch.setenv("APM_E2E_TESTS", "1")
@@ -1145,7 +1177,7 @@ class TestMCPServerOperationsCollectEnvVars:
             }
         }
         result = ops.collect_environment_variables(["srv"], server_info_cache=cache)
-        assert result.get("GITHUB_DYNAMIC_TOOLSETS") == "1"
+        assert "GITHUB_DYNAMIC_TOOLSETS" not in result
 
 
 class TestMCPServerOperationsCollectRuntimeVars:
@@ -1732,7 +1764,7 @@ class TestResolveMarketplacePlugin:
             [{"name": "my-plugin", "source": "./plugins/my-plugin", "description": "A plugin"}]
         )
 
-        with patch("requests.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             result = resolve_marketplace_plugin("my-plugin", "test-market")
 
@@ -1751,7 +1783,7 @@ class TestResolveMarketplacePlugin:
             ]
         )
 
-        with patch("requests.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             result = resolve_marketplace_plugin("ext-plugin", "test-market")
 
@@ -1765,7 +1797,7 @@ class TestResolveMarketplacePlugin:
             [{"name": "existing-plugin", "source": "./plugins/existing"}]
         )
 
-        with patch("requests.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             with pytest.raises(PluginNotFoundError):
                 resolve_marketplace_plugin("nonexistent-plugin", "test-market")
@@ -1787,7 +1819,7 @@ class TestResolveMarketplacePlugin:
             ]
         )
 
-        with patch("requests.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             result = resolve_marketplace_plugin("versioned", "test-market", version_spec="v2.5.0")
 
@@ -1816,7 +1848,7 @@ class TestResolveMarketplacePlugin:
             ]
         )
         warnings_emitted: list[str] = []
-        with patch("requests.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             result = resolve_marketplace_plugin(
                 "versioned",
@@ -1833,7 +1865,7 @@ class TestResolveMarketplacePlugin:
             [{"name": "iter-plugin", "source": "./plugins/iter-plugin"}]
         )
 
-        with patch("requests.get") as mock_get:
+        with patch("apm_cli.marketplace.client._HTTP_SESSION.get") as mock_get:
             mock_get.return_value = _FakeResponse(manifest_data)
             canonical, plugin = resolve_marketplace_plugin("iter-plugin", "test-market")
 

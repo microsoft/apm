@@ -494,7 +494,7 @@ class TestPackBasic:
         assert result.exit_code == 0, result.output
 
     def test_pack_archive(self, runner, tmp_path, monkeypatch):
-        """--archive flag produces a .tar.gz artifact."""
+        """--archive flag produces a .zip artifact."""
         monkeypatch.chdir(tmp_path)
         clear_apm_yml_cache()
         _make_skill_project(tmp_path)
@@ -596,18 +596,19 @@ class TestPackMarketplaceFilter:
 
 
 class TestPackMarketplaceOutput:
-    """Tests for deprecated --marketplace-output flag."""
+    """Tests for the removed --marketplace-output flag."""
 
-    def test_pack_marketplace_output_deprecated(self, runner, tmp_path, monkeypatch):
-        """--marketplace-output triggers a deprecation warning."""
+    def test_pack_marketplace_output_removed(self, runner, tmp_path, monkeypatch):
+        """--marketplace-output was removed; Click rejects it."""
         monkeypatch.chdir(tmp_path)
         clear_apm_yml_cache()
         _make_skill_project(tmp_path)
         result = runner.invoke(
             cli, ["pack", "--marketplace-output", str(tmp_path / "marketplace.json")]
         )
-        assert result.exit_code == 0, result.output
-        assert "deprecated" in result.output.lower()
+        assert result.exit_code != 0
+        assert "no such option" in (result.output or "").lower()
+        assert "--marketplace-output" in (result.output or "")
 
 
 class TestPackMarketplacePath:

@@ -30,8 +30,9 @@ from apm_cli.core.scope import InstallScope
 def _make_ctx(
     project_root: Path,
     *,
-    target_override: str | None = None,
+    target_override: str | list[str] | None = None,
     yaml_target: str | None = None,
+    yaml_targets: list[str] | None = None,
 ) -> MagicMock:
     ctx = MagicMock()
     ctx.project_root = project_root
@@ -40,10 +41,18 @@ def _make_ctx(
     ctx.target_override = target_override
     ctx.apm_package = MagicMock()
     ctx.apm_package.target = yaml_target
+    if yaml_targets is not None:
+        ctx.apm_package.targets = yaml_targets
     ctx.logger = MagicMock()
     ctx.targets = []
     ctx.integrators = {}
+    ctx.legacy_skill_paths = False
     return ctx
+
+
+def _target_names(ctx: MagicMock) -> list[str]:
+    """Return the resolved target profile names from a phase context."""
+    return [target.name for target in ctx.targets]
 
 
 def _target_root_dirs(ctx, project_root: Path) -> list[Path]:
@@ -63,6 +72,97 @@ def _target_root_dirs(ctx, project_root: Path) -> list[Path]:
         if root_dir:
             out.append(project_root / root_dir)
     return out
+
+
+def test_runtime_alias_list_preserves_copilot_profile_and_dirs(tmp_path: Path) -> None:
+    """Multi-target runtime aliases resolve through the copilot profile."""
+    from apm_cli.install.phases.targets import run
+
+    project = tmp_path / "project"
+    project.mkdir()
+
+    ctx = _make_ctx(project, target_override=["claude", "vscode"])
+    run(ctx)
+
+    assert _target_names(ctx) == ["claude", "copilot"]
+    assert (project / ".claude").is_dir()
+    assert (project / ".github").is_dir()
+
+
+@pytest.mark.parametrize("target_override", [["vscode"], "vscode"])
+def test_run_targets_phase_normalizes_vscode_alias(
+    tmp_path: Path,
+    target_override: str | list[str],
+) -> None:
+    """The v2 wrapper accepts vscode as the runtime alias for copilot."""
+    from apm_cli.install.phases.targets import run_targets_phase
+
+    project = tmp_path / "project"
+    project.mkdir()
+
+    ctx = _make_ctx(project, target_override=target_override)
+    run_targets_phase(ctx)
+
+    assert _target_names(ctx) == ["copilot"]
+    assert (project / ".github").is_dir()
+
+
+def test_cli_parse_claude_copilot_installs_both_targets(tmp_path: Path) -> None:
+    """Regression trap for #1746: --target claude,copilot resolves both targets.
+
+    parse_target_field intentionally returns the runtime alias spelling for
+    multi-token input ("copilot" -> "vscode"); the targets phase must then
+    normalize that alias back to the canonical "copilot" profile instead of
+    silently dropping it.
+    """
+    from apm_cli.core.target_detection import parse_target_field
+    from apm_cli.install.phases.targets import run
+
+    project = tmp_path / "project"
+    project.mkdir()
+
+    parsed = parse_target_field("claude,copilot")
+    ctx = _make_ctx(project, target_override=parsed)
+    run(ctx)
+
+    # Multi-token parsing yields the runtime alias, not the canonical name.
+    assert parsed == ["claude", "vscode"]
+    # The phase normalizes the alias so the copilot profile is preserved.
+    assert _target_names(ctx) == ["claude", "copilot"]
+    assert (project / ".claude").is_dir()
+    assert (project / ".github").is_dir()
+
+
+def test_run_targets_phase_dedupes_copilot_runtime_aliases(tmp_path: Path) -> None:
+    """Mixed canonical/runtime tokens collapse to one copilot profile."""
+    from apm_cli.install.phases.targets import run_targets_phase
+
+    project = tmp_path / "project"
+    project.mkdir()
+
+    ctx = _make_ctx(project, target_override=["copilot", "vscode"])
+    run_targets_phase(ctx)
+
+    assert _target_names(ctx) == ["copilot"]
+
+
+def test_experimental_target_override_skips_v2_resolver(tmp_path: Path) -> None:
+    """Non-canonical experimental targets stay on the legacy-only path."""
+    from apm_cli.install.phases.targets import _resolve_targets_by_scope
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    project = tmp_path / "project"
+    project.mkdir()
+
+    ctx = _make_ctx(project, target_override="copilot-cowork")
+    targets = _resolve_targets_by_scope(
+        ctx,
+        [KNOWN_TARGETS["copilot-cowork"]],
+        "copilot-cowork",
+        False,
+    )
+
+    assert [target.name for target in targets] == ["copilot-cowork"]
 
 
 def test_three_guard_collapse_no_skip(tmp_path):
@@ -92,6 +192,37 @@ def test_explicit_creates_missing_dir(tmp_path):
     run_targets_phase(ctx)
 
     assert (project / ".claude").is_dir(), "Explicit --target claude must materialize .claude/"
+
+
+def test_plural_yaml_targets_attribute_creates_only_declared_dir(tmp_path):
+    """targets: from the parsed APMPackage model drives v2 target selection."""
+    from apm_cli.install.phases.targets import run_targets_phase
+
+    project = tmp_path / "project"
+    project.mkdir()
+
+    ctx = _make_ctx(project, yaml_targets=["claude"])
+    run_targets_phase(ctx)
+
+    assert [target.name for target in ctx.targets] == ["claude"]
+    assert (project / ".claude").is_dir()
+    assert not (project / ".github").exists()
+
+
+def test_run_targets_phase_conflicting_target_fields_exits_with_usage_code(tmp_path: Path) -> None:
+    """run_targets_phase preserves usage-error exit code for target conflicts."""
+    from apm_cli.install.phases.targets import run_targets_phase
+
+    project = tmp_path / "project"
+    project.mkdir()
+
+    ctx = _make_ctx(project, yaml_target="claude", yaml_targets=["copilot"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_targets_phase(ctx)
+
+    assert exc_info.value.code == 2
+    ctx.logger.error.assert_called_once()
 
 
 @pytest.mark.parametrize(

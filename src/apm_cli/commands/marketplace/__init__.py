@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import builtins
 import json
+import logging
 import re
 import sys
 import traceback
 from pathlib import Path
+from typing import TYPE_CHECKING
+from urllib.parse import urlsplit, urlunsplit
 
 import click
-import yaml
 
 from ...core.command_logger import CommandLogger
 from ...marketplace.builder import BuildOptions, BuildReport, MarketplaceBuilder, ResolvedPackage
@@ -35,20 +37,16 @@ from ...marketplace.migration import (
     load_marketplace_config,
     migrate_marketplace_yml,
 )
-from ...marketplace.pr_integration import PrIntegrator, PrResult, PrState
-from ...marketplace.publisher import (
-    ConsumerTarget,
-    MarketplacePublisher,
-    PublishOutcome,
-    PublishPlan,
-    TargetResult,
-)
 from ...marketplace.ref_resolver import RefResolver, RemoteRef
 from ...marketplace.semver import SemVer, parse_semver, satisfies_range
 from ...marketplace.yml_schema import load_marketplace_yml
-from ...utils.console import _rich_info, _rich_warning  # noqa: F401
 from ...utils.path_security import PathTraversalError, validate_path_segments
 from .._helpers import _get_console, _is_interactive
+
+if TYPE_CHECKING:
+    from ...marketplace.models import MarketplaceSource
+
+logger = logging.getLogger(__name__)
 
 # Restore builtins shadowed by subcommand names
 list = builtins.list
@@ -84,8 +82,7 @@ class MarketplaceGroup(click.Group):
         "init",
         "check",
         "outdated",
-        "doctor",
-        "publish",
+        "audit",
         "package",
         "migrate",
     ]
@@ -113,6 +110,8 @@ class MarketplaceGroup(click.Group):
             for name in cmd_names:
                 cmd = self.get_command(ctx, name)
                 if cmd is None:
+                    continue
+                if getattr(cmd, "hidden", False):
                     continue
                 help_text = cmd.get_short_help_str(limit=150)
                 commands.append((name, help_text))
@@ -490,6 +489,8 @@ _ADD_EPILOG = """
 Examples:
   apm marketplace add owner/repo
   apm marketplace add github.com/owner/repo
+  apm marketplace add https://github.com/owner/repo#v1.0.0
+  apm marketplace add https://catalog.example.com/marketplace.json --name catalog
   apm marketplace add https://gitlab.com/group/repo
   apm marketplace add https://dev.azure.com/org/proj/_git/repo --name apm-mkt
   apm marketplace add git@gitea.example.com:org/repo.git --name custom
@@ -500,16 +501,26 @@ Examples:
 @marketplace.command(help="Register a marketplace", epilog=_ADD_EPILOG)
 @click.argument("source", metavar="SOURCE", required=True)
 @click.option("--name", "-n", default=None, help="Display name (defaults to repo name)")
-@click.option("--ref", "-r", default=None, help="Branch, tag, or commit to use (default: main)")
+@click.option(
+    "--ref",
+    "-r",
+    default=None,
+    help="Git ref (branch, tag, or commit). Default: main. Applies to git-backed sources only.",
+)
 @click.option("--branch", "-b", default=None, help="Deprecated alias for --ref", hidden=True)
-@click.option("--host", default=None, help="Git host FQDN (default: github.com)")
+@click.option(
+    "--host",
+    default=None,
+    help="Git host FQDN for OWNER/REPO shorthand (default: github.com)",
+)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed output")
 def add(source, name, ref, branch, host, verbose):
     """Register a marketplace.
 
     SOURCE accepts: OWNER/REPO shorthand, HOST/OWNER/REPO shorthand, a full
-    HTTPS URL (GitHub, GitLab, Azure DevOps, Gitea, Bitbucket Server, or
-    any self-hosted git server), an SSH URL (``git@host:org/repo.git``),
+    HTTPS git URL with optional ``#ref`` (GitHub, GitLab, Azure DevOps,
+    Gitea, Bitbucket Server, or any self-hosted git server), a hosted
+    ``marketplace.json`` URL, an SSH URL (``git@host:org/repo.git``),
     a local filesystem path, or a ``file://`` URI.
     """
     logger = CommandLogger("marketplace-add", verbose=verbose)
@@ -519,19 +530,28 @@ def add(source, name, ref, branch, host, verbose):
         from ...marketplace.registry import add_marketplace
         from ...utils.github_host import is_valid_fqdn
 
+        source_arg, fragment_ref = _split_source_fragment_ref(source)
+
         # --ref / --branch reconciliation. --branch stays as a hidden alias
-        # for one release so legacy invocations keep working; passing both
-        # is a hard error so we never silently pick one.
+        # for one release so legacy invocations keep working; passing multiple
+        # ref sources is a hard error so we never silently pick one.
+        explicit_ref = ref is not None or branch is not None
         if ref is not None and branch is not None:
             logger.error(
                 "--ref and --branch are mutually exclusive. Use --ref (--branch is a deprecated alias).",
                 symbol="error",
             )
             sys.exit(1)
-        effective_ref = ref if ref is not None else (branch if branch is not None else "main")
+        if fragment_ref and explicit_ref:
+            logger.error(
+                "Do not combine a git URL #ref with --ref or --branch. Use one ref source.",
+                symbol="error",
+            )
+            sys.exit(1)
+        effective_ref = fragment_ref or ref or branch or "main"
 
         try:
-            url, kind, resolved_host = _parse_marketplace_source(source, host)
+            url, kind, resolved_host = _parse_marketplace_source(source_arg, host)
         except PathTraversalError:
             logger.error(
                 f"Invalid source '{source}': contains a path-traversal sequence. "
@@ -552,7 +572,14 @@ def add(source, name, ref, branch, host, verbose):
         # --host is meaningful only for shorthand OWNER/REPO inputs. For URL
         # / SSH / local-path inputs the host is already embedded; warn that
         # --host is being ignored rather than silently overriding.
-        if host is not None and kind == "local":
+        is_direct_url = _is_remote_marketplace_json_url(url)
+
+        if host is not None and is_direct_url:
+            logger.warning(
+                "--host is ignored when SOURCE is a hosted marketplace.json URL.",
+                symbol="warning",
+            )
+        elif host is not None and kind == "local":
             logger.warning(
                 "--host is ignored when SOURCE is a local filesystem path.",
                 symbol="warning",
@@ -561,7 +588,7 @@ def add(source, name, ref, branch, host, verbose):
             host is not None
             and host.strip().lower() != (resolved_host or "").lower()
             and kind in ("git", "github", "gitlab")
-            and (source.startswith(("https://", "git@", "file://")))
+            and (source_arg.startswith(("https://", "git@", "file://")))
         ):
             logger.warning(
                 "--host is ignored when SOURCE is a full URL.",
@@ -570,7 +597,7 @@ def add(source, name, ref, branch, host, verbose):
 
         # Trust gate is now scoped to kinds that would forward an APM token
         # via header injection. The subprocess git path (kind == "git")
-        # never forwards GITHUB_APM_PAT / GITLAB_APM_TOKEN -- AuthResolver
+        # never forwards GITHUB_APM_PAT / GITLAB_APM_PAT -- AuthResolver
         # only emits credentials matching the classified host. Local-kind
         # fetches use no credentials at all.
         if kind in ("github", "gitlab"):
@@ -602,8 +629,18 @@ def add(source, name, ref, branch, host, verbose):
 
         # Surface progress before the slow probe + fetch (5-30s for generic-git)
         # so the user sees activity instead of staring at a blank terminal.
-        provisional_label = name or _default_alias_from_url(url)
+        provisional_label = name or (
+            _default_alias_from_remote_url(url) if is_direct_url else _default_alias_from_url(url)
+        )
         logger.start(f"Registering marketplace '{provisional_label}'...", symbol="gear")
+        if _should_warn_unpinned_git_url(
+            source_arg, kind, is_direct_url, fragment_ref, explicit_ref
+        ):
+            logger.warning(
+                "Pin this git marketplace with a #ref (for example, "
+                f"{source_arg}#v1.0.0) or --ref to avoid mutable branch updates.",
+                symbol="warning",
+            )
 
         # Probe for marketplace.json location. The probe source's name is a
         # placeholder -- _auto_detect_path only consults url/ref/path/kind.
@@ -611,9 +648,13 @@ def add(source, name, ref, branch, host, verbose):
         probe_source = MarketplaceSource(
             name=probe_name,
             url=url,
-            ref=effective_ref,
+            ref="" if is_direct_url else effective_ref,
+            path="" if is_direct_url else "marketplace.json",
         )
-        detected_path = _auto_detect_path(probe_source)
+        if is_direct_url or _local_source_points_to_file(probe_source):
+            detected_path = ""
+        else:
+            detected_path = _auto_detect_path(probe_source)
 
         if detected_path is None:
             logger.error(
@@ -627,7 +668,7 @@ def add(source, name, ref, branch, host, verbose):
         fetch_source = MarketplaceSource(
             name=probe_name,
             url=url,
-            ref=effective_ref,
+            ref="" if is_direct_url else effective_ref,
             path=detected_path,
         )
         manifest = fetch_marketplace(fetch_source, force_refresh=True)
@@ -658,15 +699,21 @@ def add(source, name, ref, branch, host, verbose):
         )
 
         logger.verbose_detail(f"    Source: {fetch_source.display_source}")
-        logger.verbose_detail(f"    Kind: {kind}")
-        logger.verbose_detail(f"    Ref: {effective_ref}")
-        logger.verbose_detail(f"    Detected path: {detected_path}")
+        logger.verbose_detail(
+            f"    Source type: {_display_source_kind(fetch_source.kind, is_direct_url)}"
+        )
+        if not is_direct_url:
+            logger.verbose_detail(f"    Ref: {effective_ref}")
+        if detected_path:
+            logger.verbose_detail(f"    Detected path: {detected_path}")
+        elif not is_direct_url:
+            logger.verbose_detail("    Detected path: direct local file")
         logger.verbose_detail(f"    Alias source: {alias_source}")
 
         final_source = MarketplaceSource(
             name=display_name,
             url=url,
-            ref=effective_ref,
+            ref="" if is_direct_url else effective_ref,
             path=detected_path,
         )
         add_marketplace(final_source)
@@ -689,6 +736,82 @@ def add(source, name, ref, branch, host, verbose):
         if verbose:
             logger.progress(traceback.format_exc(), symbol="info")
         sys.exit(1)
+
+
+def _split_source_fragment_ref(source: str) -> tuple[str, str]:
+    """Split an HTTPS git URL #ref fragment from the URL stored in the registry."""
+    raw = (source or "").strip()
+    if not raw.lower().startswith("https://"):
+        return raw, ""
+    parsed = urlsplit(raw)
+    if not parsed.fragment:
+        return raw, ""
+    clean_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
+    return clean_url, parsed.fragment
+
+
+def _is_remote_marketplace_json_url(url: str) -> bool:
+    """Return True when *url* names a hosted marketplace.json document.
+
+    Delegates to the single shared classifier in ``marketplace.models`` so
+    the CLI and ``MarketplaceSource`` cannot drift on the url-kind decision.
+    """
+    from ...marketplace.models import url_names_remote_manifest
+
+    return url_names_remote_manifest(url)
+
+
+def _should_warn_unpinned_git_url(
+    source: str,
+    kind: str,
+    is_direct_url: bool,
+    fragment_ref: str,
+    explicit_ref: bool,
+) -> bool:
+    """Return True when a git URL source uses the implicit mutable default ref."""
+    if is_direct_url or fragment_ref or explicit_ref:
+        return False
+    return source.lower().startswith("https://") and kind in {"github", "gitlab", "git"}
+
+
+def _local_source_points_to_file(source: MarketplaceSource) -> bool:
+    """Return True when a local marketplace source points directly to a file."""
+    if source.kind != "local":
+        return False
+    try:
+        return Path(source.local_path).expanduser().is_file()
+    except OSError:
+        return False
+
+
+def _display_source_kind(kind: str, is_direct_url: bool) -> str:
+    """Return a human-readable source kind for verbose CLI output."""
+    if is_direct_url:
+        return "hosted marketplace.json URL"
+    labels = {
+        "github": "GitHub repository",
+        "gitlab": "GitLab repository",
+        "git": "generic git repository",
+        "local": "local filesystem path",
+    }
+    return labels.get(kind, kind)
+
+
+def _default_alias_from_remote_url(url: str) -> str:
+    """Derive a stable default alias for a direct remote marketplace.json URL."""
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return "marketplace"
+    host = (parsed.hostname or "marketplace").lower().split(":", 1)[0]
+    path_segments = [seg for seg in (parsed.path or "").split("/") if seg]
+    parent = ""
+    if len(path_segments) >= 2 and path_segments[-1].lower() == "marketplace.json":
+        parent = path_segments[-2]
+    if parent:
+        alias = f"{host}-{parent}"
+        return re.sub(r"[^a-zA-Z0-9._-]", "_", alias).strip("._-") or host
+    return host
 
 
 def _default_alias_from_url(url: str) -> str:
@@ -845,7 +968,7 @@ def update(name, verbose):
         if name:
             source = get_marketplace_by_name(name)
             logger.start(f"Refreshing marketplace '{name}'...", symbol="gear")
-            clear_marketplace_cache(name, host=source.host)
+            clear_marketplace_cache(source=source)
             manifest = fetch_marketplace(source, force_refresh=True)
             logger.success(
                 f"Marketplace '{name}' updated ({len(manifest.plugins)} plugins)",
@@ -859,7 +982,7 @@ def update(name, verbose):
             logger.start(f"Refreshing {len(sources)} marketplace(s)...", symbol="gear")
             for s in sources:
                 try:
-                    clear_marketplace_cache(s.name, host=s.host)
+                    clear_marketplace_cache(source=s)
                     manifest = fetch_marketplace(s, force_refresh=True)
                     logger.tree_item(f"  {s.name} ({len(manifest.plugins)} plugins)")
                 except Exception as exc:
@@ -905,7 +1028,7 @@ def remove(name, yes, verbose):
                 return
 
         remove_marketplace(name)
-        clear_marketplace_cache(name, host=source.host)
+        clear_marketplace_cache(source=source)
         logger.success(f"Marketplace '{name}' removed", symbol="check")
 
     except Exception as e:
@@ -1027,15 +1150,36 @@ def _load_current_versions():
 def _extract_tag_versions(refs, entry, yml, include_prerelease):
     """Extract (SemVer, tag_name) pairs from remote refs for a package entry."""
     from ...marketplace._shared import iter_semver_tags
-    from ...marketplace.tag_pattern import build_tag_regex
+    from ...marketplace.tag_pattern import (
+        build_tag_regex,
+        infer_tag_pattern_from_refs,
+    )
+
+    def _collect(pattern: str) -> list:
+        tag_rx = (
+            build_tag_regex(pattern, name=entry.name)
+            if "{name}" in pattern
+            else build_tag_regex(pattern)
+        )
+        collected = []
+        for sv, tag_name, _ in iter_semver_tags(refs, tag_rx):
+            if sv.is_prerelease and not (include_prerelease or entry.include_prerelease):
+                continue
+            collected.append((sv, tag_name))
+        return collected
 
     pattern = entry.tag_pattern or yml.build.tag_pattern
-    tag_rx = build_tag_regex(pattern)
-    results = []
-    for sv, tag_name, _ in iter_semver_tags(refs, tag_rx):
-        if sv.is_prerelease and not (include_prerelease or entry.include_prerelease):
-            continue
-        results.append((sv, tag_name))
+    results = _collect(pattern)
+    if not results:
+        inferred = infer_tag_pattern_from_refs(refs, entry.name)
+        if inferred and inferred != pattern:
+            logger.debug(
+                "Configured tag pattern %r matched no tags for %s; inferred %r",
+                pattern,
+                entry.name,
+                inferred,
+            )
+            results = _collect(inferred)
     return results
 
 
@@ -1194,223 +1338,6 @@ def _render_doctor_table(logger, checks):
     console.print(table)
 
 
-def _load_targets_file(path):
-    """Load and validate a consumer-targets YAML file.
-
-    Returns a list of ``ConsumerTarget`` instances.
-
-    Raises ``SystemExit`` on validation failures.
-    """
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        return None, f"Invalid YAML in targets file: {exc}"
-    except OSError as exc:
-        return None, f"Cannot read targets file: {exc}"
-
-    if not isinstance(raw, dict) or "targets" not in raw:
-        return None, "Targets file must contain a 'targets' key."
-
-    raw_targets = raw["targets"]
-    if not isinstance(raw_targets, list) or not raw_targets:
-        return None, "Targets file must contain a non-empty 'targets' list."
-
-    targets = []
-    for idx, entry in enumerate(raw_targets):
-        if not isinstance(entry, dict):
-            return None, f"targets[{idx}] must be a mapping."
-
-        repo = entry.get("repo")
-        if not repo or not isinstance(repo, str):
-            return None, f"targets[{idx}]: 'repo' is required (owner/name)."
-
-        # Validate repo format: owner/name
-        parts = repo.split("/")
-        if len(parts) != 2 or not parts[0] or not parts[1]:
-            return None, f"targets[{idx}]: 'repo' must be 'owner/name', got '{repo}'."
-
-        branch = entry.get("branch")
-        if not branch or not isinstance(branch, str):
-            return None, f"targets[{idx}]: 'branch' is required."
-
-        path_in_repo = entry.get("path_in_repo", "apm.yml")
-        if not isinstance(path_in_repo, str) or not path_in_repo.strip():
-            return None, f"targets[{idx}]: 'path_in_repo' must be a non-empty string."
-
-        # Path safety check
-        try:
-            validate_path_segments(
-                path_in_repo,
-                context=f"targets[{idx}].path_in_repo",
-            )
-        except PathTraversalError as exc:
-            return None, str(exc)
-
-        targets.append(
-            ConsumerTarget(
-                repo=repo.strip(),
-                branch=branch.strip(),
-                path_in_repo=path_in_repo.strip(),
-            )
-        )
-
-    return targets, None
-
-
-def _render_publish_plan(logger, plan):
-    """Render the publish plan as a Rich panel + target table."""
-    console = _get_console()
-
-    plan_text = (
-        f"Marketplace: {plan.marketplace_name}\n"
-        f"New version: {plan.marketplace_version}\n"
-        f"New ref:     {plan.new_ref}\n"
-        f"Branch:      {plan.branch_name}\n"
-        f"Targets:     {len(plan.targets)}"
-    )
-
-    if not console:
-        logger.progress("Publish plan:", symbol="info")
-        for line in plan_text.splitlines():
-            logger.tree_item(f"  {line}")
-        click.echo()
-        for t in plan.targets:
-            logger.tree_item(f"  [*] {t.repo}  branch={t.branch}  path={t.path_in_repo}")
-        return
-
-    from rich.panel import Panel
-    from rich.table import Table
-    from rich.text import Text
-
-    console.print()
-    console.print(
-        Panel(
-            plan_text,
-            title="Publish plan",
-            border_style="cyan",
-        )
-    )
-
-    table = Table(
-        show_header=True,
-        header_style="bold cyan",
-        border_style="cyan",
-    )
-    table.add_column("Repo", style="bold white", no_wrap=True)
-    table.add_column("Branch", style="cyan")
-    table.add_column("Path", style="dim")
-    table.add_column("Status", no_wrap=True, width=10)
-
-    for t in plan.targets:
-        table.add_row(t.repo, t.branch, t.path_in_repo, Text("[*]"))
-
-    console.print(table)
-    console.print()
-
-
-def _render_publish_summary(logger, results, pr_results, no_pr, dry_run):
-    """Render the final publish summary table."""
-    console = _get_console()
-
-    # Build lookup for PR results by repo
-    pr_by_repo = {}
-    for pr_r in pr_results:
-        pr_by_repo[pr_r.target.repo] = pr_r
-
-    updated_count = sum(1 for r in results if r.outcome == PublishOutcome.UPDATED)
-    failed_count = sum(1 for r in results if r.outcome == PublishOutcome.FAILED)
-    total = len(results)
-
-    if not console:
-        click.echo()
-        for r in results:
-            icon = _outcome_symbol(r.outcome)
-            pr_info = ""
-            if not no_pr:
-                pr_r = pr_by_repo.get(r.target.repo)
-                if pr_r:
-                    pr_info = f"  PR: {pr_r.state.value}"
-                    if pr_r.pr_number:
-                        pr_info += f" #{pr_r.pr_number}"
-            logger.tree_item(f"  {icon} {r.target.repo}: {r.outcome.value}{pr_info} -- {r.message}")
-        click.echo()
-        _render_publish_footer(logger, updated_count, failed_count, total, dry_run)
-        return
-
-    from rich.table import Table
-    from rich.text import Text
-
-    table = Table(
-        title="Publish Results",
-        show_header=True,
-        header_style="bold cyan",
-        border_style="cyan",
-    )
-    table.add_column("Status", no_wrap=True, width=6)
-    table.add_column("Repo", style="bold white", no_wrap=True)
-    table.add_column("Outcome", style="white")
-
-    if not no_pr:
-        table.add_column("PR State", style="white")
-        table.add_column("PR #", style="cyan", justify="right")
-        table.add_column("PR URL", style="dim")
-
-    table.add_column("Message", style="dim", ratio=1)
-
-    for r in results:
-        icon = _outcome_symbol(r.outcome)
-        row = [Text(icon), r.target.repo, r.outcome.value]
-
-        if not no_pr:
-            pr_r = pr_by_repo.get(r.target.repo)
-            if pr_r:
-                row.append(pr_r.state.value)
-                row.append(str(pr_r.pr_number) if pr_r.pr_number else "--")
-                row.append(pr_r.pr_url or "--")
-            else:
-                row.extend(["--", "--", "--"])
-
-        row.append(r.message)
-        table.add_row(*row)
-
-    console.print()
-    console.print(table)
-    console.print()
-
-    _render_publish_footer(logger, updated_count, failed_count, total, dry_run)
-
-
-def _outcome_symbol(outcome):
-    """Map a ``PublishOutcome`` to a bracket symbol."""
-    if outcome == PublishOutcome.UPDATED:
-        return "[+]"
-    elif outcome == PublishOutcome.FAILED:
-        return "[x]"
-    elif outcome in (
-        PublishOutcome.SKIPPED_DOWNGRADE,
-        PublishOutcome.SKIPPED_REF_CHANGE,
-    ):
-        return "[!]"
-    elif outcome == PublishOutcome.NO_CHANGE:
-        return "[*]"
-    return "[*]"
-
-
-def _render_publish_footer(logger, updated, failed, total, dry_run):
-    """Render the footer success/warning line."""
-    suffix = " (dry-run)" if dry_run else ""
-    if failed == 0:
-        logger.success(
-            f"Published {updated}/{total} targets{suffix}",
-            symbol="check",
-        )
-    else:
-        logger.warning(
-            f"Published {updated}/{total} targets, {failed} failed{suffix}",
-            symbol="warning",
-        )
-
-
 @click.command(
     name="search",
     help="Search plugins in a marketplace (QUERY@MARKETPLACE)",
@@ -1508,12 +1435,11 @@ def search(expression, limit, verbose):
         sys.exit(1)
 
 
+from .audit import audit  # noqa: E402
 from .check import check  # noqa: E402
-from .doctor import doctor  # noqa: E402
 from .init import init  # noqa: E402
 from .migrate import migrate  # noqa: E402
 from .outdated import outdated  # noqa: E402
-from .publish import publish  # noqa: E402
 from .validate import validate  # noqa: E402
 
 # Public surface: the click group + per-command callables. Domain types are
@@ -1525,33 +1451,25 @@ __all__ = [
     "BuildOptions",
     "BuildReport",
     "ConfigSource",
-    "ConsumerTarget",
     "GitLsRemoteError",
     "HeadNotAllowedError",
     "MarketplaceBuilder",
     "MarketplaceGroup",
     "MarketplaceNotFoundError",
-    "MarketplacePublisher",
     "MarketplaceYmlError",
     "NoMatchingVersionError",
     "OfflineMissError",
     "PathTraversalError",
-    "PrIntegrator",
-    "PrResult",
-    "PrState",
-    "PublishOutcome",
-    "PublishPlan",
     "RefNotFoundError",
     "RefResolver",
     "RemoteRef",
     "ResolvedPackage",
     "SemVer",
-    "TargetResult",
     "add",
+    "audit",
     "browse",
     "check",
     "detect_config_source",
-    "doctor",
     "init",
     "list_cmd",
     "load_marketplace_config",
@@ -1562,7 +1480,6 @@ __all__ = [
     "outdated",
     "package",
     "parse_semver",
-    "publish",
     "remove",
     "satisfies_range",
     "search",

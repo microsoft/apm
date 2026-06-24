@@ -12,7 +12,7 @@ import pytest
 from apm_cli.core.auth import AuthResolver
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.marketplace import client as client_mod
-from apm_cli.marketplace.errors import MarketplaceFetchError
+from apm_cli.marketplace.errors import MarketplaceError, MarketplaceFetchError
 from apm_cli.marketplace.models import MarketplaceSource
 
 
@@ -167,6 +167,244 @@ class TestFetchMarketplace:
 
         with pytest.raises(MarketplaceFetchError):
             client_mod.fetch_marketplace(source, force_refresh=True, auth_resolver=mock_resolver)
+
+    def test_fetch_remote_marketplace_url_records_digest_and_etag(self, monkeypatch):
+        source = MarketplaceSource(
+            name="catalog",
+            url="https://catalog.example.com/marketplace.json",
+            path="",
+        )
+        raw = b'{"name":"catalog","plugins":[{"name":"tool","repository":"acme/tool"}]}'
+
+        class Response:
+            status_code = 200
+            url = "https://catalog.example.com/marketplace.json"
+
+            def __init__(self):
+                self.headers = {
+                    "ETag": "etag-1",
+                    "Last-Modified": "Mon, 01 Jan 2024 00:00:00 GMT",
+                }
+
+            @property
+            def content(self):
+                raise AssertionError(
+                    "remote marketplace.json fetch must stream, not read response.content"
+                )
+
+            def iter_content(self, chunk_size):
+                yield raw[:chunk_size]
+                yield raw[chunk_size:]
+
+            def raise_for_status(self):
+                return None
+
+            def close(self):
+                return None
+
+        seen_calls: list[tuple[dict, bool]] = []
+
+        class Session:
+            def get(self, url, headers=None, timeout=None, stream=False):
+                parsed = urlparse(url)
+                assert (parsed.scheme, parsed.hostname, parsed.path) == (
+                    "https",
+                    "catalog.example.com",
+                    "/marketplace.json",
+                )
+                seen_calls.append((headers or {}, stream))
+                return Response()
+
+        monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
+
+        manifest = client_mod.fetch_marketplace(source, force_refresh=True)
+
+        parsed_source_url = urlparse(manifest.source_url)
+        assert (parsed_source_url.scheme, parsed_source_url.hostname, parsed_source_url.path) == (
+            "https",
+            "catalog.example.com",
+            "/marketplace.json",
+        )
+        assert manifest.source_digest.startswith("sha256:")
+        assert len(manifest.source_digest) == len("sha256:") + 64
+        assert seen_calls == [({"User-Agent": "apm-cli"}, True)]
+        meta = client_mod._read_stale_meta(client_mod._cache_key(source))
+        assert meta["etag"] == "etag-1"
+        assert meta["index_digest"] == manifest.source_digest
+
+    def test_fetch_remote_marketplace_url_sends_conditional_headers(self, monkeypatch):
+        source = MarketplaceSource(
+            name="catalog",
+            url="https://catalog.example.com/marketplace.json",
+            path="",
+        )
+        cached = {"name": "catalog", "plugins": []}
+        cache_key = client_mod._cache_key(source)
+        client_mod._write_cache(
+            cache_key,
+            cached,
+            index_digest="sha256:" + "a" * 64,
+            etag="etag-1",
+            last_modified="Mon, 01 Jan 2024 00:00:00 GMT",
+        )
+
+        seen_headers: list[dict] = []
+
+        class Response:
+            status_code = 304
+            url = "https://catalog.example.com/marketplace.json"
+
+            def __init__(self):
+                self.headers = {}
+
+            def raise_for_status(self):
+                return None
+
+            def close(self):
+                return None
+
+        class Session:
+            def get(self, url, headers=None, timeout=None, stream=False):
+                seen_headers.append(headers or {})
+                assert stream is True
+                return Response()
+
+        monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
+
+        manifest = client_mod.fetch_marketplace(source, force_refresh=True)
+
+        assert manifest.name == "catalog"
+        assert manifest.source_digest == "sha256:" + "a" * 64
+        assert seen_headers[0]["If-None-Match"] == "etag-1"
+        assert seen_headers[0]["If-Modified-Since"] == "Mon, 01 Jan 2024 00:00:00 GMT"
+
+    def test_fetch_remote_marketplace_url_rejects_redirect_to_http(self, monkeypatch):
+        source_url = "https://catalog.example.com/marketplace.json"
+
+        class Response:
+            status_code = 200
+            url = "http://catalog.example.com/marketplace.json"
+
+            def __init__(self):
+                self.headers: dict[str, str] = {}
+
+            def raise_for_status(self):
+                return None
+
+            def close(self):
+                return None
+
+        class Session:
+            def get(self, url, headers=None, timeout=None, stream=False):
+                assert stream is True
+                return Response()
+
+        monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
+
+        with pytest.raises(MarketplaceFetchError, match="redirect to non-HTTPS URL rejected"):
+            client_mod._fetch_url_direct(source_url)
+
+    def test_http_get_clears_session_cookies_between_hosts(self, monkeypatch):
+        class Cookies:
+            def __init__(self):
+                self.clear_count = 0
+
+            def clear(self):
+                self.clear_count += 1
+
+        class Session:
+            def __init__(self):
+                self.cookies = Cookies()
+                self.calls: list[str] = []
+
+            def get(self, url, **kwargs):
+                self.calls.append(url)
+                return object()
+
+        session = Session()
+        monkeypatch.setattr(client_mod, "_HTTP_SESSION", session, raising=False)
+
+        assert client_mod._http_get("https://one.example.test") is not None
+        assert client_mod._http_get("https://two.example.test") is not None
+        assert session.calls == ["https://one.example.test", "https://two.example.test"]
+        assert session.cookies.clear_count == 4
+
+    def test_fetch_remote_marketplace_url_streams_without_content_length(self, monkeypatch):
+        source_url = "https://catalog.example.com/marketplace.json"
+        raw = b'{"name":"catalog","plugins":[]}'
+        seen_calls: list[dict[str, object]] = []
+
+        class Response:
+            status_code = 200
+            url = source_url
+
+            def __init__(self):
+                self.headers: dict[str, str] = {}
+
+            @property
+            def content(self):
+                raise AssertionError("remote marketplace.json fetch must stream bounded chunks")
+
+            def iter_content(self, chunk_size):
+                for idx in range(0, len(raw), 5):
+                    yield raw[idx : idx + 5]
+
+            def raise_for_status(self):
+                return None
+
+            def close(self):
+                return None
+
+        class Session:
+            def get(self, url, headers=None, timeout=None, stream=False):
+                seen_calls.append({"url": url, "timeout": timeout, "stream": stream})
+                return Response()
+
+        monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
+
+        result = client_mod._fetch_url_direct(source_url)
+
+        assert result is not None
+        assert result.data == {"name": "catalog", "plugins": []}
+        assert seen_calls == [{"url": source_url, "timeout": 30, "stream": True}]
+
+    def test_fetch_remote_marketplace_url_rejects_oversized_stream_without_content_length(
+        self, monkeypatch
+    ):
+        source_url = "https://catalog.example.com/marketplace.json"
+        monkeypatch.setattr(client_mod, "_MAX_MARKETPLACE_JSON_BYTES", 8)
+
+        class Response:
+            status_code = 200
+            url = source_url
+
+            def __init__(self):
+                self.headers: dict[str, str] = {}
+
+            @property
+            def content(self):
+                raise AssertionError("remote marketplace.json fetch must stream bounded chunks")
+
+            def iter_content(self, chunk_size):
+                yield b"1234"
+                yield b"5678"
+                yield b"9"
+
+            def raise_for_status(self):
+                return None
+
+            def close(self):
+                return None
+
+        class Session:
+            def get(self, url, headers=None, timeout=None, stream=False):
+                assert stream is True
+                return Response()
+
+        monkeypatch.setattr(client_mod, "_HTTP_SESSION", Session(), raising=False)
+
+        with pytest.raises(MarketplaceFetchError, match=r"marketplace\.json exceeds"):
+            client_mod._fetch_url_direct(source_url)
 
 
 class TestAutoDetectPath:
@@ -470,7 +708,7 @@ class TestDirectFetchHostRouting:
 
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
-            patch("apm_cli.marketplace.client.requests.get", side_effect=fake_get),
+            patch("apm_cli.marketplace.client._http_get", side_effect=fake_get),
         ):
             resolver = AuthResolver()
             result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
@@ -510,7 +748,7 @@ class TestDirectFetchHostRouting:
         with (
             patch.dict(os.environ, {"GITLAB_APM_PAT": "glpat-test"}, clear=False),
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
-            patch("apm_cli.marketplace.client.requests.get", side_effect=fake_get),
+            patch("apm_cli.marketplace.client._http_get", side_effect=fake_get),
         ):
             resolver = AuthResolver()
             result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
@@ -537,7 +775,7 @@ class TestDirectFetchHostRouting:
 
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
-            patch("apm_cli.marketplace.client.requests.get", side_effect=fake_get),
+            patch("apm_cli.marketplace.client._http_get", side_effect=fake_get),
         ):
             resolver = AuthResolver()
             client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
@@ -557,7 +795,7 @@ class TestDirectFetchHostRouting:
 
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
-            patch("apm_cli.marketplace.client.requests.get", side_effect=fake_get),
+            patch("apm_cli.marketplace.client._http_get", side_effect=fake_get),
         ):
             resolver = AuthResolver()
             client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
@@ -588,7 +826,7 @@ class TestDirectFetchHostRouting:
                     "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
                     return_value=None,
                 ),
-                patch("apm_cli.marketplace.client.requests.get", side_effect=fake_get),
+                patch("apm_cli.marketplace.client._http_get", side_effect=fake_get),
             ):
                 resolver = AuthResolver()
                 client_mod._fetch_file(source, "marketplace.json", auth_resolver=resolver)
@@ -614,7 +852,7 @@ class TestDirectFetchHostRouting:
         mock_git = MagicMock(return_value=None)
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
-            patch("apm_cli.marketplace.client.requests.get") as mock_get,
+            patch("apm_cli.marketplace.client._http_get") as mock_get,
             patch.dict("apm_cli.marketplace.client._FETCHERS", {"git": mock_git}),
         ):
             resolver = AuthResolver()
@@ -643,7 +881,7 @@ class TestDirectFetchHostRouting:
                 "apm_cli.deps.artifactory_entry.fetch_entry_from_archive",
                 return_value=raw,
             ),
-            patch("apm_cli.marketplace.client.requests.get", mock_get),
+            patch("apm_cli.marketplace.client._http_get", mock_get),
         ):
             result = client_mod._fetch_file(source, "marketplace.json")
 
@@ -680,7 +918,7 @@ class TestDirectFetchHostRouting:
                 "apm_cli.deps.artifactory_entry.fetch_entry_from_archive",
                 return_value=None,
             ),
-            patch("apm_cli.marketplace.client.requests.get", mock_get),
+            patch("apm_cli.marketplace.client._http_get", mock_get),
         ):
             result = client_mod._fetch_file(source, "marketplace.json")
 
@@ -704,7 +942,7 @@ class TestDirectFetchHostRouting:
                 "apm_cli.deps.artifactory_entry.fetch_entry_from_archive",
                 return_value=None,
             ),
-            patch("apm_cli.marketplace.client.requests.get", mock_get),
+            patch("apm_cli.marketplace.client._http_get", mock_get),
         ):
             result = client_mod._fetch_file(source, "marketplace.json")
 
@@ -800,7 +1038,7 @@ class TestFetchFileHostKindGuard:
         mock_git = MagicMock(return_value=None)
         with (
             patch("apm_cli.deps.registry_proxy.RegistryConfig.from_env", return_value=None),
-            patch("apm_cli.marketplace.client.requests.get") as mock_get,
+            patch("apm_cli.marketplace.client._http_get") as mock_get,
             patch.dict("apm_cli.marketplace.client._FETCHERS", {"git": mock_git}),
         ):
             client_mod._fetch_file(source, "marketplace.json")
@@ -821,3 +1059,126 @@ class TestFetchFileHostKindGuard:
             result = client_mod._fetch_file(source, "marketplace.json", auth_resolver=mock_resolver)
 
         assert result == {"name": "ok", "plugins": []}
+
+
+class TestFetchRaw:
+    """``fetch_raw`` -- public primitive for fetching arbitrary files at a ref."""
+
+    def test_wraps_auth_failure_in_marketplace_error_not_fetch_error(self):
+        # Audit relies on this contract: fetch_raw raises the neutral
+        # MarketplaceError so callers can craft per-plugin context, instead
+        # of inheriting MarketplaceFetchError's "run apm marketplace update"
+        # hint -- which is wrong at plugin granularity.
+        auth_resolver = MagicMock()
+        auth_resolver.try_with_fallback.side_effect = RuntimeError("connection reset")
+
+        with patch(
+            "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
+            return_value=None,
+        ):
+            with pytest.raises(MarketplaceError) as excinfo:
+                client_mod.fetch_raw(
+                    host="github.com",
+                    owner="acme",
+                    repo="forge",
+                    file_path="agents/x/apm.yml",
+                    ref="abc123",
+                    auth_resolver=auth_resolver,
+                )
+
+        # Must NOT be the marketplace-specific subclass (whose default
+        # message format embeds "Run 'apm marketplace update X' to retry").
+        assert not isinstance(excinfo.value, MarketplaceFetchError)
+        # Must preserve the underlying reason and the file coords so the
+        # caller can build a useful per-plugin diagnostic.
+        msg = str(excinfo.value)
+        assert "connection reset" in msg
+        assert "acme/forge/agents/x/apm.yml@abc123" in msg
+
+    def test_returns_proxy_bytes_when_proxy_hits(self):
+        # Proxy success short-circuits before any auth path is consulted.
+        with patch(
+            "apm_cli.marketplace.client._try_proxy_fetch_raw",
+            return_value=b"hello",
+        ):
+            result = client_mod.fetch_raw(
+                host="github.com",
+                owner="o",
+                repo="r",
+                file_path="f",
+                ref="main",
+            )
+        assert result == b"hello"
+
+    def test_raises_when_proxy_only_blocks_github(self):
+        # PROXY_REGISTRY_ONLY=1 must keep us off GitHub even when the
+        # proxy has no entry.  Because that path cannot verify whether
+        # the file exists, fetch_raw must raise MarketplaceError instead
+        # of returning None -- otherwise audit would silently report the
+        # plugin as NO_MANIFEST in proxy-only environments rather than
+        # surfacing it as unverifiable.
+        cfg = MagicMock(enforce_only=True)
+        with (
+            patch(
+                "apm_cli.marketplace.client._try_proxy_fetch_raw",
+                return_value=None,
+            ),
+            patch(
+                "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
+                return_value=cfg,
+            ),
+        ):
+            with pytest.raises(MarketplaceError) as excinfo:
+                client_mod.fetch_raw(
+                    host="github.com",
+                    owner="o",
+                    repo="r",
+                    file_path="f",
+                    ref="main",
+                )
+
+        msg = str(excinfo.value)
+        assert "PROXY_REGISTRY_ONLY" in msg
+        # File coordinates surface so the audit log line is actionable.
+        assert "o/r/f@main" in msg
+        # Must remain the neutral base class, not the marketplace-specific
+        # subclass whose default message embeds an "apm marketplace update"
+        # retry hint that does not apply here.
+        assert not isinstance(excinfo.value, MarketplaceFetchError)
+
+    def test_non_github_host_rejected_before_request(self):
+        # Defense-in-depth, mirrors TestFetchFileHostKindGuard for
+        # _fetch_file: if a plugin source somehow surfaces a non-GitHub
+        # host (e.g. ``gitlab.com``) we MUST NOT attach a GitHub PAT to
+        # the fallback request -- doing so would leak credentials.
+        # ``fetch_raw`` must fail closed with MarketplaceError and never
+        # invoke requests.get.
+        with (
+            patch(
+                "apm_cli.marketplace.client._try_proxy_fetch_raw",
+                return_value=None,
+            ),
+            patch(
+                "apm_cli.deps.registry_proxy.RegistryConfig.from_env",
+                return_value=None,
+            ),
+            patch(
+                "apm_cli.marketplace.client._http_get",
+            ) as mock_get,
+        ):
+            with pytest.raises(MarketplaceError) as excinfo:
+                client_mod.fetch_raw(
+                    host="gitlab.com",
+                    owner="acme",
+                    repo="forge",
+                    file_path="apm.yml",
+                    ref="v1",
+                )
+
+        # No HTTP request must be issued -- proves credentials cannot leak.
+        mock_get.assert_not_called()
+        msg = str(excinfo.value)
+        assert _quoted_hosts(msg) == {"gitlab.com"}
+        assert "not a supported plugin source" in msg
+        # Coordinates remain in the message so audit's per-plugin line is actionable.
+        assert "acme/forge/apm.yml@v1" in msg

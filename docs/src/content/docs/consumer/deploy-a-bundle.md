@@ -1,15 +1,15 @@
 ---
 title: Deploy a local bundle
-description: Install a plugin-format bundle from a directory or tarball without touching apm.yml.
+description: Install a plugin-format bundle from a directory or archive without touching apm.yml.
 ---
 
-You have a bundle on disk -- a directory or `.tar.gz` someone handed you, or
-the output of `apm pack --format plugin`. Drop it into a project with one
-command:
+You have a bundle on disk -- a directory or `.zip` someone handed you (or a
+legacy `.tar.gz`), or the output of `apm pack --format plugin`. Drop it into a
+project with one command:
 
 ```bash
 apm install ./path/to/bundle
-apm install ./dist/my-pkg-1.0.0.tar.gz
+apm install ./dist/my-pkg-1.0.0.zip
 ```
 
 This is a sibling flow to [Install packages](../install-packages/). Instead
@@ -19,8 +19,8 @@ the install is imperative, like `dpkg -i` next to `apt install`.
 
 ## What counts as a bundle
 
-A plugin-format bundle is a directory (or gzipped tarball of one) with a
-`plugin.json` at the root and primitive folders alongside it:
+A plugin-format bundle is a directory, zip archive, or legacy gzipped tarball
+with a `plugin.json` at the root and primitive folders alongside it:
 
 ```
 my-bundle/
@@ -44,8 +44,8 @@ warns and proceeds.
 ## How the install works
 
 ```
-$ apm install ./dist/my-pkg-1.0.0.tar.gz --target copilot
-[>] Installing local bundle from ./dist/my-pkg-1.0.0.tar.gz
+$ apm install ./dist/my-pkg-1.0.0.zip --target copilot
+[>] Installing local bundle from ./dist/my-pkg-1.0.0.zip
 [+] Bundle integrity verified
 [+] Deployed 7 files to .github/
 ```
@@ -53,7 +53,7 @@ $ apm install ./dist/my-pkg-1.0.0.tar.gz --target copilot
 Steps APM runs:
 
 1. **Detect.** Path exists and contains `plugin.json` at the bundle root
-   (tarballs are extracted to a temp directory first).
+   (zip archives and legacy tarballs are extracted to a temp directory first).
 2. **Verify integrity.** Hash every file listed in `pack.bundle_files`;
    reject any symlink, hash mismatch, or unlisted file.
 3. **Deploy.** Map `agents/`, `skills/`, `commands/`, `hooks/` into the
@@ -116,7 +116,7 @@ Two ways forward:
   `apm pack --format plugin --archive` and install the new artifact.
 - **Unpack.** If you only have the legacy artifact, use `apm unpack
   <bundle>` to extract it. `apm unpack` is deprecated and will be removed
-  in v0.14; prefer repacking when you can.
+  in a future release; prefer repacking when you can.
 
 A plain directory without `plugin.json` is not treated as a bundle at all.
 APM falls through to the dependency resolver and treats the path as a

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apm-cli"
-version = "0.15.0"
+version = "0.21.0"
 description = "MCP configuration tool"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -88,21 +88,25 @@ ignore = [
     "S602",     # subprocess-popen-with-shell -- intentional in CLI wrapping git/pip
     # --- Deferred rules: enable in dedicated future PRs ---
     "SIM102",   # collapsible-if -- 28 violations, auto-fixable style improvement
-    "RUF003",   # ambiguous-unicode-character-comment -- 14 violations, review against ASCII convention
-    "RUF002",   # ambiguous-unicode-character-docstring -- 8 violations, same as above
 ]
 
 [tool.ruff.lint.pylint]
 # High initial thresholds set just above current codebase maximums.
 # Prevents new code from exceeding the worst existing violations.
 # Tighten these over time via dedicated refactoring PRs.
-max-statements = 275   # current max: 269 (mcp_integrator.py::install)
-max-args = 18          # current max: 16  (commands/install.py)
-max-branches = 115     # current max: 108 (mcp_integrator.py::install)
-max-returns = 18       # current max: 16  (marketplace/publisher.py)
+# Stage 1 thresholds (PR #1464, issue #1077).
+# Roadmap: Stage 2 targets max-complexity<=20, max-branches<=25 (McCabe standard).
+max-statements = 200   # Stage 1 (was 275)
+max-args = 15          # Stage 1 (was 18)
+max-branches = 60      # Stage 1 (was 115)
+max-returns = 12       # Stage 1 (was 18)
 
 [tool.ruff.lint.mccabe]
-max-complexity = 100   # current max: 97  (mcp_integrator.py::install)
+# Stage 1 (was 100). Stage 2 target: <=20 (McCabe industry standard).
+max-complexity = 50
+
+[tool.ruff.lint.isort]
+known-first-party = ["apm_cli"]
 
 [tool.ruff.lint.per-file-ignores]
 # Subprocess calls are intentional in a CLI tool
@@ -120,7 +124,6 @@ max-complexity = 100   # current max: 97  (mcp_integrator.py::install)
 "src/apm_cli/commands/init.py" = ["F821", "S603", "S607"]
 "src/apm_cli/install/pipeline.py" = ["F821", "S603", "S607"]
 "src/apm_cli/integration/skill_integrator.py" = ["F821", "S603", "S607"]
-
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
@@ -165,5 +168,6 @@ markers = [
     "requires_runtime_copilot: requires GitHub Copilot CLI runtime installed",
     "requires_runtime_llm: requires llm runtime installed",
     "requires_inference: requires APM_RUN_INFERENCE_TESTS=1 + model API access",
+    "req: binds a test to one or more OpenAPM req-XXX ids (spec-conformance suite)",
 ]
 

@@ -9,12 +9,9 @@ under ``pack.bundle_files`` (issue #1098).
 
 import hashlib
 import json
-import os  # noqa: F401
 import re
 import shutil
-import tarfile
 from pathlib import Path, PurePosixPath
-from typing import Dict, List, Optional, Set, Tuple  # noqa: F401, UP035
 
 import yaml
 
@@ -25,7 +22,13 @@ from ..deps.lockfile import (
     migrate_lockfile_if_needed,
 )
 from ..models.apm_package import APMPackage, DependencyReference
-from ..utils.console import _rich_info, _rich_warning
+from ..utils.archive import (
+    projected_archive_path,
+    validate_archive_format,
+    write_tar_archive,
+    write_zip_archive,
+)
+from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from .packer import PackResult
 
@@ -105,6 +108,12 @@ def _collect_apm_components(apm_dir: Path) -> list[tuple[Path, str]]:
     # commands/ -> commands/
     _collect_recursive(apm_dir / "commands", "commands", components)
 
+    # extensions/ -> extensions/ (canvas extensions, experimental Copilot-only).
+    # Preserved verbatim so an offline bundle can carry a canvas; the files are
+    # inert until the consumer enables the ``canvas`` experimental flag AND
+    # passes ``--trust-canvas-extensions`` at install time.
+    _collect_recursive(apm_dir / "extensions", "extensions", components)
+
     return components
 
 
@@ -115,7 +124,7 @@ def _collect_root_plugin_components(project_root: Path) -> list[tuple[Path, str]
     ``skills/``, etc. at the repo root) have their files picked up here.
     """
     components: list[tuple[Path, str]] = []
-    for dir_name in ("agents", "skills", "commands", "instructions"):
+    for dir_name in ("agents", "skills", "commands", "instructions", "extensions"):
         _collect_recursive(project_root / dir_name, dir_name, components)
     return components
 
@@ -270,17 +279,9 @@ def _collect_hooks_from_root(package_root: Path) -> dict:
 
 def _collect_mcp(package_root: Path) -> dict:
     """Return ``mcpServers`` dict from ``.mcp.json``."""
-    mcp_file = package_root / ".mcp.json"
-    if not mcp_file.is_file() or mcp_file.is_symlink():
-        return {}
-    try:
-        data = json.loads(mcp_file.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            servers = data.get("mcpServers", {})
-            return dict(servers) if isinstance(servers, dict) else {}
-    except (json.JSONDecodeError, OSError):
-        pass
-    return {}
+    from ..core.plugin_manifest import collect_mcp_servers
+
+    return collect_mcp_servers(package_root)
 
 
 # ---------------------------------------------------------------------------
@@ -339,42 +340,15 @@ def _find_or_synthesize_plugin_json(
     suppress_missing_warning: bool = False,
     logger=None,
 ) -> dict:
-    """Locate an existing ``plugin.json`` or synthesise one from ``apm.yml``.
+    """Locate an existing ``plugin.json`` or synthesise one from ``apm.yml``."""
+    from ..core.plugin_manifest import find_or_synthesize_plugin_json
 
-    ``suppress_missing_warning`` silences the "no plugin.json on disk"
-    message when the caller knows synthesis is the expected path -- for
-    example a marketplace-publishing run that happens to have
-    ``dependencies:`` for local dev. Genuine parse errors on an existing
-    file are always surfaced.
-    """
-    from ..deps.plugin_parser import synthesize_plugin_json_from_apm_yml
-    from ..utils.helpers import find_plugin_json
-
-    plugin_json_path = find_plugin_json(project_root)
-    if plugin_json_path is not None:
-        try:
-            return json.loads(plugin_json_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
-            _warn_msg = (
-                f"Found plugin.json at {plugin_json_path} but could not parse it: {exc}. "
-                "Falling back to synthesis from apm.yml."
-            )
-            if logger:
-                logger.warning(_warn_msg)
-            else:
-                _rich_warning(_warn_msg)
-
-    elif not suppress_missing_warning:
-        # Demoted from warning to info: synthesis from apm.yml is the
-        # APM-native happy path for plugin authoring, not a defect.
-        _info_msg = (
-            "No plugin.json on disk; deriving it from apm.yml (the APM-native source of truth)."
-        )
-        if logger:
-            logger.info(_info_msg)
-        else:
-            _rich_info(_info_msg)
-    return synthesize_plugin_json_from_apm_yml(apm_yml_path)
+    return find_or_synthesize_plugin_json(
+        project_root,
+        apm_yml_path,
+        suppress_missing_warning=suppress_missing_warning,
+        logger=logger,
+    )
 
 
 def _has_marketplace_block(apm_yml_path: Path) -> bool:
@@ -444,6 +418,7 @@ def export_plugin_bundle(
     output_dir: Path,
     target: str | None = None,
     archive: bool = False,
+    archive_format: str = "zip",
     dry_run: bool = False,
     force: bool = False,
     logger=None,
@@ -457,7 +432,8 @@ def export_plugin_bundle(
         project_root: Root of the project containing ``apm.yml``.
         output_dir: Parent directory for the generated bundle.
         target: Unused for plugin format (reserved for future use).
-        archive: If True, produce a ``.tar.gz`` and remove the directory.
+        archive: If True, produce a ``.zip`` (or ``.tar.gz`` when *archive_format* is ``"tar.gz"``) and remove the directory.
+        archive_format: Archive format when *archive* is True -- ``"zip"`` (default) or ``"tar.gz"``.
         dry_run: If True, resolve the file list without writing to disk.
         force: On collision, last writer wins instead of first.
 
@@ -582,7 +558,12 @@ def export_plugin_bundle(
     bundle_dir = output_dir / f"{safe_name}-{safe_version}"
     ensure_path_within(bundle_dir, output_dir)
     if dry_run:
-        return PackResult(bundle_path=bundle_dir, files=output_files)
+        bundle_path = (
+            projected_archive_path(output_dir, bundle_dir.name, archive_format)
+            if archive
+            else bundle_dir
+        )
+        return PackResult(bundle_path=bundle_path, files=output_files)
 
     # 10. Security scan (warn-only, never blocks)
     from ..security.gate import WARN_POLICY, SecurityGate
@@ -682,16 +663,12 @@ def export_plugin_bundle(
 
     # 15. Archive if requested
     if archive:
-        archive_path = output_dir / f"{bundle_dir.name}.tar.gz"
-        ensure_path_within(archive_path, output_dir)
-        with tarfile.open(archive_path, "w:gz") as tar:
-
-            def _tar_filter(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
-                if info.issym() or info.islnk():
-                    return None  # reject symlinks injected after write
-                return info
-
-            tar.add(bundle_dir, arcname=bundle_dir.name, filter=_tar_filter)
+        validate_archive_format(archive_format)
+        archive_path = projected_archive_path(output_dir, bundle_dir.name, archive_format)
+        if archive_format == "tar.gz":
+            write_tar_archive(bundle_dir, archive_path)
+        else:
+            write_zip_archive(bundle_dir, archive_path)
         shutil.rmtree(bundle_dir)
         result.bundle_path = archive_path
 

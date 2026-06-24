@@ -3,12 +3,12 @@
 Covers the helper functions and compile-command branches that are not yet
 reached by test_compile_target_flag.py:
 
-* _display_single_file_summary  – console present, console absent, fallback
-* _display_next_steps           – console present, ImportError fallback
-* _display_validation_errors    – console present, ImportError/NameError fallback
-* _get_validation_suggestion    – every suggestion branch
-* _resolve_effective_target     – explicit flag, apm.yml, auto-detect paths
-* compile command               – no-apm-yml, --all + --target conflict,
+* _display_single_file_summary  - console present, console absent, fallback
+* _display_next_steps           - console present, ImportError fallback
+* _display_validation_errors    - console present, ImportError/NameError fallback
+* _get_validation_suggestion    - every suggestion branch
+* _resolve_effective_target     - explicit flag, apm.yml, auto-detect paths
+* compile command               - no-apm-yml, --all + --target conflict,
                                   --all target expansion, validate mode,
                                   watch mode routing, distributed success,
                                   zero-output warning, result errors,
@@ -326,65 +326,54 @@ class TestGetValidationSuggestion:
 class TestResolveEffectiveTarget:
     """Tests for _resolve_effective_target()."""
 
-    def _call(self, target: Any) -> tuple[Any, str, Any]:
+    def _call(self, target: Any, source_root: Any = None) -> tuple[Any, str, Any]:
         from apm_cli.commands.compile.cli import _resolve_effective_target
 
-        return _resolve_effective_target(target)
+        if source_root is None:
+            source_root = Path(".")
+        return _resolve_effective_target(target, source_root=source_root)
 
-    def test_none_triggers_auto_detect(self) -> None:
+    def test_none_triggers_auto_detect(self, tmp_path: Path) -> None:
         """target=None should fall through to detect_target() in a no-apm-yml scenario."""
-        # detect_target is imported locally inside _resolve_effective_target, so we
-        # patch it via its canonical module path.
-        with (
-            patch(
-                "apm_cli.core.target_detection.detect_target",
-                return_value=("vscode", "no .github folder"),
-            ),
-            patch("apm_cli.commands.compile.cli.Path") as mp,
+        with patch(
+            "apm_cli.core.target_detection.detect_target",
+            return_value=("vscode", "no .github folder"),
         ):
-            mp.return_value.exists.return_value = False
-            effective, _reason, _config = self._call(None)
+            effective, _reason, _config = self._call(None, source_root=tmp_path)
 
-        # With no apm.yml and no explicit target the auto-detect path runs.
-        # The result depends on the environment; we just verify no crash and that
-        # detect_target was consulted.
         assert effective is not None
 
-    def test_explicit_frozenset_returns_immediately(self) -> None:
+    def test_explicit_frozenset_returns_immediately(self, tmp_path: Path) -> None:
         """A frozenset from _resolve_compile_target bypasses detect_target."""
         fs = frozenset({"vscode", "claude", "agents"})
-        with patch("apm_cli.commands.compile.cli.Path") as mp:
-            mp.return_value.exists.return_value = False
-            with patch("apm_cli.commands.compile.cli._resolve_compile_target", return_value=fs):
-                effective, reason, _config = self._call(["claude", "vscode"])
+        with patch("apm_cli.commands.compile.cli._resolve_compile_target", return_value=fs):
+            effective, reason, _config = self._call(["claude", "vscode"], source_root=tmp_path)
 
         assert effective == fs
         assert reason == "explicit --target flag"
 
-    def test_apm_yml_frozenset_config_without_explicit(self) -> None:
+    def test_apm_yml_frozenset_config_without_explicit(self, tmp_path: Path) -> None:
         """frozenset from apm.yml config_target (no explicit) → 'apm.yml target' reason."""
         fs = frozenset({"claude", "agents"})
+        (tmp_path / "apm.yml").write_text("name: test\n")
 
         with (
-            patch("apm_cli.commands.compile.cli.Path") as mp,
             patch("apm_cli.commands.compile.cli._resolve_compile_target") as mock_rct,
             patch("apm_cli.models.apm_package.APMPackage.from_apm_yml") as mock_pkg,
         ):
-            mp.return_value.exists.return_value = True
             mock_pkg.return_value.target = "claude,cursor"
-            # compile_target (for explicit target=None) -> None
-            # compile_config_target (for "claude,cursor") -> fs
             mock_rct.side_effect = [None, fs]
 
-            effective, reason, _config = self._call(None)
+            effective, reason, _config = self._call(None, source_root=tmp_path)
 
         assert effective == fs
         assert reason == "apm.yml target"
 
-    def test_single_string_explicit_target_uses_detect_target(self) -> None:
+    def test_single_string_explicit_target_uses_detect_target(self, tmp_path: Path) -> None:
         """Single explicit string passes through detect_target()."""
+        (tmp_path / "apm.yml").write_text("name: test\n")
+
         with (
-            patch("apm_cli.commands.compile.cli.Path") as mp,
             patch("apm_cli.commands.compile.cli._resolve_compile_target", side_effect=lambda x: x),
             patch("apm_cli.models.apm_package.APMPackage.from_apm_yml") as mock_pkg,
             patch(
@@ -392,10 +381,9 @@ class TestResolveEffectiveTarget:
                 return_value=("claude", "explicit --target flag"),
             ),
         ):
-            mp.return_value.exists.return_value = True
             mock_pkg.return_value.target = None
 
-            effective, _reason, _config = self._call("claude")
+            effective, _reason, _config = self._call("claude", source_root=tmp_path)
 
         assert effective == "claude"
 
@@ -604,7 +592,7 @@ class TestCompileCommandWatchMode:
 
 
 class TestCompileCommandDistributedSuccess:
-    """compile command – distributed strategy success path."""
+    """compile command - distributed strategy success path."""
 
     def _setup_project_dir(self) -> None:
         Path("apm.yml").write_text("name: test\nversion: 0.1.0\n")
@@ -774,7 +762,7 @@ class TestCompileCommandDistributedSuccess:
 
 
 class TestCompileCommandWarnings:
-    """compile command – warnings propagation."""
+    """compile command - warnings propagation."""
 
     def test_result_warnings_appear_in_output(self) -> None:
         """result.warnings should be printed."""
@@ -820,7 +808,7 @@ class TestCompileCommandWarnings:
 
 
 class TestCompileCommandNoContent:
-    """compile command – no content to compile branches."""
+    """compile command - no content to compile branches."""
 
     def test_no_apm_modules_no_local_apm_content(self) -> None:
         """When no apm_modules, no .apm content, no constitution → exit 1."""
@@ -859,7 +847,7 @@ class TestCompileCommandNoContent:
 
 
 class TestCompileCommandImportError:
-    """compile command – ImportError path."""
+    """compile command - ImportError path."""
 
     def test_import_error_in_compilation_exits_1(self) -> None:
         """ImportError inside the try block should exit with code 1."""

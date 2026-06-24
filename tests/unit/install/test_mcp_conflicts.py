@@ -34,9 +34,7 @@ def _call(**overrides) -> None:
         global_=False,
         only=None,
         update=False,
-        use_ssh=False,
-        use_https=False,
-        allow_protocol_fallback=False,
+        any_transport_flag=False,
         registry_url=None,
     )
     defaults.update(overrides)
@@ -75,7 +73,7 @@ class TestValidCallNoErrors:
 
 
 # ---------------------------------------------------------------------------
-# E10 – flags require --mcp
+# E10 - flags require --mcp
 # ---------------------------------------------------------------------------
 
 
@@ -116,7 +114,7 @@ class TestE10FlagsRequireMcp:
 
 
 # ---------------------------------------------------------------------------
-# E7 – empty mcp_name
+# E7 - empty mcp_name
 # ---------------------------------------------------------------------------
 
 
@@ -127,7 +125,7 @@ class TestE7EmptyMcpName:
 
 
 # ---------------------------------------------------------------------------
-# E8 – mcp_name starts with '-'
+# E8 - mcp_name starts with '-'
 # ---------------------------------------------------------------------------
 
 
@@ -145,7 +143,7 @@ class TestE8McpNameStartsWithDash:
 
 
 # ---------------------------------------------------------------------------
-# E1 – positional packages mixed with --mcp
+# E1 - positional packages mixed with --mcp
 # ---------------------------------------------------------------------------
 
 
@@ -163,7 +161,7 @@ class TestE1PositionalPackagesMixedWithMcp:
 
 
 # ---------------------------------------------------------------------------
-# E2 – --global not supported for MCP entries
+# E2 - --global not supported for MCP entries
 # ---------------------------------------------------------------------------
 
 
@@ -177,7 +175,7 @@ class TestE2GlobalNotSupportedForMcp:
 
 
 # ---------------------------------------------------------------------------
-# E3 – --only apm conflicts with --mcp
+# E3 - --only apm conflicts with --mcp
 # ---------------------------------------------------------------------------
 
 
@@ -194,29 +192,29 @@ class TestE3OnlyApmConflictsWithMcp:
 
 
 # ---------------------------------------------------------------------------
-# E4 – transport selection flags don't apply to MCP
+# E4 - transport selection flags don't apply to MCP
 # ---------------------------------------------------------------------------
 
 
 class TestE4TransportSelectionFlags:
     def test_use_ssh_raises(self) -> None:
         with pytest.raises(click.UsageError, match=r"transport selection flags"):
-            _call(use_ssh=True)
+            _call(any_transport_flag=True)
 
     def test_use_https_raises(self) -> None:
         with pytest.raises(click.UsageError, match=r"transport selection flags"):
-            _call(use_https=True)
+            _call(any_transport_flag=True)
 
     def test_allow_protocol_fallback_raises(self) -> None:
         with pytest.raises(click.UsageError, match=r"transport selection flags"):
-            _call(allow_protocol_fallback=True)
+            _call(any_transport_flag=True)
 
     def test_none_set_ok(self) -> None:
-        _call(use_ssh=False, use_https=False, allow_protocol_fallback=False)
+        _call(any_transport_flag=False)
 
 
 # ---------------------------------------------------------------------------
-# E5 – --update is for refreshing
+# E5 - --update is for refreshing
 # ---------------------------------------------------------------------------
 
 
@@ -230,7 +228,7 @@ class TestE5UpdateFlag:
 
 
 # ---------------------------------------------------------------------------
-# E9 – --header requires --url
+# E9 - --header requires --url
 # ---------------------------------------------------------------------------
 
 
@@ -247,7 +245,7 @@ class TestE9HeaderRequiresUrl:
 
 
 # ---------------------------------------------------------------------------
-# E11 – --url with stdio command
+# E11 - --url with stdio command
 # ---------------------------------------------------------------------------
 
 
@@ -266,7 +264,7 @@ class TestE11UrlWithStdioCommand:
 
 
 # ---------------------------------------------------------------------------
-# E12 – --transport stdio with --url
+# E12 - --transport stdio with --url
 # ---------------------------------------------------------------------------
 
 
@@ -283,7 +281,7 @@ class TestE12StdioTransportWithUrl:
 
 
 # ---------------------------------------------------------------------------
-# E13 – remote transports with stdio command
+# E13 - remote transports with stdio command
 # ---------------------------------------------------------------------------
 
 
@@ -301,7 +299,7 @@ class TestE13RemoteTransportWithStdioCommand:
 
 
 # ---------------------------------------------------------------------------
-# E14 – --env with --url and no command
+# E14 - --env with --url and no command
 # ---------------------------------------------------------------------------
 
 
@@ -323,7 +321,7 @@ class TestE14EnvWithUrlNoCommand:
 
 
 # ---------------------------------------------------------------------------
-# E15 – --registry only applies to registry-resolved entries
+# E15 - --registry only applies to registry-resolved entries
 # ---------------------------------------------------------------------------
 
 

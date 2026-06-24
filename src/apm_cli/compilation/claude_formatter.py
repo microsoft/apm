@@ -8,9 +8,9 @@ output format specifically optimized for Claude's project memory system.
 import builtins
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set  # noqa: F401, UP035
 
 from ..primitives.models import Chatmode, Instruction, PrimitiveCollection
+from ..utils.paths import resolve_base_and_source_dirs
 from ..version import get_version
 from .constants import BUILD_ID_PLACEHOLDER
 from .constitution import read_constitution
@@ -62,16 +62,20 @@ class ClaudeFormatter:
     not included in CLAUDE.md (same as AGENTS.md behavior).
     """
 
-    def __init__(self, base_dir: str = "."):
+    def __init__(self, base_dir: str = ".", source_dir: str | None = None):
         """Initialize the Claude formatter.
 
         Args:
-            base_dir (str): Base directory for compilation.
+            base_dir (str): Base directory for compilation -- where CLAUDE.md
+                outputs are written.  Defaults to the current directory.
+            source_dir (Optional[str]): Where source primitives and the
+                constitution are read from.  Defaults to ``base_dir`` for
+                back-compat; set explicitly when ``apm compile --root``
+                redirects writes but sources remain in ``$PWD`` so that
+                ``<!-- Source: ... -->`` provenance comments render relative
+                to the user's working directory rather than the deploy root.
         """
-        try:
-            self.base_dir = Path(base_dir).resolve()
-        except (OSError, FileNotFoundError):
-            self.base_dir = Path(base_dir).absolute()
+        self.base_dir, self.source_dir = resolve_base_and_source_dirs(base_dir, source_dir)
 
         self.warnings: builtins.list[str] = []
         self.errors: builtins.list[str] = []
@@ -118,7 +122,10 @@ class ClaudeFormatter:
                     if not placement.dependencies and not has_constitution:
                         continue
                 content = self._generate_claude_content(
-                    placement, primitives, skip_instructions=skip_instructions
+                    placement,
+                    primitives,
+                    skip_instructions=skip_instructions,
+                    source_attribution=source_attribution,
                 )
                 content_map[placement.claude_path] = content
 
@@ -169,7 +176,7 @@ class ClaudeFormatter:
 
         # Handle empty placement map with constitution or dependencies
         if not placement_map:
-            constitution = read_constitution(self.base_dir)
+            constitution = read_constitution(self.source_dir)
             dependencies = self._collect_dependencies()
             if constitution or dependencies:
                 root_path = self.base_dir / "CLAUDE.md"
@@ -259,6 +266,7 @@ class ClaudeFormatter:
         primitives: PrimitiveCollection,
         *,
         skip_instructions: bool = False,
+        source_attribution: bool = False,
     ) -> str:
         """Generate CLAUDE.md content for a specific placement.
 
@@ -266,17 +274,30 @@ class ClaudeFormatter:
             placement (ClaudePlacement): Placement result with instructions.
             primitives (PrimitiveCollection): Full primitive collection.
             skip_instructions (bool): If True, omit the Project Standards section.
+            source_attribution (bool): Controls the opt-in cosmetic annotations
+                only: when True, the APM Version comment and the footer are
+                included; when False (default) they are omitted to reduce token
+                overhead. CLAUDE_HEADER and Build ID are always emitted
+                regardless of this flag: CLAUDE_HEADER is a functional marker
+                used by ``apm compile --clean`` to distinguish APM-generated
+                files from hand-authored ones (stale-file removal, issue #1729);
+                Build ID is always present for drift normalization.
 
         Returns:
             str: Generated CLAUDE.md content.
         """
         sections = []
 
-        # Header
+        # Header - Build ID and CLAUDE_HEADER are always present.
+        # CLAUDE_HEADER is a functional marker used by `apm compile --clean` to
+        # distinguish APM-generated files from hand-authored ones (stale-file
+        # removal for issue #1729). Build ID is always present for drift
+        # normalization. The APM version comment is cosmetic and opt-in.
         sections.append("# CLAUDE.md")
         sections.append(CLAUDE_HEADER)
         sections.append(BUILD_ID_PLACEHOLDER)
-        sections.append(f"<!-- APM Version: {get_version()} -->")
+        if source_attribution:
+            sections.append(f"<!-- APM Version: {get_version()} -->")
         sections.append("")
 
         # Dependencies section (only for root CLAUDE.md)
@@ -288,7 +309,7 @@ class ClaudeFormatter:
 
         # Constitution section (only for root CLAUDE.md)
         if placement.is_root:
-            constitution = read_constitution(self.base_dir)
+            constitution = read_constitution(self.source_dir)
             if constitution:
                 sections.append("# Constitution")
                 sections.append("")
@@ -307,17 +328,18 @@ class ClaudeFormatter:
                 build_attributed_instructions(
                     placement.instructions,
                     placement.source_attribution,
-                    self.base_dir,
+                    self.source_dir,
                 )
             )
 
         # Agents/workflows go to .github/agents/ as separate files, not here.
 
-        # Footer
-        sections.append("---")
-        sections.append("*This file was generated by APM CLI. Do not edit manually.*")
-        sections.append("*To regenerate: `apm compile`*")
-        sections.append("")
+        # Footer is opt-in (cosmetic).
+        if source_attribution:
+            sections.append("---")
+            sections.append("*This file was generated by APM CLI. Do not edit manually.*")
+            sections.append("*To regenerate: `apm compile`*")
+            sections.append("")
 
         return "\n".join(sections)
 

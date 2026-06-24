@@ -6,9 +6,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Optional  # noqa: F401, UP035
-
-import yaml  # noqa: F401
 
 from ..output.script_formatters import ScriptExecutionFormatter
 from ..runtime.utils import find_runtime_binary

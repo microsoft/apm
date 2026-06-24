@@ -100,7 +100,7 @@ curl -u ":${ADO_APM_PAT}" \
 
 A `200` here with a failing `apm install` points at precedence (a higher-priority var is set to a different token). Run `apm install --verbose` to see which source APM picked.
 
-For end-to-end auth setup see [Authentication](../enterprise/authentication/).
+For end-to-end auth setup see [Authentication](../getting-started/authentication/).
 
 ## 2. Network and TLS
 
@@ -161,7 +161,7 @@ This is the only flag that will move pins forward; a bare `apm install` keeps ex
 The CI gate compares the deployed tree against what the lockfile says should be there:
 
 ```bash
-apm audit --check drift
+apm audit --ci
 ```
 
 A non-zero exit means the working tree has diverged from `apm.lock.yaml` -- either re-run `apm install` to restore parity, or commit the new lockfile if the drift was intentional.
@@ -182,7 +182,7 @@ Reports the cache root, git-repo count, checkout count, HTTP entry count, and to
 
 ### Recover
 
-Bypass the cache for a single run:
+Bypass the cache and re-resolve refs for a single run:
 
 ```bash
 apm install --refresh

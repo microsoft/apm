@@ -105,11 +105,13 @@ class TestCopilotScopeResolution:
         assert not (self.project_root / ".copilot").exists()
 
     def test_user_scope_deploys_to_copilot(self):
-        """At user scope, instructions are filtered out (unsupported)."""
+        """At user scope, instructions use concat format (not filtered)."""
         copilot = KNOWN_TARGETS["copilot"]
         resolved = copilot.for_scope(user_scope=True)
         assert resolved.root_dir == ".copilot"
-        assert "instructions" not in resolved.primitives
+        # instructions now supported at user scope via concat (#650)
+        assert "instructions" in resolved.primitives
+        assert resolved.primitives["instructions"].format_id == "copilot_user_instructions"
 
     def test_user_scope_agents_deploy_to_copilot(self):
         """At user scope, agents deploy to .copilot/agents/."""
@@ -316,8 +318,10 @@ class TestResolveTargetsConsistency:
             targets = resolve_targets(Path(tmp), user_scope=True, explicit_target="all")
             for t in targets:
                 if t.name == "copilot":
-                    assert "prompts" not in t.primitives
-                    assert "instructions" not in t.primitives
+                    assert "prompts" in t.primitives
+                    # instructions now supported via concat (#650)
+                    assert "instructions" in t.primitives
+                    assert t.primitives["instructions"].format_id == "copilot_user_instructions"
                 if t.name == "cursor":
                     assert "instructions" not in t.primitives
                 if t.name == "opencode":
@@ -351,7 +355,10 @@ class TestWindsurfScopeResolution:
         resolved = windsurf.for_scope(user_scope=False)
         assert resolved.root_dir == ".windsurf"
         assert "instructions" in resolved.primitives
-        assert "agents" in resolved.primitives
+        assert "skills" in resolved.primitives
+        # windsurf intentionally does not expose an 'agents' primitive:
+        # Cascade discovers SKILL.md uniformly under .windsurf/skills/.
+        assert "agents" not in resolved.primitives
 
     def test_user_scope_uses_codeium_windsurf_root(self):
         windsurf = KNOWN_TARGETS["windsurf"]
@@ -370,7 +377,9 @@ class TestWindsurfScopeResolution:
         assert "skills" in resolved.primitives
         assert "commands" in resolved.primitives
         assert "hooks" in resolved.primitives
-        assert "agents" in resolved.primitives
+        # windsurf intentionally does not expose an 'agents' primitive at
+        # any scope: Cascade discovers SKILL.md uniformly under skills/.
+        assert "agents" not in resolved.primitives
 
     def test_project_scope_deploys_instructions(self):
         """At project scope, instructions deploy to .windsurf/rules/."""

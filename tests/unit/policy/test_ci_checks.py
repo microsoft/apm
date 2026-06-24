@@ -310,6 +310,41 @@ class TestNoOrphans:
         result = _check_no_orphans(manifest, lock)
         assert result.passed, result.details
 
+    def test_remote_deps_of_local_path_subpackage_not_orphaned(self, tmp_path):
+        """Remote deps declared by a local-path sub-package are transitive.
+
+        Topology: root -> ./packages/agent-config (local-path) ->
+        prisma/skills (remote, pinned SHA). The lockfile should record
+        ``resolved_by: _local/agent-config`` for ``prisma/skills`` so
+        ``_check_no_orphans`` exempts it. Regression test for #1846.
+        """
+        _write_apm_yml(tmp_path, deps=["./packages/agent-config"])
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: _local/agent-config
+                    source: local
+                    local_path: ./packages/agent-config
+                    depth: 1
+                    deployed_files: []
+                  - repo_url: prisma/skills
+                    resolved_ref: 0b8e83cddde30b3e028fb4e0f6770948c6160e08
+                    depth: 2
+                    resolved_by: _local/agent-config
+                    deployed_files: []
+            """),
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
+
+        manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_no_orphans(manifest, lock)
+        assert result.passed, f"False positive orphan: {result.details}"
+
 
 # -- Config consistency ---------------------------------------------
 
@@ -487,6 +522,67 @@ class TestContentIntegrity:
         assert any("hash-drift" in d and "installed.md" in d for d in result.details), (
             result.details
         )
+
+    def test_agents_skill_tamper_fails_content_integrity(self, tmp_path):
+        # Trap A (issue #1716): a deployed skill under the copilot skills
+        # deploy_root (.agents/skills/<s>/SKILL.md) must be covered by the
+        # per-file content-integrity manifest. Tampering the deployed file
+        # without re-installing has to fail `apm audit --ci --no-drift`.
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        rel = ".agents/skills/demo/SKILL.md"
+        _make_deployed_file(tmp_path, rel, "---\nname: demo\n---\nOriginal skill\n")
+        recorded_hash = compute_file_hash(tmp_path / rel)
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent(f"""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: owner/repo
+                    deployed_files:
+                      - .agents/skills/demo
+                      - {rel}
+                    deployed_file_hashes:
+                      {rel}: '{recorded_hash}'
+            """),
+        )
+        # Tamper the deployed skill after install (no re-deploy).
+        (tmp_path / rel).write_text("---\nname: demo\n---\nTampered skill\n", encoding="utf-8")
+
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_content_integrity(tmp_path, lock)
+        assert not result.passed
+        assert any("hash-drift" in d and rel in d for d in result.details), result.details
+
+    def test_agents_skill_clean_passes_content_integrity(self, tmp_path):
+        # Companion to Trap A: an untampered deployed skill hashes clean.
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        rel = ".agents/skills/demo/SKILL.md"
+        _make_deployed_file(tmp_path, rel, "---\nname: demo\n---\nOriginal skill\n")
+        recorded_hash = compute_file_hash(tmp_path / rel)
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent(f"""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: owner/repo
+                    deployed_files:
+                      - .agents/skills/demo
+                      - {rel}
+                    deployed_file_hashes:
+                      {rel}: '{recorded_hash}'
+            """),
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_content_integrity(tmp_path, lock)
+        assert result.passed, result.details
 
     def test_hash_skips_missing_file(self, tmp_path):
         # Lockfile records a file with a hash, but the file is missing on
@@ -1263,6 +1359,52 @@ class TestCheckDriftCacheMiss:
         assert drift_result.passed, "cache miss must produce a passing drift result"
         assert findings == [], "cache miss must produce no findings"
         assert aggregate.passed, "cache-miss skip must not fail the aggregate CIAuditResult"
+
+
+class TestCheckDriftLocalResolutionError:
+    """_check_drift must HARD-FAIL on LocalResolutionError.
+
+    A corrupt local dependency graph (missing / ambiguous / cyclic
+    ``resolved_by`` parent) is internal lockfile inconsistency, NOT a cold
+    cache. Folding it into the cache-miss soft-skip is exactly how a
+    resolution bug silently disables drift detection repo-wide, so it must
+    surface as passed=False.
+    """
+
+    def test_local_resolution_error_returns_passed_false(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apm_cli.deps.lockfile import LockFile
+        from apm_cli.deps.path_anchoring import LocalResolutionError
+        from apm_cli.policy.ci_checks import _check_drift
+
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies: []
+            """),
+        )
+        lockfile = LockFile.read(tmp_path / "apm.lock.yaml")
+        assert lockfile is not None
+
+        def _raise_local_resolution(*_args: object, **_kwargs: object) -> None:
+            raise LocalResolutionError(
+                "resolved_by parent '_local/ghost' of '_local/orphan' is not a "
+                "local dependency in the lockfile"
+            )
+
+        monkeypatch.setattr("apm_cli.install.drift.run_replay", _raise_local_resolution)
+
+        check_result, findings = _check_drift(tmp_path, lockfile)
+
+        assert not check_result.passed, "corrupt local graph must fail the drift check"
+        assert check_result.name == "drift"
+        assert "skipped" not in check_result.message.lower(), (
+            "a corrupt local graph must not masquerade as a soft skip"
+        )
+        assert findings == []
 
 
 class TestManifestMissingWarning:

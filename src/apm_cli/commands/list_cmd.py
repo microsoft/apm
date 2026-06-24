@@ -8,7 +8,6 @@ import click
 from ..core.command_logger import CommandLogger
 from ..utils.console import (
     STATUS_SYMBOLS,
-    _rich_echo,  # noqa: F401
     _rich_panel,
 )
 from ._helpers import HIGHLIGHT, RESET, _get_console, _list_available_scripts

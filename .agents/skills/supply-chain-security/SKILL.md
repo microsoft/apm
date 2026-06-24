@@ -9,7 +9,7 @@ description: >-
 
 # Supply Chain Security Skill
 
-[Supply chain security expert persona](../../agents/supply-chain-security-expert.agent.md)
+[Supply chain security expert persona](../../../.apm/agents/supply-chain-security-expert.agent.md)
 
 ## When to activate
 

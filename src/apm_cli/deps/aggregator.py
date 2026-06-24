@@ -1,11 +1,8 @@
 """Workflow dependency aggregator for APM."""
 
 import glob
-import os  # noqa: F401
-from pathlib import Path  # noqa: F401
 
 import frontmatter
-import yaml  # noqa: F401
 
 
 def scan_workflows_for_dependencies():

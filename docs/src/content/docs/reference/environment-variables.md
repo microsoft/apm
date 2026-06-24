@@ -7,7 +7,7 @@ sidebar:
 
 Single source of truth for every environment variable APM reads. Variables are grouped by purpose. Unless noted, scope is **process** (the running `apm` invocation and any child processes it spawns); a small number toggle behaviour for the entire shell **session**.
 
-For CLI flags that pair with these variables, see [CLI commands](./cli-commands/). For token policy and supply-chain guidance, see [Security and supply chain](../enterprise/security-and-supply-chain/).
+For CLI flags that pair with these variables, see the [reference index](./). For token policy and supply-chain guidance, see [Security and supply chain](../enterprise/security-and-supply-chain/).
 
 ## Authentication
 
@@ -65,6 +65,8 @@ Controls how APM clones packages from Git hosts. These settings can also be pers
 | `APM_TEMP_DIR` | Override the temp directory used by clone and download operations. | system default | Useful on Windows when endpoint security blocks `%TEMP%`. Resolution: env var > `temp_dir` in `~/.apm/config.json` > system default. |
 | `APM_NO_REFLINK` | Any non-empty value disables copy-on-write (reflink) optimisation; APM falls back to plain copies. | unset | Diagnostic / portability escape hatch. |
 | `APM_COPILOT_COWORK_SKILLS_DIR` | Override the destination directory for Copilot cowork skills. | platform auto-detect | Resolution: env var > config > auto-detect. |
+| `APM_COPILOT_APP_DB` | Override the path to the GitHub Copilot desktop App SQLite database used by the `copilot-app` target. | platform auto-detect | Useful for tests or non-standard Copilot installs. Resolution: env var > auto-detect. |
+| `APM_BROAD_FETCH_DEPTH` | Maximum commit depth used by the bare-cache broad fetch when resolving git refs. | `50` | Integer-like string; tune for very deep histories where ref resolution misses. |
 | `XDG_CACHE_HOME` | Standard XDG base-directory variable APM consults when `APM_CACHE_DIR` is unset (Linux / macOS). | unset | Honoured per the XDG spec. |
 | `LOCALAPPDATA` | Standard Windows variable APM consults when `APM_CACHE_DIR` is unset. | OS-provided | Used to derive the default Windows cache path. |
 | `CLAUDE_CONFIG_DIR` | Override the destination Claude reads for skills / agents. | Claude default | Read by the Claude integration target. |
@@ -74,6 +76,20 @@ Controls how APM clones packages from Git hosts. These settings can also be pers
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|
 | `APM_POLICY_DISABLE` | Set to `1` to skip policy discovery and enforcement for **the entire shell session**. Loudly logged. | unset | Equivalent to the per-invocation `--no-policy` on commands that expose it. The only escape hatch for `apm deps update`. See [`apm policy`](./cli/policy/). |
+
+## External scanners
+
+These keys are consumed by a third-party SARIF scanner (e.g. SkillSpector), not
+by APM itself. APM forwards them to the scanner subprocess **only** when LLM
+mode is active for that run (`apm audit --external <name> --external-llm` or
+`external.<name>.llm true`); otherwise they are stripped from the scanner's
+environment. APM never stores them. Requires the `external-scanners`
+experimental flag.
+
+| Variable | Purpose | Default | Notes |
+|---|---|---|---|
+| `OPENAI_API_KEY` | API key SkillSpector uses for LLM-powered analysis. | unset | Forwarded only when LLM mode is active. If `--external-llm` is set and no key is present, the scan fails closed. |
+| `NVIDIA_INFERENCE_KEY` | Alternative API key SkillSpector accepts for LLM-powered analysis. | unset | Same forwarding / fail-closed semantics as `OPENAI_API_KEY`. |
 
 ## Debugging and output
 

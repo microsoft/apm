@@ -105,10 +105,24 @@ class MarketplacePluginResolution:
     plugin: MarketplacePlugin
     dependency_reference: DependencyReference | None = None
     cross_repo_misconfig_risk: CrossRepoMisconfigRisk | None = None
+    source_url: str = ""
+    source_digest: str = ""
 
     def __iter__(self) -> Iterator[str | MarketplacePlugin]:
         yield self.canonical
         yield self.plugin
+
+    def provenance(self, marketplace_name: str, plugin_name: str) -> dict[str, str]:
+        """Return lockfile provenance for this resolved marketplace plugin."""
+        data = {
+            "discovered_via": marketplace_name,
+            "marketplace_plugin_name": plugin_name,
+        }
+        if self.source_url:
+            data["source_url"] = self.source_url
+        if self.source_digest:
+            data["source_digest"] = self.source_digest
+        return data
 
 
 def _normalize_owner_repo_slug(repo: str) -> str:
@@ -705,6 +719,18 @@ def resolve_plugin_source(
         raise ValueError(f"Plugin '{plugin.name}' has unsupported source type: '{source_type}'")
 
 
+def _extract_token(auth_resolver: object | None, host: str, org: str | None = None) -> str | None:
+    """Extract a token from the auth resolver for the given host."""
+    if auth_resolver is None:
+        return None
+    try:
+        ctx = auth_resolver.resolve(host, org=org)  # type: ignore[union-attr]
+        return ctx.token if ctx and ctx.token else None
+    except Exception as exc:
+        logger.debug("Could not extract token for host '%s': %s", host, type(exc).__name__)
+        return None
+
+
 def resolve_marketplace_plugin(
     plugin_name: str,
     marketplace_name: str,
@@ -777,6 +803,8 @@ def resolve_marketplace_plugin(
             plugin=plugin,
             dependency_reference=None,
             cross_repo_misconfig_risk=None,
+            source_url=manifest.source_url,
+            source_digest=manifest.source_digest,
         )
 
     canonical = resolve_plugin_source(
@@ -792,17 +820,46 @@ def resolve_marketplace_plugin(
             plugin, plugin_root=manifest.plugin_root
         )
         if in_repo_path:
-            # Fall back to the marketplace's registered ref when neither a caller-supplied
-            # version_spec nor the plugin's own path_ref is available (string sources always
-            # return path_ref=None from _extract_in_repo_path_and_ref).  Exclude "main" /
-            # "HEAD" to match the GitHub-family propagation guard and avoid redundant refs.
-            _gitlab_ref = version_spec or path_ref or (
-                source.ref if source.ref not in ("main", "HEAD") else None
-            )
+            # Fall back to the marketplace's registered ref when the plugin
+            # source itself declares no ref and no version_spec overrides it.
+            # "main" / "HEAD" are excluded because they represent the default
+            # branch -- appending them would be a no-op at best and misleading
+            # when the repo's actual default branch has a different name.
+            effective_ref = version_spec or path_ref
+            if not effective_ref and source.ref and source.ref not in ("main", "HEAD"):
+                effective_ref = source.ref
             dep_ref = _gitlab_in_marketplace_dependency_reference(
-                source, in_repo_path, _gitlab_ref
+                source, in_repo_path, effective_ref
             )
             canonical = dep_ref.to_canonical()
+
+    # ---- Build dep_ref for url-type sources on non-GitHub-family hosts ----
+    # When the plugin declares a ``url`` source and the marketplace is on a
+    # host that needs explicit git paths (GitLab, generic git), the URL
+    # already carries the full clone target.  Build a structured dep_ref so
+    # downstream auth resolves at the correct host instead of defaulting to
+    # github.com.
+    if dep_ref is None and _source_needs_explicit_git_path(source):
+        if isinstance(plugin.source, dict):
+            _src_type = _coerce_dict_plugin_type(plugin.source)
+            if _src_type == "url":
+                _url = (plugin.source.get("url", "") or "").strip()
+                if _url:
+                    _ref = plugin.source.get("ref", "")
+                    _effective_ref = version_spec or (
+                        _ref.strip() if isinstance(_ref, str) and _ref.strip() else ""
+                    )
+                    _entry: dict = {"git": _url}
+                    if _effective_ref:
+                        _entry["ref"] = _effective_ref
+                    dep_ref = DependencyReference.parse_from_dict(_entry)
+                    canonical = dep_ref.to_canonical()
+                    logger.debug(
+                        "Built dep_ref from url source for %s@%s -> %s (non-github-host url source)",
+                        plugin_name,
+                        marketplace_name,
+                        canonical,
+                    )
 
     # ---- Backfill host on canonical for GitHub-family enterprise hosts ----
     # ``*.ghe.com`` marketplaces keep virtual shorthand (no structured ``dep_ref``)
@@ -837,39 +894,73 @@ def resolve_marketplace_plugin(
         plugin, source, canonical, dep_ref
     )
 
-    # ---- Ref override / propagation ----
-    # Priority:
-    #   1. Explicit version_spec from the caller (``apm install plugin@mkt#v2``) -- always
-    #      wins; strips any existing embedded ref and replaces it.
-    #   2. Marketplace registered ``--ref`` propagated to in-marketplace *string* sources.
-    #      ``resolve_plugin_source`` has no knowledge of the marketplace's branch, so the
-    #      canonical for a relative string source (e.g. ``"./plugins/foo"``) carries no
-    #      ``#ref``.  Without this injection the downloader silently falls back to the
-    #      repo's default branch instead of the registered branch.
-    #      Guard: only when no ref is already embedded in the canonical (dict sources that
-    #      declare their own ref embed it during ``_resolve_github_source``), only for
-    #      in-marketplace string sources, and only for non-default refs (``main`` /
-    #      ``HEAD`` are implicit -- embedding them would be redundant noise).
-    if dep_ref is None:
-        if version_spec:
-            base = canonical.split("#", 1)[0]
+    # ---- Propagate marketplace registered ref (#1811) ----
+    # When a marketplace is registered with ``--ref feat/xxx`` and the plugin
+    # uses a relative string source (e.g. ``"./plugins/my-plugin"``), the
+    # canonical built by ``resolve_plugin_source`` carries no ``#ref`` suffix.
+    # Without this block the plugin would resolve against the default branch
+    # instead of the registered ref.
+    # "main" / "HEAD" are excluded to avoid appending a no-op suffix; if the
+    # repo's actual default branch is not named "main" and the user pinned
+    # ``--ref main``, this condition silently drops the ref -- fixing that
+    # would require knowing the repo's real default branch which is not
+    # available at this stage.
+    if (
+        dep_ref is None
+        and not version_spec
+        and isinstance(plugin.source, str)
+        and "#" not in canonical
+        and source.ref
+        and source.ref not in ("main", "HEAD")
+    ):
+        canonical = f"{canonical}#{source.ref}"
+
+    # ---- Version spec override ----
+    # When version_spec is provided it either triggers semver-aware tag
+    # resolution (for range expressions like ~2.1.0) or a raw ref override
+    # (for plain tags/branches/SHAs like v2.0.0).
+    if version_spec and dep_ref is None:
+        from .version_resolver import is_semver_range, is_version_constraint
+
+        base = canonical.split("#", 1)[0]
+        if is_version_constraint(version_spec):
+            from .errors import NoMatchingVersionError
+            from .version_resolver import resolve_version_constraint
+
+            owner_repo = f"{source.owner}/{source.repo}"
+            token = _extract_token(auth_resolver, source.host, org=source.owner)
+            try:
+                tag_name, _sha = resolve_version_constraint(
+                    plugin_name,
+                    owner_repo,
+                    version_spec,
+                    host=source.host,
+                    token=token,
+                )
+                canonical = f"{base}#{tag_name}"
+                logger.debug(
+                    "Version constraint '%s' for %s@%s resolved to tag '%s'",
+                    version_spec,
+                    plugin_name,
+                    marketplace_name,
+                    tag_name,
+                )
+            except NoMatchingVersionError:
+                if is_semver_range(version_spec):
+                    raise
+                canonical = f"{base}#{version_spec}"
+                logger.debug(
+                    "No '%s--v*' tags matched '%s' on %s@%s, falling back to raw git ref",
+                    plugin_name,
+                    version_spec,
+                    plugin_name,
+                    marketplace_name,
+                )
+        else:
             canonical = f"{base}#{version_spec}"
             logger.debug(
-                "Using raw git ref '%s' for %s@%s (version_spec override)",
+                "Using raw git ref '%s' for %s@%s",
                 version_spec,
-                plugin_name,
-                marketplace_name,
-            )
-        elif (
-            "#" not in canonical
-            and isinstance(plugin.source, str)
-            and _is_in_marketplace_source(plugin, source)
-            and source.ref not in ("main", "HEAD")
-        ):
-            canonical = f"{canonical}#{source.ref}"
-            logger.debug(
-                "Propagated marketplace ref '%s' to string source canonical for %s@%s",
-                source.ref,
                 plugin_name,
                 marketplace_name,
             )
@@ -932,4 +1023,6 @@ def resolve_marketplace_plugin(
         plugin=plugin,
         dependency_reference=dep_ref,
         cross_repo_misconfig_risk=cross_repo_misconfig_risk,
+        source_url=manifest.source_url,
+        source_digest=manifest.source_digest,
     )

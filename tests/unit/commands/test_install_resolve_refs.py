@@ -15,7 +15,7 @@ from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
 # The function under test lives in the commands module.
-from apm_cli.commands.install import _resolve_package_references
+from apm_cli.commands.install import _check_package_conflicts, _resolve_package_references
 from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
 from apm_cli.models.dependency.reference import DependencyReference
 
@@ -164,6 +164,24 @@ class TestResolvePackageReferencesDuplicateDetection:
         assert validated == ["owner/new-pkg"]
         assert "github.com/owner/new-pkg" in existing
         assert len(existing) == 2
+
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=True)
+    def test_existing_unpinned_dependency_is_updated_when_cli_supplies_ref(self, mock_validate):
+        """An explicit CLI ref for an existing dep must replace the unpinned manifest entry."""
+        current_deps = ["danielmeppiel/genesis"]
+        existing = _check_package_conflicts(current_deps)
+
+        valid, invalid, validated, _mkt, _entries, changed = _resolve_package_references(
+            ["danielmeppiel/genesis#v0.4.0"],
+            current_deps,
+            existing,
+        )
+
+        assert invalid == []
+        assert valid == [("danielmeppiel/genesis#v0.4.0", True)]
+        assert validated == []
+        assert changed is True
+        assert current_deps == ["danielmeppiel/genesis#v0.4.0"]
 
 
 class TestResolvePackageReferencesInvalidInput:
@@ -471,3 +489,78 @@ class TestResolvePackageReferencesCrossRepoFailClosed:
 
         # Validate is called (gate not engaged for non-marketplace deps).
         assert mock_validate.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Marketplace provenance in probe-skip bypass
+# ---------------------------------------------------------------------------
+
+
+class TestResolvePackageReferencesProbeSkipProvenance:
+    """Marketplace provenance must be recorded when the probe-skip bypass fires.
+
+    Regression: before the fix, the ``continue`` in the bypass block ran before
+    the ``if marketplace_provenance:`` write, silently dropping provenance for
+    registry-routed marketplace installs.
+    """
+
+    def test_provenance_recorded_in_probe_skip_bypass(self):
+        # Build a dep_ref that will trigger the bypass:
+        # source not "git"/"registry", is_local=False, reference set.
+        from unittest.mock import PropertyMock
+
+        dep_ref = MagicMock()
+        dep_ref.source = None
+        dep_ref.is_local = False
+        dep_ref.reference = "1.0.0"
+        dep_ref.to_canonical.return_value = "acme/reg-plugin#1.0.0"
+        dep_ref.get_identity.return_value = "github.com/acme/reg-plugin"
+        dep_ref.is_insecure = False
+        dep_ref.is_virtual = False
+        dep_ref.is_virtual_subdirectory.return_value = False
+        type(dep_ref).ref_kind = PropertyMock(return_value="semver")
+        dep_ref.allow_insecure = False
+
+        fake_provenance = {
+            "discovered_via": "apm-marketplace",
+            "marketplace_plugin_name": "reg-plugin",
+        }
+
+        # resolution is a 2-tuple (canonical_str, plugin_obj) -- the code does:
+        # ``canonical_str, _resolved_plugin = resolution``
+        fake_resolution = MagicMock()
+        fake_resolution.__iter__ = lambda s: iter(["acme/reg-plugin#1.0.0", MagicMock()])
+        fake_resolution.cross_repo_misconfig_risk = None
+        fake_resolution.provenance.return_value = fake_provenance
+        fake_resolution.dependency_reference = None
+
+        with (
+            patch(
+                "apm_cli.marketplace.resolver.parse_marketplace_ref",
+                return_value=("reg-plugin", "apm-marketplace", None),
+            ),
+            patch(
+                "apm_cli.marketplace.resolver.resolve_marketplace_plugin",
+                return_value=fake_resolution,
+            ),
+            patch(
+                "apm_cli.commands.install.resolve_parsed_dependency_reference",
+                return_value=(dep_ref, False),
+            ),
+            patch(
+                "apm_cli.commands.install.update_existing_dependency_entry_if_needed",
+                return_value=False,
+            ),
+        ):
+            _valid, invalid, _validated, mkt_prov, _entries, _changed = _resolve_package_references(
+                ["reg-plugin@apm-marketplace"],
+                [],
+                set(),
+                default_registry="corp",
+            )
+
+        assert invalid == [], f"unexpected errors: {invalid}"
+        assert "github.com/acme/reg-plugin" in mkt_prov, (
+            "marketplace provenance not written in probe-skip bypass"
+        )
+        assert mkt_prov["github.com/acme/reg-plugin"] == fake_provenance

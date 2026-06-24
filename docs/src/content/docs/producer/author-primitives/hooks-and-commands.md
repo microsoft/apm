@@ -10,9 +10,9 @@ each target's own format. Author them when the value to a specific
 harness justifies the per-target maintenance.
 
 This page covers both. For the cross-harness reach map, see
-[Primitives and targets](../../../concepts/primitives-and-targets/).
+[Primitives and targets](../../concepts/primitives-and-targets/).
 For dev-only versus prod separation in the manifest, see
-[Dev-only primitives](../../../guides/dev-only-primitives/).
+[Dev-only primitives](../../concepts/primitives-and-targets/#dev-only-primitives).
 
 ## Why they are target-specific
 
@@ -56,7 +56,29 @@ Claude (`PreToolUse`, `PostToolUse`) and Copilot (`preToolUse`,
 }
 ```
 
-The `${PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`, and `${CURSOR_PLUGIN_ROOT}`
+APM also accepts the "naked" Claude settings-slice shape -- event names at
+the top level with no outer `"hooks":` wrap. This is the literal shape
+Claude Code accepts inside its own `settings.json`, so a hooks slice copied
+straight from there works as a standalone APM hook file:
+
+```json
+{
+  "PreToolUse": [
+    {
+      "hooks": [
+        {"type": "command", "command": "${PLUGIN_ROOT}/scripts/validate.sh", "timeout": 10}
+      ]
+    }
+  ]
+}
+```
+
+Both shapes are normalized internally before merge. A file whose `"hooks"`
+key is present but not a JSON object fails closed with a warning; a file
+that parses cleanly but contributes zero entries also logs a warning so
+authors notice empty merges during development.
+
+The `${PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, and `${KIRO_PLUGIN_ROOT}`
 tokens resolve to the installed package root and are rewritten per
 target. Plain `./script.sh` resolves relative to the hook file.
 
@@ -70,6 +92,7 @@ Supported targets and where the integrator writes:
 | gemini   | `.gemini/settings.json`               | merged               |
 | codex    | `.codex/hooks.json`                   | merged               |
 | windsurf | `.windsurf/hooks.json`                | merged               |
+| kiro     | `.kiro/hooks/<package-slug>-<hook-file-stem-slug>-<event-slug>-<n>.json` | one file per hook action |
 | opencode | -- not supported --                   | silently skipped     |
 
 Copilot hook files are namespaced with the source package name to avoid
@@ -170,6 +193,6 @@ agent a procedure" fits a skill -- and reaches every harness.
   a Claude+OpenCode package and assume hooks reach both -- they do
   not. The install log notes the skip.
 
-Once your hooks and commands are in place, run `apm compile` to
-preview what each target will receive, then `apm pack` to bundle.
-See [Compile](../../compile/) and [Pack a bundle](../../pack-a-bundle/).
+Once your hooks and commands are in place, run `apm install --dry-run`
+to preview what each target will receive, then `apm pack` to bundle.
+See [Compile](../compile/) and [Pack a bundle](../pack-a-bundle/).

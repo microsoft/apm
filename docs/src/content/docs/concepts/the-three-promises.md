@@ -29,13 +29,11 @@ git clone <repo> && cd <repo> && apm install
 ### Proof in the source
 
 - `src/apm_cli/models/apm_package.py` -- the `apm.yml` schema: one
-  manifest, one set of dependencies, one set of `agentsmd` /
-  `chatmodes` / `instructions` / `prompts` / `mcp` blocks consumed by
-  every harness.
+  manifest with `dependencies`, `devDependencies`, `scripts`, `includes`,
+  and `targets` / `target` fields consumed by every harness.
 - `src/apm_cli/integration/targets.py` -- the registered harnesses an
   install fans out to (Copilot, Claude, Cursor, Codex, Gemini,
-  OpenCode, Windsurf, plus VS Code and the `llm` CLI as delivery
-  surfaces).
+  OpenCode, and Windsurf, with `vscode` as the Copilot-compatible alias).
 - `src/apm_cli/deps/lockfile.py` -- the `LockEntry.content_hash`
   field (SHA-256 of the package file tree) that makes "same install
   on every clone" mean byte-for-byte the same.
@@ -51,8 +49,8 @@ Every `apm install` scans for hidden Unicode before agents read it.
 
 Agent context is executable -- a prompt is a program for an LLM. APM
 treats it that way. Each install scans for invisible Unicode that can
-hijack agent behavior, pins content hashes in the lockfile, and gates
-transitive MCP servers behind explicit trust prompts. `apm audit`
+hijack agent behavior, pins content hashes in the lockfile, and blocks
+transitive MCP servers unless they are explicitly declared or trusted. `apm audit`
 rebuilds context in scratch and diffs against your working tree to
 catch hand-edits before they ship.
 
@@ -94,6 +92,10 @@ dependencies. Tighten-only inheritance flows enterprise -> org ->
 repo. `apm audit --ci` wires the same checks into branch protection.
 This is the supply-chain check npm and pip cannot do.
 
+This governance covers the install and integrity plane -- what reaches
+disk and whether it conforms to policy. Runtime behavior governance
+belongs to your agent harness, not to APM.
+
 The 10-second demo:
 
 ```bash
@@ -105,7 +107,7 @@ apm install --dry-run <package>
 - `src/apm_cli/policy/install_preflight.py` --
   `run_policy_preflight()` is the install-time gate; it evaluates the
   resolved dependency graph (including transitive MCP servers)
-  against the merged policy before any download or write.
+  against the merged policy before integration writes deployed files.
 - `src/apm_cli/policy/inheritance.py` -- `merge_policies()` and
   `resolve_policy_chain()` implement the tighten-only enterprise
   -> org -> repo flow with `_escalate()` enforcement.

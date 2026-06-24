@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://microsoft.github.io/apm/specs/schemas/requirements-v0.1.schema.json",
+  "title": "OpenAPM v0.1 Requirements Manifest",
+  "description": "Schema for docs/public/specs/manifests/openapm-v0.1.requirements.yml. The manifest is the machine-readable projection of the HTML req anchors in the spec body. Used by the orphan_check CI gate and the conformance test harness. Ships informatively in v0.1.1 (spec sec.12.6 reservation).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["requirements_format_version", "spec_version", "requirements"],
+  "properties": {
+    "requirements_format_version": {
+      "type": "string",
+      "const": "1",
+      "description": "Version of the manifest's OWN format. Bumped only when the schema below changes. Independent of spec_version."
+    },
+    "spec_version": {
+      "type": "string",
+      "pattern": "^v[0-9]+\\.[0-9]+(\\.[0-9]+)?$",
+      "description": "Version of the OpenAPM spec this manifest indexes (e.g. v0.1, v0.2)."
+    },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "keyword", "section", "conformance_class"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^req-[a-z]{2,3}-[0-9]{3}$",
+            "description": "Stable requirement id. Forever; mark deprecated, never reuse, never renumber."
+          },
+          "keyword": {
+            "type": "string",
+            "enum": ["MUST", "MUST NOT", "SHOULD", "SHOULD NOT", "MAY"],
+            "description": "RFC 2119 / 8174 normative keyword. Polarity matters for negative-test enforcement (see test_marker_invariants in F16 defer)."
+          },
+          "section": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+){0,3}$",
+            "description": "Section number in openapm-v0.1.md (e.g. 4.1, 5.6.4)."
+          },
+          "conformance_class": {
+            "type": "string",
+            "enum": ["producer", "consumer", "registry", "governance"],
+            "description": "The conformance class the requirement binds. The field name avoids the Python 'class' builtin shadow."
+          },
+          "fixture": {
+            "type": "string",
+            "description": "Optional repo-relative posix path to a fixture under tests/fixtures/spec-conformance/ that exercises this requirement (input-only fixture).",
+            "pattern": "^tests/fixtures/spec-conformance/.+$"
+          },
+          "oracle": {
+            "type": "string",
+            "description": "Optional repo-relative posix path to an oracle file (paired input + expected) under tests/fixtures/spec-conformance/. Oracle shape: a single JSON file with top-level keys 'input' and 'expected', OR a directory containing input.* and expected.* siblings.",
+            "pattern": "^tests/fixtures/spec-conformance/.+$"
+          },
+          "round_trip_exempt_fields": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Field names exempt from byte-for-byte round-trip equality (see test_round_trip.py stage-2 carve-out). Diffed structurally instead. Default empty.",
+            "default": []
+          },
+          "notes": {
+            "type": "string",
+            "description": "Optional one-line maintainer note (e.g. 'Registry class; v0.1 ships trust-anchor MUST only, no wire surface')."
+          }
+        }
+      }
+    }
+  }
+}

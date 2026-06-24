@@ -297,7 +297,21 @@ function Test-EndToEndInstall {
             $shimText = Get-Content $shim -Raw
             $releaseRoot = Join-Path $prefix.BinDir "..\releases" | Resolve-Path -ErrorAction SilentlyContinue
             if ($releaseRoot) {
-                Assert-True ($shimText -match [regex]::Escape($releaseRoot.Path)) "Shim points into per-user releases dir ($($releaseRoot.Path)), not temp"
+                # When the release directory lives under %LOCALAPPDATA% (the default
+                # install root, and also true of the agent runner's %TEMP%), the shim
+                # embeds the literal %LOCALAPPDATA% token (issue microsoft/apm#1509)
+                # instead of the expanded profile path. Accept either form here so
+                # the assertion verifies "shim points at the install location" rather
+                # than the on-disk encoding strategy.
+                $expectedExpanded = $releaseRoot.Path
+                $localAppData = $env:LOCALAPPDATA
+                $expectedTokenized = $null
+                if ($localAppData -and $expectedExpanded.StartsWith($localAppData, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $expectedTokenized = "%LOCALAPPDATA%" + $expectedExpanded.Substring($localAppData.Length)
+                }
+                $matchesExpanded  = $shimText -match [regex]::Escape($expectedExpanded)
+                $matchesTokenized = $expectedTokenized -and ($shimText -match [regex]::Escape($expectedTokenized))
+                Assert-True ($matchesExpanded -or $matchesTokenized) "Shim points into per-user releases dir ($expectedExpanded), not temp"
             }
             Assert-True ($shimText -notmatch [regex]::Escape($prefix.TmpDir)) "Shim does NOT point into APM_TEMP_DIR ($($prefix.TmpDir))"
 

@@ -372,143 +372,68 @@ class TestGatherDetectionEvidence:
 
 
 class TestDetectPackageTypeCascade:
-    """Test each branch in detect_package_type()."""
+    """Test each branch in detect_package_type() using real filesystem fixtures.
+
+    These tests exercise the full detection pipeline
+    (PackageFormatRegistry -> NormalizationPlanner) without mocking
+    internals, so they remain valid across implementation refactors.
+    """
 
     def test_marketplace_plugin_via_plugin_json(self, tmp_path: Path) -> None:
         """plugin.json -> MARKETPLACE_PLUGIN (cascade step 1)."""
-        with patch("apm_cli.models.validation.gather_detection_evidence") as mock_ev:
-            mock_ev.return_value = DetectionEvidence(
-                has_apm_yml=True,
-                has_skill_md=True,
-                has_hook_json=False,
-                plugin_json_path=tmp_path / "plugin.json",
-                plugin_dirs_present=(),
-                has_claude_plugin_dir=False,
-                nested_skill_dirs=(),
-                has_plugin_manifest=True,
-            )
-            pkg_type, plugin_path = detect_package_type(tmp_path)
+        plugin_json: Path = tmp_path / "plugin.json"
+        plugin_json.write_text("{}")
+        pkg_type, plugin_path = detect_package_type(tmp_path)
         assert pkg_type == PackageType.MARKETPLACE_PLUGIN
-        assert plugin_path == tmp_path / "plugin.json"
+        assert plugin_path == plugin_json
 
     def test_marketplace_plugin_via_claude_plugin_dir(self, tmp_path: Path) -> None:
         """.claude-plugin/ dir -> MARKETPLACE_PLUGIN (cascade step 1, no plugin.json)."""
-        with patch("apm_cli.models.validation.gather_detection_evidence") as mock_ev:
-            mock_ev.return_value = DetectionEvidence(
-                has_apm_yml=False,
-                has_skill_md=False,
-                has_hook_json=False,
-                plugin_json_path=None,
-                plugin_dirs_present=(),
-                has_claude_plugin_dir=True,
-                nested_skill_dirs=(),
-                has_plugin_manifest=True,
-            )
-            pkg_type, plugin_path = detect_package_type(tmp_path)
+        (tmp_path / ".claude-plugin").mkdir()
+        pkg_type, plugin_path = detect_package_type(tmp_path)
         assert pkg_type == PackageType.MARKETPLACE_PLUGIN
         assert plugin_path is None
 
     def test_hybrid_apm_yml_and_skill_md(self, tmp_path: Path) -> None:
         """apm.yml + SKILL.md -> HYBRID (cascade step 2)."""
-        with patch("apm_cli.models.validation.gather_detection_evidence") as mock_ev:
-            mock_ev.return_value = DetectionEvidence(
-                has_apm_yml=True,
-                has_skill_md=True,
-                has_hook_json=False,
-                plugin_json_path=None,
-                plugin_dirs_present=(),
-                has_claude_plugin_dir=False,
-                nested_skill_dirs=(),
-                has_plugin_manifest=False,
-            )
-            pkg_type, plugin_path = detect_package_type(tmp_path)
+        (tmp_path / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        (tmp_path / "SKILL.md").write_text("---\nname: s\ndescription: d\n---\n")
+        pkg_type, plugin_path = detect_package_type(tmp_path)
         assert pkg_type == PackageType.HYBRID
         assert plugin_path is None
 
     def test_claude_skill_skill_md_only(self, tmp_path: Path) -> None:
         """SKILL.md only -> CLAUDE_SKILL (cascade step 3)."""
-        with patch("apm_cli.models.validation.gather_detection_evidence") as mock_ev:
-            mock_ev.return_value = DetectionEvidence(
-                has_apm_yml=False,
-                has_skill_md=True,
-                has_hook_json=False,
-                plugin_json_path=None,
-                plugin_dirs_present=(),
-                has_claude_plugin_dir=False,
-                nested_skill_dirs=(),
-                has_plugin_manifest=False,
-            )
-            pkg_type, _ = detect_package_type(tmp_path)
+        (tmp_path / "SKILL.md").write_text("---\nname: s\ndescription: d\n---\n")
+        pkg_type, _ = detect_package_type(tmp_path)
         assert pkg_type == PackageType.CLAUDE_SKILL
 
     def test_skill_bundle_nested_skills(self, tmp_path: Path) -> None:
         """Nested skills/<x>/SKILL.md -> SKILL_BUNDLE (cascade step 4)."""
-        with patch("apm_cli.models.validation.gather_detection_evidence") as mock_ev:
-            mock_ev.return_value = DetectionEvidence(
-                has_apm_yml=False,
-                has_skill_md=False,
-                has_hook_json=False,
-                plugin_json_path=None,
-                plugin_dirs_present=(),
-                has_claude_plugin_dir=False,
-                nested_skill_dirs=("skill-a",),
-                has_plugin_manifest=False,
-            )
-            pkg_type, _ = detect_package_type(tmp_path)
+        skill_dir: Path = tmp_path / "skills" / "skill-a"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# skill-a")
+        pkg_type, _ = detect_package_type(tmp_path)
         assert pkg_type == PackageType.SKILL_BUNDLE
 
     def test_apm_package_with_apm_dir(self, tmp_path: Path) -> None:
         """apm.yml + .apm/ directory -> APM_PACKAGE (cascade step 5)."""
-        apm_dir: Path = tmp_path / ".apm"
-        apm_dir.mkdir()
-        with patch("apm_cli.models.validation.gather_detection_evidence") as mock_ev:
-            mock_ev.return_value = DetectionEvidence(
-                has_apm_yml=True,
-                has_skill_md=False,
-                has_hook_json=False,
-                plugin_json_path=None,
-                plugin_dirs_present=(),
-                has_claude_plugin_dir=False,
-                nested_skill_dirs=(),
-                has_plugin_manifest=False,
-            )
-            pkg_type, _ = detect_package_type(tmp_path)
-        # apm.yml exists but .apm/ existence check is done inside detect_package_type
-        # It calls _apm_yml_declares_dependencies on tmp_path/apm.yml
-        # Since tmp_path doesn't have apm.yml, _apm_yml_declares_dependencies returns False
-        # The .apm dir DOES exist -> APM_PACKAGE
+        (tmp_path / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        (tmp_path / ".apm").mkdir()
+        pkg_type, _ = detect_package_type(tmp_path)
         assert pkg_type == PackageType.APM_PACKAGE
 
     def test_hook_package_hook_json_only(self, tmp_path: Path) -> None:
         """hooks/*.json only -> HOOK_PACKAGE (cascade step 6)."""
-        with patch("apm_cli.models.validation.gather_detection_evidence") as mock_ev:
-            mock_ev.return_value = DetectionEvidence(
-                has_apm_yml=False,
-                has_skill_md=False,
-                has_hook_json=True,
-                plugin_json_path=None,
-                plugin_dirs_present=(),
-                has_claude_plugin_dir=False,
-                nested_skill_dirs=(),
-                has_plugin_manifest=False,
-            )
-            pkg_type, _ = detect_package_type(tmp_path)
+        hooks_dir: Path = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        (hooks_dir / "hook.json").write_text("{}")
+        pkg_type, _ = detect_package_type(tmp_path)
         assert pkg_type == PackageType.HOOK_PACKAGE
 
     def test_invalid_nothing_recognizable(self, tmp_path: Path) -> None:
         """Nothing recognizable -> INVALID (cascade step 7)."""
-        with patch("apm_cli.models.validation.gather_detection_evidence") as mock_ev:
-            mock_ev.return_value = DetectionEvidence(
-                has_apm_yml=False,
-                has_skill_md=False,
-                has_hook_json=False,
-                plugin_json_path=None,
-                plugin_dirs_present=(),
-                has_claude_plugin_dir=False,
-                nested_skill_dirs=(),
-                has_plugin_manifest=False,
-            )
-            pkg_type, _ = detect_package_type(tmp_path)
+        pkg_type, _ = detect_package_type(tmp_path)
         assert pkg_type == PackageType.INVALID
 
     def test_apm_yml_no_apm_dir_no_deps_returns_invalid(self, tmp_path: Path) -> None:
@@ -597,7 +522,7 @@ class TestApmYmlDeclaresdependencies:
 
 
 # ---------------------------------------------------------------------------
-# validate_apm_package – top-level dispatcher
+# validate_apm_package - top-level dispatcher
 # ---------------------------------------------------------------------------
 
 
@@ -808,7 +733,7 @@ class TestEnumValues:
 
 
 # ---------------------------------------------------------------------------
-# _validate_apm_package_with_yml – direct path
+# _validate_apm_package_with_yml - direct path
 # ---------------------------------------------------------------------------
 
 
@@ -870,3 +795,35 @@ class TestValidateApmPackageWithYml:
         (instructions_dir / "empty.md").write_text("")
         result: ValidationResult = validate_apm_package(tmp_path)
         assert any("Empty primitive" in w for w in result.warnings)
+
+    def test_canvas_only_package_is_valid(self, tmp_path: Path) -> None:
+        """A package whose only primitive is a canvas is not flagged empty."""
+        (tmp_path / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        bundle: Path = tmp_path / ".apm" / "extensions" / "widget"
+        bundle.mkdir(parents=True)
+        (bundle / "extension.mjs").write_text("export default {}\n")
+        result: ValidationResult = validate_apm_package(tmp_path)
+        assert result.is_valid
+        assert not any("No primitive files" in w for w in result.warnings)
+
+    def test_canvas_emits_gated_executable_warning(self, tmp_path: Path) -> None:
+        """A canvas bundle earns an explicit executable/gated warning."""
+        (tmp_path / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        bundle: Path = tmp_path / ".apm" / "extensions" / "widget"
+        bundle.mkdir(parents=True)
+        (bundle / "extension.mjs").write_text("export default {}\n")
+        result: ValidationResult = validate_apm_package(tmp_path)
+        canvas_warns = [w for w in result.warnings if "Canvas extension" in w]
+        assert len(canvas_warns) == 1
+        assert "widget" in canvas_warns[0]
+        assert "--trust-canvas-extensions" in canvas_warns[0]
+
+    def test_directory_without_marker_is_not_canvas(self, tmp_path: Path) -> None:
+        """An extensions/ subdir lacking extension.mjs is not a canvas bundle."""
+        (tmp_path / "apm.yml").write_text("name: pkg\nversion: 1.0.0\n")
+        bundle: Path = tmp_path / ".apm" / "extensions" / "notcanvas"
+        bundle.mkdir(parents=True)
+        (bundle / "readme.txt").write_text("not a canvas")
+        result: ValidationResult = validate_apm_package(tmp_path)
+        assert not any("Canvas extension" in w for w in result.warnings)
+        assert any("No primitive files" in w for w in result.warnings)

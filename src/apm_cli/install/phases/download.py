@@ -102,7 +102,24 @@ def run(ctx: InstallContext) -> None:
                 from apm_cli.install.phases._redownload import _should_skip_redownload
 
                 if _should_skip_redownload(_pd_locked_chk, _pd_path):
+                    ctx.content_hash_verified_deps.add(_pd_key)
                     continue
+        elif (
+            _pd_path.exists()
+            and _pd_locked_chk
+            and _pd_locked_chk.content_hash
+            and not update_refs
+            and not _pd_ref_changed
+        ):
+            # Content-hash-only lockfile entries have no commit anchor.
+            # The hash is the sole trust signal: skip only after verifying
+            # on-disk bytes still match it, otherwise fall through to the
+            # fresh-download path and its supply-chain mismatch check.
+            from apm_cli.install.phases._redownload import _should_skip_redownload
+
+            if _should_skip_redownload(_pd_locked_chk, _pd_path):
+                ctx.content_hash_verified_deps.add(_pd_key)
+                continue
         # Build download ref (use locked commit for reproducibility).
         # build_download_ref() uses the manifest ref when ref_changed is True.
         _pd_dlref = build_download_ref(

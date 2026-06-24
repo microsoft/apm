@@ -12,7 +12,6 @@ primitives are dispatched per-target in the outer loop.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Type  # noqa: F401, UP035
 
 from apm_cli.integration.base_integrator import BaseIntegrator
 
@@ -44,6 +43,7 @@ def _build_dispatch() -> dict[str, PrimitiveDispatch]:
     Deferred import to avoid circular dependencies at module level.
     """
     from apm_cli.integration.agent_integrator import AgentIntegrator
+    from apm_cli.integration.canvas_integrator import CanvasIntegrator
     from apm_cli.integration.command_integrator import CommandIntegrator
     from apm_cli.integration.hook_integrator import HookIntegrator
     from apm_cli.integration.instruction_integrator import InstructionIntegrator
@@ -68,6 +68,12 @@ def _build_dispatch() -> dict[str, PrimitiveDispatch]:
         ),
         "hooks": PrimitiveDispatch(
             HookIntegrator, "integrate_hooks_for_target", "sync_integration", "hooks"
+        ),
+        "canvas": PrimitiveDispatch(
+            CanvasIntegrator,
+            "integrate_canvases_for_target",
+            "sync_for_target",
+            "canvases",
         ),
         "skills": PrimitiveDispatch(
             SkillIntegrator,

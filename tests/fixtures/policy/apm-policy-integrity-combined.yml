@@ -1,0 +1,12 @@
+# Fixture: both new integrity keys on under the existing security namespace
+# Tests: require_hashes + fail_on_drift coexist with on_install
+name: integrity-combined-policy
+version: "1.0.0"
+enforcement: block
+
+security:
+  integrity:
+    require_hashes: true
+  audit:
+    on_install: block
+    fail_on_drift: true

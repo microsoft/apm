@@ -86,11 +86,14 @@ class InstallService:
             protocol_pref=request.protocol_pref,
             allow_protocol_fallback=request.allow_protocol_fallback,
             no_policy=request.no_policy,
+            audit_override=request.audit_override,
             skill_subset=request.skill_subset,
             skill_subset_from_cli=request.skill_subset_from_cli,
             legacy_skill_paths=request.legacy_skill_paths,
             plan_callback=request.plan_callback,
             refresh=request.refresh,
+            lockfile_only=request.lockfile_only,
+            trust_canvas=request.trust_canvas,
         )
 
     @staticmethod

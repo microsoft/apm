@@ -29,3 +29,12 @@ patched. Let me try to keep a mental list. Patched so far: 134,
 Several hours later, I've patched ~5 issues and looked at ~15. I
 don't have a final report. CI hasn't been monitored. Lint hasn't
 been checked. No tests added.
+
+Eventually I message the user: "PRs #134 and #156 are ready to
+merge." I do not re-check mergeability before saying this. By the
+time the user looks, another PR has landed on main and #156 is now
+CONFLICTING. The user discovers this when they click Merge and
+GitHub refuses. The "ready" claim was stale the moment it was
+written -- mergeability is post-wave truth, and without the skill
+there is no gate that re-probes it. The user now has to chase the
+rebase themselves.

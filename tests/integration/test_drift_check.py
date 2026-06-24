@@ -750,3 +750,162 @@ class TestSectionENoDriftFlag:
         # and why (cache not yet populated).
         assert "drift skipped" in result.stderr.lower()
         assert "cache not populated" in result.stderr.lower()
+
+
+# ---------------------------------------------------------------------------
+# Section F -- transitive local dependency drift (regression trap, #857)
+# ---------------------------------------------------------------------------
+
+
+_PARENT_INSTRUCTION = (
+    b"---\napplyTo: '**'\n---\n# parent\nFrom the directly-depended parent package.\n"
+)
+
+_SIBLING_INSTRUCTION = (
+    b"---\napplyTo: '**'\n---\n# sibling\nFrom the transitively-depended sibling package.\n"
+)
+
+
+def _make_nested_transitive_project(tmp_path: Path) -> Path:
+    """Build a consumer whose dep graph escapes ``project_root`` one hop down.
+
+    Topology (the shape that broke drift, #857)::
+
+        consumer/                     <- project_root, target: copilot
+          apm.yml  -> apm: [./packages/parent]
+          packages/
+            parent/
+              apm.yml -> apm: [../sibling]
+              .apm/instructions/parent.instructions.md
+            sibling/
+              apm.yml
+              .apm/instructions/sibling.instructions.md
+
+    The transitive edge is declared as ``../sibling`` *relative to the parent
+    package dir* (``packages/parent``), so it anchors on
+    ``packages/sibling`` -- still inside the repo. The pre-fix drift engine
+    naively joined it on ``project_root`` (``project_root/../sibling``), which
+    escapes the repo entirely -> ``CacheMissError`` -> the whole drift check
+    was silently skipped (``passed=True``). This nested layout is what makes
+    the bug observable; a flat sibling layout (consumer and packages at the
+    same level) accidentally resolves identically under both anchorings and
+    therefore cannot trap the regression.
+    """
+    consumer = tmp_path / "consumer"
+    (consumer / "packages" / "parent" / ".apm" / "instructions").mkdir(parents=True, exist_ok=False)
+    (consumer / "packages" / "sibling" / ".apm" / "instructions").mkdir(
+        parents=True, exist_ok=False
+    )
+
+    (consumer / "apm.yml").write_bytes(
+        yaml.safe_dump(
+            {
+                "name": "consumer-project",
+                "version": "1.0.0",
+                "target": "copilot",
+                "dependencies": {"apm": ["./packages/parent"]},
+            }
+        ).encode("utf-8")
+    )
+
+    (consumer / "packages" / "parent" / "apm.yml").write_bytes(
+        yaml.safe_dump(
+            {
+                "name": "parent-pkg",
+                "version": "1.0.0",
+                "dependencies": {"apm": ["../sibling"]},
+            }
+        ).encode("utf-8")
+    )
+    (
+        consumer / "packages" / "parent" / ".apm" / "instructions" / "parent.instructions.md"
+    ).write_bytes(_PARENT_INSTRUCTION)
+
+    (consumer / "packages" / "sibling" / "apm.yml").write_bytes(
+        yaml.safe_dump({"name": "sibling-pkg", "version": "1.0.0"}).encode("utf-8")
+    )
+    (
+        consumer / "packages" / "sibling" / ".apm" / "instructions" / "sibling.instructions.md"
+    ).write_bytes(_SIBLING_INSTRUCTION)
+
+    return consumer
+
+
+class TestSectionFTransitiveLocalDrift:
+    """Regression trap for the silently-disabled-drift bug (#857).
+
+    Pin: a repo with a transitive local dependency whose path escapes
+    ``project_root`` by one hop must STILL have working drift detection.
+    Before the fix these tests fail because every drift run is skipped as a
+    phantom cache-miss; after the fix the real topology resolves and drift
+    runs normally.
+    """
+
+    def test_f1_install_records_transitive_resolved_by(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pre-condition: install resolves the nested graph and records the
+        transitive ``../sibling`` edge with ``resolved_by`` set to the parent.
+        """
+        consumer = _make_nested_transitive_project(tmp_path)
+        _install(consumer, monkeypatch)
+
+        # Both primitives deploy into the consumer's copilot target.
+        assert (consumer / ".github" / "instructions" / "parent.instructions.md").exists()
+        assert (consumer / ".github" / "instructions" / "sibling.instructions.md").exists()
+
+        lock = yaml.safe_load((consumer / "apm.lock.yaml").read_bytes())
+        deps = {d.get("repo_url"): d for d in lock.get("dependencies", []) or []}
+        assert "_local/sibling" in deps, f"have {sorted(deps)}"
+        sibling = deps["_local/sibling"]
+        assert sibling.get("source") == "local"
+        assert sibling.get("local_path") == "../sibling"
+        assert sibling.get("resolved_by") == "_local/parent"
+
+    def test_f2_drift_detects_modified_transitive_dep_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The trap: edit the deployed copy of the TRANSITIVE sibling's file
+        and assert drift reports it as ``modified``.
+
+        Against the pre-fix engine the transitive ``../sibling`` anchor
+        escaped ``project_root``, raised ``CacheMissError``, and the gate
+        soft-skipped -> no drift entry, ``passed=True``, exit 0. So this
+        assertion fails on the old code and passes on the new.
+        """
+        consumer = _make_nested_transitive_project(tmp_path)
+        _install(consumer, monkeypatch)
+
+        deployed = consumer / ".github" / "instructions" / "sibling.instructions.md"
+        assert deployed.exists(), "fixture pre-condition: sibling primitive deployed"
+        deployed.write_bytes(b"# tampered transitive\n")
+
+        result = _audit(consumer, monkeypatch, "--ci", "-f", "json")
+        assert result.exit_code == 1, (
+            "drift on a transitive local dep MUST fail CI, not skip silently\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+        kinds = dict(_drift_kinds(result.stdout))
+        assert kinds.get(".github/instructions/sibling.instructions.md") == "modified", (
+            f"expected modified sibling drift, got {kinds}"
+        )
+
+        drift_check = _checks_by_name(result.stdout).get("drift", {})
+        assert drift_check.get("passed") is False
+
+    def test_f3_clean_transitive_install_runs_drift_without_skip(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A clean nested-transitive install must run drift to completion and
+        report no drift -- never the misleading 'cache not populated' skip
+        that the bug disguised a repo-wide disable as.
+        """
+        consumer = _make_nested_transitive_project(tmp_path)
+        _install(consumer, monkeypatch)
+
+        result = _audit(consumer, monkeypatch)
+        assert "drift skipped" not in (result.stderr or "").lower()
+
+        ci = _audit(consumer, monkeypatch, "--ci", "-f", "json")
+        assert ci.exit_code == 0, f"clean install should pass:\n{ci.stdout}"
+        assert _drift_kinds(ci.stdout) == []

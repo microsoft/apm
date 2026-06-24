@@ -10,15 +10,15 @@ auto-activates inside Copilot or Claude, add a custom agent that pairs with
 it, install both into a project, and ship the result as a plugin. No prompts,
 no `cat <<EOF`, no compile step you do not need.
 
-If you want the conceptual map first, read [Anatomy of an APM Package](../../introduction/anatomy-of-an-apm-package/).
+If you want the conceptual map first, read [Anatomy of an APM Package](/apm/concepts/package-anatomy/).
 Otherwise, start here.
 
 ## Prerequisites
 
-- APM installed -- see [Installation](/apm/quickstart/).
+- APM installed -- see [Installation](./installation/).
 - A GitHub account and an empty repo for publishing (step 5).
-- A runtime where you can try the result: GitHub Copilot, Claude Code, or
-  Cursor.
+- A runtime where you can try the result: GitHub Copilot, Claude Code, Kiro,
+  or Cursor.
 
 ## 1. Scaffold
 
@@ -165,11 +165,11 @@ See the [Agent Workflows guide](/apm/producer/author-primitives/instructions-and
 
 ## 4. Deploy and use
 
-Run install with no arguments. APM treats your repo as the package and
-deploys its `.apm/` content into the runtime directories your tools read:
+Run install with an explicit target. APM treats your repo as the package and
+deploys its `.apm/` content into the Copilot runtime directories:
 
 ```bash
-apm install
+apm install --target copilot
 ```
 
 Output:
@@ -209,10 +209,10 @@ team-skills/
 `apm install` resolves which harness directories to populate using a strict
 priority chain: `--target` flag > `apm.yml` `targets:` > auto-detect from
 filesystem signals (`.claude/`, `CLAUDE.md`, `.cursor/`, `.github/copilot-instructions.md`,
-`.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`). The example layout
+`.codex/`, `.gemini/`, `GEMINI.md`, `.opencode/`, `.windsurf/`, `.kiro/`). The example layout
 above shows `.github/` because `.github/copilot-instructions.md` exists in the
-project; if you also have `.claude/`, `.cursor/`, `.opencode/`, or `.gemini/`, those
-directories get populated too. With no signal at all, `apm install` exits with
+project; if you also have `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, or
+`.kiro/`, those directories get populated too. With no signal at all, `apm install` exits with
 code 2 and a teaching message instead of silently picking a target -- declare an
 intent explicitly via `--target copilot` (or another harness), or by adding
 `targets: [copilot]` to `apm.yml`. Run `apm targets` to inspect what APM detects
@@ -311,7 +311,7 @@ APM recognizes three layouts. Pick the one that matches what you are shipping:
   it directly without restructuring.
 
 For the full comparison and metadata precedence rules, see
-[Package Types](../../reference/package-types/).
+[Package Types](../reference/package-types/).
 
 ## Next steps
 

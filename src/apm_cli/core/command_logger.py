@@ -6,7 +6,6 @@ from apm_cli.utils.console — no new output primitives.
 """
 
 from dataclasses import dataclass
-from typing import Optional  # noqa: F401
 
 from apm_cli.utils.console import (
     _rich_echo,
@@ -218,9 +217,11 @@ class InstallLogger(CommandLogger):
         noun = "package" if count == 1 else "packages"
         _rich_info(f"Validating {count} {noun}...", symbol="gear")
 
-    def validation_pass(self, canonical: str, already_present: bool):
+    def validation_pass(self, canonical: str, already_present: bool, updated: bool = False):
         """Log a package that passed validation."""
-        if already_present:
+        if updated:
+            _rich_echo(f"{canonical} (updated ref in apm.yml)", color="dim", symbol="check")
+        elif already_present:
             _rich_echo(f"{canonical} (already in apm.yml)", color="dim", symbol="check")
         else:
             _rich_success(canonical, symbol="check")
@@ -683,7 +684,6 @@ class InstallLogger(CommandLogger):
                 hint).  When provided, a dim secondary line with
                 remediation guidance is rendered under the inline error.
         """
-        from apm_cli.utils.diagnostics import CATEGORY_POLICY  # noqa: F401
 
         # F9 dedupe: some callers pass reason with a "{dep_ref}: " prefix
         # (the detail strings produced by policy_checks.py do this).
@@ -758,6 +758,7 @@ class InstallLogger(CommandLogger):
         self,
         apm_count: int,
         mcp_count: int,
+        lsp_count: int = 0,
         errors: int = 0,
         stale_cleaned: int = 0,
         elapsed_seconds: float | None = None,
@@ -767,6 +768,7 @@ class InstallLogger(CommandLogger):
         Args:
             apm_count: Number of APM dependencies installed.
             mcp_count: Number of MCP servers installed.
+            lsp_count: Number of LSP servers installed.
             errors: Number of errors collected during install.
             stale_cleaned: Total stale + orphan files removed during
                 this install. Reported as a parenthetical so existing
@@ -783,6 +785,9 @@ class InstallLogger(CommandLogger):
         if mcp_count > 0:
             noun = "server" if mcp_count == 1 else "servers"
             parts.append(f"{mcp_count} MCP {noun}")
+        if lsp_count > 0:
+            noun = "server" if lsp_count == 1 else "servers"
+            parts.append(f"{lsp_count} LSP {noun}")
 
         cleanup_suffix = ""
         if stale_cleaned > 0:
@@ -809,6 +814,11 @@ class InstallLogger(CommandLogger):
             _rich_error(
                 f"Installation failed with {errors} error(s){timing_suffix}.",
                 symbol="error",
+            )
+        else:
+            _rich_info(
+                f"No changes -- install state already up to date{timing_suffix}.",
+                symbol="info",
             )
 
     def install_interrupted(self, elapsed_seconds: float):

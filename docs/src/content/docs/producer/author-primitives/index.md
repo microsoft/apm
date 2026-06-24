@@ -36,10 +36,10 @@ A package's `.apm/` directory contains primitives. Each primitive type is an opi
   agents/
     cli-logging-expert.agent.md
   hooks/
-    pre-commit.hook.md
-  commands/
-    deploy.command.md
+    pre-commit.json
 ```
+
+Commands ship as prompts (`.apm/prompts/*.prompt.md`); there is no separate `.apm/commands/` directory. See [Hooks and commands](./hooks-and-commands/).
 
 Every primitive type follows the same pattern: a markdown file (or directory containing a primary markdown file) with frontmatter declaring its name and its trigger conditions. `apm compile` reads `.apm/`, applies any policy, and writes per-target output to the right directories on the target's filesystem.
 

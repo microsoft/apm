@@ -1,7 +1,7 @@
 """Utility helpers for APM dependency commands."""
 
 from pathlib import Path
-from typing import Any, Dict  # noqa: F401, UP035
+from typing import Any
 
 from ...constants import APM_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...models.apm_package import APMPackage

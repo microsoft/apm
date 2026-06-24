@@ -89,6 +89,10 @@ Exit codes: `0` on success, `1` when the package is not installed or the query m
 
 ### `apm deps update`
 
+:::caution[Deprecated]
+`apm deps update` is deprecated in favor of [`apm update`](../update/), which is now a strict superset: it supports `-g/--global`, `[PACKAGES...]`, `--force`, and `--parallel-downloads`, plus an interactive plan, `--dry-run`, and `--yes`. `apm deps update` keeps working for one release and is removed in the next breaking release.
+:::
+
 Re-resolve git references for installed dependencies (direct and transitive), download updated content, re-integrate primitives, and regenerate `apm.lock.yaml`.
 
 ```bash
@@ -103,7 +107,7 @@ apm deps update [PACKAGES...] [OPTIONS]
 |---|---|
 | `-v, --verbose` | Show detailed update information. |
 | `--force` | Overwrite locally-authored files on collision. |
-| `-t, --target` | Force deployment to specific targets. Comma-separated. Values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `agent-skills`, `all`. `agent-skills` deploys to `.agents/skills/` (cross-client). `all` covers every per-client target but excludes `agent-skills`; combine to get both. |
+| `-t, --target` | Force deployment to specific targets. Comma-separated. Values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `agent-skills`, `all`. `copilot-cowork` is also accepted when its experimental flag is enabled. `agent-skills` deploys to `.agents/skills/` (cross-client). `all` covers every per-client target but excludes `agent-skills`; combine to get both. |
 | `--parallel-downloads N` | Max concurrent downloads. Default `4`. `0` disables parallelism. |
 | `-g, --global` | Update user-scope dependencies in `~/.apm/`. |
 | `--legacy-skill-paths` | Deploy skill files to per-client paths (`.cursor/skills/`, etc.) instead of the shared `.agents/skills/` directory. |

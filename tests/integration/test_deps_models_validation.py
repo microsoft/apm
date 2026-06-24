@@ -32,49 +32,15 @@ import yaml
 # ---------------------------------------------------------------------------
 
 
-def _make_dep_ref(
-    repo_url: str = "owner/repo",
-    host: str | None = "github.com",
-    port: int | None = None,
-    reference: str | None = None,
-    is_virtual: bool = False,
-    virtual_path: str | None = None,
-    is_local: bool = False,
-    local_path: str | None = None,
-    is_insecure: bool = False,
-    ado_organization: str | None = None,
-    ado_project: str | None = None,
-    ado_repo: str | None = None,
-    alias: str | None = None,
-    is_parent_repo_inheritance: bool = False,
-    explicit_scheme: str | None = None,
-    skill_subset: list[str] | None = None,
-    artifactory_prefix: str | None = None,
-    allow_insecure: bool = False,
-) -> Any:
+def _make_dep_ref(**kwargs: Any) -> Any:
     """Build a DependencyReference without network calls."""
     from apm_cli.models.dependency.reference import DependencyReference
 
-    return DependencyReference(
-        repo_url=repo_url,
-        host=host,
-        port=port,
-        reference=reference,
-        is_virtual=is_virtual,
-        virtual_path=virtual_path,
-        is_local=is_local,
-        local_path=local_path,
-        is_insecure=is_insecure,
-        ado_organization=ado_organization,
-        ado_project=ado_project,
-        ado_repo=ado_repo,
-        alias=alias,
-        is_parent_repo_inheritance=is_parent_repo_inheritance,
-        explicit_scheme=explicit_scheme,
-        skill_subset=skill_subset,
-        artifactory_prefix=artifactory_prefix,
-        allow_insecure=allow_insecure,
-    )
+    defaults = {
+        "repo_url": "owner/repo",
+        "host": "github.com",
+    }
+    return DependencyReference(**{**defaults, **kwargs})
 
 
 def _make_downloader() -> Any:
@@ -103,7 +69,7 @@ def _DR():
 
 
 # ============================================================================
-# SECTION 1 – DependencyReference: HTTPS & SSH URL parsing
+# SECTION 1 - DependencyReference: HTTPS & SSH URL parsing
 # ============================================================================
 
 
@@ -285,7 +251,7 @@ class TestParseVirtualPackages:
 
 
 # ============================================================================
-# SECTION 2 – DependencyReference: ADO parsing
+# SECTION 2 - DependencyReference: ADO parsing
 # ============================================================================
 
 
@@ -332,7 +298,7 @@ class TestParseAdoUrls:
 
 
 # ============================================================================
-# SECTION 3 – DependencyReference: canonical / identity / install path
+# SECTION 3 - DependencyReference: canonical / identity / install path
 # ============================================================================
 
 
@@ -492,7 +458,7 @@ class TestVirtualPackageMethods:
 
 
 # ============================================================================
-# SECTION 4 – DependencyReference: to_apm_yml_entry / to_github_url
+# SECTION 4 - DependencyReference: to_apm_yml_entry / to_github_url
 # ============================================================================
 
 
@@ -607,7 +573,7 @@ class TestGetDisplayName:
 
 
 # ============================================================================
-# SECTION 5 – DependencyReference: parse_from_dict
+# SECTION 5 - DependencyReference: parse_from_dict
 # ============================================================================
 
 
@@ -680,7 +646,7 @@ class TestParseFromDict:
 
 
 # ============================================================================
-# SECTION 6 – DependencyReference: GitLab shorthand helpers
+# SECTION 6 - DependencyReference: GitLab shorthand helpers
 # ============================================================================
 
 
@@ -715,7 +681,7 @@ class TestGitLabShorthandHelpers:
 
 
 # ============================================================================
-# SECTION 7 – DependencyReference: __str__ and get_unique_key
+# SECTION 7 - DependencyReference: __str__ and get_unique_key
 # ============================================================================
 
 
@@ -757,7 +723,7 @@ class TestStrAndUniqueKey:
 
 
 # ============================================================================
-# SECTION 8 – GitHubPackageDownloader: download_virtual_file_package
+# SECTION 8 - GitHubPackageDownloader: download_virtual_file_package
 # ============================================================================
 
 
@@ -861,7 +827,7 @@ class TestDownloadVirtualFilePackage:
 
 
 # ============================================================================
-# SECTION 9 – GitHubPackageDownloader: download_subdirectory_package guards
+# SECTION 9 - GitHubPackageDownloader: download_subdirectory_package guards
 # ============================================================================
 
 
@@ -886,7 +852,7 @@ class TestDownloadSubdirectoryPackageGuards:
 
 
 # ============================================================================
-# SECTION 10 – GitHubPackageDownloader: _try_sparse_checkout
+# SECTION 10 - GitHubPackageDownloader: _try_sparse_checkout
 # ============================================================================
 
 
@@ -940,7 +906,7 @@ class TestTrySparseCheckout:
 
 
 # ============================================================================
-# SECTION 11 – GitHubPackageDownloader: resolve_git_reference
+# SECTION 11 - GitHubPackageDownloader: resolve_git_reference
 # ============================================================================
 
 
@@ -975,7 +941,7 @@ class TestResolveGitReference:
 
 
 # ============================================================================
-# SECTION 12 – GitHubPackageDownloader: _close_repo & debug helper
+# SECTION 12 - GitHubPackageDownloader: _close_repo & debug helper
 # ============================================================================
 
 
@@ -1014,7 +980,7 @@ class TestCloseRepoAndDebug:
 
 
 # ============================================================================
-# SECTION 13 – GitHubPackageDownloader: download_raw_file routing
+# SECTION 13 - GitHubPackageDownloader: download_raw_file routing
 # ============================================================================
 
 
@@ -1062,7 +1028,7 @@ class TestDownloadRawFileRouting:
 
 
 # ============================================================================
-# SECTION 14 – install/pipeline.py: _run_phase
+# SECTION 14 - install/pipeline.py: _run_phase
 # ============================================================================
 
 
@@ -1116,7 +1082,7 @@ class TestRunPhase:
 
 
 # ============================================================================
-# SECTION 15 – install/pipeline.py: run_install_pipeline early exits
+# SECTION 15 - install/pipeline.py: run_install_pipeline early exits
 # ============================================================================
 
 
@@ -1193,7 +1159,7 @@ class TestRunInstallPipelineEarlyExits:
 
 
 # ============================================================================
-# SECTION 16 – install/pipeline.py: _preflight_auth_check
+# SECTION 16 - install/pipeline.py: _preflight_auth_check
 # ============================================================================
 
 
@@ -1268,7 +1234,7 @@ class TestPreflightAuthCheck:
 
 
 # ============================================================================
-# SECTION 17 – install/drift.py: normalization helpers
+# SECTION 17 - install/drift.py: normalization helpers
 # ============================================================================
 
 
@@ -1317,7 +1283,7 @@ class TestNormalizationHelpers:
 
 
 # ============================================================================
-# SECTION 18 – install/drift.py: scratch directory lifecycle
+# SECTION 18 - install/drift.py: scratch directory lifecycle
 # ============================================================================
 
 
@@ -1359,7 +1325,7 @@ class TestScratchDirectoryLifecycle:
 
 
 # ============================================================================
-# SECTION 19 – install/drift.py: _walk_managed / _collect_tracked_files
+# SECTION 19 - install/drift.py: _walk_managed / _collect_tracked_files
 # ============================================================================
 
 
@@ -1411,7 +1377,7 @@ class TestWalkManaged:
 
 
 # ============================================================================
-# SECTION 20 – install/drift.py: _governed_root_dirs
+# SECTION 20 - install/drift.py: _governed_root_dirs
 # ============================================================================
 
 
@@ -1441,7 +1407,7 @@ class TestGovernedRootDirs:
 
 
 # ============================================================================
-# SECTION 21 – install/drift.py: diff_scratch_against_project
+# SECTION 21 - install/drift.py: diff_scratch_against_project
 # ============================================================================
 
 
@@ -1548,7 +1514,7 @@ class TestDiffScratchAgainstProject:
 
 
 # ============================================================================
-# SECTION 22 – install/drift.py: render functions
+# SECTION 22 - install/drift.py: render functions
 # ============================================================================
 
 
@@ -1632,7 +1598,7 @@ class TestRenderDrift:
 
 
 # ============================================================================
-# SECTION 23 – install/drift.py: CheckLogger
+# SECTION 23 - install/drift.py: CheckLogger
 # ============================================================================
 
 
@@ -1701,7 +1667,7 @@ class TestCheckLogger:
 
 
 # ============================================================================
-# SECTION 24 – install/drift.py: DriftFinding / ReplayConfig / CacheMissError
+# SECTION 24 - install/drift.py: DriftFinding / ReplayConfig / CacheMissError
 # ============================================================================
 
 
@@ -1749,7 +1715,7 @@ class TestDriftDataClasses:
 
 
 # ============================================================================
-# SECTION 25 – install/drift.py: _materialize_install_path
+# SECTION 25 - install/drift.py: _materialize_install_path
 # ============================================================================
 
 
@@ -1780,6 +1746,7 @@ class TestMaterializeInstallPath:
         lock_dep.local_path = local_pkg_rel
         lock_dep.repo_url = "_local/my-tool"
         lock_dep.resolved_commit = None
+        lock_dep.resolved_by = None
 
         path = _materialize_install_path(
             lock_dep, project_root, tmp_path / "apm_modules", cache_only=True
@@ -1802,6 +1769,7 @@ class TestMaterializeInstallPath:
         lock_dep = MagicMock()
         lock_dep.source = "local"
         lock_dep.local_path = "nonexistent/path"
+        lock_dep.resolved_by = None
 
         with pytest.raises(CacheMissError, match="local source missing"):
             _materialize_install_path(lock_dep, tmp_path, tmp_path, cache_only=True)
@@ -1841,7 +1809,7 @@ class TestMaterializeInstallPath:
 
 
 # ============================================================================
-# SECTION 26 – install/drift.py: _build_package_info
+# SECTION 26 - install/drift.py: _build_package_info
 # ============================================================================
 
 
@@ -1890,7 +1858,7 @@ class TestBuildPackageInfo:
 
 
 # ============================================================================
-# SECTION 27 – install/drift.py: _make_integrators / _filter_targets
+# SECTION 27 - install/drift.py: _make_integrators / _filter_targets
 # ============================================================================
 
 
@@ -1928,7 +1896,7 @@ class TestMakeIntegratorsAndFilterTargets:
 
 
 # ============================================================================
-# SECTION 28 – install/drift.py: _inline_diff_for
+# SECTION 28 - install/drift.py: _inline_diff_for
 # ============================================================================
 
 
@@ -1957,7 +1925,7 @@ class TestInlineDiffFor:
 
 
 # ============================================================================
-# SECTION 29 – DependencyReference: is_local_path static edge cases
+# SECTION 29 - DependencyReference: is_local_path static edge cases
 # ============================================================================
 
 
@@ -1991,7 +1959,7 @@ class TestIsLocalPath:
 
 
 # ============================================================================
-# SECTION 30 – Additional edge case parsing
+# SECTION 30 - Additional edge case parsing
 # ============================================================================
 
 

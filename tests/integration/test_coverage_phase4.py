@@ -1,4 +1,4 @@
-"""Integration tests – phase 4 coverage uplift.
+"""Integration tests - phase 4 coverage uplift.
 
 Covers the following high-miss files:
 1. ``src/apm_cli/install/mcp/writer.py``            (_diff_entry, add_mcp_to_apm_yml)
@@ -643,9 +643,7 @@ class TestRunMcpInstall:
                 force=False,
                 runtime=None,
                 exclude=None,
-                verbose=False,
                 logger=logger,
-                manifest_path=apm_yml,
                 apm_dir=tmp_path,
                 scope=None,
             )
@@ -685,9 +683,7 @@ class TestRunMcpInstall:
                 force=False,
                 runtime=None,
                 exclude=None,
-                verbose=False,
                 logger=logger,
-                manifest_path=apm_yml,
                 apm_dir=tmp_path,
                 scope=None,
             )
@@ -732,9 +728,7 @@ class TestRunMcpInstall:
                 force=True,
                 runtime=None,
                 exclude=None,
-                verbose=False,
                 logger=logger,
-                manifest_path=apm_yml,
                 apm_dir=tmp_path,
                 scope=None,
             )
@@ -772,9 +766,7 @@ class TestRunMcpInstall:
                     force=False,
                     runtime=None,
                     exclude=None,
-                    verbose=False,
                     logger=logger,
-                    manifest_path=apm_yml,
                     apm_dir=tmp_path,
                     scope=None,
                 )
@@ -829,9 +821,7 @@ class TestRunMcpInstall:
                     force=False,
                     runtime=None,
                     exclude=None,
-                    verbose=True,
                     logger=logger,
-                    manifest_path=apm_yml,
                     apm_dir=tmp_path,
                     scope=None,
                 )
@@ -887,9 +877,7 @@ class TestRunMcpInstall:
                 force=False,
                 runtime=None,
                 exclude=None,
-                verbose=False,
                 logger=logger,
-                manifest_path=apm_yml,
                 apm_dir=tmp_path,
                 scope=None,
             )

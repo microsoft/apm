@@ -294,5 +294,53 @@ class TestDirectoryAnalysis:
         assert "**/*.py" in directory_map.directories[Path(".")]
 
 
+class TestListApplyToNocrash:
+    """Regression tests: list-valued applyTo must not crash distributed compilation.
+
+    GitHub issue #1300: 'list' object has no attribute 'startswith'.
+    Tests exercise the full parse_primitive_file -> compiler pipeline.
+    """
+
+    def test_analyze_directory_structure_list_apply_to_does_not_crash(self):
+        """YAML list-valued applyTo through the full parse path must not crash."""
+        from apm_cli.primitives.parser import parse_primitive_file
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            inst_file = base / "list-apply.instructions.md"
+            inst_file.write_text(
+                "---\ndescription: Test\napplyTo: ['**/*.py']\n---\n\n# content\n",
+                encoding="utf-8",
+            )
+            compiler = DistributedAgentsCompiler(temp_dir)
+            parsed = parse_primitive_file(inst_file)
+            # Must not raise AttributeError
+            directory_map = compiler.analyze_directory_structure([parsed])
+            assert len(directory_map.directories) >= 1
+
+    def test_compile_distributed_with_list_apply_to_normalised(self):
+        """Full compile_distributed run with YAML list applyTo must succeed end-to-end."""
+        from apm_cli.primitives.parser import parse_primitive_file
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            (base / "src").mkdir()
+            (base / "src" / "app.py").touch()
+            inst_file = base / "py.instructions.md"
+            inst_file.write_text(
+                "---\ndescription: Python rules\napplyTo: ['**/*.py']\n---\n\n# Python rules\n- Use type hints\n",
+                encoding="utf-8",
+            )
+
+            compiler = DistributedAgentsCompiler(temp_dir)
+            inst = parse_primitive_file(inst_file)
+
+            collection = PrimitiveCollection()
+            collection.add_primitive(inst)
+
+            result = compiler.compile_distributed(collection)
+            assert result.success
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

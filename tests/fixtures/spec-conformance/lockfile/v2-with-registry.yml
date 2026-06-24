@@ -1,0 +1,25 @@
+# Exercises: req-lk-001, req-lk-002, req-lk-003, req-lk-013, req-lk-016, req-rs-009
+# Valid v2 lockfile: at least one registry-sourced entry; lockfile_version MUST be "2".
+# resolved_hash is the sole trust anchor for mirror retrieval.
+lockfile_version: "2"
+generated_at: "2026-05-10T20:14:00+00:00"
+apm_version: "0.7.0"
+dependencies:
+  - repo_url: registry.example.com/contoso/security-baseline
+    source: registry
+    resolved_url: https://registry.example.com/contoso/security-baseline/2.3.1.tgz
+    resolved_hash: "sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    version: "2.3.1"
+    depth: 1
+    deployed_files:
+      - .github/instructions/security.instructions.md
+    deployed_file_hashes:
+      .github/instructions/security.instructions.md: "sha256:f7846f55cf23e14eebeab5b4e1550cad5b509e3348fbc4efa3a1413d393cb650"
+  - repo_url: github.com/contoso/common-prompts
+    resolved_commit: "a1b2c3d4e5f6789012345678901234567890abcd"
+    resolved_ref: "^1.0.0"
+    constraint: "^1.0.0"
+    resolved_tag: v1.4.2
+    resolved_at: "2026-05-10T20:14:00+00:00"
+    tree_sha256: "sha256:0102030405060708091011121314151617181920212223242526272829303132"
+    depth: 1

@@ -9,7 +9,6 @@ the AGENTS.md pipeline already produces.
 import builtins
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional  # noqa: F401, UP035
 
 from ..primitives.models import Instruction, PrimitiveCollection
 from ..version import get_version

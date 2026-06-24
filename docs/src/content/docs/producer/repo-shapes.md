@@ -23,7 +23,7 @@ migrate later by moving directories and re-running the same commands.
 | Monorepo-hybrid (advanced) | Root `apm.yml` plus per-plugin `apm.yml` subdirs | Many plugins live alongside the marketplace in one repo. Composition of the two postures above. |
 
 When the layout is ready, ship it with the recipe in
-[Releasing from any CI](../releasing-from-any-ci/).
+[Releasing from any CI](./releasing-from-any-ci/).
 
 ## Single-plugin
 
@@ -117,10 +117,32 @@ my-monorepo/
     plugin-a/
       apm.yml                      # plugin-a's manifest
       .apm/
+        agents/
+          expert.agent.md
+        instructions/
+          style.instructions.md
+        skills/
+          my-skill/
+            SKILL.md
     plugin-b/
       apm.yml
       .apm/
+        prompts/
+          review.prompt.md
+        hooks/
+          pre-tool.json
 ```
+
+> **Important -- use `.apm/<type>/` for every primitive in each plugin.**
+> `apm pack` accepts primitives from both `.apm/<type>/` and root
+> convention directories (e.g. `instructions/` at the plugin root), but
+> `apm install` only discovers instructions, commands, and prompts under
+> `.apm/<type>/`. Authoring `packages/plugin-a/instructions/style.instructions.md`
+> instead of `packages/plugin-a/.apm/instructions/style.instructions.md`
+> will produce a bundle that packs correctly but installs silently
+> incomplete. See [Pack a bundle -- source layout and install-time
+> discovery](./pack-a-bundle/#source-layout-and-install-time-discovery)
+> for the full per-primitive scan-path reference.
 
 Scaffold:
 
@@ -160,13 +182,46 @@ marketplace:
 Local-path entries skip remote resolution. Each plugin's own
 `apm.yml` controls its build; the root `apm.yml` controls the
 marketplace index. Pick a versioning strategy that matches how you
-tag releases -- see [Versioning strategies](../versioning-strategies/).
+tag releases -- see [Versioning strategies](./versioning-strategies/).
+
+## Shipping `bin/` executables (Claude Code only)
+
+A plugin may ship a top-level `bin/` directory of executable scripts.
+When a consumer runs a **global** install (`apm install -g`), APM
+deploys the plugin as a Claude Code skills-directory plugin (a folder
+containing `.claude-plugin/plugin.json`) under the Claude skills
+directory, which puts `bin/` on Claude Code's Bash tool `PATH`. The
+agent can then invoke your scripts as bare commands.
+
+```
+my-plugin/
+  apm.yml
+  .apm/
+  bin/
+    my-tool                          # executable script (chmod handled by APM)
+```
+
+This is a **Claude-Code-specific** contract -- no other harness has an
+equivalent -- so `bin/` deploys only when the consumer has an active
+Claude Code skills target. Authoring rules:
+
+- Deploy is **user-scope only**. A project-scope install (without `-g`)
+  skips `bin/` and prints a hint to re-run with `-g`.
+- APM sets **user-only execute** on deployed files (owner +x; group and
+  other execute bits are cleared). Do not rely on a specific umask.
+- Deployed executables sit on Claude Code's `PATH` and are invoked
+  **without per-call confirmation**. Treat them as trusted code: keep
+  them minimal, audited, and free of network side effects you would not
+  want an agent to trigger unprompted.
+- Enterprises can deny deployment per-package or globally via the
+  `bin_deploy` policy rule -- see the
+  [policy schema](../../reference/policy-schema/#bin_deploy).
 
 ## What to read next
 
-- [Versioning strategies](../versioning-strategies/) -- lockstep vs
+- [Versioning strategies](./versioning-strategies/) -- lockstep vs
   per-package and how `apm pack --check-versions` enforces them.
-- [Releasing from any CI](../releasing-from-any-ci/) -- the canonical
+- [Releasing from any CI](./releasing-from-any-ci/) -- the canonical
   release pipeline that ships any of the shapes above.
-- [Publish to a marketplace](../publish-to-a-marketplace/) -- the
+- [Publish to a marketplace](./publish-to-a-marketplace/) -- the
   `apm marketplace init` walkthrough and the registry schema.

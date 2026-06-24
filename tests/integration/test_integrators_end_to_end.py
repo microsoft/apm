@@ -381,7 +381,7 @@ class TestSkillIntegratorFindFiles:
 
 
 # ===========================================================================
-# SkillIntegrator._dirs_equal / _dircmp_equal
+# SkillIntegrator.is_skill_dir_identical_to_source / _dircmp_equal
 # ===========================================================================
 
 
@@ -393,7 +393,7 @@ class TestSkillIntegratorDirsEqual:
         dir_b.mkdir()
         (dir_a / "SKILL.md").write_text("same content")
         (dir_b / "SKILL.md").write_text("same content")
-        assert SkillIntegrator._dirs_equal(dir_a, dir_b) is True
+        assert SkillIntegrator.is_skill_dir_identical_to_source(dir_a, dir_b) is True
 
     def test_different_content(self, tmp_path: Path) -> None:
         dir_a = tmp_path / "a"
@@ -402,7 +402,7 @@ class TestSkillIntegratorDirsEqual:
         dir_b.mkdir()
         (dir_a / "SKILL.md").write_text("version 1")
         (dir_b / "SKILL.md").write_text("version 2")
-        assert SkillIntegrator._dirs_equal(dir_a, dir_b) is False
+        assert SkillIntegrator.is_skill_dir_identical_to_source(dir_a, dir_b) is False
 
     def test_different_files(self, tmp_path: Path) -> None:
         dir_a = tmp_path / "a"
@@ -411,14 +411,14 @@ class TestSkillIntegratorDirsEqual:
         dir_b.mkdir()
         (dir_a / "SKILL.md").write_text("same")
         (dir_b / "OTHER.md").write_text("same")
-        assert SkillIntegrator._dirs_equal(dir_a, dir_b) is False
+        assert SkillIntegrator.is_skill_dir_identical_to_source(dir_a, dir_b) is False
 
     def test_empty_dirs_equal(self, tmp_path: Path) -> None:
         dir_a = tmp_path / "a"
         dir_b = tmp_path / "b"
         dir_a.mkdir()
         dir_b.mkdir()
-        assert SkillIntegrator._dirs_equal(dir_a, dir_b) is True
+        assert SkillIntegrator.is_skill_dir_identical_to_source(dir_a, dir_b) is True
 
 
 # ===========================================================================

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import dataclasses
 import unittest
+from typing import ClassVar
 
 from apm_cli.policy.inheritance import (
     MAX_CHAIN_DEPTH,
@@ -14,6 +16,8 @@ from apm_cli.policy.inheritance import (
 )
 from apm_cli.policy.schema import (
     ApmPolicy,
+    AuditPolicy,
+    BinDeployPolicy,
     CompilationPolicy,
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
@@ -22,6 +26,8 @@ from apm_cli.policy.schema import (
     McpPolicy,
     McpTransportPolicy,
     PolicyCache,
+    RegistrySourcePolicy,
+    SecurityPolicy,
     UnmanagedFilesPolicy,
 )
 
@@ -712,6 +718,209 @@ class TestEdgeCases(unittest.TestCase):
     def test_name_fallback_to_parent(self):
         result = merge_policies(ApmPolicy(name="parent"), ApmPolicy(name=""))
         self.assertEqual(result.name, "parent")
+
+
+class TestSecurityAuditMerge(unittest.TestCase):
+    """security.audit merges as a floor: tightens, never relaxes."""
+
+    @staticmethod
+    def _p(on_install=None, external=None):
+        return ApmPolicy(
+            security=SecurityPolicy(audit=AuditPolicy(on_install=on_install, external=external))
+        )
+
+    def test_parent_floor_holds_over_weaker_child(self):
+        result = merge_policies(self._p("block"), self._p("warn"))
+        self.assertEqual(result.security.audit.on_install, "block")
+
+    def test_child_can_tighten_over_parent(self):
+        result = merge_policies(self._p("warn"), self._p("block"))
+        self.assertEqual(result.security.audit.on_install, "block")
+
+    def test_none_parent_transparency(self):
+        result = merge_policies(self._p(None), self._p("warn"))
+        self.assertEqual(result.security.audit.on_install, "warn")
+
+    def test_none_child_transparency(self):
+        result = merge_policies(self._p("block"), self._p(None))
+        self.assertEqual(result.security.audit.on_install, "block")
+
+    def test_external_union_merged(self):
+        result = merge_policies(self._p("block", ("skillspector",)), self._p("block", ("sarif",)))
+        self.assertEqual(set(result.security.audit.external), {"skillspector", "sarif"})
+
+
+class TestFetchFailureEscalation(unittest.TestCase):
+    """fetch_failure can only escalate: warn < block (closes #829 inheritance)."""
+
+    def _merge(self, parent_val: str, child_val: str) -> str:
+        return merge_policies(
+            ApmPolicy(fetch_failure=parent_val),
+            ApmPolicy(fetch_failure=child_val),
+        ).fetch_failure
+
+    def test_parent_block_not_relaxed_by_silent_child(self):
+        # Child default is "warn"; it must not relax a parent "block".
+        self.assertEqual(self._merge("block", "warn"), "block")
+
+    def test_child_can_tighten(self):
+        self.assertEqual(self._merge("warn", "block"), "block")
+
+    def test_same_level(self):
+        self.assertEqual(self._merge("warn", "warn"), "warn")
+
+
+class TestRegistrySourceMerge(unittest.TestCase):
+    """registry_source tightens: require unions, allow_non_registry restricts."""
+
+    def test_parent_require_preserved_when_child_silent(self):
+        parent = ApmPolicy(registry_source=RegistrySourcePolicy(require=("corp",)))
+        result = merge_policies(parent, ApmPolicy())
+        self.assertEqual(result.registry_source.require, ("corp",))
+
+    def test_require_union_merged(self):
+        parent = ApmPolicy(registry_source=RegistrySourcePolicy(require=("corp",)))
+        child = ApmPolicy(registry_source=RegistrySourcePolicy(require=("mirror",)))
+        result = merge_policies(parent, child)
+        self.assertEqual(set(result.registry_source.require), {"corp", "mirror"})
+
+    def test_allow_non_registry_parent_false_preserved(self):
+        parent = ApmPolicy(registry_source=RegistrySourcePolicy(allow_non_registry=False))
+        result = merge_policies(parent, ApmPolicy())
+        self.assertFalse(result.registry_source.allow_non_registry)
+
+    def test_allow_non_registry_child_can_tighten(self):
+        parent = ApmPolicy(registry_source=RegistrySourcePolicy(allow_non_registry=True))
+        child = ApmPolicy(registry_source=RegistrySourcePolicy(allow_non_registry=False))
+        result = merge_policies(parent, child)
+        self.assertFalse(result.registry_source.allow_non_registry)
+
+    def test_allow_non_registry_child_cannot_relax(self):
+        parent = ApmPolicy(registry_source=RegistrySourcePolicy(allow_non_registry=False))
+        child = ApmPolicy(registry_source=RegistrySourcePolicy(allow_non_registry=True))
+        result = merge_policies(parent, child)
+        self.assertFalse(result.registry_source.allow_non_registry)
+
+
+class TestBinDeployMerge(unittest.TestCase):
+    """bin_deploy tightens: deny_all sticks True, deny unions."""
+
+    def test_parent_deny_all_preserved_when_child_silent(self):
+        parent = ApmPolicy(bin_deploy=BinDeployPolicy(deny_all=True))
+        result = merge_policies(parent, ApmPolicy())
+        self.assertTrue(result.bin_deploy.deny_all)
+
+    def test_deny_all_child_can_tighten(self):
+        parent = ApmPolicy(bin_deploy=BinDeployPolicy(deny_all=False))
+        child = ApmPolicy(bin_deploy=BinDeployPolicy(deny_all=True))
+        result = merge_policies(parent, child)
+        self.assertTrue(result.bin_deploy.deny_all)
+
+    def test_deny_all_child_cannot_relax(self):
+        parent = ApmPolicy(bin_deploy=BinDeployPolicy(deny_all=True))
+        child = ApmPolicy(bin_deploy=BinDeployPolicy(deny_all=False))
+        result = merge_policies(parent, child)
+        self.assertTrue(result.bin_deploy.deny_all)
+
+    def test_parent_deny_preserved_when_child_silent(self):
+        parent = ApmPolicy(bin_deploy=BinDeployPolicy(deny=("owner/repo",)))
+        result = merge_policies(parent, ApmPolicy())
+        self.assertEqual(result.bin_deploy.deny, ("owner/repo",))
+
+    def test_deny_union_merged(self):
+        parent = ApmPolicy(bin_deploy=BinDeployPolicy(deny=("a/b",)))
+        child = ApmPolicy(bin_deploy=BinDeployPolicy(deny=("c/d",)))
+        result = merge_policies(parent, child)
+        self.assertEqual(set(result.bin_deploy.deny), {"a/b", "c/d"})
+
+
+class TestMergeUnmanagedExclude(unittest.TestCase):
+    """The unmanaged-files ``exclude`` list is union-merged across a chain."""
+
+    def test_child_exclude_unions_with_parent(self):
+        parent = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(action="deny", exclude=(".github/copilot",))
+        )
+        child = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(action=None, exclude=(".vscode/mcp.json",))
+        )
+        merged = merge_policies(parent, child)
+        self.assertEqual(
+            set(merged.unmanaged_files.exclude),
+            {".github/copilot", ".vscode/mcp.json"},
+        )
+
+    def test_parent_exclude_inherited_when_child_silent(self):
+        parent = ApmPolicy(
+            unmanaged_files=UnmanagedFilesPolicy(action="deny", exclude=(".github/copilot",))
+        )
+        child = ApmPolicy()  # no unmanaged_files block at all
+        merged = merge_policies(parent, child)
+        self.assertEqual(merged.unmanaged_files.exclude, (".github/copilot",))
+
+    def test_child_only_exclude_is_not_transparent(self):
+        # A child that sets only exclude must still carry it through, even
+        # though action and directories are None.
+        parent = ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(action="deny"))
+        child = ApmPolicy(unmanaged_files=UnmanagedFilesPolicy(exclude=(".cursor/rules/local.md",)))
+        merged = merge_policies(parent, child)
+        self.assertIn(".cursor/rules/local.md", merged.unmanaged_files.exclude)
+
+
+class TestMergeFieldCoverageGuard(unittest.TestCase):
+    """Regression trap for the whole class of "forgotten field" bugs.
+
+    A field added to ``ApmPolicy`` but not handled in ``merge_policies``
+    silently reverts to its default when a policy ``extends`` another.
+    This guard builds a parent whose every mergeable field is non-default,
+    merges it with a silent (default) child, and asserts no field reverted
+    -- so a future forgotten field MUST fail here.
+    """
+
+    EXEMPT: ClassVar[set[str]] = {"name", "version", "extends"}
+
+    @staticmethod
+    def _non_default_parent() -> ApmPolicy:
+        # Each sample value is chosen so that merging with a silent child
+        # yields a result distinct from that field's default, proving the
+        # parent value was carried through rather than dropped.
+        return ApmPolicy(
+            enforcement="block",
+            fetch_failure="block",
+            cache=PolicyCache(ttl=1800),
+            dependencies=DependencyPolicy(max_depth=10),
+            mcp=McpPolicy(self_defined="deny"),
+            compilation=CompilationPolicy(source_attribution=True),
+            manifest=ManifestPolicy(scripts="deny"),
+            unmanaged_files=UnmanagedFilesPolicy(action="deny"),
+            registry_source=RegistrySourcePolicy(require=("corp",)),
+            security=SecurityPolicy(audit=AuditPolicy(on_install="block")),
+            bin_deploy=BinDeployPolicy(deny_all=True),
+        )
+
+    def test_sample_covers_every_mergeable_field(self):
+        default = ApmPolicy()
+        sample = self._non_default_parent()
+        sampled = {
+            f.name
+            for f in dataclasses.fields(ApmPolicy)
+            if getattr(sample, f.name) != getattr(default, f.name)
+        }
+        all_fields = {f.name for f in dataclasses.fields(ApmPolicy)}
+        self.assertEqual(sampled, all_fields - self.EXEMPT)
+
+    def test_no_field_dropped_on_merge(self):
+        parent = self._non_default_parent()
+        merged = merge_policies(parent, ApmPolicy())
+        default = ApmPolicy()
+        for f in dataclasses.fields(ApmPolicy):
+            if f.name in self.EXEMPT:
+                continue
+            self.assertNotEqual(
+                getattr(merged, f.name),
+                getattr(default, f.name),
+                f"merge_policies dropped field {f.name!r}: it reverted to its default",
+            )
 
 
 if __name__ == "__main__":

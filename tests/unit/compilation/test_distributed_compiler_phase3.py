@@ -24,12 +24,16 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.compilation.distributed_compiler import (
+    AGENTS_MD_GENERATED_MARKER,
     CompilationResult,
     DirectoryMap,
     DistributedAgentsCompiler,
     PlacementResult,
 )
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
+
+# APM-generated AGENTS.md content (marker present) for orphan tests
+_GENERATED_CONTENT = f"{AGENTS_MD_GENERATED_MARKER}\n# Generated content\n"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -588,17 +592,25 @@ class TestFindOrphanedAgentsFiles:
         """Existing AGENTS.md that matches generated set is not orphaned."""
         compiler = _make_compiler_in_tmp(tmp_path)
         agents_file: Path = tmp_path / "AGENTS.md"
-        agents_file.write_text("# agents")
+        agents_file.write_text(_GENERATED_CONTENT)
         orphans: list[Path] = compiler._find_orphaned_agents_files([agents_file])
         assert agents_file not in orphans
 
     def test_detects_orphaned_file(self, tmp_path: Path) -> None:
-        """AGENTS.md not in generated set is orphaned."""
+        """APM-generated AGENTS.md not in generated set is orphaned."""
         compiler = _make_compiler_in_tmp(tmp_path)
         agents_file: Path = tmp_path / "AGENTS.md"
-        agents_file.write_text("# orphan")
+        agents_file.write_text(_GENERATED_CONTENT)
         orphans: list[Path] = compiler._find_orphaned_agents_files([])
         assert agents_file in orphans
+
+    def test_hand_authored_file_not_orphaned(self, tmp_path: Path) -> None:
+        """Hand-authored AGENTS.md (no APM marker) is never reported as orphaned."""
+        compiler = _make_compiler_in_tmp(tmp_path)
+        agents_file: Path = tmp_path / "AGENTS.md"
+        agents_file.write_text("# Hand-authored\nThis file has no APM marker.\n")
+        orphans: list[Path] = compiler._find_orphaned_agents_files([])
+        assert agents_file not in orphans
 
     def test_skips_files_in_git_dir(self, tmp_path: Path) -> None:
         """AGENTS.md inside .git/ is not reported as orphaned."""
@@ -606,7 +618,7 @@ class TestFindOrphanedAgentsFiles:
         git_dir: Path = tmp_path / ".git"
         git_dir.mkdir()
         agents_in_git: Path = git_dir / "AGENTS.md"
-        agents_in_git.write_text("# in git")
+        agents_in_git.write_text(_GENERATED_CONTENT)
         orphans: list[Path] = compiler._find_orphaned_agents_files([])
         assert agents_in_git not in orphans
 
@@ -616,7 +628,7 @@ class TestFindOrphanedAgentsFiles:
         nm_dir: Path = tmp_path / "node_modules" / "some-pkg"
         nm_dir.mkdir(parents=True)
         agents_in_nm: Path = nm_dir / "AGENTS.md"
-        agents_in_nm.write_text("# in nm")
+        agents_in_nm.write_text(_GENERATED_CONTENT)
         orphans: list[Path] = compiler._find_orphaned_agents_files([])
         assert agents_in_nm not in orphans
 
@@ -626,7 +638,7 @@ class TestFindOrphanedAgentsFiles:
         apm_mod_dir: Path = tmp_path / "apm_modules" / "pkg"
         apm_mod_dir.mkdir(parents=True)
         agents_in_apm: Path = apm_mod_dir / "AGENTS.md"
-        agents_in_apm.write_text("# in apm_modules")
+        agents_in_apm.write_text(_GENERATED_CONTENT)
         orphans: list[Path] = compiler._find_orphaned_agents_files([])
         assert agents_in_apm not in orphans
 
@@ -686,28 +698,64 @@ class TestCleanupOrphanedFiles:
         compiler = _make_compiler_in_tmp(tmp_path)
         f: Path = tmp_path / "sub" / "AGENTS.md"
         f.parent.mkdir()
-        f.write_text("# orphan")
+        f.write_text(_GENERATED_CONTENT)
         msgs: list[str] = compiler._cleanup_orphaned_files([f], dry_run=True)
         assert f.exists()
         assert any("Would clean up" in m for m in msgs)
 
-    def test_real_cleanup_deletes_file(self, tmp_path: Path) -> None:
-        """dry_run=False actually removes the file."""
+    def test_real_cleanup_deletes_apm_generated_file(self, tmp_path: Path) -> None:
+        """dry_run=False removes an APM-generated file (marker present)."""
         compiler = _make_compiler_in_tmp(tmp_path)
         f: Path = tmp_path / "sub2" / "AGENTS.md"
         f.parent.mkdir()
-        f.write_text("# orphan")
+        f.write_text(_GENERATED_CONTENT)
         msgs: list[str] = compiler._cleanup_orphaned_files([f], dry_run=False)
         assert not f.exists()
         assert any("Removed" in m for m in msgs)
+
+    def test_hand_authored_not_deleted(self, tmp_path: Path) -> None:
+        """Hand-authored AGENTS.md (no APM marker) is skipped; no user-facing warning.
+
+        The defense-in-depth re-check in _cleanup_orphaned_files is on an unreachable
+        path in normal operation (_find_orphaned_agents_files already marker-gates).
+        The skip is now logged at DEBUG level only to avoid a double-prefixed warning.
+        """
+        compiler = _make_compiler_in_tmp(tmp_path)
+        f: Path = tmp_path / "sub3" / "AGENTS.md"
+        f.parent.mkdir()
+        f.write_text("# hand-authored, no marker")
+        msgs: list[str] = compiler._cleanup_orphaned_files([f], dry_run=False)
+        assert f.exists(), "Hand-authored file must not be deleted"
+        # Skip is debug-only -- must NOT appear in user-facing cleanup messages
+        assert not any("hand-authored" in m.lower() or "Skipped" in m for m in msgs), (
+            "Hand-authored skip must not appear as a user-facing warning (demoted to debug).\n"
+            f"Messages: {msgs}"
+        )
 
     def test_unlink_failure_captured_in_messages(self, tmp_path: Path) -> None:
         """OSError during unlink is caught and reported in messages (not raised)."""
         compiler = _make_compiler_in_tmp(tmp_path)
         f: Path = tmp_path / "ghost" / "AGENTS.md"
+        f.parent.mkdir()
+        f.write_text(_GENERATED_CONTENT)
         with patch.object(Path, "unlink", side_effect=OSError("permission denied")):
             msgs: list[str] = compiler._cleanup_orphaned_files([f], dry_run=False)
         assert any("Failed to remove" in m for m in msgs)
+
+    def test_all_hand_authored_reports_zero_removed(self, tmp_path: Path) -> None:
+        """When every file in the list fails the marker re-check, reports '0 files removed'."""
+        compiler = _make_compiler_in_tmp(tmp_path)
+        f: Path = tmp_path / "hand" / "AGENTS.md"
+        f.parent.mkdir()
+        f.write_text("# hand-authored, no marker")
+        msgs: list[str] = compiler._cleanup_orphaned_files([f], dry_run=False)
+        assert f.exists(), "Hand-authored file must not be deleted"
+        assert any("0 files removed" in m for m in msgs), (
+            f"Must report '0 files removed' when all files are skipped.\nMessages: {msgs}"
+        )
+        assert not any("Removed" in m for m in msgs), (
+            f"Must not report any individual removals when nothing was removed.\nMessages: {msgs}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -725,11 +773,12 @@ class TestCompileDistributedStats:
         prims = _make_primitives()
         stats: dict = compiler._compile_distributed_stats([], prims)
         assert "agents_files_generated" in stats
+        assert "placements_analyzed" in stats
         assert "total_instructions_placed" in stats
         assert "primitives_found" in stats
 
     def test_stats_counts_placements(self, tmp_path: Path) -> None:
-        """agents_files_generated equals number of placements."""
+        """agents_files_generated falls back to len(placements) when content_map is not passed."""
         compiler = _make_compiler_in_tmp(tmp_path)
         compiler.context_optimizer.get_optimization_stats.return_value = None
         inst = _make_instruction(file_path=tmp_path / "i.md")
@@ -741,6 +790,7 @@ class TestCompileDistributedStats:
         prims = _make_primitives()
         stats: dict = compiler._compile_distributed_stats([placement], prims)
         assert stats["agents_files_generated"] == 1
+        assert stats["placements_analyzed"] == 1
         assert stats["total_instructions_placed"] == 1
 
     def test_optimization_stats_merged_when_available(self, tmp_path: Path) -> None:
@@ -796,7 +846,7 @@ class TestGetCompilationResultsForDisplay:
 
 
 # ---------------------------------------------------------------------------
-# compile_distributed – integration-style
+# compile_distributed - integration-style
 # ---------------------------------------------------------------------------
 
 
@@ -849,18 +899,18 @@ class TestCompileDistributed:
         assert any("context" in w.lower() for w in result.warnings)
 
     def test_clean_orphaned_triggers_cleanup(self, tmp_path: Path) -> None:
-        """clean_orphaned=True removes orphaned files in a non-dry-run."""
+        """clean_orphaned=True removes APM-generated orphaned files in a non-dry-run."""
         compiler = self._setup_compiler(tmp_path)
-        # Create an orphaned AGENTS.md (outside the generated set)
+        # Create an APM-generated orphaned AGENTS.md (outside the generated set)
         orphan: Path = tmp_path / "old" / "AGENTS.md"
         orphan.parent.mkdir()
-        orphan.write_text("# old")
+        orphan.write_text(_GENERATED_CONTENT)
         prims = _make_primitives()
         result: CompilationResult = compiler.compile_distributed(
             prims, config={"clean_orphaned": True, "dry_run": False}
         )
         assert result.success is True
-        # The orphan should have been cleaned up
+        # The APM-generated orphan should have been cleaned up
         assert not orphan.exists()
 
     def test_dry_run_does_not_delete_orphaned(self, tmp_path: Path) -> None:
@@ -868,7 +918,7 @@ class TestCompileDistributed:
         compiler = self._setup_compiler(tmp_path)
         orphan: Path = tmp_path / "old2" / "AGENTS.md"
         orphan.parent.mkdir()
-        orphan.write_text("# old2")
+        orphan.write_text(_GENERATED_CONTENT)
         prims = _make_primitives()
         compiler.compile_distributed(prims, config={"clean_orphaned": True, "dry_run": True})
         assert orphan.exists()

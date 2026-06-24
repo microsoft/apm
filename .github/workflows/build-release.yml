@@ -205,10 +205,20 @@ jobs:
           APM_E2E_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
+          # macOS runners are scarce, so this consolidated job runs the
+          # whole integration suite on one runner instead of sharding it
+          # across four like ci-integration.yml. Run it serially and the
+          # slower Intel runner overruns the step timeout, so parallelise
+          # in-process with xdist. --dist loadgroup is required: it is the
+          # only scheduler that honors pytest.mark.xdist_group, which keeps
+          # the HOME-mutating tests serialized on a single worker. Kept at
+          # -n 2 (matching ci-integration's per-shard width) to bound the
+          # shared-PAT API concurrency these E2E tests generate.
+          PYTEST_EXTRA_ARGS: "-n 2 --dist loadgroup"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        timeout-minutes: 20
+        timeout-minutes: 30
 
       # ── PHASE 3: RELEASE VALIDATION (tag/schedule/dispatch only) ──
       - name: Prepare isolated release-validation environment
@@ -305,10 +315,15 @@ jobs:
           APM_E2E_TESTS: "1"
           GITHUB_APM_PAT: ${{ secrets.GH_CLI_PAT }}
           ADO_APM_PAT: ${{ secrets.ADO_APM_PAT }}
+          # See the Intel job for the rationale: scarce macOS runners force
+          # the full suite onto one runner, so parallelise in-process with
+          # xdist. --dist loadgroup honors the home_env xdist_group markers
+          # that keep HOME-mutating tests serialized on a single worker.
+          PYTEST_EXTRA_ARGS: "-n 2 --dist loadgroup"
         run: |
           chmod +x scripts/test-integration.sh
           uv run ./scripts/test-integration.sh
-        timeout-minutes: 20
+        timeout-minutes: 30
 
       # ── PHASE 3: RELEASE VALIDATION ──
       - name: Prepare isolated release-validation environment

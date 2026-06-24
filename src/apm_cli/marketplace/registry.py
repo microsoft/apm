@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import threading
-from typing import Dict, List, Optional  # noqa: F401, UP035
 
 from .errors import MarketplaceNotFoundError
 from .models import MarketplaceSource

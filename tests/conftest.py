@@ -101,3 +101,24 @@ def _validate_primitive_coverage():
 
     dispatch = get_dispatch_table()
     check_primitive_coverage(dispatch)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_discovery_state():
+    """Clear process-scoped discovery cache + perf counters between tests.
+
+    These globals are reset at the top of ``run_install_pipeline`` in
+    production, but unit tests exercise ``discover_primitives`` and
+    ``find_primitive_files`` directly. Without this fixture, cache hits
+    from test A would silently shadow walk-time measurements (and even
+    primitive results) in test B -- making the suite order-dependent.
+    See review notes for #1533.
+    """
+    from apm_cli.primitives.discovery import clear_discovery_cache
+    from apm_cli.utils import perf_stats
+
+    clear_discovery_cache()
+    perf_stats.reset()
+    yield
+    clear_discovery_cache()
+    perf_stats.reset()

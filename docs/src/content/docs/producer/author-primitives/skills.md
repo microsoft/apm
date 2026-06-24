@@ -8,7 +8,7 @@ based on its `description`, reads `SKILL.md`, and follows the body to
 do a focused task. The format is the cross-tool agent-skills standard
 (SKILL.md plus optional bundled resources). APM is the package manager
 for skills, not the spec; for the full primitive matrix see
-[Primitives and targets](../../../concepts/primitives-and-targets/).
+[Primitives and targets](../../concepts/primitives-and-targets/).
 
 ## Folder layout
 
@@ -93,14 +93,14 @@ in `references/`; keep `SKILL.md` to the always-relevant flow.
 
 ## Where it lands per target
 
-`apm install` and `apm compile` deploy each skill folder to one
-directory per active target. Routing is verified in
+`apm install` deploys each skill folder to one directory per active target. Routing is verified in
 `src/apm_cli/integration/targets.py`.
 
 | Target            | Deploy directory                             |
 |-------------------|----------------------------------------------|
 | `claude`          | `.claude/skills/<name>/SKILL.md`             |
 | `windsurf`        | `.windsurf/skills/<name>/SKILL.md`           |
+| `kiro`            | `.kiro/skills/<name>/SKILL.md`               |
 | `copilot`         | `.agents/skills/<name>/SKILL.md`             |
 | `cursor`          | `.agents/skills/<name>/SKILL.md`             |
 | `codex`           | `.agents/skills/<name>/SKILL.md`             |
@@ -109,11 +109,16 @@ directory per active target. Routing is verified in
 | `agent-skills`    | `.agents/skills/<name>/SKILL.md` (explicit)  |
 
 Five harnesses converge on the cross-tool `.agents/skills/`
-directory. Claude and Windsurf keep harness-native paths because
-their runtimes scan their own roots. The whole skill folder is
-copied (`shutil.copytree`), so `scripts/`, `references/`, `assets/`,
-and `examples/` ride along. Symlinks and the `.apm-pin` cache marker
-are filtered out (`src/apm_cli/security/gate.py:ignore_non_content`).
+directory. Claude keeps its harness-native path because Claude Code's
+default scan is `.claude/skills/`; Windsurf and Kiro currently use
+`.windsurf/skills/` and `.kiro/skills/` for the same reason. Windsurf's Cascade also
+[discovers `.agents/skills/`](https://docs.windsurf.com/windsurf/cascade/skills#skill-scopes)
+natively for cross-agent compatibility (convergence tracked in
+[#1520](https://github.com/microsoft/apm/issues/1520)). The whole
+skill folder is copied (`shutil.copytree`), so `scripts/`,
+`references/`, `assets/`, and `examples/` ride along. Symlinks and
+the `.apm-pin` cache marker are filtered out
+(`src/apm_cli/security/gate.py:ignore_non_content`).
 
 To restore the pre-convergence layout where every harness gets its
 own `.<harness>/skills/` copy, pass `--legacy-skill-paths` or set
@@ -124,18 +129,17 @@ own `.<harness>/skills/` copy, pass `--legacy-skill-paths` or set
 Two commands answer "what will this look like once installed?":
 
 ```bash
-apm compile --validate          # parse frontmatter and structure; no writes
-apm compile --dry-run           # print every placement decision; no writes
-apm compile --target claude     # write only one target so you can diff
+apm install --dry-run --target claude  # preview placement without writes
+apm install --target claude            # write one target so you can diff
+apm audit --file .apm/skills/<name>/SKILL.md
 ```
 
-`apm compile --validate` is the fast lint loop. `--dry-run` shows the
-full routing table for the current set of detected harnesses.
-Targeting a single harness lets you inspect the actual file APM
-would deploy without touching the others. See
-[Compile](../../compile/) and
-[Preview and validate](../../preview-and-validate/) for the broader
-flow, and [Lifecycle](../../../concepts/lifecycle/) for where
+`apm install --dry-run` shows the routing table for the current set
+of detected harnesses. Targeting a single harness lets you inspect the
+actual file APM would deploy without touching the others. See
+[Compile](../compile/) and
+[Preview and validate](../preview-and-validate/) for the broader
+flow, and [Lifecycle](../../concepts/lifecycle/) for where
 compile sits between install and run.
 
 ## Common pitfalls

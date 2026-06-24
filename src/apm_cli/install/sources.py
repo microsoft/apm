@@ -31,7 +31,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional  # noqa: F401, UP035
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.registry_wiring import (
     get_registry_resolver,
@@ -65,6 +65,25 @@ def _format_package_type_label(pkg_type) -> str | None:
         PackageType.HOOK_PACKAGE: "Hook Package (hooks/*.json only)",
         PackageType.SKILL_BUNDLE: "Skill Bundle (skills/<name>/SKILL.md)",
     }.get(pkg_type)
+
+
+def _record_declared_license(ctx, dep_key: str, install_path) -> None:
+    """Backfill ctx.package_declared_licenses from the resolved dep's manifest.
+
+    Reads the DECLARED license (apm.yml ``license:`` or plugin.json
+    ``license``) at the install path. APM never reads the LICENSE file text or
+    concludes a license -- this is a passthrough of an author claim. When no
+    manifest declares one, the key is left ABSENT (not declared == unknown);
+    no sentinel is stored. Best-effort: any read error leaves the key absent.
+    """
+    try:
+        from apm_cli.export.declared_license import read_declared_license
+
+        declared = read_declared_license(install_path)
+    except Exception:
+        declared = None
+    if declared:
+        ctx.package_declared_licenses[dep_key] = declared
 
 
 def _rebuild_cached_semver_resolution(dep_locked_chk: Any) -> Any:
@@ -196,12 +215,15 @@ class LocalDependencySource(DependencySource):
                     )
                 return None
 
-        # Determine the anchor for relative ``local_path`` (#857). For direct
-        # deps from the root project this is project_root. For transitive
-        # deps declared inside another local package, it is the parent
-        # package's source directory -- captured during resolve via
-        # ``ctx.dep_base_dirs``.
-        base_dir = getattr(ctx, "dep_base_dirs", {}).get(dep_key) or ctx.project_root
+        # Determine the anchor for relative ``local_path`` (#857). For
+        # direct deps from the root project this is ``ctx.source_root``
+        # (which equals ``ctx.project_root`` unless ``apm install --root``
+        # redirects writes -- then it stays at $PWD).  For transitive
+        # deps declared inside another local package, the parent's
+        # source directory was captured during resolve via
+        # ``ctx.dep_base_dirs`` -- it is already absolute, so ``--root``
+        # has nothing to do.
+        base_dir = getattr(ctx, "dep_base_dirs", {}).get(dep_key) or ctx.source_root
         result_path = _copy_local_package(
             dep_ref,
             install_path,
@@ -292,6 +314,7 @@ class LocalDependencySource(DependencySource):
 
         if local_info.package_type:
             ctx.package_types[dep_key] = local_info.package_type.value
+        _record_declared_license(ctx, dep_key, install_path)
 
         return Materialization(
             package_info=local_info,
@@ -413,7 +436,7 @@ class CachedDependencySource(DependencySource):
                 display_name, ref=_ref, sha=_sha, cached=not self.fetched_this_run
             )
 
-        deltas: dict[str, int] = {"installed": 1}
+        deltas: dict[str, int] = {"installed": int(self.fetched_this_run)}
         if not dep_ref.reference:
             deltas["unpinned"] = 1
 
@@ -421,7 +444,9 @@ class CachedDependencySource(DependencySource):
         # write the empty deployed_files entry on its own (single source
         # of truth), so we just signal "skip integration" via
         # package_info=None.
-        if not ctx.targets:
+        # In lockfile_only mode, skip this early return so installed_packages
+        # is populated before we return without deploying any files.
+        if not ctx.targets and not ctx.lockfile_only:
             return Materialization(
                 package_info=None,
                 install_path=install_path,
@@ -525,6 +550,16 @@ class CachedDependencySource(DependencySource):
             ctx.package_hashes[dep_key] = _compute_hash(install_path)
         if cached_package_info.package_type:
             ctx.package_types[dep_key] = cached_package_info.package_type.value
+        _record_declared_license(ctx, dep_key, install_path)
+
+        # Return without deploying integration files when the target set is empty.
+        if not ctx.targets:
+            return Materialization(
+                package_info=None,
+                install_path=install_path,
+                dep_key=dep_key,
+                deltas=deltas,
+            )
 
         return Materialization(
             package_info=cached_package_info,
@@ -565,7 +600,6 @@ class FreshDependencySource(DependencySource):
     def acquire(self) -> Materialization | None:
         from apm_cli.deps.installed_package import InstalledPackage
         from apm_cli.drift import build_download_ref
-        from apm_cli.models.apm_package import PackageType  # noqa: F401
         from apm_cli.utils.content_hash import compute_package_hash as _compute_hash
         from apm_cli.utils.path_security import safe_rmtree
 
@@ -788,6 +822,7 @@ class FreshDependencySource(DependencySource):
 
             if hasattr(package_info, "package_type") and package_info.package_type:
                 ctx.package_types[dep_key] = package_info.package_type.value
+            _record_declared_license(ctx, dep_key, install_path)
 
             if hasattr(package_info, "package_type"):
                 package_type = package_info.package_type

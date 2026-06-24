@@ -16,7 +16,6 @@ Deny/require list semantics:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple  # noqa: F401, UP035
 
 
 @dataclass(frozen=True)
@@ -118,10 +117,15 @@ class UnmanagedFilesPolicy:
     When either field is set (including ``directories=()`` with a declared
     ``directories`` key), the merge applies escalation / union rules.
     ``action`` is then one of ``ignore`` | ``warn`` | ``deny``.
+
+    ``exclude`` is a glob allow-list of workspace paths to suppress from the
+    report -- used to silence known harness-managed artifacts. ``None`` means
+    "no opinion" (transparent during merge); a set list is union-merged.
     """
 
     action: str | None = None  # None | ignore | warn | deny
     directories: tuple[str, ...] | None = None  # None -> no opinion; () explicit
+    exclude: tuple[str, ...] | None = None  # None -> no opinion; globs to suppress
 
     @property
     def effective_action(self) -> str:
@@ -144,6 +148,96 @@ class RegistrySourcePolicy:
 
 
 @dataclass(frozen=True)
+class ScannerGovernance:
+    """Per-scanner governance applied at install-time audit (org floor).
+
+    Restrict-only by design: policy may tighten what a user/CLI can do, but it
+    never injects argv tokens of its own.
+
+      * ``allow_args`` -- ``False`` forbids *all* extra-args passthrough for the
+        scanner (a governance kill-switch: user/CLI ``--external-args`` and the
+        ``external.<name>.args`` config are stripped to ``()``). ``None``/``True``
+        permit the (allowlist-validated) passthrough.
+
+    ``llm`` mandation is intentionally NOT modelled in v1: forcing outbound LLM
+    egress from a project-shipped ``apm-policy.yml`` would be a trust-domain
+    change, so orgs forbid LLM by not enabling it / denylisting the scanner.
+    """
+
+    allow_args: bool | None = None
+
+
+@dataclass(frozen=True)
+class AuditPolicy:
+    """Rules governing the ``apm audit`` content scan, including at install time.
+
+    ``on_install`` semantics (mirrors the ``None = no opinion`` convention so
+    inheritance merge stays transparent):
+      * ``None``    -- no opinion (inherit parent / fall through to config).
+      * ``"off"``   -- never run audit during ``apm install``.
+      * ``"warn"``  -- run audit at install, surface findings, never block.
+      * ``"block"`` -- run audit at install, fail the install on critical findings.
+
+    ``external`` lists external SARIF scanner names (see
+    ``security/external/registry.SUPPORTED_SCANNERS``) that MUST run as part of
+    the install-time audit.  ``None`` = no opinion; ``()`` = explicitly none.
+    Requires the ``external_scanners`` experimental flag to take effect.
+
+    ``scanners`` carries optional per-scanner governance (see
+    :class:`ScannerGovernance`) as a tuple of ``(name, governance)`` pairs to
+    stay frozen/hashable, consistent with the other tuple-typed policy fields.
+    ``None`` = no opinion. Enforced only at the install-time audit phase and
+    only while the ``external_scanners`` flag is enabled.
+    """
+
+    on_install: str | None = None  # None | off | warn | block
+    external: tuple[str, ...] | None = None  # required external scanners at install
+    scanners: tuple[tuple[str, ScannerGovernance], ...] | None = None
+    # When True, ``apm audit`` exits non-zero if the workspace content drifts
+    # from the lockfile. Default off preserves today's advisory behavior (bare
+    # ``apm audit`` renders drift but exits 0). Tighten-not-relax on merge.
+    fail_on_drift: bool = False
+
+
+@dataclass(frozen=True)
+class IntegrityPolicy:
+    """Rules governing supply-chain integrity of locked dependencies.
+
+    ``require_hashes``: when ``True``, every non-local lockfile entry MUST carry
+    a content hash. A missing or empty hash is a FAILURE (fail-closed), never a
+    silent pass -- an unhashed entry could let a tampered lockfile redirect a
+    download without detection. Default off preserves today's behavior. The key
+    only asserts hash-presence on the lockfile entry; it does not add a second
+    filesystem hash pass (the install pipeline already computes+records hashes).
+    """
+
+    require_hashes: bool = False
+
+
+@dataclass(frozen=True)
+class SecurityPolicy:
+    """Rules governing APM's security checks (content audit and scanners)."""
+
+    audit: AuditPolicy = field(default_factory=AuditPolicy)
+    integrity: IntegrityPolicy = field(default_factory=IntegrityPolicy)
+
+
+@dataclass(frozen=True)
+class BinDeployPolicy:
+    """Policy controls for marketplace_plugin bin/ deployment.
+
+    ``deny_all``: when ``True``, bin/ deployment is suppressed for all
+    marketplace_plugin packages regardless of the ``deny`` list.
+
+    ``deny``: package canonical dependency strings (e.g. ``owner/repo``)
+    whose bin/ executables must NOT be deployed. Matched as exact strings.
+    """
+
+    deny_all: bool = False
+    deny: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ApmPolicy:
     """Top-level APM policy model."""
 
@@ -159,3 +253,5 @@ class ApmPolicy:
     manifest: ManifestPolicy = field(default_factory=ManifestPolicy)
     unmanaged_files: UnmanagedFilesPolicy = field(default_factory=UnmanagedFilesPolicy)
     registry_source: RegistrySourcePolicy = field(default_factory=RegistrySourcePolicy)
+    security: SecurityPolicy = field(default_factory=SecurityPolicy)
+    bin_deploy: BinDeployPolicy = field(default_factory=BinDeployPolicy)

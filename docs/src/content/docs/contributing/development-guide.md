@@ -114,12 +114,13 @@ uv run --extra dev ruff check --fix src/ tests/   # lint with auto-fix
 uv run --extra dev ruff format src/ tests/        # format
 ```
 
-Verify both gates pass before pushing -- this command must be silent
-(it is what CI runs):
+Verify Ruff lint and format before pushing:
 
 ```bash
 uv run --extra dev ruff check src/ tests/ && uv run --extra dev ruff format --check src/ tests/
 ```
+
+CI also runs repository guardrails from `.github/workflows/ci.yml`, including duplication and auth-boundary checks.
 
 ### Optional: local pre-commit hooks
 

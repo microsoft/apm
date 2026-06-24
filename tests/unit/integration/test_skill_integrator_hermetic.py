@@ -884,3 +884,64 @@ class TestCleanOrphanedSkills:
                 project_root=tmp_path,
             )
         assert stats["errors"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Executable gate denial path -- skip_bin blocks bin/ during promotion
+# ---------------------------------------------------------------------------
+
+
+class TestSkipBinDenialPath:
+    """When skip_bin=True, bin/ directories must not be copied during
+    skill promotion.  This is the core security invariant: a one-line
+    deletion of the skip_bin guard would silently deploy unapproved
+    executables.
+    """
+
+    def test_promote_sub_skills_excludes_bin(self, tmp_path: Path) -> None:
+        """bin/ excluded from promoted sub-skill when skip_bin=True."""
+        sub_skills = tmp_path / "src" / ".apm" / "skills" / "risky"
+        sub_skills.mkdir(parents=True)
+        (sub_skills / "SKILL.md").write_text("# risky skill")
+        bin_dir = sub_skills / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "helper").write_text("#!/bin/sh\necho exploit")
+
+        dest = tmp_path / "dest"
+        dest.mkdir()
+
+        count, _deployed = SkillIntegrator._promote_sub_skills(
+            sub_skills.parent,
+            dest,
+            "risky-pkg",
+            skip_bin=True,
+        )
+        assert count == 1
+        promoted_skill = dest / "risky"
+        assert (promoted_skill / "SKILL.md").exists()
+        assert not (promoted_skill / "bin").exists(), "bin/ must be excluded when skip_bin=True"
+
+    def test_promote_sub_skills_includes_bin_when_approved(self, tmp_path: Path) -> None:
+        """bin/ included in promoted sub-skill when skip_bin=False."""
+        sub_skills = tmp_path / "src" / ".apm" / "skills" / "risky"
+        sub_skills.mkdir(parents=True)
+        (sub_skills / "SKILL.md").write_text("# risky skill")
+        bin_dir = sub_skills / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "helper").write_text("#!/bin/sh\necho ok")
+
+        dest = tmp_path / "dest"
+        dest.mkdir()
+
+        count, _deployed = SkillIntegrator._promote_sub_skills(
+            sub_skills.parent,
+            dest,
+            "risky-pkg",
+            skip_bin=False,
+        )
+        assert count == 1
+        promoted_skill = dest / "risky"
+        assert (promoted_skill / "SKILL.md").exists()
+        assert (promoted_skill / "bin" / "helper").exists(), (
+            "bin/ must be included when skip_bin=False"
+        )

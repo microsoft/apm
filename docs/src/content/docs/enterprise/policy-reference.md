@@ -40,7 +40,7 @@ mcp:
 
 compilation:
   target:
-    allow: []                   # vscode | claude | cursor | opencode | codex | all
+    allow: []                   # copilot | claude | cursor | opencode | codex | gemini | vscode | windsurf | kiro | agent-skills | all
     enforce: null               # Enforce specific target (must be present in list)
   strategy:
     enforce: null               # distributed | single-file
@@ -55,6 +55,10 @@ manifest:
 unmanaged_files:
   action: ignore                # ignore | warn | deny
   directories: []               # Directories to monitor
+
+registry_source:
+  require: []                   # Registry names required for dependencies
+  allow_non_registry: true      # false = block git/local sources
 ```
 
 ## Top-level fields
@@ -96,7 +100,7 @@ Org-side posture when consumers cannot fetch this policy AND have a stale cached
 | `warn` | Loud warning emitted; install proceeds with the cached policy (or with no policy if cache is empty). Default. |
 | `block` | Fail-closed when a cached policy is available but a refresh fails. |
 
-Consumers can opt into fail-closed semantics for the no-cache case from their `apm.yml` via `policy.fetch_failure_default: block` -- see [Network failure semantics](#95-network-failure-semantics) for the full matrix and [`apm.yml` policy block](../../reference/manifest-schema/#39-policy) for the consumer-side fields.
+Consumers can opt into fail-closed semantics for the no-cache case from their `apm.yml` via `policy.fetch_failure_default: block` -- see [Network failure semantics](#95-network-failure-semantics) for the full matrix and [`apm.yml` policy block](../reference/manifest-schema/#39-policy) for the consumer-side fields.
 
 ---
 
@@ -174,7 +178,7 @@ dependencies:
   require_pinned_constraint: true
 ```
 
-Transitive deps are also classified; they pass when their parent manifests pinned them. See the [policy schema reference](../../reference/policy-schema/#require_pinned_constraint-reference) for the full classification table and diagnostic format.
+Transitive deps are also classified; they pass when their parent manifests pinned them. See the [policy schema reference](../reference/policy-schema/#require_pinned_constraint-reference) for the full classification table and diagnostic format.
 
 ---
 
@@ -288,7 +292,7 @@ Whether the `scripts` section is allowed in `apm.yml`:
 
 ### `content_types.allow`
 
-Restrict which content types packages can declare:
+Parsed allow-list for package content types. This field is not enforced in APM 0.16.0:
 
 ```yaml
 manifest:
@@ -326,6 +330,40 @@ unmanaged_files:
     - .cursor/rules
     - .claude
     - .opencode
+    - .kiro
+```
+
+### `exclude`
+
+Glob allow-list of workspace paths to suppress from the report. Use it to
+silence known harness-managed artifacts that legitimately live in a governance
+directory but are not APM-tracked. Excluded paths are never reported. Merges as
+a union down an `extends:` chain.
+
+```yaml
+unmanaged_files:
+  action: warn
+  exclude:
+    - .github/copilot-instructions.md
+    - .claude/settings.local.json
+```
+
+### Enriched findings
+
+Each reported file is annotated in place within the single unmanaged-files
+report. This is drift / divergence visibility -- `apm.lock.yaml` is
+hand-editable YAML -- not supply-chain-attack prevention:
+
+- a factual reason: `not tracked in apm.lock.yaml`;
+- a lazy primitive-type tag (`[type: skill|agent|instruction|mcp]`), computed
+  only for already-flagged files (a directory merely named `mcp` is not treated
+  as MCP config -- only a `.mcp/` root or an `mcp.json` file is);
+- a deny-conflict note `matches deny rule (<pattern>)` when the path matches
+  this policy's own `dependencies.deny` or `mcp.deny`, surfaced for a human to
+  resolve. APM reports only -- it never removes or blocks the file.
+
+```text
+[!] .claude/skills/rogue/SKILL.md [type: skill] -- not tracked in apm.lock.yaml; matches deny rule (**/rogue/**)
 ```
 
 ---
@@ -343,7 +381,7 @@ Allow and deny lists use glob-style patterns:
 
 `*` matches any characters within a single path segment (no `/`). `**` matches across any number of segments.
 
-Deny patterns are evaluated first. If a reference matches any deny pattern, it fails regardless of the allow list. An empty allow list permits everything not denied.
+Deny patterns are evaluated first. If a reference matches any deny pattern, it fails regardless of the allow list. A `null` allow list permits everything not denied; an empty allow list permits nothing.
 
 ---
 
@@ -364,6 +402,8 @@ Deny patterns are evaluated first. If a reference matches any deny pattern, it f
 
 ### Policy checks (run with `--ci --policy`)
 
+There are 19 policy checks in APM 0.16.0.
+
 **Dependencies:**
 
 | Check | Validates |
@@ -375,6 +415,7 @@ Deny patterns are evaluated first. If a reference matches any deny pattern, it f
 | `required-package-version` | Required packages with version pins match per `require_resolution` |
 | `transitive-depth` | No dependency exceeds `max_depth` |
 | `dependency-pinned-constraint` | Every dep uses a bounded constraint (semver range, literal tag, or SHA) when `require_pinned_constraint: true` |
+| `registry-source` | Dependencies come from required registries when `registry_source` is configured |
 
 **MCP:**
 
@@ -398,6 +439,7 @@ Deny patterns are evaluated first. If a reference matches any deny pattern, it f
 | Check | Validates |
 |-------|-----------|
 | `required-manifest-fields` | All required fields are present and non-empty |
+| `explicit-includes` | `includes:` is explicit when `require_explicit_includes: true` |
 | `scripts-policy` | Scripts section absent if policy denies it |
 
 **Unmanaged files:**
@@ -437,6 +479,7 @@ A child policy can only tighten constraints — never relax them:
 | `mcp.self_defined` | Escalates: `allow` < `warn` < `deny` |
 | `manifest.scripts` | Escalates: `allow` < `deny` |
 | `unmanaged_files.action` | Escalates: `ignore` < `warn` < `deny` |
+| `unmanaged_files.exclude` | Union, additive-only -- child adds suppression globs to the parent set; `null` and `[]` both preserve the parent list (a child cannot clear it) |
 | `source_attribution` | `parent OR child` — either enables it |
 | `trust_transitive` | `parent AND child` — both must allow it |
 
@@ -540,7 +583,7 @@ dependencies:
 ## Install-time enforcement
 
 :::note[Non-goal: structured output]
-Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-readable terminal text only. For machine-readable policy reports (CI gating, dashboards, code-scanning uploads) use `apm audit --ci --format json` or `apm audit --ci --format sarif` — see [`apm audit`](../../reference/cli/install/) in the CLI reference.
+Install-time enforcement does **NOT** emit JSON or SARIF. The output is human-readable terminal text only. For machine-readable policy reports (CI gating, dashboards, code-scanning uploads) use `apm audit --ci --format json` or `apm audit --ci --format sarif` — see [`apm audit`](../reference/cli/audit/) in the CLI reference.
 :::
 
 ### 1. What APM policy is
@@ -564,9 +607,10 @@ Install-time enforcement and `apm audit --ci` both resolve the **full multi-leve
 Install-time enforcement runs the same rule families documented in [Check reference](#check-reference):
 
 - **Dependencies** — `allow`, `deny`, `require` (presence + optional version pin), `max_depth`, `require_pinned_constraint`.
-- **MCP** — `allow`, `deny`, `transport.allow`, `self_defined`, `trust_transitive`.
+- **Registry source** — `require`, `allow_non_registry`.
+- **MCP** — `allow`, `deny`, `transport.allow`, `self_defined`.
 - **Compilation** — `target.allow` / `target.enforce` (target-aware, evaluated against the resolved target list).
-- **Manifest** — `required_fields`, `scripts`, `content_types.allow`.
+- **Manifest** — `required_fields`, `require_explicit_includes`, `scripts`.
 - **Unmanaged files** — `action` against the configured `directories`.
 
 ### 5. When enforcement runs
@@ -877,7 +921,7 @@ When `enforcement=block`, any of the following exit `1` and abort before integra
 | `transport` | MCP transport not in `mcp.transport.allow` | `Policy violation: <mcp-server> -- transport <t> not in mcp.transport.allow=[<list>]` | Switch the server to an allowed transport, or request `mcp.transport.allow` updates. |
 | `target` | Resolved target not in `compilation.target.allow` (or violates `target.enforce`) | `Policy violation: target <t> -- not in compilation.target.allow=[<list>]` | Re-run with `--target <allowed>`, or update `compilation.target` in `apm.yml`. Evaluated post-`targets` phase, so CLI overrides are honoured. |
 | `pinned-constraint` | `require_pinned_constraint: true` and a dep declares an unbounded ref | `Policy violation: N dependency(ies) use unbounded constraints (hint: pin to a semver range, literal tag, or SHA)` plus per-dep `<dep>: <reason>` | Pin each listed dep to a semver range with an upper bound (`^1.2.3`, `>=1.0,<2.0`), a literal tag (`v1.5.3`), or a 40-char SHA. Roll out under `enforcement: warn` first to size the fleet impact. |
-| `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny`/`transport`/`self_defined` | `Transitive MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.` plus per-server `Policy violation: ...` | Remove the offending dep, request an org policy update, or set `mcp.trust_transitive: true` if the org chooses to allow transitive MCP entries. |
+| `transitive_mcp` | MCP server pulled in by a transitive dep, blocked by `mcp.deny`/`transport`/`self_defined` | `Transitive MCP server(s) blocked by org policy. APM packages remain installed; MCP configs were NOT written.` plus per-server `Policy violation: ...` | Remove the offending dep, request an org policy update, or pass `--trust-transitive-mcp` only as a reviewed break-glass CLI choice. |
 
 All violation messages above flow through `InstallLogger.policy_violation`; under `block` they print inline as `[x]` errors and exit `1`. Use `apm audit --ci --format json` for the same set of findings in machine-readable form.
 
@@ -914,6 +958,6 @@ manifest:
 
 ## Related
 
-- [Governance](../../enterprise/governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
-- [CI Policy Enforcement](../../guides/ci-policy-setup/) -- step-by-step CI setup tutorial
-- [GitHub Rulesets](../../integrations/github-rulesets/) -- enforce policy as a required status check
+- [Governance](./governance-guide/) -- conceptual overview, bypass contract, and rollout playbook
+- [Enforce in CI](./enforce-in-ci/) -- step-by-step CI setup tutorial
+- [GitHub Rulesets](../integrations/github-rulesets/) -- enforce policy as a required status check

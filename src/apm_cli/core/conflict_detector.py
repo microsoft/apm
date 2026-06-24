@@ -1,6 +1,6 @@
 """MCP server conflict detection and resolution."""
 
-from typing import Any, Dict  # noqa: F401, UP035
+from typing import Any
 
 from ..adapters.client.base import MCPClientAdapter
 

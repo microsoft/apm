@@ -197,6 +197,12 @@ class TestInstallLogger:
         logger.validation_pass("microsoft/repo", already_present=True)
         assert "already in apm.yml" in mock_echo.call_args[0][0]
 
+    @patch("apm_cli.core.command_logger._rich_echo")
+    def test_validation_pass_existing_updated(self, mock_echo):
+        logger = InstallLogger()
+        logger.validation_pass("microsoft/repo#v1", already_present=True, updated=True)
+        assert "updated ref in apm.yml" in mock_echo.call_args[0][0]
+
     @patch("apm_cli.core.command_logger._rich_error")
     def test_validation_fail(self, mock_error):
         logger = InstallLogger()
@@ -303,6 +309,13 @@ class TestInstallLogger:
         call_msg = mock_success.call_args[0][0]
         assert "APM" in call_msg
         assert "MCP" in call_msg
+
+    @patch("apm_cli.core.command_logger._rich_success")
+    def test_install_summary_includes_lsp(self, mock_success):
+        logger = InstallLogger()
+        logger.install_summary(apm_count=0, mcp_count=0, lsp_count=2)
+        call_msg = mock_success.call_args[0][0]
+        assert "2 LSP servers" in call_msg
 
     @patch("apm_cli.core.command_logger._rich_warning")
     def test_install_summary_with_errors(self, mock_warning):

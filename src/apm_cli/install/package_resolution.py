@@ -41,6 +41,7 @@ def resolve_parsed_dependency_reference(
     auth_resolver: Any,
     verbose: bool,
     resolve_artifactory_boundary: Callable[..., Any] | None = None,
+    logger: Any = None,
 ) -> tuple[Any, bool]:
     """Parse or probe *package* into a ``DependencyReference``.
 
@@ -93,6 +94,7 @@ def resolve_parsed_dependency_reference(
             auth_resolver,
             verbose=verbose,
             dep_ref=dep_ref,
+            logger=logger,
         )
         if resolved is not dep_ref:
             return resolved, True
@@ -125,6 +127,116 @@ def user_scope_rejection_reason(dep_ref: Any, scope: Any) -> str | None:
     if dep_ref.is_parent_repo_inheritance and scope is InstallScope.USER:
         return GIT_PARENT_USER_SCOPE_ERROR
     return None
+
+
+def get_existing_skill_subset(
+    current_deps: builtins.list,
+    identity: str,
+    *,
+    dependency_reference_cls: Any,
+) -> builtins.list[str] | None:
+    """Return the persisted ``skills:`` list for *identity*, or None."""
+    for dep_entry in current_deps:
+        try:
+            if isinstance(dep_entry, builtins.str):
+                existing_ref = dependency_reference_cls.parse(dep_entry)
+            elif isinstance(dep_entry, builtins.dict):
+                existing_ref = dependency_reference_cls.parse_from_dict(dep_entry)
+            else:
+                continue
+        except (ValueError, TypeError, AttributeError, KeyError):
+            continue
+        if existing_ref.get_identity() == identity:
+            subset = getattr(existing_ref, "skill_subset", None)
+            return list(subset) if subset else None
+    return None
+
+
+def normalize_and_merge_skill_subset(
+    cli_subset: builtins.tuple[str, ...],
+    current_deps: builtins.list,
+    identity: str,
+    *,
+    dependency_reference_cls: Any,
+) -> builtins.list[str]:
+    """Normalize CLI ``--skill`` names and merge with existing manifest skills.
+
+    Strips whitespace, drops empty strings, deduplicates, then unions with
+    the persisted ``skills:`` list from ``apm.yml`` so that repeated
+    ``--skill`` invocations are additive (issue #1771).
+
+    Returns a sorted, deduplicated list ready for ``dep_ref.skill_subset``.
+    """
+    seen: builtins.set[str] = builtins.set()
+    for s in cli_subset:
+        s = s.strip()
+        if s:
+            seen.add(s)
+    existing = get_existing_skill_subset(
+        current_deps, identity, dependency_reference_cls=dependency_reference_cls
+    )
+    if existing:
+        seen.update(existing)
+    return sorted(seen)
+
+
+def manifest_has_different_entry_for_identity(
+    current_deps: builtins.list,
+    identity: str,
+    canonical: str,
+    *,
+    dependency_reference_cls: Any,
+) -> bool:
+    """Return True when apm.yml already has *identity* but not *canonical*."""
+    for dep_entry in current_deps:
+        try:
+            if isinstance(dep_entry, builtins.str):
+                existing_ref = dependency_reference_cls.parse(dep_entry)
+            elif isinstance(dep_entry, builtins.dict):
+                existing_ref = dependency_reference_cls.parse_from_dict(dep_entry)
+            else:
+                continue
+        except (ValueError, TypeError, AttributeError, KeyError):
+            continue
+        if existing_ref.get_identity() == identity:
+            return existing_ref.to_canonical() != canonical
+    return False
+
+
+def update_existing_dependency_entry_if_needed(
+    current_deps: builtins.list,
+    *,
+    already_in_deps: bool,
+    apm_yml_entries: dict,
+    canonical: str,
+    dep_ref: Any,
+    identity: str,
+    dependency_reference_cls: Any,
+    logger: Any = None,
+) -> bool:
+    """Rewrite an existing manifest dep when the requested ref changed."""
+    should_update = already_in_deps and (
+        canonical in apm_yml_entries
+        or (
+            dep_ref.reference
+            and manifest_has_different_entry_for_identity(
+                current_deps,
+                identity,
+                canonical,
+                dependency_reference_cls=dependency_reference_cls,
+            )
+        )
+    )
+    if should_update:
+        merge_structured_entry_into_current_deps(
+            current_deps,
+            apm_yml_entries.get(canonical, dep_ref.to_apm_yml_entry()),
+            identity,
+            canonical,
+            dependency_reference_cls=dependency_reference_cls,
+            logger=logger,
+        )
+    return should_update
 
 
 def merge_structured_entry_into_current_deps(
@@ -181,7 +293,7 @@ def persist_dependency_list_if_changed(
 
         dump_yaml(data, apm_yml_path)
         if logger:
-            logger.success(f"Updated {apm_yml_filename} to preserve marketplace subdirectory entry")
+            logger.success(f"Updated {apm_yml_filename} dependency entries")
     except Exception as e:
         if logger:
             logger.error(f"Failed to write {apm_yml_filename}: {e}")
