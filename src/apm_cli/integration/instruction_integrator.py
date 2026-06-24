@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import RULE_FORMATS
-from apm_cli.utils.atomic_io import write_text_lf
+from apm_cli.utils.atomic_io import _to_lf, write_text_lf
 from apm_cli.utils.console import _rich_echo
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
@@ -195,10 +195,15 @@ class InstructionIntegrator(BaseIntegrator):
                 new_content, links_resolved = self._render_instruction(
                     source_file, target_path, fmt
                 )
+                # Compare the on-disk bytes against the exact bytes
+                # write_text_lf would emit (LF-normalized). A text-mode
+                # read_text() comparison would collapse CRLF->LF and wrongly
+                # adopt a stale CRLF file left by a pre-fix install, pinning a
+                # platform-dependent hash in the lockfile (apm#1889).
                 if (
                     not force
                     and target_path.exists()
-                    and target_path.read_text(encoding="utf-8") == new_content
+                    and target_path.read_bytes() == _to_lf(new_content).encode("utf-8")
                 ):
                     files_adopted += 1
                     target_paths.append(target_path)
