@@ -17,6 +17,29 @@ import tempfile
 from pathlib import Path
 
 
+def _to_lf(data: str) -> str:
+    """Normalize CRLF to LF (leaves bare CR alone, like the drift normalizer).
+
+    Mirrors :func:`apm_cli.utils.normalization._normalize_line_endings` at the
+    string level. Combined with ``newline=""`` on the open() call, this keeps
+    written bytes platform-independent so deployed-file hashes do not diverge
+    between Windows (which would otherwise translate ``\\n`` -> ``\\r\\n``) and
+    POSIX.
+    """
+    return data.replace("\r\n", "\n")
+
+
+def write_text_lf(path: Path, data: str) -> None:
+    """Write ``data`` to ``path`` as UTF-8 with deterministic LF line endings.
+
+    Non-atomic counterpart to :func:`atomic_write_text`. ``newline=""`` disables
+    the platform newline translation that ``Path.write_text`` performs in text
+    mode, so the on-disk bytes (and therefore their content hash) are identical
+    on every OS.
+    """
+    path.write_text(_to_lf(data), encoding="utf-8", newline="")
+
+
 def atomic_write_text(path: Path, data: str, *, new_file_mode: int | None = None) -> None:
     """Atomically write ``data`` (UTF-8) to ``path``.
 
@@ -42,10 +65,10 @@ def atomic_write_text(path: Path, data: str, *, new_file_mode: int | None = None
         if new_file_mode is not None and not existed and hasattr(os, "fchmod"):
             with contextlib.suppress(OSError):
                 os.fchmod(fd, new_file_mode)
-        fh = os.fdopen(fd, "w", encoding="utf-8")
+        fh = os.fdopen(fd, "w", encoding="utf-8", newline="")
         fd_wrapped = True
         with fh:
-            fh.write(data)
+            fh.write(_to_lf(data))
         os.replace(tmp_name, path)
     except Exception:
         if not fd_wrapped:

@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Deployed files are now written with LF line endings on every platform, so
+  identical content no longer produces different `local_deployed_file_hashes` /
+  `deployed_file_hashes` between Windows and Linux (which previously churned the
+  lockfile across machines and CI).
 - `apm install <pkg>@<marketplace>` now preserves GitLab and other
   non-GitHub hosts from url-type marketplace plugin sources, so auth
   resolution no longer falls back to `github.com` for those installs.

@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 import pytest
 
-from apm_cli.utils.atomic_io import atomic_write_text
+from apm_cli.utils.atomic_io import atomic_write_text, write_text_lf
 
 
 class TestAtomicWriteText:
@@ -177,3 +177,41 @@ class TestAtomicWriteText:
                 atomic_write_text(target, "data")
 
         assert not target.exists()
+
+    # ------------------------------------------------------------------
+    # Deterministic LF line endings (cross-platform hash stability)
+    # ------------------------------------------------------------------
+
+    def test_crlf_normalized_to_lf(self, tmp_path: Path) -> None:
+        """CRLF input is written as LF so on-disk bytes are OS-independent."""
+        target = tmp_path / "crlf.txt"
+        atomic_write_text(target, "a\r\nb\r\nc")
+        assert target.read_bytes() == b"a\nb\nc"
+
+    def test_lf_input_unchanged(self, tmp_path: Path) -> None:
+        """LF input round-trips without gaining a carriage return."""
+        target = tmp_path / "lf.txt"
+        atomic_write_text(target, "a\nb\n")
+        assert target.read_bytes() == b"a\nb\n"
+
+
+class TestWriteTextLf:
+    """Tests for write_text_lf() (non-atomic, LF-normalizing writer)."""
+
+    def test_creates_file_with_lf(self, tmp_path: Path) -> None:
+        """Content is written and CRLF is normalized to LF."""
+        target = tmp_path / "out.md"
+        write_text_lf(target, "a\r\nb\r\n")
+        assert target.read_bytes() == b"a\nb\n"
+
+    def test_lf_input_unchanged(self, tmp_path: Path) -> None:
+        """LF-only input is left byte-for-byte intact."""
+        target = tmp_path / "out.md"
+        write_text_lf(target, "# H\n\ntext\n")
+        assert target.read_bytes() == b"# H\n\ntext\n"
+
+    def test_unicode_round_trips(self, tmp_path: Path) -> None:
+        """Non-ASCII content survives the UTF-8 + LF write."""
+        target = tmp_path / "u.md"
+        write_text_lf(target, "café ☕ 日本語\r\n")
+        assert target.read_text(encoding="utf-8") == "café ☕ 日本語\n"
