@@ -766,10 +766,17 @@ def resolve_targets(
     *,
     flag: str | list[str] | None = None,
     yaml_targets: list[str] | None = None,
+    flag_source: str = "--target flag",
 ) -> ResolvedTargets:
     """Resolve effective targets. Raises on error.
 
     Priority: flag > yaml_targets > auto-detect signals.
+
+    ``flag_source`` labels the provenance reported when ``flag`` wins. It
+    defaults to ``"--target flag"`` (an explicit CLI selector) but callers
+    pass a different label -- e.g. ``"apm config target"`` -- when the flag
+    value originated from a configured default rather than the CLI, so the
+    provenance line does not misattribute a config default to ``--target``.
     """
     from apm_cli.core.errors import (
         AmbiguousHarnessError,
@@ -784,7 +791,7 @@ def resolve_targets(
         _validate_canonical_v2(tokens)
         return ResolvedTargets(
             targets=sorted(tokens),
-            source="--target flag",
+            source=flag_source,
             auto_create=True,
         )
 

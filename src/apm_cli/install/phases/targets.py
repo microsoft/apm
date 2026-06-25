@@ -399,6 +399,7 @@ def _resolve_targets_by_scope(
             ctx.project_root,
             flag=_v2_flag,
             yaml_targets=_v2_yaml,
+            flag_source=getattr(ctx, "target_override_source", None) or "--target flag",
         )
     except _click.UsageError as exc:
         if ctx.logger:
@@ -472,8 +473,10 @@ def run(ctx: InstallContext) -> None:
         if default_target is not None:
             # Treat configured default target exactly like an explicit selector
             # for this invocation so downstream phases and policy checks see
-            # the same effective value.
+            # the same effective value. Record the provenance separately so the
+            # resolution output does not misattribute it to a CLI --target flag.
             ctx.target_override = default_target
+            ctx.target_override_source = "apm config target"
 
     # Resolve effective explicit target: CLI --target wins, then apm.yml,
     # then user-scoped config default target.

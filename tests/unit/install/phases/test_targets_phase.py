@@ -169,6 +169,57 @@ def test_manifest_target_wins_over_config_default_target(tmp_path: Path) -> None
     assert (project / ".github").is_dir()
 
 
+def test_cli_target_wins_over_config_default_target(tmp_path: Path) -> None:
+    """An explicit --target selector keeps precedence over the config default.
+
+    Regression trap for the top slot of the precedence chain
+    (CLI --target > apm.yml > apm config target > auto-detect). The guard in
+    phases/targets.py only consults the configured default when
+    ``ctx.target_override`` is unset; if that guard regresses, a config default
+    would clobber an explicit CLI selection.
+    """
+    from apm_cli.install.phases.targets import run
+    from apm_cli.models.apm_package import APMPackage
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: demo\nversion: 0.1.0\n", encoding="utf-8")
+    ctx = _make_ctx(tmp_path, target_override="copilot")
+    ctx.project_root = project
+    ctx.apm_package = APMPackage.from_apm_yml(project / "apm.yml")
+
+    with patch("apm_cli.config.get_install_target", return_value="claude"):
+        run(ctx)
+
+    assert [target.name for target in ctx.targets] == ["copilot"]
+    assert (project / ".github").is_dir()
+
+
+def test_config_default_target_provenance_names_config_source(tmp_path: Path, capsys: Any) -> None:
+    """A config-default install reports 'apm config target' as its provenance.
+
+    Without the provenance discriminant the bare `apm install` resolution path
+    misattributes a configured default to the `--target` flag.
+    """
+    from apm_cli.install.phases.targets import run
+    from apm_cli.models.apm_package import APMPackage
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "apm.yml").write_text("name: demo\nversion: 0.1.0\n", encoding="utf-8")
+    ctx = _make_ctx(tmp_path)
+    ctx.project_root = project
+    ctx.apm_package = APMPackage.from_apm_yml(project / "apm.yml")
+
+    with patch("apm_cli.config.get_install_target", return_value="claude"):
+        run(ctx)
+
+    out = capsys.readouterr().out
+    assert "source: apm config target" in out
+    assert "source: --target flag" not in out
+    assert ctx.target_override == "claude"  # governance parity preserved
+
+
 # ---------------------------------------------------------------------------
 # TestProjectScopeGateForCowork
 # ---------------------------------------------------------------------------
