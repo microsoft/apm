@@ -620,8 +620,8 @@ def _print_mcp_summary(
         console.print(f"[green]{STATUS_SYMBOLS['success']} All servers up to date[/green]")
 
 
-def _load_stored_mcp_configs(project_root: Any, logger: Any) -> builtins.dict:
-    """Load lockfile MCP config snapshots for export/install drift detection."""
+def _load_stored_mcp_configs(project_root: Any, logger: Any) -> dict:
+    """Load lockfile MCP config snapshots for export drift detection."""
     try:
         from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 
@@ -630,7 +630,8 @@ def _load_stored_mcp_configs(project_root: Any, logger: Any) -> builtins.dict:
     except FileNotFoundError:
         return {}
     except Exception as exc:
-        logger.warning(f"Lockfile unreadable; drift detection disabled for this export: {exc}")
+        logger.warning("Lockfile unreadable; drift detection disabled for this export.")
+        logger.verbose_detail(f"Lockfile read detail: {exc}")
         return {}
 
     if existing_lock and existing_lock.mcp_configs:
