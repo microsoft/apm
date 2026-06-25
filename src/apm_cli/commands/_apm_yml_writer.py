@@ -96,8 +96,12 @@ def _entry_matches(entry, repo_url: str) -> bool:
         return False
 
 
-def _apply_subset(entry, field: str, subset: list[str] | None):
+def _apply_subset(entry, field: str | list[str] | None, subset: list[str] | None = None):
     """Apply a dependency subset field, promoting to dict form if needed."""
+    if not isinstance(field, str):
+        subset = field
+        field = "skills"
+
     # Parse current entry to get canonical info
     if isinstance(entry, str):
         ref = DependencyReference.parse(entry)
