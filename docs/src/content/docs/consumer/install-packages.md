@@ -178,6 +178,12 @@ apm install -g <package>               # install to user scope (~/.apm/)
 apm install -v                         # verbose: show resolution and integration
 ```
 
+Targets with native user-scope instruction files pick up global instructions
+during install. Targets whose user-scope instruction surface is a root context
+file require explicit
+[`apm compile --global`](../../reference/cli/compile/#global-compilation);
+`apm install -g` prints a hint and writes no root context file.
+
 For the full flag reference, run `apm install --help` or see
 [CLI commands](../../reference/cli/install/).
 
