@@ -133,6 +133,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#1876)
 - Windows pip fallback no longer terminates early when native pip writes stderr
   under `$ErrorActionPreference = "Stop"`. (closes #1874) (#1876)
+- `apm install plugin@marketplace` now correctly fetches from the
+  marketplace's registered `--ref` branch instead of silently falling back
+  to the repository's default branch. Root cause: `resolve_marketplace_plugin`
+  did not propagate `source.ref` to downstream resolution calls. Covers both
+  GitHub-family hosts (ref appended to canonical as `#ref`) and GitLab-hosted
+  marketplaces (ref injected into `DependencyReference`). Guards prevent
+  double-injection when a plugin's own dict source already carries an explicit
+  `ref`, and skip `main`/`HEAD` as implicit defaults. (by @chkp-roniz;
+  mirrors #1824)
+- GitLab archive URLs with slash-containing branch names (e.g.
+  `feat/my-feature`) now produce correctly-formed Artifactory-proxyable
+  filenames. The slash is preserved in the path segment (as the GitLab
+  archive API expects) but replaced with `-` in the archive filename,
+  matching GitLab's own naming convention. Previously,
+  `PROXY_REGISTRY_ONLY=1` installs from such branches returned HTTP 404
+  from the proxy because the generated filename contained a literal slash.
+  (by @chkp-roniz; fixes the proxy scenario not covered by #1824)
 
 ### Security
 
