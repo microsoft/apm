@@ -752,6 +752,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported="partial",
         user_root_dir=".codeium/windsurf",
         unsupported_user_primitives=("instructions",),
+        pack_prefixes=(".windsurf/", ".agents/"),
         compile_family="agents",
         hooks_config_display=".windsurf/hooks.json",
     ),
