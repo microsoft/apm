@@ -1,8 +1,8 @@
 name: Verify shared/apm.md matrix secret-stripping fix
 
-# Empirical proof for the env-relay fix in .github/workflows/shared/apm.md.
+# Empirical proof for fixes in .github/workflows/shared/apm.md.
 #
-# Two job sets:
+# Three job sets:
 #
 #   A. prove-old-pattern-strips-output (regression sentinel)
 #      Replicates the pre-fix shape (PEM embedded in a job output). Asserts
@@ -19,6 +19,22 @@ name: Verify shared/apm.md matrix secret-stripping fix
 #      round-trips intact (SHA-256 comparison; the SHA is not a substring
 #      of the PEM and is therefore not masked).
 #
+#   C. apm-version-pinning (positive proof of the import-default fix)
+#      Proves the apm-version import-schema default in shared/apm.md pins
+#      every non-opting consumer to a bare-semver CLI release instead of
+#      floating to 'latest'. Two independent checks:
+#        (1) Artifact assertion (no deps): every compiled *.lock.yml that
+#            calls microsoft/apm-action renders a pinned `apm-version:
+#            <semver>` literal and carries NO raw
+#            `apm-version: ${{ github.aw.import-inputs.apm-version }}`
+#            token. The raw token (the bug shape from PR #1842) is empty
+#            at runtime, so apm-action resolves '' || 'latest' and floats.
+#        (2) Drift guard (source of truth): the schema default in
+#            shared/apm.md MUST equal the apm-version input default
+#            declared by the pinned microsoft/apm-action ref. Fetches the
+#            action's action.yml at that exact ref and compares. Fails if
+#            the mirror drifts (see the MAINTENANCE note in shared/apm.md).
+#
 # Self-contained: no real GitHub-App credentials required. The synthetic
 # PEM below is registered at runtime via ::add-mask:: which feeds the same
 # HostContext.SecretMasker that processes repo / org secrets.
@@ -28,12 +44,14 @@ on:
     paths:
       - .github/workflows/shared/apm.md
       - .github/workflows/verify-shared-apm-matrix.yml
+      - .github/workflows/*.lock.yml
   push:
     branches:
       - main
     paths:
       - .github/workflows/shared/apm.md
       - .github/workflows/verify-shared-apm-matrix.yml
+      - .github/workflows/*.lock.yml
   workflow_dispatch:
 
 permissions:
@@ -281,3 +299,84 @@ jobs:
             exit 1
           fi
           echo "[OK] row kind=$ROW_KIND app_id=$ROW_APP_ID pk_sha=$got_sha matches expected."
+
+  # =====================================================================
+  # Job set C: apm-version pinning (import-default fix, PR #1842).
+  # =====================================================================
+  c-apm-version-pinning:
+    name: C. apm-version default pins non-opting consumers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compiled consumer locks pin apm-version (no float-to-latest)
+        run: |
+          set -euo pipefail
+          # Non-opting consumers import shared/apm.md WITHOUT passing
+          # apm-version. gh-aw substitutes the import-schema default at
+          # compile time, so each apm-action step in the lock must carry a
+          # bare-semver `apm-version: <x.y.z>` literal. The pre-fix bug left
+          # the raw `apm-version: ${{ github.aw.import-inputs.apm-version }}`
+          # token in the lock; that token is empty at runtime, so apm-action
+          # resolves '' || 'latest' and floats every run to the newest CLI.
+          mapfile -t locks < <(grep -rl 'uses: microsoft/apm-action@' .github/workflows/*.lock.yml || true)
+          if [ "${#locks[@]}" -eq 0 ]; then
+            echo "::error::no compiled *.lock.yml references microsoft/apm-action -- harness cannot prove the property"
+            exit 1
+          fi
+          fail=0
+          for lock in "${locks[@]}"; do
+            # 1. The raw compile-time token must NOT survive into the lock.
+            if grep -Eq 'apm-version:[[:space:]]*\$\{\{[[:space:]]*github\.aw\.import-inputs\.apm-version' "$lock"; then
+              echo "::error file=$lock::raw github.aw.import-inputs.apm-version token leaked into lock -- non-opting consumer floats to 'latest'"
+              fail=1
+            fi
+            # 2. Every apm-action step must carry a bare-semver apm-version pin.
+            n_action=$(grep -c 'uses: microsoft/apm-action@' "$lock" || true)
+            n_pinned=$(grep -cE 'apm-version:[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+' "$lock" || true)
+            if [ "$n_pinned" -lt "$n_action" ]; then
+              echo "::error file=$lock::$n_action apm-action step(s) but only $n_pinned pinned apm-version line(s) -- a step would float to 'latest'"
+              fail=1
+            else
+              echo "[OK] $lock: $n_action apm-action step(s), $n_pinned pinned apm-version line(s)"
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
+          echo "[OK] all ${#locks[@]} consumer lock(s) pin apm-version -- no float-to-latest path."
+
+      - name: Drift guard - schema default mirrors apm-action's pinned default
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          src=.github/workflows/shared/apm.md
+          # Schema default declared by shared/apm.md (the value gh-aw
+          # substitutes when a consumer omits apm-version). Anchored to the
+          # 4-space input `default:` so the step-level usages do not match.
+          schema_default=$(grep -A15 '^  apm-version:' "$src" \
+            | grep -m1 '^    default:' | tr -d "\"' " | sed 's/.*default://')
+          # The apm-action ref the Pack and Restore steps pin to.
+          action_ref=$(grep -m1 -oE 'microsoft/apm-action@[A-Za-z0-9._-]+' "$src" | cut -d@ -f2)
+          echo "shared/apm.md schema default = '$schema_default'  (apm-action ref: $action_ref)"
+          if [ -z "$schema_default" ] || [ -z "$action_ref" ]; then
+            echo "::error file=$src::could not extract schema default ('$schema_default') or apm-action ref ('$action_ref')"
+            exit 1
+          fi
+          # Source of truth: apm-action's own apm-version input default at the
+          # pinned ref. The schema default MUST mirror it (see MAINTENANCE note).
+          action_default=$(gh api "repos/microsoft/apm-action/contents/action.yml?ref=${action_ref}" --jq '.content' \
+            | base64 -d \
+            | grep -A15 '^  apm-version:' | grep -m1 '^    default:' | tr -d "\"' " | sed 's/.*default://')
+          echo "apm-action@${action_ref} apm-version default = '$action_default'"
+          if [ -z "$action_default" ]; then
+            echo "::error::could not extract apm-version default from microsoft/apm-action@${action_ref}"
+            exit 1
+          fi
+          if [ "$schema_default" != "$action_default" ]; then
+            echo "::error file=$src::apm-version schema default '$schema_default' != apm-action@${action_ref} default '$action_default' -- bump in lockstep with the action (see MAINTENANCE note)"
+            exit 1
+          fi
+          echo "[OK] schema default '$schema_default' mirrors apm-action@${action_ref} -- no drift."
