@@ -157,6 +157,7 @@ def _integrate_materialization(
                 if ctx.skill_subset_from_cli
                 else (tuple(dep_ref.skill_subset) if dep_ref.skill_subset else None)
             ),
+            dep_target_subset=dep_ref.target_subset,
             ctx=ctx,
             allow_executables=_effective_allow(ctx),
         )

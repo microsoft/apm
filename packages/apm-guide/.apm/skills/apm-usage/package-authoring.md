@@ -2,13 +2,15 @@
 
 ## Supported package layouts
 
-APM recognizes three layouts. The shape of the package root tells APM
+APM recognizes five layouts. The shape of the package root tells APM
 how to install it:
 
 | Root signal | Author intent | Install semantic |
 |---|---|---|
 | `.apm/` (with or without apm.yml) | Multiple independent primitives | Hoist each primitive into the consumer runtime dirs |
 | `SKILL.md` (alone, or with apm.yml = HYBRID) | One skill bundle | Copy whole tree to `<target>/skills/<name>/` |
+| `skills/<name>/SKILL.md` | Many skills in one repo | Promote each nested skill to `<target>/skills/<name>/` |
+| `hooks/*.json` only | Harness hook package | Deploy hooks to the target's hooks directory |
 | `plugin.json` / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
 
 The HYBRID layout (apm.yml + SKILL.md) is a single skill bundle that
@@ -86,33 +88,37 @@ consumers run `apm install`.
 ## Hook files
 
 Packages can ship hooks (pre/post tool-use scripts) by placing JSON
-files under `hooks/` or `.apm/hooks/`.  When a package targets multiple
-tools, use target-specific filenames so each tool receives only its own
-hooks:
+files under `hooks/` or `.apm/hooks/`. Filename-based hook routing
+(`*-<harness>-hooks.json` and `hooks-<harness>.json`) is deprecated.
+Consumers should route a hook package with per-dependency `targets:`
+in their own `dependencies.apm` entry instead.
 
-| Filename pattern | Deployed to |
-|---|---|
-| `*-copilot-hooks.json` | GitHub Copilot only |
-| `*-cursor-hooks.json` | Cursor only |
-| `*-claude-hooks.json` | Claude Code only |
-| `*-codex-hooks.json` | Codex CLI only |
-| `*-gemini-hooks.json` | Gemini CLI only |
-| `*-antigravity-hooks.json` | Antigravity CLI only |
-| `*-windsurf-hooks.json` | Windsurf only |
-| `*-kiro-hooks.json` | Kiro only |
-| Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets |
+Package-level `targets:` (top-level) selects the package's own
+compile/install runtimes; per-dependency `targets:` (inside a
+`dependencies.apm` entry) selects which active harnesses receive that
+dependency's target-scoped primitives. They compose via intersection. See
+`dependencies.md` for consumer syntax.
 
-Example directory tree for a multi-target hook package:
+### Migrating filename-routed hooks
 
+Keep hook filenames simple, then document the target set consumers
+should use:
+
+```yaml
+dependencies:
+  apm:
+    - git: owner/my-hooks-pkg
+      targets: [codex]
 ```
-my-hooks-pkg/
-  hooks/
-    hooks.json              # deployed to all targets
-    copilot-hooks.json      # Copilot only
-    cursor-hooks.json       # Cursor only
-    claude-hooks.json       # Claude Code only
-    kiro-hooks.json         # Kiro only
-```
+
+Before: encode the target in a filename such as `my-pkg-codex-hooks.json`.
+After: keep hook filenames generic and let the consumer set `targets: [codex]`.
+
+During the deprecation window, existing suffix-named hook files still
+route to their matching harness and emit an install-time warning. Once a
+consumer adds per-dependency `targets:`, APM bypasses filename routing
+for that dependency and deploys all its hook files to the narrowed target
+set.
 
 APM automatically normalises event names per target (e.g. `postToolUse`
 becomes `PostToolUse` in Claude) and rewrites path variables
@@ -130,7 +136,10 @@ contributors, and CI runners do not see the installer's machine-local
 absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
 references to absolute paths because the user-scope config is read
-without a fixed cwd. If a referenced hook script is missing at install
+without a fixed cwd. If a manifest in `hooks/` or `.apm/hooks/` uses
+`./hooks/<script>`, APM first resolves it from the hook file directory,
+then falls back to the package root to avoid deploying a doubled
+`hooks/hooks/` path. If a referenced hook script is missing at install
 time the installer emits a warning either way; user-scope additionally
 rewrites the unexpanded variable to an absolute source path so the hook
 fails loudly at runtime, while project-scope leaves the variable in
@@ -164,6 +173,9 @@ Both `apm.yml`'s `targets:`/`target:` and the `--target` CLI flag share the same
 Error messages always name the `apm.yml` path and the offending token, so the fix point is unambiguous. The list form (`targets: [a, b]`) is the recommended shape; the singular `target:` and CSV-string forms are supported indefinitely as sugar.
 
 The package-authored `targets:`/`target:` field overrides auto-detect but is itself overridden by an explicit `--target` flag at install/compile time. Run `apm targets` in the consumer's directory to see what the resolution chain produces.
+
+For one dependency's target-scoped primitive reach, use per-dependency
+`targets:` inside `dependencies.apm`; see `dependencies.md`.
 
 ## Manifest fields: `license:` (declared license for SBOM)
 
