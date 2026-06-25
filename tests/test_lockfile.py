@@ -571,6 +571,13 @@ class TestLockedDependencyPkgMetadata:
         restored = LockedDependency.from_dict(d)
         assert restored.name is None
 
+    def test_round_trip_empty_name_preserved(self):
+        dep = LockedDependency(repo_url="owner/repo", name="")
+        d = dep.to_dict()
+        assert d["name"] == ""
+        restored = LockedDependency.from_dict(d)
+        assert restored.name == ""
+
     # --- (g) _known_keys includes "name" -----------------------------------
 
     def test_name_in_known_keys_not_unknown_fields(self):
@@ -616,6 +623,28 @@ class TestLockedDependencyPkgMetadata:
             package_version="9.9.9",
         )
         assert locked.version == "3.0.0"
+
+    def test_from_dependency_ref_git_semver_resolution_wins_over_package_version(self):
+        from apm_cli.deps.git_semver_resolver import GitSemverResolution
+
+        dep_ref = DependencyReference(repo_url="owner/repo", reference="^1.0.0")
+        git_semver_resolution = GitSemverResolution(
+            constraint="^1.0.0",
+            resolved_version="1.2.3",
+            resolved_tag="v1.2.3",
+            resolved_sha="a" * 40,
+            matched_pattern="v{version}",
+            resolved_at="2026-06-25T00:00:00Z",
+        )
+        locked = LockedDependency.from_dependency_ref(
+            dep_ref,
+            "abc123",
+            1,
+            None,
+            git_semver_resolution=git_semver_resolution,
+            package_version="9.9.9",
+        )
+        assert locked.version == "1.2.3"
 
     def test_from_dependency_ref_no_name_when_not_provided(self):
         dep_ref = DependencyReference(repo_url="owner/repo", reference="main")

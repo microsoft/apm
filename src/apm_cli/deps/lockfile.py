@@ -168,7 +168,7 @@ class LockedDependency:
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for YAML output."""
         result: dict[str, Any] = {"repo_url": self.repo_url}
-        if self.name:
+        if self.name is not None:
             result["name"] = self.name
         if self.host:
             result["host"] = self.host
@@ -439,6 +439,15 @@ class LockedDependency:
         else:
             resolved_ref_val = dep_ref.reference
 
+        if registry_resolution is not None:
+            version_value = registry_resolution.version
+        elif git_semver_resolution is not None:
+            version_value = git_semver_resolution.resolved_version
+        elif source != "registry":
+            version_value = package_version
+        else:
+            version_value = None
+
         return cls(
             repo_url=dep_ref.repo_url,
             host=host,
@@ -447,15 +456,7 @@ class LockedDependency:
             registry_prefix=registry_prefix,
             resolved_commit=resolved_commit,
             resolved_ref=resolved_ref_val,
-            version=(
-                registry_resolution.version
-                if registry_resolution is not None
-                else (
-                    git_semver_resolution.resolved_version
-                    if git_semver_resolution is not None
-                    else package_version
-                )
-            ),
+            version=version_value,
             virtual_path=dep_ref.virtual_path,
             is_virtual=dep_ref.is_virtual,
             depth=depth,
