@@ -328,7 +328,8 @@ def integrate_package_primitives(  # noqa: PLR0913
         # OR sit inside it.  ensure_path_within(child, parent) raises if not.
         ensure_path_within(Path(project_root).resolve(), scratch_root)
 
-    # Executable approval gate (npm v12-style default-deny).
+    # Executable approval gate (npm v12-style default-deny). hooks/bin gate
+    # below (~424, ~585); mcp/canvas unused (mcp filtered upstream, canvas re-derived ~433).
     _hooks_approved, _bin_approved, _mcp_approved, _canvas_approved = _check_executable_approval(
         package_name, package_info, allow_executables, ctx=ctx
     )

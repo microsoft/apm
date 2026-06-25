@@ -315,6 +315,35 @@ class TestFilterFilesByTarget:
             parts = f.split("/")
             assert ".." not in parts, f"traversal segment leaked for payload {payload!r}: {f}"
 
+    # -- windsurf convergence onto .agents/skills/ (#1802) ----------------
+
+    def test_filter_files_windsurf_includes_agents_skills_prefix(self):
+        """``apm pack --target windsurf`` must keep converged ``.agents/skills/``
+        entries.
+
+        Post-convergence, windsurf skills deploy to ``.agents/skills/`` via
+        ``deploy_root='.agents'``.  Without ``pack_prefixes=('.windsurf/',
+        '.agents/')`` on the windsurf TargetProfile, ``effective_pack_prefixes``
+        falls back to ``('.windsurf/',)`` and the ``.agents/skills/`` entries are
+        silently dropped from the produced bundle.  This is a regression trap for
+        that omission.
+        """
+        from apm_cli.bundle.lockfile_enrichment import _filter_files_by_target
+
+        files = [
+            ".agents/skills/x/SKILL.md",
+            ".windsurf/rules/r.md",
+        ]
+        filtered, _mappings = _filter_files_by_target(files, "windsurf")
+
+        # The converged skills entry must survive the windsurf prefix filter.
+        assert ".agents/skills/x/SKILL.md" in filtered, (
+            "windsurf pack dropped converged .agents/skills/ entry -- "
+            "pack_prefixes likely missing '.agents/'"
+        )
+        # Native windsurf-rooted entries still survive.
+        assert ".windsurf/rules/r.md" in filtered
+
 
 class TestFilterFilesByTargetList:
     """Tests for _filter_files_by_target with list targets."""

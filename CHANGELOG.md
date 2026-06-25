@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm approve --recommended` bulk-accepts an organization's `recommend`
   set, and `apm approve --list` shows the effective trust state of every
   installed package with executables. (#1873)
+- The shared gh-aw workflow `.github/workflows/shared/apm.md` exposes an optional `apm-version` import input that pins the apm CLI version for both the pack and restore `microsoft/apm-action` steps (so the two cannot skew), surviving `gh aw update` without hand-editing the vendored file. Omitting it falls through to the action's pinned default via a gh-aw schema default, so non-opting consumers stay reproducible instead of floating to `latest`. (#1842)
 - Org-wide policy discovery now cascades through candidate repo names
   (`.github`, then `.apm`, then `_apm`) and speaks the Azure DevOps Items
   API, so Azure DevOps organizations -- which forbid repo names that begin
@@ -68,6 +69,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **Breaking (security):** executable dependencies -- including MCP servers and
+  canvas extensions -- now require explicit, persistent approval via `apm approve`,
+  closing the gap where canvas extensions were trusted per-run. The
+  `--trust-canvas-extensions` flag is removed as a consequence; canvas extensions
+  are now governed by the executable-trust gate like every other executable
+  surface. (by @sergio-sisternes-epam) (#1865)
+
+  ```diff
+  - apm install --trust-canvas-extensions   # before: per-run trust flag
+  + apm approve <pkg>                        # after: one-time, persistent approval
+  ```
+
+  CI / non-interactive pipelines that previously passed the flag should
+  instead pre-seed approvals before `apm install`, e.g.
+  `apm approve <pkg>`, so the gate finds the package already trusted and
+  never prompts.
 - The standalone `~/.apm/approvals.yml` personal-consent file is removed;
   its contents are migrated into `~/.apm/config.json` under
   `executables: {allow, deny}` on first read (net-new control-surface
@@ -94,6 +111,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Codex MCP config writes, falling back to `~/.codex/config.toml` when unset.
   (closes #1861) (#1863)
 
+### Security
+
+- The `allowExecutables` default-deny gate now enforces `mcp` server writes and
+  `canvas` extensions in addition to `hooks` and `bin`, bringing all four executable
+  surfaces under one approval model. `apm approve` decisions are also stored
+  user-local in `~/.apm/approvals.yml` instead of the committed project `apm.yml`,
+  so cloning a repository no longer silently inherits another developer's executable
+  approvals. (by @sergio-sisternes-epam) (#1865)
+
 ## [0.21.0] - 2026-06-19
 
 ### Added
@@ -118,6 +144,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm lock export --format cyclonedx|spdx` emits a standard SBOM inventory of installed packages, and a new declared-license recorder stores each package's manifest-declared license (`apm.yml` `license:` / `plugin.json`) in the lockfile after offline SPDX-id validation. APM records what a package declares -- it does not scan LICENSE text or gate installs on a license. (closes #1777) (#1820)
 - `apm install` / `apm pack` can now deploy an experimental Copilot-only `canvas` primitive: a package declaring `.apm/extensions/<name>/` ships verbatim to `.github/extensions/<name>/` (or `~/.copilot/extensions/<name>/` with `--global`), where Copilot CLI discovers it in-session. The surface is gated twice -- `apm experimental enable canvas` plus `--trust-canvas-extensions` for dependency-provided canvases -- and is fail-closed when the flag is off. (#1689)
 - `apm install` now blocks dependency-provided executables (hooks and `bin/`) by default, mirroring npm v12's default-deny model. A dependency's hooks or binaries deploy only after explicit approval in an `allowExecutables` block of `apm.yml`, managed via `apm approve` / `apm deny`; root-authored content and text-only primitives are unaffected. (#1723)
+
+### Changed
+
+- Windsurf skills now deploy to the cross-tool `.agents/skills/<name>/SKILL.md` path (was `.windsurf/skills/`), converging with Copilot, Cursor, Codex, Gemini, and OpenCode. Pass `--legacy-skill-paths` or set `APM_LEGACY_SKILL_PATHS=1` to restore the per-client `.windsurf/skills/` layout. The lockfile pack-time cross-target skill map for Windsurf is swept separately in #1805. (closes #1520) (#1802)
 
 ### Removed
 

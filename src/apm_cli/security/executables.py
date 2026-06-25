@@ -123,7 +123,7 @@ def is_package_approved(
             consuming project's ``apm.yml``.  ``None`` means no block
             exists (nothing approved).
         package_key: The approval key (e.g. ``owner/repo#v1.0``).
-        exec_type: One of ``hooks``, ``mcp``, ``bin``.
+        exec_type: One of ``hooks``, ``mcp``, ``bin``, ``canvas``.
 
     Returns:
         ``True`` only when the block contains a matching entry with
@@ -503,14 +503,16 @@ def prompt_executable_approval(
     Args:
         declarations: Executable declarations for packages that need
             approval (already filtered to only those with executables).
-        allow_executables: Existing ``allowExecutables`` block from
-            ``apm.yml`` (merged into result for packages already approved).
+        allow_executables: Existing approvals map (project ``apm.yml``
+            ``allowExecutables`` overlaid with user-local
+            ``~/.apm/approvals.yml``); merged into result for packages
+            already approved.
         trust_all: When True, auto-approve everything without prompting.
         no_executables: When True, deny everything without prompting.
 
     Returns:
-        Updated ``allowExecutables`` dict ready to write back to
-        ``apm.yml``.
+        Updated approvals dict ready to persist to the user-local
+        ``~/.apm/approvals.yml``.
 
     Raises:
         SystemExit: In non-interactive mode when unapproved executables
@@ -794,17 +796,26 @@ def filter_mcp_by_allow_executables(
     _filtered = []
     for _dep in mcp_deps:
         _slug = _dep.name
-        if _slug and not is_package_approved(_allow_execs, _slug, EXEC_TYPE_MCP):
+        # Fail-closed: keep a server only when it carries a name AND that name
+        # is approved.  A falsy/missing name is treated as NOT approved so an
+        # unnamed dep can never slip past the gate.
+        if _slug and is_package_approved(_allow_execs, _slug, EXEC_TYPE_MCP):
+            _filtered.append(_dep)
+        elif _slug:
             logger.verbose_detail(
                 f"Skipping MCP server from '{_slug}': executables not trusted yet. "
                 f"Run 'apm approve {_slug}' to trust it."
             )
         else:
-            _filtered.append(_dep)
+            logger.verbose_detail(
+                "Skipping an unnamed MCP server: executables not trusted yet. "
+                "Identify it in apm.yml and run 'apm approve <package>' to trust it."
+            )
     if len(_filtered) < len(mcp_deps):
         logger.warning(
             f"Filtered {len(mcp_deps) - len(_filtered)} MCP server(s) whose "
-            "executables are not trusted yet."
+            "executables are not trusted yet.",
+            symbol="warning",
         )
     return _filtered
 

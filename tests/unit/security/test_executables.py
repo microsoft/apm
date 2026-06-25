@@ -22,11 +22,13 @@ import yaml
 
 from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
+    EXEC_TYPE_CANVAS,
     EXEC_TYPE_HOOKS,
     EXEC_TYPE_MCP,
     ExecutableDeclaration,
     _is_fully_approved,
     build_approval_key,
+    filter_mcp_by_allow_executables,
     is_any_type_approved,
     is_package_approved,
     parse_allow_executables,
@@ -282,6 +284,19 @@ class TestScanPackageExecutables:
             assert decl.hook_count == 1
             assert decl.bin_count == 1
             assert decl.exec_types == [EXEC_TYPE_HOOKS, EXEC_TYPE_BIN]
+
+    def test_detects_canvas_extensions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ext_dir = Path(tmpdir) / ".apm" / "extensions" / "widget"
+            ext_dir.mkdir(parents=True)
+            (ext_dir / "extension.mjs").write_text("export default {};")
+            # A sibling directory without the marker is ignored.
+            (Path(tmpdir) / ".apm" / "extensions" / "nomarker").mkdir()
+
+            decl = scan_package_executables(Path(tmpdir), "canvas-pkg", "1.0")
+            assert decl.canvas_count == 1
+            assert "widget" in decl.canvas_details
+            assert EXEC_TYPE_CANVAS in decl.exec_types
 
 
 # ---------------------------------------------------------------------------
@@ -585,3 +600,66 @@ class TestSaveUserExecutablesAtomic:
         assert data["executables"]["allow"]["pkg#1.0"]["hooks"] is True
         # No leftover temp files in the dir.
         assert [p.name for p in tmp_path.iterdir()] == ["config.json"]
+
+
+# ---------------------------------------------------------------------------
+# filter_mcp_by_allow_executables (fail-closed under v1 deny-wins)
+# ---------------------------------------------------------------------------
+
+
+class _FakeMcpDep:
+    """Minimal stand-in for an MCP dependency exposing ``.name``."""
+
+    def __init__(self, name: str | None) -> None:
+        self.name = name
+
+
+class _RecordingLogger:
+    """Captures verbose_detail / warning calls for assertions."""
+
+    def __init__(self) -> None:
+        self.verbose: list[str] = []
+        self.warnings: list[str] = []
+
+    def verbose_detail(self, message: str, *args, **kwargs) -> None:
+        self.verbose.append(message)
+
+    def warning(self, message: str, *args, **kwargs) -> None:
+        self.warnings.append(message)
+
+
+class TestFilterMcpFailClosed:
+    """filter_mcp_by_allow_executables stays fail-closed under v1 deny-wins.
+
+    The v1 resolver drives the effective map from the project-level
+    ``executables`` block (personal consent merges in elsewhere); these
+    tests confirm the gate filters unapproved and unnamed deps regardless.
+    """
+
+    def test_none_gate_passes_all(self) -> None:
+        deps = [_FakeMcpDep("a"), _FakeMcpDep("b")]
+        logger = _RecordingLogger()
+        assert filter_mcp_by_allow_executables(deps, None, logger) == deps
+        assert logger.warnings == []
+
+    def test_unapproved_filtered_out(self) -> None:
+        deps = [_FakeMcpDep("a")]
+        logger = _RecordingLogger()
+        result = filter_mcp_by_allow_executables(deps, {}, logger)
+        assert result == []
+        assert logger.warnings  # surfaced a remediation warning
+
+    def test_project_allowed_slug_passes(self) -> None:
+        deps = [_FakeMcpDep("a")]
+        logger = _RecordingLogger()
+        result = filter_mcp_by_allow_executables(deps, {"a": {"mcp": True}}, logger)
+        assert result == deps
+        assert logger.warnings == []
+
+    def test_unnamed_dep_is_fail_closed(self) -> None:
+        # A falsy/missing name must never bypass the gate.
+        deps = [_FakeMcpDep(None), _FakeMcpDep("")]
+        logger = _RecordingLogger()
+        result = filter_mcp_by_allow_executables(deps, {"a": {"mcp": True}}, logger)
+        assert result == []
+        assert logger.warnings

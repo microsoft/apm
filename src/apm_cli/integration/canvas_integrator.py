@@ -472,8 +472,8 @@ class CanvasIntegrator(BaseIntegrator):
             message=(
                 f"Blocked {len(bundles)} canvas extension(s) ({names}) from '{pkg}': "
                 f"canvas extensions are executable {CANVAS_MARKER} code and are not "
-                f"deployed from dependencies by default. Run 'apm approve {pkg}' to "
-                f"add '{pkg}' to allowExecutables and deploy them to {deploy_dir}."
+                f"trusted by default. Run 'apm approve {pkg}' to trust '{pkg}' and "
+                f"deploy them to {deploy_dir}."
             ),
             package=package_name or "",
         )
