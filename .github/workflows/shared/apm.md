@@ -473,7 +473,7 @@ steps:
     id: bundles
     run: |
       set -euo pipefail
-      mapfile -t list < <(find /tmp/gh-aw/apm-bundles -name '*.tar.gz' | sort)
+      mapfile -t list < <(find /tmp/gh-aw/apm-bundles \( -name '*.tar.gz' -o -name '*.zip' \) | sort)
       [ ${#list[@]} -gt 0 ] || { echo '::error::no apm bundles found'; exit 1; }
       printf '%s\n' "${list[@]}" > /tmp/gh-aw/apm-bundle-list.txt
   - name: Restore APM packages (all bundles)

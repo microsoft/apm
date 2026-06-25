@@ -505,7 +505,7 @@ jobs:
         run: "set -euo pipefail\nexpected=$(echo \"$EXPECTED_MATRIX\" | jq -r --arg prefix \"$ARTIFACT_PREFIX\" '.group | map($prefix + \"apm-\" + .id) | sort | .[]')\nactual=$(ls /tmp/gh-aw/apm-bundles | sort)\nmissing=$(comm -23 <(echo \"$expected\") <(echo \"$actual\") || true)\nunexpected=$(comm -13 <(echo \"$expected\") <(echo \"$actual\") || true)\nif [ -n \"$missing\" ]; then\n  echo \"::error::missing APM bundles (group did not pack successfully): $missing\"\n  exit 1\nfi\nif [ -n \"$unexpected\" ]; then\n  echo \"::error::unexpected artifact in apm bundle download (collision attack?): $unexpected\"\n  exit 1\nfi\n"
       - id: bundles
         name: Build bundle list
-        run: "set -euo pipefail\nmapfile -t list < <(find /tmp/gh-aw/apm-bundles -name '*.tar.gz' | sort)\n[ ${#list[@]} -gt 0 ] || { echo '::error::no apm bundles found'; exit 1; }\nprintf '%s\\n' \"${list[@]}\" > /tmp/gh-aw/apm-bundle-list.txt\n"
+        run: "set -euo pipefail\nmapfile -t list < <(find /tmp/gh-aw/apm-bundles \\( -name '*.tar.gz' -o -name '*.zip' \\) | sort)\n[ ${#list[@]} -gt 0 ] || { echo '::error::no apm bundles found'; exit 1; }\nprintf '%s\\n' \"${list[@]}\" > /tmp/gh-aw/apm-bundle-list.txt\n"
       - name: Restore APM packages (all bundles)
         uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1.10.0
         with:

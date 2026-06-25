@@ -39,8 +39,10 @@ name: Verify shared/apm.md matrix secret-stripping fix
 #      Proves the `apm pack --archive` default archive format (.zip) stays
 #      inside the extension set the pinned microsoft/apm-action release
 #      detects when it scans the build dir for a bundle. Source of truth:
-#      src/apm_cli/bundle/packer.py (producer default) vs apm-action
-#      src/bundler.ts at the pinned ref (consumer detection). Fails on the
+#      src/apm_cli/commands/pack.py (the --archive-format Click default the
+#      CLI exposes and apm-action invokes) vs apm-action src/bundler.ts at the
+#      pinned ref (consumer detection); the bundle/packer.py dataclass default
+#      is asserted consistent. Fails on the
 #      'apm pack produced no bundle' outage shape -- the CLI default flipped
 #      from .tar.gz to .zip while apm-action still filtered only .tar.gz, so
 #      the GH-AW Compatibility job saw no bundle. Keep the CLI default in
@@ -411,26 +413,42 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # 'apm pack --archive' defaults to .zip (packer.py). apm-action scans
-          # the build dir for an archive bundle by filtering on a fixed
-          # extension set. When the CLI default flipped from .tar.gz to .zip
-          # but apm-action still filtered only '.tar.gz', the GH-AW
-          # Compatibility job failed with 'apm pack produced no bundle'. This
-          # guard cross-references the two repos so the producer default can
-          # never silently drift out of the set the pinned apm-action release
-          # detects.
+          # 'apm pack --archive' defaults to .zip. apm-action scans the build
+          # dir for an archive bundle by filtering on a fixed extension set.
+          # When the CLI default flipped from .tar.gz to .zip but apm-action
+          # still filtered only '.tar.gz', the GH-AW Compatibility job failed
+          # with 'apm pack produced no bundle'. This guard cross-references the
+          # two repos so the producer default can never silently drift out of
+          # the set the pinned apm-action release detects.
 
-          # Producer side (source of truth in THIS repo): the default archive
-          # format 'apm pack --archive' emits when --archive-format is omitted.
-          producer_fmt=$(grep -m1 -E '^[[:space:]]*archive_format: str = "' \
-            src/apm_cli/bundle/packer.py | sed -E 's/.*= "([^"]+)".*/\1/')
+          # Producer side (source of truth in THIS repo): apm-action invokes
+          # `apm pack --archive` WITHOUT --archive-format, so the user-facing
+          # default that decides the emitted extension is the Click option
+          # default in commands/pack.py -- NOT the internal dataclass default
+          # in bundle/packer.py. Read the CLI surface, then assert the dataclass
+          # default stays consistent so a future split is caught here too.
+          pack_cli=src/apm_cli/commands/pack.py
+          producer_fmt=$(grep -A8 '"--archive-format"' "$pack_cli" \
+            | grep -m1 -E '^[[:space:]]*default="' | sed -E 's/.*default="([^"]+)".*/\1/')
           case "$producer_fmt" in
             zip)    producer_ext=".zip" ;;
             tar.gz) producer_ext=".tar.gz" ;;
-            "")     echo "::error file=src/apm_cli/bundle/packer.py::could not read archive_format default"; exit 1 ;;
-            *)      echo "::error file=src/apm_cli/bundle/packer.py::unrecognized archive_format default '$producer_fmt'"; exit 1 ;;
+            "")     echo "::error file=$pack_cli::could not read the --archive-format Click default"; exit 1 ;;
+            *)      echo "::error file=$pack_cli::unrecognized --archive-format default '$producer_fmt'"; exit 1 ;;
           esac
-          echo "producer: apm pack --archive default format = '$producer_fmt' (ext '$producer_ext')"
+          echo "producer: 'apm pack --archive' default format = '$producer_fmt' (ext '$producer_ext') [commands/pack.py]"
+
+          # Consistency: the bundle/packer.py dataclass default must agree with
+          # the CLI default. apm pack constructs the packer from the CLI option,
+          # so a divergence here means the two could disagree under some code
+          # path -- fail loudly rather than trust a single side.
+          packer_fmt=$(grep -m1 -E '^[[:space:]]*archive_format: str = "' \
+            src/apm_cli/bundle/packer.py | sed -E 's/.*= "([^"]+)".*/\1/')
+          if [ -n "$packer_fmt" ] && [ "$packer_fmt" != "$producer_fmt" ]; then
+            echo "::error file=src/apm_cli/bundle/packer.py::archive_format dataclass default '$packer_fmt' disagrees with the --archive-format CLI default '$producer_fmt' (commands/pack.py) -- reconcile the two before relying on the drift guard."
+            exit 1
+          fi
+          echo "consistency: packer.py dataclass default '$packer_fmt' matches CLI default"
 
           # Consumer side (cross-repo): read apm-action's archive-detection
           # extension set from the ref shared/apm.md pins (the release CI runs).
