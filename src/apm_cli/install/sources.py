@@ -430,6 +430,14 @@ class CachedDependencySource(DependencySource):
             _ref = _rref.ref_name
         elif dep_locked_chk and getattr(dep_locked_chk, "resolved_ref", None):
             _ref = dep_locked_chk.resolved_ref
+        elif dep_ref.source == "registry":
+            # Fresh install: exact version lives in the resolver's last_resolutions
+            # map (populated by the BFS callback). Fall back to dep_ref.reference
+            # only if the resolver has no record (should not normally happen).
+            from apm_cli.install.registry_wiring import resolver_last_registry_resolution
+
+            _reg_res = resolver_last_registry_resolution(ctx, dep_key)
+            _ref = _reg_res.version if _reg_res else (dep_ref.reference or "")
         else:
             _ref = dep_ref.reference or ""
         # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
