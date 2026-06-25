@@ -336,6 +336,85 @@ def _display_marketplace_plugin(
         click.echo(f"  Install: apm install {plugin.name}@{marketplace_name}")
 
 
+def _display_registry_versions(
+    package: str,
+    dep_ref: DependencyReference,
+    logger: CommandLogger,
+) -> None:
+    """List available versions from the configured registry for a registry dep."""
+    from ..deps.registry.auth import make_auth_context
+    from ..deps.registry.client import RegistryClient, RegistryError
+    from ..deps.registry.config_loader import resolve_effective_registries
+
+    repo_url = dep_ref.repo_url
+    parts = [p for p in repo_url.split("/") if p]
+    if len(parts) < 2:
+        logger.error(f"Cannot parse owner/repo from '{package}'")
+        sys.exit(1)
+    owner = "/".join(parts[:-1]) if len(parts) > 2 else parts[0]
+    repo = parts[-1]
+
+    project_registries = None
+    project_default = None
+    try:
+        from ..models.apm_package import APMPackage
+
+        apm_yml = Path(".") / "apm.yml"
+        if apm_yml.is_file():
+            pkg = APMPackage.from_apm_yml(apm_yml)
+            project_registries = pkg.registries
+            project_default = pkg.default_registry
+    except Exception:
+        pass
+
+    registries, default_registry = resolve_effective_registries(project_registries, project_default)
+    if not registries or not default_registry:
+        logger.error(f"No registry configured; cannot list versions for '{package}'")
+        sys.exit(1)
+    registry_url = registries.get(default_registry)
+    if not registry_url:
+        logger.error(f"Registry '{default_registry}' has no URL configured")
+        sys.exit(1)
+
+    try:
+        auth = make_auth_context(default_registry)
+        client = RegistryClient(registry_url, auth)
+        versions = client.list_versions(owner, repo)
+    except RegistryError as exc:
+        logger.error(f"Failed to list versions for '{package}': {exc}")
+        sys.exit(1)
+
+    if not versions:
+        logger.progress(f"No versions found for '{package}'")
+        return
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(
+            title=f"Available versions: {package}",
+            show_header=True,
+            header_style="bold cyan",
+        )
+        table.add_column("Version", style="bold white")
+        table.add_column("Published", style="dim white")
+
+        for entry in sorted(versions, key=lambda e: e.version):
+            table.add_row(entry.version, entry.published_at)
+
+        console.print(table)
+
+    except ImportError:
+        click.echo(f"Available versions: {package}")
+        click.echo("-" * 50)
+        click.echo(f"{'Version':<20} {'Published':<30}")
+        click.echo("-" * 50)
+        for entry in sorted(versions, key=lambda e: e.version):
+            click.echo(f"{entry.version:<20} {entry.published_at:<30}")
+
+
 def display_versions(package: str, logger: CommandLogger) -> None:
     """Query and display available remote versions (tags/branches).
 
@@ -358,12 +437,18 @@ def display_versions(package: str, logger: CommandLogger) -> None:
         _display_marketplace_plugin(plugin_name, marketplace_name, logger)
         return
 
-    # -- Git-based path (unchanged) --
+    # -- Git-based path --
     try:
         dep_ref = DependencyReference.parse(package)
     except ValueError as exc:
         logger.error(f"Invalid package reference '{package}': {exc}")
         sys.exit(1)
+
+    # Detect registry dep via lockfile and route to registry API.
+    _, _, _locked_source = _lookup_lockfile_ref(package, Path("."))
+    if _locked_source == "registry":
+        _display_registry_versions(package, dep_ref, logger)
+        return
 
     try:
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
