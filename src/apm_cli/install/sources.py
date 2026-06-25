@@ -653,6 +653,8 @@ class FreshDependencySource(DependencySource):
                 package_info = ctx.pre_download_results[dep_key]
             elif dep_ref.source == "registry":
                 if dep_key in ctx.callback_failures:
+                    # Resolve already surfaced the registry failure; do not
+                    # retry through the git fallback path.
                     return None
                 from apm_cli.deps.registry.feature_gate import (
                     require_package_registry_enabled,
