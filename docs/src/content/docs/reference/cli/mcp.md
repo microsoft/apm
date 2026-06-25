@@ -115,14 +115,18 @@ Regenerate runtime MCP config files from already-resolved state (`apm.yml` +
 ```bash
 apm mcp export --runtime vscode
 apm mcp export --runtime copilot --runtime codex
+apm mcp export --target vscode
 ```
 
 `--runtime` is repeatable. Pass as many target runtimes as needed in a single
-invocation. Valid runtimes match those accepted by `apm install --target`.
+invocation. `--target` (`-t`) is an alias for users coming from
+`apm install --target`. Valid MCP-capable runtime names include `vscode`,
+`copilot`, `codex`, `cursor`, `claude`, `gemini`, `opencode`, `windsurf`,
+`kiro`, `antigravity`, `intellij`, and `hermes`.
 
 | Flag | Description |
 |---|---|
-| `--runtime RUNTIME` | Target runtime to write config for. Repeatable. |
+| `--runtime RUNTIME`, `--target RUNTIME`, `-t RUNTIME` | Target runtime to write config for. Repeatable. |
 | `--verbose`, `-v` | Verbose output. |
 
 **Read-only**: `export` reads `apm.yml` and the lockfile but never modifies
@@ -134,8 +138,12 @@ fully offline from `apm.yml`. Registry-sourced servers require network
 reachability to the MCP registry to retrieve server invocation metadata
 (command, args, env), because resolved invocations are not persisted in the
 lockfile; a `[>] Looking up N MCP server(s) in registry...` line is printed
-when that lookup fires. A future release may persist this metadata in the
-lockfile to enable fully offline export of registry servers.
+when that lookup fires.
+
+:::note[Planned]
+Follow-up #1906 tracks persisting registry invocation metadata in the lockfile
+so registry-sourced exports can run fully offline.
+:::
 
 **`targets:` whitelist**: if `apm.yml` declares a `targets:` list, a requested
 runtime that is not in that list is skipped with a `[!]` warning. All other

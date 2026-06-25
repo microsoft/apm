@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm mcp export --runtime <target>` regenerates runtime MCP config from
+  `apm.yml` and `apm.lock.yaml` without running a full install; `--target`/`-t`
+  are aliases for install-style target wording. (#1905)
 - Executable Trust Governance v1 (#1873): executable trust is now one concept
   with one resolver and deny-wins precedence. Organizations can now declare an
   `executables:` block in `apm-policy.yml` (`deny_all`, `deny`, `require`,

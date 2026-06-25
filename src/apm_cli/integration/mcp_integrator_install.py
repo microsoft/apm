@@ -620,6 +620,148 @@ def _print_mcp_summary(
         console.print(f"[green]{STATUS_SYMBOLS['success']} All servers up to date[/green]")
 
 
+def _load_stored_mcp_configs(project_root: Any, logger: Any) -> builtins.dict:
+    """Load lockfile MCP config snapshots for export/install drift detection."""
+    try:
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+        lock_path = get_lockfile_path(project_root)
+        existing_lock = LockFile.read(lock_path)
+    except FileNotFoundError:
+        return {}
+    except Exception as exc:
+        logger.warning(f"Lockfile unreadable; drift detection disabled for this export: {exc}")
+        return {}
+
+    if existing_lock and existing_lock.mcp_configs:
+        return builtins.dict(existing_lock.mcp_configs)
+    return {}
+
+
+def _emit_mcp_export_header(
+    console: Any,
+    logger: Any,
+    server_count: int,
+    target_runtimes: list[str],
+) -> None:
+    """Render the export header with the same visual style as install."""
+    message = f"Exporting MCP config ({server_count} servers) for: {', '.join(target_runtimes)}"
+    if not console:
+        logger.progress(message)
+        return
+
+    try:
+        from rich.text import Text
+
+        noun = "server" if server_count == 1 else "servers"
+        header = Text()
+        header.append("+- MCP Export (", style="cyan")
+        header.append(str(server_count), style="cyan bold")
+        header.append(f" {noun}", style="cyan")
+        header.append(f", target: {', '.join(target_runtimes)}", style="cyan")
+        header.append(")", style="cyan")
+        console.print(header)
+    except Exception:
+        logger.progress(message)
+
+
+def run_mcp_export(
+    runtimes: list[str],
+    project_root: Any,
+    verbose: bool = False,
+    logger: Any = None,
+) -> int:
+    """Export MCP runtime configs from already-resolved project state.
+
+    Returns a process-style exit code so the Click wrapper stays thin and the
+    export orchestration is testable without a Click context.
+    """
+    from apm_cli.factory import ClientFactory
+    from apm_cli.integration.mcp_integrator import MCPIntegrator, _get_console
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.utils.yaml_io import load_yaml
+
+    if logger is None:
+        logger = NullCommandLogger()
+
+    supported = ClientFactory.supported_clients()
+    unknown = [runtime for runtime in runtimes if runtime not in supported]
+    if unknown:
+        supported_text = ", ".join(sorted(supported))
+        for runtime in unknown:
+            logger.error(f"Unknown runtime: '{runtime}'. Supported: {supported_text}")
+        return 1
+
+    apm_yml_path = Path(project_root) / "apm.yml"
+    if not apm_yml_path.exists():
+        logger.error("apm.yml not found. Run this command from a project with an apm.yml file.")
+        return 1
+
+    try:
+        apm_config = load_yaml(apm_yml_path)
+    except Exception as exc:
+        logger.error(f"Failed to parse apm.yml: {exc}")
+        return 1
+
+    try:
+        package = APMPackage.from_apm_yml(apm_yml_path)
+        mcp_deps = package.get_all_mcp_dependencies()
+    except Exception as exc:
+        logger.error(f"Failed to read MCP dependencies: {exc}")
+        return 1
+
+    if not mcp_deps:
+        logger.info("No MCP dependencies found in apm.yml. Nothing to export.")
+        return 0
+
+    stored_mcp_configs = _load_stored_mcp_configs(project_root, logger)
+    try:
+        gated = MCPIntegrator._gate_project_scoped_runtimes(
+            runtimes,
+            user_scope=False,
+            project_root=project_root,
+            apm_config=apm_config,
+            explicit_target=None,
+        )
+    except Exception as exc:
+        logger.error(f"Could not resolve target whitelist: {exc}")
+        return 1
+
+    excluded = [runtime for runtime in runtimes if runtime not in gated]
+    for runtime in excluded:
+        logger.warning(
+            f"Runtime '{runtime}' is not in the active targets: whitelist "
+            f"-- skipping. Add it to 'targets:' in apm.yml to enable."
+        )
+
+    if not gated:
+        logger.error(
+            "All requested runtimes were excluded by the targets: whitelist. "
+            "Add at least one requested runtime to 'targets:' in apm.yml."
+        )
+        return 1
+
+    console = _get_console()
+    _emit_mcp_export_header(console, logger, len(mcp_deps), gated)
+    try:
+        configured_count, successful_updates = _apply_mcp_configs(
+            mcp_deps=mcp_deps,
+            target_runtimes=gated,
+            stored_mcp_configs=stored_mcp_configs,
+            project_root=project_root,
+            user_scope=False,
+            verbose=verbose,
+            console=console,
+            logger=logger,
+        )
+    except RuntimeError as exc:
+        logger.error(str(exc))
+        return 1
+
+    _print_mcp_summary(console, configured_count, successful_updates)
+    return 0
+
+
 def run_mcp_install(
     mcp_deps: list,
     runtime: str | None = None,

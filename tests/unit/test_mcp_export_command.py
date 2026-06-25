@@ -239,6 +239,38 @@ class TestExportMultipleRuntimes:
         assert "vscode" in target_runtimes
         assert "copilot" in target_runtimes
 
+    def test_target_alias_passed_to_apply(self, tmp_path):
+        """--target is an alias for --runtime to match install target wording."""
+        runner = CliRunner()
+        dep = _make_self_defined_dep()
+
+        with (
+            runner.isolated_filesystem(temp_dir=tmp_path),
+            patch(
+                "apm_cli.models.apm_package.APMPackage.from_apm_yml",
+                autospec=True,
+            ) as mock_pkg_cls,
+            patch(
+                "apm_cli.integration.mcp_integrator_install._apply_mcp_configs",
+                return_value=(1, set()),
+            ) as mock_apply,
+            patch(
+                "apm_cli.integration.mcp_integrator.MCPIntegrator._gate_project_scoped_runtimes",
+                side_effect=lambda rts, **kw: rts,
+            ),
+        ):
+            mock_pkg = MagicMock()
+            mock_pkg.get_all_mcp_dependencies.return_value = [dep]
+            mock_pkg_cls.return_value = mock_pkg
+
+            Path("apm.yml").write_text(APM_YML_WITH_MCP, encoding="utf-8")
+            result = runner.invoke(mcp, ["export", "--target", "vscode"])
+
+        assert result.exit_code == 0, result.output
+        mock_apply.assert_called_once()
+        target_runtimes = mock_apply.call_args.kwargs["target_runtimes"]
+        assert target_runtimes == ["vscode"]
+
 
 # ---------------------------------------------------------------------------
 # targets: whitelist respected

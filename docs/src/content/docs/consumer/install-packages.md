@@ -201,6 +201,10 @@ For the full flag reference, run `apm install --help` or see
 - **Drift between `apm_modules/` and the lockfile.** Run
   `apm audit --ci` locally to reproduce the CI gate; see
   [Update and refresh](../update-and-refresh/) to recover.
+- **Runtime MCP config drift.** After editing MCP environment variables or
+  runtime settings in `apm.yml`, run
+  [`apm mcp export --target <runtime>`](../../reference/cli/mcp/#apm-mcp-export)
+  to refresh config files without reinstalling packages.
 
 Once your dependencies are installed, scripts run them.
 [Run scripts](../run-scripts/) shows how to wire `apm.yml`'s

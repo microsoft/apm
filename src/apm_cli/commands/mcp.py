@@ -534,6 +534,8 @@ def list(ctx, limit, verbose):  # noqa: F811
 )
 @click.option(
     "--runtime",
+    "--target",
+    "-t",
     "runtimes",
     multiple=True,
     required=True,
@@ -546,134 +548,18 @@ def export(ctx, runtimes, verbose):
     """Regenerate runtime MCP config from resolved apm.yml + lockfile state.
 
     Does NOT re-resolve or install dependencies; reads the existing resolved
-    state only.  Respects the targets: whitelist in apm.yml.
+    state only. Respects the targets: whitelist in apm.yml.
     """
     from pathlib import Path
 
-    from ..factory import ClientFactory
-    from ..integration.mcp_integrator import MCPIntegrator
-    from ..integration.mcp_integrator_install import _apply_mcp_configs, _print_mcp_summary
-    from ..utils.console import _rich_error, _rich_info, _rich_warning
+    from ..integration.mcp_integrator_install import run_mcp_export
 
     logger = CommandLogger("mcp-export", verbose=verbose)
-
-    # --- Validate runtime names ---
-    supported = ClientFactory.supported_clients()
-    unknown = [r for r in runtimes if r not in supported]
-    if unknown:
-        for rt in unknown:
-            _rich_error(
-                f"Unknown runtime: '{rt}'. Supported: {', '.join(sorted(supported))}",
-                symbol="error",
-            )
-        sys.exit(1)
-
-    # --- Locate and load apm.yml ---
-    project_root = Path.cwd()
-    apm_yml_path = project_root / "apm.yml"
-    if not apm_yml_path.exists():
-        _rich_error(
-            "apm.yml not found. Run this command from a project with an apm.yml file.",
-            symbol="error",
-        )
-        sys.exit(1)
-
-    # --- Load apm.yml config dict (for targets: whitelist) ---
-    try:
-        from ..utils.yaml_io import load_yaml
-
-        apm_config = load_yaml(apm_yml_path)
-    except Exception as exc:
-        _rich_error(f"Failed to parse apm.yml: {exc}", symbol="error")
-        sys.exit(1)
-
-    # --- Load MCP dependencies ---
-    try:
-        from ..models.apm_package import APMPackage
-
-        package = APMPackage.from_apm_yml(apm_yml_path)
-        mcp_deps = package.get_all_mcp_dependencies()
-    except Exception as exc:
-        _rich_error(f"Failed to read MCP dependencies: {exc}", symbol="error")
-        sys.exit(1)
-
-    if not mcp_deps:
-        _rich_info("No MCP dependencies found in apm.yml. Nothing to export.", symbol="info")
-        return
-
-    # --- Load stored MCP configs from lockfile (for drift detection) ---
-    stored_mcp_configs: builtins.dict = {}
-    try:
-        from ..deps.lockfile import LockFile, get_lockfile_path
-
-        lock_path = get_lockfile_path(project_root)
-        existing_lock = LockFile.read(lock_path)
-        if existing_lock and existing_lock.mcp_configs:
-            stored_mcp_configs = builtins.dict(existing_lock.mcp_configs)
-    except Exception:
-        pass  # Missing or unreadable lockfile is not fatal for export
-
-    # --- Apply targets: whitelist ---
-    requested = builtins.list(runtimes)
-    try:
-        gated = MCPIntegrator._gate_project_scoped_runtimes(
-            requested,
-            user_scope=False,
-            project_root=project_root,
-            apm_config=apm_config,
-            explicit_target=None,
-        )
-    except Exception as exc:
-        _rich_error(f"Could not resolve target whitelist: {exc}", symbol="error")
-        sys.exit(1)
-
-    # Warn about runtimes dropped by the whitelist
-    excluded = [r for r in requested if r not in gated]
-    if excluded:
-        for rt in excluded:
-            _rich_warning(
-                f"Runtime '{rt}' is not in the active targets: whitelist "
-                f"-- skipping. Add it to 'targets:' in apm.yml to enable.",
-                symbol="warning",
-            )
-
-    if not gated:
-        _rich_warning(
-            "All requested runtimes were excluded by the targets: whitelist. Nothing to export.",
-            symbol="warning",
-        )
-        sys.exit(1)
-
-    # --- Emit header ---
-    console = _get_console()
-    if console:
-        try:
-            from rich.text import Text
-
-            header = Text()
-            header.append("+- MCP Export (", style="cyan")
-            header.append(str(len(mcp_deps)), style="cyan bold")
-            header.append(f" server{'s' if len(mcp_deps) != 1 else ''}", style="cyan")
-            header.append(f", target: {', '.join(gated)}", style="cyan")
-            header.append(")", style="cyan")
-            console.print(header)
-        except Exception:
-            logger.progress(
-                f"Exporting MCP config ({len(mcp_deps)} servers) for: {', '.join(gated)}"
-            )
-    else:
-        logger.progress(f"Exporting MCP config ({len(mcp_deps)} servers) for: {', '.join(gated)}")
-
-    # --- Apply configs (shared with install path -- zero divergence) ---
-    configured_count, successful_updates = _apply_mcp_configs(
-        mcp_deps=mcp_deps,
-        target_runtimes=gated,
-        stored_mcp_configs=stored_mcp_configs,
-        project_root=project_root,
-        user_scope=False,
+    exit_code = run_mcp_export(
+        runtimes=builtins.list(runtimes),
+        project_root=Path.cwd(),
         verbose=verbose,
-        console=console,
         logger=logger,
     )
-
-    _print_mcp_summary(console, configured_count, successful_updates)
+    if exit_code:
+        sys.exit(exit_code)
