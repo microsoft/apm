@@ -3343,7 +3343,7 @@ class TestIssue1007Fixes:
         names = {f.name for f in result}
         assert "cursor-hooks.json" not in names, "cursor-hooks.json must not reach copilot"
         assert "copilot-hooks.json" in names, "copilot-hooks.json must reach copilot"
-        assert "hooks.json" in names, "Generic hooks.json must reach copilot"
+        assert "hooks.json" not in names, "hooks.json must not reach copilot when specific exists"
 
     def test_filter_generic_hooks_universal(self, tmp_path: Path) -> None:
         """Generic stems (no *-<agent>-hooks suffix) pass through for ALL targets."""

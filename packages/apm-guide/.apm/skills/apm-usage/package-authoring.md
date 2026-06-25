@@ -92,27 +92,32 @@ hooks:
 
 | Filename pattern | Deployed to |
 |---|---|
-| `*-copilot-hooks.json` | GitHub Copilot only |
-| `*-cursor-hooks.json` | Cursor only |
-| `*-claude-hooks.json` | Claude Code only |
-| `*-codex-hooks.json` | Codex CLI only |
-| `*-gemini-hooks.json` | Gemini CLI only |
-| `*-antigravity-hooks.json` | Antigravity CLI only |
-| `*-windsurf-hooks.json` | Windsurf only |
-| `*-kiro-hooks.json` | Kiro only |
-| Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets |
+| `*-copilot-hooks.json` or `hooks-copilot.json` | GitHub Copilot only |
+| `*-cursor-hooks.json` or `hooks-cursor.json` | Cursor only |
+| `*-claude-hooks.json` or `hooks-claude.json` | Claude Code only |
+| `*-codex-hooks.json` or `hooks-codex.json` | Codex CLI only |
+| `*-gemini-hooks.json` or `hooks-gemini.json` | Gemini CLI only |
+| `*-antigravity-hooks.json` or `hooks-antigravity.json` | Antigravity CLI only |
+| `*-windsurf-hooks.json` or `hooks-windsurf.json` | Windsurf only |
+| `*-kiro-hooks.json` or `hooks-kiro.json` | Kiro only |
+| Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets, unless that target has a target-specific manifest |
 
 Example directory tree for a multi-target hook package:
 
 ```
 my-hooks-pkg/
   hooks/
-    hooks.json              # deployed to all targets
+    hooks.json              # default/general manifest
     copilot-hooks.json      # Copilot only
+    hooks-codex.json        # Codex only
     cursor-hooks.json       # Cursor only
     claude-hooks.json       # Claude Code only
     kiro-hooks.json         # Kiro only
 ```
+
+When a target-specific manifest exists, APM uses it instead of
+`hooks.json` for that target. Mirroring the same filename in both
+`hooks/` and `.apm/hooks/` is safe; it is integrated once per target.
 
 APM automatically normalises event names per target (e.g. `postToolUse`
 becomes `PostToolUse` in Claude) and rewrites path variables
@@ -130,7 +135,9 @@ contributors, and CI runners do not see the installer's machine-local
 absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
 references to absolute paths because the user-scope config is read
-without a fixed cwd. If a referenced hook script is missing at install
+without a fixed cwd. If a manifest in `hooks/` or `.apm/hooks/` uses
+`./hooks/<script>`, APM resolves it from the package root to avoid
+deploying a doubled `hooks/hooks/` path. If a referenced hook script is missing at install
 time the installer emits a warning either way; user-scope additionally
 rewrites the unexpanded variable to an absolute source path so the hook
 fails loudly at runtime, while project-scope leaves the variable in

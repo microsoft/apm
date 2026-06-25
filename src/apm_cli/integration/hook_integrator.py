@@ -40,7 +40,7 @@ Hook JSON format (Cursor  -- flat arrays with command key):
 Script path handling:
     - ${CLAUDE_PLUGIN_ROOT}/path, ${CURSOR_PLUGIN_ROOT}/path, ${PLUGIN_ROOT}/path
       -> resolved relative to package root, rewritten for target
-    - ./path -> relative path, resolved from hook file's parent directory, rewritten for target
+    - ./path -> relative path, resolved from the hook file context, rewritten for target
     - System commands (no path separators) -> passed through unchanged
 """
 
@@ -414,19 +414,33 @@ def _reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
                     del pool[disk_key]
 
 
-# Mapping from hook-file stem suffix to the set of target keys that
-# should receive the file.  Files whose stem does not match any
-# suffix are treated as universal and deployed to every target.
-_HOOK_FILE_TARGET_SUFFIXES: dict[str, set[str]] = {
-    "copilot-hooks": {"copilot", "vscode"},
-    "cursor-hooks": {"cursor"},
-    "claude-hooks": {"claude"},
-    "codex-hooks": {"codex"},
-    "gemini-hooks": {"gemini"},
-    "antigravity-hooks": {"antigravity"},
-    "windsurf-hooks": {"windsurf"},
-    "kiro-hooks": {"kiro"},
+# Mapping from hook-file harness token to the target keys that should
+# receive the file. Files whose stem does not match a token remain
+# universal unless a target-specific manifest is present for that target.
+_HOOK_FILE_TARGET_TOKENS: dict[str, set[str]] = {
+    "copilot": {"copilot", "vscode"},
+    "vscode": {"copilot", "vscode"},
+    "cursor": {"cursor"},
+    "claude": {"claude"},
+    "codex": {"codex"},
+    "gemini": {"gemini"},
+    "antigravity": {"antigravity"},
+    "windsurf": {"windsurf"},
+    "kiro": {"kiro"},
 }
+
+
+def _hook_file_allowed_targets(hook_file: Path) -> set[str] | None:
+    """Return explicit targets for a hook file, or None for universal files."""
+    stem_lower = hook_file.stem.lower()
+    for token, allowed_targets in _HOOK_FILE_TARGET_TOKENS.items():
+        if (
+            stem_lower == f"{token}-hooks"
+            or stem_lower.endswith(f"-{token}-hooks")
+            or stem_lower == f"hooks-{token}"
+        ):
+            return allowed_targets
+    return None
 
 
 def _filter_hook_files_for_target(
@@ -440,10 +454,12 @@ def _filter_hook_files_for_target(
     """Return only hook files intended for *target_key*.
 
     Routing is based on the file stem (case-insensitive):
-      - Stems ending with a known ``-<target>-hooks`` suffix are
+      - Stems matching ``<target>-hooks`` or ``hooks-<target>`` are
         restricted to matching targets.
-      - All other stems (e.g. ``hooks``, ``my-custom-hooks``) are
-        universal and pass through for every target.
+      - If a target-specific manifest exists, it wins over universal
+        manifests such as ``hooks.json`` for that target.
+      - Mirrored manifests from ``hooks/`` and ``.apm/hooks/`` are
+        de-duplicated by filename for each target.
 
     Args:
         hook_files: All discovered hook JSON files.
@@ -452,20 +468,63 @@ def _filter_hook_files_for_target(
     Returns:
         Filtered list preserving original order.
     """
-    result: list[Path] = []
+    specific: list[Path] = []
+    universal: list[Path] = []
     for hf in hook_files:
-        stem_lower = hf.stem.lower()
-        matched_suffix: str | None = None
-        for suffix, allowed_targets in _HOOK_FILE_TARGET_SUFFIXES.items():
-            if stem_lower == suffix or stem_lower.endswith(f"-{suffix}"):
-                matched_suffix = suffix
-                if target_key in allowed_targets:
-                    result.append(hf)
-                break
-        if matched_suffix is None:
-            # Universal file -- deploy to all targets
-            result.append(hf)
+        allowed_targets = _hook_file_allowed_targets(hf)
+        if allowed_targets is None:
+            universal.append(hf)
+        elif target_key in allowed_targets:
+            specific.append(hf)
+
+    selected = specific if specific else universal
+    result: list[Path] = []
+    seen_names: set[str] = set()
+    for hf in selected:
+        name_key = hf.name.lower()
+        if name_key in seen_names:
+            continue
+        seen_names.add(name_key)
+        result.append(hf)
     return result
+
+
+def _relative_hook_script_bases(
+    package_path: Path,
+    hook_file_dir: Path | None,
+    rel_path: str,
+) -> list[Path]:
+    """Return candidate bases for resolving a relative hook script path."""
+    bases: list[Path] = []
+    use_package_root = hook_file_dir is None
+    if hook_file_dir is not None:
+        in_package_hooks = hook_file_dir == package_path / "hooks"
+        in_apm_hooks = hook_file_dir == package_path / ".apm" / "hooks"
+        if rel_path.startswith("hooks/") and (in_package_hooks or in_apm_hooks):
+            bases.append(package_path)
+            use_package_root = True
+        bases.append(hook_file_dir)
+    if use_package_root and package_path not in bases:
+        bases.append(package_path)
+    return bases
+
+
+def _resolve_relative_hook_script(
+    package_path: Path,
+    hook_file_dir: Path | None,
+    rel_path: str,
+) -> Path | None:
+    """Resolve a relative hook script path without escaping the package."""
+    last_candidate: Path | None = None
+    for base in _relative_hook_script_bases(package_path, hook_file_dir, rel_path):
+        try:
+            candidate = ensure_path_within(base / rel_path, package_path)
+        except PathTraversalError:
+            continue
+        last_candidate = candidate
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return last_candidate
 
 
 class HookIntegrator(BaseIntegrator):
@@ -601,8 +660,8 @@ class HookIntegrator(BaseIntegrator):
         Returns:
             List[Path]: List of absolute paths to hook JSON files
         """
-        hook_files = []
-        seen = set()
+        hook_files: list[Path] = []
+        seen_stems: set[str] = set()
 
         # Search in .apm/hooks/ (APM convention)
         apm_hooks = package_path / ".apm" / "hooks"
@@ -610,9 +669,9 @@ class HookIntegrator(BaseIntegrator):
             for f in sorted(apm_hooks.glob("*.json")):
                 if f.is_symlink():
                     continue
-                resolved = f.resolve()
-                if resolved not in seen:
-                    seen.add(resolved)
+                stem_key = f.stem.lower()
+                if stem_key not in seen_stems:
+                    seen_stems.add(stem_key)
                     hook_files.append(f)
 
         # Search in hooks/ (Claude-native convention)
@@ -621,9 +680,9 @@ class HookIntegrator(BaseIntegrator):
             for f in sorted(hooks_dir.glob("*.json")):
                 if f.is_symlink():
                     continue
-                resolved = f.resolve()
-                if resolved not in seen:
-                    seen.add(resolved)
+                stem_key = f.stem.lower()
+                if stem_key not in seen_stems:
+                    seen_stems.add(stem_key)
                     hook_files.append(f)
 
         return hook_files
@@ -774,17 +833,14 @@ class HookIntegrator(BaseIntegrator):
         # like ".github/..." not "./" or ".\")
         # Match both forward-slash and backslash separators (Windows hook JSON
         # may use backslashes: .\scripts\scan.ps1)
-        # Resolve from hook file's directory if available, else fall back to package root
-        resolve_base = hook_file_dir if hook_file_dir else package_path
         rel_pattern = r"(\.[\\/][^\s\"']+)"
         for match in re.finditer(rel_pattern, new_command):
             rel_ref = match.group(1)
             # Normalize to forward slashes for path resolution
             rel_path = rel_ref[2:].replace("\\", "/")
 
-            try:
-                source_file = ensure_path_within(resolve_base / rel_path, package_path)
-            except PathTraversalError:
+            source_file = _resolve_relative_hook_script(package_path, hook_file_dir, rel_path)
+            if source_file is None:
                 continue
             if source_file.exists() and source_file.is_file():
                 target_rel = f"{scripts_base}/{rel_path}"

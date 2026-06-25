@@ -80,7 +80,19 @@ authors notice empty merges during development.
 
 The `${PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, and `${KIRO_PLUGIN_ROOT}`
 tokens resolve to the installed package root and are rewritten per
-target. Plain `./script.sh` resolves relative to the hook file.
+target. Plain `./script.sh` resolves relative to the hook file. If the hook
+file lives in `hooks/` or `.apm/hooks/`, a path like
+`./hooks/run-hook.sh` resolves from the package root so the deployed
+path is not doubled.
+
+For multi-target packages, name per-harness manifests either
+`<target>-hooks.json` (or `my-<target>-hooks.json`) or
+`hooks-<target>.json`, for example `codex-hooks.json` or
+`hooks-codex.json`. When a target-specific manifest exists, it wins
+for that target; `hooks.json` stays the default Claude/general
+manifest and is not merged into that target's output. If the same
+manifest filename is mirrored in both `hooks/` and `.apm/hooks/`, APM
+integrates it once per target.
 
 Supported targets and where the integrator writes:
 
