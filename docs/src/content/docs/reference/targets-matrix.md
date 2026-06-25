@@ -90,6 +90,8 @@ GitHub Copilot (CLI and IDE).
   - hooks: `.github/hooks/<name>.json`
   - generated: `.github/copilot-instructions.md` (compile output)
 - **User scope.** Partial. `prompts` deploy under `~/.copilot/prompts/`; `instructions` from all packages are concatenated into `~/.copilot/copilot-instructions.md` (Copilot CLI reads only that single file at user scope). User-scope deploys land under `~/.copilot/`, not `~/.github/`.
+- **Global compile.** `apm compile -g` can also render global instructions to
+  `~/.copilot/AGENTS.md` for root-context readers that honor `AGENTS.md`.
 
 ## claude
 
@@ -120,6 +122,9 @@ Cursor.
   - skills: `.agents/skills/<name>/SKILL.md`
   - hooks: `.cursor/hooks.json`
 - **User scope.** Partial. `instructions` is excluded at user scope; Cursor reads global rules from its Settings UI rather than from disk.
+- **Global compile.** `apm compile -g` can render global instructions to
+  `~/.cursor/AGENTS.md` for root-context readers that honor `AGENTS.md`; Cursor
+  global rules still use the Settings UI.
 - **Caveat.** Command files use the shared `claude_command` transformer today; Cursor-specific frontmatter keys (`author`, `mcp`, `parameters`, ...) are dropped at install time and surfaced via diagnostics.
 
 ## codex
@@ -174,6 +179,8 @@ OpenCode.
   - commands: `.opencode/commands/<name>.md`
   - skills: `.agents/skills/<name>/SKILL.md`
 - **Caveat.** OpenCode has no hooks concept; the `hooks` primitive is silently skipped for this target.
+- **Global compile.** `apm compile -g` writes
+  `~/.config/opencode/AGENTS.md` from global instructions.
 
 ## windsurf
 
