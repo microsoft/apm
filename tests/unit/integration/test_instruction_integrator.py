@@ -1163,9 +1163,7 @@ class TestClaudeRulesIntegration:
         assert b"\r\n" in target.read_bytes()
 
         # Re-install must rewrite (not adopt) so bytes converge back to LF.
-        result = self.integrator.integrate_package_instructions_claude(
-            pkg_info, self.project_root
-        )
+        result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
         assert result.files_integrated == 1
         assert result.files_adopted == 0
         assert target.read_bytes() == lf_bytes
@@ -1182,9 +1180,7 @@ class TestClaudeRulesIntegration:
         pkg_info = _make_package_info(pkg)
 
         self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
-        result = self.integrator.integrate_package_instructions_claude(
-            pkg_info, self.project_root
-        )
+        result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
         assert result.files_adopted == 1
         assert result.files_integrated == 0
 
