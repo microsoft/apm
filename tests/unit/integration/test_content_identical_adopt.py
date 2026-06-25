@@ -80,6 +80,35 @@ class TestIsContentIdenticalToSource:
         b.write_bytes(b"different bytes\n")
         assert BaseIntegrator.is_content_identical_to_source(a, b) is False
 
+    def test_lf_target_adopts_crlf_source(self, tmp_path: Path) -> None:
+        """apm#1916: a CRLF source (Windows text write / autocrlf) must adopt
+        against the always-LF deployed target instead of re-integrating."""
+        target = tmp_path / "target"
+        source = tmp_path / "source"
+        target.write_bytes(b"# Fixture\nbody\n")
+        source.write_bytes(b"# Fixture\r\nbody\r\n")
+        assert BaseIntegrator.is_content_identical_to_source(target, source) is True
+
+    def test_stale_crlf_target_is_not_adopted(self, tmp_path: Path) -> None:
+        """apm#1889: a stale CRLF target left by a pre-LF install must NOT be
+        adopted; it should mismatch so the caller rewrites it to LF."""
+        target = tmp_path / "target"
+        source = tmp_path / "source"
+        target.write_bytes(b"# Fixture\r\nbody\r\n")
+        source.write_bytes(b"# Fixture\nbody\n")
+        assert BaseIntegrator.is_content_identical_to_source(target, source) is False
+
+    def test_non_utf8_source_only_raw_byte_match_adopts(self, tmp_path: Path) -> None:
+        """Binary/non-UTF-8 sources cannot be normalized: only an exact raw
+        byte match adopts; any difference falls through to skip/rewrite."""
+        target = tmp_path / "target"
+        source = tmp_path / "source"
+        target.write_bytes(b"\xff\xfe\x00bytes")
+        source.write_bytes(b"\xff\xfe\x00bytes")
+        assert BaseIntegrator.is_content_identical_to_source(target, source) is True
+        source.write_bytes(b"\xff\xfe\x00OTHER")
+        assert BaseIntegrator.is_content_identical_to_source(target, source) is False
+
     def test_target_missing_returns_false(self, tmp_path: Path) -> None:
         a = tmp_path / "missing"
         b = tmp_path / "present"

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.primitives.discovery import discover_primitives
+from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_warning
 
 
@@ -165,10 +166,20 @@ class BaseIntegrator:
 
     @staticmethod
     def is_content_identical_to_source(target_path: Path, source_path: Path) -> bool:
-        """Return True if *target_path* is byte-identical to *source_path*.
+        """Return True if *target_path* matches what APM would deploy from *source_path*.
 
         Used by non-skill integrators to silently *adopt* a pre-existing
         on-disk file that already matches what APM would deploy.
+
+        Deployed files are always written LF-normalized (``write_text_lf``),
+        so the on-disk *target* bytes are compared against the *LF-normalized*
+        source bytes -- not the raw source bytes. Without this normalization a
+        package whose source carries CRLF line endings (Windows text-mode
+        checkout, ``core.autocrlf``, or a text-mode write) would never match
+        the LF target, so every reinstall would needlessly re-integrate the
+        file and report it as freshly installed (apm#1916). Only the *source*
+        side is normalized: a stale CRLF *target* left by a pre-LF install
+        still mismatches and is rewritten to LF rather than adopted (apm#1889).
 
         Why this exists
         ---------------
@@ -194,12 +205,13 @@ class BaseIntegrator:
 
         Conservative by design
         ----------------------
-        Only fires for *byte-identical* matches. Format-transforming
-        targets (``codex_agent``, ``cursor_rules``, ``claude_rules``,
+        Only fires when the deployed bytes match the source content (modulo
+        CRLF->LF normalization). Format-transforming targets
+        (``codex_agent``, ``cursor_rules``, ``claude_rules``,
         ``windsurf_rules``, ``gemini_command``, ...) won't match -- they
         keep the existing skip behavior. This means we never silently
         adopt content that *might* have come from somewhere else; we only
-        adopt files that are demonstrably the package's own bytes already
+        adopt files that are demonstrably the package's own content already
         on disk.
 
         TOCTOU hardening
@@ -236,7 +248,21 @@ class BaseIntegrator:
                 # an optimisation; the user-authored skip path is the
                 # safe fallback.
                 return False
-            return target_bytes == source_bytes
+            # Compare the on-disk (LF) target against the LF-normalized
+            # source. A fast raw-byte equality covers the common case where
+            # source is already LF; the normalized comparison only runs when
+            # they differ (e.g. a CRLF source on Windows).
+            if target_bytes == source_bytes:
+                return True
+            try:
+                normalized_source = normalize_crlf_to_lf(source_bytes.decode("utf-8")).encode(
+                    "utf-8"
+                )
+            except UnicodeDecodeError:
+                # Binary or non-UTF-8 source: only a raw byte match (handled
+                # above) can adopt; otherwise fall through to skip/rewrite.
+                return False
+            return target_bytes == normalized_source
         except OSError:
             return False
 
