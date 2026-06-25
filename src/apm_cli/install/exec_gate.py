@@ -21,8 +21,8 @@ def check_executable_approval(
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
     *,
     ctx: InstallContext | None = None,
-) -> tuple[bool, bool]:
-    """Return ``(hooks_approved, bin_approved)`` for a package.
+) -> tuple[bool, bool, bool, bool]:
+    """Return ``(hooks_approved, bin_approved, mcp_approved, canvas_approved)`` for a package.
 
     Local project content (``_local``) is always trusted.  Dependency
     packages are checked against the ``allowExecutables`` block.  When
@@ -34,11 +34,13 @@ def check_executable_approval(
     """
     is_local = package_name == "_local"
     if is_local or allow_executables is None:
-        return True, True
+        return True, True, True, True
 
     from apm_cli.security.executables import (
         EXEC_TYPE_BIN,
+        EXEC_TYPE_CANVAS,
         EXEC_TYPE_HOOKS,
+        EXEC_TYPE_MCP,
         build_approval_key,
         is_package_approved,
     )
@@ -61,9 +63,13 @@ def check_executable_approval(
         is_package_approved(allow_executables, k, EXEC_TYPE_HOOKS) for k in candidate_keys
     )
     bin_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_BIN) for k in candidate_keys)
+    mcp_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_MCP) for k in candidate_keys)
+    canvas_ok = any(
+        is_package_approved(allow_executables, k, EXEC_TYPE_CANVAS) for k in candidate_keys
+    )
 
     # Track blocked packages for the post-loop approval prompt.
-    if ctx is not None and (not hooks_ok or not bin_ok):
+    if ctx is not None and (not hooks_ok or not bin_ok or not mcp_ok or not canvas_ok):
         from apm_cli.security.executables import scan_package_executables
 
         _install = Path(package_info.install_path)
@@ -75,7 +81,7 @@ def check_executable_approval(
         if _decl.has_executables:
             ctx.blocked_executables.append(_decl)
 
-    return hooks_ok, bin_ok
+    return hooks_ok, bin_ok, mcp_ok, canvas_ok
 
 
 def resolve_package_key(package_info: Any, package_name: str) -> str:

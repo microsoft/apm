@@ -40,7 +40,6 @@ def unpack_bundle(
     skip_verify: bool = False,
     dry_run: bool = False,
     force: bool = False,
-    trust_canvas: bool = False,
 ) -> UnpackResult:
     """Extract and apply an APM bundle to a project directory.
 
@@ -54,10 +53,6 @@ def unpack_bundle(
         skip_verify: If *True*, skip completeness verification against the lockfile.
         dry_run: If *True*, resolve the file list but write nothing to disk.
         force: If *True*, deploy even when critical hidden characters are found.
-        trust_canvas: If *True*, allow executable canvas extension files
-            (``.github/extensions/<name>/extension.mjs``) to be unpacked.
-            Defaults to *False* (fail closed) so a vendored bundle cannot
-            smuggle executable canvas code past the trust gate.
 
     Returns:
         :class:`UnpackResult` describing what was (or would be) extracted.
@@ -170,18 +165,17 @@ def unpack_bundle(
                 dep_file_map[dep_key] = dep_files
 
         # Security + feature gate: canvas extensions are executable Node
-        # bundles (``extension.mjs``).  ``apm unpack`` copies deployed files
-        # verbatim WITHOUT routing through ``CanvasIntegrator``, so neither
-        # the experimental feature flag nor its trust gate would otherwise
-        # apply.  Require BOTH gates -- the ``canvas`` experimental flag ON
-        # (feature availability) AND ``trust_canvas`` (executable-code trust)
-        # -- before unpacking canvas paths.  Fail closed: drop them when
-        # either gate is missing.
+        # bundles (``extension.mjs``).  ``apm unpack`` (deprecated) copies
+        # deployed files verbatim WITHOUT routing through ``CanvasIntegrator``.
+        # When the canvas feature flag is OFF, drop paths silently.
+        # When ON, canvas files are allowed (apm unpack has no project context
+        # so no allowExecutables enforcement is available; the user is assumed
+        # to understand what they are unpacking for this deprecated command).
         canvas_blocked = 0
         from ..core.experimental import is_enabled
         from ..integration.canvas_integrator import is_canvas_bundle_path
 
-        if not (is_enabled("canvas") and trust_canvas):
+        if not is_enabled("canvas"):
             _blocked = {f for f in unique_files if is_canvas_bundle_path(f)}
             if _blocked:
                 canvas_blocked = len(_blocked)

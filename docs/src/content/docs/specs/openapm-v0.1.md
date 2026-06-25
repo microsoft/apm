@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **90 normative statements** indexed in
+- OpenAPM v0.1 carries **92 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -2270,6 +2270,8 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010) | Governance-only   |
 | 9 | Archive path-traversal                      | [req-sc-002](#req-sc-002), [req-sc-004](#req-sc-004)               | Consumer-default  |
 | 10| Hash-algorithm downgrade                    | [req-mf-018](#req-mf-018), [req-lk-016](#req-lk-016)               | Consumer-default  |
+| 11| Unauthorised executable primitive deployment | [req-sc-009](#req-sc-009)                                         | Consumer-default  |
+| 12| Approval grant propagation via VCS           | [req-sc-010](#req-sc-010)                                         | Consumer-default  |
 
 ### 10.12 Publisher provenance and attestations (reserved for v0.2)
 
@@ -2284,6 +2286,36 @@ provenance binding format; sigstore verification semantics;
 Governance `policy.dependencies.require_attestation` enforcement
 modes; and the registry HTTP wire envelope (alongside
 [Appendix B](#appendix-b-registry-http-api-reserved-for-v02)).
+
+### 10.13 Executable primitive approval gate
+
+**Threat.** A dependency package deploys executable code --
+hooks, bin executables, MCP server configurations, or canvas
+extensions -- that runs on the developer's machine without
+explicit consent.
+
+**Mitigations.**
+
+<a id="req-sc-009"></a>
+**[req-sc-009]** A conforming **consumer** implementation MUST,
+when the consuming project's `apm.yml` contains an `allowExecutables`
+block, deny deployment of any executable primitive (hooks, bin
+executables, MCP server configurations, and canvas extensions)
+from a dependency package unless that package is explicitly listed
+in the effective approval set for the corresponding executable type.
+A consumer MUST fail closed when the `allowExecutables` block is
+present but the package is absent from the approval set: the
+primitive MUST NOT be deployed.
+
+<a id="req-sc-010"></a>
+**[req-sc-010]** A conforming **consumer** implementation that
+provides an interactive approval mechanism for executable primitives
+MUST persist per-user approval decisions in a location that is
+isolated from the project manifest (`apm.yml`) and is not tracked
+by version control alongside project files by default. The consumer
+MUST NOT write interactive approval decisions into the project
+`apm.yml`, so that one developer's approval cannot propagate
+implicitly to other developers who clone or share the project.
 
 ---
 
@@ -2372,7 +2404,8 @@ conformance statement identifying:
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
 [req-sc-006](#req-sc-006), [req-sc-007](#req-sc-007),
-[req-sc-008](#req-sc-008) (SHOULD), [req-cf-001](#req-cf-001),
+[req-sc-008](#req-sc-008) (SHOULD), [req-sc-009](#req-sc-009),
+[req-sc-010](#req-sc-010), [req-cf-001](#req-cf-001),
 [req-cf-002](#req-cf-002).
 
 #### 11.3.3 Registry
@@ -2781,11 +2814,13 @@ renumbering of conformance classes.
 | [req-sc-006](#req-sc-006)                | MUST    | 4.2.3   | consumer    |
 | [req-sc-007](#req-sc-007)                | MUST    | 10.3    | consumer    |
 | [req-sc-008](#req-sc-008)                | SHOULD  | 10.3    | consumer    |
+| [req-sc-009](#req-sc-009)                | MUST    | 10.13   | consumer    |
+| [req-sc-010](#req-sc-010)                | MUST    | 10.13   | consumer    |
 | [req-rg-001](#req-rg-001)                | MUST    | 11.3.3  | registry    |
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 90** (85 MUST, 5 SHOULD).
+**Total normative statements: 92** (87 MUST, 5 SHOULD).
 
 ---
 
@@ -2799,6 +2834,7 @@ renumbering of conformance classes.
 | 0.1.2   | 2026-05-28 | Round-3 spec-guardian editorial fold (no new normative statements; statement count remains 87). Section 11.3.2 Consumer enumeration appended `[req-rs-014]` and `[req-cf-002]` (closing drift vs Appendix C). req-lk-005 extended: writers MUST canonicalise the `dependencies` list in ascending lexicographic order of (`repo_url`, `virtual_path`) so frozen-install diffs are stable across implementations. req-sc-003 extended: consumers MUST drop the originating Authorization header before issuing a cross-host-class redirect (closes the mirror-redirect token-leak surface in Section 10.3). req-rg-001 extended with publish-side idempotency clause: a Registry MUST either reject a republish or accept ONLY if bytes are byte-identical to the previously-served bytes. Section 6.2 + Section 6.3.1 defaults pinned: `fetch_failure` defaults to `warn` and `dependencies.require_resolution` defaults to `project-wins` (mirrored as advisory `"default"` annotations in `policy-v0.1.schema.json`). Manifest schema `conflict_resolution` enum aligned to prose: renamed `intersect` -> `intersection-pick`, dropped `nest` from the v0.1 enum (`nest` remains reserved-for-v0.2 per req-rs-013, now noted via schema `$comment`). Mode B silent-extension detector landed in `.github/workflows/spec-conformance.yml` and `tests/spec_conformance/mode_b_detector.sh`; closes the named sole-implementer rot risk by gating PRs that add substantive code under critical paths (`primitives/`, `deps/`, `policy/`, `registry/`, `runtime/`, `install/`, `integration/`) without a spec citation, with auditable `apm-spec-waiver:` opt-out. |
 | 0.1.3   | 2026-06-16 | Spec-citation fold for the declarable integrity policy keys. Added two governance MUSTs under a new Section 6.8 "Integrity controls": [req-pl-013] (`security.integrity.require_hashes` -- fail-closed install when a resolved non-local dependency lacks a recorded hash in `apm.lock.yaml`, or the lockfile is absent/unreadable) and [req-pl-014] (`security.audit.fail_on_drift` -- audit exits non-zero on detected or indeterminate drift). Both keys are default-off and merge by logical OR (tighten-not-relax). Added the non-normative Section 6.3.6 `security` field reference and two merge-table rows; renumbered the governance conformance trailer 6.8 -> 6.9. Statement count: 87 -> 89 (84 MUST, 5 SHOULD). NOTE: a sibling spec-citation amendment also edits the shared count sites (Section 1.3, Appendix C trailer, this revision history); whichever lands second reconciles the cumulative total and takes the union of the added Appendix C rows. |
 | 0.1.4   | 2026-06-16 | Normative addition (semver-zero `0.x` minor): added `[req-pl-015]` (Section 6.3.5, governance MUST) codifying unmanaged-artifact surfacing completeness -- a governance implementation evaluating policy over a populated primitive target tree MUST surface every file under a managed primitive target directory that is neither recorded in `apm.lock.yaml` nor matched by a configured `unmanaged_files.exclude` glob, each with its unmanaged reason and a supplemental dependency/MCP deny-conflict note where applicable; the inferred primitive type is carried where determinable and omitted otherwise; an excluded path MUST NOT be surfaced even when it also matches a deny pattern. The requirement body is structured as sub-clauses (a)/(b)/(c) so each obligation is individually citable. Added the `unmanaged_files.exclude` row to the Section 6.4 merge table (additive union, deduplicated, parent order preserved). The requirement governs reporting COMPLETENESS only; enforcement stays governed by `unmanaged_files.action`. Reconciled with the sibling 0.1.3 amendment (req-pl-013/req-pl-014): cumulative statement count 89 -> 90 (85 MUST, 5 SHOULD); Appendix C carries the union of all three new governance rows. |
+| 0.1.5   | 2026-06-20 | Spec-citation fold for the executable primitive approval gate. Added new Section 10.13 "Executable primitive approval gate" with two consumer MUSTs: [req-sc-009] (deny deployment of any hook, bin, MCP server, or canvas extension from a dependency not listed in the effective `allowExecutables` approval set when the block is present -- fail closed) and [req-sc-010] (persist interactive approval decisions user-locally, not in the project `apm.yml`, so one developer's approval cannot propagate via VCS to teammates). Added rows 11 and 12 to the Section 10.11 summary table. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 90 -> 92 (87 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

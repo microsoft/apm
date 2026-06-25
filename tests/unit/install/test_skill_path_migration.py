@@ -58,6 +58,7 @@ class TestLegacySkillPattern:
             ".cursor/skills/review/SKILL.md",
             ".opencode/skills/deep/nested/file.md",
             ".gemini/skills/lint/SKILL.md",
+            ".windsurf/skills/cascade/SKILL.md",
         ],
     )
     def test_matches_legacy_clients(self, path: str) -> None:

@@ -210,13 +210,14 @@ def test_install_py_under_legacy_budget():
     boundary; the chdir + source-root-override mechanism lives in
     ``apm_cli/install/root_redirect.py`` and ``apm_cli/core/scope.py``.
 
-    Experimental canvas support raised 2085 -> 2110 to add the
-    ``--trust-canvas-extensions`` Click option plus its signature param,
-    the ``trust_canvas`` ``InstallContext`` field, and the trust-signal
-    wiring through ``_install_apm_dependencies`` / ``InstallRequest`` and
-    the local-bundle handler. All glue at the handler boundary; the
-    integrator and its trust gate live in
-    ``apm_cli/integration/canvas_integrator.py``.
+    ``allowExecutables`` MCP gate raised 2100 -> 2130 to add the
+    MCP filtering loop after ``collect_transitive`` that filters out MCP
+    servers from packages not approved in ``allowExecutables``.  The gate
+    also removed ``--trust-canvas-extensions`` Click option and the
+    ``trust_canvas`` ``InstallContext`` field; canvas trust is now unified
+    under ``allowExecutables``.  All logic at the handler boundary; the
+    actual approval check delegates to ``is_package_approved`` in
+    ``apm_cli/security/executables.py``.
 
     Default-registry CLI routing raised 2110 -> 2128 to wire
     ``_default_registry_for_cli`` into ``_validate_and_add_packages_to_apm_yml``
@@ -246,8 +247,8 @@ def test_install_py_under_legacy_budget():
     install_py = Path(__file__).resolve().parents[3] / "src" / "apm_cli" / "commands" / "install.py"
     assert install_py.is_file()
     n = _line_count(install_py)
-    assert n <= 2100, (
-        f"commands/install.py grew to {n} LOC (budget 2100). "
+    assert n <= 2150, (
+        f"commands/install.py grew to {n} LOC (budget 2150). "
         "Do NOT trim cosmetically -- engage the python-architecture skill "
         "(.apm/skills/python-architecture/SKILL.md) and propose an "
         "extraction into apm_cli/install/."

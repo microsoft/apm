@@ -371,6 +371,14 @@ requirements:
     keyword: SHOULD
     section: "10.3"
     conformance_class: consumer
+  - id: req-sc-009
+    keyword: MUST
+    section: "10.13"
+    conformance_class: consumer
+  - id: req-sc-010
+    keyword: MUST
+    section: "10.13"
+    conformance_class: consumer
   - id: req-rg-001
     keyword: MUST
     section: "11.3.3"

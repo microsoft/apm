@@ -816,7 +816,7 @@ class TestValidateApmPackageWithYml:
         canvas_warns = [w for w in result.warnings if "Canvas extension" in w]
         assert len(canvas_warns) == 1
         assert "widget" in canvas_warns[0]
-        assert "--trust-canvas-extensions" in canvas_warns[0]
+        assert "apm approve" in canvas_warns[0]
 
     def test_directory_without_marker_is_not_canvas(self, tmp_path: Path) -> None:
         """An extensions/ subdir lacking extension.mjs is not a canvas bundle."""

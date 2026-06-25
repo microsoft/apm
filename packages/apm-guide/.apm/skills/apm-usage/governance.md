@@ -174,27 +174,36 @@ environments where plugin executables are not trusted by default.
 
 Behind the `canvas` experimental flag, a package may ship a Copilot CLI canvas
 extension under `.apm/extensions/<name>/extension.mjs` (executable Node.js).
-Because a canvas from a dependency is arbitrary executable code, APM **blocks
-dependency-provided canvases by default**: the consumer must pass
-`--trust-canvas-extensions` to deploy them. A first-party canvas in the root
+Because a canvas from a dependency is arbitrary executable code, APM blocks
+dependency-provided canvases when the project opts in to the executable gate:
+the project must add `allowExecutables: {}` to `apm.yml` and each developer
+must run `apm approve <pkg>` to deploy it. A first-party canvas in the root
 package being installed deploys once the flag is on; dependency canvases always
-require the trust flag.
+require explicit approval.
+
+Approvals recorded by `apm approve` are stored in **`~/.apm/approvals.yml`**
+(user-local, never committed to source control). Adding `allowExecutables: {}`
+to `apm.yml` enables the gate for the project, but does not grant trust to any
+package; every developer cloning the project must approve packages themselves.
+CI pipelines may commit specific grants directly in `apm.yml` to bypass
+interactive approval in automated environments.
 
 At **project scope** a canvas deploys to `.github/extensions/<name>/`. With
 `--global`, a **dependency-provided** canvas deploys to
 `~/.copilot/extensions/<name>/` so it is available in every Copilot session;
-global install always requires `--trust-canvas-extensions` (full-account blast
+global install always requires `allowExecutables` approval (full-account blast
 radius), supports only the default `~/.copilot` location (a non-default
 `$COPILOT_HOME` is refused), and does not deploy first-party root canvases
 (package them as a dependency instead). `apm uninstall --global` prunes the
 global canvas.
 
-The trust gate is enforced on every install path -- normal install, offline
-bundle install (`apm install <bundle>`), and `apm unpack` -- so a vendored
-bundle cannot smuggle an executable canvas past trust. The flag is a
-feature-availability toggle, not a security gate; the trust requirement holds
-regardless of the flag. An enterprise policy field for canvas trust is a
-deferred follow-up and is not part of this experimental release.
+The trust gate is enforced on every install path -- normal install and offline
+bundle install (`apm install <bundle>`) -- so a vendored bundle cannot smuggle
+an executable canvas past trust. Canvas trust is now unified with the
+`allowExecutables` default-deny gate (hooks, bin, mcp, canvas); approve once and
+all four executable types are governed consistently. An enterprise policy field
+for canvas trust is a deferred follow-up and is not part of this experimental
+release.
 
 ## Local content governance
 

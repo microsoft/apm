@@ -418,7 +418,6 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     plan_callback=None,
     refresh: bool = False,
     lockfile_only: bool = False,
-    trust_canvas: bool = False,
 ):
     """Install APM package dependencies.
 
@@ -548,7 +547,6 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         legacy_skill_paths=legacy_skill_paths,
         refresh=refresh,
         lockfile_only=lockfile_only,
-        trust_canvas=trust_canvas,
     )
 
     # ------------------------------------------------------------------

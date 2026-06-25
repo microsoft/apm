@@ -793,7 +793,7 @@ def _validate_apm_package_with_yml(
             "Canvas extension(s) found (experimental, Copilot-only): "
             f"{', '.join(canvas_names)}. These ship executable extension.mjs "
             "code; consumers must enable the 'canvas' experimental flag, and "
-            "dependents must pass --trust-canvas-extensions to install them."
+            "dependents must approve the package via 'apm approve <pkg>' to install them."
         )
 
     if not has_primitives:

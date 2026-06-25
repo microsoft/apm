@@ -211,7 +211,6 @@ class InstallContext:
     protocol_pref: Any  # ProtocolPreference
     allow_protocol_fallback: bool
     trust_transitive_mcp: bool
-    trust_canvas: bool
     no_policy: bool
     install_mode: Any  # InstallMode
     packages: tuple  # Original Click packages
@@ -921,11 +920,6 @@ def _handle_mcp_install(
     help="Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)",
 )
 @click.option(
-    "--trust-canvas-extensions",
-    is_flag=True,
-    help="[experimental] Deploy canvas extensions provided by dependencies. Canvas extensions are executable Node code and are blocked by default; this flag opts in. With --global the canvas deploys to ~/.copilot/extensions and the flag is always required. Requires the 'canvas' experimental feature.",
-)
-@click.option(
     "--parallel-downloads",
     type=int,
     default=4,
@@ -1134,7 +1128,6 @@ def install(  # noqa: PLR0913
     frozen,
     verbose,
     trust_transitive_mcp,
-    trust_canvas_extensions,
     parallel_downloads,
     dev,
     target,
@@ -1266,6 +1259,10 @@ def install(  # noqa: PLR0913
             except ValueError as exc:
                 raise click.UsageError(f"Bundle security check failed: {exc}") from exc
             if _bundle_info is not None:
+                # allowExecutables for bundle install gate.
+                from ..security.executables import read_bundle_allow_executables as _rbae
+
+                _allow_execs_for_bundle = _rbae(Path(root or ".") / "apm.yml", logger)
                 _install_lb(
                     bundle_info=_bundle_info,
                     bundle_arg=packages[0],
@@ -1277,7 +1274,7 @@ def install(  # noqa: PLR0913
                     alias=alias,
                     logger=logger,
                     legacy_skill_paths=legacy_skill_paths,
-                    trust_canvas=trust_canvas_extensions,
+                    allow_executables=_allow_execs_for_bundle,
                     # Rejected-flag context for consolidated UsageError:
                     rejected_flags={
                         "--update": update,
@@ -1546,7 +1543,6 @@ def install(  # noqa: PLR0913
             protocol_pref=protocol_pref,
             allow_protocol_fallback=allow_protocol_fallback,
             trust_transitive_mcp=trust_transitive_mcp,
-            trust_canvas=trust_canvas_extensions,
             no_policy=no_policy,
             audit_override=audit_override,
             install_mode=InstallMode(only) if only else InstallMode.ALL,
@@ -1798,7 +1794,6 @@ def _install_apm_packages(ctx, outcome):
                 skill_subset=ctx.skill_subset,
                 skill_subset_from_cli=ctx.skill_subset_from_cli,
                 refresh=ctx.refresh,
-                trust_canvas=ctx.trust_canvas,
             )
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics
@@ -1862,7 +1857,11 @@ def _install_apm_packages(ctx, outcome):
             logger.verbose_detail(f"Collected {len(transitive_mcp)} transitive MCP dependency(ies)")
             mcp_deps = MCPIntegrator.deduplicate(mcp_deps + transitive_mcp)
 
-    # -- S1/S2 fix (#827-C2/C3): enforce policy on ALL MCP deps ----
+    # allowExecutables MCP gate.
+    from ..security.executables import filter_mcp_by_allow_executables as _fmcp
+
+    mcp_deps = _fmcp(mcp_deps, getattr(apm_package, "allow_executables", None), logger)
+
     # The pipeline gate phase (policy_gate.py) checks direct APM deps
     # and direct MCP deps from apm.yml.  However, transitive MCP
     # servers (discovered via collect_transitive above) are only known
@@ -2052,7 +2051,6 @@ def _install_apm_dependencies(  # noqa: PLR0913
     plan_callback=None,
     refresh: bool = False,
     lockfile_only: bool = False,
-    trust_canvas: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -2093,6 +2091,5 @@ def _install_apm_dependencies(  # noqa: PLR0913
         plan_callback=plan_callback,
         refresh=refresh,
         lockfile_only=lockfile_only,
-        trust_canvas=trust_canvas,
     )
     return InstallService().run(request)
