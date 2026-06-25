@@ -55,6 +55,7 @@ from typing import Any
 import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.integration.hook_file_routing import filter_hook_files_for_target
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -64,6 +65,8 @@ from apm_cli.utils.path_security import (
 from apm_cli.utils.paths import portable_relpath
 
 _log = logging.getLogger(__name__)
+
+_filter_hook_files_for_target = filter_hook_files_for_target
 
 
 # DEPRECATED -- use IntegrationResult directly for new code.
@@ -412,81 +415,6 @@ def _reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
                 disk_entry["_apm_source"] = sources.popleft()
                 if not sources:
                     del pool[disk_key]
-
-
-# Mapping from hook-file harness token to the target keys that should
-# receive the file. Files whose stem does not match a token remain
-# universal unless a target-specific manifest is present for that target.
-_HOOK_FILE_TARGET_TOKENS: dict[str, set[str]] = {
-    "copilot": {"copilot", "vscode"},
-    "vscode": {"copilot", "vscode"},
-    "cursor": {"cursor"},
-    "claude": {"claude"},
-    "codex": {"codex"},
-    "gemini": {"gemini"},
-    "antigravity": {"antigravity"},
-    "windsurf": {"windsurf"},
-    "kiro": {"kiro"},
-}
-
-
-def _hook_file_allowed_targets(hook_file: Path) -> set[str] | None:
-    """Return explicit targets for a hook file, or None for universal files."""
-    stem_lower = hook_file.stem.lower()
-    for token, allowed_targets in _HOOK_FILE_TARGET_TOKENS.items():
-        if (
-            stem_lower == f"{token}-hooks"
-            or stem_lower.endswith(f"-{token}-hooks")
-            or stem_lower == f"hooks-{token}"
-        ):
-            return allowed_targets
-    return None
-
-
-def _filter_hook_files_for_target(
-    hook_files: list[Path],
-    target_key: str,
-    *,
-    package_name: str = "",
-    package_identity: str = "",
-    warned_packages: set[str] | None = None,
-) -> list[Path]:
-    """Return only hook files intended for *target_key*.
-
-    Routing is based on the file stem (case-insensitive):
-      - Stems matching ``<target>-hooks`` or ``hooks-<target>`` are
-        restricted to matching targets.
-      - If a target-specific manifest exists, it wins over universal
-        manifests such as ``hooks.json`` for that target.
-      - Mirrored manifests from ``hooks/`` and ``.apm/hooks/`` are
-        de-duplicated by filename for each target.
-
-    Args:
-        hook_files: All discovered hook JSON files.
-        target_key: Lowercase target name (e.g. ``"claude"``, ``"cursor"``).
-
-    Returns:
-        Filtered list preserving original order.
-    """
-    specific: list[Path] = []
-    universal: list[Path] = []
-    for hf in hook_files:
-        allowed_targets = _hook_file_allowed_targets(hf)
-        if allowed_targets is None:
-            universal.append(hf)
-        elif target_key in allowed_targets:
-            specific.append(hf)
-
-    selected = specific if specific else universal
-    result: list[Path] = []
-    seen_names: set[str] = set()
-    for hf in selected:
-        name_key = hf.name.lower()
-        if name_key in seen_names:
-            continue
-        seen_names.add(name_key)
-        result.append(hf)
-    return result
 
 
 def _relative_hook_script_bases(
