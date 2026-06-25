@@ -335,7 +335,7 @@ def _resolve_effective_target(
     return detected_target, detection_reason, config_target
 
 
-def _handle_global_flag(dry_run: bool, logger: CommandLogger | None = None) -> int:
+def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
     """Handle --global compilation of user-scope root context files.
 
     Returns 0 on success, 1 on error (for sys.exit).
@@ -344,24 +344,7 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger | None = None) -> i
     from ...compilation import compile_user_root_contexts
     from ...core.scope import InstallScope, get_apm_dir
     from ...integration.targets import KNOWN_TARGETS
-    from ...utils.console import _rich_error, _rich_info, _rich_success
 
-    if logger is None:
-
-        class _RichLogger:
-            def error(self, message: str, symbol: str = "error") -> None:
-                _rich_error(message, symbol=symbol)
-
-            def info(self, message: str, symbol: str = "info") -> None:
-                _rich_info(message, symbol=symbol)
-
-            def success(self, message: str, symbol: str = "check") -> None:
-                _rich_success(message, symbol=symbol)
-
-            def verbose_detail(self, _message: str) -> None:
-                return
-
-        logger = _RichLogger()
     source_root = get_apm_dir(InstallScope.USER)
     apm_modules = source_root / "apm_modules"
     if not apm_modules.is_dir():
@@ -413,17 +396,17 @@ def _handle_global_flag(dry_run: bool, logger: CommandLogger | None = None) -> i
         elif status.startswith("error:"):
             logger.error(f"{tname}: {status[6:]}", symbol="error")
             has_error = True
-        if getattr(entry, "has_critical_security", False):
+        if entry.has_critical_security:
             has_error = True
 
     if not has_error:
         changed_count = written_count + would_write_count
         if changed_count:
             verb = "Would compile" if dry_run else "Compiled"
-            message = (
-                f"{verb} {changed_count} user-scope root context file(s); "
-                f"{unchanged_count} unchanged."
-            )
+            message = f"{verb} {changed_count} user-scope root context file(s)"
+            if unchanged_count:
+                message += f"; {unchanged_count} unchanged"
+            message += "."
             if dry_run:
                 logger.info(message, symbol="preview")
             else:
@@ -1038,6 +1021,9 @@ def compile(  # noqa: PLR0913 -- Click handler
 
     By default, uses distributed compilation to generate multiple focused AGENTS.md
     files across your directory structure following the Minimal Context Principle.
+
+    Use --global / -g to compile user-scope root context files from globally
+    installed packages.
 
     Use --single-agents for traditional single-file compilation when needed.
 

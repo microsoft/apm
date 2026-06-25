@@ -260,7 +260,10 @@ without `applyTo:` frontmatter) and writes user-scope root context files for
 root-context targets:
 
 - `~/.claude/CLAUDE.md` (or `$CLAUDE_CONFIG_DIR/CLAUDE.md`)
-- `~/.codex/AGENTS.md` and other verified AGENTS.md user roots
+- `~/.codex/AGENTS.md`
+- `~/.config/opencode/AGENTS.md`
+- `~/.copilot/AGENTS.md`
+- `~/.cursor/AGENTS.md`
 - `~/.gemini/GEMINI.md`
 
 ### Overwrite protection

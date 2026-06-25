@@ -48,7 +48,6 @@ def _hint_global_root_context(ctx: InstallContext) -> None:
 
     from apm_cli.compilation.user_root_context import discover_global_instructions
     from apm_cli.core.scope import InstallScope, get_apm_dir
-    from apm_cli.utils.console import _rich_info
 
     source_root = get_apm_dir(InstallScope.USER)
     if not discover_global_instructions(source_root):
@@ -71,11 +70,13 @@ def _hint_global_root_context(ctx: InstallContext) -> None:
     if not target_names:
         return
 
-    message = f"Global instructions installed. Run 'apm compile -g' for: {', '.join(target_names)}."
     if ctx.logger:
+        targets = ", ".join(target_names)
+        message = (
+            "Global instructions installed. Run 'apm compile -g' "
+            f"to update root context files for: {targets}."
+        )
         ctx.logger.info(message, symbol="info")
-    else:
-        _rich_info(message, symbol="info")
 
 
 def run(ctx: InstallContext) -> InstallResult:

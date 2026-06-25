@@ -37,7 +37,7 @@ def _make_install_context(scope=None, targets=None, dry_run=False):
     """Create a mock InstallContext for finalize.run()/hint tests."""
     ctx = MagicMock()
     ctx.scope = scope
-    ctx.logger = None
+    ctx.logger = MagicMock()
     ctx.dry_run = dry_run
     ctx.targets = targets if targets is not None else []
     ctx.total_links_resolved = 0
@@ -79,15 +79,15 @@ class TestHintGlobalRootContext:
                 "apm_cli.compilation.user_root_context.discover_global_instructions",
                 return_value=[SimpleNamespace(apply_to=None)],
             ),
-            patch("apm_cli.utils.console._rich_info") as mock_info,
         ):
             _hint_global_root_context(ctx)
 
-        mock_info.assert_called_once()
-        message = mock_info.call_args.args[0]
+        ctx.logger.info.assert_called_once()
+        message = ctx.logger.info.call_args.args[0]
         assert "apm compile -g" in message
         assert "Claude Code" in message
-        assert mock_info.call_args.kwargs.get("symbol") == "info"
+        assert "root context files" in message
+        assert ctx.logger.info.call_args.kwargs.get("symbol") == "info"
 
     def test_hint_lists_multiple_root_context_targets(self):
         """All distinct root-context target names are listed once each."""
@@ -113,11 +113,10 @@ class TestHintGlobalRootContext:
                 "apm_cli.compilation.user_root_context.discover_global_instructions",
                 return_value=[SimpleNamespace(apply_to=None)],
             ),
-            patch("apm_cli.utils.console._rich_info") as mock_info,
         ):
             _hint_global_root_context(ctx)
 
-        message = mock_info.call_args.args[0]
+        message = ctx.logger.info.call_args.args[0]
         assert message.count("Codex") == 1
         assert "Gemini CLI" in message
 
@@ -140,11 +139,10 @@ class TestHintGlobalRootContext:
                 "apm_cli.compilation.user_root_context.discover_global_instructions",
                 return_value=[],
             ),
-            patch("apm_cli.utils.console._rich_info") as mock_info,
         ):
             _hint_global_root_context(ctx)
 
-        mock_info.assert_not_called()
+        ctx.logger.info.assert_not_called()
 
     def test_no_hint_when_only_directory_native_targets(self):
         """Only directory-native (vscode/copilot) targets active -> no hint."""
@@ -165,11 +163,10 @@ class TestHintGlobalRootContext:
                 "apm_cli.compilation.user_root_context.discover_global_instructions",
                 return_value=[SimpleNamespace(apply_to=None)],
             ),
-            patch("apm_cli.utils.console._rich_info") as mock_info,
         ):
             _hint_global_root_context(ctx)
 
-        mock_info.assert_not_called()
+        ctx.logger.info.assert_not_called()
 
     def test_no_hint_for_user_scope_native_rules_target(self):
         """Targets with native user-scope rules are ignored even if family is agents."""
@@ -190,11 +187,10 @@ class TestHintGlobalRootContext:
                 "apm_cli.compilation.user_root_context.discover_global_instructions",
                 return_value=[SimpleNamespace(apply_to=None)],
             ),
-            patch("apm_cli.utils.console._rich_info") as mock_info,
         ):
             _hint_global_root_context(ctx)
 
-        mock_info.assert_not_called()
+        ctx.logger.info.assert_not_called()
 
     def test_hint_uses_context_logger_when_available(self):
         """The install hint routes through the command logger when present."""
@@ -217,12 +213,10 @@ class TestHintGlobalRootContext:
                 "apm_cli.compilation.user_root_context.discover_global_instructions",
                 return_value=[SimpleNamespace(apply_to=None)],
             ),
-            patch("apm_cli.utils.console._rich_info") as mock_info,
         ):
             _hint_global_root_context(ctx)
 
         logger.info.assert_called_once()
-        mock_info.assert_not_called()
 
     def test_no_hint_for_targets_without_user_scope(self):
         """Targets whose for_scope returns None are ignored."""
@@ -243,11 +237,10 @@ class TestHintGlobalRootContext:
                 "apm_cli.compilation.user_root_context.discover_global_instructions",
                 return_value=[SimpleNamespace(apply_to=None)],
             ),
-            patch("apm_cli.utils.console._rich_info") as mock_info,
         ):
             _hint_global_root_context(ctx)
 
-        mock_info.assert_not_called()
+        ctx.logger.info.assert_not_called()
 
     def test_no_hint_on_dry_run(self):
         """Dry-run installs do not emit the hint and skip discovery entirely."""
@@ -264,12 +257,11 @@ class TestHintGlobalRootContext:
             patch(
                 "apm_cli.compilation.user_root_context.discover_global_instructions",
             ) as mock_discover,
-            patch("apm_cli.utils.console._rich_info") as mock_info,
         ):
             _hint_global_root_context(ctx)
 
         mock_discover.assert_not_called()
-        mock_info.assert_not_called()
+        ctx.logger.info.assert_not_called()
 
     def test_hint_writes_no_file(self):
         """The hint never calls compile_user_root_contexts (read-only)."""
@@ -290,7 +282,6 @@ class TestHintGlobalRootContext:
                 "apm_cli.compilation.user_root_context.discover_global_instructions",
                 return_value=[SimpleNamespace(apply_to=None)],
             ),
-            patch("apm_cli.utils.console._rich_info"),
             patch(
                 "apm_cli.compilation.user_root_context.compile_user_root_contexts",
             ) as mock_compile,

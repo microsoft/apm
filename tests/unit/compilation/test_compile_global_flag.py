@@ -56,23 +56,17 @@ class TestHandleGlobalFlag:
         source_root.mkdir()
         # apm_modules does NOT exist
 
-        mock_rich_error = MagicMock()
+        logger = MagicMock()
 
-        with (
-            patch(
-                "apm_cli.core.scope.get_apm_dir",
-                return_value=source_root,
-            ),
-            patch(
-                "apm_cli.utils.console._rich_error",
-                new=mock_rich_error,
-            ),
+        with patch(
+            "apm_cli.core.scope.get_apm_dir",
+            return_value=source_root,
         ):
-            rc = _handle_global_flag(dry_run=False)
+            rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 1
-        mock_rich_error.assert_called_once()
-        assert "apm_modules not found" in str(mock_rich_error.call_args).lower()
+        logger.error.assert_called_once()
+        assert "apm_modules not found" in str(logger.error.call_args).lower()
 
     def test_success_written_status(self, tmp_path):
         """Result with 'written' status -> prints [+] and returns 0."""
@@ -85,8 +79,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", str(tmp_path / ".claude/CLAUDE.md"), "written")]
 
-        mock_rich_success = MagicMock()
-        mock_rich_info = MagicMock()
+        logger = MagicMock()
 
         with (
             patch(
@@ -97,20 +90,11 @@ class TestHandleGlobalFlag:
                 "apm_cli.compilation.compile_user_root_contexts",
                 return_value=results,
             ),
-            patch(
-                "apm_cli.utils.console._rich_success",
-                new=mock_rich_success,
-            ),
-            patch(
-                "apm_cli.utils.console._rich_info",
-                new=mock_rich_info,
-            ),
         ):
-            rc = _handle_global_flag(dry_run=False)
+            rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        # Should call _rich_success with [+]
-        calls_str = str(mock_rich_success.call_args_list)
+        calls_str = str(logger.success.call_args_list)
         assert "[+]" in calls_str or "claude" in calls_str.lower()
 
     def test_success_would_write_status(self, tmp_path):
@@ -124,7 +108,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", str(tmp_path / ".claude/CLAUDE.md"), "would-write")]
 
-        mock_rich_info = MagicMock()
+        logger = MagicMock()
 
         with (
             patch(
@@ -135,16 +119,11 @@ class TestHandleGlobalFlag:
                 "apm_cli.compilation.compile_user_root_contexts",
                 return_value=results,
             ),
-            patch(
-                "apm_cli.utils.console._rich_info",
-                new=mock_rich_info,
-            ),
         ):
-            rc = _handle_global_flag(dry_run=True)
+            rc = _handle_global_flag(dry_run=True, logger=logger)
 
         assert rc == 0
-        # Should call _rich_info with [*]
-        calls_str = str(mock_rich_info.call_args_list)
+        calls_str = str(logger.info.call_args_list)
         assert "[*]" in calls_str or "would" in calls_str.lower()
 
     def test_success_unchanged_status(self, tmp_path):
@@ -158,7 +137,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", str(tmp_path / ".claude/CLAUDE.md"), "unchanged")]
 
-        mock_rich_info = MagicMock()
+        logger = MagicMock()
 
         with (
             patch(
@@ -169,16 +148,13 @@ class TestHandleGlobalFlag:
                 "apm_cli.compilation.compile_user_root_contexts",
                 return_value=results,
             ),
-            patch(
-                "apm_cli.utils.console._rich_info",
-                new=mock_rich_info,
-            ),
         ):
-            rc = _handle_global_flag(dry_run=False)
+            rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        calls_str = str(mock_rich_info.call_args_list)
-        assert "unchanged" not in calls_str.lower()
+        logger.info.assert_called_once_with(
+            "No user-scope root context files changed.", symbol="info"
+        )
 
     def test_success_skipped_no_instructions(self, tmp_path):
         """Result with 'skipped-no-instructions' -> returns 0 without default detail."""
@@ -191,7 +167,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", None, "skipped-no-instructions")]
 
-        mock_rich_info = MagicMock()
+        logger = MagicMock()
 
         with (
             patch(
@@ -202,16 +178,13 @@ class TestHandleGlobalFlag:
                 "apm_cli.compilation.compile_user_root_contexts",
                 return_value=results,
             ),
-            patch(
-                "apm_cli.utils.console._rich_info",
-                new=mock_rich_info,
-            ),
         ):
-            rc = _handle_global_flag(dry_run=False)
+            rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        calls_str = str(mock_rich_info.call_args_list)
-        assert "skipped" not in calls_str.lower()
+        logger.info.assert_called_once_with(
+            "No user-scope root context files changed.", symbol="info"
+        )
 
     def test_success_skipped_hand_authored(self, tmp_path):
         """Result with 'skipped-hand-authored' -> prints [i] and returns 0."""
@@ -226,7 +199,7 @@ class TestHandleGlobalFlag:
             _make_result("claude", str(tmp_path / ".claude/CLAUDE.md"), "skipped-hand-authored")
         ]
 
-        mock_rich_info = MagicMock()
+        logger = MagicMock()
 
         with (
             patch(
@@ -237,14 +210,14 @@ class TestHandleGlobalFlag:
                 "apm_cli.compilation.compile_user_root_contexts",
                 return_value=results,
             ),
-            patch(
-                "apm_cli.utils.console._rich_info",
-                new=mock_rich_info,
-            ),
         ):
-            rc = _handle_global_flag(dry_run=False)
+            rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
+        logger.info.assert_any_call(
+            f"claude: skipped (hand-authored) {tmp_path / '.claude/CLAUDE.md'}",
+            symbol="info",
+        )
 
     def test_error_status_returns_1(self, tmp_path):
         """Result with 'error:...' status -> prints [x] and returns 1."""
@@ -257,8 +230,7 @@ class TestHandleGlobalFlag:
 
         results = [_make_result("claude", str(tmp_path / ".claude/CLAUDE.md"), "error:disk full")]
 
-        mock_rich_error = MagicMock()
-        mock_rich_info = MagicMock()
+        logger = MagicMock()
 
         with (
             patch(
@@ -269,20 +241,11 @@ class TestHandleGlobalFlag:
                 "apm_cli.compilation.compile_user_root_contexts",
                 return_value=results,
             ),
-            patch(
-                "apm_cli.utils.console._rich_error",
-                new=mock_rich_error,
-            ),
-            patch(
-                "apm_cli.utils.console._rich_info",
-                new=mock_rich_info,
-            ),
         ):
-            rc = _handle_global_flag(dry_run=False)
+            rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 1
-        # Should call _rich_error
-        mock_rich_error.assert_called()
+        logger.error.assert_called()
 
     def test_critical_security_result_returns_1(self, tmp_path):
         """Critical security result -> returns 1 even when status is written."""
@@ -302,15 +265,15 @@ class TestHandleGlobalFlag:
             )
         ]
 
+        logger = MagicMock()
         with (
             patch("apm_cli.core.scope.get_apm_dir", return_value=source_root),
             patch(
                 "apm_cli.compilation.compile_user_root_contexts",
                 return_value=results,
             ),
-            patch("apm_cli.utils.console._rich_success"),
         ):
-            rc = _handle_global_flag(dry_run=False)
+            rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 1
 
@@ -328,8 +291,7 @@ class TestHandleGlobalFlag:
             _make_result("vscode", str(tmp_path / ".vscode/AGENTS.md"), "unchanged"),
         ]
 
-        mock_rich_success = MagicMock()
-        mock_rich_info = MagicMock()
+        logger = MagicMock()
 
         with (
             patch(
@@ -340,20 +302,11 @@ class TestHandleGlobalFlag:
                 "apm_cli.compilation.compile_user_root_contexts",
                 return_value=results,
             ),
-            patch(
-                "apm_cli.utils.console._rich_success",
-                new=mock_rich_success,
-            ),
-            patch(
-                "apm_cli.utils.console._rich_info",
-                new=mock_rich_info,
-            ),
         ):
-            rc = _handle_global_flag(dry_run=False)
+            rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
-        # Success and info should have been called
-        assert mock_rich_success.called or mock_rich_info.called
+        logger.success.assert_called()
 
     def test_no_results_returns_success(self, tmp_path):
         """Empty results list -> returns 0."""
@@ -366,7 +319,7 @@ class TestHandleGlobalFlag:
 
         results = []
 
-        mock_rich_info = MagicMock()
+        logger = MagicMock()
 
         with (
             patch(
@@ -377,14 +330,11 @@ class TestHandleGlobalFlag:
                 "apm_cli.compilation.compile_user_root_contexts",
                 return_value=results,
             ),
-            patch(
-                "apm_cli.utils.console._rich_info",
-                new=mock_rich_info,
-            ),
         ):
-            rc = _handle_global_flag(dry_run=False)
+            rc = _handle_global_flag(dry_run=False, logger=logger)
 
         assert rc == 0
+        logger.info.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
