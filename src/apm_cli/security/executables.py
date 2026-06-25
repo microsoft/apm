@@ -511,6 +511,7 @@ def load_user_approvals() -> dict[str, dict[str, bool]]:
         if (
             isinstance(key, str)
             and isinstance(entry, dict)
+            and all(isinstance(k, str) for k in entry)
             and all(isinstance(v, bool) for v in entry.values())
         ):
             cleaned[key] = entry
@@ -579,11 +580,15 @@ def filter_mcp_by_allow_executables(
         # unnamed dep can never slip past the gate.
         if _slug and is_package_approved(_allow_execs, _slug, EXEC_TYPE_MCP):
             _filtered.append(_dep)
-        else:
-            _label = _slug or "<unnamed>"
+        elif _slug:
             logger.verbose_detail(
-                f"Skipping MCP server from '{_label}': not approved in allowExecutables. "
-                f"Run 'apm approve {_label}' to approve."
+                f"Skipping MCP server from '{_slug}': not approved in allowExecutables. "
+                f"Run 'apm approve {_slug}' to approve."
+            )
+        else:
+            logger.verbose_detail(
+                "Skipping an unnamed MCP server: not approved in allowExecutables. "
+                "Identify it in apm.yml and run 'apm approve <package>' to approve."
             )
     if len(_filtered) < len(mcp_deps):
         logger.warning(

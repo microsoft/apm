@@ -31,8 +31,10 @@ from apm_cli.security.executables import (
     filter_mcp_by_allow_executables,
     is_any_type_approved,
     is_package_approved,
+    load_user_approvals,
     parse_allow_executables,
     prompt_executable_approval,
+    save_user_approvals,
     scan_package_executables,
     write_allow_executables,
 )
@@ -648,3 +650,41 @@ class TestFilterMcpByAllowExecutables:
             result = filter_mcp_by_allow_executables(deps, {}, logger)
         assert result == []
         assert logger.warnings
+
+
+class TestLoadUserApprovalsShapeValidation:
+    """``load_user_approvals`` must drop malformed entries (fail-closed)."""
+
+    def test_drops_malformed_entries(self) -> None:
+        raw = {
+            "good": {"mcp": True, "canvas": False},
+            "bad_value": {"mcp": "yes"},
+            "bad_inner_key": {5: True},
+            "not_a_dict": ["mcp"],
+            7: {"mcp": True},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "approvals.yml"
+            with open(path, "w", encoding="utf-8") as handle:  # yaml-io-exempt
+                yaml.safe_dump(raw, handle)
+            with patch(
+                "apm_cli.security.executables.get_user_approvals_path",
+                return_value=path,
+            ):
+                result = load_user_approvals()
+        assert result == {"good": {"mcp": True, "canvas": False}}
+
+
+class TestSaveUserApprovalsDirMode:
+    """``save_user_approvals`` must create ``~/.apm`` as user-private (0o700)."""
+
+    def test_creates_dir_mode_0o700(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "nested" / "approvals.yml"
+            with patch(
+                "apm_cli.security.executables.get_user_approvals_path",
+                return_value=path,
+            ):
+                save_user_approvals({"a": {"mcp": True}})
+            assert path.exists()
+            assert (path.parent.stat().st_mode & 0o777) == 0o700

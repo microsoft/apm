@@ -17,9 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **Breaking:** the `--trust-canvas-extensions` flag is removed. Dependency-provided
-  canvas extensions are now governed by the `allowExecutables` gate like every other
-  executable surface; add an `allowExecutables: {}` block to `apm.yml` and run
+- **Breaking (security):** executable dependencies -- including MCP servers and
+  canvas extensions -- now require explicit, persistent approval via `apm approve`,
+  closing the gap where canvas extensions were trusted per-run. The
+  `--trust-canvas-extensions` flag is removed as a consequence; canvas extensions
+  are now governed by the `allowExecutables` gate like every other executable
+  surface. Add an `allowExecutables: {}` block to `apm.yml` and run
   `apm approve <pkg>` to trust them. (by @sergio-sisternes-epam) (#1865)
 
   ```diff
