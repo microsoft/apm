@@ -328,7 +328,7 @@ jobs:
           fail=0
           for lock in "${locks[@]}"; do
             # 1. The raw compile-time token must NOT survive into the lock.
-            if grep -Eq 'apm-version:[[:space:]]*\$\{\{[[:space:]]*github\.aw\.import-inputs\.apm-version' "$lock"; then
+            if grep -Eq '^[[:space:]]*apm-version:[[:space:]]*\$\{\{[[:space:]]*github\.aw\.import-inputs\.apm-version' "$lock"; then
               echo "::error file=$lock::raw github.aw.import-inputs.apm-version token leaked into lock -- non-opting consumer floats to 'latest'"
               fail=1
             fi
