@@ -245,6 +245,38 @@ class TestConfigSet:
             result = self.runner.invoke(config, ["set", "target", "oops"])
         assert result.exit_code == 1
 
+    def test_set_self_update_channel(self):
+        """Set self-update channel preference."""
+        with patch("apm_cli.config.set_self_update_channel", return_value="prerelease") as mock_set:
+            result = self.runner.invoke(config, ["set", "self-update.channel", "prerelease"])
+        assert result.exit_code == 0
+        mock_set.assert_called_once_with("prerelease")
+
+    def test_set_self_update_install_dir(self):
+        """Set self-update install target directory preference."""
+        with patch(
+            "apm_cli.config.set_self_update_install_dir", return_value="/opt/apm/bin"
+        ) as mock_set:
+            result = self.runner.invoke(config, ["set", "self-update.install-dir", "/opt/apm/bin"])
+        assert result.exit_code == 0
+        mock_set.assert_called_once_with("/opt/apm/bin")
+
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "self-update.token",
+            "self-update.registry-token",
+            "self-update.installer-base-url",
+            "self-update.command",
+        ],
+    )
+    def test_set_rejects_secret_or_executable_self_update_keys(self, key):
+        """Do not persist secret or executable self-update settings."""
+        result = self.runner.invoke(config, ["set", key, "value"])
+
+        assert result.exit_code == 1
+        assert "self-update config only supports non-secret installer preferences" in result.output
+
 
 class TestConfigGet:
     """Tests for `apm config get [key]`."""
@@ -300,6 +332,20 @@ class TestConfigGet:
             result = self.runner.invoke(config, ["get", "target"])
         assert result.exit_code == 0
         assert "target: Not set (using auto-detection)" in result.output
+
+    def test_get_self_update_channel(self):
+        """Get configured self-update channel preference."""
+        with patch("apm_cli.config.get_self_update_channel", return_value="stable"):
+            result = self.runner.invoke(config, ["get", "self-update.channel"])
+        assert result.exit_code == 0
+        assert "self-update.channel: stable" in result.output
+
+    def test_get_self_update_install_dir(self):
+        """Get configured self-update install directory preference."""
+        with patch("apm_cli.config.get_self_update_install_dir", return_value="/opt/apm/bin"):
+            result = self.runner.invoke(config, ["get", "self-update.install-dir"])
+        assert result.exit_code == 0
+        assert "self-update.install-dir: /opt/apm/bin" in result.output
 
 
 class TestAutoIntegrateFunctions:
@@ -796,6 +842,20 @@ class TestConfigUnsetSubcommand:
         """apm config unset target exits 0."""
         with patch("apm_cli.config.unset_install_target") as mock_unset:
             result = self.runner.invoke(config, ["unset", "target"])
+        assert result.exit_code == 0
+        mock_unset.assert_called_once()
+
+    def test_unset_self_update_channel_exits_0(self):
+        """apm config unset self-update.channel exits 0."""
+        with patch("apm_cli.config.unset_self_update_channel") as mock_unset:
+            result = self.runner.invoke(config, ["unset", "self-update.channel"])
+        assert result.exit_code == 0
+        mock_unset.assert_called_once()
+
+    def test_unset_self_update_install_dir_exits_0(self):
+        """apm config unset self-update.install-dir exits 0."""
+        with patch("apm_cli.config.unset_self_update_install_dir") as mock_unset:
+            result = self.runner.invoke(config, ["unset", "self-update.install-dir"])
         assert result.exit_code == 0
         mock_unset.assert_called_once()
 

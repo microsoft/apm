@@ -10,6 +10,16 @@ CHANGELOG when using policy features.
 - **Repo-level:** `apm-policy.yml` in the repository root
 - **Local override:** `--policy ./path/to/apm-policy.yml`
 
+## User config trust boundary
+
+`~/.apm/config.json` is user-scoped state, not org policy. Keep durable config
+additive and narrow: `apm config` may persist non-secret defaults such as
+install targets, transport preferences, and self-update installer preferences
+(`self-update.channel`, `self-update.install-dir`). Do not use self-update
+config for credentials, registry tokens, mirror URLs, commands, or installer
+arguments. Tokens stay on the auth path; bootstrap mirror URLs stay
+environment-only so redirecting binary downloads remains invocation-scoped.
+
 ## Policy schema overview
 
 ```yaml
