@@ -285,6 +285,32 @@ class TestRequiredExecutableUntrusted:
         )
         assert result.passed
 
+    def test_require_only_message_omits_recommended_noop(self):
+        # S2 (#1873): a require-only package (not in recommend) must NOT be
+        # told to run `apm approve --recommended` -- that is a no-op when the
+        # recommend set is empty. Lead with the per-package remedy instead.
+        deps = _make_dep_refs(["org/pkg"])
+        lock = _make_lockfile([{"repo_url": "org/pkg", "exec_status": "gated_pending_approval"}])
+        result = _check_required_executable_untrusted(
+            deps, lock, ExecutablesPolicy(require=("org/pkg",))
+        )
+        assert not result.passed
+        assert "apm approve <package>" in result.message
+        assert "--recommended" not in result.message
+
+    def test_require_and_recommend_message_offers_bulk(self):
+        # When the untrusted required package IS in the recommend set, the
+        # bulk one-liner is genuinely actionable, so surface it.
+        deps = _make_dep_refs(["org/pkg"])
+        lock = _make_lockfile([{"repo_url": "org/pkg", "exec_status": "gated_pending_approval"}])
+        result = _check_required_executable_untrusted(
+            deps,
+            lock,
+            ExecutablesPolicy(require=("org/pkg",), recommend=("org/pkg",)),
+        )
+        assert not result.passed
+        assert "--recommended" in result.message
+
 
 # -- Check 5: required-package-version ------------------------------
 

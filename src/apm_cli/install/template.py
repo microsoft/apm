@@ -49,6 +49,12 @@ def _effective_allow(ctx) -> dict | None:
             data = load_yaml(manifest_path)
             if isinstance(data, dict):
                 project_data = data
+                if data.get("allowExecutables") is not None:
+                    from apm_cli.security.executables import (
+                        warn_allow_executables_alias_once,
+                    )
+
+                    warn_allow_executables_alias_once(getattr(ctx, "logger", None))
 
     # Fall back to the in-memory gate signal when apm.yml is unreadable so a
     # project that opted in via allowExecutables still gates.

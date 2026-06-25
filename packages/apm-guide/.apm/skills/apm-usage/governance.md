@@ -169,9 +169,12 @@ executables:
 | Field | Default | Behavior |
 |-------|---------|----------|
 | `deny_all` | `false` | When `true`, blocks every executable type for every package. |
-| `deny` | `[]` | Canonical package strings (`owner/name`, glob allowed) whose executables must not deploy. Deny always wins. Union-merged across inheritance. |
-| `require` | `[]` | Packages whose executables MUST be present and trusted. Union-merged. |
-| `recommend` | `[]` | Org-vetted set; default-allowed unless locally denied. Bulk-accepted with `apm approve --recommended`. Union-merged. |
+| `deny` | `[]` | Canonical package strings whose executables must not deploy. **Deny always wins** and is the only side that supports `fnmatch` globs in v1 (e.g. `evil/*` blocks every package under `evil/`). Union-merged across inheritance. |
+| `require` | `[]` | Packages whose executables MUST be present and trusted (exact-match in v1). Union-merged. `require` mandates presence + trust but does **not** grant execution -- it stays a developer-consent decision. To mandate AND auto-deploy fleet-wide, list the package in BOTH `require` and `recommend`. |
+| `recommend` | `[]` | Org-vetted set (exact-match in v1); default-allowed unless locally denied. Bulk-accepted with `apm approve --recommended`. Union-merged. |
+| `enforce` | `[]` | v2 mandate tier; **accepted but INERT in v1** -- degrades to `recommend` (no force-execute; a user deny still overrides). Writing it emits a deprecation-style warning. |
+
+Glob scope (v1): only `deny` supports glob patterns (the safety ceiling). `allow`, `recommend`, and `require` are exact-match only -- widening the GRANT side with a wildcard has a larger blast radius and is deferred.
 
 The install gate and `apm audit` resolve trust through one shared deny-wins,
 first-match-wins ladder:
@@ -185,6 +188,10 @@ first-match-wins ladder:
 6. org recommend             -> allowed (user-overridable)
 7. (no match)                -> gated pending approval (denied but approvable)
 ```
+
+A package listed only in org `enforce` (the v2 mandate tier) collapses into
+rung 6: it resolves as allowed-but-user-overridable, and `apm policy explain`
+labels its deciding layer `enforce-degraded` to make the v1 degrade explicit.
 
 The project layer is `apm.yml` `executables.{allow,deny}` (committed, via
 `apm approve` / `apm deny`); the user layer is `~/.apm/config.json`

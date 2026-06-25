@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `executables:` block in `apm-policy.yml` (`deny_all`, `deny`, `require`,
   `recommend`) that is carried through policy inheritance, closing the
   GRANT/MANDATE asymmetry where projects could allow executables but orgs
-  could not deny them. A single deny-wins precedence resolver
+  could not deny them. Org `deny` patterns support `fnmatch` globs (e.g.
+  `evil/*`) so an admin can block a whole publisher fleet-wide; the GRANT
+  side (`allow`/`recommend`/`require`) is exact-match in v1. A single deny-wins precedence resolver
   (`resolve_exec_decision`) is now shared by both the install gate and the
   `apm audit` policy checks, so the gate and the audit can never disagree.
   Precedence (first match wins): org `deny_all`/`deny` > user deny > project
@@ -59,6 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   migrated to `executables.allow` on the next `apm approve`/`apm deny`
   write. The org `bin_deploy` deny policy is folded into
   `executables.deny[bin]` as a deprecated alias. (#1873)
+- The org `executables.enforce` tier (the v2 mandate rung) is accepted but
+  INERT in v1: writing it emits a validation warning and the resolver
+  degrades it to `recommend` (no force-execute; a user deny still
+  overrides). (#1873)
 
 ### Removed
 

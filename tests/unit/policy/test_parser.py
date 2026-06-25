@@ -153,6 +153,17 @@ class TestValidatePolicy(unittest.TestCase):
         _, warnings = validate_policy({"bin_deploy": {"deny_all": True}})
         self.assertTrue(any("deprecated" in w and "bin_deploy" in w for w in warnings))
 
+    def test_enforce_emits_inert_warning(self):
+        # M2 (#1873): writing executables.enforce must warn at validate time
+        # that it is accepted but INERT in v1 (degrades to recommend).
+        errors, warnings = validate_policy({"executables": {"enforce": ["org/mandated"]}})
+        self.assertEqual(errors, [])
+        self.assertTrue(any("enforce" in w and "INERT" in w and "recommend" in w for w in warnings))
+
+    def test_empty_enforce_does_not_warn(self):
+        _, warnings = validate_policy({"executables": {"enforce": []}})
+        self.assertFalse(any("enforce" in w and "INERT" in w for w in warnings))
+
     def test_build_executables_policy(self):
         policy = _build_policy(
             {

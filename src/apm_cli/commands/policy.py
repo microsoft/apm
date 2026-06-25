@@ -372,7 +372,7 @@ def status(policy_source, no_cache, as_json, output_format, check):
 
 @policy.command(
     "explain",
-    help="Explain the effective executable-trust decision for a package",
+    help="Explain the effective executable-trust decision for an installed package",
 )
 @click.argument("package")
 def explain(package):
@@ -383,6 +383,8 @@ def explain(package):
     lower-authority layers that decision shadowed. This is the per-package
     companion to ``apm policy status`` (the policy-chain view) and the
     fleet-level executable-trust drift check in ``apm doctor``.
+
+    Note: only resolves packages that are installed in the current project.
     """
     from .approve import explain_decision
 

@@ -242,6 +242,12 @@ def _validate_executables(data: dict, errors: list[str], warnings: list[str]) ->
                 f"executables.{key} must be a YAML list of package strings "
                 f"(got {type(val).__name__})"
             )
+    if execs.get("enforce"):
+        warnings.append(
+            "executables.enforce is accepted but INERT in v1: it degrades to "
+            "'recommend' (no force-execute; a user deny still overrides). "
+            "Full mandate ships in v2."
+        )
 
 
 def _build_policy(data: dict) -> ApmPolicy:

@@ -191,7 +191,38 @@ class TestNonInteractiveExecutablePromptIntegration:
 
         logger.warning.assert_called_once()
         logger.info.assert_called_once()
-        assert "apm policy explain owner/repo" in logger.info.call_args.args[0]
+        remedy = logger.info.call_args.args[0]
+        assert "apm policy explain owner/repo" in remedy
+        # M4 (#1873): non-interactive remedy leads with the bulk one-liner.
+        assert "apm approve --recommended" in remedy
+
+    def test_interactive_decline_surfaces_parked_remedy(self, monkeypatch) -> None:
+        # M3 (#1873): declining at the interactive prompt must still print a
+        # remedy -- present-but-parked guidance is not approve-only.
+        import sys
+
+        import apm_cli.install.phases.integrate as integ
+        import apm_cli.security.executables as ex
+
+        decl = ExecutableDeclaration(
+            package_key="owner/repo#1.0", package_name="owner/repo", hook_count=1
+        )
+        logger = MagicMock()
+        ctx = SimpleNamespace(blocked_executables=[decl], logger=logger)
+
+        monkeypatch.delenv("APM_NON_INTERACTIVE", raising=False)
+        monkeypatch.delenv("CI", raising=False)
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+        monkeypatch.setattr(ex, "load_user_executables", lambda: ({}, {}))
+        # Simulate a full decline: prompt returns the seed unchanged.
+        monkeypatch.setattr(ex, "prompt_executable_approval", lambda *a, **k: {})
+
+        integ._run_executable_approval_prompt(ctx)
+
+        info_msgs = " ".join(str(c.args[0]) for c in logger.info.call_args_list)
+        assert "left parked" in info_msgs
+        assert "apm approve owner/repo" in info_msgs
+        assert "apm policy explain owner/repo" in info_msgs
 
 
 # -------------------------------------------------------------------

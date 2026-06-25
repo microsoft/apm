@@ -267,3 +267,50 @@ class TestExecStatusForDeclaration:
         ctx = _ctx(project_deny={"other/pkg": {EXEC_TYPE_HOOKS: True}})
         status = exec_status_for_declaration(ctx, [PKG], (EXEC_TYPE_HOOKS,))
         assert status == TRUST_GATED
+
+
+class TestOrgDenyGlob:
+    """M1: deny is the ceiling and supports fnmatch globs (deny side ONLY)."""
+
+    def test_glob_denies_matching_package(self):
+        ctx = _ctx(org_deny=frozenset({"evil/*"}))
+        d = resolve_exec_decision(ctx, "evil/backdoor#v1", EXEC_TYPE_HOOKS)
+        assert d.allowed is False
+        assert d.deciding_layer == LAYER_ORG_DENY
+        assert d.trust_state == TRUST_DENIED
+
+    def test_glob_denies_second_matching_package(self):
+        ctx = _ctx(org_deny=frozenset({"evil/*"}))
+        d = resolve_exec_decision(ctx, "evil/x#v2", EXEC_TYPE_MCP)
+        assert d.allowed is False
+        assert d.deciding_layer == LAYER_ORG_DENY
+
+    def test_glob_does_not_deny_lookalike(self):
+        # ``good/evil-lookalike`` must NOT match ``evil/*`` -- the glob is
+        # anchored to the segment, not a substring.
+        ctx = _ctx(org_deny=frozenset({"evil/*"}))
+        d = resolve_exec_decision(ctx, "good/evil-lookalike#v1", EXEC_TYPE_HOOKS)
+        assert d.allowed is False  # default-deny, but NOT via the org ceiling
+        assert d.deciding_layer == LAYER_DEFAULT_DENY
+
+    def test_deny_glob_is_ceiling_user_cannot_widen(self):
+        # A user allow cannot widen past an org deny glob -- deny always wins.
+        ctx = _ctx(
+            org_deny=frozenset({"evil/*"}),
+            user_allow={"evil/backdoor#v1": {EXEC_TYPE_HOOKS: True}},
+        )
+        d = resolve_exec_decision(ctx, "evil/backdoor#v1", EXEC_TYPE_HOOKS)
+        assert d.allowed is False
+        assert d.deciding_layer == LAYER_ORG_DENY
+
+    def test_exact_deny_still_works(self):
+        ctx = _ctx(org_deny=frozenset({"evil/backdoor"}))
+        d = resolve_exec_decision(ctx, "evil/backdoor#v1", EXEC_TYPE_HOOKS)
+        assert d.allowed is False
+        assert d.deciding_layer == LAYER_ORG_DENY
+
+    def test_bin_deny_glob(self):
+        ctx = _ctx(org_bin_deny=frozenset({"evil/*"}))
+        d = resolve_exec_decision(ctx, "evil/tool#v1", EXEC_TYPE_BIN)
+        assert d.allowed is False
+        assert d.deciding_layer == LAYER_ORG_DENY

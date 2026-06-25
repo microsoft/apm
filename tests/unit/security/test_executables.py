@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 from apm_cli.security.executables import (
@@ -518,3 +519,69 @@ class TestPromptExecutableApproval:
         decl = self._make_decl()
         result = prompt_executable_approval([decl])
         assert "pkg#1.0" not in result
+
+    @patch("apm_cli.security.executables._is_interactive", return_value=False)
+    def test_non_interactive_message_uses_unified_vocab(self, _mock, capsys) -> None:
+        # M4 (#1873): the live install-gate message must drop the retired
+        # ``allowExecutables`` noun, lead with the bulk one-liner, and offer
+        # the introspection hatch.
+        decl = self._make_decl()
+        with pytest.raises(SystemExit):
+            prompt_executable_approval([decl])
+        out = capsys.readouterr().out
+        assert "allowExecutables" not in out
+        assert "apm approve --recommended" in out
+        assert "apm policy explain" in out
+
+
+class TestAliasDeprecationWarning:
+    """S1 (#1873): the allowExecutables alias warns once, not per-package."""
+
+    def test_warns_once(self, capsys) -> None:
+        import apm_cli.security.executables as ex
+
+        ex._ALIAS_DEPRECATION_WARNED = False
+        ex.warn_allow_executables_alias_once()
+        ex.warn_allow_executables_alias_once()
+        out = capsys.readouterr().out
+        assert out.count("allowExecutables") == 1
+        assert "deprecated" in out
+        assert "executables.allow" in out
+
+    def test_uses_logger_when_given(self) -> None:
+        import apm_cli.security.executables as ex
+
+        ex._ALIAS_DEPRECATION_WARNED = False
+        calls = []
+
+        class _Logger:
+            def warning(self, msg, symbol=None):
+                calls.append(msg)
+
+        ex.warn_allow_executables_alias_once(_Logger())
+        assert len(calls) == 1
+        assert "deprecated" in calls[0]
+
+
+class TestSaveUserExecutablesAtomic:
+    """S3 (#1873): personal consent writes are atomic and owner-only."""
+
+    def test_atomic_write_sets_owner_only_mode(self, tmp_path, monkeypatch) -> None:
+        import json
+
+        import apm_cli.security.executables as ex
+
+        cfg = tmp_path / "config.json"
+        monkeypatch.setattr(ex, "_user_config_file", lambda: cfg)
+        ex.save_user_executables({"pkg#1.0": {"hooks": True}}, {})
+        assert cfg.is_file()
+        # Owner-only perms on the freshly-created file.
+        assert (cfg.stat().st_mode & 0o777) == 0o600
+        # Content round-trips and preserves co-resident keys on rewrite.
+        cfg.write_text(json.dumps({"default_client": "vscode"}), encoding="utf-8")
+        ex.save_user_executables({"pkg#1.0": {"hooks": True}}, {})
+        data = json.loads(cfg.read_text(encoding="utf-8"))
+        assert data["default_client"] == "vscode"
+        assert data["executables"]["allow"]["pkg#1.0"]["hooks"] is True
+        # No leftover temp files in the dir.
+        assert [p.name for p in tmp_path.iterdir()] == ["config.json"]

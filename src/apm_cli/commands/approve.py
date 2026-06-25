@@ -43,7 +43,11 @@ def _load_store(
 
     if user_scope:
         return load_user_executables()
-    allow, deny, _alias = load_project_executables(manifest)
+    allow, deny, used_alias = load_project_executables(manifest)
+    if used_alias:
+        from ..security.executables import warn_allow_executables_alias_once
+
+        warn_allow_executables_alias_once()
     return allow, deny
 
 
@@ -317,6 +321,11 @@ def _list_decisions(manifest: Path) -> None:
             mark = "+" if decision.allowed else "x"
             states.append(f"{exec_type}[{mark}:{decision.deciding_layer}]")
         _rich_echo(f"  {decl.package_key}: {' '.join(states)}")
+    if blocked_count:
+        _rich_info(
+            "[x] = parked. Trust with 'apm approve <package>' or 'apm approve --recommended'.",
+            symbol="info",
+        )
 
 
 def _find_matching_key(grant_map: dict[str, dict[str, bool]], pkg: str) -> str | None:

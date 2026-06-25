@@ -415,9 +415,12 @@ never widen past an org deny.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `deny_all` | `bool` | `false` | When `true`, blocks every executable type for every package org-wide. |
-| `deny` | `list<string>` | `[]` | Canonical package strings (`owner/name`, glob allowed, e.g. `evil/*`) whose executables must not deploy. Deny is the ceiling and always wins. |
-| `require` | `list<string>` | `[]` | Packages whose executables MUST be present and trusted. A required package whose executables are untrusted hard-fails the `required-executable-untrusted` audit check in CI. |
-| `recommend` | `list<string>` | `[]` | Org-vetted set: default-allowed unless locally denied. Bulk-accepted with `apm approve --recommended`. |
+| `deny` | `list<string>` | `[]` | Canonical package strings whose executables must not deploy. **Deny is the ceiling and always wins**, and is the only side that supports `fnmatch` globs in v1, e.g. `evil/*` blocks every package under `evil/`. |
+| `require` | `list<string>` | `[]` | Packages whose executables MUST be present and trusted (exact-match only in v1). A required package whose executables are untrusted hard-fails the `required-executable-untrusted` audit check in CI. `require` mandates presence + trust but does **not** grant execution -- it stays a developer-consent decision. To mandate AND auto-deploy fleet-wide, list the package in BOTH `require` and `recommend`. |
+| `recommend` | `list<string>` | `[]` | Org-vetted set (exact-match only in v1): default-allowed unless locally denied. Bulk-accepted with `apm approve --recommended`. |
+| `enforce` | `list<string>` | `[]` | v2 mandate tier; **accepted but INERT in v1** -- it degrades to `recommend` (no force-execute; a user deny still overrides). Writing it emits a deprecation-style warning. |
+
+> **Glob scope (v1):** only `deny` supports glob patterns (it is the safety ceiling -- broad denial is safety-positive). `allow`, `recommend`, and `require` are exact-match only; widening the GRANT side with a wildcard has a larger blast radius and is deferred.
 
 ```yaml
 # apm-policy.yml

@@ -221,6 +221,9 @@ class TestApproveCmd:
                 result = runner.invoke(approve_cmd, ["--list"])
             assert result.exit_code == 0
             assert "hook-pkg" in result.output
+            # N1 (#1873): a blocked/parked package surfaces a footer CTA.
+            assert "parked" in result.output
+            assert "--recommended" in result.output
 
 
 # ---------------------------------------------------------------------------

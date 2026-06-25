@@ -484,7 +484,9 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
             "parked pending approval; install completed without deploying them."
         )
         remedy = (
-            f"Run 'apm policy explain {first}' for detail, then 'apm approve {first}' to trust it."
+            "Trust the org-vetted set: apm approve --recommended  |  "
+            f"Trust one: apm approve {first}  |  "
+            f"Inspect: apm policy explain {first}"
         )
         if ctx.logger:
             ctx.logger.warning(msg, symbol="warning")
@@ -522,6 +524,32 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
                 "Run 'apm install' again to deploy approved executables.",
                 symbol="info",
             )
+
+    # Any package the user declined stays parked -- always surface a remedy
+    # so the present-but-parked path is actionable on the decline branch too.
+    parked = [d for d in ctx.blocked_executables if not _decl_fully_trusted(updated, d)]
+    if parked:
+        first = parked[0].package_name
+        logger = ctx.logger
+        if logger is None:
+            from apm_cli.core.command_logger import CommandLogger
+
+            logger = CommandLogger("install")
+        logger.info(
+            f"{len(parked)} package(s) left parked. Their executables will not run until trusted.",
+            symbol="info",
+        )
+        logger.info(
+            f"Deploy later: apm approve {first} (then re-run apm install)  |  "
+            f"Why parked?: apm policy explain {first}",
+            symbol="info",
+        )
+
+
+def _decl_fully_trusted(allow: dict, decl) -> bool:
+    """Return True when *allow* grants every exec type *decl* declares."""
+    grant = allow.get(decl.package_key) or allow.get(decl.package_name) or {}
+    return all(grant.get(t, False) for t in decl.exec_types)
 
 
 # ======================================================================

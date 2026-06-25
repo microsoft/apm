@@ -17,6 +17,7 @@ See also: ``apm approve`` / ``apm deny`` CLI commands.
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import sys
 from dataclasses import dataclass, field
@@ -248,15 +249,29 @@ def _map_grants(
     return False
 
 
+def _deny_glob_match(name: str, patterns: Any) -> bool:
+    """Return True if *name* matches any DENY *pattern* (exact or glob).
+
+    Deny is the org ceiling, so in v1 it supports ``fnmatch`` globs such as
+    ``evil/*`` to block a whole publisher fleet-wide. Allow / recommend /
+    require remain exact-match only -- widening the GRANT side with a glob is
+    a larger blast radius (a typo over-trusts), whereas broad denial is
+    safety-positive (#1873).
+    """
+    if name in patterns:
+        return True
+    return any(fnmatch.fnmatchcase(name, p) for p in patterns)
+
+
 def _org_denies(ctx: ExecTrustContext, name: str, exec_type: str) -> tuple[bool, str | None]:
     """Return ``(denied, layer)`` for the org DENY ceiling (rule 1)."""
     if ctx.org_deny_all:
         return True, LAYER_ORG_DENY_ALL
     if exec_type == EXEC_TYPE_BIN and ctx.org_bin_deny_all:
         return True, LAYER_ORG_DENY_ALL
-    if name in ctx.org_deny:
+    if _deny_glob_match(name, ctx.org_deny):
         return True, LAYER_ORG_DENY
-    if exec_type == EXEC_TYPE_BIN and name in ctx.org_bin_deny:
+    if exec_type == EXEC_TYPE_BIN and _deny_glob_match(name, ctx.org_bin_deny):
         return True, LAYER_ORG_DENY
     return False, None
 
@@ -526,17 +541,15 @@ def prompt_executable_approval(
 
     # Non-interactive (CI): hard error
     if not _is_interactive():
-        _rich_warning(
-            f"{len(pending)} package(s) declare executable primitives "
-            "but are not approved in allowExecutables:"
-        )
+        _rich_warning(f"{len(pending)} package(s) ship executables that are not trusted yet:")
         for decl in pending:
             provenance = "(transitive)" if decl.is_transitive else "(direct)"
             _rich_echo(f"  {decl.package_key} {provenance}: {decl.summary_line()}")
         _rich_echo("")
         _rich_info(
-            "Run 'apm approve <package>' to approve, "
-            "or add entries to allowExecutables in apm.yml.",
+            "Trust the org-vetted set: apm approve --recommended  |  "
+            "Trust one: apm approve <package>  |  "
+            "Inspect: apm policy explain <package>",
             symbol="info",
         )
         sys.exit(1)
@@ -638,11 +651,11 @@ def write_allow_executables(
     Reads the existing YAML, updates the ``allowExecutables`` key, and
     writes it back using the standard ``dump_yaml`` helper.
 
-    Note: individual package approvals should live in the user-local
-    ``~/.apm/approvals.yml`` (see :func:`save_user_approvals`), not in the
-    project manifest which is committed to source control.  This function is
-    retained for writing the gate opt-in signal (``allowExecutables: {}``) and
-    for CI/automated contexts that intentionally commit approvals.
+    Note: this writes only the project gate opt-in signal
+    (``allowExecutables: {}``) and the CI/automated-context approvals that are
+    intentionally committed.  Personal, machine-local consent lives in
+    ``~/.apm/config.json`` under ``executables: {allow, deny}`` (see
+    :func:`save_user_executables`); there is no standalone approvals file.
     """
     from ..utils.yaml_io import dump_yaml, load_yaml
 
@@ -656,60 +669,6 @@ def write_allow_executables(
         del data["allowExecutables"]
 
     dump_yaml(data, manifest_path)
-
-
-# -------------------------------------------------------------------
-# User-local approvals store (~/.apm/approvals.yml)
-# -------------------------------------------------------------------
-
-
-def get_user_approvals_path() -> Path:
-    """Return the path to the user-local executable approvals file.
-
-    The file lives at ``~/.apm/approvals.yml`` and is never committed to
-    source control.  It stores the same ``allowExecutables`` mapping as the
-    project ``apm.yml`` but is scoped to the current user's machine, so
-    cloning a project does not implicitly grant trust to its dependencies.
-    """
-    return Path.home() / ".apm" / "approvals.yml"
-
-
-def load_user_approvals() -> dict[str, dict[str, bool]]:
-    """Load the user-local approvals from ``~/.apm/approvals.yml``.
-
-    Returns an empty dict when the file does not exist.  The file stores the
-    approvals mapping directly (package key -> exec-type booleans), without
-    the ``allowExecutables:`` YAML wrapper used in project ``apm.yml``.
-    """
-    path = get_user_approvals_path()
-    if not path.is_file():
-        return {}
-    from ..utils.yaml_io import load_yaml
-
-    data = load_yaml(path)
-    if not isinstance(data, dict):
-        return {}
-    return data
-
-
-def save_user_approvals(approvals: dict[str, dict[str, bool]]) -> None:
-    """Persist *approvals* to ``~/.apm/approvals.yml``.
-
-    Creates ``~/.apm/`` if it does not exist.  The file is written with
-    mode ``0o600`` (owner-only) to prevent other users on a shared system
-    from reading the approval list.
-    """
-    import contextlib
-
-    from ..utils.yaml_io import dump_yaml
-
-    path = get_user_approvals_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    dump_yaml(approvals, path)
-    with contextlib.suppress(NotImplementedError, OSError):
-        import os
-
-        os.chmod(path, 0o600)
 
 
 def materialize_exec_map(ctx: ExecTrustContext) -> dict[str, dict[str, bool]] | None:
@@ -837,15 +796,15 @@ def filter_mcp_by_allow_executables(
         _slug = _dep.name
         if _slug and not is_package_approved(_allow_execs, _slug, EXEC_TYPE_MCP):
             logger.verbose_detail(
-                f"Skipping MCP server from '{_slug}': not approved in allowExecutables. "
-                f"Run 'apm approve {_slug}' to approve."
+                f"Skipping MCP server from '{_slug}': executables not trusted yet. "
+                f"Run 'apm approve {_slug}' to trust it."
             )
         else:
             _filtered.append(_dep)
     if len(_filtered) < len(mcp_deps):
         logger.warning(
-            f"Filtered {len(mcp_deps) - len(_filtered)} MCP server(s) not approved "
-            "in allowExecutables."
+            f"Filtered {len(mcp_deps) - len(_filtered)} MCP server(s) whose "
+            "executables are not trusted yet."
         )
     return _filtered
 
@@ -950,6 +909,34 @@ def parse_project_executables(
     return allow, deny, used_alias
 
 
+_ALIAS_DEPRECATION_WARNED = False
+
+
+def warn_allow_executables_alias_once(logger: Any | None = None) -> None:
+    """Emit the ``allowExecutables`` deprecation warning at most once per run.
+
+    The deprecated ``allowExecutables`` block in ``apm.yml`` still works (it
+    folds into ``executables.allow``), but writers should migrate. This warns
+    a single time on ``apm install`` / ``apm approve`` so the message is
+    actionable without spamming once per package (#1873).
+    """
+    global _ALIAS_DEPRECATION_WARNED
+    if _ALIAS_DEPRECATION_WARNED:
+        return
+    _ALIAS_DEPRECATION_WARNED = True
+    msg = (
+        "'allowExecutables' in apm.yml is deprecated; it now maps to "
+        "'executables.allow'. It will migrate automatically on your next "
+        "'apm approve'/'apm deny'."
+    )
+    if logger is not None:
+        logger.warning(msg, symbol="warning")
+        return
+    from ..utils.console import _rich_warning
+
+    _rich_warning(msg)
+
+
 def project_executables_gate_enabled(data: dict[str, Any]) -> bool:
     """Return True when the project opts into the gate (any block present)."""
     return data.get("executables") is not None or data.get("allowExecutables") is not None
@@ -963,8 +950,12 @@ def _user_config_file() -> Path:
 
 
 def _legacy_approvals_path() -> Path:
-    """Return the path to the deprecated ``~/.apm/approvals.yml`` store."""
-    return get_user_approvals_path()
+    """Return the path to the deprecated ``~/.apm/approvals.yml`` store.
+
+    Read-only: the file is migrated into ``~/.apm/config.json`` on first read
+    and deleted. There is no writer for this path anymore (#1873).
+    """
+    return Path.home() / ".apm" / "approvals.yml"
 
 
 def _migrate_legacy_approvals(allow: dict[str, dict[str, bool]]) -> dict[str, dict[str, bool]]:
@@ -1027,10 +1018,13 @@ def save_user_executables(
     """Persist personal executable consent into ``~/.apm/config.json``.
 
     The config file is written owner-only (``0o600``) to keep the consent
-    list private on shared systems.
+    list private on shared systems. The write is atomic (``atomic_write_text``
+    with ``new_file_mode=0o600``) so a crash mid-write cannot corrupt the
+    shared config and a freshly-created file is never world-readable.
     """
-    import contextlib
     import json
+
+    from ..utils.atomic_io import atomic_write_text
 
     cfg_path = _user_config_file()
     cfg: dict[str, Any] = {}
@@ -1041,9 +1035,7 @@ def save_user_executables(
             cfg = {}
     cfg["executables"] = {"allow": allow, "deny": deny}
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
-    cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    with contextlib.suppress(NotImplementedError, OSError):
-        os.chmod(cfg_path, 0o600)
+    atomic_write_text(cfg_path, json.dumps(cfg, indent=2), new_file_mode=0o600)
 
 
 def build_exec_trust_context(

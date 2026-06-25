@@ -269,14 +269,15 @@ def _check_required_executable_untrusted(
             passed=True,
             message="All required executables are trusted",
         )
+    recommend = set(exec_policy.recommend or ())
+    bulk_eligible = [pkg for pkg in untrusted if pkg in recommend]
+    remedy = "Trust them to deploy: `apm approve <package>` per package."
+    if bulk_eligible:
+        remedy += " Org-recommended packages can be bulk-trusted with `apm approve --recommended`."
     return CheckResult(
         name="required-executable-untrusted",
         passed=False,
-        message=(
-            f"{len(untrusted)} required executable(s) present but untrusted. "
-            "Approve them to deploy: `apm approve --recommended` (org-vetted set) "
-            "or `apm approve <package>` per package."
-        ),
+        message=(f"{len(untrusted)} required executable(s) present but untrusted. {remedy}"),
         details=untrusted,
     )
 
