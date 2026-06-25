@@ -792,7 +792,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `resolved_ref`            | User-supplied ref (branch, tag, SHA).                                           |
 | `resolved_commit`         | Exact 40-character lowercase hexadecimal commit SHA-1.                          |
 | `tree_sha256`             | Hash envelope (`sha256:<hex>`) over the canonicalised git tree. See [req-lk-015](#req-lk-015). |
-| `version`                 | Resolved version selector (semver string for semver-bearing sources); for other sources MAY carry a self-asserted version per [req-lk-019](#req-lk-019). |
+| `version`                 | Registry entries carry the registry-resolved selector for reinstall; git/local entries MAY carry a dependency-`apm.yml`-derived inventory value per [req-lk-019](#req-lk-019). |
 | `virtual_path`            | Subpath inside repo for virtual packages.                                       |
 | `is_virtual`              | Boolean.                                                                        |
 | `depth`                   | Tree depth (0 = self, 1 = direct, >1 = transitive).                             |
