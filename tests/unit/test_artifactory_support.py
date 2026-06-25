@@ -357,9 +357,10 @@ class TestBuildArtifactoryArchiveUrl:
             "GitLab path segment must preserve the raw ref including the slash"
         )
         # The archive filename must have the slash replaced with a dash.
-        assert any(u.endswith("/-/archive/feat/my-slash-branch/repo-feat-my-slash-branch.zip") for u in urls), (
-            "GitLab archive filename must replace '/' with '-' in the ref portion"
-        )
+        assert any(
+            u.endswith("/-/archive/feat/my-slash-branch/repo-feat-my-slash-branch.zip")
+            for u in urls
+        ), "GitLab archive filename must replace '/' with '-' in the ref portion"
         # The GitHub-style candidates must be unchanged (slashes are valid there).
         assert any("/archive/refs/heads/feat/my-slash-branch.zip" in u for u in urls), (
             "GitHub-style /archive/refs/heads/{ref}.zip must be unchanged for slash refs"

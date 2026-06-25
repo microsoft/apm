@@ -1583,17 +1583,13 @@ class TestMarketplaceRegisteredRefPropagation:
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
-    def test_github_string_source_version_spec_overrides_registered_ref(
-        self, mock_get, mock_fetch
-    ):
+    def test_github_string_source_version_spec_overrides_registered_ref(self, mock_get, mock_fetch):
         """Explicit ``version_spec`` (``apm install plugin@mkt#v2``) must win over source.ref."""
         plugin = MarketplacePlugin(name="my-plugin", source="./plugins/my-plugin")
         mock_get.return_value = self._github_source(ref="feat/my-feature")
         mock_fetch.return_value = self._manifest(plugin)
 
-        result = resolve_marketplace_plugin(
-            "my-plugin", "my-marketplace", version_spec="v2.0.0"
-        )
+        result = resolve_marketplace_plugin("my-plugin", "my-marketplace", version_spec="v2.0.0")
 
         assert result.canonical.endswith("#v2.0.0")
         assert "feat/my-feature" not in result.canonical
