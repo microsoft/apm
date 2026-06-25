@@ -102,7 +102,7 @@ Claude Code.
   - instructions: `.claude/rules/<name>.md`
   - agents: `.claude/agents/<name>.md`
   - commands: `.claude/commands/<name>.md`
-  - skills: `.agents/skills/<name>/SKILL.md`
+  - skills: `.claude/skills/<name>/SKILL.md`
   - hooks: merged into `.claude/settings.json`
 - **Compile output.** `CLAUDE.md` and per-rule files under `.claude/rules/`.
 
