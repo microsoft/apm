@@ -97,6 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm update` no longer shows a spurious update for registry semver deps already at the latest matching version; the lockfile now stores the resolved concrete version instead of the manifest range, and the pre-update cache purge now covers registry deps so the resolver re-annotates them before the update plan fires. (#1897)
 - `apm install <pkg>@<marketplace>` now preserves GitLab and other
   non-GitHub hosts from url-type marketplace plugin sources, so auth
   resolution no longer falls back to `github.com` for those installs.

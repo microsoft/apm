@@ -414,12 +414,17 @@ class LockedDependency:
         else:
             source = None
 
-        # When a git-semver resolution is present, prefer the concrete
-        # resolved tag for ``resolved_ref`` (so subsequent installs see a
-        # literal tag, not the original range). The original constraint
-        # is preserved in the dedicated ``constraint`` field.
+        # Prefer the concrete resolved identifier for ``resolved_ref`` so that
+        # ``build_update_plan`` can detect real version changes by comparing
+        # old_ref (locked concrete) vs new_ref (freshly resolved concrete).
+        # Registry deps: store the resolved version (e.g. "1.0.3"), not the
+        # range ("^1.0.0").  Git-semver deps: store the resolved tag.  Both
+        # preserve the original selector in their dedicated fields
+        # (``version`` / ``constraint`` respectively).
         if git_semver_resolution is not None:
             resolved_ref_val: str | None = git_semver_resolution.resolved_tag
+        elif registry_resolution is not None:
+            resolved_ref_val = registry_resolution.version
         else:
             resolved_ref_val = dep_ref.reference
 

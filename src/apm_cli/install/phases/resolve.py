@@ -23,6 +23,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
@@ -183,7 +184,7 @@ def _purge_cached_semver_paths_for_update(
     apm_modules_dir,
     logger,
 ) -> None:
-    """Pre-purge on-disk install paths for direct git-source semver deps
+    """Pre-purge on-disk install paths for direct git-source and registry semver deps
     when ``--update`` / ``--refresh`` is set.
 
     Bug 1 fix (#1496): the BFS resolver short-circuits at
@@ -196,9 +197,9 @@ def _purge_cached_semver_paths_for_update(
     trigger and must not be swallowed by the on-disk cache. Scoped to
     direct deps to avoid disturbing transitive cached content; the
     resolver re-walks transitives naturally once a direct dep's
-    callback rewrites its ref. Local, registry, and proxy deps are
-    excluded -- their semver semantics (if any) belong to a different
-    resolver path.
+    callback rewrites its ref. Local and proxy deps are excluded (their
+    semver semantics belong to a different resolver path). Registry semver
+    deps are included: their callback also gates on install_path.exists().
     """
     from contextlib import suppress
 
@@ -208,8 +209,6 @@ def _purge_cached_semver_paths_for_update(
         if getattr(_dep, "ref_kind", None) != "semver":
             continue
         if _dep.is_local:
-            continue
-        if getattr(_dep, "source", None) == "registry":
             continue
         if getattr(_dep, "artifactory_prefix", None):
             continue
@@ -357,6 +356,17 @@ def _setup_downloader(ctx: InstallContext) -> None:
         )
 
 
+def _annotate_registry_dep_ref(dep_ref, registry_resolver) -> None:
+    reg_res = registry_resolver.last_resolutions.get(dep_ref.get_unique_key())
+    if not reg_res:
+        return
+    dep_ref.resolved_reference = ResolvedReference(
+        original_ref=dep_ref.reference or reg_res.version,
+        ref_type=GitReferenceType.TAG,
+        ref_name=reg_res.version,
+    )
+
+
 def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
     """Raise when the resolver recorded fatal dependency-resolution errors."""
     if not dependency_graph.resolution_errors:
@@ -488,7 +498,6 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
             _force_semver_resolve = (
                 update_refs
                 and not dep_ref.is_local
-                and getattr(dep_ref, "source", None) != "registry"
                 and not getattr(dep_ref, "artifactory_prefix", None)
                 and getattr(dep_ref, "ref_kind", None) == "semver"
             )
@@ -565,6 +574,7 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
                         callback_downloaded[dep_ref.get_unique_key()] = None
                         return install_path
                 registry_resolver.download_package(dep_ref, install_path)
+                _annotate_registry_dep_ref(dep_ref, registry_resolver)
                 # Mark as already-downloaded so the parallel pre-download
                 # phase skips this dep. No SHA for registry deps.
                 callback_downloaded[dep_ref.get_unique_key()] = None

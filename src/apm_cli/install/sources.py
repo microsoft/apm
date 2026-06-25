@@ -396,7 +396,12 @@ class CachedDependencySource(DependencySource):
             if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
                 cached_commit = locked_dep.resolved_commit
         if not cached_commit:
-            cached_commit = dep_ref.reference
+            # Registry deps identify by resolved_hash+version, not a commit SHA.
+            # dep_ref.reference is a semver range (e.g. "^1.0.0") for registry
+            # deps -- storing it as resolved_commit would corrupt the lockfile
+            # and cause the update plan to show a spurious "^1.0.0 -> -" diff.
+            if dep_ref.source != "registry":
+                cached_commit = dep_ref.reference
         return cached_commit
 
     def acquire(self) -> Materialization | None:
