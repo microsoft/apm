@@ -148,12 +148,17 @@ class TestDiscoverPolicyWithChainEMUEndToEnd:
         ) as mock_fetch:
             result = discover_policy_with_chain(tmp_path)
 
-        # Discovery reached _fetch_from_repo (proves SCP_LIKE_RE
-        # matched and org was extracted) and routed to contoso/.github.
+        # The regression guard for #1159 is the ROUTING: discovery reached
+        # _fetch_from_repo (proves SCP_LIKE_RE matched and the org was
+        # extracted) and the FIRST candidate it tried was contoso/.github.
         assert mock_fetch.call_count >= 1
         first_call_repo_ref = mock_fetch.call_args_list[0].args[0]
         assert first_call_repo_ref == "contoso/.github"
-        assert result is sentinel
+        # Cascading discovery (#1830) tries .github -> .apm -> _apm. With every
+        # candidate mocked absent, the cascade exhausts and returns a fresh
+        # terminal "absent" result -- it does NOT propagate the per-candidate
+        # sentinel object. The org-routing assertion above is the real guard.
+        assert result.outcome == "absent"
 
     def test_ado_v3_ssh_remote_routes_to_correct_org_policy_repo(self, tmp_path):
         _git_init_with_remote(
@@ -164,20 +169,21 @@ class TestDiscoverPolicyWithChainEMUEndToEnd:
 
         sentinel = PolicyFetchResult(outcome="absent")
 
+        # ADO remotes route through _fetch_from_ado_repo (#1830), which takes
+        # the org as a keyword argument rather than a "<org>/<repo>" ref.
         with patch(
-            "apm_cli.policy.discovery._fetch_from_repo", return_value=sentinel
+            "apm_cli.policy.discovery._fetch_from_ado_repo", return_value=sentinel
         ) as mock_fetch:
             result = discover_policy_with_chain(tmp_path)
 
-        # Pre-fix the repo_ref would have been constructed from
-        # org="v3" -- a silent mis-routing.  Post-fix the real org
-        # ``realorg`` is used.
+        # Pre-fix the org would have been parsed as "v3" -- a silent
+        # mis-routing.  Post-fix the real org ``realorg`` is used.
         assert mock_fetch.call_count >= 1
-        first_call_repo_ref = mock_fetch.call_args_list[0].args[0]
-        # ADO host attaches a host prefix when host != github.com.
-        assert "realorg/.github" in first_call_repo_ref
-        assert "v3/.github" not in first_call_repo_ref
-        assert result is sentinel
+        first_call_org = mock_fetch.call_args_list[0].kwargs["org"]
+        assert first_call_org == "realorg"
+        assert first_call_org != "v3"
+        # Cascade exhausts to a fresh terminal "absent" (see EMU test note).
+        assert result.outcome == "absent"
 
 
 class TestDependencyReferenceParsesEMUAndAdoSsh:

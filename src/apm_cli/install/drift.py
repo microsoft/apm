@@ -247,15 +247,19 @@ def _materialize_install_path(
     # unverifiable -- there is no marker we can write at install time and
     # no commit we can compare at audit time. Refuse to replay it rather
     # than silently trust whatever happens to live in the cache.
-    if getattr(lock_dep, "source", None) != "local" and not lock_dep.resolved_commit:
+    if (
+        getattr(lock_dep, "source", None) not in {"local", "registry"}
+        and not lock_dep.resolved_commit
+    ):
         raise CacheMissError(
             f"cannot replay {lock_dep.repo_url}: lockfile entry has no resolved_commit "
             "(cache freshness unverifiable). Re-run 'apm install' with a pinned ref "
             "(commit, tag, or specific branch HEAD) before audit."
         )
     if not candidate.exists():
+        _ref_label = lock_dep.resolved_commit or lock_dep.version or "unknown"
         raise CacheMissError(
-            f"cache miss for {lock_dep.repo_url}@{lock_dep.resolved_commit}: "
+            f"cache miss for {lock_dep.repo_url}@{_ref_label}: "
             f"expected {candidate}; run 'apm install' to populate the cache"
         )
     # Stale-cache detection: verify the cache pin marker matches the
