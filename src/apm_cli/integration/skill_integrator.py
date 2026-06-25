@@ -983,6 +983,7 @@ class SkillIntegrator(BaseIntegrator):
 
             is_primary = idx == 0  # first active target owns diagnostics
             skills_mapping = target.primitives["skills"]
+            # Static targets still need the effective root for the containment guard below.
             effective_root = skills_mapping.deploy_root or target.root_dir
             target_skill_dir = self._target_skill_dir(target, project_root, skill_name)
 
