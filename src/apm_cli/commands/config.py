@@ -642,10 +642,8 @@ def get(key):
         if _self_update_channel != "stable":
             click.echo(f"  self-update.channel: {_self_update_channel}")
         _self_update_install_dir = _get_self_update_install_dir()
-        click.echo(
-            "  self-update.install-dir: "
-            f"{_self_update_install_dir if _self_update_install_dir is not None else 'Not set (using installer default)'}"
-        )
+        if _self_update_install_dir is not None:
+            click.echo(f"  self-update.install-dir: {_self_update_install_dir}")
         # Only show transport keys when non-default to reduce noise.
         _apf_val = get_allow_protocol_fallback()
         _ssh_val = get_prefer_ssh()

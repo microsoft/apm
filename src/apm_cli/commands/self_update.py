@@ -241,7 +241,7 @@ def self_update(check):
                 logger.error("Unable to fetch a prerelease version from remote")
                 logger.info(
                     "No prerelease was found or the lookup failed; switch to stable with "
-                    "apm config set self-update.channel stable."
+                    "`apm config set self-update.channel stable`."
                 )
             else:
                 logger.error("Unable to fetch latest version from remote")

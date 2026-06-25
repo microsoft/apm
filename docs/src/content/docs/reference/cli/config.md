@@ -143,7 +143,8 @@ apm install                    # no --target needed: deploys to claude
 apm config unset target        # clear it (back to auto-detection)
 ```
 
-Persist self-update installer preferences:
+Persist self-update installer preferences so prerelease upgrades and custom
+installer locations do not require env vars on every run:
 
 ```bash
 apm config set self-update.channel prerelease

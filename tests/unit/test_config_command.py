@@ -351,6 +351,38 @@ class TestConfigGet:
         assert result.exit_code == 0
         assert "self-update.channel: prerelease" in result.output
 
+    def test_get_all_config_suppresses_unset_self_update_install_dir(self):
+        """apm config get (no key) omits unset self-update install-dir."""
+        with (
+            patch("apm_cli.config.get_auto_integrate", return_value=True),
+            patch("apm_cli.config.get_temp_dir", return_value=None),
+            patch("apm_cli.config.get_self_update_channel", return_value="stable"),
+            patch("apm_cli.config.get_self_update_install_dir", return_value=None),
+            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
+            patch("apm_cli.config.get_prefer_ssh", return_value=False),
+            patch("apm_cli.core.experimental.is_enabled", return_value=False),
+        ):
+            result = self.runner.invoke(config, ["get"])
+
+        assert result.exit_code == 0
+        assert "self-update.install-dir" not in result.output
+
+    def test_get_all_config_shows_configured_self_update_install_dir(self):
+        """apm config get (no key) shows configured self-update install-dir."""
+        with (
+            patch("apm_cli.config.get_auto_integrate", return_value=True),
+            patch("apm_cli.config.get_temp_dir", return_value=None),
+            patch("apm_cli.config.get_self_update_channel", return_value="stable"),
+            patch("apm_cli.config.get_self_update_install_dir", return_value="/opt/apm/bin"),
+            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
+            patch("apm_cli.config.get_prefer_ssh", return_value=False),
+            patch("apm_cli.core.experimental.is_enabled", return_value=False),
+        ):
+            result = self.runner.invoke(config, ["get"])
+
+        assert result.exit_code == 0
+        assert "self-update.install-dir: /opt/apm/bin" in result.output
+
     def test_get_target_when_set(self):
         """Get configured default install target."""
         with patch("apm_cli.config.get_install_target", return_value="claude"):

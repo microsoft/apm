@@ -100,6 +100,8 @@ Persist non-secret self-update defaults:
 apm config set self-update.channel prerelease
 apm config set self-update.install-dir ~/.local/bin
 apm self-update
+apm config unset self-update.channel
+apm config unset self-update.install-dir
 ```
 
 ## Behavior
