@@ -678,27 +678,7 @@ def run_mcp_install(
     elif scope is InstallScope.PROJECT:
         user_scope = False
 
-    # Split into registry-resolved and self-defined deps
-    # Backward compat: plain strings are treated as registry deps
-    registry_deps = [
-        dep
-        for dep in mcp_deps
-        if isinstance(dep, str)
-        or (hasattr(dep, "is_registry_resolved") and dep.is_registry_resolved)
-    ]
-    self_defined_deps = [
-        dep for dep in mcp_deps if hasattr(dep, "is_self_defined") and dep.is_self_defined
-    ]
-    registry_dep_names = [dep.name if hasattr(dep, "name") else dep for dep in registry_deps]
-
     console = _get_console()
-    # Track servers that were re-applied due to config drift
-    servers_to_update: builtins.set = builtins.set()
-    # Track successful updates separately so the summary counts are accurate
-    # even when some drift-detected servers fail to install.
-    successful_updates: builtins.set = builtins.set()
-    if stored_mcp_configs is None:
-        stored_mcp_configs = {}
 
     # Start MCP section with clean header
     if console:
@@ -731,7 +711,80 @@ def run_mcp_install(
     if target_runtimes is None:
         return 0
 
-    # Use the new registry operations module for better server detection
+    configured_count, successful_updates = _apply_mcp_configs(
+        mcp_deps=mcp_deps,
+        target_runtimes=target_runtimes,
+        stored_mcp_configs=stored_mcp_configs,
+        project_root=project_root,
+        user_scope=user_scope,
+        verbose=verbose,
+        console=console,
+        logger=logger,
+    )
+
+    # Close the panel
+    _print_mcp_summary(console, configured_count, successful_updates)
+
+    return configured_count
+
+
+def _apply_mcp_configs(
+    mcp_deps: list,
+    target_runtimes: list[str],
+    stored_mcp_configs: dict | None,
+    project_root: Any,
+    user_scope: bool,
+    verbose: bool,
+    console: Any,
+    logger: Any,
+) -> tuple[int, builtins.set]:
+    """Write MCP runtime config for *target_runtimes* from resolved deps.
+
+    This is the single canonical implementation of the adapter-loop that turns
+    resolved MCP dependencies into runtime config files (e.g.
+    ``.vscode/mcp.json``, ``.github/copilot-mcp.json``).  Both
+    ``run_mcp_install`` and ``apm mcp export`` delegate here so there is
+    exactly one place that decides what each runtime's config file contains.
+
+    Args:
+        mcp_deps: Resolved MCP dependency objects (MCPDependency instances or
+            plain registry-name strings for backward compatibility).
+        target_runtimes: Runtime names that should receive config writes.
+        stored_mcp_configs: Previously stored configs from the lockfile used
+            for drift detection.  Pass ``None`` or ``{}`` to skip drift checks.
+        project_root: Project root directory (for repo-local config paths).
+        user_scope: When ``True``, applies user-scope config paths.
+        verbose: Emit verbose adapter output.
+        console: Rich console instance or ``None`` for plain logger mode.
+        logger: Command logger for progress / error messages.
+
+    Returns:
+        A ``(configured_count, successful_updates)`` tuple where
+        *configured_count* is the total number of server+runtime pairs
+        configured and *successful_updates* is the set of server names that
+        were re-applied due to config drift.
+    """
+    if stored_mcp_configs is None:
+        stored_mcp_configs = {}
+
+    # Split into registry-resolved and self-defined deps.
+    # Backward compat: plain strings are treated as registry deps.
+    registry_deps = [
+        dep
+        for dep in mcp_deps
+        if isinstance(dep, str)
+        or (hasattr(dep, "is_registry_resolved") and dep.is_registry_resolved)
+    ]
+    self_defined_deps = [
+        dep for dep in mcp_deps if hasattr(dep, "is_self_defined") and dep.is_self_defined
+    ]
+    registry_dep_names = [dep.name if hasattr(dep, "name") else dep for dep in registry_deps]
+
+    # Track servers that were re-applied due to config drift
+    servers_to_update: builtins.set = builtins.set()
+    # Track successful updates separately so the summary counts are accurate
+    # even when some drift-detected servers fail to install.
+    successful_updates: builtins.set = builtins.set()
     configured_count = 0
 
     # --- Registry-based deps ---
@@ -793,7 +846,4 @@ def run_mcp_install(
             logger=logger,
         )
 
-    # Close the panel
-    _print_mcp_summary(console, configured_count, successful_updates)
-
-    return configured_count
+    return configured_count, successful_updates

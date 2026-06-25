@@ -1,12 +1,12 @@
 ---
 title: apm mcp
-description: Discover and inspect MCP servers in the registry
+description: Discover, inspect, and export MCP server configuration
 sidebar:
   order: 22
 ---
 
 Discover, inspect, and install MCP servers from the public MCP registry
-(or an enterprise mirror).
+(or an enterprise mirror); regenerate runtime config from resolved state.
 
 ## Synopsis
 
@@ -15,12 +15,13 @@ apm mcp list [--limit N] [--verbose]
 apm mcp search QUERY [--limit N] [--verbose]
 apm mcp show SERVER_NAME [--verbose]
 apm mcp install NAME [-- runtime args...]
+apm mcp export --runtime RUNTIME [--runtime RUNTIME ...] [--verbose]
 ```
 
 ## Description
 
 `apm mcp` groups read-only registry queries (`list`, `search`, `show`)
-plus a thin install alias.
+plus a thin install alias and the `export` command.
 
 The canonical install path for MCP servers is
 [`apm install --mcp NAME`](../install/#mcp-server-entry-use-only-with---mcp). It
@@ -105,6 +106,37 @@ list):
 | `--force` | Overwrite an existing entry. |
 | `--no-policy` | Skip policy checks. |
 | `--verbose`, `-v` | Verbose output. |
+
+### `apm mcp export`
+
+Regenerate runtime MCP config files from already-resolved state (`apm.yml` +
+`apm.lock.yaml`) without re-resolving or installing dependencies.
+
+```bash
+apm mcp export --runtime vscode
+apm mcp export --runtime copilot --runtime codex
+```
+
+`--runtime` is repeatable. Pass as many target runtimes as needed in a single
+invocation. Valid runtimes match those accepted by `apm install --target`.
+
+| Flag | Description |
+|---|---|
+| `--runtime RUNTIME` | Target runtime to write config for. Repeatable. |
+| `--verbose`, `-v` | Verbose output. |
+
+**Read-only**: `export` reads `apm.yml` and the lockfile but never modifies
+either. No dependency resolution, no network calls for git packages, no
+lockfile writes.
+
+**`targets:` whitelist**: if `apm.yml` declares a `targets:` list, a requested
+runtime that is not in that list is skipped with a `[!]` warning. All other
+runtimes in the invocation still proceed. If every requested runtime is
+excluded, the command exits non-zero.
+
+Use `export` after editing environment variables or runtime-level settings in
+`apm.yml` when you want the config files refreshed without running a full
+`apm install`.
 
 ## Environment variables
 

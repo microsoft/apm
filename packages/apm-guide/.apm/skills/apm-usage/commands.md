@@ -165,6 +165,7 @@ To build the marketplace, run `apm pack` (it reads `apm.yml` and writes `.claude
 | `apm mcp list` | List MCP servers in project | `--limit N` |
 | `apm mcp search QUERY` | Search MCP registry | `--limit N` |
 | `apm mcp show SERVER` | Show server details | -- |
+| `apm mcp export --runtime RUNTIME` | Regenerate runtime MCP config from resolved state (repeatable `--runtime`; read-only, no dep resolution, no lockfile write) | `--runtime RUNTIME` (repeatable), `--verbose` |
 
 Self-defined stdio MCP entries declared in `apm.yml` (`env:` / `args:`) have their placeholders resolved at install time on Codex, Gemini, Antigravity, and Cursor, which have no runtime interpolation. Copilot CLI preserves env references as `${VAR}`; VS Code and JetBrains preserve them as `${env:VAR}`. All three env syntaxes are accepted: `${VAR}`, `${env:VAR}`, and the legacy `<VAR>`. Missing variables fall back to an interactive prompt on install-time targets (suppressed in non-TTY contexts). See [Manifest schema -- MCP placeholder syntaxes](https://microsoft.github.io/apm/reference/manifest-schema/) for the per-target matrix.
 
