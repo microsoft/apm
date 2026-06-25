@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **92 normative statements** indexed in
+- OpenAPM v0.1 carries **94 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -2272,6 +2272,8 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 10| Hash-algorithm downgrade                    | [req-mf-018](#req-mf-018), [req-lk-016](#req-lk-016)               | Consumer-default  |
 | 11| Unauthorised executable primitive deployment | [req-sc-009](#req-sc-009)                                         | Consumer-default  |
 | 12| Approval grant propagation via VCS           | [req-sc-010](#req-sc-010)                                         | Consumer-default  |
+| 13| Org executable denial bypassed by project/user grant | [req-sc-011](#req-sc-011)                                 | Consumer-default  |
+| 14| Required-package audit false-positive on withheld executable | [req-sc-012](#req-sc-012)                         | Consumer-default  |
 
 ### 10.12 Publisher provenance and attestations (reserved for v0.2)
 
@@ -2316,6 +2318,48 @@ by version control alongside project files by default. The consumer
 MUST NOT write interactive approval decisions into the project
 `apm.yml`, so that one developer's approval cannot propagate
 implicitly to other developers who clone or share the project.
+
+### 10.14 Executable trust precedence and audit fidelity
+
+**Threat.** Two failure modes defeat centralized executable
+governance. First, a project-level or user-level approval re-enables
+an executable primitive that an organization policy has denied, or
+the install-time gate and the post-install audit reach different
+trust conclusions for the same primitive (a split-brain that lets a
+denied primitive read as trusted, or the reverse). Second, a
+governance requirement mandating that a package be present is
+reported as unmet merely because that package's executable primitives
+were withheld from deployment, making it impossible to both mandate a
+package and let a consumer withhold its executables.
+
+**Mitigations.**
+
+<a id="req-sc-011"></a>
+**[req-sc-011]** A conforming **consumer** implementation MUST resolve
+every executable-primitive trust decision through a single deny-wins
+precedence relation in which an organization policy denial (an
+`executables.deny` entry or `executables.deny_all` in an applicable
+`apm-policy.yml` per [Section 6](#6-policy-format-apm-policyyml))
+overrides any project-level or user-level grant for the same package
+and executable type. A consumer MUST reach the identical allow-or-deny
+outcome for identical inputs whether the decision gates deployment at
+install time or classifies an already-installed primitive at audit
+time. A consumer MUST NOT allow a project `apm.yml` grant or a
+user-local approval to re-enable an executable primitive that an
+applicable organization policy denies.
+
+<a id="req-sc-012"></a>
+**[req-sc-012]** A conforming **consumer** implementation that
+evaluates a governance requirement mandating the presence of a package
+(per [Section 6](#6-policy-format-apm-policyyml)) MUST determine
+satisfaction of that requirement from the presence of the package in
+the resolved lockfile, and MUST NOT condition it on whether that
+package's executable primitives were deployed. When a required package
+is present but one or more of its executable primitives are withheld
+from deployment by the trust resolution of
+[req-sc-011](#req-sc-011), a consumer MUST treat the presence
+requirement as satisfied and MUST surface each withheld executable as
+a diagnostic signal distinct from any missing-package violation.
 
 ---
 
@@ -2405,7 +2449,8 @@ conformance statement identifying:
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
 [req-sc-006](#req-sc-006), [req-sc-007](#req-sc-007),
 [req-sc-008](#req-sc-008) (SHOULD), [req-sc-009](#req-sc-009),
-[req-sc-010](#req-sc-010), [req-cf-001](#req-cf-001),
+[req-sc-010](#req-sc-010), [req-sc-011](#req-sc-011),
+[req-sc-012](#req-sc-012), [req-cf-001](#req-cf-001),
 [req-cf-002](#req-cf-002).
 
 #### 11.3.3 Registry
@@ -2816,11 +2861,13 @@ renumbering of conformance classes.
 | [req-sc-008](#req-sc-008)                | SHOULD  | 10.3    | consumer    |
 | [req-sc-009](#req-sc-009)                | MUST    | 10.13   | consumer    |
 | [req-sc-010](#req-sc-010)                | MUST    | 10.13   | consumer    |
+| [req-sc-011](#req-sc-011)                | MUST    | 10.14   | consumer    |
+| [req-sc-012](#req-sc-012)                | MUST    | 10.14   | consumer    |
 | [req-rg-001](#req-rg-001)                | MUST    | 11.3.3  | registry    |
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 92** (87 MUST, 5 SHOULD).
+**Total normative statements: 94** (89 MUST, 5 SHOULD).
 
 ---
 
@@ -2835,6 +2882,7 @@ renumbering of conformance classes.
 | 0.1.3   | 2026-06-16 | Spec-citation fold for the declarable integrity policy keys. Added two governance MUSTs under a new Section 6.8 "Integrity controls": [req-pl-013] (`security.integrity.require_hashes` -- fail-closed install when a resolved non-local dependency lacks a recorded hash in `apm.lock.yaml`, or the lockfile is absent/unreadable) and [req-pl-014] (`security.audit.fail_on_drift` -- audit exits non-zero on detected or indeterminate drift). Both keys are default-off and merge by logical OR (tighten-not-relax). Added the non-normative Section 6.3.6 `security` field reference and two merge-table rows; renumbered the governance conformance trailer 6.8 -> 6.9. Statement count: 87 -> 89 (84 MUST, 5 SHOULD). NOTE: a sibling spec-citation amendment also edits the shared count sites (Section 1.3, Appendix C trailer, this revision history); whichever lands second reconciles the cumulative total and takes the union of the added Appendix C rows. |
 | 0.1.4   | 2026-06-16 | Normative addition (semver-zero `0.x` minor): added `[req-pl-015]` (Section 6.3.5, governance MUST) codifying unmanaged-artifact surfacing completeness -- a governance implementation evaluating policy over a populated primitive target tree MUST surface every file under a managed primitive target directory that is neither recorded in `apm.lock.yaml` nor matched by a configured `unmanaged_files.exclude` glob, each with its unmanaged reason and a supplemental dependency/MCP deny-conflict note where applicable; the inferred primitive type is carried where determinable and omitted otherwise; an excluded path MUST NOT be surfaced even when it also matches a deny pattern. The requirement body is structured as sub-clauses (a)/(b)/(c) so each obligation is individually citable. Added the `unmanaged_files.exclude` row to the Section 6.4 merge table (additive union, deduplicated, parent order preserved). The requirement governs reporting COMPLETENESS only; enforcement stays governed by `unmanaged_files.action`. Reconciled with the sibling 0.1.3 amendment (req-pl-013/req-pl-014): cumulative statement count 89 -> 90 (85 MUST, 5 SHOULD); Appendix C carries the union of all three new governance rows. |
 | 0.1.5   | 2026-06-20 | Spec-citation fold for the executable primitive approval gate. Added new Section 10.13 "Executable primitive approval gate" with two consumer MUSTs: [req-sc-009] (deny deployment of any hook, bin, MCP server, or canvas extension from a dependency not listed in the effective `allowExecutables` approval set when the block is present -- fail closed) and [req-sc-010] (persist interactive approval decisions user-locally, not in the project `apm.yml`, so one developer's approval cannot propagate via VCS to teammates). Added rows 11 and 12 to the Section 10.11 summary table. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 90 -> 92 (87 MUST, 5 SHOULD). |
+| 0.1.6   | 2026-06-25 | Spec-citation fold for executable trust precedence and audit fidelity. Added Section 10.14 with two consumer MUSTs: [req-sc-011] (executable trust resolves through one deny-wins precedence; an org executables.deny/deny_all overrides any project or user grant; the install gate and the audit MUST reach the identical outcome via the shared resolver) and [req-sc-012] (a required package's audit asserts lockfile presence, not executable deployment; a present-but-withheld required package satisfies the presence requirement and surfaces a distinct withheld-executable signal). Added rows 13 and 14 to the Section 10.11 summary table. Section 11.3.2 and Appendix C updated. Statement count 92 -> 94 (89 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 
