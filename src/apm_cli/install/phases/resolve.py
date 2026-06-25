@@ -358,7 +358,7 @@ def _setup_downloader(ctx: InstallContext) -> None:
 
 def _annotate_registry_dep_ref(dep_ref, registry_resolver) -> None:
     reg_res = registry_resolver.last_resolutions.get(dep_ref.get_unique_key())
-    if not reg_res:
+    if not reg_res or not reg_res.version:
         return
     dep_ref.resolved_reference = ResolvedReference(
         original_ref=dep_ref.reference or reg_res.version,
