@@ -170,6 +170,23 @@ class TestMaterializeInstallPath:
         with pytest.raises(CacheMissError, match="no resolved_commit"):
             _materialize_install_path(dep, tmp_path, tmp_path / "apm_modules", cache_only=True)
 
+    def test_registry_dep_no_commit_uses_existing_cache(self, tmp_path: Path) -> None:
+        from apm_cli.install.drift import _materialize_install_path
+
+        apm_modules = tmp_path / "apm_modules"
+        cached = apm_modules / "owner" / "repo"
+        cached.mkdir(parents=True)
+        dep = LockedDependency(
+            repo_url="owner/repo",
+            source="registry",
+            resolved_commit=None,
+            version="1.0.0",
+        )
+
+        result = _materialize_install_path(dep, tmp_path, apm_modules, cache_only=True)
+
+        assert result == cached
+
 
 # ---------------------------------------------------------------------------
 # _build_package_info

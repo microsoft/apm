@@ -413,7 +413,7 @@ def _display_registry_versions(
         sys.exit(1)
 
     if not versions:
-        logger.progress(f"No versions found for '{package}'")
+        logger.warning(f"No versions found for '{package}'. Verify the package name and registry.")
         return
 
     try:
@@ -499,7 +499,7 @@ def display_versions(
         sys.exit(1)
 
     if not refs:
-        logger.progress(f"No versions found for '{package}'")
+        logger.warning(f"No versions found for '{package}'. Verify the package name and remote.")
         return
 
     # -- render with Rich table (fallback to plain text) ---------------

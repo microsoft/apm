@@ -83,6 +83,7 @@ def test_deps_list_source_label_mapping():
     """Source labels follow host class: local, ADO, GitLab, default GitHub bucket."""
     assert _deps_list_source_label(None, is_local=True) == "local"
     assert _deps_list_source_label(None, lockfile_source="local") == "local"
+    assert _deps_list_source_label(None, lockfile_source="registry") == "registry"
     assert _deps_list_source_label("gitlab.com") == "gitlab"
     assert _deps_list_source_label("dev.azure.com") == "azure-devops"
     assert _deps_list_source_label("github.com") == "github"

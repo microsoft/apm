@@ -434,7 +434,7 @@ class TestDisplayVersions:
         ):
             display_versions("org/repo", logger)
 
-    def test_no_refs_logs_progress(self):
+    def test_no_refs_logs_warning(self):
         from apm_cli.commands.view import display_versions
 
         logger = _make_logger()
@@ -449,7 +449,7 @@ class TestDisplayVersions:
             ),
         ):
             display_versions("org/repo", logger)
-        logger.progress.assert_called()
+        logger.warning.assert_called()
 
     def test_rich_table_rendered_with_refs(self):
         from apm_cli.commands.view import display_versions

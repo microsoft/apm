@@ -424,8 +424,9 @@ class RegistryPackageResolver:
             ref = dep_ref.reference or ""
             if ref and not is_semver_range(ref):
                 msg += (
-                    f"\nHint: '{ref}' looks like a git ref, not a semver range. "
-                    f"If this package lives on GitHub, use the explicit git form:\n"
+                    f"\nHint: verify the package name and registry configuration. "
+                    f"'{ref}' also looks like a git ref, not a semver range; "
+                    f"if this package lives on GitHub, use the explicit git form:\n"
                     f"  - git: {dep_ref.repo_url}#{ref}"
                 )
             raise RegistryResolutionError(msg) from exc

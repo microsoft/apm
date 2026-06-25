@@ -1,11 +1,11 @@
 ---
 title: apm view
-description: Inspect package metadata or list remote versions
+description: Inspect package metadata or list package versions
 sidebar:
   order: 5
 ---
 
-Show local metadata for an installed package, or query remote refs without cloning.
+Show local metadata for an installed package, or query package versions without cloning.
 
 ## Synopsis
 
@@ -20,7 +20,7 @@ apm view PACKAGE [FIELD] [OPTIONS]
 `apm view` has two modes, selected by the optional `FIELD` argument:
 
 - **No field** -- read installed package metadata from `apm_modules/` (or `~/.apm/apm_modules/` with `-g`). Local-only; the package must be installed.
-- **`versions` field** -- query the remote for available tags and branches. No local install required.
+- **`versions` field** -- query available versions. Git packages list remote tags and branches without requiring a local install. Installed registry packages are detected from `apm.lock.yaml` and list registry versions instead.
 
 When `PACKAGE` matches the `NAME@MARKETPLACE` pattern, `apm view` resolves the plugin against the marketplace manifest and prints its entry (name, version, description, source, tags) instead of a Git repository view. This applies whether or not `versions` is passed.
 
@@ -36,9 +36,9 @@ Output includes: name, version, description, author, source, install path, lockf
 
 ### `apm view <package> versions`
 
-Lists remote tags and branches for the package. Calls the remote -- requires network access, and for private repositories requires `GITHUB_APM_PAT` (see [authentication](../../../consumer/authentication/)).
+Lists available versions for the package. Calls the remote -- requires network access.
 
-Output is a table with name, type (`tag` or `branch`), and short commit SHA.
+For git packages, output is a table with name, type (`tag` or `branch`), and short commit SHA. For installed registry packages, `apm view` reads the lockfile source and queries the configured registry, then prints version and published timestamp columns. Private git repositories require `GITHUB_APM_PAT`; private registries use the registry token configured for that registry (see [authentication](../../../consumer/authentication/)).
 
 ## Arguments
 
@@ -67,10 +67,16 @@ Short-name lookup (resolves against `apm_modules/`):
 apm view apm-sample-package
 ```
 
-List remote tags and branches without cloning:
+List git tags and branches without cloning:
 
 ```bash
 apm view microsoft/apm-sample-package versions
+```
+
+List registry versions for an installed registry package:
+
+```bash
+apm view acme/web-skills versions
 ```
 
 Inspect a package installed at user scope:
