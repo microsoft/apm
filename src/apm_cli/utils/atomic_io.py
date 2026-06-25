@@ -17,7 +17,7 @@ import tempfile
 from pathlib import Path
 
 
-def _to_lf(data: str) -> str:
+def normalize_crlf_to_lf(data: str) -> str:
     """Normalize CRLF to LF (leaves bare CR alone, like the drift normalizer).
 
     Mirrors :func:`apm_cli.utils.normalization._normalize_line_endings` at the
@@ -32,12 +32,12 @@ def _to_lf(data: str) -> str:
 def write_text_lf(path: Path, data: str) -> None:
     """Write ``data`` to ``path`` as UTF-8 with deterministic LF line endings.
 
-    Non-atomic counterpart to :func:`atomic_write_text`. ``newline=""`` disables
-    the platform newline translation that ``Path.write_text`` performs in text
-    mode, so the on-disk bytes (and therefore their content hash) are identical
-    on every OS.
+    Non-atomic counterpart to :func:`atomic_write_text`. Caller must ensure
+    ``path.parent`` exists. ``newline=""`` disables the platform newline
+    translation that ``Path.write_text`` performs in text mode, so the on-disk
+    bytes (and therefore their content hash) are identical on every OS.
     """
-    path.write_text(_to_lf(data), encoding="utf-8", newline="")
+    path.write_text(normalize_crlf_to_lf(data), encoding="utf-8", newline="")
 
 
 def atomic_write_text(path: Path, data: str, *, new_file_mode: int | None = None) -> None:
@@ -68,7 +68,7 @@ def atomic_write_text(path: Path, data: str, *, new_file_mode: int | None = None
         fh = os.fdopen(fd, "w", encoding="utf-8", newline="")
         fd_wrapped = True
         with fh:
-            fh.write(_to_lf(data))
+            fh.write(normalize_crlf_to_lf(data))
         os.replace(tmp_name, path)
     except Exception:
         if not fd_wrapped:
