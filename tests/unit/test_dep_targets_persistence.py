@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
 
 
@@ -78,3 +79,30 @@ def test_targets_and_skills_coexist() -> None:
         "skills": ["reviewer"],
         "targets": ["codex"],
     }
+
+
+class TestLockedDependencyTargets:
+    """Lockfile audit persistence for per-dependency targets."""
+
+    def test_targets_emitted_in_to_dict(self) -> None:
+        dep = LockedDependency(repo_url="owner/repo", target_subset=["codex"])
+
+        assert dep.to_dict()["target_subset"] == ["codex"]
+
+    def test_targets_omitted_when_empty(self) -> None:
+        dep = LockedDependency(repo_url="owner/repo")
+
+        assert "target_subset" not in dep.to_dict()
+
+    def test_from_dict_restores_targets(self) -> None:
+        dep = LockedDependency.from_dict({"repo_url": "owner/repo", "target_subset": ["codex"]})
+
+        assert dep.target_subset == ["codex"]
+
+    def test_lockfile_round_trip(self) -> None:
+        lock = LockFile()
+        lock.add_dependency(LockedDependency(repo_url="owner/repo", target_subset=["codex"]))
+
+        restored = LockFile.from_yaml(lock.to_yaml())
+
+        assert restored.dependencies["owner/repo"].target_subset == ["codex"]

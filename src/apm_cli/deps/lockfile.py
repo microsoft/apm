@@ -94,6 +94,7 @@ class LockedDependency:
     is_insecure: bool = False  # True when the locked source was http://
     allow_insecure: bool = False  # True when the manifest explicitly allowed HTTP
     skill_subset: list[str] = field(default_factory=list)  # Sorted skill names for SKILL_BUNDLE
+    target_subset: list[str] = field(default_factory=list)  # Audit-only consumer target subset
 
     # Registry resolver fields (design §6.1).
     # Populated when source == "registry"; absent otherwise. resolved_hash is
@@ -213,6 +214,8 @@ class LockedDependency:
             result["allow_insecure"] = True
         if self.skill_subset:
             result["skill_subset"] = sorted(self.skill_subset)
+        if self.target_subset:
+            result["target_subset"] = sorted(self.target_subset)
         if self.resolved_url:
             result["resolved_url"] = self.resolved_url
         if self.resolved_hash:
@@ -295,6 +298,7 @@ class LockedDependency:
             "is_insecure",
             "allow_insecure",
             "skill_subset",
+            "target_subset",
             "resolved_url",
             "resolved_hash",
             "constraint",
@@ -334,6 +338,7 @@ class LockedDependency:
             is_insecure=data.get("is_insecure", False),
             allow_insecure=data.get("allow_insecure", False),
             skill_subset=list(data.get("skill_subset") or []),
+            target_subset=list(data.get("target_subset") or []),
             resolved_url=data.get("resolved_url"),
             resolved_hash=data.get("resolved_hash"),
             constraint=data.get("constraint"),
@@ -452,6 +457,9 @@ class LockedDependency:
             skill_subset=sorted(dep_ref.skill_subset)
             if isinstance(getattr(dep_ref, "skill_subset", None), list)
             else [],
+            target_subset=sorted(dep_ref.target_subset)
+            if isinstance(getattr(dep_ref, "target_subset", None), list)
+            else [],
             resolved_url=(
                 registry_resolution.resolved_url if registry_resolution is not None else None
             ),
@@ -497,6 +505,7 @@ class LockedDependency:
             is_insecure=self.is_insecure,
             allow_insecure=self.allow_insecure,
             source=self.source,
+            target_subset=sorted(self.target_subset) if self.target_subset else None,
         )
 
 
