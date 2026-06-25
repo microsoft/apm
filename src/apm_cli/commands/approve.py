@@ -112,7 +112,7 @@ def deny_cmd(packages: tuple[str, ...]) -> None:
             _rich_success(f"Revoked approval for {matched_key}")
             removed += 1
         else:
-            _rich_warning(f"{pkg}: not found in allowExecutables")
+            _rich_warning(f"{pkg}: not found in ~/.apm/approvals.yml")
 
     if removed > 0:
         save_user_approvals(allow_exec)

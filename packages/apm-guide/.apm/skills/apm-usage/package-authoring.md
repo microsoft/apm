@@ -416,7 +416,7 @@ and are blocked unless the consumer adds the package to `allowExecutables` and r
 `apm approve <pkg>`; a
 first-party canvas in the root package deploys once the flag is on. With
 `--global`, a dependency canvas deploys to `~/.copilot/extensions/<name>/`
-(always requiring the trust flag; default `~/.copilot` only; first-party root
+(always requiring `allowExecutables` approval; default `~/.copilot` only; first-party root
 canvases are project-scope only). `apm pack` preserves `.apm/extensions/`. See
 the [canvas integration guide](../../../../../docs/src/content/docs/integrations/canvas.md).
 

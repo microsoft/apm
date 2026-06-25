@@ -493,8 +493,9 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
     if updated and updated != allow_exec:
         save_user_approvals(updated)
         if ctx.logger:
+            _new_count = sum(1 for _k in updated if _k not in allow_exec)
             ctx.logger.info(
-                "Updated ~/.apm/approvals.yml. "
+                f"Updated ~/.apm/approvals.yml ({_new_count} approved). "
                 "Run 'apm install' again to deploy approved executables.",
                 symbol="info",
             )

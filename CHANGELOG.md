@@ -22,6 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   executable surface; add an `allowExecutables: {}` block to `apm.yml` and run
   `apm approve <pkg>` to trust them. (by @sergio-sisternes-epam) (#1865)
 
+  ```diff
+  - apm install --trust-canvas-extensions   # before: per-run trust flag
+  + apm approve <pkg>                        # after: one-time, user-local approval
+  ```
+
+  CI / non-interactive pipelines that previously passed the flag should
+  instead pre-seed approvals before `apm install`, e.g.
+  `apm approve <pkg>` (writes `~/.apm/approvals.yml` directly, no prompt),
+  so the gate finds the package already trusted and never prompts.
+
 ### Fixed
 
 - `apm install <pkg>@<marketplace>` now preserves GitLab and other

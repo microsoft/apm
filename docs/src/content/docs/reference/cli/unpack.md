@@ -23,6 +23,15 @@ Extraction is **additive-only**: only files listed in the bundle's lockfile are 
 
 `BUNDLE_PATH` accepts a `.zip` archive (the default), a legacy `.tar.gz` archive, or the directory form of an unpacked bundle.
 
+:::caution[Bundles are self-contained and deploy executable surfaces directly]
+`apm unpack` materializes a complete, self-contained bundle into your
+project. Unlike `apm install`, there is no upstream `allowExecutables`
+approval prompt at unpack time -- a bundle that contains a canvas
+`extension.mjs` (executable Node.js code) deploys that file when the
+`canvas` experimental flag is enabled. Only unpack bundles from sources
+you trust, and use `--dry-run` to inspect the file list first.
+:::
+
 ## Options
 
 | Flag | Default | Description |

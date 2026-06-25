@@ -21,11 +21,14 @@ import yaml
 
 from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
+    EXEC_TYPE_CANVAS,
     EXEC_TYPE_HOOKS,
     EXEC_TYPE_MCP,
     ExecutableDeclaration,
     _is_fully_approved,
     build_approval_key,
+    effective_allow_executables,
+    filter_mcp_by_allow_executables,
     is_any_type_approved,
     is_package_approved,
     parse_allow_executables,
@@ -282,6 +285,19 @@ class TestScanPackageExecutables:
             assert decl.bin_count == 1
             assert decl.exec_types == [EXEC_TYPE_HOOKS, EXEC_TYPE_BIN]
 
+    def test_detects_canvas_extensions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ext_dir = Path(tmpdir) / ".apm" / "extensions" / "widget"
+            ext_dir.mkdir(parents=True)
+            (ext_dir / "extension.mjs").write_text("export default {};")
+            # A sibling directory without the marker is ignored.
+            (Path(tmpdir) / ".apm" / "extensions" / "nomarker").mkdir()
+
+            decl = scan_package_executables(Path(tmpdir), "canvas-pkg", "1.0")
+            assert decl.canvas_count == 1
+            assert "widget" in decl.canvas_details
+            assert EXEC_TYPE_CANVAS in decl.exec_types
+
 
 # ---------------------------------------------------------------------------
 # parse_allow_executables
@@ -518,3 +534,117 @@ class TestPromptExecutableApproval:
         decl = self._make_decl()
         result = prompt_executable_approval([decl])
         assert "pkg#1.0" not in result
+
+
+# ---------------------------------------------------------------------------
+# effective_allow_executables (project + user-local merge)
+# ---------------------------------------------------------------------------
+
+
+class TestEffectiveAllowExecutables:
+    """Tests for effective_allow_executables merge precedence."""
+
+    def test_none_project_returns_none(self) -> None:
+        # Gate disabled -> None regardless of user approvals.
+        with patch(
+            "apm_cli.security.executables.load_user_approvals",
+            return_value={"x#1.0": {"mcp": True}},
+        ):
+            assert effective_allow_executables(None) is None
+
+    def test_user_approvals_overlay_project(self) -> None:
+        project = {"a#1.0": {"mcp": True}}
+        with patch(
+            "apm_cli.security.executables.load_user_approvals",
+            return_value={"b#1.0": {"canvas": True}},
+        ):
+            merged = effective_allow_executables(project)
+        assert merged == {"a#1.0": {"mcp": True}, "b#1.0": {"canvas": True}}
+
+    def test_user_approval_wins_on_overlap(self) -> None:
+        project = {"a#1.0": {"mcp": False}}
+        with patch(
+            "apm_cli.security.executables.load_user_approvals",
+            return_value={"a#1.0": {"mcp": True}},
+        ):
+            merged = effective_allow_executables(project)
+        # User-local approval takes precedence over a stale project entry.
+        assert merged == {"a#1.0": {"mcp": True}}
+
+    def test_empty_project_plus_user(self) -> None:
+        with patch(
+            "apm_cli.security.executables.load_user_approvals",
+            return_value={"a#1.0": {"bin": True}},
+        ):
+            merged = effective_allow_executables({})
+        assert merged == {"a#1.0": {"bin": True}}
+
+
+# ---------------------------------------------------------------------------
+# filter_mcp_by_allow_executables
+# ---------------------------------------------------------------------------
+
+
+class _FakeMcpDep:
+    """Minimal stand-in for an MCP dependency exposing ``.name``."""
+
+    def __init__(self, name: str | None) -> None:
+        self.name = name
+
+
+class _RecordingLogger:
+    """Captures verbose_detail / warning calls for assertions."""
+
+    def __init__(self) -> None:
+        self.verbose: list[str] = []
+        self.warnings: list[str] = []
+
+    def verbose_detail(self, message: str, *args, **kwargs) -> None:
+        self.verbose.append(message)
+
+    def warning(self, message: str, *args, **kwargs) -> None:
+        self.warnings.append(message)
+
+
+class TestFilterMcpByAllowExecutables:
+    """Tests for filter_mcp_by_allow_executables (fail-closed gate)."""
+
+    def test_none_gate_passes_all(self) -> None:
+        deps = [_FakeMcpDep("a"), _FakeMcpDep("b")]
+        logger = _RecordingLogger()
+        assert filter_mcp_by_allow_executables(deps, None, logger) == deps
+        assert logger.warnings == []
+
+    def test_unapproved_filtered_out(self) -> None:
+        deps = [_FakeMcpDep("a")]
+        logger = _RecordingLogger()
+        with patch(
+            "apm_cli.security.executables.load_user_approvals",
+            return_value={},
+        ):
+            result = filter_mcp_by_allow_executables(deps, {}, logger)
+        assert result == []
+        assert logger.warnings  # surfaced a remediation warning
+
+    def test_approved_slug_passes(self) -> None:
+        deps = [_FakeMcpDep("a")]
+        logger = _RecordingLogger()
+        with patch(
+            "apm_cli.security.executables.load_user_approvals",
+            return_value={"a": {"mcp": True}},
+        ):
+            result = filter_mcp_by_allow_executables(deps, {}, logger)
+        assert result == deps
+        assert logger.warnings == []
+
+    def test_unnamed_dep_is_fail_closed(self) -> None:
+        # A falsy/missing name must never bypass the gate.
+        deps = [_FakeMcpDep(None), _FakeMcpDep("")]
+        logger = _RecordingLogger()
+        with patch(
+            "apm_cli.security.executables.load_user_approvals",
+            return_value={"a": {"mcp": True}},
+        ):
+            result = filter_mcp_by_allow_executables(deps, {}, logger)
+        assert result == []
+        assert logger.warnings

@@ -122,7 +122,7 @@ def is_package_approved(
             consuming project's ``apm.yml``.  ``None`` means no block
             exists (nothing approved).
         package_key: The approval key (e.g. ``owner/repo#v1.0``).
-        exec_type: One of ``hooks``, ``mcp``, ``bin``.
+        exec_type: One of ``hooks``, ``mcp``, ``bin``, ``canvas``.
 
     Returns:
         ``True`` only when the block contains a matching entry with
@@ -300,14 +300,16 @@ def prompt_executable_approval(
     Args:
         declarations: Executable declarations for packages that need
             approval (already filtered to only those with executables).
-        allow_executables: Existing ``allowExecutables`` block from
-            ``apm.yml`` (merged into result for packages already approved).
+        allow_executables: Existing approvals map (project ``apm.yml``
+            ``allowExecutables`` overlaid with user-local
+            ``~/.apm/approvals.yml``); merged into result for packages
+            already approved.
         trust_all: When True, auto-approve everything without prompting.
         no_executables: When True, deny everything without prompting.
 
     Returns:
-        Updated ``allowExecutables`` dict ready to write back to
-        ``apm.yml``.
+        Updated approvals dict ready to persist to the user-local
+        ``~/.apm/approvals.yml``.
 
     Raises:
         SystemExit: In non-interactive mode when unapproved executables
@@ -501,26 +503,38 @@ def load_user_approvals() -> dict[str, dict[str, bool]]:
     data = load_yaml(path)
     if not isinstance(data, dict):
         return {}
-    return data
+    # Defensive: a corrupt or hand-tampered approvals file must never weaken
+    # or crash the gate.  Keep only well-formed entries (str key -> dict of
+    # bool); silently drop anything malformed so the caller sees a clean map.
+    cleaned: dict[str, dict[str, bool]] = {}
+    for key, entry in data.items():
+        if (
+            isinstance(key, str)
+            and isinstance(entry, dict)
+            and all(isinstance(v, bool) for v in entry.values())
+        ):
+            cleaned[key] = entry
+    return cleaned
 
 
 def save_user_approvals(approvals: dict[str, dict[str, bool]]) -> None:
     """Persist *approvals* to ``~/.apm/approvals.yml``.
 
-    Creates ``~/.apm/`` if it does not exist.  The file is written with
-    mode ``0o600`` (owner-only) to prevent other users on a shared system
-    from reading the approval list.
+    Creates ``~/.apm/`` if it does not exist.  Both the directory (mode
+    ``0o700``) and the file (mode ``0o600``) are owner-only to prevent
+    other users on a shared system from reading the approval list.
     """
     import contextlib
+    import os
 
     from ..utils.yaml_io import dump_yaml
 
     path = get_user_approvals_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(NotImplementedError, OSError):
+        os.chmod(path.parent, 0o700)
     dump_yaml(approvals, path)
     with contextlib.suppress(NotImplementedError, OSError):
-        import os
-
         os.chmod(path, 0o600)
 
 
@@ -560,17 +574,22 @@ def filter_mcp_by_allow_executables(
     _filtered = []
     for _dep in mcp_deps:
         _slug = _dep.name
-        if _slug and not is_package_approved(_allow_execs, _slug, EXEC_TYPE_MCP):
-            logger.verbose_detail(
-                f"Skipping MCP server from '{_slug}': not approved in allowExecutables. "
-                f"Run 'apm approve {_slug}' to approve."
-            )
-        else:
+        # Fail-closed: keep a server only when it carries a name AND that name
+        # is approved.  A falsy/missing name is treated as NOT approved so an
+        # unnamed dep can never slip past the gate.
+        if _slug and is_package_approved(_allow_execs, _slug, EXEC_TYPE_MCP):
             _filtered.append(_dep)
+        else:
+            _label = _slug or "<unnamed>"
+            logger.verbose_detail(
+                f"Skipping MCP server from '{_label}': not approved in allowExecutables. "
+                f"Run 'apm approve {_label}' to approve."
+            )
     if len(_filtered) < len(mcp_deps):
         logger.warning(
             f"Filtered {len(mcp_deps) - len(_filtered)} MCP server(s) not approved "
-            "in allowExecutables."
+            "in allowExecutables. Run 'apm approve <package>' to approve.",
+            symbol="warning",
         )
     return _filtered
 
