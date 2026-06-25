@@ -15,6 +15,8 @@ from ..integration.targets import KNOWN_TARGETS
 # maps FROM .claude/ for the common case of Claude-first projects packing
 # for Copilot.  Cursor, opencode, and windsurf skills converge on the
 # shared .agents/skills/ convention rather than bespoke per-target paths.
+# Windsurf agents still collapse into .windsurf/skills/ because the target
+# has no distinct agent envelope.
 _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
     "claude": {
         ".github/skills/": ".claude/skills/",
