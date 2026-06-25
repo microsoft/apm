@@ -3346,7 +3346,7 @@ class TestIssue1007Fixes:
         assert "hooks.json" not in names, "hooks.json must not reach copilot when specific exists"
 
     def test_filter_generic_hooks_universal(self, tmp_path: Path) -> None:
-        """Generic stems (no *-<agent>-hooks suffix) pass through for ALL targets."""
+        """Generic stems pass through for all targets when no target-specific file exists."""
         generic_files = [
             tmp_path / "hooks.json",
             tmp_path / "telemetry-hooks.json",
