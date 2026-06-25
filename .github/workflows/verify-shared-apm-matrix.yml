@@ -35,6 +35,18 @@ name: Verify shared/apm.md matrix secret-stripping fix
 #            action's action.yml at that exact ref and compares. Fails if
 #            the mirror drifts (see the MAINTENANCE note in shared/apm.md).
 #
+#   D. pack-format-consumer-compat (cross-repo drift guard)
+#      Proves the `apm pack --archive` default archive format (.zip) stays
+#      inside the extension set the pinned microsoft/apm-action release
+#      detects when it scans the build dir for a bundle. Source of truth:
+#      src/apm_cli/bundle/packer.py (producer default) vs apm-action
+#      src/bundler.ts at the pinned ref (consumer detection). Fails on the
+#      'apm pack produced no bundle' outage shape -- the CLI default flipped
+#      from .tar.gz to .zip while apm-action still filtered only .tar.gz, so
+#      the GH-AW Compatibility job saw no bundle. Keep the CLI default in
+#      apm-action's detected set, or bump the pinned apm-action ref in
+#      lockstep.
+#
 # Self-contained: no real GitHub-App credentials required. The synthetic
 # PEM below is registered at runtime via ::add-mask:: which feeds the same
 # HostContext.SecretMasker that processes repo / org secrets.
@@ -45,6 +57,7 @@ on:
       - .github/workflows/shared/apm.md
       - .github/workflows/verify-shared-apm-matrix.yml
       - .github/workflows/*.lock.yml
+      - src/apm_cli/bundle/packer.py
   push:
     branches:
       - main
@@ -52,6 +65,7 @@ on:
       - .github/workflows/shared/apm.md
       - .github/workflows/verify-shared-apm-matrix.yml
       - .github/workflows/*.lock.yml
+      - src/apm_cli/bundle/packer.py
   workflow_dispatch:
 
 permissions:
@@ -380,3 +394,77 @@ jobs:
             exit 1
           fi
           echo "[OK] schema default '$schema_default' mirrors apm-action@${action_ref} -- no drift."
+
+  # =====================================================================
+  # Job set D: apm pack archive-format <-> apm-action consumer detection.
+  # Outage shape: GH-AW Compatibility job 'apm pack produced no bundle'.
+  # =====================================================================
+  d-pack-format-consumer-compat:
+    name: D. apm pack default archive format is detected by apm-action
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Producer default archive ext is in the pinned apm-action detected set
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # 'apm pack --archive' defaults to .zip (packer.py). apm-action scans
+          # the build dir for an archive bundle by filtering on a fixed
+          # extension set. When the CLI default flipped from .tar.gz to .zip
+          # but apm-action still filtered only '.tar.gz', the GH-AW
+          # Compatibility job failed with 'apm pack produced no bundle'. This
+          # guard cross-references the two repos so the producer default can
+          # never silently drift out of the set the pinned apm-action release
+          # detects.
+
+          # Producer side (source of truth in THIS repo): the default archive
+          # format 'apm pack --archive' emits when --archive-format is omitted.
+          producer_fmt=$(grep -m1 -E '^[[:space:]]*archive_format: str = "' \
+            src/apm_cli/bundle/packer.py | sed -E 's/.*= "([^"]+)".*/\1/')
+          case "$producer_fmt" in
+            zip)    producer_ext=".zip" ;;
+            tar.gz) producer_ext=".tar.gz" ;;
+            "")     echo "::error file=src/apm_cli/bundle/packer.py::could not read archive_format default"; exit 1 ;;
+            *)      echo "::error file=src/apm_cli/bundle/packer.py::unrecognized archive_format default '$producer_fmt'"; exit 1 ;;
+          esac
+          echo "producer: apm pack --archive default format = '$producer_fmt' (ext '$producer_ext')"
+
+          # Consumer side (cross-repo): read apm-action's archive-detection
+          # extension set from the ref shared/apm.md pins (the release CI runs).
+          src=.github/workflows/shared/apm.md
+          action_ref=$(grep -m1 -oE 'microsoft/apm-action@[A-Za-z0-9._-]+' "$src" | cut -d@ -f2)
+          if [ -z "$action_ref" ]; then
+            echo "::error file=$src::could not extract microsoft/apm-action ref"; exit 1
+          fi
+          bundler=$(gh api "repos/microsoft/apm-action/contents/src/bundler.ts?ref=${action_ref}" --jq '.content' | base64 -d)
+          # Consumer contract anchor: the ARCHIVE_EXTENSIONS constant lists the
+          # extensions apm-action's findBundleOrNull() accepts in archive mode
+          # (e.g. const ARCHIVE_EXTENSIONS = ['.zip', '.tar.gz']). Older releases
+          # inline the set as archives = entries.filter(e => e.endsWith('.x') ...);
+          # fall back to that shape so the guard reads both.
+          detected=$(printf '%s\n' "$bundler" \
+            | grep -E 'ARCHIVE_EXTENSIONS[[:space:]]*=[[:space:]]*\[' \
+            | grep -oE "'\.[A-Za-z.]+'" | tr -d "'" | sort -u)
+          if [ -z "$detected" ]; then
+            detected=$(printf '%s\n' "$bundler" \
+              | grep -E 'archives[[:space:]]*=[[:space:]]*entries\.filter' \
+              | grep -oE "endsWith\('\.[A-Za-z.]+'\)" \
+              | grep -oE "'\.[A-Za-z.]+'" | tr -d "'" | sort -u)
+          fi
+          if [ -z "$detected" ]; then
+            echo "::error::could not read apm-action's archive-mode extension set (ARCHIVE_EXTENSIONS constant or archives = entries.filter ... endsWith) from microsoft/apm-action@${action_ref} src/bundler.ts -- the consumer contract may have moved; update this guard"
+            exit 1
+          fi
+          echo "consumer: apm-action@${action_ref} detects archive extensions:"
+          printf '  %s\n' $detected
+
+          if printf '%s\n' "$detected" | grep -Fxq "$producer_ext"; then
+            echo "[OK] apm pack default '$producer_ext' is in apm-action@${action_ref}'s detected set -- no producer/consumer drift."
+          else
+            echo "::error file=src/apm_cli/bundle/packer.py::apm pack default archive ext '$producer_ext' is NOT detected by microsoft/apm-action@${action_ref} (detects: $(echo $detected | tr '\n' ' '))"
+            echo "::error::This is the 'apm pack produced no bundle' outage shape. Keep the CLI default in apm-action's detected set, or bump the pinned apm-action ref in $src to a release that detects '$producer_ext'."
+            exit 1
+          fi
