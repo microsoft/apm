@@ -525,7 +525,11 @@ def list(ctx, limit, verbose):  # noqa: F811
     epilog=(
         "Repeatable: pass --runtime multiple times to target several runtimes at once.\n"
         "The targets: whitelist in apm.yml is always respected; a runtime not in the\n"
-        "whitelist is skipped with a [!] warning rather than written."
+        "whitelist is skipped with a [!] warning rather than written.\n\n"
+        "Network boundary: self-defined servers (registry: false) are exported fully\n"
+        "offline. Registry-sourced servers require MCP-registry reachability to fetch\n"
+        "server invocation metadata, since resolved invocations are not stored in the\n"
+        "lockfile."
     ),
 )
 @click.option(
