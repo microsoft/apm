@@ -505,7 +505,7 @@ jobs:
       - name: Restore APM packages (all bundles)
         uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1.10.0
         with:
-          apm-version: 0.14.0
+          apm-version: 0.21.0
           bundles-file: /tmp/gh-aw/apm-bundle-list.txt
 
       - name: Checkout PR branch
@@ -1157,7 +1157,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token || secrets.GH_AW_PLUGINS_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
         with:
-          apm-version: 0.14.0
+          apm-version: 0.21.0
           archive: "true"
           dependencies: ${{ steps.list.outputs.deps }}
           isolated: "true"

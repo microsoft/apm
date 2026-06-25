@@ -172,19 +172,24 @@ import-schema:
   apm-version:
     type: string
     required: false
-    # MAINTENANCE: this default MUST mirror the apm-version default shipped
-    # by the pinned microsoft/apm-action ref used in the Pack and Restore
-    # steps below. gh-aw substitutes this value at compile time when a
-    # consumer omits apm-version, so an empty string is never forwarded to
-    # apm-action (an empty apm-version floats the action to 'latest', the
-    # opposite of the pinned default). Bump this in lockstep with the action.
-    default: '0.14.0'
+    # MAINTENANCE: this is the apm CLI version gh-aw substitutes when a
+    # consumer omits apm-version. It is forwarded to BOTH the Pack and
+    # Restore steps below, so it alone decides the produced archive format
+    # (an empty string would float apm-action to 'latest' -- never emit
+    # one). It does NOT need to equal apm-action's own apm-version default:
+    # Pack and Restore receive this one value so the CLI cannot skew between
+    # them, and apm-action restores whatever format it detects. The binding
+    # contract (verify-shared-apm-matrix Job C) is that the format THIS
+    # version produces is in the pinned apm-action's detected set. Keep it on
+    # the repo's current CLI line so the default path exercises the shipped
+    # pack format.
+    default: '0.21.0'
     description: >
       apm CLI version for apm-action to install, as a bare semver tag (e.g.
-      '0.14.0'); pass 'latest' to opt into floating to the newest release.
-      Omit to use apm-action's pinned default. Applied to both the Pack and
-      Restore apm-action steps so the CLI version cannot skew between packing
-      and restoring.
+      '0.21.0'); pass 'latest' to opt into floating to the newest release.
+      Omit to use this workflow's pinned default. Applied to both the Pack
+      and Restore apm-action steps so the CLI version cannot skew between
+      packing and restoring.
 
 jobs:
   apm-prep:

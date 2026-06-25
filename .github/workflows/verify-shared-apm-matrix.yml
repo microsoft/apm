@@ -317,14 +317,21 @@ jobs:
           echo "[OK] row kind=$ROW_KIND app_id=$ROW_APP_ID pk_sha=$got_sha matches expected."
 
   # =====================================================================
-  # Job set C: apm-version pinning (import-default fix, PR #1842).
+  # Job set C: apm-version default correctness.
+  #   1. non-opting consumer locks pin a bare-semver apm-version (no
+  #      float-to-latest) -- import-default fix, PR #1842.
+  #   2. the format that default version produces is detected by the
+  #      pinned apm-action (format-compat). This supersedes the old
+  #      version-equality guard: equality (schema default == apm-action's
+  #      own default) never caught the pack-format outage and could both
+  #      false-pass and false-fail (see step comment).
   # =====================================================================
   c-apm-version-pinning:
     name: C. apm-version default pins non-opting consumers
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Compiled consumer locks pin apm-version (no float-to-latest)
         run: |
@@ -363,7 +370,7 @@ jobs:
           fi
           echo "[OK] all ${#locks[@]} consumer lock(s) pin apm-version -- no float-to-latest path."
 
-      - name: Drift guard - schema default mirrors apm-action's pinned default
+      - name: Format-compat - the default apm-version produces a format the pinned apm-action detects
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -376,26 +383,67 @@ jobs:
             | grep -m1 '^    default:' | tr -d "\"' " | sed 's/.*default://')
           # The apm-action ref the Pack and Restore steps pin to.
           action_ref=$(grep -m1 -oE 'microsoft/apm-action@[A-Za-z0-9._-]+' "$src" | cut -d@ -f2)
-          echo "shared/apm.md schema default = '$schema_default'  (apm-action ref: $action_ref)"
           if [ -z "$schema_default" ] || [ -z "$action_ref" ]; then
             echo "::error file=$src::could not extract schema default ('$schema_default') or apm-action ref ('$action_ref')"
             exit 1
           fi
-          # Source of truth: apm-action's own apm-version input default at the
-          # pinned ref. The schema default MUST mirror it (see MAINTENANCE note).
-          action_default=$(gh api "repos/microsoft/apm-action/contents/action.yml?ref=${action_ref}" --jq '.content' \
-            | base64 -d \
-            | grep -A15 '^  apm-version:' | grep -m1 '^    default:' | tr -d "\"' " | sed 's/.*default://')
-          echo "apm-action@${action_ref} apm-version default = '$action_default'"
-          if [ -z "$action_default" ]; then
-            echo "::error::could not extract apm-version default from microsoft/apm-action@${action_ref}"
+          # The outage we guard ('apm pack produced no bundle') is a PACK
+          # FORMAT the pinned apm-action cannot detect -- NOT a version
+          # mismatch between this default and apm-action's own default. Pack
+          # and Restore both receive this one substituted value, so the CLI
+          # version cannot skew between them, and apm-action restores whatever
+          # format it detects. Version equality is therefore neither necessary
+          # nor sufficient: it false-passes when apm-action keeps an old
+          # default but drops a format, and false-fails on a harmless version
+          # diff. Assert the real contract instead -- the format THIS default
+          # emits is in apm-action's detected set (the same check Job D runs
+          # for THIS repo's CLI default).
+          if ! printf '%s' "$schema_default" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error file=$src::apm-version default '$schema_default' is not a bare semver -- the format-compat guard needs a concrete version to map to a pack format"
             exit 1
           fi
-          if [ "$schema_default" != "$action_default" ]; then
-            echo "::error file=$src::apm-version schema default '$schema_default' != apm-action@${action_ref} default '$action_default' -- bump in lockstep with the action (see MAINTENANCE note)"
+          # Version -> pack format boundary: `apm pack --archive` defaults to
+          # .zip at apm >= 0.20.0 (BREAKING #1720); earlier releases default
+          # to .tar.gz. sort -V puts the smaller version first, so the boundary
+          # sorting first means schema_default >= 0.20.0.
+          lowest=$(printf '%s\n0.20.0\n' "$schema_default" | sort -V | head -n1)
+          if [ "$lowest" = "0.20.0" ]; then
+            default_ext=".zip"
+          else
+            default_ext=".tar.gz"
+          fi
+          echo "shared/apm.md apm-version default = '$schema_default' -> emits '$default_ext'  (apm-action ref: $action_ref)"
+          # Consumer side: read apm-action's archive-detection extension set
+          # from the immutable SHA the production locks pin (mirrors Job D's
+          # read). Fall back to the tag only if the lock entry is absent.
+          lock=.github/aw/actions-lock.json
+          action_sha=$(jq -r --arg k "microsoft/apm-action@${action_ref}" '.entries[$k].sha // empty' "$lock" 2>/dev/null || true)
+          fetch_ref="${action_sha:-$action_ref}"
+          bundler=$(gh api "repos/microsoft/apm-action/contents/src/bundler.ts?ref=${fetch_ref}" --jq '.content' | base64 -d)
+          # Accept the ARCHIVE_EXTENSIONS constant or the older inline
+          # entries.filter(...endsWith...) shape, single- OR double-quoted.
+          detected=$(printf '%s\n' "$bundler" \
+            | grep -E 'ARCHIVE_EXTENSIONS[[:space:]]*=[[:space:]]*\[' \
+            | grep -oE "['\"]\.[A-Za-z.]+['\"]" | tr -d "'\"" | sort -u)
+          if [ -z "$detected" ]; then
+            detected=$(printf '%s\n' "$bundler" \
+              | grep -E 'archives[[:space:]]*=[[:space:]]*entries\.filter' \
+              | grep -oE "endsWith\(['\"]\.[A-Za-z.]+['\"]\)" \
+              | grep -oE "['\"]\.[A-Za-z.]+['\"]" | tr -d "'\"" | sort -u)
+          fi
+          if [ -z "$detected" ]; then
+            echo "::error::could not read apm-action's archive-mode extension set (ARCHIVE_EXTENSIONS or entries.filter ... endsWith) from microsoft/apm-action@${action_ref} src/bundler.ts -- the consumer contract may have moved; update this guard"
             exit 1
           fi
-          echo "[OK] schema default '$schema_default' mirrors apm-action@${action_ref} -- no drift."
+          echo "apm-action@${action_ref} (src/bundler.ts @ ${fetch_ref}) detects archive extensions:"
+          printf '  %s\n' $detected
+          if printf '%s\n' "$detected" | grep -Fxq "$default_ext"; then
+            echo "[OK] default apm-version '$schema_default' emits '$default_ext', detected by apm-action@${action_ref} -- no producer/consumer drift."
+          else
+            echo "::error file=$src::default apm-version '$schema_default' emits '$default_ext', NOT detected by microsoft/apm-action@${action_ref} (detects: $(echo $detected | tr '\n' ' '))"
+            echo "::error::This is the 'apm pack produced no bundle' outage shape. Bump the pinned apm-action ref to a release that detects '$default_ext', or set apm-version to a release whose pack format apm-action detects."
+            exit 1
+          fi
 
   # =====================================================================
   # Job set D: apm pack archive-format <-> apm-action consumer detection.
@@ -406,7 +454,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Producer default archive ext is in the pinned apm-action detected set
         env:
