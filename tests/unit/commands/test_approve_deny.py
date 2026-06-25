@@ -9,6 +9,7 @@ Covers:
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 from click.testing import CliRunner
@@ -32,6 +33,12 @@ def _write_manifest(tmpdir: str, extra: dict | None = None) -> Path:
     manifest = Path(tmpdir) / "apm.yml"
     manifest.write_text(yaml.dump(data))
     return manifest
+
+
+def _write_user_approvals(approvals_path: Path, data: dict) -> None:
+    """Write approval data to the given (mocked) user approvals file."""
+    approvals_path.parent.mkdir(parents=True, exist_ok=True)
+    approvals_path.write_text(yaml.dump(data))
 
 
 def _create_pkg_with_hooks(apm_modules: Path, name: str) -> None:
@@ -117,7 +124,9 @@ class TestApproveCmd:
             assert result.exit_code == 0
             assert "hook-pkg" in result.output
 
-    def test_approve_all(self) -> None:
+    def test_approve_all_writes_user_file(self, tmp_path: Path) -> None:
+        """apm approve --all must write to ~/.apm/approvals.yml, not project apm.yml."""
+        approvals_file = tmp_path / ".apm" / "approvals.yml"
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_manifest(".")
@@ -125,26 +134,43 @@ class TestApproveCmd:
             _create_pkg_with_hooks(apm_modules, "hook-pkg")
             _create_pkg_with_bin(apm_modules, "bin-pkg")
 
-            result = runner.invoke(approve_cmd, ["--all"])
+            with patch(
+                "apm_cli.security.executables.get_user_approvals_path",
+                return_value=approvals_file,
+            ):
+                result = runner.invoke(approve_cmd, ["--all"])
+
             assert result.exit_code == 0
             assert "Approved" in result.output
 
-            # Verify it wrote to apm.yml
+            # Verify written to user-local file, NOT project apm.yml
             from apm_cli.utils.yaml_io import load_yaml
 
-            data = load_yaml(Path("apm.yml"))
-            assert "allowExecutables" in data
+            project_data = load_yaml(Path("apm.yml"))
+            assert "allowExecutables" not in project_data
 
-    def test_approve_specific_package(self) -> None:
+            assert approvals_file.is_file()
+            user_data = load_yaml(approvals_file)
+            assert isinstance(user_data, dict)
+            assert len(user_data) > 0
+
+    def test_approve_specific_package_writes_user_file(self, tmp_path: Path) -> None:
+        approvals_file = tmp_path / ".apm" / "approvals.yml"
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_manifest(".")
             apm_modules = Path("apm_modules")
             _create_pkg_with_hooks(apm_modules, "hook-pkg")
 
-            result = runner.invoke(approve_cmd, ["hook-pkg"])
+            with patch(
+                "apm_cli.security.executables.get_user_approvals_path",
+                return_value=approvals_file,
+            ):
+                result = runner.invoke(approve_cmd, ["hook-pkg"])
+
             assert result.exit_code == 0
             assert "Approved" in result.output
+            assert approvals_file.is_file()
 
     def test_approve_unknown_package(self) -> None:
         runner = CliRunner()
@@ -165,42 +191,59 @@ class TestApproveCmd:
 class TestDenyCmd:
     """Tests for the apm deny CLI command."""
 
-    def test_deny_existing_entry(self) -> None:
+    def test_deny_existing_entry(self, tmp_path: Path) -> None:
+        """apm deny must remove from user file, not project apm.yml."""
+        approvals_file = tmp_path / ".apm" / "approvals.yml"
+        _write_user_approvals(approvals_file, {"pkg#1.0": {"hooks": True}})
+
         runner = CliRunner()
         with runner.isolated_filesystem():
-            _write_manifest(
-                ".",
-                extra={
-                    "allowExecutables": {"pkg#1.0": {"hooks": True}},
-                },
-            )
-            result = runner.invoke(deny_cmd, ["pkg#1.0"])
+            _write_manifest(".")
+
+            with patch(
+                "apm_cli.security.executables.get_user_approvals_path",
+                return_value=approvals_file,
+            ):
+                result = runner.invoke(deny_cmd, ["pkg#1.0"])
+
             assert result.exit_code == 0
             assert "Revoked" in result.output
 
             from apm_cli.utils.yaml_io import load_yaml
 
-            data = load_yaml(Path("apm.yml"))
-            ae = data.get("allowExecutables", {})
-            assert "pkg#1.0" not in ae
+            user_data = load_yaml(approvals_file) or {}
+            assert "pkg#1.0" not in user_data
 
-    def test_deny_prefix_match(self) -> None:
+    def test_deny_prefix_match(self, tmp_path: Path) -> None:
+        approvals_file = tmp_path / ".apm" / "approvals.yml"
+        _write_user_approvals(approvals_file, {"owner/repo#v1.0": {"hooks": True}})
+
         runner = CliRunner()
         with runner.isolated_filesystem():
-            _write_manifest(
-                ".",
-                extra={
-                    "allowExecutables": {"owner/repo#v1.0": {"hooks": True}},
-                },
-            )
-            result = runner.invoke(deny_cmd, ["owner/repo"])
+            _write_manifest(".")
+
+            with patch(
+                "apm_cli.security.executables.get_user_approvals_path",
+                return_value=approvals_file,
+            ):
+                result = runner.invoke(deny_cmd, ["owner/repo"])
+
             assert result.exit_code == 0
             assert "Revoked" in result.output
 
-    def test_deny_not_found(self) -> None:
+    def test_deny_not_found(self, tmp_path: Path) -> None:
+        approvals_file = tmp_path / ".apm" / "approvals.yml"
+        _write_user_approvals(approvals_file, {})
+
         runner = CliRunner()
         with runner.isolated_filesystem():
-            _write_manifest(".", extra={"allowExecutables": {}})
-            result = runner.invoke(deny_cmd, ["nonexistent"])
+            _write_manifest(".")
+
+            with patch(
+                "apm_cli.security.executables.get_user_approvals_path",
+                return_value=approvals_file,
+            ):
+                result = runner.invoke(deny_cmd, ["nonexistent"])
+
             assert result.exit_code == 0
             assert "not found" in result.output

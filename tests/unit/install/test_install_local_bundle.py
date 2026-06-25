@@ -518,13 +518,15 @@ class TestAsFlagRequiresLocalBundle:
 
 
 class TestLocalBundleCanvasTrust:
-    """A vendored bundle must not smuggle an executable canvas past the gates.
+    """A vendored bundle must not smuggle an executable canvas past the feature gate.
 
-    Both gates must hold: the ``canvas`` experimental flag (feature
-    availability) and ``--trust-canvas-extensions`` (executable-code trust).
+    The ``canvas`` experimental flag controls feature availability.
+    When ON, canvas in bundles deploys freely (no allowExecutables enforcement
+    for the deprecated ``apm unpack`` path and the local bundle path when
+    the project has no allowExecutables block).
     """
 
-    def test_canvas_blocked_without_trust(self, tmp_path, monkeypatch):
+    def test_canvas_blocked_when_feature_flag_off(self, tmp_path, monkeypatch):
         bundle = _make_bundle(
             tmp_path,
             files={
@@ -535,11 +537,12 @@ class TestLocalBundleCanvasTrust:
         project = _make_project(tmp_path)
         result = _invoke(project, monkeypatch, str(bundle), "--target", "copilot")
         assert result.exit_code == 0, result.output
-        # Agent deploys; canvas is blocked.
+        # Agent deploys; canvas is blocked (feature flag off).
         assert (project / ".github" / "agents" / "a.md").exists()
         assert not (project / ".github" / "extensions" / "widget").exists()
 
-    def test_canvas_deployed_with_trust_and_flag(self, tmp_path, monkeypatch):
+    def test_canvas_deployed_when_flag_on_no_enforcement(self, tmp_path, monkeypatch):
+        """Canvas deploys when the experimental flag is on and no allowExecutables enforcement."""
         import apm_cli.config as _conf
 
         monkeypatch.setattr(_conf, "_config_cache", {"experimental": {"canvas": True}})
@@ -557,13 +560,12 @@ class TestLocalBundleCanvasTrust:
             str(bundle),
             "--target",
             "copilot",
-            "--trust-canvas-extensions",
         )
         assert result.exit_code == 0, result.output
         assert (project / ".github" / "extensions" / "widget" / "extension.mjs").exists()
 
-    def test_canvas_blocked_when_trusted_but_flag_off(self, tmp_path, monkeypatch):
-        """Trust alone is not enough: the experimental flag must also be on."""
+    def test_canvas_blocked_when_feature_off_regardless(self, tmp_path, monkeypatch):
+        """When the experimental flag is off, canvas is always silently dropped."""
         import apm_cli.config as _conf
 
         monkeypatch.setattr(_conf, "_config_cache", {"experimental": {}})
@@ -581,13 +583,9 @@ class TestLocalBundleCanvasTrust:
             str(bundle),
             "--target",
             "copilot",
-            "--trust-canvas-extensions",
         )
         assert result.exit_code == 0, result.output
         assert (project / ".github" / "agents" / "a.md").exists()
         assert not (project / ".github" / "extensions" / "widget").exists()
-        # Flag OFF mirrors the silent CanvasIntegrator no-op: the canvas type
-        # does not exist yet, so the bundle path must not surface a
-        # trust-specific warning telling the operator to pass a flag they
-        # already passed.
+        # Flag OFF: canvas dropped silently -- no trust-specific warning in output.
         assert "trust-canvas-extensions" not in result.output

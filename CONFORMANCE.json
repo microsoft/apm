@@ -978,6 +978,28 @@
     },
     {
       "conformance_class": "consumer",
+      "id": "req-sc-009",
+      "keyword": "MUST",
+      "section": "10.13",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_deny_executable_primitive_without_allowexecutables_approval"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-010",
+      "keyword": "MUST",
+      "section": "10.13",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_persist_approvals_user_locally_not_in_project_manifest"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
       "id": "req-tg-001",
       "keyword": "MUST",
       "section": "8.4",
@@ -1024,7 +1046,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 61,
+      "active": 63,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1048,5 +1070,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 90
+  "total_requirements": 92
 }

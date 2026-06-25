@@ -53,7 +53,12 @@ class InstallContext:
     marketplace_provenance: dict[str, Any] | None = None
     parallel_downloads: int = 4
     logger: Any = None  # InstallLogger
-    target_override: str | None = None  # CLI --target value
+    target_override: str | None = None  # effective --target value (CLI or config default)
+    # Provenance label for ``target_override`` when it did NOT come from the CLI.
+    # None means an explicit CLI ``--target`` selector. When the value is
+    # populated from the configured default (``apm config target``), this is
+    # set to "apm config target" so provenance output is not misattributed.
+    target_override_source: str | None = None
     allow_insecure: bool = False
     allow_insecure_hosts: tuple[str, ...] = ()
 
@@ -63,10 +68,6 @@ class InstallContext:
     verbose: bool = False
     refresh: bool = False
     dev: bool = False
-    # --trust-canvas-extensions: opt in to deploying dependency-provided
-    # canvas extensions (executable Node code). First-party (root project .apm/)
-    # canvases deploy without this; only dependency canvases are gated.
-    trust_canvas: bool = False
     only_packages: list[str] | None = None
     protocol_pref: Any = None  # ProtocolPreference (NONE/SSH/HTTPS) for shorthand transport
     allow_protocol_fallback: bool | None = None  # None => read APM_ALLOW_PROTOCOL_FALLBACK env
