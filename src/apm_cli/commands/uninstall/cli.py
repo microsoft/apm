@@ -83,8 +83,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         logger.start(f"Uninstalling {len(packages)} package(s)...")
 
-        # Fire pre-uninstall lifecycle hooks
-        _fire_uninstall_hooks(
+        # Fire pre-uninstall lifecycle scripts
+        _fire_uninstall_scripts(
             "pre-uninstall",
             packages=packages,
             scope=scope,
@@ -294,8 +294,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         if packages_not_found:
             logger.warning(f"Note: {len(packages_not_found)} package(s) were not found in apm.yml")
 
-        # Fire post-uninstall lifecycle hooks
-        _fire_uninstall_hooks(
+        # Fire post-uninstall lifecycle scripts
+        _fire_uninstall_scripts(
             "post-uninstall",
             packages=packages_to_remove,
             scope=scope,
@@ -310,7 +310,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         sys.exit(1)
 
 
-def _fire_uninstall_hooks(
+def _fire_uninstall_scripts(
     event_name: str,
     *,
     packages,
@@ -320,15 +320,15 @@ def _fire_uninstall_hooks(
     verbose: bool,
     deploy_root,
 ) -> None:
-    """Build a hook runner and fire an uninstall lifecycle event.
+    """Build a script runner and fire an uninstall lifecycle event.
 
-    Best-effort: all exceptions are swallowed so hooks never block
+    Best-effort: all exceptions are swallowed so scripts never block
     the uninstall flow.
     """
     import contextlib
 
     with contextlib.suppress(Exception):
-        from apm_cli.core.lifecycle_hooks import (
+        from apm_cli.core.lifecycle_scripts import (
             LifecycleEvent,
             PackageInfo,
             build_runner_from_context,

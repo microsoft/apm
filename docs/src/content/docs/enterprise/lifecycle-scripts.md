@@ -1,16 +1,16 @@
 ---
-title: "Lifecycle Hooks"
+title: "Lifecycle Scripts"
 description: "Run custom actions (shell commands, HTTP webhooks) at install, update, and uninstall time."
 sidebar:
   order: 12
 ---
 
-APM supports **lifecycle hooks** -- custom actions that fire automatically
-at key moments during install, update, and uninstall operations. Hooks are
-fire-and-forget: a failing hook never blocks the CLI.
+APM supports **lifecycle scripts** -- custom actions that fire automatically
+at key moments during install, update, and uninstall operations. Scripts are
+fire-and-forget: a failing script never blocks the CLI.
 
-Hooks are defined in standalone JSON files and discovered from well-known
-directories, following the same pattern as GitHub Copilot CLI hooks.
+Scripts are defined in standalone JSON files and discovered from well-known
+directories, following the same pattern as GitHub Copilot CLI extensions.
 
 ## Supported events
 
@@ -23,14 +23,14 @@ directories, following the same pattern as GitHub Copilot CLI hooks.
 | `pre-uninstall`  | Before uninstall begins              |
 | `post-uninstall` | After a successful uninstall         |
 
-## Hook file format
+## Script file format
 
-Hook files are JSON with a versioned schema:
+Script files are JSON with a versioned schema:
 
 ```json
 {
   "version": 1,
-  "hooks": {
+  "scripts": {
     "post-install": [
       {
         "type": "command",
@@ -48,7 +48,7 @@ Hook files are JSON with a versioned schema:
 }
 ```
 
-## Hook types
+## Script types
 
 ### Command
 
@@ -98,21 +98,21 @@ Security:
 
 ## Discovery locations
 
-Hook files are loaded from three directories. All files are **additive** --
-every hook from every file runs. Policy hooks cannot be disabled.
+Script files are loaded from three directories. All files are **additive** --
+every script from every file runs. Policy scripts cannot be disabled.
 
 | Priority     | Path                        | Who controls     |
 |--------------|-----------------------------|------------------|
 | 1 (highest)  | `/etc/apm/policy.d/*.json`  | Platform/IT team |
-| 2            | `~/.apm/hooks/*.json`       | Individual user  |
-| 3            | `.apm/hooks.json`           | Project          |
+| 2            | `~/.apm/scripts/*.json`     | Individual user  |
+| 3            | `.apm/scripts.json`         | Project          |
 
 Policy and user sources are directories (all `*.json` files are loaded).
 The project source is a single file.
 
 ## Event payload
 
-Command hooks receive JSON on **stdin**. HTTP hooks receive it as the
+Command scripts receive JSON on **stdin**. HTTP scripts receive it as the
 POST body.
 
 ```json
@@ -129,9 +129,35 @@ POST body.
 }
 ```
 
+## Trust model
+
+Lifecycle scripts from different sources are subject to different trust rules:
+
+- **Policy scripts** (`/etc/apm/policy.d/*.json`) -- controlled by your
+  platform/IT team. Run without any consent gate; they cannot be disabled
+  by the developer.
+- **User scripts** (`~/.apm/scripts/*.json`) -- controlled by the developer.
+  Run without a gate.
+- **Project scripts** (`.apm/scripts.json`) -- committed in the repository.
+  **Skipped by default.** Cloning an untrusted repo and running `apm install`
+  would otherwise execute attacker-controlled shell commands. Trust is
+  explicit, file-content-bound, and revocable:
+  - Run `apm scripts trust` to record trust for the current file contents.
+  - Any edit to `.apm/scripts.json` revokes trust and requires re-approval.
+  - Run `apm scripts untrust` to revoke without editing the file.
+
+Two environment-level kill-switches are also available:
+
+- `APM_NO_SCRIPTS=1` -- disables all lifecycle scripts for one run. Useful
+  in CI and untrusted clone environments.
+- Org policy `executables.deny_all: true` -- when set in `apm-policy.yml`,
+  suppresses all lifecycle scripts as a one-directional safety ceiling. An
+  org that has locked down all executable primitives will also have lifecycle
+  scripts suppressed automatically.
+
 ## Analytics use case
 
-The canonical use case for lifecycle hooks is installation analytics.
+The canonical use case for lifecycle scripts is installation analytics.
 An enterprise platform team can deploy an org-wide webhook via the
 policy directory to track which packages are actively used:
 
@@ -140,7 +166,7 @@ Create `/etc/apm/policy.d/analytics.json`:
 ```json
 {
   "version": 1,
-  "hooks": {
+  "scripts": {
     "post-install": [
       {
         "type": "http",
@@ -172,20 +198,20 @@ trends -- without any changes to individual project configurations.
 
 ## Security considerations
 
-- HTTP hook URLs must use `https://`.
-- Tokens are never stored in hook files -- use env-var expansion in headers.
-- All hooks are fire-and-forget with configurable timeouts (10s for HTTP,
+- HTTP script URLs must use `https://`.
+- Tokens are never stored in script files -- use env-var expansion in headers.
+- All scripts are fire-and-forget with configurable timeouts (10s for HTTP,
   30s for commands by default).
-- Hook failures are logged in verbose mode (`--verbose`) and never
+- Script failures are logged in verbose mode (`--verbose`) and never
   block the CLI.
 
-## Hook output log
+## Script output log
 
-Hook stdout, stderr, and execution status are appended to a log file at
-`~/.apm/logs/hooks.log` (or `$APM_HOME/logs/hooks.log`). This lets
-administrators audit hook behaviour without enabling verbose CLI output.
+Script stdout, stderr, and execution status are appended to a log file at
+`~/.apm/logs/scripts.log` (or `$APM_HOME/logs/scripts.log`). This lets
+administrators audit script behaviour without enabling verbose CLI output.
 
-Each entry includes a UTC timestamp, event name, hook type, target
+Each entry includes a UTC timestamp, event name, script type, target
 command or URL, status, exit code (for commands), and any captured output:
 
 ```
@@ -196,50 +222,62 @@ command or URL, status, exit code (for commands), and any captured output:
   stdout: HTTP 200
 ```
 
-The log file is created automatically on first hook execution.
+The log file is created automatically on first script execution.
 
 ## CLI commands
 
-APM provides three commands to work with lifecycle hooks:
+APM provides commands to work with lifecycle scripts:
 
-### ``apm hooks`` -- list discovered hooks
+### ``apm scripts`` -- list discovered scripts
 
-Run without a sub-command to see all hooks discovered from policy, user,
+Run without a sub-command to see all scripts discovered from policy, user,
 and project directories:
 
 ```bash
-apm hooks
+apm scripts
 ```
 
-### ``apm hooks init`` -- scaffold a starter hook file
+### ``apm scripts init`` -- scaffold a starter script file
 
-Generate a starter JSON hook file at ``.apm/hooks.json``:
+Generate a starter JSON script file at ``.apm/scripts.json``:
 
 ```bash
-apm hooks init            # creates .apm/hooks.json
-apm hooks init --force    # overwrite existing file
+apm scripts init            # creates .apm/scripts.json
+apm scripts init --force    # overwrite existing file
 ```
 
-### ``apm hooks validate`` -- check hook files for errors
+### ``apm scripts validate`` -- check script files for errors
 
-Validate all discovered hook files across policy, user, and project
+Validate all discovered script files across policy, user, and project
 directories. Reports schema errors, unknown events, missing fields, and
 non-HTTPS URLs:
 
 ```bash
-apm hooks validate
+apm scripts validate
 ```
 
 Exits with a non-zero code if any errors are found.
 
-### ``apm hooks test`` -- dry-run a synthetic event
+### ``apm scripts test`` -- dry-run a synthetic event
 
-Fire a synthetic event through all discovered hooks to verify wiring
+Fire a synthetic event through all discovered scripts to verify wiring
 without performing a real install/update/uninstall:
 
 ```bash
-apm hooks test                    # fires post-install (default)
-apm hooks test pre-uninstall      # fires a specific event
+apm scripts test                    # fires post-install (default)
+apm scripts test pre-uninstall      # fires a specific event
 ```
 
-Hook output is written to ``~/.apm/logs/hooks.log`` as usual.
+Script output is written to ``~/.apm/logs/scripts.log`` as usual.
+
+### ``apm scripts trust`` -- trust the project script file
+
+```bash
+apm scripts trust    # trusts .apm/scripts.json at its current contents
+```
+
+### ``apm scripts untrust`` -- revoke trust for the project script file
+
+```bash
+apm scripts untrust  # revokes trust; project scripts will no longer run
+```

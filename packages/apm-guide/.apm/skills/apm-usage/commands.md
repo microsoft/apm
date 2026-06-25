@@ -87,16 +87,16 @@ When `apm install --target copilot` has already deployed instructions to `.githu
 
 **External scanners (experimental, behind `apm experimental enable external-scanners`).** `--external NAME` runs a third-party SARIF scanner (e.g. `skillspector`) and merges its findings. `--external-llm/--no-external-llm` toggles LLM-powered analysis (default off; sends scanned content to a third-party API, so APM prints a `[!]` egress banner and forwards `OPENAI_API_KEY`/`NVIDIA_INFERENCE_KEY` only when on). `--external-args TEXT` is a single shlex-split string of extra scanner flags, validated against a per-adapter allowlist -- non-allowlisted flags, secret-looking flags, and out-of-cwd paths are rejected fail-closed. `--external-llm`/`--external-args` without `--external` is a usage error (exit 2). Scanner configuration or infrastructure errors (feature disabled, scanner not found, malformed SARIF) exit **3**. Persist defaults with `apm config set external.<name>.llm true` and `apm config set external.<name>.args -- "--model gpt-4o"`. Precedence: CLI > config > policy floor.
 
-## Lifecycle hooks
+## Lifecycle scripts
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm hooks` | List all discovered lifecycle hooks across policy, user, and project sources | -- |
-| `apm hooks init` | Scaffold a starter `.apm/hooks.json` file in the current project | `--force` (overwrite existing file) |
-| `apm hooks test EVENT` | Fire a synthetic event through all discovered hooks (dry-run) | `--verbose` |
-| `apm hooks validate` | Check all discovered hook files for schema errors, unknown events, missing fields, and non-HTTPS URLs | -- |
+| `apm scripts` | List all discovered lifecycle scripts across policy, user, and project sources | -- |
+| `apm scripts init` | Scaffold a starter `.apm/scripts.json` file in the current project | `--force` (overwrite existing file) |
+| `apm scripts test EVENT` | Fire a synthetic event through all discovered scripts (dry-run) | `--verbose` |
+| `apm scripts validate` | Check all discovered script files for schema errors, unknown events, missing fields, and non-HTTPS URLs | -- |
 
-Lifecycle hooks fire on six events: `pre-install`, `post-install`, `pre-update`, `post-update`, `pre-uninstall`, `post-uninstall`. Hook files are standalone JSON discovered from three sources (additive): policy (`/etc/apm/policy.d/*.json`), user (`~/.apm/hooks/*.json`), project (`.apm/hooks.json`). Two hook types: `command` (shell via subprocess, event JSON on stdin) and `http` (HTTPS POST). Hook output is appended to `~/.apm/logs/hooks.log`. See the [Lifecycle hooks](/apm/enterprise/lifecycle-hooks/) guide for full documentation.
+Lifecycle scripts fire on six events: `pre-install`, `post-install`, `pre-update`, `post-update`, `pre-uninstall`, `post-uninstall`. Script files are standalone JSON discovered from three sources (additive): policy (`/etc/apm/policy.d/*.json`), user (`~/.apm/scripts/*.json`), project (`.apm/scripts.json`). Two script types: `command` (shell via subprocess, event JSON on stdin) and `http` (HTTPS POST). Script output is appended to `~/.apm/logs/scripts.log`. See the [Lifecycle scripts](/apm/enterprise/lifecycle-scripts/) guide for full documentation.
 
 ## Distribution
 

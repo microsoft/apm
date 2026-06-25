@@ -528,8 +528,8 @@ def _run_dep_update(
         return _confirm_plan_application()
 
     try:
-        # Fire pre-update lifecycle hooks
-        _fire_update_hooks(
+        # Fire pre-update lifecycle scripts
+        _fire_update_scripts(
             "pre-update",
             apm_package=staged_apm_package,
             scope=scope,
@@ -603,8 +603,8 @@ def _run_dep_update(
         else:
             _rich_success("No dependency changes were applied.")
 
-        # Fire post-update lifecycle hooks
-        _fire_update_hooks(
+        # Fire post-update lifecycle scripts
+        _fire_update_scripts(
             "post-update",
             apm_package=staged_apm_package,
             scope=scope,
@@ -613,7 +613,7 @@ def _run_dep_update(
         )
 
 
-def _fire_update_hooks(
+def _fire_update_scripts(
     event_name: str,
     *,
     apm_package: Any,
@@ -621,15 +621,15 @@ def _fire_update_hooks(
     logger: CommandLogger | None,
     verbose: bool,
 ) -> None:
-    """Build a hook runner and fire an update lifecycle event.
+    """Build a script runner and fire an update lifecycle event.
 
-    Best-effort: all exceptions are swallowed so hooks never block
+    Best-effort: all exceptions are swallowed so scripts never block
     the update flow.
     """
     import contextlib
 
     with contextlib.suppress(Exception):
-        from apm_cli.core.lifecycle_hooks import (
+        from apm_cli.core.lifecycle_scripts import (
             LifecycleEvent,
             PackageInfo,
             build_runner_from_context,
