@@ -13,6 +13,7 @@ from collections.abc import Iterable
 
 import click
 
+from ..deps.lockfile import LockedDependency
 from ..deps.outdated_row import OutdatedRow
 from ..deps.revision_pins import (
     RevisionPinResolutionError,
@@ -50,10 +51,16 @@ def _strip_v(ref: str) -> str:
     return ref[1:] if ref and ref.startswith("v") else (ref or "")
 
 
-def _package_basename(dep) -> str:
+def _package_basename(dep: LockedDependency) -> str:
     """Return the display name used in ``{name}`` tag patterns."""
     if dep.marketplace_plugin_name:
         return dep.marketplace_plugin_name
+    # For virtual subdirectory packages, derive the name from the virtual path
+    # (e.g. "packages/agent-dev-workflow" -> "agent-dev-workflow").
+    if dep.is_virtual and dep.virtual_path:
+        dep_ref = dep.to_dependency_ref()
+        if dep_ref.is_virtual_subdirectory():
+            return dep.virtual_path.rstrip("/").rsplit("/", 1)[-1]
     repo = dep.repo_url or ""
     if not repo:
         return ""

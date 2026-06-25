@@ -908,6 +908,51 @@ class TestOutdatedCommand:
             # Remote refs were fetched -- virtual deps are NOT silently skipped
             mock_downloader.list_remote_refs.assert_called_once()
 
+    @patch(_PATCH_AUTH)
+    @patch(_PATCH_DOWNLOADER)
+    @patch(_PATCH_MIGRATE)
+    @patch(_PATCH_GET_LOCKFILE_PATH)
+    @patch(_PATCH_GET_APM_DIR)
+    @patch(_PATCH_LOCKFILE)
+    def test_monorepo_virtual_subdir_tag_pattern_recognized(
+        self,
+        mock_lf_cls,
+        mock_get_apm_dir,
+        mock_get_path,
+        mock_migrate,
+        mock_dl_cls,
+        mock_auth,
+    ):
+        """Monorepo tags using virtual-path basename are parsed, not marked unknown."""
+        with self._chdir_tmp() as tmp:
+            mock_get_apm_dir.return_value = tmp
+            mock_get_path.return_value = tmp / "apm.lock.yaml"
+
+            virtual_dep = LockedDependency(
+                repo_url="org/monorepo",
+                resolved_ref="agent-dev-workflow_v0.0.20260624",
+                resolved_commit="d2b0ad19fd792cbb12e0f653b65607b8f9c95d4e",
+                is_virtual=True,
+                virtual_path="packages/agent-dev-workflow",
+            )
+            deps = {"org/monorepo/packages/agent-dev-workflow": virtual_dep}
+            mock_lf_cls.read.return_value = _make_lockfile(deps)
+
+            mock_downloader = MagicMock()
+            mock_downloader.list_remote_refs.return_value = [
+                _remote_tag("agent-dev-workflow_v0.0.20260624"),
+                _remote_tag("agent-dev-workflow_v0.0.20260625"),
+            ]
+            mock_dl_cls.return_value = mock_downloader
+
+            result = self.runner.invoke(cli, ["outdated"])
+
+            assert result.exit_code == 0
+            assert "unknown" not in result.output.lower()
+            assert "outdated" in result.output.lower()
+            # Latest tag is shown (may be truncated in narrow tables)
+            assert "agent-dev-" in result.output
+
     # --- Dev dependency visibility ---
 
     @patch(_PATCH_AUTH)
