@@ -490,7 +490,7 @@ def get(key):
 
             value = get_install_target()
             if value is None:
-                click.echo("target: Not set")
+                click.echo("target: Not set (using auto-detection)")
             else:
                 click.echo(f"target: {_render_target_value(value)}")
             return
@@ -648,7 +648,7 @@ def unset(key):
         from ..config import unset_install_target
 
         unset_install_target()
-        logger.success("Default install target removed")
+        logger.success("Default install target removed (will fall back to auto-detection)")
         return
 
     if key == "mcp-registry-url":

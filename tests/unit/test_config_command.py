@@ -299,7 +299,7 @@ class TestConfigGet:
         with patch("apm_cli.config.get_install_target", return_value=None):
             result = self.runner.invoke(config, ["get", "target"])
         assert result.exit_code == 0
-        assert "target: Not set" in result.output
+        assert "target: Not set (using auto-detection)" in result.output
 
 
 class TestAutoIntegrateFunctions:
