@@ -191,7 +191,7 @@ first-match-wins ladder:
 
 A package listed only in org `enforce` (the v2 mandate tier) collapses into
 rung 6: it resolves as allowed-but-user-overridable, and `apm policy explain`
-labels its deciding layer `enforce-degraded` to make the v1 degrade explicit.
+labels its deciding layer `org-enforce-degraded` to make the v1 degrade explicit.
 
 The project layer is `apm.yml` `executables.{allow,deny}` (committed, via
 `apm approve` / `apm deny`); the user layer is `~/.apm/config.json`

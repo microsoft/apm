@@ -84,8 +84,9 @@ To gate on rule violations rather than resolvability, use
 
 Explain the effective executable-trust decision for a single installed
 package. For each executable type the package declares, it prints whether
-that primitive is allowed, the deciding precedence layer (`org`, `project`,
-or `user`), and any lower-authority layers that decision shadowed. This is
+that primitive is allowed, the deciding precedence layer (a compound
+label such as `org-deny`, `project-allow`, or `default-deny`), and any
+lower-authority layers that decision shadowed. This is
 the per-package companion to `apm policy status` (the policy-chain view) and
 the fleet-level executable-trust drift check in `apm doctor`.
 
@@ -100,8 +101,8 @@ apm policy explain PACKAGE
 The effective decision follows the deny-wins precedence: an organization
 `executables.deny` / `deny_all` is the ceiling no project or user grant can
 widen. See [Executable approval](../approve/) for the trust model and
-[Policy reference](../../../enterprise/policy-reference/) for the
-`apm-policy.yml` schema.
+[apm-policy.yml schema](../policy-schema/#executables) for the
+`executables` ceiling.
 
 ## Examples
 
