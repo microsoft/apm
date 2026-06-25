@@ -13,39 +13,9 @@ This is the Template Method companion to the Strategy pattern in
 
 from __future__ import annotations
 
-import contextlib
-
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.install.sources import DependencySource, Materialization
-
-_EFFECTIVE_ALLOW_UNSET = object()
-
-
-def _effective_allow(ctx) -> dict | None:
-    """Return the effective allowExecutables map for the install context.
-
-    Reads the gate opt-in signal from the project ``apm.yml`` via
-    ``ctx.apm_package.allow_executables`` and merges it with the
-    user-local approvals from ``~/.apm/approvals.yml``.  Returns
-    ``None`` when the gate is disabled (backward-compatible behaviour).
-
-    The merged map is memoized on ``ctx`` for the duration of the install
-    run: it is read once per dependency during materialization and the
-    approvals file does not change mid-run, so re-reading it per dep is
-    pure overhead.
-    """
-    cached = getattr(ctx, "_effective_allow_cache", _EFFECTIVE_ALLOW_UNSET)
-    if cached is not _EFFECTIVE_ALLOW_UNSET:
-        return cached
-
-    from apm_cli.security.executables import effective_allow_executables
-
-    project_val = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
-    result = effective_allow_executables(project_val)
-    with contextlib.suppress(Exception):
-        ctx._effective_allow_cache = result
-    return result
 
 
 def _effective_allow(ctx) -> dict | None:
