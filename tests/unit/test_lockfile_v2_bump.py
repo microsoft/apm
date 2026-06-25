@@ -306,3 +306,41 @@ class TestToDependencyRefRestoresSource:
         ref = locked.to_dependency_ref()
         assert ref.source == "local"
         assert ref.is_local
+
+
+# ---------------------------------------------------------------------------
+# Issue #1888 (d): no v2 bump for name-carrying deps
+# ---------------------------------------------------------------------------
+
+
+class TestNoBumpForPkgMetadata:
+    """Test (d): a lockfile whose only new content is name-carrying git deps
+    must NOT be promoted to lockfile_version "2".
+    """
+
+    def test_git_dep_with_name_and_version_stays_v1(self):
+        lock = LockFile()
+        lock.add_dependency(_git_dep(name="foo-package", version="1.0.0"))
+        assert lock.lockfile_version == "1"
+        yaml_out = lock.to_yaml()
+        assert "lockfile_version: '1'" in yaml_out
+
+    def test_local_dep_with_name_stays_v1(self):
+        lock = LockFile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="_local/x",
+                source="local",
+                local_path="./local/x",
+                name="local-pkg",
+                version="0.1.0",
+            )
+        )
+        assert lock.lockfile_version == "1"
+
+    def test_name_in_yaml_output_for_git_dep(self):
+        lock = LockFile()
+        lock.add_dependency(_git_dep(name="foo-package"))
+        yaml_out = lock.to_yaml()
+        assert "name: foo-package" in yaml_out
+        assert "lockfile_version: '1'" in yaml_out

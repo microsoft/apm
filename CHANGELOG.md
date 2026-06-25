@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Azure DevOps marketplace metadata now resolves through the Azure DevOps
+  Items API instead of cloning the whole repo, with transparent fallback to
+  the existing git path when REST is unavailable. (by @Aaryan-Dadu; closes
+  #1808) (#1852)
 - Executable-trust vocabulary is unified onto one noun, `executables`.
   `apm approve` / `apm deny` now default to the project `apm.yml`
   `executables: {allow, deny}` block (the committed, team-wide admin
@@ -102,6 +106,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm update` no longer shows a spurious update for registry semver deps already at the latest matching version. (#1897)
+- APM-written deployed text files now use LF line endings on every platform,
+  so identical content no longer produces different
+  `local_deployed_file_hashes` / `deployed_file_hashes` between Windows and
+  Linux (which previously churned the lockfile across machines and CI).
 - `apm install <pkg>@<marketplace>` now preserves GitLab and other
   non-GitHub hosts from url-type marketplace plugin sources, so auth
   resolution no longer falls back to `github.com` for those installs.

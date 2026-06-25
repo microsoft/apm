@@ -627,6 +627,65 @@ def build_ado_api_url(
     )
 
 
+def parse_ado_repo_url(url: str | None) -> tuple[str, str, str] | None:
+    """Decompose an Azure DevOps repo URL into ``(org, project, repo)``.
+
+    Inverse of :func:`build_ado_https_clone_url` -- accepts the standard
+    ``_git`` clone shape on both ADO hostnames:
+
+    - ``https://dev.azure.com/{org}/{project}/_git/{repo}`` (org in path)
+    - ``https://{org}.visualstudio.com/{project}/_git/{repo}`` (org in subdomain)
+
+    A trailing ``.git`` and any segments after ``{repo}`` (virtual sub-paths)
+    are ignored. Path segments are percent-decoded so an encoded project name
+    (e.g. ``my%20project``) round-trips; callers that rebuild a URL (e.g.
+    :func:`build_ado_api_url`) re-encode as needed.
+
+    Returns ``None`` when *url* is not an ADO host or does not contain the
+    ``_git`` marker, so callers can fall back to a generic code path rather
+    than guessing at a malformed decomposition.
+    """
+    if not url:
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return None
+    hostname = parsed.hostname or ""
+    if not is_azure_devops_hostname(hostname):
+        return None
+
+    path = parsed.path.strip("/")
+    if path.endswith(".git"):
+        path = path[: -len(".git")]
+    segments = [urllib.parse.unquote(s) for s in path.split("/") if s]
+    if "_git" not in segments:
+        return None
+    git_idx = segments.index("_git")
+    # repo is the segment immediately after the ``_git`` marker.
+    if git_idx + 1 >= len(segments):
+        return None
+    repo = segments[git_idx + 1]
+    before = segments[:git_idx]
+
+    if is_visualstudio_legacy_hostname(hostname):
+        # Legacy ``*.visualstudio.com``: org lives in the subdomain, the path
+        # before ``_git`` is just the project.
+        org = hostname.split(".")[0]
+        if len(before) < 1:
+            return None
+        project = before[-1]
+    else:
+        # ``dev.azure.com``: org and project both precede ``_git``.
+        if len(before) < 2:
+            return None
+        org, project = before[0], before[1]
+
+    if not (org and project and repo):
+        return None
+    return org, project, repo
+
+
 def is_artifactory_path(path_segments: list) -> bool:
     """Return True if path segments indicate a JFrog Artifactory VCS repository.
 
