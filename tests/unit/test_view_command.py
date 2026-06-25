@@ -218,6 +218,23 @@ class TestViewCommand(_InfoCmdBase):
         assert result.exit_code == 0
         assert "main" in result.output
 
+    def test_view_versions_routes_registry_dep_to_registry_api(self):
+        """display_versions delegates to the registry API for a lockfile-confirmed registry dep."""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch(
+                    "apm_cli.commands.view._lookup_lockfile_ref",
+                    return_value=("^1.0.0", "", "registry"),
+                ),
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                result = self.runner.invoke(cli, ["view", "myorg/myrepo", "versions"])
+        assert result.exit_code == 0
+        mock_reg.assert_called_once()
+        mock_gh.return_value.list_remote_refs.assert_not_called()
+
     # -- invalid field ----------------------------------------------------
 
     def test_view_invalid_field(self):

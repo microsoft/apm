@@ -89,7 +89,7 @@ def resolve_package_path(
     sys.exit(1)
 
 
-def _lookup_lockfile_ref(package: str, project_root: Path):
+def _lookup_lockfile_ref(package: str, project_root: Path) -> tuple[str, str, str]:
     """Return (ref, commit, source) from the lockfile for *package*, or ("", "", "")."""
     try:
         from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
@@ -429,7 +429,7 @@ def _display_registry_versions(
         table.add_column("Version", style="bold white")
         table.add_column("Published", style="dim white")
 
-        for entry in sorted(versions, key=lambda e: e.version):
+        for entry in versions:
             table.add_row(entry.version, entry.published_at)
 
         console.print(table)
@@ -439,11 +439,15 @@ def _display_registry_versions(
         click.echo("-" * 50)
         click.echo(f"{'Version':<20} {'Published':<30}")
         click.echo("-" * 50)
-        for entry in sorted(versions, key=lambda e: e.version):
+        for entry in versions:
             click.echo(f"{entry.version:<20} {entry.published_at:<30}")
 
 
-def display_versions(package: str, logger: CommandLogger) -> None:
+def display_versions(
+    package: str,
+    logger: CommandLogger,
+    project_root: Path | None = None,
+) -> None:
     """Query and display available remote versions (tags/branches).
 
     This is a purely remote operation -- it does NOT require the package
@@ -455,6 +459,10 @@ def display_versions(package: str, logger: CommandLogger) -> None:
     When *package* matches the ``NAME@MARKETPLACE`` pattern, the
     marketplace manifest is fetched instead and the plugin's marketplace
     metadata is displayed.
+
+    *project_root* is used only to detect registry deps via the lockfile.
+    Pass ``None`` (e.g. for ``--global``) to skip lockfile detection and
+    go straight to the git path.
     """
     # -- Marketplace path: NAME@MARKETPLACE --
     from ..marketplace.resolver import parse_marketplace_ref
@@ -473,10 +481,15 @@ def display_versions(package: str, logger: CommandLogger) -> None:
         sys.exit(1)
 
     # Detect registry dep via lockfile and route to registry API.
-    _, _, _locked_source = _lookup_lockfile_ref(package, Path("."))
-    if _locked_source == "registry":
-        _display_registry_versions(package, dep_ref, logger)
-        return
+    # Only consult the lockfile when we have a project root with an apm.yml;
+    # this prevents mis-routing when the user is outside an APM project or
+    # running with --global (project_root=None).
+    _pr = project_root if project_root is not None else Path(".")
+    if (_pr / "apm.yml").is_file():
+        _, _, _locked_source = _lookup_lockfile_ref(package, _pr)
+        if _locked_source == "registry":
+            _display_registry_versions(package, dep_ref, logger)
+            return
 
     try:
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
@@ -572,7 +585,7 @@ def view(package: str, field: str | None, global_: bool):
             sys.exit(1)
 
         if field == "versions":
-            display_versions(package, logger)
+            display_versions(package, logger, project_root=None if global_ else Path("."))
             return
 
     # --- marketplace ref without explicit field -> show versions ---
