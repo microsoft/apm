@@ -342,7 +342,7 @@ def _display_registry_versions(
     logger: CommandLogger,
 ) -> None:
     """List available versions from the configured registry for a registry dep."""
-    from ..deps.registry.auth import make_auth_context
+    from ..deps.registry.auth import resolve_for_url
     from ..deps.registry.client import RegistryClient, RegistryError
     from ..deps.registry.config_loader import resolve_effective_registries
 
@@ -354,6 +354,7 @@ def _display_registry_versions(
     owner = "/".join(parts[:-1]) if len(parts) > 2 else parts[0]
     repo = parts[-1]
 
+    # Build the merged registries map (config.json + ~/.apm/apm.yml + project).
     project_registries = None
     project_default = None
     try:
@@ -368,16 +369,43 @@ def _display_registry_versions(
         pass
 
     registries, default_registry = resolve_effective_registries(project_registries, project_default)
-    if not registries or not default_registry:
-        logger.error(f"No registry configured; cannot list versions for '{package}'")
-        sys.exit(1)
-    registry_url = registries.get(default_registry)
-    if not registry_url:
-        logger.error(f"Registry '{default_registry}' has no URL configured")
-        sys.exit(1)
+    if registries is None:
+        registries = {}
+
+    # Prefer resolved_url from lockfile: it names the exact registry used for
+    # this dep and works for non-default registries without any extra lookup.
+    registry_url = None
+    try:
+        from ..deps.lockfile import LockFile, get_lockfile_path
+
+        lf_path = get_lockfile_path(Path("."))
+        lf = LockFile.read(lf_path)
+        if lf:
+            locked = lf.dependencies.get(package)
+            if locked is None:
+                for key, d in lf.dependencies.items():
+                    if package in key or key.endswith(f"/{package}"):
+                        locked = d
+                        break
+            if locked and locked.resolved_url:
+                sep = "/v1/packages/"
+                idx = locked.resolved_url.find(sep)
+                if idx != -1:
+                    registry_url = locked.resolved_url[:idx]
+    except Exception:
+        pass
+
+    if registry_url is None:
+        if not default_registry:
+            logger.error(f"No registry configured; cannot list versions for '{package}'")
+            sys.exit(1)
+        registry_url = registries.get(default_registry) if registries else None
+        if not registry_url:
+            logger.error(f"Registry '{default_registry}' has no URL configured")
+            sys.exit(1)
 
     try:
-        auth = make_auth_context(default_registry)
+        auth = resolve_for_url(registry_url, registries or {})
         client = RegistryClient(registry_url, auth)
         versions = client.list_versions(owner, repo)
     except RegistryError as exc:
