@@ -681,7 +681,7 @@ class TestLockedDependencyPkgMetadata:
             name="some-pkg",
         )
         ref = locked.to_dependency_ref()
-        assert not hasattr(ref, "name") or getattr(ref, "name", None) != "some-pkg"
+        assert not hasattr(ref, "name")
 
 
 class TestFromInstalledPackagesPkgMetadata:
