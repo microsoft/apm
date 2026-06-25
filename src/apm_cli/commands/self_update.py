@@ -237,6 +237,12 @@ def self_update(check):
                 logger.info(
                     "Check the mirror URL, publish latest.json, or set VERSION to a pinned release."
                 )
+            elif _channel == "prerelease":
+                logger.error("Unable to fetch a prerelease version from remote")
+                logger.info(
+                    "No prerelease was found or the lookup failed; switch to stable with "
+                    "apm config set self-update.channel stable."
+                )
             else:
                 logger.error("Unable to fetch latest version from remote")
                 logger.info("Check your internet connection or try again later.")

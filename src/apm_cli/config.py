@@ -282,6 +282,9 @@ def set_self_update_install_dir(path: str) -> str:
     if not stripped:
         raise ValueError("self-update.install-dir must not be empty")
     resolved = os.path.abspath(os.path.expanduser(stripped))
+    from .utils.path_security import validate_path_segments
+
+    validate_path_segments(resolved, context="self-update.install-dir")
     update_config({_SELF_UPDATE_INSTALL_DIR_KEY: resolved})
     return resolved
 

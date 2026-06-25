@@ -186,7 +186,9 @@ def config(ctx):
             _temp_dir_val = _get_temp_dir()
             if _temp_dir_val:
                 config_table.add_row("", "Temp Directory", _temp_dir_val)
-            config_table.add_row("", "Self-update Channel", _get_self_update_channel_cfg())
+            _self_update_channel_val = _get_self_update_channel_cfg()
+            if _self_update_channel_val != "stable":
+                config_table.add_row("", "Self-update Channel", _self_update_channel_val)
             _self_update_install_dir_val = _get_self_update_install_dir_cfg()
             if _self_update_install_dir_val:
                 config_table.add_row(
@@ -246,7 +248,9 @@ def config(ctx):
             _temp_dir_fb = _get_temp_dir_fb()
             if _temp_dir_fb:
                 click.echo(f"  Temp Directory: {_temp_dir_fb}")
-            click.echo(f"  self-update.channel: {_get_self_update_channel_fb()}")
+            _self_update_channel_fb = _get_self_update_channel_fb()
+            if _self_update_channel_fb != "stable":
+                click.echo(f"  self-update.channel: {_self_update_channel_fb}")
             _self_update_install_dir_fb = _get_self_update_install_dir_fb()
             if _self_update_install_dir_fb:
                 click.echo(f"  self-update.install-dir: {_self_update_install_dir_fb}")
@@ -409,7 +413,7 @@ def set(key, value):  # noqa: F811
             "self-update config only supports non-secret installer preferences: "
             "self-update.channel, self-update.install-dir"
         )
-        logger.progress(
+        logger.info(
             "Credentials, tokens, mirror URLs, commands, and installer args are not persisted."
         )
         sys.exit(1)
@@ -634,7 +638,9 @@ def get(key):
             get_self_update_install_dir as _get_self_update_install_dir,
         )
 
-        click.echo(f"  self-update.channel: {_get_self_update_channel()}")
+        _self_update_channel = _get_self_update_channel()
+        if _self_update_channel != "stable":
+            click.echo(f"  self-update.channel: {_self_update_channel}")
         _self_update_install_dir = _get_self_update_install_dir()
         click.echo(
             "  self-update.install-dir: "

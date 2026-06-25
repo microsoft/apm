@@ -56,8 +56,8 @@ def _build_releases_api_url(
 def _build_releases_list_api_url(github_url: str, repo: str) -> str:
     """Build the release-list metadata URL for prerelease channel lookup."""
     if github_url == _PUBLIC_GITHUB_URL:
-        return f"{_PUBLIC_API_BASE}/repos/{repo}/releases"
-    return f"{github_url}/api/v3/repos/{repo}/releases"
+        return f"{_PUBLIC_API_BASE}/repos/{repo}/releases?per_page=5"
+    return f"{github_url}/api/v3/repos/{repo}/releases?per_page=5"
 
 
 def _get_version_check_auth_resolver() -> AuthResolver:

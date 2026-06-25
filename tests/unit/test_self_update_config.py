@@ -69,4 +69,5 @@ def test_prerelease_channel_uses_releases_endpoint(monkeypatch):
     assert parsed.scheme == "https"
     assert parsed.hostname == "api.github.com"
     assert parsed.path == "/repos/microsoft/apm/releases"
+    assert parsed.query == "per_page=5"
     assert version == "2.0.0rc1"

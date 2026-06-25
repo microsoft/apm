@@ -123,6 +123,20 @@ class TestSelfUpdateInstallerConfig:
 
         assert config_mod.get_self_update_install_dir() == str(bin_dir)
 
+    @pytest.mark.parametrize(
+        "bad_path",
+        [
+            "/some/path\x00evil",
+            "/some\npath",
+            "/some\rpath",
+            "",
+            "   ",
+        ],
+    )
+    def test_install_dir_rejects_malformed_paths(self, isolated_config, bad_path):
+        with pytest.raises(ValueError):
+            config_mod.set_self_update_install_dir(bad_path)
+
     def test_update_channel_roundtrip(self, isolated_config):
         config_mod.set_self_update_channel("prerelease")
 
