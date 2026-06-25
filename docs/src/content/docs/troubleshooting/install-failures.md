@@ -148,7 +148,7 @@ This re-resolves and rewrites `apm.lock.yaml`. Commit the result.
 
 ### Drifted refs
 
-To force re-resolution to the latest Git ref allowed by `apm.yml`:
+To force re-resolution to the latest version or Git ref allowed by `apm.yml`:
 
 ```bash
 apm install --update

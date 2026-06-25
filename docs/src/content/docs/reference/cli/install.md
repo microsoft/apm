@@ -29,7 +29,7 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 
 | Flag | Default | Description |
 |---|---|---|
-| `--update` | off | Re-resolve dependencies to the latest Git ref allowed by `apm.yml` and rewrite `apm.lock.yaml`. Mutually exclusive with `--frozen`. Prefer the dedicated [`apm update`](../update/) command for the consent-gated workflow. |
+| `--update` | off | Re-resolve dependencies to the latest version or Git ref allowed by `apm.yml` and rewrite `apm.lock.yaml`. Mutually exclusive with `--frozen`. Prefer the dedicated [`apm update`](../update/) command for the consent-gated workflow. |
 | `--frozen` | off | Lockfile-only install: refuse to resolve anything new and fail if `apm.yml` and `apm.lock.yaml` have drifted. Mirrors `npm ci`. Mutually exclusive with `--update`. |
 | `--dry-run` | off | Print the install plan without touching the filesystem. |
 | `--force` | off | Overwrite locally-authored files on collision **and** bypass the security scan's critical-finding block. Does **not** suppress general install errors (any reported error still exits `1`, matching npm / pip / cargo). Does **not** refresh remote refs -- use `apm update` for that. Use only after independent verification. |
@@ -226,7 +226,7 @@ See [Registries](../../../guides/registries/) for the full setup guide.
 
 ## Related
 
-- [`apm update`](../update/) -- refresh dependencies in `apm.yml` to their latest matching refs, with a consent gate.
+- [`apm update`](../update/) -- refresh dependencies in `apm.yml` to their latest matching versions or refs, with a consent gate.
 - [`apm self-update`](../self-update/) -- upgrade the `apm` CLI binary itself.
 - [`apm prune`](../prune/) -- remove orphaned packages and stale files.
 - [Registries](../../../guides/registries/) -- end-to-end guide for registry-sourced dependencies.
