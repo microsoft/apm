@@ -122,6 +122,12 @@ class TestGetConfigPath:
     ) -> None:
         home = tmp_path / "home"
         monkeypatch.setenv("HOME", str(home))
+        # ``Path.expanduser`` resolves ``~`` from USERPROFILE (or
+        # HOMEDRIVE+HOMEPATH) on Windows rather than HOME, so set every var the
+        # platform may consult to keep the expansion deterministic everywhere.
+        monkeypatch.setenv("USERPROFILE", str(home))
+        monkeypatch.setenv("HOMEDRIVE", home.drive)
+        monkeypatch.setenv("HOMEPATH", str(home)[len(home.drive) :])
         monkeypatch.setenv("CODEX_HOME", "~/codex-config")
 
         adapter = _make_adapter(user_scope=True)

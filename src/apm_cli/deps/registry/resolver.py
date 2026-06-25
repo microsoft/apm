@@ -417,10 +417,19 @@ class RegistryPackageResolver:
         if exc.status in (401, 403):
             raise RegistryResolutionError(f"{exc}\n{remediation_message(base_url)}") from exc
         if exc.status == 404:
-            raise RegistryResolutionError(
+            msg = (
                 f"registry {dep_ref.registry_name!r} has no package "
                 f"{dep_ref.repo_url!r} (HTTP 404 from {exc.url})"
-            ) from exc
+            )
+            ref = dep_ref.reference or ""
+            if ref and not is_semver_range(ref):
+                msg += (
+                    f"\nHint: verify the package name and registry configuration. "
+                    f"'{ref}' also looks like a git ref, not a semver range; "
+                    f"if this package lives on GitHub, use the explicit git form:\n"
+                    f"  - git: {dep_ref.repo_url}#{ref}"
+                )
+            raise RegistryResolutionError(msg) from exc
         raise RegistryResolutionError(str(exc)) from exc
 
 

@@ -240,6 +240,27 @@ class TestRenderPlanText:
         assert "[=]" in text
         assert "1 unchanged" in text
 
+    def test_registry_update_suppresses_dash_to_dash_when_both_commits_absent(self):
+        """Registry deps (no resolved_commit) must not produce a confusing (- -> -) indicator."""
+        plan = UpdatePlan(
+            entries=(
+                PlanEntry(
+                    dep_key="o/r",
+                    action="update",
+                    display_name="o/r",
+                    old_resolved_ref="1.0.0",
+                    new_resolved_ref="1.1.0",
+                    old_resolved_commit=None,
+                    new_resolved_commit=None,
+                ),
+            )
+        )
+
+        text = render_plan_text(plan)
+
+        assert "- -> -" not in text
+        assert "1.0.0 -> 1.1.0" in text
+
 
 # -----------------------------------------------------------------------------
 # lockfile_satisfies_manifest

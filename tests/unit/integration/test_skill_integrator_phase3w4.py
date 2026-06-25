@@ -63,6 +63,11 @@ def _make_target(
     target.root_dir = root_dir
     target.auto_create = auto_create
     target.resolved_deploy_root = resolved_deploy_root
+    target.deploy_path = MagicMock(
+        side_effect=lambda project_root, *parts: (
+            resolved_deploy_root if resolved_deploy_root is not None else project_root / root_dir
+        ).joinpath(*parts)
+    )
     prim = MagicMock()
     mapping = MagicMock()
     mapping.deploy_root = deploy_root

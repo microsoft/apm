@@ -18,7 +18,7 @@ apm self-update [--check]
 `apm self-update` upgrades the **APM CLI itself** to the latest version published on GitHub releases. It downloads the official platform installer (`install.sh` on macOS/Linux, `install.ps1` on Windows) and runs it in place.
 
 :::caution[Looking for dependency updates?]
-This command does **not** update the packages declared in your `apm.yml`. To re-resolve your dependencies against the latest matching Git refs, run:
+This command does **not** update the packages declared in your `apm.yml`. To re-resolve your dependencies against the latest matching versions or Git refs, run:
 
 ```bash
 apm update
@@ -128,6 +128,6 @@ The check is cached and non-blocking. It is suppressed in distributions that dis
 
 ## Related
 
-- [`apm update`](../update/) -- refresh dependencies declared in `apm.yml` against the latest matching refs.
+- [`apm update`](../update/) -- refresh dependencies declared in `apm.yml` against the latest matching versions or refs.
 - [`apm install`](../install/) -- install dependencies; use `--frozen` for read-only, lockfile-pinned installs.
 - [Quickstart](../../../quickstart/) -- first-time install.

@@ -34,6 +34,7 @@ from .identity import (
     build_canonical_dependency_string,
     build_dependency_unique_key,
 )
+from .subsets import parse_skill_subset, parse_target_subset
 from .types import VirtualPackageType
 
 # Identity/semver helpers re-exported from .identity for back-compat imports.
@@ -82,6 +83,7 @@ class DependencyReference:
 
     # SKILL_BUNDLE subset selection (persisted in apm.yml `skills:` field)
     skill_subset: list[str] | None = None  # Sorted skill names, or None = all
+    target_subset: list[str] | None = None  # Sorted lowercase target names, or None = all
 
     # SSH username for SCP-shorthand or ``ssh://`` dependencies. ``None`` for
     # non-SSH inputs. Defaults to ``"git"`` whenever an SSH form was parsed
@@ -919,25 +921,11 @@ class DependencyReference:
         # Parse skills: field (SKILL_BUNDLE subset selection)
         skills_raw = entry.get("skills")
         if skills_raw is not None:
-            if not isinstance(skills_raw, (list,)):
-                raise ValueError("'skills' field must be a list of skill names")
-            if len(skills_raw) == 0:
-                raise ValueError(
-                    "skills: must contain at least one name; "
-                    "remove the field to install all skills in the bundle."
-                )
-            seen: set = set()
-            validated: list = []
-            for name in skills_raw:
-                if not isinstance(name, str) or not name.strip():
-                    raise ValueError("Each entry in 'skills' must be a non-empty string")
-                name = name.strip()
-                # Path safety: reject traversal sequences
-                validate_path_segments(name, context="skills/<name>")
-                if name not in seen:
-                    seen.add(name)
-                    validated.append(name)
-            dep.skill_subset = sorted(validated)
+            dep.skill_subset = parse_skill_subset(skills_raw)
+
+        targets_raw = entry.get("targets")
+        if targets_raw is not None:
+            dep.target_subset = parse_target_subset(targets_raw)
 
         return dep
 
@@ -2027,14 +2015,19 @@ class DependencyReference:
             entry["allow_insecure"] = self.allow_insecure
             if self.skill_subset:
                 entry["skills"] = sorted(self.skill_subset)
+            if self.target_subset:
+                entry["targets"] = sorted(self.target_subset)
             return entry
-        if self.skill_subset:
+        if self.skill_subset or self.target_subset:
             entry = {"git": self.get_identity()}
             if self.reference:
                 entry["ref"] = self.reference
             if self.alias:
                 entry["alias"] = self.alias
-            entry["skills"] = sorted(self.skill_subset)
+            if self.skill_subset:
+                entry["skills"] = sorted(self.skill_subset)
+            if self.target_subset:
+                entry["targets"] = sorted(self.target_subset)
             return entry
         return self.to_canonical()
 

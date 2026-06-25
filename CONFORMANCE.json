@@ -255,6 +255,17 @@
       ]
     },
     {
+      "conformance_class": "consumer",
+      "id": "req-lk-019",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_inventory_metadata_is_non_trust_anchor"
+      ]
+    },
+    {
       "conformance_class": "producer",
       "id": "req-mf-001",
       "keyword": "MUST",
@@ -1000,6 +1011,28 @@
     },
     {
       "conformance_class": "consumer",
+      "id": "req-sc-011",
+      "keyword": "MUST",
+      "section": "10.14",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_must_resolve_executable_trust_through_deny_wins_precedence"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-sc-012",
+      "keyword": "MUST",
+      "section": "10.14",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_required_package_audit_asserts_presence_not_deployment"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
       "id": "req-tg-001",
       "keyword": "MUST",
       "section": "8.4",
@@ -1046,7 +1079,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 63,
+      "active": 66,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1070,5 +1103,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 92
+  "total_requirements": 95
 }

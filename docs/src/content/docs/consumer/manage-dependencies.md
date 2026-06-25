@@ -299,7 +299,7 @@ corresponds to a declared dependency. It does not touch your manifest,
 your lockfile entries are rewritten on the next `apm install`, and
 deployed files in `.github/`, `.claude/`, etc. are reconciled then too.
 
-If you also want to refresh remaining deps to their latest refs, see
+If you also want to refresh remaining deps to their latest versions or refs, see
 [Update and refresh](../update-and-refresh/).
 
 ## The lockfile
@@ -328,7 +328,7 @@ For the full lockfile schema, see
 
 :::note[Coming from npm?]
 The split mirrors `package.json` + `package-lock.json`. The verbs match
-too: `apm update` refreshes dependencies to the latest matching refs
+too: `apm update` refreshes dependencies to the latest matching versions or refs
 (like `npm update`); `apm install --frozen` is the lockfile-only,
 fail-on-drift install for CI (like `npm ci`). To upgrade the `apm` CLI
 binary itself, use `apm self-update`.
