@@ -306,8 +306,8 @@ GitHub URLs are stripped to shorthand; non-GitHub hosts keep the FQDN.
 ## Per-dependency target selection (`targets:`)
 
 `targets:` is an optional per-dependency list on the object form of a
-`dependencies.apm` entry. It restricts which harnesses receive that
-dependency's hooks and target-scoped primitives.
+`dependencies.apm` entry. It restricts which active install targets
+receive that dependency's target-scoped primitives.
 
 Package-level `targets:` (top-level) selects the package's own
 compile/install runtimes; per-dependency `targets:` (inside a
@@ -315,8 +315,11 @@ compile/install runtimes; per-dependency `targets:` (inside a
 hooks reach. They compose via intersection. See `package-authoring.md`
 for author guidance.
 
-- Type: list of harness keys (`copilot`, `vscode`, `claude`, `cursor`,
-  `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`).
+- Type: list of harness keys (`copilot`, `claude`, `cursor`, `codex`,
+  `gemini`, `antigravity`, `windsurf`, `kiro`, plus canonical targets
+  such as `opencode`, `agent-skills`, `openclaw`, `hermes`,
+  `copilot-cowork`, and `copilot-app`). Use `copilot`, not the runtime
+  alias `vscode`, for Copilot-family dependency routing.
 - Default: omitted means all active install targets.
 - Semantics: effective reach is `install_targets INTERSECT dep_targets`.
   A non-empty list narrows reach; it never widens beyond what the install

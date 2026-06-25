@@ -98,6 +98,7 @@ def _entry_matches(entry, repo_url: str) -> bool:
 
 def _apply_subset(entry, field: str | list[str] | None, subset: list[str] | None = None):
     """Apply a dependency subset field, promoting to dict form if needed."""
+    # Compatibility for older direct tests that called _apply_subset(entry, subset).
     if not isinstance(field, str):
         subset = field
         field = "skills"

@@ -2,13 +2,15 @@
 
 ## Supported package layouts
 
-APM recognizes three layouts. The shape of the package root tells APM
+APM recognizes five layouts. The shape of the package root tells APM
 how to install it:
 
 | Root signal | Author intent | Install semantic |
 |---|---|---|
 | `.apm/` (with or without apm.yml) | Multiple independent primitives | Hoist each primitive into the consumer runtime dirs |
 | `SKILL.md` (alone, or with apm.yml = HYBRID) | One skill bundle | Copy whole tree to `<target>/skills/<name>/` |
+| `skills/<name>/SKILL.md` | Many skills in one repo | Promote each nested skill to `<target>/skills/<name>/` |
+| `hooks/*.json` only | Harness hook package | Deploy hooks to the target's hooks directory |
 | `plugin.json` / `.claude-plugin/` | Claude plugin collection | Dissect via plugin artifact mapping |
 
 The HYBRID layout (apm.yml + SKILL.md) is a single skill bundle that
@@ -132,8 +134,9 @@ absolute prefix. `apm install -g` (user-scope, e.g.
 `~/.claude/settings.json`) rewrites `${PLUGIN_ROOT}` and relative `./`
 references to absolute paths because the user-scope config is read
 without a fixed cwd. If a manifest in `hooks/` or `.apm/hooks/` uses
-`./hooks/<script>`, APM resolves it from the package root to avoid
-deploying a doubled `hooks/hooks/` path. If a referenced hook script is missing at install
+`./hooks/<script>`, APM first resolves it from the hook file directory,
+then falls back to the package root to avoid deploying a doubled
+`hooks/hooks/` path. If a referenced hook script is missing at install
 time the installer emits a warning either way; user-scope additionally
 rewrites the unexpanded variable to an absolute source path so the hook
 fails loudly at runtime, while project-scope leaves the variable in

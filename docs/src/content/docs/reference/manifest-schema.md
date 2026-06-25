@@ -386,12 +386,12 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `path` | `string` | OPTIONAL / REQUIRED (local) | Relative path within the repo, or local filesystem path | When `git` is present: subdirectory or file (virtual package). When `git` is absent: local filesystem path (must start with `./`, `../`, `/`, or `~/`). |
 | `ref` | `string` | OPTIONAL | Branch, tag, or commit SHA | Git reference to checkout. |
 | `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$` | Local alias. |
-| `targets` | `list<string>` | OPTIONAL | Subset of valid harness keys (`copilot`, `vscode`, `claude`, `cursor`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`) | Restricts which harnesses receive this dependency's hooks/target-scoped primitives. Omitted = all. Effective reach = install targets INTERSECT this list. |
+| `targets` | `list<string>` | OPTIONAL | Subset of canonical target keys (`copilot`, `claude`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `openclaw`, `hermes`, `copilot-cowork`, `copilot-app`) | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
 
-`targets:` on a dependency is intersected with the install targets
+`targets:` on a dependency is intersected with the active install targets
 (`--target`, config default, package-level `targets:`, or auto-detect).
 Listing a harness the install did not select does not add it; omitting
-`targets:` means the dependency reaches every install target. An empty
+`targets:` means the dependency reaches every active install target. An empty
 list `targets: []` is rejected at parse time -- omit the key to mean
 "all".
 

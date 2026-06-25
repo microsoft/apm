@@ -95,14 +95,14 @@ def _deprecated_filename_routing_warning(
     pkg_label = package_name or package_identity or "unknown"
     identity = package_identity or package_name or pkg_label
     return (
-        f"[!] {pkg_label}: filename-based target routing is deprecated.\n"
+        f"{pkg_label}: filename-based target routing is deprecated.\n"
         f"    '{hook_filename}' routes via suffix to [{targets_csv}].\n"
         "    Add to your apm.yml:\n"
         "\n"
         f"      - git: {identity}\n"
         f"        targets: [{targets_csv}]\n"
         "\n"
-        "    See: https://apm.github.io/docs/guides/per-dep-targets"
+        "    See: https://microsoft.github.io/apm/reference/manifest-schema/#412-object-form"
     )
 
 
