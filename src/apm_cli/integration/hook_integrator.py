@@ -66,6 +66,8 @@ from apm_cli.utils.paths import portable_relpath
 
 _log = logging.getLogger(__name__)
 
+# Testability seam: tests can patch deprecated filename routing without
+# replacing the imported helper for every call site.
 _filter_hook_files_for_target = filter_hook_files_for_target
 
 
@@ -1795,7 +1797,7 @@ class HookIntegrator(BaseIntegrator):
         repo-relative so checked-in project-scope configs stay portable
         across clones, contributors, and CI runners (#1394).
         """
-        if dep_targets_active and target.name not in (allowed_targets or {target.name}):
+        if dep_targets_active and (not allowed_targets or target.name not in allowed_targets):
             raise AssertionError(f"BUG: target {target.name} bypassed chokepoint filter")
 
         if target.name == "copilot":

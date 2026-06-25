@@ -140,7 +140,7 @@ def test_disjoint_targets_emits_diagnostic(tmp_path: Path) -> None:
     diagnostics = _run_with_targets(tmp_path, ["claude"], ["codex"], hook_integrator)
 
     assert [d.message for d in diagnostics._diagnostics] == [
-        "per-dependency targets [codex] do not overlap active install targets; skipping"
+        "Per-dependency targets [codex] do not overlap active install targets; skipping"
     ]
     assert [d.detail for d in diagnostics._diagnostics] == ["active targets: [claude]"]
 

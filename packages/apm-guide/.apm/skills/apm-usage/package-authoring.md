@@ -95,9 +95,9 @@ in their own `dependencies.apm` entry instead.
 
 Package-level `targets:` (top-level) selects the package's own
 compile/install runtimes; per-dependency `targets:` (inside a
-`dependencies.apm` entry) selects which harnesses that dependency's
-hooks reach. They compose via intersection. See `dependencies.md` for
-consumer syntax.
+`dependencies.apm` entry) selects which active harnesses receive that
+dependency's target-scoped primitives. They compose via intersection. See
+`dependencies.md` for consumer syntax.
 
 ### Migrating filename-routed hooks
 
@@ -110,6 +110,9 @@ dependencies:
     - git: owner/my-hooks-pkg
       targets: [codex]
 ```
+
+Before: encode the target in a filename such as `my-pkg-codex-hooks.json`.
+After: keep hook filenames generic and let the consumer set `targets: [codex]`.
 
 During the deprecation window, existing suffix-named hook files still
 route to their matching harness and emit an install-time warning. Once a
@@ -171,8 +174,8 @@ Error messages always name the `apm.yml` path and the offending token, so the fi
 
 The package-authored `targets:`/`target:` field overrides auto-detect but is itself overridden by an explicit `--target` flag at install/compile time. Run `apm targets` in the consumer's directory to see what the resolution chain produces.
 
-For hook reach on a single dependency, use per-dependency `targets:`
-inside `dependencies.apm`; see `dependencies.md`.
+For one dependency's target-scoped primitive reach, use per-dependency
+`targets:` inside `dependencies.apm`; see `dependencies.md`.
 
 ## Manifest fields: `license:` (declared license for SBOM)
 

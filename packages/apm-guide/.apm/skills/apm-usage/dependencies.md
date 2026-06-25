@@ -144,7 +144,7 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `ref` | OPTIONAL | Branch, tag, or commit SHA. |
 | `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
 | `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. Generic hosts do not receive APM-managed PATs on HTTP file reads. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys) for keying rules. |
-| `targets` | OPTIONAL | Consumer-side harness subset for that dependency's hooks. Non-empty list of target names. |
+| `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
 
 ```yaml
 - git: https://gitlab.com/acme/repo.git
@@ -311,9 +311,9 @@ receive that dependency's target-scoped primitives.
 
 Package-level `targets:` (top-level) selects the package's own
 compile/install runtimes; per-dependency `targets:` (inside a
-`dependencies.apm` entry) selects which harnesses that dependency's
-hooks reach. They compose via intersection. See `package-authoring.md`
-for author guidance.
+`dependencies.apm` entry) selects which active harnesses receive that
+dependency's target-scoped primitives. They compose via intersection. See
+`package-authoring.md` for author guidance.
 
 - Type: list of harness keys (`copilot`, `claude`, `cursor`, `codex`,
   `gemini`, `antigravity`, `windsurf`, `kiro`, plus canonical targets

@@ -79,7 +79,8 @@ def _warn_if_needed(
             package_identity,
             hook_filename,
             matched_targets,
-        )
+        ),
+        symbol="warning",
     )
     warned_packages.add(warning_key)
 
@@ -92,12 +93,12 @@ def _deprecated_filename_routing_warning(
 ) -> str:
     """Return the user-facing filename-routing deprecation warning."""
     targets_csv = ", ".join(matched_targets)
-    pkg_label = package_name or package_identity or "unknown"
-    identity = package_identity or package_name or pkg_label
+    pkg_label = package_name or package_identity or "<owner/repo>"
+    identity = package_identity or package_name or "<owner/repo>"
     return (
         f"{pkg_label}: filename-based target routing is deprecated.\n"
         f"    '{hook_filename}' routes via suffix to [{targets_csv}].\n"
-        "    Add to your apm.yml:\n"
+        "    Update your apm.yml dependency to object form:\n"
         "\n"
         f"      - git: {identity}\n"
         f"        targets: [{targets_csv}]\n"

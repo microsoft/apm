@@ -37,7 +37,7 @@ def parse_target_subset(targets_raw: object) -> list[str]:
     if not targets_raw:
         raise ValueError(
             "targets: must contain at least one target; "
-            "remove the field to install hooks for all targets."
+            "remove the field to route primitives to all active install targets."
         )
 
     valid_targets = sorted(KNOWN_TARGETS.keys())

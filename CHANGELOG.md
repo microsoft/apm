@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Per-dependency `targets:` controls which harnesses a dependency's hooks
-  reach; filename-suffix hook routing (`*-<harness>-hooks.json`) is
-  deprecated. Omitting `targets:` routes to all active install targets. (#1902)
+- Per-dependency `targets:` scopes a dependency's target-specific primitives
+  to selected harnesses (for example `targets: [copilot, claude]`), preventing
+  hooks from leaking across tools. Filename-suffix hook routing
+  (`*-<harness>-hooks.json`) is deprecated. (#1902)
 - Executable Trust Governance v1 (#1873): executable trust is now one concept
   with one resolver and deny-wins precedence. Organizations can now declare an
   `executables:` block in `apm-policy.yml` (`deny_all`, `deny`, `require`,

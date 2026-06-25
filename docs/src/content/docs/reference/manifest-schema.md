@@ -396,7 +396,7 @@ list `targets: []` is rejected at parse time -- omit the key to mean
 "all".
 
 ```yaml
-- git: acme/lint-hooks
+- git: my-team/review-hooks
   targets: [copilot, claude]
 ```
 

@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from apm_cli.integration.targets import TargetProfile
+
     from ..utils.diagnostics import DiagnosticCollector
 
 
 def filter_targets_for_dependency(
-    targets: Any,
+    targets: list[TargetProfile],
     dep_target_subset: list[str] | None,
     diagnostics: DiagnosticCollector,
     package_name: str,
-) -> tuple[Any, set[str], bool]:
+) -> tuple[list[TargetProfile], set[str], bool]:
     """Apply the consumer-manifest dependency target filter."""
     if not dep_target_subset:
         return targets, set(), False
@@ -24,7 +26,7 @@ def filter_targets_for_dependency(
         requested = ", ".join(sorted(allowed_dep_targets))
         active = ", ".join(sorted(target.name for target in targets))
         diagnostics.warn(
-            f"per-dependency targets [{requested}] do not overlap active install targets; skipping",
+            f"Per-dependency targets [{requested}] do not overlap active install targets; skipping",
             package=package_name,
             detail=f"active targets: [{active}]",
         )
