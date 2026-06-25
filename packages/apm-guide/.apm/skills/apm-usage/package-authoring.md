@@ -86,38 +86,34 @@ consumers run `apm install`.
 ## Hook files
 
 Packages can ship hooks (pre/post tool-use scripts) by placing JSON
-files under `hooks/` or `.apm/hooks/`.  When a package targets multiple
-tools, use target-specific filenames so each tool receives only its own
-hooks:
+files under `hooks/` or `.apm/hooks/`. Filename-based hook routing
+(`*-<harness>-hooks.json` and `hooks-<harness>.json`) is deprecated.
+Consumers should route a hook package with per-dependency `targets:`
+in their own `dependencies.apm` entry instead.
 
-| Filename pattern | Deployed to |
-|---|---|
-| `*-copilot-hooks.json` or `hooks-copilot.json` | GitHub Copilot only |
-| `*-cursor-hooks.json` or `hooks-cursor.json` | Cursor only |
-| `*-claude-hooks.json` or `hooks-claude.json` | Claude Code only |
-| `*-codex-hooks.json` or `hooks-codex.json` | Codex CLI only |
-| `*-gemini-hooks.json` or `hooks-gemini.json` | Gemini CLI only |
-| `*-antigravity-hooks.json` or `hooks-antigravity.json` | Antigravity CLI only |
-| `*-windsurf-hooks.json` or `hooks-windsurf.json` | Windsurf only |
-| `*-kiro-hooks.json` or `hooks-kiro.json` | Kiro only |
-| Any other name (e.g. `hooks.json`, `telemetry-hooks.json`) | All targets, unless that target has a target-specific manifest |
+Package-level `targets:` (top-level) selects the package's own
+compile/install runtimes; per-dependency `targets:` (inside a
+`dependencies.apm` entry) selects which harnesses that dependency's
+hooks reach. They compose via intersection. See `dependencies.md` for
+consumer syntax.
 
-Example directory tree for a multi-target hook package:
+### Migrating filename-routed hooks
 
-```
-my-hooks-pkg/
-  hooks/
-    hooks.json              # default/general manifest
-    copilot-hooks.json      # Copilot only
-    hooks-codex.json        # Codex only
-    cursor-hooks.json       # Cursor only
-    claude-hooks.json       # Claude Code only
-    kiro-hooks.json         # Kiro only
+Keep hook filenames simple, then document the target set consumers
+should use:
+
+```yaml
+dependencies:
+  apm:
+    - git: owner/my-hooks-pkg
+      targets: [codex]
 ```
 
-When a target-specific manifest exists, APM uses it instead of
-`hooks.json` for that target. Mirroring the same filename in both
-`hooks/` and `.apm/hooks/` is safe; it is integrated once per target.
+During the deprecation window, existing suffix-named hook files still
+route to their matching harness and emit an install-time warning. Once a
+consumer adds per-dependency `targets:`, APM bypasses filename routing
+for that dependency and deploys all its hook files to the narrowed target
+set.
 
 APM automatically normalises event names per target (e.g. `postToolUse`
 becomes `PostToolUse` in Claude) and rewrites path variables
@@ -171,6 +167,9 @@ Both `apm.yml`'s `targets:`/`target:` and the `--target` CLI flag share the same
 Error messages always name the `apm.yml` path and the offending token, so the fix point is unambiguous. The list form (`targets: [a, b]`) is the recommended shape; the singular `target:` and CSV-string forms are supported indefinitely as sugar.
 
 The package-authored `targets:`/`target:` field overrides auto-detect but is itself overridden by an explicit `--target` flag at install/compile time. Run `apm targets` in the consumer's directory to see what the resolution chain produces.
+
+For hook reach on a single dependency, use per-dependency `targets:`
+inside `dependencies.apm`; see `dependencies.md`.
 
 ## Manifest fields: `license:` (declared license for SBOM)
 

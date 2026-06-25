@@ -85,14 +85,24 @@ file lives in `hooks/` or `.apm/hooks/`, a path like
 `./hooks/run-hook.sh` resolves from the package root so the deployed
 path is not doubled.
 
-For multi-target packages, name per-harness manifests either
-`<target>-hooks.json` (or `my-<target>-hooks.json`) or
-`hooks-<target>.json`, for example `codex-hooks.json` or
-`hooks-codex.json`. When a target-specific manifest exists, it wins
-for that target; `hooks.json` stays the default Claude/general
-manifest and is not merged into that target's output. If the same
-manifest filename is mirrored in both `hooks/` and `.apm/hooks/`, APM
-integrates it once per target.
+For multi-target packages, prefer simple hook filenames plus consumer
+per-dependency `targets:` in `dependencies.apm` to limit reach. If the
+same manifest stem is mirrored in both `hooks/` and `.apm/hooks/`, APM
+integrates the `.apm/hooks/` copy once per target.
+
+:::note
+See the object-form dependency field in
+[Manifest Schema](../../reference/manifest-schema/#412-object-form) and
+the target vocabulary in
+[Primitives and targets](../../concepts/primitives-and-targets/).
+:::
+
+:::caution[Deprecated]
+Hook filename routing (`*-<harness>-hooks.json`) is deprecated. Ship one
+hook manifest; consumers scope harness reach with the per-dependency
+`targets:` field. The filename router still works during the deprecation
+window and warns at install time.
+:::
 
 Supported targets and where the integrator writes:
 

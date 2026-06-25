@@ -386,6 +386,19 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `path` | `string` | OPTIONAL / REQUIRED (local) | Relative path within the repo, or local filesystem path | When `git` is present: subdirectory or file (virtual package). When `git` is absent: local filesystem path (must start with `./`, `../`, `/`, or `~/`). |
 | `ref` | `string` | OPTIONAL | Branch, tag, or commit SHA | Git reference to checkout. |
 | `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$` | Local alias. |
+| `targets` | `list<string>` | OPTIONAL | Subset of valid harness keys (`copilot`, `vscode`, `claude`, `cursor`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`) | Restricts which harnesses receive this dependency's hooks/target-scoped primitives. Omitted = all. Effective reach = install targets INTERSECT this list. |
+
+`targets:` on a dependency is intersected with the install targets
+(`--target`, config default, package-level `targets:`, or auto-detect).
+Listing a harness the install did not select does not add it; omitting
+`targets:` means the dependency reaches every install target. An empty
+list `targets: []` is rejected at parse time -- omit the key to mean
+"all".
+
+```yaml
+- git: acme/lint-hooks
+  targets: [copilot, claude]
+```
 
 Remote dependency (git URL plus sub-path):
 

@@ -144,6 +144,7 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `ref` | OPTIONAL | Branch, tag, or commit SHA. |
 | `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
 | `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. Generic hosts do not receive APM-managed PATs on HTTP file reads. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys) for keying rules. |
+| `targets` | OPTIONAL | Consumer-side harness subset for that dependency's hooks. Non-empty list of target names. |
 
 ```yaml
 - git: https://gitlab.com/acme/repo.git
@@ -301,6 +302,42 @@ APM normalizes dependency strings when saving to apm.yml:
 | `./packages/my-skills` | `./packages/my-skills` |
 
 GitHub URLs are stripped to shorthand; non-GitHub hosts keep the FQDN.
+
+## Per-dependency target selection (`targets:`)
+
+`targets:` is an optional per-dependency list on the object form of a
+`dependencies.apm` entry. It restricts which harnesses receive that
+dependency's hooks and target-scoped primitives.
+
+Package-level `targets:` (top-level) selects the package's own
+compile/install runtimes; per-dependency `targets:` (inside a
+`dependencies.apm` entry) selects which harnesses that dependency's
+hooks reach. They compose via intersection. See `package-authoring.md`
+for author guidance.
+
+- Type: list of harness keys (`copilot`, `vscode`, `claude`, `cursor`,
+  `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`).
+- Default: omitted means all active install targets.
+- Semantics: effective reach is `install_targets INTERSECT dep_targets`.
+  A non-empty list narrows reach; it never widens beyond what the install
+  resolved. An empty list is a parse error; remove the field to mean
+  "all".
+
+```yaml
+dependencies:
+  apm:
+    - git: owner/codex-hooks
+      targets: [codex]
+
+    - git: owner/universal-hooks
+      # no targets: all active install targets
+```
+
+The lockfile records `target_subset` for audit/display only. Install
+routing always recomputes from the live `apm.yml` entry, so editing the
+lockfile cannot widen a dependency's reach. The formal schema contract
+lives in `docs/src/content/docs/reference/manifest-schema.md` section
+4.1.2.
 
 ## MCP dependency formats
 
