@@ -13,6 +13,7 @@ Covers:
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -590,8 +591,12 @@ class TestSaveUserExecutablesAtomic:
         monkeypatch.setattr(ex, "_user_config_file", lambda: cfg)
         ex.save_user_executables({"pkg#1.0": {"hooks": True}}, {})
         assert cfg.is_file()
-        # Owner-only perms on the freshly-created file.
-        assert (cfg.stat().st_mode & 0o777) == 0o600
+        # Owner-only perms on the freshly-created file. POSIX mode bits are not
+        # enforced on Windows, where atomic_write_text documents that the mode
+        # hint is silently ignored, so only assert the permission contract on
+        # platforms that honour it.
+        if os.name != "nt":
+            assert (cfg.stat().st_mode & 0o777) == 0o600
         # Content round-trips and preserves co-resident keys on rewrite.
         cfg.write_text(json.dumps({"default_client": "vscode"}), encoding="utf-8")
         ex.save_user_executables({"pkg#1.0": {"hooks": True}}, {})
