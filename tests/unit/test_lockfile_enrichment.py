@@ -123,6 +123,25 @@ class TestLockfileEnrichment:
         assert ".claude/skills/my-plugin/SKILL.md" in deployed
         assert all(f.startswith(".claude/") for f in deployed)
 
+    @pytest.mark.parametrize("target", ["cursor", "opencode", "windsurf"])
+    def test_converged_targets_map_github_skills_to_agents_skills(self, target):
+        """Converged targets remap GitHub skills through the shared .agents path."""
+        lf = LockFile()
+        dep = LockedDependency(
+            repo_url="owner/repo",
+            resolved_commit="abc123",
+            version="1.0.0",
+            deployed_files=[".github/skills/shared/SKILL.md"],
+        )
+        lf.add_dependency(dep)
+
+        result = enrich_lockfile_for_pack(lf, fmt="apm", target=target)
+        parsed = yaml.safe_load(result)
+
+        deployed = parsed["dependencies"][0]["deployed_files"]
+        assert deployed == [".agents/skills/shared/SKILL.md"]
+        assert parsed["pack"]["mapped_from"] == [".github/skills/"]
+
     def test_cross_target_mapping_records_mapped_from(self):
         """When mapping occurs, pack section records mapped_from."""
         lf = LockFile()
@@ -484,11 +503,11 @@ class TestWindsurfTargetParity:
         assert ".unrelated/foo" not in deployed
 
     def test_windsurf_cross_map_skills_from_github(self):
-        """``.github/skills/`` files are remapped under ``.windsurf/skills/``."""
+        """``.github/skills/`` files are remapped under ``.agents/skills/``."""
         lf = self._lockfile_with([".github/skills/x/SKILL.md"])
         result = enrich_lockfile_for_pack(lf, fmt="apm", target="windsurf")
         deployed = yaml.safe_load(result)["dependencies"][0]["deployed_files"]
-        assert ".windsurf/skills/x/SKILL.md" in deployed
+        assert ".agents/skills/x/SKILL.md" in deployed
 
     def test_windsurf_cross_map_agents_collapse_to_skills(self):
         """``.github/agents/`` is intentionally remapped to ``.windsurf/skills/``

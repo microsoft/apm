@@ -13,12 +13,8 @@ from ..integration.targets import KNOWN_TARGETS
 # .github/ is the canonical interop prefix -- install always creates it, so
 # all non-github targets map FROM .github/.  The copilot target additionally
 # maps FROM .claude/ for the common case of Claude-first projects packing
-# for Copilot.  Cursor/opencode sources are niche; if someone publishes
-# skills exclusively under .cursor/, they must pack with --target cursor.
-#
-# Windsurf converts agents -> skills (lossy: AGENTS.md format is collapsed
-# into the windsurf skill envelope), so .github/agents/ maps to
-# .windsurf/skills/.
+# for Copilot.  Cursor, opencode, and windsurf skills converge on the
+# shared .agents/skills/ convention rather than bespoke per-target paths.
 _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
     "claude": {
         ".github/skills/": ".claude/skills/",
@@ -33,11 +29,11 @@ _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
         ".claude/agents/": ".github/agents/",
     },
     "cursor": {
-        ".github/skills/": ".cursor/skills/",
+        ".github/skills/": ".agents/skills/",
         ".github/agents/": ".cursor/agents/",
     },
     "opencode": {
-        ".github/skills/": ".opencode/skills/",
+        ".github/skills/": ".agents/skills/",
         ".github/agents/": ".opencode/agents/",
     },
     "codex": {
@@ -45,7 +41,7 @@ _CROSS_TARGET_MAPS: dict[str, dict[str, str]] = {
         ".github/agents/": ".codex/agents/",
     },
     "windsurf": {
-        ".github/skills/": ".windsurf/skills/",
+        ".github/skills/": ".agents/skills/",
         ".github/agents/": ".windsurf/skills/",
     },
     "agent-skills": {
