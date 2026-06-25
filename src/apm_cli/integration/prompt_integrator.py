@@ -302,7 +302,9 @@ class PromptIntegrator(BaseIntegrator):
                 continue
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.try_adopt_identical(target_path, source_file, target_paths):
+            if self.try_adopt_identical(
+                target_path, source_file, target_paths, lf_normalized_deploy=True
+            ):
                 files_adopted += 1
                 continue
 

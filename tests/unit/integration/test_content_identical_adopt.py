@@ -80,34 +80,82 @@ class TestIsContentIdenticalToSource:
         b.write_bytes(b"different bytes\n")
         assert BaseIntegrator.is_content_identical_to_source(a, b) is False
 
-    def test_lf_target_adopts_crlf_source(self, tmp_path: Path) -> None:
-        """apm#1916: a CRLF source (Windows text write / autocrlf) must adopt
-        against the always-LF deployed target instead of re-integrating."""
+    def test_lf_normalized_deploy_adopts_crlf_source(self, tmp_path: Path) -> None:
+        """apm#1916: under an LF-normalizing deployer a CRLF source (Windows
+        text write / autocrlf) must adopt against the always-LF deployed
+        target instead of re-integrating."""
         target = tmp_path / "target"
         source = tmp_path / "source"
         target.write_bytes(b"# Fixture\nbody\n")
         source.write_bytes(b"# Fixture\r\nbody\r\n")
-        assert BaseIntegrator.is_content_identical_to_source(target, source) is True
+        assert (
+            BaseIntegrator.is_content_identical_to_source(target, source, lf_normalized_deploy=True)
+            is True
+        )
 
-    def test_stale_crlf_target_is_not_adopted(self, tmp_path: Path) -> None:
-        """apm#1889: a stale CRLF target left by a pre-LF install must NOT be
-        adopted; it should mismatch so the caller rewrites it to LF."""
+    def test_lf_normalized_deploy_stale_crlf_target_not_adopted(self, tmp_path: Path) -> None:
+        """apm#1889: under an LF-normalizing deployer a stale CRLF target left
+        by a pre-LF install must NOT be adopted against an LF source; it should
+        mismatch so the caller rewrites it to LF."""
         target = tmp_path / "target"
         source = tmp_path / "source"
         target.write_bytes(b"# Fixture\r\nbody\r\n")
         source.write_bytes(b"# Fixture\nbody\n")
+        assert (
+            BaseIntegrator.is_content_identical_to_source(target, source, lf_normalized_deploy=True)
+            is False
+        )
+
+    def test_lf_normalized_deploy_stale_crlf_target_with_crlf_source_not_adopted(
+        self, tmp_path: Path
+    ) -> None:
+        """apm#1889: the dangerous case -- a stale CRLF target whose raw bytes
+        equal a CRLF source (Windows checkout with ``core.autocrlf``) must
+        still NOT be adopted under an LF-normalizing deployer, because
+        ``write_text_lf`` would emit LF. There is deliberately no raw-byte
+        short-circuit that would wrongly adopt it."""
+        target = tmp_path / "target"
+        source = tmp_path / "source"
+        target.write_bytes(b"# Fixture\r\nbody\r\n")
+        source.write_bytes(b"# Fixture\r\nbody\r\n")
+        assert (
+            BaseIntegrator.is_content_identical_to_source(target, source, lf_normalized_deploy=True)
+            is False
+        )
+
+    def test_byte_preserving_deploy_requires_raw_identity(self, tmp_path: Path) -> None:
+        """Byte-preserving deployers (hook / kiro-hook / canvas copy the source
+        verbatim) must compare raw bytes: a CRLF source against an LF target is
+        NOT identical (the copy would write CRLF), but two CRLF files are."""
+        target = tmp_path / "target"
+        source = tmp_path / "source"
+        # CRLF source vs LF target -> byte-preserving copy would differ.
+        target.write_bytes(b"# Fixture\nbody\n")
+        source.write_bytes(b"# Fixture\r\nbody\r\n")
         assert BaseIntegrator.is_content_identical_to_source(target, source) is False
+        # Two raw-identical CRLF files -> adopt (no rewrite for byte copy).
+        target.write_bytes(b"# Fixture\r\nbody\r\n")
+        assert BaseIntegrator.is_content_identical_to_source(target, source) is True
 
     def test_non_utf8_source_only_raw_byte_match_adopts(self, tmp_path: Path) -> None:
-        """Binary/non-UTF-8 sources cannot be normalized: only an exact raw
-        byte match adopts; any difference falls through to skip/rewrite."""
+        """Binary/non-UTF-8 sources cannot be line-normalized: in both deploy
+        modes only an exact raw byte match adopts; any difference falls through
+        to skip/rewrite."""
         target = tmp_path / "target"
         source = tmp_path / "source"
         target.write_bytes(b"\xff\xfe\x00bytes")
         source.write_bytes(b"\xff\xfe\x00bytes")
         assert BaseIntegrator.is_content_identical_to_source(target, source) is True
+        assert (
+            BaseIntegrator.is_content_identical_to_source(target, source, lf_normalized_deploy=True)
+            is True
+        )
         source.write_bytes(b"\xff\xfe\x00OTHER")
         assert BaseIntegrator.is_content_identical_to_source(target, source) is False
+        assert (
+            BaseIntegrator.is_content_identical_to_source(target, source, lf_normalized_deploy=True)
+            is False
+        )
 
     def test_target_missing_returns_false(self, tmp_path: Path) -> None:
         a = tmp_path / "missing"
@@ -172,6 +220,39 @@ class TestInstructionIntegratorAdopt:
         )
         # Bytes preserved (no-op write or no write at all -- both acceptable).
         assert target.read_bytes() == body
+
+    def test_crlf_source_adopts_against_lf_target_when_managed_none(self, tmp_path: Path) -> None:
+        """apm#1916 end-to-end: a CRLF source (Windows text-mode checkout /
+        ``core.autocrlf``) against the LF target that ``write_text_lf`` already
+        deployed must be ADOPTED, not re-integrated.
+
+        Deterministically reproduces the Windows-only no-op-reinstall churn on
+        any OS by writing explicit CRLF source bytes. Guards
+        ``_check_adopt_or_skip(lf_normalized_deploy=True)``: drop that flag and
+        the CRLF source no longer matches the LF target, so the file is skipped
+        as user-authored and this test fails.
+        """
+        crlf_source = b"---\r\napplyTo: '**/*.py'\r\n---\r\n# Secure coding base\r\n"
+        lf_target = b"---\napplyTo: '**/*.py'\n---\n# Secure coding base\n"
+        _, target, pkg_info = self._build(tmp_path, crlf_source)
+        target.write_bytes(lf_target)  # what write_text_lf already deployed
+
+        result = InstructionIntegrator().integrate_instructions_for_target(
+            KNOWN_TARGETS["copilot"],
+            pkg_info,
+            tmp_path,
+            force=False,
+            managed_files=None,
+        )
+
+        assert target in result.target_paths, (
+            "CRLF source must adopt against the LF-deployed target so the file "
+            "is not endlessly re-integrated on Windows reinstalls (apm#1916)."
+        )
+        assert result.files_skipped == 0
+        assert result.files_integrated == 0, (
+            "Adopt must not re-report the file as freshly integrated."
+        )
 
     def test_divergent_pre_existing_file_is_still_skipped(self, tmp_path: Path) -> None:
         """User-authored content with different bytes keeps the existing

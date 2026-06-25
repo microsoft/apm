@@ -165,21 +165,41 @@ class BaseIntegrator:
         return {p.replace("\\", "/") for p in managed_files}
 
     @staticmethod
-    def is_content_identical_to_source(target_path: Path, source_path: Path) -> bool:
+    def is_content_identical_to_source(
+        target_path: Path,
+        source_path: Path,
+        *,
+        lf_normalized_deploy: bool = False,
+    ) -> bool:
         """Return True if *target_path* matches what APM would deploy from *source_path*.
 
         Used by non-skill integrators to silently *adopt* a pre-existing
         on-disk file that already matches what APM would deploy.
 
-        Deployed files are always written LF-normalized (``write_text_lf``),
-        so the on-disk *target* bytes are compared against the *LF-normalized*
-        source bytes -- not the raw source bytes. Without this normalization a
-        package whose source carries CRLF line endings (Windows text-mode
-        checkout, ``core.autocrlf``, or a text-mode write) would never match
-        the LF target, so every reinstall would needlessly re-integrate the
-        file and report it as freshly installed (apm#1916). Only the *source*
-        side is normalized: a stale CRLF *target* left by a pre-LF install
-        still mismatches and is rewritten to LF rather than adopted (apm#1889).
+        The comparison depends on *how the calling integrator deploys*, which
+        the caller declares via ``lf_normalized_deploy``:
+
+        * ``lf_normalized_deploy=False`` (default) -- *byte-preserving*
+          deployers (the hook, kiro-hook, and canvas integrators copy the
+          source verbatim with ``shutil.copy2`` / ``shutil.copyfile``). The
+          deployed bytes equal the source bytes exactly, so "identical" is
+          raw byte identity.
+        * ``lf_normalized_deploy=True`` -- *LF-normalizing* deployers (the
+          agent, instruction, prompt, and command integrators write through
+          ``write_text_lf``). The deployed bytes equal the *LF-normalized*
+          source, so the on-disk *target* is identical iff it equals what
+          ``write_text_lf`` would write. Without this, a package whose source
+          carries CRLF line endings (Windows text-mode checkout,
+          ``core.autocrlf``, or a text-mode write) would never match the LF
+          target, so every reinstall would needlessly re-integrate the file
+          and report it as freshly installed (apm#1916).
+
+        In the LF-normalizing mode only the *source* side is normalized and
+        there is no raw-byte short-circuit: a stale CRLF *target* left by a
+        pre-LF install -- even one whose raw bytes happen to equal a CRLF
+        source on a ``core.autocrlf`` checkout -- still mismatches the LF
+        bytes ``write_text_lf`` would emit and is rewritten to LF rather than
+        adopted (apm#1889).
 
         Why this exists
         ---------------
@@ -248,37 +268,54 @@ class BaseIntegrator:
                 # an optimisation; the user-authored skip path is the
                 # safe fallback.
                 return False
-            # Compare the on-disk (LF) target against the LF-normalized
-            # source. A fast raw-byte equality covers the common case where
-            # source is already LF; the normalized comparison only runs when
-            # they differ (e.g. a CRLF source on Windows).
-            if target_bytes == source_bytes:
-                return True
+            if not lf_normalized_deploy:
+                # Byte-preserving deployer: deployed bytes equal source
+                # bytes verbatim, so "identical" is raw byte identity.
+                return target_bytes == source_bytes
+            # LF-normalizing deployer: the target is identical iff it equals
+            # what ``write_text_lf`` would write -- the LF-normalized source.
+            # No raw-byte short-circuit: a stale CRLF target whose raw bytes
+            # match a CRLF source must still be rewritten to LF, not adopted
+            # (apm#1889).
             try:
                 normalized_source = normalize_crlf_to_lf(source_bytes.decode("utf-8")).encode(
                     "utf-8"
                 )
             except UnicodeDecodeError:
-                # Binary or non-UTF-8 source: only a raw byte match (handled
-                # above) can adopt; otherwise fall through to skip/rewrite.
-                return False
+                # Non-UTF-8 source can't be line-normalized and
+                # ``write_text_lf`` could not have produced it; fall back to
+                # raw byte identity.
+                return target_bytes == source_bytes
             return target_bytes == normalized_source
         except OSError:
             return False
 
     @staticmethod
-    def try_adopt_identical(target_path: Path, source_path: Path, target_paths: list) -> bool:
-        """Adopt *target_path* when it is byte-identical to *source_path*.
+    def try_adopt_identical(
+        target_path: Path,
+        source_path: Path,
+        target_paths: list,
+        *,
+        lf_normalized_deploy: bool = False,
+    ) -> bool:
+        """Adopt *target_path* when it is identical to what would be deployed.
 
         Encapsulates the ``is_content_identical_to_source`` + append pattern
         so secondary call sites in agent/prompt/hook integrators share a
         single predicate call instead of repeating the three-line block.
 
+        ``lf_normalized_deploy`` is forwarded to
+        :meth:`is_content_identical_to_source`: LF-normalizing deployers
+        (agent, prompt) pass ``True``; byte-preserving deployers (hook,
+        kiro-hook) keep the ``False`` default.
+
         Returns ``True`` and appends *target_path* to *target_paths* when the
         files are identical; returns ``False`` and leaves *target_paths*
         unchanged otherwise.
         """
-        if BaseIntegrator.is_content_identical_to_source(target_path, source_path):
+        if BaseIntegrator.is_content_identical_to_source(
+            target_path, source_path, lf_normalized_deploy=lf_normalized_deploy
+        ):
             target_paths.append(target_path)
             return True
         return False
@@ -304,7 +341,9 @@ class BaseIntegrator:
 
         Args:
             target_path: Destination path on disk.
-            source_file: Source file to compare against for byte-identity.
+            source_file: Source file to compare against; the file is adopted
+                when the on-disk target already matches the deployed (LF-
+                normalized) form of this source.
             rel_path: Relative path string used for collision detection and
                 diagnostics.
             managed_files: Set of APM-managed relative paths; ``None`` means
@@ -317,10 +356,10 @@ class BaseIntegrator:
         Returns:
             ``(skip, adopted)`` — when ``skip`` is ``True`` the caller must
             ``continue`` (or otherwise skip writing this file); ``adopted``
-            is ``True`` only when the existing file was byte-identical and
-            has been silently adopted.
+            is ``True`` only when the existing file already matched the
+            deployed content and has been silently adopted.
         """
-        if self.is_content_identical_to_source(target_path, source_file):
+        if self.is_content_identical_to_source(target_path, source_file, lf_normalized_deploy=True):
             target_paths.append(target_path)
             return True, True
         if self.check_collision(

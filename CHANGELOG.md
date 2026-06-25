@@ -108,8 +108,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reinstalling a dependency whose source files carry CRLF line endings
   (Windows text-mode checkout or `core.autocrlf`) now correctly adopts the
   already-deployed LF file instead of re-integrating it every run and falsely
-  reporting it as freshly installed. The adopt check compares the on-disk
-  (LF) target against the LF-normalized source, so no-op installs report
+  reporting it as freshly installed. The adopt check is deploy-mode aware:
+  LF-normalizing integrators (instruction/agent/prompt/command) compare the
+  on-disk target against the LF-normalized source, while byte-preserving
+  integrators (hook/canvas) keep exact raw-byte identity; a stale CRLF target
+  is still rewritten to LF rather than adopted. No-op installs now report
   `(files unchanged)` on Windows as they already did on Linux/macOS. (#1916)
 - `apm update` no longer shows a spurious update for registry semver deps already at the latest matching version. (#1897)
 - APM-written deployed text files now use LF line endings on every platform,
