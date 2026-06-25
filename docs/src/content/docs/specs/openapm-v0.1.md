@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **94 normative statements** indexed in
+- OpenAPM v0.1 carries **95 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -792,7 +792,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `resolved_ref`            | User-supplied ref (branch, tag, SHA).                                           |
 | `resolved_commit`         | Exact 40-character lowercase hexadecimal commit SHA-1.                          |
 | `tree_sha256`             | Hash envelope (`sha256:<hex>`) over the canonicalised git tree. See [req-lk-015](#req-lk-015). |
-| `version`                 | Resolved version selector (semver string for semver-bearing sources).           |
+| `version`                 | Resolved version selector (semver string for semver-bearing sources); for other sources MAY carry a self-asserted version per [req-lk-019](#req-lk-019). |
 | `virtual_path`            | Subpath inside repo for virtual packages.                                       |
 | `is_virtual`              | Boolean.                                                                        |
 | `depth`                   | Tree depth (0 = self, 1 = direct, >1 = transitive).                             |
@@ -810,6 +810,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `constraint`              | git-semver: the original semver range from the manifest (verbatim).             |
 | `resolved_tag`            | git-semver: the literal tag the range resolved to.                              |
 | `resolved_at`             | git-semver: ISO 8601 UTC timestamp; advisory (see [Section 7.3](#73-git-semver-resolution)). |
+| `name`                    | Self-asserted display/inventory name; non-identity (see [req-lk-019](#req-lk-019)). |
 | `attestations`            | Reserved for v0.2 (publisher provenance).                                       |
 | `x-<name>`                | Vendor extension (per [req-ext-001](#req-ext-001)).                             |
 
@@ -847,6 +848,21 @@ or partially extract the archive.
 preserve vendor-extension keys (`x-[a-z][a-z0-9-]*`) at every
 mapping level of the lockfile -- top-level and per-entry -- on
 round-trip. See [req-ext-001](#req-ext-001).
+
+<a id="req-lk-019"></a>
+**[req-lk-019]** A conforming **consumer** implementation MUST treat
+the optional `name` and `version` fields of a dependency entry as
+**self-asserted inventory metadata** only -- recorded to support
+human-readable listing and audit reporting, never as a trust
+anchor. A consumer MUST preserve both fields on round-trip per
+[req-lk-011](#req-lk-011), and MUST NOT derive any identity,
+deduplication, or frozen-replay decision from them; package
+identity and replay derive solely from `repo_url`,
+`resolved_commit`, `resolved_tag`/`constraint`, and the recorded
+hash envelopes (see [req-lk-003](#req-lk-003),
+[req-lk-008](#req-lk-008)). The presence of either field is
+additive and MUST NOT change `lockfile_version` (both are valid in
+`"1"` and `"2"`).
 
 <a id="req-lk-016"></a>
 **[req-lk-016]** A conforming **consumer** implementation MUST emit
@@ -2434,6 +2450,7 @@ conformance statement identifying:
 [req-lk-013](#req-lk-013), [req-lk-014](#req-lk-014),
 [req-lk-015](#req-lk-015), [req-lk-016](#req-lk-016),
 [req-lk-017](#req-lk-017), [req-lk-018](#req-lk-018) (SHOULD),
+[req-lk-019](#req-lk-019),
 [req-rs-001](#req-rs-001), [req-rs-002](#req-rs-002),
 [req-rs-003](#req-rs-003), [req-rs-004](#req-rs-004),
 [req-rs-005](#req-rs-005), [req-rs-006](#req-rs-006),
@@ -2813,6 +2830,7 @@ renumbering of conformance classes.
 | [req-lk-016](#req-lk-016)                | MUST    | 5.2     | consumer    |
 | [req-lk-017](#req-lk-017)                | MUST    | 5.2     | consumer    |
 | [req-lk-018](#req-lk-018)                | SHOULD  | 5.5     | consumer    |
+| [req-lk-019](#req-lk-019)                | MUST    | 5.2     | consumer    |
 | [req-pl-001](#req-pl-001)                | MUST    | 6.1     | governance  |
 | [req-pl-002](#req-pl-002)                | MUST    | 6.2     | governance  |
 | [req-pl-003](#req-pl-003)                | MUST    | 6.4     | governance  |
@@ -2867,7 +2885,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 94** (89 MUST, 5 SHOULD).
+**Total normative statements: 95** (90 MUST, 5 SHOULD).
 
 ---
 
@@ -2883,6 +2901,7 @@ renumbering of conformance classes.
 | 0.1.4   | 2026-06-16 | Normative addition (semver-zero `0.x` minor): added `[req-pl-015]` (Section 6.3.5, governance MUST) codifying unmanaged-artifact surfacing completeness -- a governance implementation evaluating policy over a populated primitive target tree MUST surface every file under a managed primitive target directory that is neither recorded in `apm.lock.yaml` nor matched by a configured `unmanaged_files.exclude` glob, each with its unmanaged reason and a supplemental dependency/MCP deny-conflict note where applicable; the inferred primitive type is carried where determinable and omitted otherwise; an excluded path MUST NOT be surfaced even when it also matches a deny pattern. The requirement body is structured as sub-clauses (a)/(b)/(c) so each obligation is individually citable. Added the `unmanaged_files.exclude` row to the Section 6.4 merge table (additive union, deduplicated, parent order preserved). The requirement governs reporting COMPLETENESS only; enforcement stays governed by `unmanaged_files.action`. Reconciled with the sibling 0.1.3 amendment (req-pl-013/req-pl-014): cumulative statement count 89 -> 90 (85 MUST, 5 SHOULD); Appendix C carries the union of all three new governance rows. |
 | 0.1.5   | 2026-06-20 | Spec-citation fold for the executable primitive approval gate. Added new Section 10.13 "Executable primitive approval gate" with two consumer MUSTs: [req-sc-009] (deny deployment of any hook, bin, MCP server, or canvas extension from a dependency not listed in the effective `allowExecutables` approval set when the block is present -- fail closed) and [req-sc-010] (persist interactive approval decisions user-locally, not in the project `apm.yml`, so one developer's approval cannot propagate via VCS to teammates). Added rows 11 and 12 to the Section 10.11 summary table. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 90 -> 92 (87 MUST, 5 SHOULD). |
 | 0.1.6   | 2026-06-25 | Spec-citation fold for executable trust precedence and audit fidelity. Added Section 10.14 with two consumer MUSTs: [req-sc-011] (executable trust resolves through one deny-wins precedence; an org executables.deny/deny_all overrides any project or user grant; the install gate and the audit MUST reach the identical outcome via the shared resolver) and [req-sc-012] (a required package's audit asserts lockfile presence, not executable deployment; a present-but-withheld required package satisfies the presence requirement and surfaces a distinct withheld-executable signal). Added rows 13 and 14 to the Section 10.11 summary table. Section 11.3.2 and Appendix C updated. Statement count 92 -> 94 (89 MUST, 5 SHOULD). |
+| 0.1.7   | 2026-06-27 | Spec-citation fold for lockfile inventory metadata (closes the #1888 Mode-B silent-extension gate). Added [req-lk-019] (Section 5.2, consumer MUST): the optional per-entry `name` and `version` fields are self-asserted inventory metadata only -- preserved on round-trip per [req-lk-011], never a trust anchor, and never an identity, deduplication, or frozen-replay key (identity/replay derive solely from `repo_url`, `resolved_commit`, `resolved_tag`/`constraint`, and the recorded hash envelopes); their presence is additive and MUST NOT change `lockfile_version`. Added the `name` row to the Section 5.2 per-entry field table and broadened the `version` row note to non-semver sources; added `name` to the `entry` `$defs` in `lockfile-v0.1.schema.json` (sibling of `declared_license`). Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 94 -> 95 (90 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

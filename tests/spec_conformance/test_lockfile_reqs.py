@@ -1,6 +1,6 @@
 """Lockfile (apm.lock.yaml) conformance tests -- sec.5.
 
-Covers req-lk-001..018. The integrity sub-cluster (req-lk-012..017)
+Covers req-lk-001..019. The integrity sub-cluster (req-lk-012..017)
 now drives REAL fail-closed oracles against the committed binary
 fixture pair under `integrity/`.
 """
@@ -221,4 +221,38 @@ def test_lockfile_should_record_publish_timestamp():
         "schema affordance (generated_at) is asserted above; full "
         "publisher coverage requires the registry wire conformance "
         "module which is not in v0.1 scope."
+    )
+
+
+@pytest.mark.req("req-lk-019")
+def test_lockfile_inventory_metadata_is_non_trust_anchor():
+    # The optional `name`/`version` inventory fields MUST be permitted
+    # on an entry and MUST validate when carried alongside the trust
+    # anchors -- they are additive metadata, not identity.
+    schema = load_schema("lockfile-v0.1.schema.json")
+    entry_props = schema["$defs"]["entry"]["properties"]
+    for key in ("name", "version"):
+        assert key in entry_props, f"entry MUST permit `{key}`"
+        assert entry_props[key]["type"] == "string"
+
+    doc = {
+        "lockfile_version": "1",
+        "dependencies": [
+            {
+                "repo_url": "github.com/contoso/example",
+                "resolved_commit": "7f3c9a4d2e1b8c7f0a9e6d5c4b3a2918f7e6d5c4",
+                "depth": 1,
+                "name": "example",
+                "version": "1.2.0",
+            }
+        ],
+    }
+    validate_against("lockfile-v0.1.schema.json", doc)
+
+    # The normative boundary: self-asserted, never a trust anchor, and
+    # never an identity/dedup/replay key.
+    assert_spec_contains(
+        "**self-asserted inventory metadata**",
+        "MUST NOT derive any identity",
+        "MUST NOT change `lockfile_version`",
     )
