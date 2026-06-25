@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The shared gh-aw workflow `.github/workflows/shared/apm.md` exposes an optional `apm-version` import input that pins the apm CLI version for both the pack and restore `microsoft/apm-action` steps (so the two cannot skew), surviving `gh aw update` without hand-editing the vendored file. Omitting it falls through to the action's pinned default via a gh-aw schema default, so non-opting consumers stay reproducible instead of floating to `latest`. (#1842)
 - `apm config set target <env>` configures a default install target so a bare
   `apm install` deploys to it -- set the target once, then install everywhere
   without repeating `--target`. Precedence is `--target` > `apm.yml` `target:` >
@@ -65,6 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm lock export --format cyclonedx|spdx` emits a standard SBOM inventory of installed packages, and a new declared-license recorder stores each package's manifest-declared license (`apm.yml` `license:` / `plugin.json`) in the lockfile after offline SPDX-id validation. APM records what a package declares -- it does not scan LICENSE text or gate installs on a license. (closes #1777) (#1820)
 - `apm install` / `apm pack` can now deploy an experimental Copilot-only `canvas` primitive: a package declaring `.apm/extensions/<name>/` ships verbatim to `.github/extensions/<name>/` (or `~/.copilot/extensions/<name>/` with `--global`), where Copilot CLI discovers it in-session. The surface is gated twice -- `apm experimental enable canvas` plus `--trust-canvas-extensions` for dependency-provided canvases -- and is fail-closed when the flag is off. (#1689)
 - `apm install` now blocks dependency-provided executables (hooks and `bin/`) by default, mirroring npm v12's default-deny model. A dependency's hooks or binaries deploy only after explicit approval in an `allowExecutables` block of `apm.yml`, managed via `apm approve` / `apm deny`; root-authored content and text-only primitives are unaffected. (#1723)
+
+### Changed
+
+- Windsurf skills now deploy to the cross-tool `.agents/skills/<name>/SKILL.md` path (was `.windsurf/skills/`), converging with Copilot, Cursor, Codex, Gemini, and OpenCode. Pass `--legacy-skill-paths` or set `APM_LEGACY_SKILL_PATHS=1` to restore the per-client `.windsurf/skills/` layout. The lockfile pack-time cross-target skill map for Windsurf is swept separately in #1805. (closes #1520) (#1802)
 
 ### Removed
 

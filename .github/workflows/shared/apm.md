@@ -66,6 +66,16 @@
 #          target: copilot
 #          packages:
 #            - microsoft/apm-sample-package
+#
+# 5. Pin a specific apm CLI version (overrides the action's built-in default):
+#
+#    imports:
+#      - uses: shared/apm.md
+#        with:
+#          apm-version: '0.20.0'
+#          target: copilot
+#          packages:
+#            - microsoft/apm-sample-package
 
 import-schema:
   packages:
@@ -157,6 +167,24 @@ import-schema:
       faster bundles. The shared workflow runs apm-action in isolated mode,
       so any apm.yml in the consumer repo is intentionally ignored -- this
       input is the sole target signal.
+
+  # apm CLI version (overrides apm-action's pinned default)
+  apm-version:
+    type: string
+    required: false
+    # MAINTENANCE: this default MUST mirror the apm-version default shipped
+    # by the pinned microsoft/apm-action ref used in the Pack and Restore
+    # steps below. gh-aw substitutes this value at compile time when a
+    # consumer omits apm-version, so an empty string is never forwarded to
+    # apm-action (an empty apm-version floats the action to 'latest', the
+    # opposite of the pinned default). Bump this in lockstep with the action.
+    default: '0.12.4'
+    description: >
+      apm CLI version for apm-action to install, as a bare semver tag (e.g.
+      '0.12.4'); pass 'latest' to opt into floating to the newest release.
+      Omit to use apm-action's pinned default. Applied to both the Pack and
+      Restore apm-action steps so the CLI version cannot skew between packing
+      and restoring.
 
 jobs:
   apm-prep:
@@ -370,6 +398,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token || secrets.GH_AW_PLUGINS_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
         with:
+          apm-version: ${{ github.aw.import-inputs.apm-version }}
           dependencies: ${{ steps.list.outputs.deps }}
           isolated: 'true'
           pack: 'true'
@@ -450,6 +479,7 @@ steps:
   - name: Restore APM packages (all bundles)
     uses: microsoft/apm-action@v1.7.2
     with:
+      apm-version: ${{ github.aw.import-inputs.apm-version }}
       bundles-file: /tmp/gh-aw/apm-bundle-list.txt
 ---
 

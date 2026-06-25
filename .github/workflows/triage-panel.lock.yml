@@ -463,6 +463,7 @@ jobs:
       - name: Restore APM packages (all bundles)
         uses: microsoft/apm-action@b48dd081eb0050f6d7f32d0e7caa0a59a2d419fd # v1.7.2
         with:
+          apm-version: 0.12.4
           bundles-file: /tmp/gh-aw/apm-bundle-list.txt
 
       - name: Configure Git credentials
@@ -1187,6 +1188,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token || secrets.GH_AW_PLUGINS_TOKEN || secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
         with:
+          apm-version: 0.12.4
           archive: "true"
           dependencies: ${{ steps.list.outputs.deps }}
           isolated: "true"

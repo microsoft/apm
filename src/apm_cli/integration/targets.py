@@ -708,10 +708,14 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         compile_family="agents",
         hooks_config_display=".codex/hooks.json",
     ),
-    # Windsurf/Cascade -- .windsurf/ is the workspace config directory.
+    # Windsurf/Cascade (now Devin Desktop) -- .windsurf/ is the workspace
+    # config directory.
     # Rules are markdown files with trigger/globs frontmatter under .windsurf/rules/.
-    # Skills use the standard SKILL.md format under .windsurf/skills/.
-    # Cascade auto-invokes them when the description frontmatter matches the
+    # Skills converge onto the cross-tool .agents/skills/<name>/SKILL.md path
+    # (deploy_root=".agents"), matching copilot/cursor/codex/gemini/opencode;
+    # Devin's own docs also use .agents/skills/.  Rules, workflows, and hooks
+    # stay under .windsurf/.
+    # Cascade auto-invokes skills when the description frontmatter matches the
     # task -- this is the universal invocation mechanism, so windsurf does
     # NOT expose a separate ``agents`` primitive.  Package authors who want
     # their content to deploy to windsurf must declare it under
@@ -734,7 +738,12 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
                 "windsurf_rules",
                 output_compare=True,
             ),
-            "skills": PrimitiveMapping("skills", "/SKILL.md", "skill_standard"),
+            "skills": PrimitiveMapping(
+                "skills",
+                "/SKILL.md",
+                "skill_standard",
+                deploy_root=".agents",
+            ),
             "commands": PrimitiveMapping("workflows", ".md", "windsurf_workflow"),
             "hooks": PrimitiveMapping("", "hooks.json", "windsurf_hooks"),
         },
@@ -743,6 +752,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported="partial",
         user_root_dir=".codeium/windsurf",
         unsupported_user_primitives=("instructions",),
+        pack_prefixes=(".windsurf/", ".agents/"),
         compile_family="agents",
         hooks_config_display=".windsurf/hooks.json",
     ),

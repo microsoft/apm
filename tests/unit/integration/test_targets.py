@@ -305,21 +305,22 @@ class TestActiveTargets:
 
 
 # ---------------------------------------------------------------------------
-# Skill routing convergence (convergence §1)
+# Skill routing convergence (apm#1520)
 # ---------------------------------------------------------------------------
 
 
 class TestDefaultSkillRouting:
-    """Assert that the 4 documented clients route skills to .agents/ by default."""
+    """Assert that the documented clients route skills to .agents/ by default."""
 
     def test_default_skill_routing_uses_agents_dir_for_documented_clients(self):
-        """copilot, cursor, opencode, codex, gemini all have deploy_root='.agents' on skills."""
+        """copilot, cursor, opencode, codex, gemini, windsurf all have deploy_root='.agents' on skills."""
         expected = {
             "copilot": ".agents",
             "cursor": ".agents",
             "opencode": ".agents",
             "codex": ".agents",
             "gemini": ".agents",
+            "windsurf": ".agents",
             "claude": None,  # not documented as .agents/-aware
         }
         for name, want_root in expected.items():
@@ -335,11 +336,12 @@ class TestDefaultSkillRouting:
         from apm_cli.integration.targets import apply_legacy_skill_paths
 
         profiles = [
-            KNOWN_TARGETS[n] for n in ("copilot", "cursor", "opencode", "codex", "claude", "gemini")
+            KNOWN_TARGETS[n]
+            for n in ("copilot", "cursor", "opencode", "codex", "claude", "gemini", "windsurf")
         ]
         restored = apply_legacy_skill_paths(profiles)
 
-        # All 6 should have deploy_root=None after legacy restore
+        # All 7 should have deploy_root=None after legacy restore
         for profile in restored:
             skills_pm = profile.primitives.get("skills")
             assert skills_pm is not None, f"{profile.name} should have skills"
@@ -372,6 +374,38 @@ class TestDefaultSkillRouting:
         skills_pm = restored[0].primitives["skills"]
         assert skills_pm.deploy_root is None, (
             f"gemini: expected deploy_root=None (legacy), got {skills_pm.deploy_root!r}"
+        )
+
+    def test_windsurf_skill_routing_uses_agents_dir_by_default(self):
+        """Windsurf (now Devin Desktop) converges skills onto .agents/skills/ (apm#1520)."""
+        profile = KNOWN_TARGETS["windsurf"]
+        skills_pm = profile.primitives["skills"]
+        assert skills_pm.deploy_root == ".agents", (
+            f"windsurf: expected deploy_root='.agents', got {skills_pm.deploy_root!r}"
+        )
+        # The deploy directory is <effective_root>/skills/<name>; with the
+        # override that resolves to .agents/skills/ (parts, not substring).
+        effective_root = skills_pm.deploy_root or profile.root_dir
+        resolved = Path(effective_root) / "skills"
+        assert resolved.parts == (".agents", "skills"), (
+            f"windsurf: expected .agents/skills/, got {resolved.parts!r}"
+        )
+
+    def test_windsurf_legacy_skill_paths_restores_per_client_routing(self):
+        """With apply_legacy_skill_paths(), windsurf skills return to .windsurf/skills/ (apm#1520)."""
+        from apm_cli.integration.targets import apply_legacy_skill_paths
+
+        profiles = [KNOWN_TARGETS["windsurf"]]
+        restored = apply_legacy_skill_paths(profiles)
+        profile = restored[0]
+        skills_pm = profile.primitives["skills"]
+        assert skills_pm.deploy_root is None, (
+            f"windsurf: expected deploy_root=None (legacy), got {skills_pm.deploy_root!r}"
+        )
+        effective_root = skills_pm.deploy_root or profile.root_dir
+        resolved = Path(effective_root) / "skills"
+        assert resolved.parts == (".windsurf", "skills"), (
+            f"windsurf legacy: expected .windsurf/skills/, got {resolved.parts!r}"
         )
 
     def test_apply_legacy_does_not_mutate_known_targets(self):
