@@ -504,3 +504,146 @@ class TestStaleCleanupFullRun:
             patch("apm_cli.install.phases.cleanup.BaseIntegrator.cleanup_empty_parents"),
         ):
             cleanup.run(ctx)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Block 13: cross-package file protection (#1831)
+# Files deployed by another package must not be removed as stale.
+# ---------------------------------------------------------------------------
+
+
+class TestCrossPackageProtection:
+    """Stale cleanup must skip files still claimed by another package."""
+
+    def test_shared_file_not_removed_when_other_package_deploys_it(self, tmp_path):
+        """Issue #1831: if pkg-a no longer deploys shared.md but pkg-b still
+        does, cleanup must NOT delete shared.md."""
+        prev_dep_a = _make_orphan_dep(
+            [".github/agents/shared.md", ".github/agents/only-a.md"],
+            file_hashes={".github/agents/shared.md": "abc", ".github/agents/only-a.md": "def"},
+        )
+        lf = _make_lockfile({"pkg-a": prev_dep_a})
+        lf.get_dependency.return_value = prev_dep_a
+
+        # pkg-a no longer deploys either file; pkg-b still deploys shared.md
+        ctx = _make_ctx(
+            existing_lockfile=lf,
+            intended_dep_keys={"pkg-a", "pkg-b"},
+            package_deployed_files={
+                "pkg-a": [],
+                "pkg-b": [".github/agents/shared.md"],
+            },
+            project_root=tmp_path,
+        )
+
+        mock_result = MagicMock()
+        mock_result.failed = []
+        mock_result.deleted = [".github/agents/only-a.md"]
+        mock_result.deleted_targets = []
+        mock_result.skipped_user_edit = []
+
+        with (
+            patch(
+                "apm_cli.install.phases.cleanup.detect_stale_files",
+                return_value={".github/agents/shared.md", ".github/agents/only-a.md"},
+            ),
+            patch(
+                "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
+                return_value=mock_result,
+            ) as mock_rm,
+            patch("apm_cli.install.phases.cleanup.BaseIntegrator.cleanup_empty_parents"),
+        ):
+            cleanup.run(ctx)
+
+        # remove_stale_deployed_files should only receive "only-a.md"
+        # because shared.md is still claimed by pkg-b
+        call_args = mock_rm.call_args
+        stale_passed = call_args[0][0]
+        assert ".github/agents/only-a.md" in stale_passed
+        assert ".github/agents/shared.md" not in stale_passed
+        ctx.logger.verbose_detail.assert_called_once_with(
+            "Kept stale file .github/agents/shared.md for pkg-a; still deployed by another package"
+        )
+
+    def test_file_removed_when_no_other_package_claims_it(self, tmp_path):
+        """Normal case: stale file not claimed by any other package is removed."""
+        prev_dep = _make_orphan_dep(
+            [".github/agents/old.md"],
+            file_hashes={".github/agents/old.md": "abc"},
+        )
+        lf = _make_lockfile({"pkg-a": prev_dep})
+        lf.get_dependency.return_value = prev_dep
+
+        ctx = _make_ctx(
+            existing_lockfile=lf,
+            intended_dep_keys={"pkg-a", "pkg-b"},
+            package_deployed_files={
+                "pkg-a": [],
+                "pkg-b": [".github/agents/other.md"],
+            },
+            project_root=tmp_path,
+        )
+
+        mock_result = MagicMock()
+        mock_result.failed = []
+        mock_result.deleted = [".github/agents/old.md"]
+        mock_result.deleted_targets = []
+        mock_result.skipped_user_edit = []
+
+        with (
+            patch(
+                "apm_cli.install.phases.cleanup.detect_stale_files",
+                return_value={".github/agents/old.md"},
+            ),
+            patch(
+                "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
+                return_value=mock_result,
+            ) as mock_rm,
+            patch("apm_cli.install.phases.cleanup.BaseIntegrator.cleanup_empty_parents"),
+        ):
+            cleanup.run(ctx)
+
+        # The file should be passed to removal since no other package claims it
+        call_args = mock_rm.call_args
+        stale_passed = call_args[0][0]
+        assert ".github/agents/old.md" in stale_passed
+
+
+# ---------------------------------------------------------------------------
+# Block 14: legacy lockfile graceful skip (#1831)
+# When prev_dep.deployed_files is empty (old APM version), stale cleanup
+# is safely skipped and the new deployed_files is recorded for next run.
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyLockfileGracefulSkip:
+    """Legacy lockfiles with empty deployed_files skip stale cleanup safely."""
+
+    def test_empty_prev_deployed_files_skips_cleanup(self, tmp_path):
+        """When previous lockfile has empty deployed_files, no stale removal
+        is attempted. The new deployed_files will be recorded for future diffs."""
+        prev_dep = _make_orphan_dep([], file_hashes={})
+        lf = _make_lockfile({"legacy-pkg": prev_dep})
+        lf.get_dependency.return_value = prev_dep
+
+        ctx = _make_ctx(
+            existing_lockfile=lf,
+            intended_dep_keys={"legacy-pkg"},
+            package_deployed_files={
+                "legacy-pkg": [".github/agents/new-file.md"],
+            },
+            project_root=tmp_path,
+        )
+
+        with (
+            patch(
+                "apm_cli.install.phases.cleanup.remove_stale_deployed_files",
+            ) as mock_rm,
+            patch("apm_cli.install.phases.cleanup.BaseIntegrator.cleanup_empty_parents"),
+        ):
+            cleanup.run(ctx)
+
+        # No removal should be attempted since there are no previously
+        # tracked files to compare against
+        mock_rm.assert_not_called()
+        ctx.logger.stale_cleanup.assert_not_called()

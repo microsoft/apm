@@ -48,6 +48,7 @@ from apm_cli.install.mcp.writer import _add_mcp_to_apm_yml  # noqa: F401
 from apm_cli.install.package_resolution import (
     GIT_PARENT_USER_SCOPE_ERROR,
     dependency_reference_to_yaml_entry,
+    normalize_and_merge_skill_subset,
     persist_dependency_list_if_changed,
     resolve_parsed_dependency_reference,
     update_existing_dependency_entry_if_needed,
@@ -453,18 +454,16 @@ def _resolve_package_references(
             )
             canonical = dep_ref.to_canonical()
             identity = dep_ref.get_identity()
-            # Attach --skill filter so to_apm_yml_entry() emits the dict form
+            # Attach --skill filter so to_apm_yml_entry() emits the dict form.
+            # Merges with existing skills: list so repeated --skill
+            # invocations are additive (issue #1771).
             if skill_subset:
-                # Normalize: strip whitespace, drop empty strings, deduplicate
-                # (preserve order) so invalid or redundant names can't persist.
-                _seen: builtins.set[str] = builtins.set()
-                _normalized: builtins.list[str] = []
-                for _s in skill_subset:
-                    _s = _s.strip()
-                    if _s and _s not in _seen:
-                        _seen.add(_s)
-                        _normalized.append(_s)
-                dep_ref.skill_subset = _normalized
+                dep_ref.skill_subset = normalize_and_merge_skill_subset(
+                    skill_subset,
+                    current_deps,
+                    identity,
+                    dependency_reference_cls=DependencyReference,
+                )
             if marketplace_dep_ref is not None or direct_virtual_resolved:
                 _apm_yml_entries[canonical] = dependency_reference_to_yaml_entry(dep_ref)
         except ValueError as e:

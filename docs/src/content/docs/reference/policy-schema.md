@@ -36,8 +36,8 @@ Those controls are owned by the **agent harness** that runs your agents, not by 
 
 Discovery order, in priority:
 
-1. `--policy <ref>` flag on `apm install` or `apm audit`.
-2. Auto-discovery from the project's git remote -- fetches `<owner>/.github/apm-policy.yml` via the GitHub Contents API.
+1. Explicit policy source on `apm audit --ci` via `--policy <ref>` or `apm policy status` via `--policy-source <ref>`. `apm install` auto-discovers from the project's git remote and supports `--no-policy`; it does not accept `--policy` today.
+2. Auto-discovery from the project's git remote -- checks the org policy repo cascade (`.github`, `.apm`, `_apm`; Azure DevOps uses `_apm` only).
 
 The `<ref>` accepts:
 
@@ -259,7 +259,7 @@ turned them on.
 
 `extends:` accepts:
 
-- `org` -- the same org's `.github/apm-policy.yml`.
+- `org` -- the same org's auto-discovered policy repo.
 - `<owner>/<repo>` -- another repo on the same host.
 - `https://...` -- a direct URL.
 
@@ -317,7 +317,7 @@ For every `allow:` field, the three states are distinct:
 ## Complete example
 
 ```yaml
-# .github/apm-policy.yml -- shipped from contoso/.github
+# .github/apm-policy.yml -- shipped from the first auto-discovered policy repo
 name: contoso-baseline
 version: "2025.05"
 extends: contoso-enterprise/policy

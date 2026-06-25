@@ -129,6 +129,57 @@ def user_scope_rejection_reason(dep_ref: Any, scope: Any) -> str | None:
     return None
 
 
+def get_existing_skill_subset(
+    current_deps: builtins.list,
+    identity: str,
+    *,
+    dependency_reference_cls: Any,
+) -> builtins.list[str] | None:
+    """Return the persisted ``skills:`` list for *identity*, or None."""
+    for dep_entry in current_deps:
+        try:
+            if isinstance(dep_entry, builtins.str):
+                existing_ref = dependency_reference_cls.parse(dep_entry)
+            elif isinstance(dep_entry, builtins.dict):
+                existing_ref = dependency_reference_cls.parse_from_dict(dep_entry)
+            else:
+                continue
+        except (ValueError, TypeError, AttributeError, KeyError):
+            continue
+        if existing_ref.get_identity() == identity:
+            subset = getattr(existing_ref, "skill_subset", None)
+            return list(subset) if subset else None
+    return None
+
+
+def normalize_and_merge_skill_subset(
+    cli_subset: builtins.tuple[str, ...],
+    current_deps: builtins.list,
+    identity: str,
+    *,
+    dependency_reference_cls: Any,
+) -> builtins.list[str]:
+    """Normalize CLI ``--skill`` names and merge with existing manifest skills.
+
+    Strips whitespace, drops empty strings, deduplicates, then unions with
+    the persisted ``skills:`` list from ``apm.yml`` so that repeated
+    ``--skill`` invocations are additive (issue #1771).
+
+    Returns a sorted, deduplicated list ready for ``dep_ref.skill_subset``.
+    """
+    seen: builtins.set[str] = builtins.set()
+    for s in cli_subset:
+        s = s.strip()
+        if s:
+            seen.add(s)
+    existing = get_existing_skill_subset(
+        current_deps, identity, dependency_reference_cls=dependency_reference_cls
+    )
+    if existing:
+        seen.update(existing)
+    return sorted(seen)
+
+
 def manifest_has_different_entry_for_identity(
     current_deps: builtins.list,
     identity: str,
