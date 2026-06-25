@@ -96,7 +96,7 @@ from ..constants import (
 )
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger, _ValidationOutcome
-from ..core.target_detection import TargetParamType
+from ..core.target_detection import TargetParamType, manifest_targets_from_target_option
 
 # MCP --mcp helpers (module-level re-exports for test patches); must stay at
 # import time per comments in the original mid-file block.
@@ -1474,19 +1474,18 @@ def install(  # noqa: PLR0913
         # Check if apm.yml exists
         apm_yml_exists = manifest_path.exists()
 
-        # Auto-bootstrap: create minimal apm.yml when packages specified but no apm.yml
         if not apm_yml_exists and packages:
-            # Get current directory name as project name
             project_name = Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
             config = _get_default_config(project_name)
-            # #1743: persist the resolved --target into the auto-created apm.yml so a
-            # later bare `apm update` re-deploys to the same harness(es). Mirrors init.py.
-            if target is not None:
-                config["targets"] = sorted([target] if isinstance(target, str) else list(target))
+            if manifest_targets := manifest_targets_from_target_option(target):
+                config["targets"] = manifest_targets
             _create_minimal_apm_yml(config, target_path=manifest_path)
             logger.success(f"Created {manifest_display}")
+            if manifest_targets:
+                logger.progress(
+                    f"Targets set: {', '.join(manifest_targets)} (persisted to {manifest_display})"
+                )
 
-        # Error when NO apm.yml AND NO packages
         if not apm_yml_exists and not packages:
             logger.error(f"No {manifest_display} found")
             if scope is InstallScope.USER:
@@ -1496,7 +1495,6 @@ def install(  # noqa: PLR0913
                 logger.progress("  apm install <org/repo> to auto-create + install")
             sys.exit(1)
 
-        # If packages are specified, validate and add them to apm.yml first
         outcome = None
         if packages:
             # -- W2-pkg-rollback (#827): snapshot raw bytes BEFORE mutation --
