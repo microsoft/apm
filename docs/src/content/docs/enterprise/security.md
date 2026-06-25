@@ -136,6 +136,12 @@ download → scan source → block or deploy → report
 Content scanning extends beyond install:
 
 - **`apm compile`** scans compiled output (AGENTS.md, CLAUDE.md, `.github/copilot-instructions.md`, commands) before writing to disk. Critical findings cause `apm compile` to exit with code 1 after writing — defense-in-depth since source files were already scanned at install, but compilation assembles content from multiple sources. `.github/copilot-instructions.md` is assembled from global instructions in `.apm/instructions/`, including those installed under `apm_modules/`.
+- **`apm compile --global`** scans user-scope root context files assembled from
+  globally installed instructions before writing them. Critical findings stop
+  the write and exit with code 1. Existing hand-authored root context files are
+  skipped unless they carry APM's generated marker, so opting into global
+  compilation does not clobber user-managed `CLAUDE.md`, `AGENTS.md`, or
+  `GEMINI.md` files.
 - **`apm pack`** scans files before bundling. This catches hidden characters before a package is published, preventing authors from accidentally distributing tainted content.
 - **`apm unpack`** scans bundle contents before deployment. This is a pre-deployment gate matching `apm install` — critical findings block deployment unless `--force` is used. (Note: `apm unpack` is DEPRECATED; prefer `apm install <bundle-path>` for new pipelines -- it applies the same scan plus lockfile integration. See [Pack and distribute](../producer/pack-a-bundle/).)
 
