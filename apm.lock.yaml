@@ -1,8 +1,10 @@
 lockfile_version: '1'
-generated_at: '2026-06-16T23:58:41.693187+00:00'
-apm_version: 0.20.0
+generated_at: '2026-06-25T18:39:34.738228+00:00'
+apm_version: 0.21.0
 dependencies:
 - repo_url: _local/apm-issue-autopilot
+  name: apm-issue-autopilot
+  version: 0.1.0
   package_type: apm_package
   deployed_files:
   - .agents/skills/apm-issue-autopilot
@@ -68,6 +70,8 @@ dependencies:
   local_path: ./packages/apm-issue-autopilot
   declared_license: MIT
 - repo_url: _local/batch-bug-shepherd
+  name: batch-bug-shepherd
+  version: 0.1.0
   package_type: apm_package
   deployed_files:
   - .agents/skills/batch-bug-shepherd
@@ -119,6 +123,8 @@ dependencies:
   local_path: ./packages/batch-bug-shepherd
   declared_license: MIT
 - repo_url: _local/apm-triage-panel
+  name: apm-triage-panel
+  version: 0.1.0
   depth: 2
   resolved_by: _local/apm-issue-autopilot
   package_type: hybrid
@@ -135,6 +141,8 @@ dependencies:
   local_path: ../apm-triage-panel
   declared_license: MIT
 - repo_url: _local/pr-description-skill
+  name: pr-description-skill
+  version: 0.1.0
   depth: 2
   resolved_by: _local/apm-issue-autopilot
   package_type: hybrid
@@ -187,6 +195,8 @@ dependencies:
   local_path: ../pr-description-skill
   declared_license: MIT
 - repo_url: _local/shepherd-driver
+  name: shepherd-driver
+  version: 0.1.0
   depth: 2
   resolved_by: _local/apm-issue-autopilot
   package_type: hybrid
@@ -217,6 +227,8 @@ dependencies:
   local_path: ../shepherd-driver
   declared_license: MIT
 - repo_url: _local/apm-review-panel
+  name: apm-review-panel
+  version: 0.1.0
   depth: 3
   resolved_by: _local/shepherd-driver
   package_type: hybrid

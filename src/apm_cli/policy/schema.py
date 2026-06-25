@@ -238,6 +238,39 @@ class BinDeployPolicy:
 
 
 @dataclass(frozen=True)
+class ExecutablesPolicy:
+    """Org policy controls for executable-primitive trust (issue #1873, Gap A).
+
+    Unifies the executable-trust vocabulary onto one noun, ``executables``,
+    and closes the GRANT asymmetry: ``apm-policy.yml`` could previously only
+    DENY executables (via the deprecated ``bin_deploy`` block, bin-scoped),
+    never GRANT or recommend them fleet-wide.
+
+    All five fields ratchet tighten-only through inheritance
+    (:func:`~apm_cli.policy.inheritance._merge_executables`):
+
+      * ``deny_all``  -- kill-switch denying every executable type for all
+        packages (OR-merged: any ancestor's ``True`` sticks).
+      * ``deny``      -- package canonical strings denied for ALL exec types
+        (union-merged; absolute ceiling on DENY).
+      * ``require``   -- packages whose executables are mandated PRESENT; the
+        ``required-executable-untrusted`` audit hard-fails CI when a required
+        package is present-but-parked (union-merged).
+      * ``recommend`` -- org-vetted set; default-allow but user-overridable
+        (union-merged). Bulk-accepted via ``apm approve --recommended``.
+      * ``enforce``   -- v2 mandate tier (force-execute when provenance is
+        verified). In v1 this NEVER force-executes: it fail-safe degrades to
+        ``recommend`` with no force path (union-merged, known-but-degraded).
+    """
+
+    deny_all: bool = False
+    deny: tuple[str, ...] = ()
+    require: tuple[str, ...] = ()
+    recommend: tuple[str, ...] = ()
+    enforce: tuple[str, ...] = ()  # v2 mandate tier; v1 degrades to recommend
+
+
+@dataclass(frozen=True)
 class ApmPolicy:
     """Top-level APM policy model."""
 
@@ -254,4 +287,9 @@ class ApmPolicy:
     unmanaged_files: UnmanagedFilesPolicy = field(default_factory=UnmanagedFilesPolicy)
     registry_source: RegistrySourcePolicy = field(default_factory=RegistrySourcePolicy)
     security: SecurityPolicy = field(default_factory=SecurityPolicy)
+    # ``bin_deploy`` is the DEPRECATED bin-scoped predecessor of
+    # ``executables`` (issue #1873). Retained one minor cycle as an alias the
+    # resolver still honors for the ``bin`` exec type; new policies use
+    # ``executables:`` instead.
     bin_deploy: BinDeployPolicy = field(default_factory=BinDeployPolicy)
+    executables: ExecutablesPolicy = field(default_factory=ExecutablesPolicy)

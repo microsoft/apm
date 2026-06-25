@@ -125,7 +125,8 @@ Each item in `dependencies` describes one resolved package.
 | `registry_prefix` | string | no | URL path prefix when resolved through a registry proxy (e.g. `artifactory/github`). |
 | `resolved_ref` | string | no | The user-supplied ref from `apm.yml` (`main`, `v1.2.0`, a SHA). |
 | `resolved_commit` | string | no | Exact 40-char commit SHA installed. The pin. |
-| `version` | string | no | Resolved package version/ref selector. For registry entries this is the exact version selected from the registry, whether semver or not. |
+| `name` | string | no | Package name as declared in the dependency's own `apm.yml` at resolution time. **SELF-ASSERTED** author-claim metadata -- NOT integrity-verified and MUST NOT be used for trust decisions or identity keying. Always cross-reference `repo_url` + `resolved_commit` (or `resolved_hash`) for provenance. Omitted when absent. |
+| `version` | string | no | Resolved package version. For registry entries: the exact version selected from the registry for reinstall; `resolved_hash` remains the integrity anchor. For git/local entries: the `version` field from the dependency's `apm.yml` at resolution time (display/inventory metadata only -- replay always uses `resolved_ref`/`resolved_commit`). For git-semver entries: the resolved semver version. **SELF-ASSERTED** for git/local entries; see `name` boundary note above. |
 | `virtual_path` | string | no | Subpath inside the repo for virtual packages (monorepo subpaths). |
 | `is_virtual` | bool | no | `true` when the entry is a virtual subpath package. |
 | `depth` | int | no | Position in the dependency tree. `0` is the project itself, `1` is a direct dep, higher is transitive. Defaults to `1`. |
@@ -134,6 +135,7 @@ Each item in `dependencies` describes one resolved package.
 | `skill_subset` | list of strings | no | For `skill_bundle` packages: the sorted subset of skill names the manifest selected. Empty means "all". |
 | `deployed_files` | list of strings | no | Project-relative paths APM wrote for this dep. Sorted. Powers `prune` and `audit`'s file-presence check. |
 | `deployed_file_hashes` | map | no | `path -> sha256` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Directory entries (trailing `/`) have no hash. |
+| `exec_status` | string | no | Executable-trust state of this dep's executable primitives, set by the install-time gate via the shared deny-wins resolver. One of `deployed` (trusted and materialized), `gated_pending_approval` (present but parked until approved), `denied` (blocked by an org/user deny), or `absent` (declares no executables). Consumed by `audit`'s `required-executable-untrusted` signal; see [Executable approval](../cli/approve/). |
 | `source` | string | no | `"local"` for path dependencies, `"registry"` for dedicated-registry resolutions. Absent for Git deps. |
 | `resolved_url` | string | registry only | Fully-qualified download URL used to re-fetch registry archives. |
 | `resolved_hash` | string | registry only | SHA-256 digest of the registry archive bytes, verified on every install. |

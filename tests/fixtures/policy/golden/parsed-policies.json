@@ -29,6 +29,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "warn",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -96,6 +103,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "block",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -165,6 +179,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "block",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -232,6 +253,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "warn",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": "nonexistent-org/nonexistent-policy-repo",
     "fetch_failure": "warn",
     "manifest": {
@@ -299,6 +327,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "block",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": "cycle-policy-a",
     "fetch_failure": "warn",
     "manifest": {
@@ -368,6 +403,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "warn",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": "cycle-policy-b",
     "fetch_failure": "warn",
     "manifest": {
@@ -437,6 +479,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "warn",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": "contoso-depth-5/policy",
     "fetch_failure": "warn",
     "manifest": {
@@ -504,6 +553,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "warn",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -571,6 +627,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "block",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -638,6 +701,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "block",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -705,6 +775,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "block",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -780,6 +857,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "off",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -847,6 +931,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "warn",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -914,6 +1005,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "block",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -983,6 +1081,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "block",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -1052,6 +1157,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "block",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -1121,6 +1233,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "block",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -1188,6 +1307,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "warn",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -1264,6 +1390,13 @@
       "require_resolution": "policy-wins"
     },
     "enforcement": "block",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -1331,6 +1464,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "warn",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -1410,6 +1550,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "warn",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": null,
     "fetch_failure": "warn",
     "manifest": {
@@ -1495,6 +1642,13 @@
       "require_resolution": "project-wins"
     },
     "enforcement": "warn",
+    "executables": {
+      "deny": [],
+      "deny_all": false,
+      "enforce": [],
+      "recommend": [],
+      "require": []
+    },
     "extends": "org",
     "fetch_failure": "warn",
     "manifest": {

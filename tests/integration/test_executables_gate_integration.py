@@ -14,11 +14,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.install.exec_gate import (
     check_executable_approval,
     log_bin_status,
     resolve_package_key,
 )
+from apm_cli.install.phases.integrate import _run_executable_approval_prompt
+from apm_cli.install.phases.lockfile import LockfileBuilder
 from apm_cli.security.executables import (
     ALL_EXEC_TYPES,
     ENFORCED_EXEC_TYPES,
@@ -132,7 +135,7 @@ class TestScanPackageExecutablesIntegration:
         decl = scan_package_executables(tmp_path, "mcp-pkg", "1.0")
 
         assert decl.mcp_count == 2
-        # MCP is now an enforced executable type
+        # MCP is an enforced exec type (#1865 expanded the gate to MCP+canvas).
         assert decl.has_executables is True
         assert EXEC_TYPE_MCP in decl.exec_types
 
@@ -156,6 +159,70 @@ class TestScanPackageExecutablesIntegration:
         # Only the real file is counted
         assert decl.hook_count == 1
         assert decl.hook_details == ["real.json"]
+
+
+class TestLockfileExecStatusIntegration:
+    """Integration: install-phase trust state is serialized into the lockfile."""
+
+    def test_attach_exec_status_serializes_to_lockfile_yaml(self) -> None:
+        lockfile = LockFile()
+        lockfile.add_dependency(LockedDependency(repo_url="owner/repo"))
+        ctx = SimpleNamespace(package_exec_status={"owner/repo": "gated_pending_approval"})
+
+        LockfileBuilder(ctx)._attach_exec_status(lockfile)
+
+        assert lockfile.dependencies["owner/repo"].exec_status == "gated_pending_approval"
+        assert "exec_status: gated_pending_approval" in lockfile.to_yaml()
+
+
+class TestNonInteractiveExecutablePromptIntegration:
+    """Integration: CI installs park executables instead of aborting."""
+
+    def test_noninteractive_blocked_executables_warn_without_exit(self, monkeypatch) -> None:
+        decl = ExecutableDeclaration(
+            package_key="owner/repo#1.0", package_name="owner/repo", hook_count=1
+        )
+        logger = MagicMock()
+        ctx = SimpleNamespace(blocked_executables=[decl], logger=logger)
+
+        monkeypatch.setenv("APM_NON_INTERACTIVE", "1")
+
+        _run_executable_approval_prompt(ctx)
+
+        logger.warning.assert_called_once()
+        logger.info.assert_called_once()
+        remedy = logger.info.call_args.args[0]
+        assert "apm policy explain owner/repo" in remedy
+        # M4 (#1873): non-interactive remedy leads with the bulk one-liner.
+        assert "apm approve --recommended" in remedy
+
+    def test_interactive_decline_surfaces_parked_remedy(self, monkeypatch) -> None:
+        # M3 (#1873): declining at the interactive prompt must still print a
+        # remedy -- present-but-parked guidance is not approve-only.
+        import sys
+
+        import apm_cli.install.phases.integrate as integ
+        import apm_cli.security.executables as ex
+
+        decl = ExecutableDeclaration(
+            package_key="owner/repo#1.0", package_name="owner/repo", hook_count=1
+        )
+        logger = MagicMock()
+        ctx = SimpleNamespace(blocked_executables=[decl], logger=logger)
+
+        monkeypatch.delenv("APM_NON_INTERACTIVE", raising=False)
+        monkeypatch.delenv("CI", raising=False)
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+        monkeypatch.setattr(ex, "load_user_executables", lambda: ({}, {}))
+        # Simulate a full decline: prompt returns the seed unchanged.
+        monkeypatch.setattr(ex, "prompt_executable_approval", lambda *a, **k: {})
+
+        integ._run_executable_approval_prompt(ctx)
+
+        info_msgs = " ".join(str(c.args[0]) for c in logger.info.call_args_list)
+        assert "left parked" in info_msgs
+        assert "apm approve owner/repo" in info_msgs
+        assert "apm policy explain owner/repo" in info_msgs
 
 
 # -------------------------------------------------------------------
@@ -308,29 +375,23 @@ class TestCheckExecutableApprovalIntegration:
 
     def test_local_always_approved(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "_local", "")
-        hooks_ok, bin_ok, mcp_ok, canvas_ok = check_executable_approval(
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval(
             "_local", pkg_info, {"deny-all": {}}
         )
         assert hooks_ok is True
         assert bin_ok is True
-        assert mcp_ok is True
-        assert canvas_ok is True
 
     def test_none_allow_executables_means_all_approved(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "any-pkg", "1.0")
-        hooks_ok, bin_ok, mcp_ok, canvas_ok = check_executable_approval("any-pkg", pkg_info, None)
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval("any-pkg", pkg_info, None)
         assert hooks_ok is True
         assert bin_ok is True
-        assert mcp_ok is True
-        assert canvas_ok is True
 
     def test_empty_allow_executables_blocks_all(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
-        hooks_ok, bin_ok, mcp_ok, canvas_ok = check_executable_approval("pkg", pkg_info, {})
+        hooks_ok, bin_ok, _mcp_ok, _canvas_ok = check_executable_approval("pkg", pkg_info, {})
         assert hooks_ok is False
         assert bin_ok is False
-        assert mcp_ok is False
-        assert canvas_ok is False
 
     def test_approved_package_passes(self, tmp_path: Path) -> None:
         pkg_info = self._make_pkg_info(tmp_path, "pkg", "1.0")
@@ -517,6 +578,7 @@ class TestConstantsIntegration:
             assert t in ALL_EXEC_TYPES
 
     def test_mcp_and_canvas_in_enforced(self) -> None:
+        # #1865 expanded the executable gate to cover MCP and canvas.
         assert EXEC_TYPE_MCP in ENFORCED_EXEC_TYPES
         assert EXEC_TYPE_CANVAS in ENFORCED_EXEC_TYPES
 
@@ -666,12 +728,11 @@ class TestApproveDenyCommandsIntegration:
         from apm_cli.commands.approve import approve_cmd
 
         project = self._setup_project(tmp_path)
-        approvals_file = tmp_path / ".apm" / "approvals.yml"
-        approvals_file.parent.mkdir(parents=True, exist_ok=True)
-        approvals_file.write_text("risky-pkg#2.0.0:\n  hooks: true\ntool-pkg#1.0.0:\n  bin: true\n")
-        monkeypatch.setattr(
-            "apm_cli.security.executables.get_user_approvals_path",
-            lambda: approvals_file,
+        manifest = project / "apm.yml"
+        manifest.write_text(
+            "name: test\nallowExecutables:\n"
+            "  risky-pkg#2.0.0:\n    hooks: true\n"
+            "  tool-pkg#1.0.0:\n    bin: true\n"
         )
         monkeypatch.chdir(project)
 
@@ -687,11 +748,6 @@ class TestApproveDenyCommandsIntegration:
         from apm_cli.commands.approve import approve_cmd
 
         project = self._setup_project(tmp_path)
-        approvals_file = tmp_path / ".apm" / "approvals.yml"
-        monkeypatch.setattr(
-            "apm_cli.security.executables.get_user_approvals_path",
-            lambda: approvals_file,
-        )
         monkeypatch.chdir(project)
 
         runner = CliRunner()
@@ -701,14 +757,12 @@ class TestApproveDenyCommandsIntegration:
         assert "Approved" in result.output
         assert "risky-pkg" in result.output
 
-        # Verify the user-local approvals file was updated, not project apm.yml
+        # Verify manifest was updated (unified executables.allow noun)
         from apm_cli.utils.yaml_io import load_yaml
 
-        assert approvals_file.is_file()
-        data = load_yaml(approvals_file)
-        assert "risky-pkg#2.0.0" in data
-        project_data = load_yaml(project / "apm.yml")
-        assert "allowExecutables" not in project_data
+        data = load_yaml(project / "apm.yml")
+        assert "executables" in data
+        assert "risky-pkg#2.0.0" in data["executables"]["allow"]
 
     def test_approve_all(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner
@@ -716,11 +770,6 @@ class TestApproveDenyCommandsIntegration:
         from apm_cli.commands.approve import approve_cmd
 
         project = self._setup_project(tmp_path)
-        approvals_file = tmp_path / ".apm" / "approvals.yml"
-        monkeypatch.setattr(
-            "apm_cli.security.executables.get_user_approvals_path",
-            lambda: approvals_file,
-        )
         monkeypatch.chdir(project)
 
         runner = CliRunner()
@@ -731,8 +780,8 @@ class TestApproveDenyCommandsIntegration:
 
         from apm_cli.utils.yaml_io import load_yaml
 
-        assert approvals_file.is_file()
-        allow = load_yaml(approvals_file)
+        data = load_yaml(project / "apm.yml")
+        allow = data["executables"]["allow"]
         assert "risky-pkg#2.0.0" in allow
         assert "tool-pkg#1.0.0" in allow
 
@@ -784,12 +833,11 @@ class TestApproveDenyCommandsIntegration:
         from apm_cli.commands.approve import deny_cmd
 
         project = self._setup_project(tmp_path)
-        approvals_file = tmp_path / ".apm" / "approvals.yml"
-        approvals_file.parent.mkdir(parents=True, exist_ok=True)
-        approvals_file.write_text("risky-pkg#2.0.0:\n  hooks: true\ntool-pkg#1.0.0:\n  bin: true\n")
-        monkeypatch.setattr(
-            "apm_cli.security.executables.get_user_approvals_path",
-            lambda: approvals_file,
+        manifest = project / "apm.yml"
+        manifest.write_text(
+            "name: test\nallowExecutables:\n"
+            "  risky-pkg#2.0.0:\n    hooks: true\n"
+            "  tool-pkg#1.0.0:\n    bin: true\n"
         )
         monkeypatch.chdir(project)
 
@@ -797,14 +845,17 @@ class TestApproveDenyCommandsIntegration:
         result = runner.invoke(deny_cmd, ["risky-pkg"])
 
         assert result.exit_code == 0
-        assert "Revoked" in result.output
+        assert "Denied" in result.output
 
         from apm_cli.utils.yaml_io import load_yaml
 
-        data = load_yaml(approvals_file)
-        assert "risky-pkg#2.0.0" not in data
-        # tool-pkg should still be there
-        assert "tool-pkg#1.0.0" in data
+        data = load_yaml(manifest)
+        # deny migrates the legacy alias onto the unified noun
+        deny = data["executables"]["deny"]
+        assert "risky-pkg#2.0.0" in deny
+        # tool-pkg should remain allowed, not denied
+        assert "tool-pkg#1.0.0" in data["executables"]["allow"]
+        assert "tool-pkg#1.0.0" not in deny
 
     def test_deny_nonexistent_package(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner
@@ -820,7 +871,13 @@ class TestApproveDenyCommandsIntegration:
         result = runner.invoke(deny_cmd, ["missing"])
 
         assert result.exit_code == 0
-        assert "not found" in result.output
+        # deny may target a not-yet-installed package (a pre-emptive block)
+        assert "Denied missing" in result.output
+
+        from apm_cli.utils.yaml_io import load_yaml
+
+        data = load_yaml(manifest)
+        assert "missing" in data["executables"]["deny"]
 
     def test_approve_no_manifest_errors(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner
@@ -835,26 +892,18 @@ class TestApproveDenyCommandsIntegration:
         assert result.exit_code == 1
         assert "No apm.yml" in result.output
 
-    def test_deny_no_manifest_succeeds(self, tmp_path: Path, monkeypatch) -> None:
+    def test_deny_no_manifest_errors(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner
 
         from apm_cli.commands.approve import deny_cmd
 
-        # deny no longer requires a project manifest: it operates purely on the
-        # user-local approvals store. With no approvals recorded, the package is
-        # simply reported as not found and the command exits cleanly.
-        approvals_file = tmp_path / ".apm" / "approvals.yml"
-        monkeypatch.setattr(
-            "apm_cli.security.executables.get_user_approvals_path",
-            lambda: approvals_file,
-        )
         monkeypatch.chdir(tmp_path)
 
         runner = CliRunner()
         result = runner.invoke(deny_cmd, ["pkg"])
 
-        assert result.exit_code == 0
-        assert "not found" in result.output
+        assert result.exit_code == 1
+        assert "No apm.yml" in result.output
 
     def test_approve_all_already_approved(self, tmp_path: Path, monkeypatch) -> None:
         from click.testing import CliRunner
@@ -862,12 +911,11 @@ class TestApproveDenyCommandsIntegration:
         from apm_cli.commands.approve import approve_cmd
 
         project = self._setup_project(tmp_path)
-        approvals_file = tmp_path / ".apm" / "approvals.yml"
-        approvals_file.parent.mkdir(parents=True, exist_ok=True)
-        approvals_file.write_text("risky-pkg#2.0.0:\n  hooks: true\ntool-pkg#1.0.0:\n  bin: true\n")
-        monkeypatch.setattr(
-            "apm_cli.security.executables.get_user_approvals_path",
-            lambda: approvals_file,
+        manifest = project / "apm.yml"
+        manifest.write_text(
+            "name: test\nallowExecutables:\n"
+            "  risky-pkg#2.0.0:\n    hooks: true\n"
+            "  tool-pkg#1.0.0:\n    bin: true\n"
         )
         monkeypatch.chdir(project)
 

@@ -22,6 +22,7 @@ from apm_cli.policy.schema import (
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
     DependencyPolicy,
+    ExecutablesPolicy,
     ManifestPolicy,
     McpPolicy,
     McpTransportPolicy,
@@ -834,6 +835,44 @@ class TestBinDeployMerge(unittest.TestCase):
         self.assertEqual(set(result.bin_deploy.deny), {"a/b", "c/d"})
 
 
+class TestExecutablesMerge(unittest.TestCase):
+    """executables tightens: deny_all OR-sticks; lists union (issue #1873)."""
+
+    def test_deny_all_sticks_when_child_silent(self):
+        parent = ApmPolicy(executables=ExecutablesPolicy(deny_all=True))
+        result = merge_policies(parent, ApmPolicy())
+        self.assertTrue(result.executables.deny_all)
+
+    def test_deny_all_child_cannot_relax(self):
+        parent = ApmPolicy(executables=ExecutablesPolicy(deny_all=True))
+        child = ApmPolicy(executables=ExecutablesPolicy(deny_all=False))
+        result = merge_policies(parent, child)
+        self.assertTrue(result.executables.deny_all)
+
+    def test_deny_union_merged(self):
+        parent = ApmPolicy(executables=ExecutablesPolicy(deny=("a/b",)))
+        child = ApmPolicy(executables=ExecutablesPolicy(deny=("c/d",)))
+        result = merge_policies(parent, child)
+        self.assertEqual(set(result.executables.deny), {"a/b", "c/d"})
+
+    def test_require_union_merged(self):
+        parent = ApmPolicy(executables=ExecutablesPolicy(require=("org/hook",)))
+        child = ApmPolicy(executables=ExecutablesPolicy(require=("org/mcp",)))
+        result = merge_policies(parent, child)
+        self.assertEqual(set(result.executables.require), {"org/hook", "org/mcp"})
+
+    def test_recommend_union_merged(self):
+        parent = ApmPolicy(executables=ExecutablesPolicy(recommend=("org/a",)))
+        child = ApmPolicy(executables=ExecutablesPolicy(recommend=("org/b",)))
+        result = merge_policies(parent, child)
+        self.assertEqual(set(result.executables.recommend), {"org/a", "org/b"})
+
+    def test_enforce_union_merged(self):
+        parent = ApmPolicy(executables=ExecutablesPolicy(enforce=("org/x",)))
+        result = merge_policies(parent, ApmPolicy())
+        self.assertEqual(result.executables.enforce, ("org/x",))
+
+
 class TestMergeUnmanagedExclude(unittest.TestCase):
     """The unmanaged-files ``exclude`` list is union-merged across a chain."""
 
@@ -896,6 +935,7 @@ class TestMergeFieldCoverageGuard(unittest.TestCase):
             registry_source=RegistrySourcePolicy(require=("corp",)),
             security=SecurityPolicy(audit=AuditPolicy(on_install="block")),
             bin_deploy=BinDeployPolicy(deny_all=True),
+            executables=ExecutablesPolicy(deny_all=True),
         )
 
     def test_sample_covers_every_mergeable_field(self):

@@ -70,6 +70,8 @@ jobs:
         run: uv run pytest tests/integration/test_runtime_smoke.py -v
 
       - name: Run inference validation
+        id: inference
+        continue-on-error: true
         env:
           APM_RUN_INFERENCE_TESTS: "1"
           APM_E2E_TESTS: "1"
@@ -83,8 +85,16 @@ jobs:
       - name: Annotate result
         if: always()
         run: |
-          if [[ "${{ job.status }}" == "success" ]]; then
-            echo "::notice::✅ Runtime inference tests passed"
+          # The inference validation step is a non-blocking live-inference
+          # smoke (it exercises `apm run` against GitHub Models). It is
+          # decoupled from the release gate on purpose: live inference depends
+          # on a Copilot-entitled credential and a GitHub Models-compatible
+          # runtime, neither of which is guaranteed in CI (see apm#605: codex
+          # >= v0.116 is incompatible with GitHub Models). Read the step's own
+          # outcome rather than job.status so this annotation is truthful even
+          # though continue-on-error keeps the job green.
+          if [[ "${{ steps.inference.outcome }}" == "success" ]]; then
+            echo "::notice::Runtime inference smoke passed"
           else
-            echo "::warning::⚠️ Runtime inference tests failed — this does not block releases"
+            echo "::warning::Runtime inference smoke failed -- non-blocking. Known causes: the CI token is not a Copilot-entitled credential for live inference, and codex >= v0.116 is incompatible with GitHub Models (apm#605). This does NOT gate releases."
           fi

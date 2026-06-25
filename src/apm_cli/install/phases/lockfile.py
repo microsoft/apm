@@ -91,6 +91,8 @@ class LockfileBuilder:
             # Attach deployed_files and package_type to each LockedDependency
             self._attach_deployed_files(lockfile)
             self._attach_package_types(lockfile)
+            # Attach #1873 executable trust state captured at the gate.
+            self._attach_exec_status(lockfile)
             # Apply CLI --skill override to lockfile entries (skill_bundle only)
             self._attach_skill_subset_override(lockfile)
             # Attach content hashes captured at download/verify time
@@ -169,6 +171,22 @@ class LockfileBuilder:
         for dep_key, pkg_type in self.ctx.package_types.items():
             if dep_key in lockfile.dependencies:
                 lockfile.dependencies[dep_key].package_type = pkg_type
+
+    def _attach_exec_status(self, lockfile: LockFile) -> None:
+        """Attach the #1873 ``exec_status`` trust state computed at the gate.
+
+        ``ctx.package_exec_status`` is keyed by dep_key and holds the worst-case
+        trust state (``deployed`` / ``gated_pending_approval`` / ``denied``) for
+        each dependency that declared executables. Packages with no executables
+        are absent from the map and keep ``exec_status=None`` (the audit treats
+        them as trusted).
+        """
+        statuses = getattr(self.ctx, "package_exec_status", None)
+        if not statuses:
+            return
+        for dep_key, status in statuses.items():
+            if dep_key in lockfile.dependencies and status:
+                lockfile.dependencies[dep_key].exec_status = status
 
     def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
         """Apply CLI --skill override to lockfile skill_bundle entries.

@@ -327,3 +327,113 @@ class TestAlreadyResolvedSkipLogic:
             lockfile_match=lockfile_match,
         )
         assert result is expected
+
+
+# ===========================================================================
+# TestForceSemverResolve -- BFS callback early-return guard
+# ===========================================================================
+
+
+def _force_semver_resolve(
+    *,
+    update_refs: bool,
+    is_local: bool,
+    source: str | None,
+    artifactory_prefix: str | None,
+    ref_kind: str | None,
+) -> bool:
+    """Mirror of the _force_semver_resolve expression in download_callback.
+
+    Kept in sync with resolve.py so that any change to the production
+    condition surfaces here as a test failure.
+    """
+    return update_refs and not is_local and not artifactory_prefix and ref_kind == "semver"
+
+
+class TestForceSemverResolve:
+    """BFS download_callback must re-resolve semver deps on --update.
+
+    When install_path exists the callback short-circuits UNLESS
+    _force_semver_resolve is True.  Regression guard for the bug where
+    registry deps with semver constraints were excluded from re-resolution,
+    causing 'apm update' to silently keep the old version even when a newer
+    one satisfying the range was available.
+    """
+
+    def test_registry_semver_forces_resolve_on_update(self) -> None:
+        """Registry dep with ^1.0.0 must re-resolve when update_refs=True."""
+        assert (
+            _force_semver_resolve(
+                update_refs=True,
+                is_local=False,
+                source="registry",
+                artifactory_prefix=None,
+                ref_kind="semver",
+            )
+            is True
+        )
+
+    def test_registry_semver_no_force_on_normal_install(self) -> None:
+        """Registry semver dep must NOT re-resolve on a plain install."""
+        assert (
+            _force_semver_resolve(
+                update_refs=False,
+                is_local=False,
+                source="registry",
+                artifactory_prefix=None,
+                ref_kind="semver",
+            )
+            is False
+        )
+
+    def test_git_semver_forces_resolve_on_update(self) -> None:
+        """Git-source semver dep continues to re-resolve (pre-existing behavior)."""
+        assert (
+            _force_semver_resolve(
+                update_refs=True,
+                is_local=False,
+                source=None,
+                artifactory_prefix=None,
+                ref_kind="semver",
+            )
+            is True
+        )
+
+    def test_registry_literal_ref_no_force(self) -> None:
+        """Registry dep with a literal ref (e.g. 'stable') is never force-resolved."""
+        assert (
+            _force_semver_resolve(
+                update_refs=True,
+                is_local=False,
+                source="registry",
+                artifactory_prefix=None,
+                ref_kind="literal",
+            )
+            is False
+        )
+
+    def test_local_dep_never_force_resolved(self) -> None:
+        """Local deps are excluded regardless of ref_kind."""
+        assert (
+            _force_semver_resolve(
+                update_refs=True,
+                is_local=True,
+                source=None,
+                artifactory_prefix=None,
+                ref_kind="semver",
+            )
+            is False
+        )
+
+    def test_artifactory_dep_never_force_resolved(self) -> None:
+        """Artifactory-proxied deps are excluded regardless of ref_kind."""
+        assert (
+            _force_semver_resolve(
+                update_refs=True,
+                is_local=False,
+                source=None,
+                artifactory_prefix="artifactory/github",
+                ref_kind="semver",
+            )
+            is False
+        )

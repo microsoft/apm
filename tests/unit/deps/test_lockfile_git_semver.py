@@ -199,6 +199,59 @@ class TestInstalledPackagePlumbing:
         assert ld.version == "1.5.3"
 
 
+class TestRegistryDepResolvedRef:
+    """from_dependency_ref uses registry_resolution.version for resolved_ref.
+
+    Regression tests for the lockfile-corruption bug where a cached re-install
+    of a registry dep wrote the manifest range (^1.0.0) as resolved_ref instead
+    of the exact resolved version (1.1.1).
+    """
+
+    def test_registry_resolution_sets_resolved_ref_to_version(self) -> None:
+        from apm_cli.deps.registry.resolver import RegistryResolution
+
+        dep_ref = _make_dep_ref(reference="^1.0.0")
+        reg_res = RegistryResolution(
+            resolved_url="https://registry.example/pkg/1.1.1.tgz",
+            resolved_hash="sha256:abc",
+            version="1.1.1",
+        )
+
+        locked = LockedDependency.from_dependency_ref(
+            dep_ref=dep_ref,
+            resolved_commit=None,
+            depth=1,
+            resolved_by=None,
+            registry_resolution=reg_res,
+        )
+
+        assert locked.resolved_ref == "1.1.1", (
+            "resolved_ref must be the exact version, not the manifest range"
+        )
+        assert locked.resolved_commit is None
+        assert locked.source == "registry"
+
+    def test_registry_resolved_ref_roundtrips(self) -> None:
+        from apm_cli.deps.registry.resolver import RegistryResolution
+
+        dep_ref = _make_dep_ref(reference="^1.0.0")
+        reg_res = RegistryResolution(
+            resolved_url="https://registry.example/pkg/1.1.1.tgz",
+            resolved_hash="sha256:abc",
+            version="1.1.1",
+        )
+        locked = LockedDependency.from_dependency_ref(
+            dep_ref=dep_ref,
+            resolved_commit=None,
+            depth=1,
+            resolved_by=None,
+            registry_resolution=reg_res,
+        )
+        rebuilt = LockedDependency.from_dict(locked.to_dict())
+        assert rebuilt.resolved_ref == "1.1.1"
+        assert rebuilt.resolved_commit is None
+
+
 class TestMutualExclusivity:
     """``from_dependency_ref`` enforces resolution-source mutual exclusivity.
 
