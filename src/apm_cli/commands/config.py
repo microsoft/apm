@@ -29,6 +29,13 @@ _CONFIG_KEY_DISPLAY_NAMES = {
 }
 
 
+def _render_target_value(value: str | list[str]) -> str:
+    """Render a target value for CLI output."""
+    if isinstance(value, list):
+        return ",".join(value)
+    return value
+
+
 def _parse_bool_value(value: str) -> bool:
     """Parse a CLI boolean value."""
     normalized = value.strip().lower()
@@ -67,6 +74,7 @@ def _valid_config_keys() -> str:
 
     keys = [
         "auto-integrate",
+        "target",
         "mcp-registry-url",
         "temp-dir",
         "allow-protocol-fallback",
@@ -344,6 +352,18 @@ def set(key, value):  # noqa: F811
             sys.exit(1)
         return
 
+    if key == "target":
+        from ..config import set_install_target
+
+        try:
+            parsed = set_install_target(value)
+            rendered = _render_target_value(parsed)
+            logger.success(f"Default install target set to: {rendered}")
+        except ValueError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
+        return
+
     if key == "mcp-registry-url":
         from ..config import get_mcp_registry_url, set_mcp_registry_url
 
@@ -465,6 +485,16 @@ def get(key):
                 click.echo(f"temp-dir: {value}")
             return
 
+        if key == "target":
+            from ..config import get_install_target
+
+            value = get_install_target()
+            if value is None:
+                click.echo("target: Not set (using auto-detection)")
+            else:
+                click.echo(f"target: {_render_target_value(value)}")
+            return
+
         if key == "mcp-registry-url":
             from ..config import get_mcp_registry_url
 
@@ -526,6 +556,11 @@ def get(key):
         click.echo(
             f"  temp-dir: {temp_dir if temp_dir is not None else 'Not set (using system default)'}"
         )
+        from ..config import get_install_target as _get_install_target
+
+        _install_target = _get_install_target()
+        if _install_target is not None:
+            click.echo(f"  target: {_render_target_value(_install_target)}")
         # Only show transport keys when non-default to reduce noise.
         _apf_val = get_allow_protocol_fallback()
         _ssh_val = get_prefer_ssh()
@@ -607,6 +642,13 @@ def unset(key):
 
         unset_temp_dir()
         logger.success("Temporary directory configuration removed")
+        return
+
+    if key == "target":
+        from ..config import unset_install_target
+
+        unset_install_target()
+        logger.success("Default install target removed (will fall back to auto-detection)")
         return
 
     if key == "mcp-registry-url":

@@ -53,7 +53,12 @@ class InstallContext:
     marketplace_provenance: dict[str, Any] | None = None
     parallel_downloads: int = 4
     logger: Any = None  # InstallLogger
-    target_override: str | None = None  # CLI --target value
+    target_override: str | None = None  # effective --target value (CLI or config default)
+    # Provenance label for ``target_override`` when it did NOT come from the CLI.
+    # None means an explicit CLI ``--target`` selector. When the value is
+    # populated from the configured default (``apm config target``), this is
+    # set to "apm config target" so provenance output is not misattributed.
+    target_override_source: str | None = None
     allow_insecure: bool = False
     allow_insecure_hosts: tuple[str, ...] = ()
 

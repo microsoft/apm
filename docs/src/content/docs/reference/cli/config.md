@@ -40,19 +40,21 @@ Print the value of `KEY`. With no argument, prints all user-settable keys with t
 Write `KEY` to `~/.apm/config.json`. Validates the value before writing:
 
 - `temp-dir` must be an existing, writable directory. The path is expanded (`~`) and stored absolute.
+- `target` must be a valid install target token (or comma-separated list), using the same validator as `apm install --target`.
 - `copilot-cowork-skills-dir` must be absolute after expansion; the directory itself does not need to exist.
 - `mcp-registry-url` must be an `http://` or `https://` URL with a valid host. All other schemes are rejected.
 - Boolean keys reject anything outside the accepted truthy/falsy strings.
 
 ### `apm config unset KEY`
 
-Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported unset keys: `temp-dir`, `copilot-cowork-skills-dir`, `prefer-ssh`, `allow-protocol-fallback`, `audit-on-install`, `external.<name>.{llm,args}`, `mcp-registry-url`, and `registry.<name>.{url,token,default}`. After unsetting a key the effective value falls back to the environment variable, then the built-in default. Other boolean keys are reset by `set`-ing them to their default.
+Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported unset keys: `target`, `temp-dir`, `copilot-cowork-skills-dir`, `prefer-ssh`, `allow-protocol-fallback`, `audit-on-install`, `external.<name>.{llm,args}`, `mcp-registry-url`, and `registry.<name>.{url,token,default}`. After unsetting a key the effective value falls back to the environment variable, then the built-in default. Other boolean keys are reset by `set`-ing them to their default.
 
 ## Configuration keys
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `auto-integrate` | boolean | `true` | Auto-discover `.prompt.md` files under `.github/prompts/` and `.apm/prompts/` and merge them into compiled `AGENTS.md` output. |
+| `target` | target token | unset | Default target for installs when `--target` and `apm.yml target(s)` are absent. Uses the same parser as `apm install --target` (single or comma-separated). |
 | `temp-dir` | path | system temp | Directory used for clone and download operations. Useful when the OS temp directory is locked down (for example, corporate Windows endpoints rejecting `%TEMP%` with `[WinError 5]`). |
 | `allow-protocol-fallback` | boolean | `false` | Enable the legacy cross-protocol fallback chain. When true, APM retries a failed clone with the opposite protocol (SSH→HTTPS or HTTPS→SSH). Equivalent to `--allow-protocol-fallback` or `APM_ALLOW_PROTOCOL_FALLBACK=1`. |
 | `prefer-ssh` | boolean | `false` | Prefer SSH transport for shorthand (`owner/repo`) dependencies. Equivalent to `--ssh` or `APM_GIT_PROTOCOL=ssh`. |
@@ -118,6 +120,15 @@ Read and write `auto-integrate`:
 ```bash
 apm config get auto-integrate
 apm config set auto-integrate false
+```
+
+Persist a default install target:
+
+```bash
+apm config set target claude   # set the default once
+apm config get target          # claude
+apm install                    # no --target needed: deploys to claude
+apm config unset target        # clear it (back to auto-detection)
 ```
 
 Persist SSH transport preference (no more `--ssh` on every install):
@@ -199,11 +210,11 @@ See [External scanners](../../../integrations/external-scanners/).
 - **Format:** JSON object, one entry per stored key.
 - **Created on first read** with `{"default_client": "vscode"}`. Hand-editing is supported but `apm config set` is preferred -- it validates input and normalizes paths.
 
-Internal JSON keys use snake_case (`auto_integrate`, `temp_dir`, `allow_protocol_fallback`, `prefer_ssh`, `copilot_cowork_skills_dir`); CLI keys use kebab-case. The CLI translates between the two.
+Internal JSON keys use snake_case (`auto_integrate`, `install_target`, `temp_dir`, `allow_protocol_fallback`, `prefer_ssh`, `copilot_cowork_skills_dir`); CLI keys use kebab-case (the CLI `target` key is stored as `install_target`). The CLI translates between the two.
 
 ## Related
 
-- [`apm install`](../install/) -- consumes `temp-dir` for clone/download work and `allow-protocol-fallback` / `prefer-ssh` for transport selection.
+- [`apm install`](../install/) -- consumes `target`, `temp-dir`, and `allow-protocol-fallback` / `prefer-ssh`.
 - [`apm compile`](../compile/) -- affected by `auto-integrate`.
 - [`apm experimental`](../experimental/) -- gates `copilot-cowork-skills-dir` and `registry.*` keys.
 - [Environment variables](../../environment-variables/) -- `APM_ALLOW_PROTOCOL_FALLBACK`, `APM_GIT_PROTOCOL` are the env-var equivalents of the transport keys.
