@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `apm config set target <env>` configures a default install target so a bare
+  `apm install` deploys to it -- set the target once, then install everywhere
+  without repeating `--target`. Precedence is `--target` > `apm.yml` `target:` >
+  config default > auto-detect, and `apm config get/unset target` inspect and
+  clear it. (#1881)
 - Org-wide policy discovery now cascades through candidate repo names
   (`.github`, then `.apm`, then `_apm`) and speaks the Azure DevOps Items
   API, so Azure DevOps organizations -- which forbid repo names that begin

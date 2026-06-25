@@ -54,7 +54,7 @@ Remove `KEY` from `~/.apm/config.json`. No-op if the key is not set. Supported u
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `auto-integrate` | boolean | `true` | Auto-discover `.prompt.md` files under `.github/prompts/` and `.apm/prompts/` and merge them into compiled `AGENTS.md` output. |
-| `target` | target | unset | Default target for installs when `--target` and `apm.yml target(s)` are absent. Uses the same parser as `apm install --target` (single or comma-separated). |
+| `target` | target token | unset | Default target for installs when `--target` and `apm.yml target(s)` are absent. Uses the same parser as `apm install --target` (single or comma-separated). |
 | `temp-dir` | path | system temp | Directory used for clone and download operations. Useful when the OS temp directory is locked down (for example, corporate Windows endpoints rejecting `%TEMP%` with `[WinError 5]`). |
 | `allow-protocol-fallback` | boolean | `false` | Enable the legacy cross-protocol fallback chain. When true, APM retries a failed clone with the opposite protocol (SSH→HTTPS or HTTPS→SSH). Equivalent to `--allow-protocol-fallback` or `APM_ALLOW_PROTOCOL_FALLBACK=1`. |
 | `prefer-ssh` | boolean | `false` | Prefer SSH transport for shorthand (`owner/repo`) dependencies. Equivalent to `--ssh` or `APM_GIT_PROTOCOL=ssh`. |
@@ -125,9 +125,10 @@ apm config set auto-integrate false
 Persist a default install target:
 
 ```bash
-apm config set target claude
-apm config get target
-apm config unset target
+apm config set target claude   # set the default once
+apm config get target          # claude
+apm install                    # no --target needed: deploys to claude
+apm config unset target        # clear it (back to auto-detection)
 ```
 
 Persist SSH transport preference (no more `--ssh` on every install):
@@ -209,7 +210,7 @@ See [External scanners](../../../integrations/external-scanners/).
 - **Format:** JSON object, one entry per stored key.
 - **Created on first read** with `{"default_client": "vscode"}`. Hand-editing is supported but `apm config set` is preferred -- it validates input and normalizes paths.
 
-Internal JSON keys use snake_case (`auto_integrate`, `temp_dir`, `allow_protocol_fallback`, `prefer_ssh`, `copilot_cowork_skills_dir`); CLI keys use kebab-case. The CLI translates between the two.
+Internal JSON keys use snake_case (`auto_integrate`, `install_target`, `temp_dir`, `allow_protocol_fallback`, `prefer_ssh`, `copilot_cowork_skills_dir`); CLI keys use kebab-case (the CLI `target` key is stored as `install_target`). The CLI translates between the two.
 
 ## Related
 
