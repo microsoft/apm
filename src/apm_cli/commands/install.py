@@ -1480,8 +1480,7 @@ def install(  # noqa: PLR0913
             project_name = Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
             config = _get_default_config(project_name)
             # #1743: persist the resolved --target into the auto-created apm.yml so a
-            # subsequent bare `apm update` re-deploys to the same harness(es) without
-            # re-specifying --target. Mirrors `apm init` (see init.py: config["targets"]).
+            # later bare `apm update` re-deploys to the same harness(es). Mirrors init.py.
             if target is not None:
                 config["targets"] = sorted([target] if isinstance(target, str) else list(target))
             _create_minimal_apm_yml(config, target_path=manifest_path)
