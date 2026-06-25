@@ -15,6 +15,7 @@ import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
+from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
@@ -248,7 +249,7 @@ class AgentIntegrator(BaseIntegrator):
             raise ValueError(f"Refusing to read symlink source: {source}")
         content = source.read_text(encoding="utf-8")
         content, links_resolved = self.resolve_links(content, source, target)
-        target.write_text(content, encoding="utf-8")
+        write_text_lf(target, content)
         return links_resolved
 
     # ------------------------------------------------------------------
@@ -332,7 +333,7 @@ class AgentIntegrator(BaseIntegrator):
             "description": description,
             "developer_instructions": body.strip(),
         }
-        target.write_text(_toml.dumps(doc), encoding="utf-8")
+        write_text_lf(target, _toml.dumps(doc))
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.
     def integrate_package_agents(

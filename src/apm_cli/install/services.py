@@ -741,6 +741,7 @@ def integrate_local_bundle(
     import hashlib
     import shutil
 
+    from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
     from apm_cli.utils.content_hash import compute_file_hash
 
     from ..core.scope import InstallScope
@@ -774,6 +775,16 @@ def integrate_local_bundle(
             if rel == "apm.lock.yaml" or rel.lower() == "plugin.json" or rel.lower() == ".mcp.json":
                 continue
             pack_files[rel] = hashlib.sha256(fp.read_bytes()).hexdigest()
+
+    text_bundle_suffixes = {".json", ".md", ".toml", ".txt", ".yaml", ".yml"}
+
+    def _normalized_bundle_text(path: Path) -> str | None:
+        if path.suffix.lower() not in text_bundle_suffixes:
+            return None
+        try:
+            return normalize_crlf_to_lf(path.read_bytes().decode("utf-8"))
+        except UnicodeDecodeError:
+            return None
 
     deployed_files: list[str] = []
     deployed_hashes: dict[str, str] = {}
@@ -987,15 +998,21 @@ def integrate_local_bundle(
             except ValueError:
                 record = dest.as_posix()
 
+            normalized_text = _normalized_bundle_text(src)
+            if normalized_text is None:
+                desired_hash = expected_hash
+            else:
+                desired_hash = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
+
             if dry_run:
                 deployed_files.append(record)
                 # Normalize to "sha256:<hex>" so the dry-run lockfile preview
                 # matches the format written by ``compute_file_hash`` on the
-                # real deploy path.  ``expected_hash`` here is bare hex from
-                # ``pack.bundle_files``; without the prefix, downstream
+                # real deploy path.  ``desired_hash`` here is bare hex for
+                # the bytes this deploy path writes; without the prefix, downstream
                 # exact-match comparisons (e.g. ``cleanup.py`` provenance
                 # check) treat the file as user-edited and skip cleanup.
-                deployed_hashes[record] = f"sha256:{expected_hash}"
+                deployed_hashes[record] = f"sha256:{desired_hash}"
                 if logger:
                     logger.verbose_detail(f"[dry-run] would deploy {record}")
                 continue
@@ -1007,7 +1024,7 @@ def integrate_local_bundle(
                     existing_hash = hashlib.sha256(dest.read_bytes()).hexdigest()
                 except OSError:
                     existing_hash = None
-                if existing_hash and existing_hash != expected_hash:
+                if existing_hash and existing_hash != desired_hash:
                     skipped += 1
                     msg = (
                         f"Skipped {record}: file exists with different "
@@ -1019,12 +1036,14 @@ def integrate_local_bundle(
                         logger.warning(msg)
                     continue
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest, follow_symlinks=False)
-            # IM4: hash the deployed file (post-copy) rather than trusting
-            # the source bundle's expected_hash.  Today the integrator is a
-            # raw copy so the values match, but documenting deployed-file
-            # provenance now keeps the lockfile honest if future transforms
-            # (frontmatter injection, etc.) mutate content during deploy.
+            if normalized_text is None:
+                shutil.copy2(src, dest, follow_symlinks=False)
+            else:
+                write_text_lf(dest, normalized_text)
+            # IM4: hash the deployed file after the deploy transform rather
+            # than trusting the source bundle's expected_hash.  Local bundle
+            # text files may be LF-normalized during deploy, so the lockfile
+            # must bind the actual on-disk bytes.
             deployed_files.append(record)
             # Use ``compute_file_hash`` so the recorded value carries the
             # canonical ``sha256:<hex>`` prefix.  Matches the format written

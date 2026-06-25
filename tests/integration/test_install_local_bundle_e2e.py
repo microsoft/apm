@@ -628,6 +628,50 @@ class TestLocalBundleHashFormatCrossFlow:
                 "Stale-cleanup provenance check would mis-classify this file as user-edited."
             )
 
+    def test_crlf_source_records_same_hash_as_lf_source(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CRLF source content deploys as LF and records the same hash as LF source."""
+        from apm_cli.utils.content_hash import compute_file_hash
+
+        def install_skill_source(root: Path, source_content: str) -> tuple[bytes, str]:
+            bundle = _make_plugin_bundle(
+                root / "src",
+                files={"skills/coding/SKILL.md": source_content},
+            )
+            project = _make_project(root / "dst")
+
+            result = _invoke_install(
+                project, str(bundle), "--target", "copilot", monkeypatch=monkeypatch
+            )
+            assert result.exit_code == 0, f"stdout={result.output!r}\nstderr={result.stderr!r}"
+
+            deployed = project / ".agents" / "skills" / "coding" / "SKILL.md"
+            deployed_bytes = deployed.read_bytes()
+            data = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+            deployed_hashes = data.get("local_deployed_file_hashes") or {}
+
+            recorded_hashes = []
+            for record_path, recorded in deployed_hashes.items():
+                candidate = Path(record_path)
+                if not candidate.is_absolute():
+                    candidate = project / candidate
+                if candidate == deployed:
+                    recorded_hashes.append(recorded)
+
+            assert recorded_hashes == [compute_file_hash(deployed)]
+            return deployed_bytes, recorded_hashes[0]
+
+        lf_bytes, lf_hash = install_skill_source(
+            tmp_path / "lf", "# Coding Skill\nHelps with code.\n"
+        )
+        crlf_bytes, crlf_hash = install_skill_source(
+            tmp_path / "crlf", "# Coding Skill\r\nHelps with code.\r\n"
+        )
+
+        assert lf_bytes == crlf_bytes == b"# Coding Skill\nHelps with code.\n"
+        assert crlf_hash == lf_hash
+
     def test_recorded_hash_compares_equal_in_cleanup_provenance_check(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

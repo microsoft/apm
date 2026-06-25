@@ -21,6 +21,7 @@ from ..core.target_detection import (
 )
 from ..primitives.discovery import discover_primitives
 from ..primitives.models import PrimitiveCollection
+from ..utils.atomic_io import write_text_lf
 from ..utils.path_security import PathTraversalError, ensure_path_within
 from ..utils.paths import portable_relpath
 from ..version import get_version
@@ -1353,7 +1354,7 @@ class AgentsCompiler:
 
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(content, encoding="utf-8")
+            write_text_lf(output_path, content)
             result.stats["copilot_root_instructions_written"] = 1
             result.stats["copilot_root_instructions_unchanged"] = 0
             return result

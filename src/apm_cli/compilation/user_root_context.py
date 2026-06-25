@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..utils.atomic_io import write_text_lf
+
 if TYPE_CHECKING:
     import logging as _logging_module
 
@@ -286,7 +288,7 @@ def compile_user_root_contexts(
                     )
                 )
                 continue
-            output_path.write_text(content, encoding="utf-8")
+            write_text_lf(output_path, content)
             log.debug("user_root_context: wrote %s", output_path)
             results.append(
                 UserRootCompileResult(

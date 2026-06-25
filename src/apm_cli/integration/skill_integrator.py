@@ -10,6 +10,7 @@ from pathlib import Path
 
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.targets import TargetProfile
+from apm_cli.utils.atomic_io import write_text_lf
 
 
 def _build_copy_ignore(
@@ -591,7 +592,7 @@ class SkillIntegrator(BaseIntegrator):
                 preserved_source_root=source_root,
             )
             if count:
-                target_file.write_text(resolved, encoding="utf-8")
+                write_text_lf(target_file, resolved)
                 links_resolved += count
         return links_resolved
 
