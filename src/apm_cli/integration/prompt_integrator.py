@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
@@ -45,7 +46,7 @@ class PromptIntegrator(BaseIntegrator):
             raise ValueError(f"Refusing to read symlink source: {source}")
         content = source.read_text(encoding="utf-8")
         content, links_resolved = self.resolve_links(content, source, target)
-        target.write_text(content, encoding="utf-8")
+        write_text_lf(target, content)
         return links_resolved
 
     def get_target_filename(self, source_file: Path, package_name: str) -> str:

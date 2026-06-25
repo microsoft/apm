@@ -307,6 +307,8 @@ class LocalDependencySource(DependencySource):
                 resolved_by=resolved_by,
                 is_dev=_is_dev,
                 registry_config=None,
+                package_name=local_info.package.name if local_info.package else None,
+                package_version=local_info.package.version if local_info.package else None,
             )
         )
         if install_path.is_dir() and not dep_ref.is_local:
@@ -563,6 +565,12 @@ class CachedDependencySource(DependencySource):
                 registry_config=_cached_registry,
                 registry_resolution=_cached_resolution,
                 git_semver_resolution=_cached_semver,
+                package_name=cached_package_info.package.name
+                if cached_package_info.package
+                else None,
+                package_version=cached_package_info.package.version
+                if cached_package_info.package
+                else None,
             )
         )
         if install_path.is_dir():
@@ -804,6 +812,12 @@ class FreshDependencySource(DependencySource):
                     registry_config=(ctx.registry_config if not dep_ref.is_local else None),
                     registry_resolution=_registry_resolution,
                     git_semver_resolution=_git_semver_resolution,
+                    package_name=package_info.package.name
+                    if package_info and package_info.package
+                    else None,
+                    package_version=package_info.package.version
+                    if package_info and package_info.package
+                    else None,
                 )
             )
             if install_path.is_dir():

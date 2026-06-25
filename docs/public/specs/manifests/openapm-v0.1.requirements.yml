@@ -187,6 +187,11 @@ requirements:
     keyword: SHOULD
     section: "5.5"
     conformance_class: consumer
+  - id: req-lk-019
+    keyword: MUST
+    section: "5.2"
+    conformance_class: consumer
+    notes: "name and dependency-apm.yml-derived version are self-asserted inventory metadata, never trust anchors"
   - id: req-pl-001
     keyword: MUST
     section: "6.1"

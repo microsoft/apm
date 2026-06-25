@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import RULE_FORMATS
+from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
 from apm_cli.utils.console import _rich_echo
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
@@ -63,7 +64,7 @@ class InstructionIntegrator(BaseIntegrator):
         """
         content = source.read_text(encoding="utf-8")
         content, links_resolved = self.resolve_links(content, source, target)
-        target.write_text(content, encoding="utf-8")
+        write_text_lf(target, content)
         return links_resolved
 
     def _render_instruction(self, source: Path, target: Path, fmt: str) -> tuple[str, int]:
@@ -194,17 +195,23 @@ class InstructionIntegrator(BaseIntegrator):
                 new_content, links_resolved = self._render_instruction(
                     source_file, target_path, fmt
                 )
+                # Compare the on-disk bytes against the exact bytes
+                # write_text_lf would emit (LF-normalized). A text-mode
+                # read_text() comparison would collapse CRLF->LF and wrongly
+                # adopt a stale CRLF file left by a pre-fix install, pinning a
+                # platform-dependent hash in the lockfile (apm#1889).
                 if (
                     not force
                     and target_path.exists()
-                    and target_path.read_text(encoding="utf-8") == new_content
+                    and target_path.read_bytes()
+                    == normalize_crlf_to_lf(new_content).encode("utf-8")
                 ):
                     files_adopted += 1
                     target_paths.append(target_path)
                     if diagnostics is not None and getattr(diagnostics, "verbose", False):
                         _rich_echo(f"  [=] adopted-unchanged: {rel_path}", color="dim")
                     continue
-                target_path.write_text(new_content, encoding="utf-8")
+                write_text_lf(target_path, new_content)
                 total_links_resolved += links_resolved
                 files_integrated += 1
                 target_paths.append(target_path)
@@ -388,14 +395,14 @@ class InstructionIntegrator(BaseIntegrator):
             if self._is_apm_managed_copilot(existing):
                 # APM-managed: update or append this package's provenance section.
                 updated = self._update_copilot_managed(existing, pkg_source or "unknown", section)
-                target_path.write_text(updated, encoding="utf-8")
+                write_text_lf(target_path, updated)
                 return IntegrationResult(1, 0, 0, [target_path])
             norm_rel = rel_path.replace("\\", "/")
             if norm_rel in (managed_files or set()) or force:
                 # Either was managed on a previous run (pre-provenance format)
                 # or caller explicitly requested overwrite.
                 new_content = self._APM_COPILOT_HEADER + "\n" + section + "\n"
-                target_path.write_text(new_content, encoding="utf-8")
+                write_text_lf(target_path, new_content)
                 return IntegrationResult(1, 0, 0, [target_path])
             # User-authored file: emit collision warning and skip.
             self.check_collision(
@@ -404,7 +411,7 @@ class InstructionIntegrator(BaseIntegrator):
             return IntegrationResult(0, 0, 1, [])
 
         new_content = self._APM_COPILOT_HEADER + "\n" + section + "\n"
-        target_path.write_text(new_content, encoding="utf-8")
+        write_text_lf(target_path, new_content)
         return IntegrationResult(1, 0, 0, [target_path])
 
     # ------------------------------------------------------------------
@@ -514,7 +521,7 @@ class InstructionIntegrator(BaseIntegrator):
         Converts ``applyTo:`` → ``globs:`` frontmatter and resolves links.
         """
         content, links_resolved = self._render_instruction(source, target, "cursor_rules")
-        target.write_text(content, encoding="utf-8")
+        write_text_lf(target, content)
         return links_resolved
 
     # DEPRECATED: use integrate_instructions_for_target(KNOWN_TARGETS["cursor"], ...) instead.
@@ -611,7 +618,7 @@ class InstructionIntegrator(BaseIntegrator):
         and resolves links.
         """
         content, links_resolved = self._render_instruction(source, target, "windsurf_rules")
-        target.write_text(content, encoding="utf-8")
+        write_text_lf(target, content)
         return links_resolved
 
     # ------------------------------------------------------------------
@@ -720,7 +727,7 @@ class InstructionIntegrator(BaseIntegrator):
         Converts ``applyTo:`` to ``paths:`` frontmatter and resolves links.
         """
         content, links_resolved = self._render_instruction(source, target, "claude_rules")
-        target.write_text(content, encoding="utf-8")
+        write_text_lf(target, content)
         return links_resolved
 
     # DEPRECATED: use integrate_instructions_for_target(KNOWN_TARGETS["claude"], ...) instead.

@@ -526,3 +526,13 @@ uses the locked SHA, ensuring reproducible installs across machines.
 Lockfile keys keep `github.com` implicit for migration stability while
 non-default hosts add the lowercased host segment. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys)
 for the full keying rules.
+
+Each dependency entry can also record the package-declared `name`. For
+git/local deps, `version` is read from the dependency's own `apm.yml` at
+resolution time. These package-declared values are **SELF-ASSERTED** author
+claims useful for inventory and audit -- they are NOT integrity-verified and
+MUST NOT be used for trust decisions. Always cross-reference `repo_url` +
+`resolved_commit` (or `resolved_hash`) for provenance. For registry deps,
+`version` is the locked registry selection used for reinstall, with
+`resolved_hash` as the integrity anchor; for git/local deps it is display
+metadata only.
