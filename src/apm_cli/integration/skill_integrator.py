@@ -831,13 +831,7 @@ class SkillIntegrator(BaseIntegrator):
                 continue
 
             is_primary = idx == 0  # first active target owns diagnostics
-            skills_mapping = target.primitives["skills"]
-            # Dynamic-root targets (cowork): use resolved_deploy_root.
-            if target.resolved_deploy_root is not None:
-                target_skills_root = target.resolved_deploy_root
-            else:
-                effective_root = skills_mapping.deploy_root or target.root_dir
-                target_skills_root = project_root / effective_root / "skills"
+            target_skills_root = target.deploy_path(project_root, primitive="skills")
 
             # Dedup: skip if same resolved skills root already processed.
             resolved_root = target_skills_root.resolve()
@@ -944,6 +938,16 @@ class SkillIntegrator(BaseIntegrator):
                 except ImportError:
                     pass  # CLI not available in tests
 
+        # Validate before target path construction so no invalid segment reaches
+        # deploy_path(), including cowork's dynamic-root branch.
+        from apm_cli.utils.path_security import (
+            PathTraversalError,
+            ensure_path_within,
+            validate_path_segments,
+        )
+
+        validate_path_segments(skill_name, context="skill name")
+
         # Deploy to all active targets that support skills.
         # When *targets* is provided (from --target), use it directly.
         # Otherwise auto-detect with copilot as the fallback.
@@ -972,28 +976,18 @@ class SkillIntegrator(BaseIntegrator):
                 continue
 
             is_primary = idx == 0  # first active target owns diagnostics
-            skills_mapping = target.primitives["skills"]
-            # Dynamic-root targets (cowork): use resolved_deploy_root.
-            if target.resolved_deploy_root is not None:
-                target_skill_dir = target.resolved_deploy_root / skill_name
-            else:
-                effective_root = skills_mapping.deploy_root or target.root_dir
-                target_skill_dir = project_root / effective_root / "skills" / skill_name
+            target_skills_root = target.deploy_path(project_root, primitive="skills")
+            target_skill_dir = target.deploy_path(project_root, skill_name, primitive="skills")
 
             # Security: validate name + containment + symlink rejection.
-            from apm_cli.utils.path_security import (
-                PathTraversalError,
-                ensure_path_within,
-                validate_path_segments,
-            )
-
-            validate_path_segments(skill_name, context="skill name")
             if target_skill_dir.is_symlink():
                 raise PathTraversalError(
                     f"Skill destination {target_skill_dir} is a symlink -- refusing to deploy"
                 )
+            # Cowork targets resolve to an explicit user-configured skills root;
+            # deploy_path() joins only the validated skill name below that root.
             if target.resolved_deploy_root is None:
-                ensure_path_within(target_skill_dir, project_root / effective_root / "skills")
+                ensure_path_within(target_skill_dir, target_skills_root)
 
             # Dedup: skip if same resolved path already deployed.
             resolved = target_skill_dir.resolve()
@@ -1072,10 +1066,6 @@ class SkillIntegrator(BaseIntegrator):
                 files_copied = sum(1 for _ in target_skill_dir.rglob("*") if _.is_file())
 
             # Promote sub-skills for this target
-            if target.resolved_deploy_root is not None:
-                target_skills_root = target.resolved_deploy_root
-            else:
-                target_skills_root = project_root / effective_root / "skills"
             _, sub_deployed = self._promote_sub_skills(
                 sub_skills_dir,
                 target_skills_root,
@@ -1169,9 +1159,7 @@ class SkillIntegrator(BaseIntegrator):
                 continue
 
             is_primary = idx == 0
-            skills_mapping = target.primitives["skills"]
-            effective_root = skills_mapping.deploy_root or target.root_dir
-            target_skills_root = project_root / effective_root / "skills"
+            target_skills_root = target.deploy_path(project_root, primitive="skills")
 
             # Dedup: skip if same resolved skills root already processed.
             resolved_root = target_skills_root.resolve()

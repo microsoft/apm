@@ -29,6 +29,7 @@ from apm_cli.integration.skill_integrator import (
     should_compile_instructions,
     validate_skill_name,
 )
+from tests.unit._skill_integrator_target_helpers import attach_skill_deploy_path
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -66,9 +67,10 @@ def _make_target(
     prim = MagicMock()
     mapping = MagicMock()
     mapping.deploy_root = deploy_root
+    mapping.subdir = "skills"
     prim.__getitem__ = MagicMock(return_value=mapping)
     target.primitives = {"skills": mapping}
-    return target
+    return attach_skill_deploy_path(target)
 
 
 # ---------------------------------------------------------------------------

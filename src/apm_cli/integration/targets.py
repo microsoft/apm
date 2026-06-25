@@ -303,22 +303,39 @@ class TargetProfile:
             return False
         return primitive in self.primitives
 
-    def deploy_path(self, project_root: Path, *parts: str) -> Path:
+    def deploy_path(self, project_root: Path, *parts: str, primitive: str | None = None) -> Path:
         """Return the filesystem path for deployment.
 
         When ``resolved_deploy_root`` is set (dynamic-root targets like
         cowork), the path is rooted there.  Otherwise falls back to the
-        standard ``project_root / root_dir`` pattern.
+        standard ``project_root / root_dir`` pattern.  When ``primitive``
+        names a mapping with ``deploy_root``, that primitive-specific root is
+        used instead of ``root_dir``.  Unknown primitive names raise
+        ``KeyError`` instead of falling back to ``root_dir``.  For known
+        primitives, ``primitive`` is not consulted when ``resolved_deploy_root``
+        is set; the dynamic root already identifies the complete deployment
+        root.
 
         Args:
             project_root: Workspace or home directory root.
-            *parts: Additional path segments (e.g. ``"skills"``, ``"my-skill"``).
+            *parts: Additional path segments below the resolved deployment
+                root. For primitive-aware calls, pass segments below the
+                primitive root, e.g. ``deploy_path(root, "my-skill",
+                primitive="skills")`` rather than including ``"skills"`` in
+                ``parts``.
+            primitive: Optional primitive name whose mapping can override
+                ``root_dir`` via ``deploy_root`` and append its mapped
+                ``subdir``.
         """
+        mapping = self.primitives[primitive] if primitive is not None else None
         if self.resolved_deploy_root is not None:
             return (
                 self.resolved_deploy_root.joinpath(*parts) if parts else self.resolved_deploy_root
             )
-        base = project_root / self.root_dir
+        deploy_root = mapping.deploy_root if mapping is not None else None
+        base = project_root / (deploy_root or self.root_dir)
+        if mapping is not None and mapping.subdir:
+            base = base / mapping.subdir
         return base.joinpath(*parts) if parts else base
 
     def for_scope(self, user_scope: bool = False) -> TargetProfile | None:
