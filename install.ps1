@@ -539,12 +539,46 @@ if ($pinnedVersion) {
 }
 
 $releaseDir = Join-Path $releasesDir $tagName
-$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("apm-install-" + [System.Guid]::NewGuid().ToString("N"))
+$tempRootInput = if ($env:APM_TEMP_DIR) {
+    $env:APM_TEMP_DIR.Trim().Trim('"').TrimEnd('\', '/')
+} else {
+    [System.IO.Path]::GetTempPath()
+}
+
+$tempRootDir = $null
+try {
+    $tempRootDir = [System.IO.Path]::GetFullPath($tempRootInput)
+    New-Item -ItemType Directory -Force -Path $tempRootDir | Out-Null
+} catch {
+    Write-ErrorText "Failed to prepare temporary staging root: $_"
+    if ($tempRootDir) {
+        Write-Host "Temporary staging root was: $tempRootDir"
+    } else {
+        Write-Host "Temporary staging root was: $tempRootInput"
+    }
+    Write-Host "Set APM_TEMP_DIR to a writable directory allowed by endpoint policy, then retry:"
+    Write-Host "  `$env:APM_TEMP_DIR = `"`$env:LOCALAPPDATA\Programs\apm\tmp`""
+    Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
+    exit 1
+}
+
+$tempDir = Join-Path $tempRootDir ("apm-install-" + [System.Guid]::NewGuid().ToString("N"))
 $zipPath = Join-Path $tempDir $assetName
 
-New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
-New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-New-Item -ItemType Directory -Force -Path $releasesDir | Out-Null
+try {
+    New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $releasesDir | Out-Null
+} catch {
+    Write-ErrorText "Failed to prepare installer directories: $_"
+    Write-Host "Temporary staging directory: $tempDir"
+    Write-Host "Install bin directory: $binDir"
+    Write-Host "Releases directory: $releasesDir"
+    Write-Host "If temporary staging was denied, set APM_TEMP_DIR to a writable directory allowed by endpoint policy, then retry:"
+    Write-Host "  `$env:APM_TEMP_DIR = `"`$env:LOCALAPPDATA\Programs\apm\tmp`""
+    Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
+    exit 1
+}
 
 try {
     # ------------------------------------------------------------------

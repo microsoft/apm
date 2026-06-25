@@ -35,8 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install -g --target codex` now honors `CODEX_HOME` for user-scope
   Codex MCP config writes, falling back to `~/.codex/config.toml` when unset.
   (closes #1861) (#1863)
-- Windows pip fallback no longer terminates early when native pip writes
-  stderr under `$ErrorActionPreference = "Stop"`. (closes #1874) (#1876)
+- Windows installer staging now honors `APM_TEMP_DIR` and reports actionable
+  guidance when the temporary staging root is not writable. (closes #1874)
+  (#1876)
+- Windows pip fallback no longer terminates early when native pip writes stderr
+  under `$ErrorActionPreference = "Stop"`. (closes #1874) (#1876)
 
 ## [0.21.0] - 2026-06-19
 

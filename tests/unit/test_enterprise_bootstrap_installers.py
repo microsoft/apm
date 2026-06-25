@@ -169,6 +169,35 @@ def test_unix_installer_fail_closed_asset_exit_code() -> None:
     assert "APM_RELEASE_BASE_URL is not configured" in combined
 
 
+def test_windows_installer_honors_apm_temp_dir_for_download_staging() -> None:
+    """install.ps1 must stage downloads under APM_TEMP_DIR when configured."""
+    text = _read_repo_file("install.ps1")
+    body = text.split("$releaseDir = Join-Path $releasesDir $tagName", 1)[1].split(
+        "try {\n    # ------------------------------------------------------------------", 1
+    )[0]
+
+    temp_env_branch = "if ($env:APM_TEMP_DIR)"
+    temp_root_input = "$tempRootInput"
+    temp_root_dir = "$tempRootDir = [System.IO.Path]::GetFullPath($tempRootInput)"
+    temp_dir = "$tempDir = Join-Path $tempRootDir"
+    default_temp = "[System.IO.Path]::GetTempPath()"
+    temp_guidance = "Set APM_TEMP_DIR to a writable directory allowed by endpoint policy"
+    example_temp_dir = "$env:LOCALAPPDATA\\Programs\\apm\\tmp"
+
+    assert temp_env_branch in body
+    assert temp_root_input in body
+    assert temp_root_dir in body
+    assert temp_dir in body
+    assert default_temp in body
+    assert temp_guidance in body
+    assert example_temp_dir in body
+    assert "Temporary staging directory: $tempDir" in body
+    assert "Join-Path ([System.IO.Path]::GetTempPath())" not in body
+    assert body.index(temp_env_branch) < body.index(temp_root_dir)
+    assert body.index(temp_root_dir) < body.index(temp_dir)
+    assert body.index(temp_dir) < body.index("$zipPath = Join-Path $tempDir $assetName")
+
+
 def test_windows_pip_fallback_scopes_native_stderr_error_action_guard() -> None:
     """install.ps1 must not let native pip stderr terminate fallback."""
     text = _read_repo_file("install.ps1")
