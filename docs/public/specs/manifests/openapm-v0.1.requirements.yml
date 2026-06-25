@@ -191,7 +191,7 @@ requirements:
     keyword: MUST
     section: "5.2"
     conformance_class: consumer
-    notes: "name/version are self-asserted inventory metadata, never a trust anchor"
+    notes: "name and dependency-apm.yml-derived version are self-asserted inventory metadata, never trust anchors"
   - id: req-pl-001
     keyword: MUST
     section: "6.1"

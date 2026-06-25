@@ -851,16 +851,20 @@ round-trip. See [req-ext-001](#req-ext-001).
 
 <a id="req-lk-019"></a>
 **[req-lk-019]** A conforming **consumer** implementation MUST treat
-the optional `name` and `version` fields of a dependency entry as
-**self-asserted inventory metadata** only -- recorded to support
-human-readable listing and audit reporting, never as a trust
-anchor. A consumer MUST preserve both fields on round-trip per
-[req-lk-011](#req-lk-011), and MUST NOT derive any identity,
-deduplication, or frozen-replay decision from them; package
-identity and replay derive solely from `repo_url`,
-`resolved_commit`, `resolved_tag`/`constraint`, and the recorded
-hash envelopes (see [req-lk-003](#req-lk-003),
-[req-lk-008](#req-lk-008)). The presence of either field is
+the optional `name` field, and any dependency-`apm.yml`-derived
+`version` value, as **self-asserted inventory metadata** only --
+recorded to support human-readable listing and audit reporting,
+never as a trust anchor. A consumer MUST preserve both fields on
+round-trip per [req-lk-011](#req-lk-011), and MUST NOT derive any
+identity or deduplication decision from them. For git/local entries,
+a dependency-`apm.yml`-derived `version` MUST NOT drive frozen
+replay; replay derives from `resolved_ref`, `resolved_commit`,
+`resolved_tag`/`constraint`, and the recorded hash envelopes (see
+[req-lk-003](#req-lk-003), [req-lk-008](#req-lk-008)). For registry
+entries, the registry-resolved `version` MAY remain the exact
+registry selection used for reinstall, but the integrity anchor is
+the recorded `resolved_hash` required by [req-lk-013](#req-lk-013).
+The presence of `name` or dependency-`apm.yml`-derived `version` is
 additive and MUST NOT change `lockfile_version` (both are valid in
 `"1"` and `"2"`).
 
@@ -2939,4 +2943,3 @@ is excluded from canonical-emission stability checks per
 [Section 5.6](#56-git-semver-fields-constraint-resolved_tag-resolved_at). Round-
 trip conformance ([req-cf-001](#req-cf-001)) treats this field as
 permitted-to-vary.
-

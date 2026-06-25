@@ -249,10 +249,13 @@ def test_lockfile_inventory_metadata_is_non_trust_anchor():
     }
     validate_against("lockfile-v0.1.schema.json", doc)
 
-    # The normative boundary: self-asserted, never a trust anchor, and
-    # never an identity/dedup/replay key.
+    # The normative boundary: package-declared fields are self-asserted,
+    # never trust anchors, and never identity/dedup keys. Registry version
+    # may still select the exact registry artifact; resolved_hash is the
+    # integrity anchor.
     assert_spec_contains(
         "**self-asserted inventory metadata**",
-        "MUST NOT derive any identity",
+        "MUST NOT derive any\nidentity or deduplication decision",
+        "registry-resolved `version` MAY remain the exact\nregistry selection",
         "MUST NOT change `lockfile_version`",
     )
