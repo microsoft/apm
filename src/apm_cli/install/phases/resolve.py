@@ -27,6 +27,7 @@ from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
+    from apm_cli.deps.registry.resolver import RegistryPackageResolver
     from apm_cli.install.context import InstallContext
     from apm_cli.models.dependency.reference import DependencyReference
 
@@ -356,7 +357,10 @@ def _setup_downloader(ctx: InstallContext) -> None:
         )
 
 
-def _annotate_registry_dep_ref(dep_ref, registry_resolver) -> None:
+def _annotate_registry_dep_ref(
+    dep_ref: DependencyReference,
+    registry_resolver: RegistryPackageResolver,
+) -> None:
     reg_res = registry_resolver.last_resolutions.get(dep_ref.get_unique_key())
     if not reg_res:
         return

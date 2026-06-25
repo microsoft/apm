@@ -1,11 +1,11 @@
 ---
 title: apm update
-description: Re-resolve dependencies in apm.yml against the latest matching Git refs, with a plan and consent gate before writing.
+description: Re-resolve dependencies in apm.yml against the latest matching versions or Git refs, with a plan and consent gate before writing.
 sidebar:
   order: 4
 ---
 
-Refresh the dependencies declared in `apm.yml` to the latest matching Git refs, after showing you the plan and asking for consent.
+Refresh the dependencies declared in `apm.yml` to the latest matching versions or Git refs, after showing you the plan and asking for consent.
 
 ## Synopsis
 
@@ -15,7 +15,7 @@ apm update [OPTIONS] [PACKAGES...]
 
 ## Description
 
-`apm update` re-resolves every dependency in your project's `apm.yml` against the newest Git ref allowed by its constraint, prints a structured plan -- **added**, **updated**, **removed**, **unchanged** -- and prompts before touching anything. Full-SHA revision pins are refreshed by resolving the latest annotated semver tag from the authoritative upstream, then rewriting the SHA in `apm.yml` with a tag annotation after you accept the plan (for example `# v2.0.0`). Decline the prompt and APM exits cleanly: no manifest rewrite, no lockfile write, no filesystem changes.
+`apm update` re-resolves every dependency in your project's `apm.yml` against the newest version or Git ref allowed by its constraint, prints a structured plan -- **added**, **updated**, **removed**, **unchanged** -- and prompts before touching anything. Full-SHA revision pins are refreshed by resolving the latest annotated semver tag from the authoritative upstream, then rewriting the SHA in `apm.yml` with a tag annotation after you accept the plan (for example `# v2.0.0`). Decline the prompt and APM exits cleanly: no manifest rewrite, no lockfile write, no filesystem changes.
 
 Pass one or more `PACKAGES` to refresh only those dependencies, or `-g/--global` to refresh the user-scope dependencies under `~/.apm/` instead of the current project. With these flags `apm update` is a strict superset of the deprecated [`apm deps update`](../deps/#apm-deps-update).
 
@@ -88,13 +88,13 @@ apm update
 
 ## Behavior
 
-- **Re-resolve every dep.** Each entry in `apm.yml` is resolved against its remote source for the newest ref allowed by the constraint (branch tip, latest matching tag, etc.). Full-SHA revision pins move only to the commit behind the latest annotated semver tag; branch refs and lightweight tags are refused. Local-path deps are skipped.
+- **Re-resolve every dep.** Each entry in `apm.yml` is resolved against its remote source for the newest version or ref allowed by the constraint (registry version, branch tip, latest matching tag, etc.). Full-SHA revision pins move only to the commit behind the latest annotated semver tag; branch refs and lightweight tags are refused. Local-path deps are skipped.
 - **Registry deps.** Registry semver deps are re-resolved against their configured registry. Deps already at the latest version satisfying their constraint appear as **unchanged** in the plan.
 - **Structured plan.** Output is grouped into four sections:
   - **added** -- present in the new resolution but not in the previous lockfile.
   - **updated** -- ref or version moved.
   - **removed** -- previously locked, no longer required by `apm.yml`.
-  - **unchanged** -- already at the latest matching ref.
+  - **unchanged** -- already at the latest matching version or ref.
 - **Consent gate.** The prompt defaults to **No**. Without `--yes`, declining (or running in a non-interactive context) aborts with a clean exit; the manifest, lockfile, and workspace are untouched.
 - **No partial consent.** A single prompt covers both revision-pin manifest rewrites and the normal update plan; declining leaves everything unchanged.
 - **`--dry-run` skips the prompt.** It computes and prints the plan, including revision-pin SHA/tag rewrites, but never writes and never asks.
