@@ -21,15 +21,20 @@ import yaml
 
 from apm_cli.security.executables import (
     EXEC_TYPE_BIN,
+    EXEC_TYPE_CANVAS,
     EXEC_TYPE_HOOKS,
     EXEC_TYPE_MCP,
     ExecutableDeclaration,
     _is_fully_approved,
     build_approval_key,
+    effective_allow_executables,
+    filter_mcp_by_allow_executables,
     is_any_type_approved,
     is_package_approved,
+    load_user_approvals,
     parse_allow_executables,
     prompt_executable_approval,
+    save_user_approvals,
     scan_package_executables,
     write_allow_executables,
 )
@@ -51,9 +56,9 @@ class TestExecutableDeclaration:
         assert decl.has_executables
 
     def test_has_executables_true_with_mcp_only(self) -> None:
-        """MCP-only packages are not flagged (MCP enforcement deferred)."""
+        """MCP-only packages are now flagged (MCP enforcement is active)."""
         decl = ExecutableDeclaration(package_key="a#1.0", package_name="a", mcp_count=1)
-        assert not decl.has_executables
+        assert decl.has_executables
 
     def test_has_executables_true_with_bin(self) -> None:
         decl = ExecutableDeclaration(package_key="a#1.0", package_name="a", bin_count=3)
@@ -64,7 +69,7 @@ class TestExecutableDeclaration:
         assert decl.exec_types == []
 
     def test_exec_types_all(self) -> None:
-        """exec_types only includes enforced types (hooks, bin); MCP is excluded."""
+        """exec_types includes all enforced types (hooks, mcp, bin, canvas)."""
         decl = ExecutableDeclaration(
             package_key="a#1.0",
             package_name="a",
@@ -72,7 +77,9 @@ class TestExecutableDeclaration:
             mcp_count=1,
             bin_count=1,
         )
-        assert decl.exec_types == [EXEC_TYPE_HOOKS, EXEC_TYPE_BIN]
+        assert EXEC_TYPE_HOOKS in decl.exec_types
+        assert EXEC_TYPE_BIN in decl.exec_types
+        assert EXEC_TYPE_MCP in decl.exec_types
 
     def test_exec_types_partial(self) -> None:
         decl = ExecutableDeclaration(
@@ -81,7 +88,7 @@ class TestExecutableDeclaration:
         assert decl.exec_types == [EXEC_TYPE_HOOKS, EXEC_TYPE_BIN]
 
     def test_summary_line(self) -> None:
-        """summary_line only shows enforced types (hooks, bin)."""
+        """summary_line shows all enforced types (hooks, mcp, bin, canvas)."""
         decl = ExecutableDeclaration(
             package_key="a#1.0",
             package_name="a",
@@ -91,7 +98,7 @@ class TestExecutableDeclaration:
         )
         summary = decl.summary_line()
         assert "2 hook(s)" in summary
-        assert "MCP" not in summary
+        assert "1 MCP server(s)" in summary
         assert "3 bin executable(s)" in summary
 
     def test_summary_line_hooks_only(self) -> None:
@@ -249,8 +256,8 @@ class TestScanPackageExecutables:
             )
             decl = scan_package_executables(Path(tmpdir), "mcp-pkg", "1.0")
             assert decl.mcp_count == 2
-            # MCP is scanned but not included in enforced exec_types.
-            assert EXEC_TYPE_MCP not in decl.exec_types
+            # MCP is now enforced so it appears in exec_types.
+            assert EXEC_TYPE_MCP in decl.exec_types
             assert "server-a" in decl.mcp_details
 
     def test_transitive_flag(self) -> None:
@@ -279,6 +286,19 @@ class TestScanPackageExecutables:
             assert decl.hook_count == 1
             assert decl.bin_count == 1
             assert decl.exec_types == [EXEC_TYPE_HOOKS, EXEC_TYPE_BIN]
+
+    def test_detects_canvas_extensions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ext_dir = Path(tmpdir) / ".apm" / "extensions" / "widget"
+            ext_dir.mkdir(parents=True)
+            (ext_dir / "extension.mjs").write_text("export default {};")
+            # A sibling directory without the marker is ignored.
+            (Path(tmpdir) / ".apm" / "extensions" / "nomarker").mkdir()
+
+            decl = scan_package_executables(Path(tmpdir), "canvas-pkg", "1.0")
+            assert decl.canvas_count == 1
+            assert "widget" in decl.canvas_details
+            assert EXEC_TYPE_CANVAS in decl.exec_types
 
 
 # ---------------------------------------------------------------------------
@@ -516,3 +536,155 @@ class TestPromptExecutableApproval:
         decl = self._make_decl()
         result = prompt_executable_approval([decl])
         assert "pkg#1.0" not in result
+
+
+# ---------------------------------------------------------------------------
+# effective_allow_executables (project + user-local merge)
+# ---------------------------------------------------------------------------
+
+
+class TestEffectiveAllowExecutables:
+    """Tests for effective_allow_executables merge precedence."""
+
+    def test_none_project_returns_none(self) -> None:
+        # Gate disabled -> None regardless of user approvals.
+        with patch(
+            "apm_cli.security.executables.load_user_approvals",
+            return_value={"x#1.0": {"mcp": True}},
+        ):
+            assert effective_allow_executables(None) is None
+
+    def test_user_approvals_overlay_project(self) -> None:
+        project = {"a#1.0": {"mcp": True}}
+        with patch(
+            "apm_cli.security.executables.load_user_approvals",
+            return_value={"b#1.0": {"canvas": True}},
+        ):
+            merged = effective_allow_executables(project)
+        assert merged == {"a#1.0": {"mcp": True}, "b#1.0": {"canvas": True}}
+
+    def test_user_approval_wins_on_overlap(self) -> None:
+        project = {"a#1.0": {"mcp": False}}
+        with patch(
+            "apm_cli.security.executables.load_user_approvals",
+            return_value={"a#1.0": {"mcp": True}},
+        ):
+            merged = effective_allow_executables(project)
+        # User-local approval takes precedence over a stale project entry.
+        assert merged == {"a#1.0": {"mcp": True}}
+
+    def test_empty_project_plus_user(self) -> None:
+        with patch(
+            "apm_cli.security.executables.load_user_approvals",
+            return_value={"a#1.0": {"bin": True}},
+        ):
+            merged = effective_allow_executables({})
+        assert merged == {"a#1.0": {"bin": True}}
+
+
+# ---------------------------------------------------------------------------
+# filter_mcp_by_allow_executables
+# ---------------------------------------------------------------------------
+
+
+class _FakeMcpDep:
+    """Minimal stand-in for an MCP dependency exposing ``.name``."""
+
+    def __init__(self, name: str | None) -> None:
+        self.name = name
+
+
+class _RecordingLogger:
+    """Captures verbose_detail / warning calls for assertions."""
+
+    def __init__(self) -> None:
+        self.verbose: list[str] = []
+        self.warnings: list[str] = []
+
+    def verbose_detail(self, message: str, *args, **kwargs) -> None:
+        self.verbose.append(message)
+
+    def warning(self, message: str, *args, **kwargs) -> None:
+        self.warnings.append(message)
+
+
+class TestFilterMcpByAllowExecutables:
+    """Tests for filter_mcp_by_allow_executables (fail-closed gate)."""
+
+    def test_none_gate_passes_all(self) -> None:
+        deps = [_FakeMcpDep("a"), _FakeMcpDep("b")]
+        logger = _RecordingLogger()
+        assert filter_mcp_by_allow_executables(deps, None, logger) == deps
+        assert logger.warnings == []
+
+    def test_unapproved_filtered_out(self) -> None:
+        deps = [_FakeMcpDep("a")]
+        logger = _RecordingLogger()
+        with patch(
+            "apm_cli.security.executables.load_user_approvals",
+            return_value={},
+        ):
+            result = filter_mcp_by_allow_executables(deps, {}, logger)
+        assert result == []
+        assert logger.warnings  # surfaced a remediation warning
+
+    def test_approved_slug_passes(self) -> None:
+        deps = [_FakeMcpDep("a")]
+        logger = _RecordingLogger()
+        with patch(
+            "apm_cli.security.executables.load_user_approvals",
+            return_value={"a": {"mcp": True}},
+        ):
+            result = filter_mcp_by_allow_executables(deps, {}, logger)
+        assert result == deps
+        assert logger.warnings == []
+
+    def test_unnamed_dep_is_fail_closed(self) -> None:
+        # A falsy/missing name must never bypass the gate.
+        deps = [_FakeMcpDep(None), _FakeMcpDep("")]
+        logger = _RecordingLogger()
+        with patch(
+            "apm_cli.security.executables.load_user_approvals",
+            return_value={"a": {"mcp": True}},
+        ):
+            result = filter_mcp_by_allow_executables(deps, {}, logger)
+        assert result == []
+        assert logger.warnings
+
+
+class TestLoadUserApprovalsShapeValidation:
+    """``load_user_approvals`` must drop malformed entries (fail-closed)."""
+
+    def test_drops_malformed_entries(self) -> None:
+        raw = {
+            "good": {"mcp": True, "canvas": False},
+            "bad_value": {"mcp": "yes"},
+            "bad_inner_key": {5: True},
+            "not_a_dict": ["mcp"],
+            7: {"mcp": True},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "approvals.yml"
+            with open(path, "w", encoding="utf-8") as handle:  # yaml-io-exempt
+                yaml.safe_dump(raw, handle)
+            with patch(
+                "apm_cli.security.executables.get_user_approvals_path",
+                return_value=path,
+            ):
+                result = load_user_approvals()
+        assert result == {"good": {"mcp": True, "canvas": False}}
+
+
+class TestSaveUserApprovalsDirMode:
+    """``save_user_approvals`` must create ``~/.apm`` as user-private (0o700)."""
+
+    def test_creates_dir_mode_0o700(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "nested" / "approvals.yml"
+            with patch(
+                "apm_cli.security.executables.get_user_approvals_path",
+                return_value=path,
+            ):
+                save_user_approvals({"a": {"mcp": True}})
+            assert path.exists()
+            assert (path.parent.stat().st_mode & 0o777) == 0o700

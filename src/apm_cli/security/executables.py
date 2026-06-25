@@ -1,8 +1,8 @@
 """Executable primitive approval gate (npm v12-inspired opt-in model).
 
-APM packages can declare three kinds of executable primitives -- hooks,
-MCP servers, and bin/ executables -- that run arbitrary code on the
-developer's machine.  When the consuming project declares an
+APM packages can declare four kinds of executable primitives -- hooks,
+MCP servers, bin/ executables, and canvas extensions -- that run arbitrary
+code on the developer's machine.  When the consuming project declares an
 ``allowExecutables`` block in its ``apm.yml``, this module enforces a
 deny-by-default policy: none of these primitives are deployed unless
 explicitly approved.  Projects that omit the block entirely get
@@ -25,16 +25,15 @@ from typing import Any
 
 # Executable type constants used as keys in the allowExecutables block.
 EXEC_TYPE_HOOKS = "hooks"
-EXEC_TYPE_MCP = "mcp"  # Reserved for future enforcement.
+EXEC_TYPE_MCP = "mcp"
 EXEC_TYPE_BIN = "bin"
+EXEC_TYPE_CANVAS = "canvas"
 
-# Types with active enforcement in the install gate.  MCP is excluded
-# because MCPIntegrator does not yet honour the approval state --
-# surfacing it in the UI would create a false-assurance control.
-ENFORCED_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_BIN)
+# Types with active enforcement in the install gate.
+ENFORCED_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_BIN, EXEC_TYPE_MCP, EXEC_TYPE_CANVAS)
 
 # All recognised exec-type keys (for manifest validation).
-ALL_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_MCP, EXEC_TYPE_BIN)
+ALL_EXEC_TYPES = (EXEC_TYPE_HOOKS, EXEC_TYPE_MCP, EXEC_TYPE_BIN, EXEC_TYPE_CANVAS)
 
 
 @dataclass(frozen=True)
@@ -51,9 +50,11 @@ class ExecutableDeclaration:
         hook_count: Number of hook files discovered.
         mcp_count: Number of MCP server entries discovered.
         bin_count: Number of bin/ executables discovered.
+        canvas_count: Number of canvas extensions discovered.
         hook_details: Per-hook summaries for ``inspect`` display.
         mcp_details: Per-MCP-server summaries.
         bin_details: Per-binary summaries.
+        canvas_details: Per-canvas summaries.
     """
 
     package_key: str
@@ -63,14 +64,18 @@ class ExecutableDeclaration:
     hook_count: int = 0
     mcp_count: int = 0
     bin_count: int = 0
+    canvas_count: int = 0
     hook_details: list[str] = field(default_factory=list)
     mcp_details: list[str] = field(default_factory=list)
     bin_details: list[str] = field(default_factory=list)
+    canvas_details: list[str] = field(default_factory=list)
 
     @property
     def has_executables(self) -> bool:
         """Return True if this package declares enforced executable primitives."""
-        return self.hook_count > 0 or self.bin_count > 0
+        return (
+            self.hook_count > 0 or self.bin_count > 0 or self.mcp_count > 0 or self.canvas_count > 0
+        )
 
     @property
     def exec_types(self) -> list[str]:
@@ -78,8 +83,12 @@ class ExecutableDeclaration:
         types: list[str] = []
         if self.hook_count > 0:
             types.append(EXEC_TYPE_HOOKS)
+        if self.mcp_count > 0:
+            types.append(EXEC_TYPE_MCP)
         if self.bin_count > 0:
             types.append(EXEC_TYPE_BIN)
+        if self.canvas_count > 0:
+            types.append(EXEC_TYPE_CANVAS)
         return types
 
     def summary_line(self) -> str:
@@ -87,8 +96,12 @@ class ExecutableDeclaration:
         parts: list[str] = []
         if self.hook_count:
             parts.append(f"{self.hook_count} hook(s)")
+        if self.mcp_count:
+            parts.append(f"{self.mcp_count} MCP server(s)")
         if self.bin_count:
             parts.append(f"{self.bin_count} bin executable(s)")
+        if self.canvas_count:
+            parts.append(f"{self.canvas_count} canvas extension(s)")
         return ", ".join(parts)
 
 
@@ -109,7 +122,7 @@ def is_package_approved(
             consuming project's ``apm.yml``.  ``None`` means no block
             exists (nothing approved).
         package_key: The approval key (e.g. ``owner/repo#v1.0``).
-        exec_type: One of ``hooks``, ``mcp``, ``bin``.
+        exec_type: One of ``hooks``, ``mcp``, ``bin``, ``canvas``.
 
     Returns:
         ``True`` only when the block contains a matching entry with
@@ -175,6 +188,8 @@ def scan_package_executables(
     - ``bin/`` directory -- bin executables
     - MCP is declared in the package's ``apm.yml`` under
       ``dependencies.mcp``, not as files -- so we parse that instead.
+    - ``.apm/extensions/<name>/extension.mjs`` -- canvas extension bundles
+      (mirrors :meth:`CanvasIntegrator.find_canvas_bundles`)
 
     Returns an :class:`ExecutableDeclaration` (may have zero counts if
     the package declares no executables).
@@ -233,6 +248,18 @@ def scan_package_executables(
         except Exception:
             pass  # Non-fatal: if we cannot parse, treat as zero MCP
 
+    # 4. Canvas extensions: .apm/extensions/<name>/extension.mjs
+    #    Mirrors CanvasIntegrator.find_canvas_bundles marker detection.
+    canvas_marker = "extension.mjs"
+    canvas_dirs: list[Path] = []
+    extensions_root = install_path / ".apm" / "extensions"
+    if extensions_root.is_dir():
+        for ext_dir in extensions_root.iterdir():
+            if ext_dir.is_dir() and (ext_dir / canvas_marker).is_file():
+                canvas_dirs.append(ext_dir)
+    canvas_dirs = sorted(canvas_dirs)
+    canvas_details = [d.name for d in canvas_dirs]
+
     return ExecutableDeclaration(
         package_key=key,
         package_name=package_name,
@@ -241,9 +268,11 @@ def scan_package_executables(
         hook_count=len(hook_files),
         mcp_count=mcp_count,
         bin_count=len(bin_files),
+        canvas_count=len(canvas_dirs),
         hook_details=hook_details,
         mcp_details=mcp_details,
         bin_details=bin_details,
+        canvas_details=canvas_details,
     )
 
 
@@ -271,14 +300,16 @@ def prompt_executable_approval(
     Args:
         declarations: Executable declarations for packages that need
             approval (already filtered to only those with executables).
-        allow_executables: Existing ``allowExecutables`` block from
-            ``apm.yml`` (merged into result for packages already approved).
+        allow_executables: Existing approvals map (project ``apm.yml``
+            ``allowExecutables`` overlaid with user-local
+            ``~/.apm/approvals.yml``); merged into result for packages
+            already approved.
         trust_all: When True, auto-approve everything without prompting.
         no_executables: When True, deny everything without prompting.
 
     Returns:
-        Updated ``allowExecutables`` dict ready to write back to
-        ``apm.yml``.
+        Updated approvals dict ready to persist to the user-local
+        ``~/.apm/approvals.yml``.
 
     Raises:
         SystemExit: In non-interactive mode when unapproved executables
@@ -381,7 +412,7 @@ def parse_allow_executables(data: dict[str, Any]) -> dict[str, dict[str, bool]] 
     if not isinstance(raw, dict):
         raise ValueError(
             "allowExecutables must be a mapping of "
-            "package keys to {hooks: bool, mcp: bool, bin: bool}"
+            "package keys to {hooks: bool, mcp: bool, bin: bool, canvas: bool}"
         )
 
     result: dict[str, dict[str, bool]] = {}
@@ -420,6 +451,12 @@ def write_allow_executables(
 
     Reads the existing YAML, updates the ``allowExecutables`` key, and
     writes it back using the standard ``dump_yaml`` helper.
+
+    Note: individual package approvals should live in the user-local
+    ``~/.apm/approvals.yml`` (see :func:`save_user_approvals`), not in the
+    project manifest which is committed to source control.  This function is
+    retained for writing the gate opt-in signal (``allowExecutables: {}``) and
+    for CI/automated contexts that intentionally commit approvals.
     """
     from ..utils.yaml_io import dump_yaml, load_yaml
 
@@ -433,3 +470,150 @@ def write_allow_executables(
         del data["allowExecutables"]
 
     dump_yaml(data, manifest_path)
+
+
+# -------------------------------------------------------------------
+# User-local approvals store (~/.apm/approvals.yml)
+# -------------------------------------------------------------------
+
+
+def get_user_approvals_path() -> Path:
+    """Return the path to the user-local executable approvals file.
+
+    The file lives at ``~/.apm/approvals.yml`` and is never committed to
+    source control.  It stores the same ``allowExecutables`` mapping as the
+    project ``apm.yml`` but is scoped to the current user's machine, so
+    cloning a project does not implicitly grant trust to its dependencies.
+    """
+    return Path.home() / ".apm" / "approvals.yml"
+
+
+def load_user_approvals() -> dict[str, dict[str, bool]]:
+    """Load the user-local approvals from ``~/.apm/approvals.yml``.
+
+    Returns an empty dict when the file does not exist.  The file stores the
+    approvals mapping directly (package key -> exec-type booleans), without
+    the ``allowExecutables:`` YAML wrapper used in project ``apm.yml``.
+    """
+    path = get_user_approvals_path()
+    if not path.is_file():
+        return {}
+    from ..utils.yaml_io import load_yaml
+
+    data = load_yaml(path)
+    if not isinstance(data, dict):
+        return {}
+    # Defensive: a corrupt or hand-tampered approvals file must never weaken
+    # or crash the gate.  Keep only well-formed entries (str key -> dict of
+    # bool); silently drop anything malformed so the caller sees a clean map.
+    cleaned: dict[str, dict[str, bool]] = {}
+    for key, entry in data.items():
+        if (
+            isinstance(key, str)
+            and isinstance(entry, dict)
+            and all(isinstance(k, str) for k in entry)
+            and all(isinstance(v, bool) for v in entry.values())
+        ):
+            cleaned[key] = entry
+    return cleaned
+
+
+def save_user_approvals(approvals: dict[str, dict[str, bool]]) -> None:
+    """Persist *approvals* to ``~/.apm/approvals.yml``.
+
+    Creates ``~/.apm/`` if it does not exist.  Both the directory (mode
+    ``0o700``) and the file (mode ``0o600``) are owner-only to prevent
+    other users on a shared system from reading the approval list.
+    """
+    import contextlib
+    import os
+
+    from ..utils.yaml_io import dump_yaml
+
+    path = get_user_approvals_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(NotImplementedError, OSError):
+        os.chmod(path.parent, 0o700)
+    dump_yaml(approvals, path)
+    with contextlib.suppress(NotImplementedError, OSError):
+        os.chmod(path, 0o600)
+
+
+def effective_allow_executables(
+    project_allow_executables: dict[str, dict[str, bool]] | None,
+) -> dict[str, dict[str, bool]] | None:
+    """Return the effective allowExecutables map for an install run.
+
+    Merges the project-level gate signal with the user-local approvals:
+
+    - Returns ``None`` when the project has no ``allowExecutables`` block
+      (gate disabled -- backward-compatible behaviour, all executables
+      deployed).
+    - Returns a merged dict when the gate is enabled: project-level entries
+      (retained for CI / automated pipelines) are overlaid with user-local
+      approvals from ``~/.apm/approvals.yml``.  User approvals take
+      precedence so an ``apm approve`` decision is always honoured even if the
+      project entry is absent or stale.
+    """
+    if project_allow_executables is None:
+        return None
+    user = load_user_approvals()
+    return {**project_allow_executables, **user}
+
+
+def filter_mcp_by_allow_executables(
+    mcp_deps: list,
+    project_allow_execs: dict | None,
+    logger: Any,
+) -> list:
+    """Filter MCP deps not approved in allowExecutables. Returns filtered list."""
+    if project_allow_execs is None or not mcp_deps:
+        return mcp_deps
+    _allow_execs = effective_allow_executables(project_allow_execs)
+    if _allow_execs is None:
+        return mcp_deps
+    _filtered = []
+    for _dep in mcp_deps:
+        _slug = _dep.name
+        # Fail-closed: keep a server only when it carries a name AND that name
+        # is approved.  A falsy/missing name is treated as NOT approved so an
+        # unnamed dep can never slip past the gate.
+        if _slug and is_package_approved(_allow_execs, _slug, EXEC_TYPE_MCP):
+            _filtered.append(_dep)
+        elif _slug:
+            logger.verbose_detail(
+                f"Skipping MCP server from '{_slug}': not approved in allowExecutables. "
+                f"Run 'apm approve {_slug}' to approve."
+            )
+        else:
+            logger.verbose_detail(
+                "Skipping an unnamed MCP server: not approved in allowExecutables. "
+                "Identify it in apm.yml and run 'apm approve <package>' to approve."
+            )
+    if len(_filtered) < len(mcp_deps):
+        logger.warning(
+            f"Filtered {len(mcp_deps) - len(_filtered)} MCP server(s) not approved "
+            "in allowExecutables. Run 'apm approve <package>' to approve.",
+            symbol="warning",
+        )
+    return _filtered
+
+
+def read_bundle_allow_executables(apm_yml_path: Path, logger: Any) -> dict | None:
+    """Read allowExecutables from apm.yml for bundle install. Fail-closed on error."""
+    try:
+        from ..utils.yaml_io import load_yaml  # local import avoids circular at module init
+
+        if not apm_yml_path.is_file():
+            return None
+        data = load_yaml(apm_yml_path)
+        if isinstance(data, dict):
+            return parse_allow_executables(data)
+        return None
+    except Exception as exc:
+        logger.warning(
+            f"Could not read allowExecutables from apm.yml: {exc}. "
+            "Treating as fully enforced with no approvals.",
+            symbol="warning",
+        )
+        return {}

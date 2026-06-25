@@ -54,7 +54,12 @@ _log = logging.getLogger(__name__)
 # Legacy per-client skill prefixes that have been converged into .agents/skills/.
 # .claude/skills/ is excluded (Claude is not in the convergence set).
 # .codex/skills/ was never a legacy path (Codex always used .agents/).
-_LEGACY_SKILL_PATTERN = re.compile(r"^\.(github|cursor|opencode|gemini)/skills/([^/]+)/.+$")
+# .windsurf/skills/ is included: windsurf converged onto .agents/skills/ after
+# previously deploying skills under .windsurf/skills/ (see targets.py windsurf
+# profile deploy_root=".agents").
+_LEGACY_SKILL_PATTERN = re.compile(
+    r"^\.(github|cursor|opencode|gemini|windsurf)/skills/([^/]+)/.+$"
+)
 
 # ------------------------------------------------------------------
 # Shared message templates (single source of truth — H6)

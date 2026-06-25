@@ -174,27 +174,36 @@ environments where plugin executables are not trusted by default.
 
 Behind the `canvas` experimental flag, a package may ship a Copilot CLI canvas
 extension under `.apm/extensions/<name>/extension.mjs` (executable Node.js).
-Because a canvas from a dependency is arbitrary executable code, APM **blocks
-dependency-provided canvases by default**: the consumer must pass
-`--trust-canvas-extensions` to deploy them. A first-party canvas in the root
+Because a canvas from a dependency is arbitrary executable code, APM blocks
+dependency-provided canvases when the project opts in to the executable gate:
+the project must add `allowExecutables: {}` to `apm.yml` and each developer
+must run `apm approve <pkg>` to deploy it. A first-party canvas in the root
 package being installed deploys once the flag is on; dependency canvases always
-require the trust flag.
+require explicit approval.
+
+Approvals recorded by `apm approve` are stored in **`~/.apm/approvals.yml`**
+(user-local, never committed to source control). Adding `allowExecutables: {}`
+to `apm.yml` enables the gate for the project, but does not grant trust to any
+package; every developer cloning the project must approve packages themselves.
+CI pipelines may commit specific grants directly in `apm.yml` to bypass
+interactive approval in automated environments.
 
 At **project scope** a canvas deploys to `.github/extensions/<name>/`. With
 `--global`, a **dependency-provided** canvas deploys to
 `~/.copilot/extensions/<name>/` so it is available in every Copilot session;
-global install always requires `--trust-canvas-extensions` (full-account blast
+global install always requires `allowExecutables` approval (full-account blast
 radius), supports only the default `~/.copilot` location (a non-default
 `$COPILOT_HOME` is refused), and does not deploy first-party root canvases
 (package them as a dependency instead). `apm uninstall --global` prunes the
 global canvas.
 
-The trust gate is enforced on every install path -- normal install, offline
-bundle install (`apm install <bundle>`), and `apm unpack` -- so a vendored
-bundle cannot smuggle an executable canvas past trust. The flag is a
-feature-availability toggle, not a security gate; the trust requirement holds
-regardless of the flag. An enterprise policy field for canvas trust is a
-deferred follow-up and is not part of this experimental release.
+The trust gate is enforced on every install path -- normal install and offline
+bundle install (`apm install <bundle>`) -- so a vendored bundle cannot smuggle
+an executable canvas past trust. Canvas trust is now unified with the
+`allowExecutables` default-deny gate (hooks, bin, mcp, canvas); approve once and
+all four executable types are governed consistently. An enterprise policy field
+for canvas trust is a deferred follow-up and is not part of this experimental
+release.
 
 ## Local content governance
 
@@ -290,11 +299,11 @@ may use. This section covers how that contract is enforced at `apm install` time
 
 ### 2. Discovery and applicability
 
-APM auto-discovers policy from `<org>/.github/apm-policy.yml` for any GitHub
-remote  --  both `github.com` and GitHub Enterprise (GHE). Non-GitHub remotes (ADO,
-GitLab, plain git) currently fall through with no policy applied; tracked as a
-follow-up. Repositories with no detectable git remote (unpacked bundles, temp
-dirs) emit an explicit "could not determine org" line and skip discovery.
+APM auto-discovers org policy from the project's git remote by checking
+`.github`, `.apm`, and `_apm` policy repos in order on GitHub API-compatible
+hosts. Azure DevOps hosts use `_apm` only, because ADO rejects dot-prefixed
+repository names. Repositories with no detectable git remote (unpacked bundles,
+temp dirs) emit an explicit "could not determine org" line and skip discovery.
 
 The `--policy <override>` flag is **audit-only today**  --  it works on
 `apm audit --ci` but is not yet wired through `apm install`.
@@ -536,7 +545,8 @@ as `[x]` errors and exit `1`.
 
 Checklist to publish a policy:
 
-1. Create `<org>/.github/apm-policy.yml` in the org's `.github` repository.
+1. Create `apm-policy.yml` in the org policy repo (`.github` on GitHub, `_apm`
+   project/repo on Azure DevOps).
 2. Start from the recommended starter below and trim to the minimum reflecting
    your governance posture.
 3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming

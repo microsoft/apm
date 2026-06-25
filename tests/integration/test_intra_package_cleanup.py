@@ -94,6 +94,21 @@ def _write_apm_yml_local(project_dir, local_pkg_path):
     )
 
 
+def _write_apm_yml_local_packages(project_dir, local_pkg_paths):
+    """Write apm.yml with multiple local-path package dependencies."""
+    config = {
+        "name": "intra-package-cleanup-test",
+        "version": "1.0.0",
+        "dependencies": {
+            "apm": [{"path": str(path)} for path in local_pkg_paths],
+            "mcp": [],
+        },
+    }
+    (project_dir / "apm.yml").write_text(
+        yaml.dump(config, default_flow_style=False), encoding="utf-8"
+    )
+
+
 def _find_local_dep(lockfile):
     """Return the locked-dep entry that represents a local-path package, or None.
 
@@ -109,6 +124,29 @@ def _find_local_dep(lockfile):
         if entry and entry.get("source") == "local":
             return entry
     return None
+
+
+def _find_local_deps(lockfile):
+    """Return all locked-dep entries that represent local-path packages."""
+    if not lockfile:
+        return []
+    deps = lockfile.get("dependencies") or {}
+    entries = deps if isinstance(deps, list) else deps.values()
+    return [entry for entry in entries if entry and entry.get("source") == "local"]
+
+
+def _make_local_prompt_package(tmp_path, name, prompts):
+    """Create a local-path APM package with prompt primitives."""
+    pkg = tmp_path / name
+    prompts_dir = pkg / ".apm" / "prompts"
+    prompts_dir.mkdir(parents=True)
+    (pkg / "apm.yml").write_text(
+        yaml.dump({"name": name, "version": "0.0.1"}, default_flow_style=False),
+        encoding="utf-8",
+    )
+    for filename, body in prompts.items():
+        (prompts_dir / filename).write_text(body, encoding="utf-8")
+    return pkg
 
 
 class TestFileRenamedWithinPackage:
@@ -205,3 +243,59 @@ class TestFileRenamedWithinPackage:
             assert stale not in deployed_after, (
                 f"Stale path {stale} still in lockfile deployed_files after partial install"
             )
+
+
+class TestCrossPackageSharedFileCleanup:
+    """Regression tests for issue #1831 across real local-path packages."""
+
+    def test_shared_file_survives_when_other_package_still_deploys_it(
+        self, temp_project, apm_command, tmp_path
+    ):
+        """If pkg-a drops a shared prompt, pkg-b's deployed copy survives."""
+        shared_body = "---\ndescription: shared\n---\nshared\n"
+        pkg_a = _make_local_prompt_package(
+            tmp_path,
+            "pkg-a",
+            {
+                "shared.prompt.md": shared_body,
+                "only-a.prompt.md": "---\ndescription: only a\n---\nonly a\n",
+            },
+        )
+        pkg_b = _make_local_prompt_package(
+            tmp_path,
+            "pkg-b",
+            {"shared.prompt.md": shared_body},
+        )
+        _write_apm_yml_local_packages(temp_project, [pkg_a, pkg_b])
+
+        result1 = _run_apm(apm_command, ["install"], temp_project)
+        assert result1.returncode == 0, (
+            f"Initial install failed:\nSTDOUT: {result1.stdout}\nSTDERR: {result1.stderr}"
+        )
+
+        lockfile_before = _read_lockfile(temp_project)
+        local_deps_before = _find_local_deps(lockfile_before)
+        shared_claims = [
+            dep
+            for dep in local_deps_before
+            if ".github/prompts/shared.prompt.md" in (dep.get("deployed_files") or [])
+        ]
+        assert len(shared_claims) == 2, (
+            "Both local packages must claim the shared prompt before testing cleanup"
+        )
+
+        shared_target = temp_project / ".github" / "prompts" / "shared.prompt.md"
+        only_a_target = temp_project / ".github" / "prompts" / "only-a.prompt.md"
+        assert shared_target.exists()
+        assert only_a_target.exists()
+
+        (pkg_a / ".apm" / "prompts" / "shared.prompt.md").unlink()
+        (pkg_a / ".apm" / "prompts" / "only-a.prompt.md").unlink()
+
+        result2 = _run_apm(apm_command, ["install"], temp_project)
+        assert result2.returncode == 0, (
+            f"Re-install failed:\nSTDOUT: {result2.stdout}\nSTDERR: {result2.stderr}"
+        )
+
+        assert shared_target.exists(), "Shared prompt was deleted despite pkg-b ownership"
+        assert not only_a_target.exists(), "Unclaimed stale prompt survived cleanup"

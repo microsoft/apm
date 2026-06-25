@@ -468,41 +468,37 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
     After the integration loop, any package that had hooks or bin/
     blocked is collected in ``ctx.blocked_executables``.  This function
     runs the interactive approval flow (or hard-errors in CI) and
-    persists approved entries to ``apm.yml`` so the next install
-    deploys them.
+    persists approved entries to ``~/.apm/approvals.yml`` (user-local,
+    never committed to source control) so the next install deploys them.
     """
     if not ctx.blocked_executables:
         return
 
     from apm_cli.security.executables import (
+        load_user_approvals,
         prompt_executable_approval,
-        write_allow_executables,
+        save_user_approvals,
     )
 
-    allow_exec = None
-    if ctx.apm_package is not None:
-        allow_exec = getattr(ctx.apm_package, "allow_executables", None)
+    # Seed the prompt with existing user-local approvals (not project entries,
+    # which are read-only from the install pipeline's perspective).
+    allow_exec = load_user_approvals() or {}
 
     updated = prompt_executable_approval(
         ctx.blocked_executables,
         allow_executables=allow_exec,
     )
 
-    # Persist approvals to apm.yml if user approved anything new.
-    if updated and updated != (allow_exec or {}):
-        manifest_path = ctx.source_root or ctx.project_root
-        apm_yml = manifest_path / "apm.yml"
-        if apm_yml.is_file():
-            write_allow_executables(apm_yml, updated)
-            # Update the in-memory model so subsequent code sees the change.
-            if ctx.apm_package is not None:
-                ctx.apm_package.allow_executables = updated
-            if ctx.logger:
-                ctx.logger.info(
-                    "Updated allowExecutables in apm.yml. "
-                    "Run 'apm install' again to deploy approved executables.",
-                    symbol="info",
-                )
+    # Persist new approvals to user-local file if user approved anything new.
+    if updated and updated != allow_exec:
+        save_user_approvals(updated)
+        if ctx.logger:
+            _new_count = sum(1 for _k in updated if _k not in allow_exec)
+            ctx.logger.info(
+                f"Updated ~/.apm/approvals.yml ({_new_count} newly approved). "
+                "Run 'apm install' again to deploy approved executables.",
+                symbol="info",
+            )
 
 
 # ======================================================================

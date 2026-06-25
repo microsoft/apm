@@ -1,7 +1,10 @@
 """``apm approve`` and ``apm deny`` -- manage executable primitive approvals.
 
 These commands mirror npm v12's ``npm approve-scripts`` / ``npm deny-scripts``.
-They read and write the ``allowExecutables`` block in the project's ``apm.yml``.
+They read and write the user-local ``~/.apm/approvals.yml`` file so that
+approval decisions are never committed to source control.  The project
+``apm.yml`` only signals whether the gate is enabled (``allowExecutables: {}``
+key present) -- individual package approvals live in the user file.
 """
 
 from __future__ import annotations
@@ -23,20 +26,17 @@ def _find_manifest() -> Path:
     return manifest
 
 
-def _load_allow_executables(manifest: Path) -> dict[str, dict[str, bool]] | None:
-    """Load the ``allowExecutables`` block from ``apm.yml``.
+def _load_allow_executables() -> dict[str, dict[str, bool]] | None:
+    """Load the user-local approvals from ``~/.apm/approvals.yml``.
 
-    Returns ``None`` when the project has not declared the block (gate
-    disabled -- backward-compatible) vs ``{}`` when the block is present
-    but empty (gate enabled, deny-all).
+    Returns ``None`` when no approvals have been recorded yet (gate behaviour
+    is determined by the project manifest, not this file).
     """
-    from ..security.executables import parse_allow_executables
-    from ..utils.yaml_io import load_yaml
+    from ..security.executables import get_user_approvals_path, load_user_approvals
 
-    data = load_yaml(manifest)
-    if not isinstance(data, dict):
+    if not get_user_approvals_path().is_file():
         return None
-    return parse_allow_executables(data)
+    return load_user_approvals()
 
 
 @click.command("approve")
@@ -55,9 +55,9 @@ def _load_allow_executables(manifest: Path) -> dict[str, dict[str, bool]] | None
 def approve_cmd(packages: tuple[str, ...], pending: bool, approve_all: bool) -> None:
     """Approve executable primitives for installed packages.
 
-    Adds entries to the ``allowExecutables`` block in ``apm.yml`` so that
-    hooks, MCP servers, and bin/ executables from the specified packages
-    are deployed during ``apm install``.
+    Adds entries to ``~/.apm/approvals.yml`` (user-local, never committed to
+    source control) so that hooks, MCP servers, canvas extensions, and bin/
+    executables from the specified packages are deployed during ``apm install``.
 
     Examples:
 
@@ -68,14 +68,12 @@ def approve_cmd(packages: tuple[str, ...], pending: bool, approve_all: bool) -> 
         apm approve --all
     """
     manifest = _find_manifest()
-    allow_exec = _load_allow_executables(manifest)
+    allow_exec = _load_allow_executables()
 
     if pending:
         _show_pending(manifest, allow_exec or {})
         return
 
-    # Approving a package implies opting into the gate; initialise
-    # the block when absent so approvals are persisted correctly.
     if allow_exec is None:
         allow_exec = {}
 
@@ -95,31 +93,30 @@ def approve_cmd(packages: tuple[str, ...], pending: bool, approve_all: bool) -> 
 def deny_cmd(packages: tuple[str, ...]) -> None:
     """Revoke executable approval for packages.
 
-    Removes entries from the ``allowExecutables`` block in ``apm.yml``.
+    Removes entries from ``~/.apm/approvals.yml`` (user-local approvals
+    store).
 
     Example:
 
         apm deny owner/repo
     """
-    manifest = _find_manifest()
-    allow_exec = _load_allow_executables(manifest) or {}
+    allow_exec = _load_allow_executables() or {}
 
-    from ..security.executables import write_allow_executables
+    from ..security.executables import save_user_approvals
 
     removed = 0
     for pkg in packages:
-        # Try exact match first, then prefix match
         matched_key = _find_matching_key(allow_exec, pkg)
         if matched_key:
             del allow_exec[matched_key]
             _rich_success(f"Revoked approval for {matched_key}")
             removed += 1
         else:
-            _rich_warning(f"{pkg}: not found in allowExecutables")
+            _rich_warning(f"{pkg}: not found in ~/.apm/approvals.yml")
 
     if removed > 0:
-        write_allow_executables(manifest, allow_exec)
-        _rich_info(f"Updated allowExecutables in apm.yml ({removed} removed).", symbol="info")
+        save_user_approvals(allow_exec)
+        _rich_info(f"Updated ~/.apm/approvals.yml ({removed} removed).", symbol="info")
 
 
 def _find_matching_key(allow_exec: dict[str, dict[str, bool]], pkg: str) -> str | None:
@@ -157,7 +154,7 @@ def _show_pending(manifest: Path, allow_exec: dict[str, dict[str, bool]]) -> Non
 
 def _approve_all_pending(manifest: Path, allow_exec: dict[str, dict[str, bool]]) -> None:
     """Approve all installed packages with unapproved executables."""
-    from ..security.executables import write_allow_executables
+    from ..security.executables import save_user_approvals
 
     declarations = _scan_installed_packages(manifest)
     count = 0
@@ -171,8 +168,8 @@ def _approve_all_pending(manifest: Path, allow_exec: dict[str, dict[str, bool]])
         _rich_success("All packages with executables are already approved.")
         return
 
-    write_allow_executables(manifest, allow_exec)
-    _rich_info(f"Updated allowExecutables in apm.yml ({count} approved).", symbol="info")
+    save_user_approvals(allow_exec)
+    _rich_info(f"Updated ~/.apm/approvals.yml ({count} approved).", symbol="info")
 
 
 def _approve_packages(
@@ -181,18 +178,16 @@ def _approve_packages(
     packages: tuple[str, ...],
 ) -> None:
     """Approve specific packages by name."""
-    from ..security.executables import write_allow_executables
+    from ..security.executables import save_user_approvals
 
     declarations = _scan_installed_packages(manifest)
     decl_map = {d.package_name: d for d in declarations}
-    # Also index by package_key for exact matches
     decl_key_map = {d.package_key: d for d in declarations}
 
     count = 0
     for pkg in packages:
         decl = decl_key_map.get(pkg) or decl_map.get(pkg)
         if decl is None:
-            # Try prefix match on keys
             for d in declarations:
                 if d.package_key.startswith(pkg + "#") or d.package_name.startswith(pkg):
                     decl = d
@@ -211,8 +206,8 @@ def _approve_packages(
         count += 1
 
     if count > 0:
-        write_allow_executables(manifest, allow_exec)
-        _rich_info(f"Updated allowExecutables in apm.yml ({count} approved).", symbol="info")
+        save_user_approvals(allow_exec)
+        _rich_info(f"Updated ~/.apm/approvals.yml ({count} approved).", symbol="info")
 
 
 def _scan_installed_packages(manifest: Path) -> list:

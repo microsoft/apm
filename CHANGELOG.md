@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The shared gh-aw workflow `.github/workflows/shared/apm.md` exposes an optional `apm-version` import input that pins the apm CLI version for both the pack and restore `microsoft/apm-action` steps (so the two cannot skew), surviving `gh aw update` without hand-editing the vendored file. Omitting it falls through to the action's pinned default via a gh-aw schema default, so non-opting consumers stay reproducible instead of floating to `latest`. (#1842)
+- `apm config set target <env>` configures a default install target so a bare
+  `apm install` deploys to it -- set the target once, then install everywhere
+  without repeating `--target`. Precedence is `--target` > `apm.yml` `target:` >
+  config default > auto-detect, and `apm config get/unset target` inspect and
+  clear it. (#1881)
+- Org-wide policy discovery now cascades through candidate repo names
+  (`.github`, then `.apm`, then `_apm`) and speaks the Azure DevOps Items
+  API, so Azure DevOps organizations -- which forbid repo names that begin
+  or end with `.` -- can host an APM governance policy repo for the first
+  time. (by @sergio-sisternes-epam; closes #1813) (#1830)
+
+### Removed
+
+- **Breaking (security):** executable dependencies -- including MCP servers and
+  canvas extensions -- now require explicit, persistent approval via `apm approve`,
+  closing the gap where canvas extensions were trusted per-run. The
+  `--trust-canvas-extensions` flag is removed as a consequence; canvas extensions
+  are now governed by the `allowExecutables` gate like every other executable
+  surface. Add an `allowExecutables: {}` block to `apm.yml` and run
+  `apm approve <pkg>` to trust them. (by @sergio-sisternes-epam) (#1865)
+
+  ```diff
+  - apm install --trust-canvas-extensions   # before: per-run trust flag
+  + apm approve <pkg>                        # after: one-time, user-local approval
+  ```
+
+  CI / non-interactive pipelines that previously passed the flag should
+  instead pre-seed approvals before `apm install`, e.g.
+  `apm approve <pkg>` (writes `~/.apm/approvals.yml` directly, no prompt),
+  so the gate finds the package already trusted and never prompts.
+
+### Fixed
+
+- `apm install <pkg>@<marketplace>` now preserves GitLab and other
+  non-GitHub hosts from url-type marketplace plugin sources, so auth
+  resolution no longer falls back to `github.com` for those installs.
+  (by @sergio-sisternes-epam; closes #1848) (#1853)
+- `apm pack` no longer drops the per-plugin `version` field for INTERNAL or
+  private `github.com` marketplace repos; all GitHub host types now resolve
+  metadata through the REST Contents API instead of the raw CDN, which
+  returned 404 for private repos. (by @sergio-sisternes-epam) (#1854)
+- `apm audit --ci` no longer flags pinned remote dependencies declared by
+  local-path sub-packages as orphaned when they are resolved transitively.
+  (by @sergio-sisternes-epam; closes #1846) (#1855)
+- `apm update` stale-file cleanup no longer deletes a file when another
+  installed package also deploys one at the same path; a cross-package
+  ownership guard now excludes shared paths from the stale set.
+  (by @sergio-sisternes-epam; closes #1831) (#1856)
+- `apm install -g --target codex` now honors `CODEX_HOME` for user-scope
+  Codex MCP config writes, falling back to `~/.codex/config.toml` when unset.
+  (closes #1861) (#1863)
+
+### Security
+
+- The `allowExecutables` default-deny gate now enforces `mcp` server writes and
+  `canvas` extensions in addition to `hooks` and `bin`, bringing all four executable
+  surfaces under one approval model. `apm approve` decisions are also stored
+  user-local in `~/.apm/approvals.yml` instead of the committed project `apm.yml`,
+  so cloning a repository no longer silently inherits another developer's executable
+  approvals. (by @sergio-sisternes-epam) (#1865)
+
 ## [0.21.0] - 2026-06-19
 
 ### Added
@@ -32,6 +96,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` / `apm pack` can now deploy an experimental Copilot-only `canvas` primitive: a package declaring `.apm/extensions/<name>/` ships verbatim to `.github/extensions/<name>/` (or `~/.copilot/extensions/<name>/` with `--global`), where Copilot CLI discovers it in-session. The surface is gated twice -- `apm experimental enable canvas` plus `--trust-canvas-extensions` for dependency-provided canvases -- and is fail-closed when the flag is off. (#1689)
 - `apm install` now blocks dependency-provided executables (hooks and `bin/`) by default, mirroring npm v12's default-deny model. A dependency's hooks or binaries deploy only after explicit approval in an `allowExecutables` block of `apm.yml`, managed via `apm approve` / `apm deny`; root-authored content and text-only primitives are unaffected. (#1723)
 
+### Changed
+
+- Windsurf skills now deploy to the cross-tool `.agents/skills/<name>/SKILL.md` path (was `.windsurf/skills/`), converging with Copilot, Cursor, Codex, Gemini, and OpenCode. Pass `--legacy-skill-paths` or set `APM_LEGACY_SKILL_PATHS=1` to restore the per-client `.windsurf/skills/` layout. The lockfile pack-time cross-target skill map for Windsurf is swept separately in #1805. (closes #1520) (#1802)
+
 ### Removed
 
 - `apm marketplace publish` command and consumer-repo fan-out workflow; consumers should run `apm install --update` instead. (#1134)
@@ -41,7 +109,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Registry deps with non-semver version selectors (e.g. `stable`, `main`) no longer report perpetual `outdated`. The drift check now uses literal equality for non-semver registry pins rather than range comparison, which always returned `True` against a semver range. (#1816)
 - Non-semver registry version selectors are now exact-matched against the registry's published version list at install time. Previously they were rejected with "not a valid semver range". (#1816)
-
 - Cursor hook integration: emit required top-level `version: 1` in `.cursor/hooks.json`.
   Affected versions: v0.14.1-v0.20.0. Hooks were silently ignored by Cursor on those
   versions. Run `apm install` (or `apm install --target cursor`) to repair existing

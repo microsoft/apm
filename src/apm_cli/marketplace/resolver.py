@@ -833,6 +833,34 @@ def resolve_marketplace_plugin(
             )
             canonical = dep_ref.to_canonical()
 
+    # ---- Build dep_ref for url-type sources on non-GitHub-family hosts ----
+    # When the plugin declares a ``url`` source and the marketplace is on a
+    # host that needs explicit git paths (GitLab, generic git), the URL
+    # already carries the full clone target.  Build a structured dep_ref so
+    # downstream auth resolves at the correct host instead of defaulting to
+    # github.com.
+    if dep_ref is None and _source_needs_explicit_git_path(source):
+        if isinstance(plugin.source, dict):
+            _src_type = _coerce_dict_plugin_type(plugin.source)
+            if _src_type == "url":
+                _url = (plugin.source.get("url", "") or "").strip()
+                if _url:
+                    _ref = plugin.source.get("ref", "")
+                    _effective_ref = version_spec or (
+                        _ref.strip() if isinstance(_ref, str) and _ref.strip() else ""
+                    )
+                    _entry: dict = {"git": _url}
+                    if _effective_ref:
+                        _entry["ref"] = _effective_ref
+                    dep_ref = DependencyReference.parse_from_dict(_entry)
+                    canonical = dep_ref.to_canonical()
+                    logger.debug(
+                        "Built dep_ref from url source for %s@%s -> %s (non-github-host url source)",
+                        plugin_name,
+                        marketplace_name,
+                        canonical,
+                    )
+
     # ---- Backfill host on canonical for GitHub-family enterprise hosts ----
     # ``*.ghe.com`` marketplaces keep virtual shorthand (no structured ``dep_ref``)
     # because there is no nested-group ambiguity to disambiguate, but the bare

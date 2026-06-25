@@ -26,13 +26,13 @@ see [Primitive types](./primitive-types/).
 | gemini          | `.gemini/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | antigravity     | `.agents/`             |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
-| windsurf        | `.windsurf/`           |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
+| windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | kiro            | `.kiro/`               |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
-Gemini, Antigravity, and Codex by default (see [Skills convergence](#skills-convergence)
-below). Claude, Windsurf, and Kiro keep target-native skill directories.
+Gemini, Antigravity, Codex, and Windsurf by default (see [Skills convergence](#skills-convergence)
+below). Claude and Kiro keep target-native skill directories.
 
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
 Copilot desktop App), and `openclaw` (OpenClaw agent runtime) are
@@ -102,7 +102,7 @@ Claude Code.
   - instructions: `.claude/rules/<name>.md`
   - agents: `.claude/agents/<name>.md`
   - commands: `.claude/commands/<name>.md`
-  - skills: `.agents/skills/<name>/SKILL.md`
+  - skills: `.claude/skills/<name>/SKILL.md`
   - hooks: merged into `.claude/settings.json`
 - **Compile output.** `CLAUDE.md` and per-rule files under `.claude/rules/`.
 
@@ -180,11 +180,11 @@ OpenCode.
 Windsurf / Cascade.
 
 - **Detection.** `.windsurf/` directory.
-- **Deploy directory.** `.windsurf/` at project scope; `~/.codeium/windsurf/` at user scope.
+- **Deploy directory.** Native primitives deploy under `.windsurf/` at project scope and `~/.codeium/windsurf/` at user scope; skills converge on `.agents/skills/` at both scopes (`~/.agents/skills/` at user scope).
 - **Supported primitives.** instructions, skills, commands, hooks, mcp.
 - **File conventions.**
   - instructions: `.windsurf/rules/<name>.md`
-  - skills: `.windsurf/skills/<name>/SKILL.md`
+  - skills: `.agents/skills/<name>/SKILL.md`
   - commands: `.windsurf/workflows/<name>.md`
   - hooks: `.windsurf/hooks.json`
 - **Agents.** Not deployed. Cascade auto-invokes any `SKILL.md` by its `description:` frontmatter, so a separate agents primitive would collide with skills on the same path. Ship personas as skills under `.apm/skills/<name>/SKILL.md` instead.

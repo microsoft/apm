@@ -357,7 +357,7 @@ class TestWindsurfScopeResolution:
         assert "instructions" in resolved.primitives
         assert "skills" in resolved.primitives
         # windsurf intentionally does not expose an 'agents' primitive:
-        # Cascade discovers SKILL.md uniformly under .windsurf/skills/.
+        # Cascade discovers SKILL.md uniformly under .agents/skills/.
         assert "agents" not in resolved.primitives
 
     def test_user_scope_uses_codeium_windsurf_root(self):

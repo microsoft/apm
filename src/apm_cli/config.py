@@ -13,6 +13,7 @@ _ENV_GIT_PROTOCOL = "APM_GIT_PROTOCOL"
 
 CONFIG_DIR = os.path.expanduser("~/.apm")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
+_INSTALL_TARGET_KEY = "install_target"
 
 _config_cache: dict | None = None
 
@@ -168,6 +169,47 @@ def unset_temp_dir() -> None:
     No-op if the key is not present.
     """
     _unset_config_key("temp_dir")
+
+
+def get_install_target() -> str | list[str] | None:
+    """Get the configured default target used by ``apm install``.
+
+    Returns:
+        Parsed target value from config, or ``None`` when unset/invalid.
+    """
+    from apm_cli.core.target_detection import parse_target_field
+
+    value = get_config().get(_INSTALL_TARGET_KEY)
+    try:
+        return parse_target_field(value)
+    except ValueError:
+        return None
+
+
+def set_install_target(target: str) -> str | list[str]:
+    """Persist a default install target after validation.
+
+    Args:
+        target: Target token or comma-separated target list.
+
+    Returns:
+        Parsed/normalized target value that was persisted.
+
+    Raises:
+        ValueError: If *target* is not a valid target expression.
+    """
+    from apm_cli.core.target_detection import parse_target_field
+
+    parsed = parse_target_field(target)
+    if parsed is None:
+        raise ValueError("Invalid target: target value must not be empty")
+    update_config({_INSTALL_TARGET_KEY: parsed})
+    return parsed
+
+
+def unset_install_target() -> None:
+    """Remove the default install target from the config file."""
+    _unset_config_key(_INSTALL_TARGET_KEY)
 
 
 # ---------------------------------------------------------------------------

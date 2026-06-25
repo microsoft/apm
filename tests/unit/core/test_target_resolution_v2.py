@@ -160,6 +160,24 @@ def test_resolution_priority_flag_over_yaml(tmp_path):
     assert "--target flag" in resolved.source
 
 
+def test_flag_source_label_overrides_default_provenance(tmp_path):
+    """A config-supplied flag value labels provenance as its own source.
+
+    When the resolved flag value originated from a configured default rather
+    than the CLI, the caller passes ``flag_source`` so the provenance line is
+    not misattributed to ``--target``.
+    """
+    resolved = resolve_targets(tmp_path, flag="claude", flag_source="apm config target")
+    assert resolved.targets == ["claude"]
+    assert resolved.source == "apm config target"
+
+
+def test_flag_source_defaults_to_cli_flag(tmp_path):
+    """Omitting ``flag_source`` keeps the explicit --target provenance label."""
+    resolved = resolve_targets(tmp_path, flag="claude")
+    assert resolved.source == "--target flag"
+
+
 def test_resolution_priority_yaml_over_autodetect(tmp_path):
     _touch(tmp_path / "CLAUDE.md")
     resolved = resolve_targets(tmp_path, flag=None, yaml_targets=["copilot"])

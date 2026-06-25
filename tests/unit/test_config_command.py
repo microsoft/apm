@@ -229,6 +229,22 @@ class TestConfigSet:
         assert result.exit_code == 0
         mock_set.assert_called_once_with(True)
 
+    def test_set_target(self):
+        """Set install default target."""
+        with patch("apm_cli.config.set_install_target", return_value="claude") as mock_set:
+            result = self.runner.invoke(config, ["set", "target", "claude"])
+        assert result.exit_code == 0
+        mock_set.assert_called_once_with("claude")
+
+    def test_set_target_invalid_value(self):
+        """Reject invalid target value."""
+        with patch(
+            "apm_cli.config.set_install_target",
+            side_effect=ValueError("Invalid target: 'oops' is not a valid target"),
+        ):
+            result = self.runner.invoke(config, ["set", "target", "oops"])
+        assert result.exit_code == 1
+
 
 class TestConfigGet:
     """Tests for `apm config get [key]`."""
@@ -270,6 +286,20 @@ class TestConfigGet:
             result = self.runner.invoke(config, ["get"])
         assert result.exit_code == 0
         assert "auto-integrate: true" in result.output
+
+    def test_get_target_when_set(self):
+        """Get configured default install target."""
+        with patch("apm_cli.config.get_install_target", return_value="claude"):
+            result = self.runner.invoke(config, ["get", "target"])
+        assert result.exit_code == 0
+        assert "target: claude" in result.output
+
+    def test_get_target_when_unset(self):
+        """Show not-set message for default install target."""
+        with patch("apm_cli.config.get_install_target", return_value=None):
+            result = self.runner.invoke(config, ["get", "target"])
+        assert result.exit_code == 0
+        assert "target: Not set (using auto-detection)" in result.output
 
 
 class TestAutoIntegrateFunctions:
@@ -759,6 +789,13 @@ class TestConfigUnsetSubcommand:
         """apm config unset temp-dir exits 0."""
         with patch("apm_cli.config.unset_temp_dir") as mock_unset:
             result = self.runner.invoke(config, ["unset", "temp-dir"])
+        assert result.exit_code == 0
+        mock_unset.assert_called_once()
+
+    def test_unset_target_exits_0(self):
+        """apm config unset target exits 0."""
+        with patch("apm_cli.config.unset_install_target") as mock_unset:
+            result = self.runner.invoke(config, ["unset", "target"])
         assert result.exit_code == 0
         mock_unset.assert_called_once()
 
