@@ -194,6 +194,12 @@ class TestAtomicWriteText:
         atomic_write_text(target, "a\nb\n")
         assert target.read_bytes() == b"a\nb\n"
 
+    def test_bare_cr_input_unchanged(self, tmp_path: Path) -> None:
+        """Bare CR round-trips; only CRLF pairs are normalized."""
+        target = tmp_path / "bare-cr.txt"
+        atomic_write_text(target, "a\rb\n")
+        assert target.read_bytes() == b"a\rb\n"
+
 
 class TestWriteTextLf:
     """Tests for write_text_lf() (non-atomic, LF-normalizing writer)."""
@@ -209,6 +215,12 @@ class TestWriteTextLf:
         target = tmp_path / "out.md"
         write_text_lf(target, "# H\n\ntext\n")
         assert target.read_bytes() == b"# H\n\ntext\n"
+
+    def test_bare_cr_input_unchanged(self, tmp_path: Path) -> None:
+        """Bare CR is not normalized so drift-normalizer semantics match."""
+        target = tmp_path / "bare-cr.md"
+        write_text_lf(target, "a\rb\n")
+        assert target.read_bytes() == b"a\rb\n"
 
     def test_unicode_round_trips(self, tmp_path: Path) -> None:
         """Non-ASCII content survives the UTF-8 + LF write."""
