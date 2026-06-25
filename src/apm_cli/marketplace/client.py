@@ -602,7 +602,7 @@ def _ado_auth_header(token: str | None, git_env: dict | None) -> dict[str, str]:
     """
     if not token:
         return {}
-    extra_header = (git_env or {}).get("GIT_CONFIG_VALUE_0", "")
+    extra_header = (git_env or {}).get("GIT_CONFIG_VALUE_0", "").strip()
     if extra_header.lower().startswith("authorization: bearer "):
         return {"Authorization": f"Bearer {token}"}
     encoded = base64.b64encode(f":{token}".encode()).decode("ascii")
@@ -711,11 +711,17 @@ def _fetch_ado(
     except Exception as exc:
         # REST failed (network, auth exhausted, sign-in page, malformed JSON,
         # 5xx, ...). Fall back to the clone path so offline/unusual repos keep
-        # working. str(exc) only -- never interpolate the response/headers.
+        # working. Sanitize exception text because requests exceptions can
+        # include URLs with query parameters.
+        from ..cache.git_cache import _sanitize_url
+
+        logger.info(
+            "ADO REST metadata fetch unavailable for '%s'; falling back to git.", source.name
+        )
         logger.debug(
             "ADO REST metadata fetch failed for '%s'; falling back to generic-git: %s",
             source.name,
-            exc,
+            _sanitize_url(str(exc)),
         )
         return _fetch_git(source, file_path, host_info=host_info, auth_resolver=auth_resolver)
 

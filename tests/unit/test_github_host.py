@@ -1,4 +1,5 @@
 import re
+from urllib.parse import urlparse
 
 import pytest
 
@@ -367,7 +368,24 @@ def test_parse_ado_repo_url_round_trips_through_build_ado_api_url():
         "https://dev.azure.com/contoso/platform/_git/tools"
     )
     url = github_host.build_ado_api_url(org, project, repo, "marketplace.json", "main")
-    assert "/contoso/platform/_apis/git/repositories/tools/items" in url
+    assert urlparse(url).path == "/contoso/platform/_apis/git/repositories/tools/items"
+
+
+def test_parse_ado_repo_url_round_trips_visualstudio_legacy_api_url():
+    org, project, repo = github_host.parse_ado_repo_url(
+        "https://contoso.visualstudio.com/platform/_git/tools"
+    )
+    url = github_host.build_ado_api_url(
+        org,
+        project,
+        repo,
+        "marketplace.json",
+        "main",
+        host="contoso.visualstudio.com",
+    )
+    parsed = urlparse(url)
+    assert parsed.hostname == "contoso.visualstudio.com"
+    assert parsed.path == "/platform/_apis/git/repositories/tools/items"
 
 
 @pytest.mark.parametrize(

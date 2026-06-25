@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or end with `.` -- can host an APM governance policy repo for the first
   time. (by @sergio-sisternes-epam; closes #1813) (#1830)
 
+### Changed
+
+- Azure DevOps marketplace metadata now resolves through the Azure DevOps
+  Items API instead of cloning the whole repo, with transparent fallback to
+  the existing git path when REST is unavailable. (by @Aaryan-Dadu; closes
+  #1808) (#1852)
+
 ### Removed
 
 - **Breaking (security):** executable dependencies -- including MCP servers and

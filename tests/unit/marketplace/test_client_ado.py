@@ -18,6 +18,7 @@ import json
 import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -38,6 +39,24 @@ def _ado_source(url: str = _ADO_URL, name: str = "acme", ref: str = "main") -> M
 
 def _ado_host_info() -> SimpleNamespace:
     return SimpleNamespace(host="dev.azure.com", kind="ado")
+
+
+def _assert_ado_items_url(
+    url: str,
+    *,
+    hostname: str,
+    path: str,
+    file_path: str = "marketplace.json",
+    ref: str = "main",
+) -> None:
+    parsed = urlparse(url)
+    assert parsed.scheme == "https"
+    assert parsed.hostname == hostname
+    assert parsed.path == path
+    query = parse_qs(parsed.query)
+    assert query["path"] == [file_path]
+    assert query["versionDescriptor.version"] == [ref]
+    assert query["api-version"] == ["7.0"]
 
 
 def _fake_response(status_code: int, *, text: str = "", content_type: str = "application/json"):
@@ -116,10 +135,11 @@ def test_fetch_ado_uses_rest_items_api_not_clone() -> None:
     assert result == _MANIFEST
     assert len(captured) == 1
     url, headers = captured[0]
-    assert "/contoso/platform/_apis/git/repositories/tools/items" in url
-    assert "path=marketplace.json" in url
-    assert "versionDescriptor.version=main" in url
-    assert "api-version=" in url
+    _assert_ado_items_url(
+        url,
+        hostname="dev.azure.com",
+        path="/contoso/platform/_apis/git/repositories/tools/items",
+    )
     # PAT routed as HTTP Basic, never embedded in the URL.
     expected = base64.b64encode(b":pat-abc").decode("ascii")
     assert headers["Authorization"] == f"Basic {expected}"
@@ -191,8 +211,12 @@ def test_fetch_ado_legacy_visualstudio_host() -> None:
         )
 
     assert result == _MANIFEST
-    # build_ado_api_url targets dev.azure.com-style path under the legacy host.
-    assert "contoso.visualstudio.com/contoso/platform/_apis/git/repositories/tools" in captured[0]
+    # Legacy hosts carry the org in the subdomain, not as a path segment.
+    _assert_ado_items_url(
+        captured[0],
+        hostname="contoso.visualstudio.com",
+        path="/platform/_apis/git/repositories/tools/items",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +336,8 @@ def test_fetch_file_dispatches_ado_kind_through_rest() -> None:
     assert result == _MANIFEST
     assert len(captured) == 1
     url, headers = captured[0]
-    assert "/_apis/git/repositories/tools/items" in url
+    parsed = urlparse(url)
+    assert parsed.path == "/contoso/platform/_apis/git/repositories/tools/items"
     expected = base64.b64encode(b":pat-real").decode("ascii")
     assert headers["Authorization"] == f"Basic {expected}"
     # Proxy/GitHub-only path must not be consulted for ADO.
