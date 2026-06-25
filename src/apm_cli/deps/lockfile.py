@@ -126,6 +126,11 @@ class LockedDependency:
     # no executable primitive; it is OMITTED from the serialized entry so a
     # never-gated package stays distinguishable from an explicitly-cleared one.
     exec_status: str | None = None
+    # Package-declared name from the dependency's own apm.yml (issue #1888).
+    # SELF-ASSERTED display/inventory metadata only -- NOT an identity anchor.
+    # See to_dict/from_dict and the supply-chain boundary note in the lockfile
+    # spec. Omitted from the serialized entry when absent.
+    name: str | None = None
     # Forward-compat carrier: keys we don't recognise are preserved
     # through a from_dict / to_dict round-trip so an older APM build
     # reading a lockfile written by a newer build doesn't silently drop
@@ -163,6 +168,8 @@ class LockedDependency:
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for YAML output."""
         result: dict[str, Any] = {"repo_url": self.repo_url}
+        if self.name:
+            result["name"] = self.name
         if self.host:
             result["host"] = self.host
         if self.host_type:
@@ -302,6 +309,7 @@ class LockedDependency:
             "resolved_at",
             "declared_license",
             "exec_status",
+            "name",
             # legacy migration key handled above
             "deployed_skills",
         }
@@ -341,6 +349,7 @@ class LockedDependency:
             resolved_at=data.get("resolved_at"),
             declared_license=data.get("declared_license"),
             exec_status=exec_status,
+            name=data.get("name"),
             _unknown_fields=unknown_fields,
         )
 
@@ -355,6 +364,8 @@ class LockedDependency:
         registry_config=None,
         registry_resolution=None,
         git_semver_resolution=None,
+        package_name: str | None = None,
+        package_version: str | None = None,
     ) -> LockedDependency:
         """Create from a DependencyReference with resolution info.
 
@@ -437,7 +448,7 @@ class LockedDependency:
                 else (
                     git_semver_resolution.resolved_version
                     if git_semver_resolution is not None
-                    else None
+                    else package_version
                 )
             ),
             virtual_path=dep_ref.virtual_path,
@@ -467,6 +478,7 @@ class LockedDependency:
             resolved_at=(
                 git_semver_resolution.resolved_at if git_semver_resolution is not None else None
             ),
+            name=package_name,
         )
 
     def to_dependency_ref(self) -> DependencyReference:
@@ -719,6 +731,8 @@ class LockFile:
                 registry_config=registry_config,
                 registry_resolution=registry_resolution,
                 git_semver_resolution=git_semver_resolution,
+                package_name=getattr(entry, "package_name", None),
+                package_version=getattr(entry, "package_version", None),
             )
             lock.add_dependency(locked_dep)
 

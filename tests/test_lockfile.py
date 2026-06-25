@@ -523,3 +523,216 @@ class TestLockFileSemanticEquivalence:
         a = self._make_lock()
         b = LockFile()
         assert not a.is_semantically_equivalent(b)
+
+
+# ---------------------------------------------------------------------------
+# Issue #1888: installed package name + version per lockfile entry
+# ---------------------------------------------------------------------------
+
+
+class TestLockedDependencyPkgMetadata:
+    """Tests for the name / version fields added by issue #1888 (Option A).
+
+    Blocking tests a, b, e, f, g from the advisory panel.
+    """
+
+    # --- (a) round-trip ----------------------------------------------------
+
+    def test_to_dict_emits_name_when_set(self):
+        dep = LockedDependency(repo_url="owner/repo", name="my-package")
+        d = dep.to_dict()
+        assert d["name"] == "my-package"
+
+    def test_to_dict_omits_name_when_none(self):
+        dep = LockedDependency(repo_url="owner/repo", name=None)
+        d = dep.to_dict()
+        assert "name" not in d
+
+    def test_from_dict_restores_name(self):
+        d = {"repo_url": "owner/repo", "name": "my-package", "resolved_commit": "abc"}
+        dep = LockedDependency.from_dict(d)
+        assert dep.name == "my-package"
+
+    def test_round_trip_name_and_version(self):
+        dep = LockedDependency(
+            repo_url="owner/repo",
+            name="my-package",
+            version="1.2.3",
+            resolved_commit="abc123",
+        )
+        restored = LockedDependency.from_dict(dep.to_dict())
+        assert restored.name == "my-package"
+        assert restored.version == "1.2.3"
+
+    def test_round_trip_name_none_omitted_not_null(self):
+        dep = LockedDependency(repo_url="owner/repo", name=None)
+        d = dep.to_dict()
+        assert "name" not in d
+        restored = LockedDependency.from_dict(d)
+        assert restored.name is None
+
+    # --- (g) _known_keys includes "name" -----------------------------------
+
+    def test_name_in_known_keys_not_unknown_fields(self):
+        """'name' must be in _known_keys so it lands on .name, not _unknown_fields."""
+        d = {"repo_url": "owner/repo", "name": "pkg-name"}
+        dep = LockedDependency.from_dict(d)
+        assert dep.name == "pkg-name"
+        assert "name" not in dep._unknown_fields
+
+    # --- (b) from_dependency_ref priority ----------------------------------
+
+    def test_from_dependency_ref_sets_name_from_package_name(self):
+        dep_ref = DependencyReference(repo_url="owner/repo", reference="main")
+        locked = LockedDependency.from_dependency_ref(
+            dep_ref, "abc123", 1, None, package_name="cool-pkg"
+        )
+        assert locked.name == "cool-pkg"
+
+    def test_from_dependency_ref_package_version_fallback_no_resolution(self):
+        """package_version is used for version when no registry/semver resolution present."""
+        dep_ref = DependencyReference(repo_url="owner/repo", reference="main")
+        locked = LockedDependency.from_dependency_ref(
+            dep_ref, "abc123", 1, None, package_version="2.3.4"
+        )
+        assert locked.version == "2.3.4"
+
+    def test_from_dependency_ref_registry_resolution_wins_over_package_version(self):
+        """registry_resolution.version must win over package_version (Option A)."""
+        from apm_cli.deps.registry.resolver import RegistryResolution
+
+        dep_ref = DependencyReference(repo_url="owner/repo", reference="1.0.0")
+        reg_res = RegistryResolution(
+            version="3.0.0",
+            resolved_url="https://reg.example.com/pkg/3.0.0",
+            resolved_hash="sha256:" + "a" * 64,
+        )
+        locked = LockedDependency.from_dependency_ref(
+            dep_ref,
+            "abc123",
+            1,
+            None,
+            registry_resolution=reg_res,
+            package_version="9.9.9",
+        )
+        assert locked.version == "3.0.0"
+
+    def test_from_dependency_ref_no_name_when_not_provided(self):
+        dep_ref = DependencyReference(repo_url="owner/repo", reference="main")
+        locked = LockedDependency.from_dependency_ref(dep_ref, "abc123", 1, None)
+        assert locked.name is None
+
+    # --- (e) identity-key invariance ---------------------------------------
+
+    def test_get_unique_key_invariant_git(self):
+        """name/version must NOT affect get_unique_key() for git deps."""
+        base = LockedDependency(repo_url="owner/repo", resolved_commit="abc123")
+        with_meta = LockedDependency(
+            repo_url="owner/repo", resolved_commit="abc123", name="pkg", version="1.0.0"
+        )
+        assert base.get_unique_key() == with_meta.get_unique_key()
+
+    def test_get_unique_key_invariant_local(self):
+        base = LockedDependency(repo_url="pkg", source="local", local_path="./pkg")
+        with_meta = LockedDependency(
+            repo_url="pkg", source="local", local_path="./pkg", name="pkg", version="0.1.0"
+        )
+        assert base.get_unique_key() == with_meta.get_unique_key()
+
+    def test_get_unique_key_invariant_registry(self):
+        base = LockedDependency(repo_url="owner/repo", source="registry", version="1.0.0")
+        with_meta = LockedDependency(
+            repo_url="owner/repo", source="registry", version="1.0.0", name="owner-repo"
+        )
+        assert base.get_unique_key() == with_meta.get_unique_key()
+
+    # --- (f) to_dependency_ref() ignores name, is_registry guard unchanged -
+
+    def test_to_dependency_ref_git_uses_resolved_ref_not_version(self):
+        """For a git dep, version is apm.yml metadata; resolved_ref drives replay."""
+        locked = LockedDependency(
+            repo_url="owner/repo",
+            source=None,
+            resolved_ref="main",
+            resolved_commit="abc123",
+            version="1.0.0",
+            name="some-pkg",
+        )
+        ref = locked.to_dependency_ref()
+        assert ref.reference == "main"
+
+    def test_to_dependency_ref_registry_uses_version_as_ref(self):
+        """For registry deps, version IS the replay selector."""
+        locked = LockedDependency(
+            repo_url="owner/repo",
+            source="registry",
+            version="2.5.0",
+            name="some-pkg",
+        )
+        ref = locked.to_dependency_ref()
+        assert ref.reference == "2.5.0"
+
+    def test_to_dependency_ref_name_field_not_on_ref(self):
+        """DependencyReference has no 'name' attribute; name is display-only."""
+        locked = LockedDependency(
+            repo_url="owner/repo",
+            source=None,
+            resolved_ref="main",
+            name="some-pkg",
+        )
+        ref = locked.to_dependency_ref()
+        assert not hasattr(ref, "name") or getattr(ref, "name", None) != "some-pkg"
+
+
+class TestFromInstalledPackagesPkgMetadata:
+    """Test (c): from_installed_packages threads package_name/package_version through."""
+
+    def test_installed_package_with_pkg_metadata_yields_name_and_version(self):
+        from apm_cli.deps.installed_package import InstalledPackage
+
+        dep_ref = DependencyReference(repo_url="owner/foo", reference="main")
+        pkg = InstalledPackage(
+            dep_ref=dep_ref,
+            resolved_commit="abc123",
+            depth=1,
+            resolved_by=None,
+            is_dev=False,
+            package_name="foo",
+            package_version="2.0.0",
+        )
+
+        graph_mock = Mock()
+        node_mock = Mock()
+        node_mock.depth = 1
+        node_mock.parent = None
+        node_mock.is_dev = False
+        graph_mock.dependency_tree.get_node.return_value = node_mock
+
+        lock = LockFile.from_installed_packages([pkg], graph_mock)
+        dep = lock.get_dependency("owner/foo")
+        assert dep is not None
+        assert dep.name == "foo"
+        assert dep.version == "2.0.0"
+
+    def test_installed_package_without_pkg_metadata_leaves_name_none(self):
+        from apm_cli.deps.installed_package import InstalledPackage
+
+        dep_ref = DependencyReference(repo_url="owner/bar", reference="v1")
+        pkg = InstalledPackage(
+            dep_ref=dep_ref,
+            resolved_commit="def456",
+            depth=1,
+            resolved_by=None,
+        )
+
+        graph_mock = Mock()
+        node_mock = Mock()
+        node_mock.depth = 1
+        node_mock.parent = None
+        node_mock.is_dev = False
+        graph_mock.dependency_tree.get_node.return_value = node_mock
+
+        lock = LockFile.from_installed_packages([pkg], graph_mock)
+        dep = lock.get_dependency("owner/bar")
+        assert dep is not None
+        assert dep.name is None
