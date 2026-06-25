@@ -492,19 +492,12 @@ def _filter_hook_files_for_target(
 def _relative_hook_script_bases(
     package_path: Path,
     hook_file_dir: Path | None,
-    rel_path: str,
 ) -> list[Path]:
     """Return candidate bases for resolving a relative hook script path."""
     bases: list[Path] = []
-    use_package_root = hook_file_dir is None
     if hook_file_dir is not None:
-        in_package_hooks = hook_file_dir == package_path / "hooks"
-        in_apm_hooks = hook_file_dir == package_path / ".apm" / "hooks"
-        if rel_path.startswith("hooks/") and (in_package_hooks or in_apm_hooks):
-            bases.append(package_path)
-            use_package_root = True
         bases.append(hook_file_dir)
-    if use_package_root and package_path not in bases:
+    if package_path not in bases:
         bases.append(package_path)
     return bases
 
@@ -516,7 +509,7 @@ def _resolve_relative_hook_script(
 ) -> Path | None:
     """Resolve a relative hook script path without escaping the package."""
     last_candidate: Path | None = None
-    for base in _relative_hook_script_bases(package_path, hook_file_dir, rel_path):
+    for base in _relative_hook_script_bases(package_path, hook_file_dir):
         try:
             candidate = ensure_path_within(base / rel_path, package_path)
         except PathTraversalError:

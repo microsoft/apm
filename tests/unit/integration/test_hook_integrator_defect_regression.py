@@ -11,7 +11,7 @@ from apm_cli.models.apm_package import APMPackage, PackageInfo
 
 def _package_info(package_path: Path, name: str = "superpowers") -> PackageInfo:
     return PackageInfo(
-        package=APMPackage(name=name, version="1.0.0"),
+        package=APMPackage(name=name, version="1.0.0", source=f"owner/{name}"),
         install_path=package_path,
     )
 
@@ -31,7 +31,8 @@ def _session_start_hook(command: str = "echo hook") -> dict:
 
 def test_same_hook_in_both_dirs_integrates_once(tmp_path: Path) -> None:
     project = tmp_path / "project"
-    package_path = tmp_path / "pkg"
+    package_path = tmp_path / "superpowers"
+    (project / ".github").mkdir(parents=True)
     for hooks_dir in (package_path / ".apm" / "hooks", package_path / "hooks"):
         hooks_dir.mkdir(parents=True)
         (hooks_dir / "hooks.json").write_text(
@@ -49,7 +50,7 @@ def test_same_hook_in_both_dirs_integrates_once(tmp_path: Path) -> None:
 
 
 def test_overlapping_dirs_different_hooks_both_integrate(tmp_path: Path) -> None:
-    package_path = tmp_path / "pkg"
+    package_path = tmp_path / "superpowers"
     (package_path / ".apm" / "hooks").mkdir(parents=True)
     (package_path / "hooks").mkdir(parents=True)
     (package_path / ".apm" / "hooks" / "first.json").write_text(
@@ -67,3 +68,50 @@ def test_overlapping_dirs_different_hooks_both_integrate(tmp_path: Path) -> None
         ".apm/hooks/first.json",
         "hooks/second.json",
     ]
+
+
+def test_copilot_hook_path_no_doubling(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    package_path = tmp_path / "superpowers"
+    (project / ".github").mkdir(parents=True)
+    hooks_dir = package_path / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "run-hook.cmd").write_text("@echo off\n", encoding="utf-8")
+    (hooks_dir / "hooks-copilot.json").write_text(
+        json.dumps({"hooks": {"sessionStart": [{"command": "./hooks/run-hook.cmd start"}]}}),
+        encoding="utf-8",
+    )
+
+    HookIntegrator().integrate_package_hooks(
+        _package_info(package_path),
+        project,
+    )
+
+    output = (project / ".github" / "hooks" / "superpowers-hooks-copilot.json").read_text(
+        encoding="utf-8"
+    )
+    data = json.loads(output)
+    command = data["hooks"]["sessionStart"][0]["command"]
+    assert command == ".github/hooks/scripts/superpowers/hooks/run-hook.cmd start"
+    assert (
+        project / ".github" / "hooks" / "scripts" / "superpowers" / "hooks" / "run-hook.cmd"
+    ).exists()
+
+
+def test_claude_hook_script_path_no_doubling(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    package_path = tmp_path / "superpowers"
+    hooks_dir = package_path / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "run-hook.cmd").write_text("@echo off\n", encoding="utf-8")
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps(_session_start_hook("./hooks/run-hook.cmd start")),
+        encoding="utf-8",
+    )
+
+    HookIntegrator().integrate_package_hooks_claude(_package_info(package_path), project)
+
+    settings = json.loads((project / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    command = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+    assert command == ".claude/hooks/superpowers/hooks/run-hook.cmd start"
+    assert (project / ".claude" / "hooks" / "superpowers" / "hooks" / "run-hook.cmd").exists()
