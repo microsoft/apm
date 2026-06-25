@@ -335,6 +335,97 @@ def _resolve_effective_target(
     return detected_target, detection_reason, config_target
 
 
+def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
+    """Handle --global compilation of user-scope root context files.
+
+    Returns 0 on success, 1 on error (for sys.exit).
+    """
+
+    from ...compilation import compile_user_root_contexts
+    from ...core.scope import InstallScope, get_apm_dir
+    from ...integration.targets import KNOWN_TARGETS
+
+    source_root = get_apm_dir(InstallScope.USER)
+    apm_modules = source_root / "apm_modules"
+    if not apm_modules.is_dir():
+        display_path = _display_user_path(apm_modules)
+        logger.error(
+            f"User-scope apm_modules not found: {display_path}. "
+            "Run 'apm install -g <package>' to install packages globally.",
+            symbol="error",
+        )
+        return 1
+
+    results = compile_user_root_contexts(
+        list(KNOWN_TARGETS.values()),
+        source_root,
+        dry_run=dry_run,
+        logger=None,
+    )
+
+    if not results:
+        logger.info(
+            "No user-scope targets produced output -- run 'apm install -g <package>' "
+            "to add global instructions.",
+            symbol="info",
+        )
+        return 0
+
+    has_error = False
+    written_count = 0
+    would_write_count = 0
+    unchanged_count = 0
+    for entry in results:
+        status = entry.status
+        tname = entry.target
+        path = entry.path
+        display_path = _display_user_path(path) if path is not None else None
+        if status == "written":
+            logger.success(f"{tname}: wrote {display_path}", symbol="check")
+            written_count += 1
+        elif status == "would-write":
+            logger.info(f"{tname}: would write {display_path} (dry-run)", symbol="preview")
+            would_write_count += 1
+        elif status == "unchanged":
+            logger.verbose_detail(f"{tname}: unchanged {display_path}")
+            unchanged_count += 1
+        elif status == "skipped-hand-authored":
+            logger.info(f"{tname}: skipped (hand-authored) {display_path}", symbol="info")
+        elif status == "skipped-no-instructions":
+            logger.verbose_detail(f"{tname}: skipped (no global instructions)")
+        elif status.startswith("error:"):
+            logger.error(f"{tname}: {status[6:]}", symbol="error")
+            has_error = True
+        if entry.has_critical_security:
+            has_error = True
+
+    if not has_error:
+        changed_count = written_count + would_write_count
+        if changed_count:
+            verb = "Would compile" if dry_run else "Compiled"
+            message = f"{verb} {changed_count} user-scope root context file(s)"
+            if unchanged_count:
+                message += f"; {unchanged_count} unchanged"
+            message += "."
+            if dry_run:
+                logger.info(message, symbol="preview")
+            else:
+                logger.success(message, symbol="check")
+        else:
+            logger.info("No user-scope root context files changed.", symbol="info")
+
+    return 1 if has_error else 0
+
+
+def _display_user_path(path: Path) -> str:
+    """Render paths under HOME with a stable tilde prefix for CLI output."""
+    try:
+        rel = path.resolve().relative_to(Path.home().resolve())
+    except ValueError:
+        return str(path)
+    return f"~/{rel.as_posix()}"
+
+
 def _validate_project(logger: CommandLogger, dry_run: bool, source_root: Path) -> None:
     """Check APM project exists and has content.
 
@@ -892,6 +983,19 @@ def _run_compilation(
         "for scratch-dir verification. Cannot be combined with --watch."
     ),
 )
+@click.option(
+    "--global",
+    "-g",
+    "global_",
+    is_flag=True,
+    default=False,
+    help=(
+        "Compile user-scope root context files (~/.claude/CLAUDE.md, etc.) "
+        "from ~/.apm/apm_modules. Cannot be combined with project-scoped output "
+        "flags such as --target, --all, --watch, --root, or --output; use with "
+        "--dry-run to preview changes."
+    ),
+)
 @click.pass_context
 def compile(  # noqa: PLR0913 -- Click handler
     ctx,
@@ -911,11 +1015,15 @@ def compile(  # noqa: PLR0913 -- Click handler
     compile_all,
     no_dedup,
     root,
+    global_,
 ):
     """Compile APM context into distributed AGENTS.md files.
 
     By default, uses distributed compilation to generate multiple focused AGENTS.md
     files across your directory structure following the Minimal Context Principle.
+
+    Use --global / -g to compile user-scope root context files from globally
+    installed packages.
 
     Use --single-agents for traditional single-file compilation when needed.
 
@@ -952,6 +1060,39 @@ def compile(  # noqa: PLR0913 -- Click handler
         # CLI output and would only ever fire for downstream library
         # consumers running with -W default, which we have none of.
         logger.warning("'--target all' is deprecated; use '--all' instead.")
+
+    # --global: compile user-scope root context files from ~/.apm/apm_modules.
+    # Must be checked before --watch / --root guards so we return early.
+    if global_:
+        from click.core import ParameterSource
+
+        allowed_with_global = {"global_", "dry_run", "verbose"}
+        flag_names = {
+            "chatmode": "--chatmode",
+            "clean": "--clean",
+            "compile_all": "--all",
+            "legacy_skill_paths": "--legacy-skill-paths",
+            "local_only": "--local-only",
+            "no_dedup": "--no-dedup/--force-instructions",
+            "no_links": "--no-links",
+            "output": "--output",
+            "root": "--root",
+            "single_agents": "--single-agents",
+            "target": "--target",
+            "validate": "--validate",
+            "verbose": "--verbose",
+            "watch": "--watch",
+            "with_constitution": "--with-constitution/--no-constitution",
+        }
+        for name in sorted(set(ctx.params) - allowed_with_global):
+            if ctx.get_parameter_source(name) is ParameterSource.DEFAULT:
+                continue
+            flag = flag_names.get(name, f"--{name.replace('_', '-')}")
+            raise click.UsageError(f"--global is not valid with {flag}")
+        rc = _handle_global_flag(dry_run=dry_run, logger=logger)
+        if rc != 0:
+            ctx.exit(rc)
+        return
 
     # --root + --watch is rejected: ``_watch_mode`` uses bare-relative
     # paths (``Path(APM_DIR)``, ``AgentsCompiler(".")``) and the watch

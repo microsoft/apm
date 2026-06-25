@@ -16,6 +16,7 @@ from .schema import (
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
     DependencyPolicy,
+    ExecutablesPolicy,
     IntegrityPolicy,
     ManifestPolicy,
     McpPolicy,
@@ -53,6 +54,7 @@ _KNOWN_TOP_LEVEL_KEYS = {
     "unmanaged_files",
     "security",
     "bin_deploy",
+    "executables",
 }
 
 
@@ -210,7 +212,42 @@ def validate_policy(data: dict) -> tuple[list[str], list[str]]:
                     f"security.integrity.require_hashes must be a boolean, got '{require_hashes}'"
                 )
 
+    # executables (issue #1873, Gap A): org grant/deny trust block.
+    _validate_executables(data, errors, warnings)
+
     return errors, warnings
+
+
+def _validate_executables(data: dict, errors: list[str], warnings: list[str]) -> None:
+    """Validate the ``executables:`` block and warn on deprecated ``bin_deploy``."""
+    if data.get("bin_deploy") is not None:
+        warnings.append(
+            "'bin_deploy' is deprecated; use 'executables' (deny_all/deny) instead. "
+            "bin_deploy is still honored as a bin-scoped deny alias for one minor cycle."
+        )
+
+    execs = data.get("executables")
+    if execs is None:
+        return
+    if not isinstance(execs, dict):
+        errors.append("executables must be a YAML mapping")
+        return
+    deny_all = execs.get("deny_all")
+    if deny_all is not None and not isinstance(deny_all, bool):
+        errors.append(f"executables.deny_all must be a boolean, got '{deny_all}'")
+    for key in ("deny", "require", "recommend", "enforce"):
+        val = execs.get(key)
+        if val is not None and not isinstance(val, list):
+            errors.append(
+                f"executables.{key} must be a YAML list of package strings "
+                f"(got {type(val).__name__})"
+            )
+    if execs.get("enforce"):
+        warnings.append(
+            "executables.enforce is accepted but INERT in v1: it degrades to "
+            "'recommend' (no force-execute; a user deny still overrides). "
+            "Full mandate ships in v2."
+        )
 
 
 def _build_policy(data: dict) -> ApmPolicy:
@@ -327,6 +364,17 @@ def _build_policy(data: dict) -> ApmPolicy:
         deny=_parse_tuple(bd_data.get("deny")) if bd_data.get("deny") is not None else (),
     )
 
+    ex_data = data.get("executables") or {}
+    executables = ExecutablesPolicy(
+        deny_all=bool(ex_data.get("deny_all", False)),
+        deny=_parse_tuple(ex_data.get("deny")) if ex_data.get("deny") is not None else (),
+        require=_parse_tuple(ex_data.get("require")) if ex_data.get("require") is not None else (),
+        recommend=_parse_tuple(ex_data.get("recommend"))
+        if ex_data.get("recommend") is not None
+        else (),
+        enforce=_parse_tuple(ex_data.get("enforce")) if ex_data.get("enforce") is not None else (),
+    )
+
     return ApmPolicy(
         name=data.get("name", "") or "",
         version=data.get("version", "") or "",
@@ -342,6 +390,7 @@ def _build_policy(data: dict) -> ApmPolicy:
         registry_source=registry_source,
         security=security,
         bin_deploy=bin_deploy,
+        executables=executables,
     )
 
 

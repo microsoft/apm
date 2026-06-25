@@ -309,7 +309,11 @@ def _format_ref_change(entry: PlanEntry) -> str:
     old_ref = entry.old_resolved_ref or "-"
     new_ref = entry.new_resolved_ref or old_ref
     ref_part = old_ref if old_ref == new_ref else f"{old_ref} -> {new_ref}"
-    return f"{ref_part} ({entry.short_old_commit} -> {entry.short_new_commit})"
+    old_c = entry.short_old_commit
+    new_c = entry.short_new_commit
+    if old_c == "-" and new_c == "-":
+        return ref_part
+    return f"{ref_part} ({old_c} -> {new_c})"
 
 
 def render_plan_text(plan: UpdatePlan, *, verbose: bool = False) -> str:

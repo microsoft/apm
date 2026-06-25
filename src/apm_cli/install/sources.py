@@ -396,7 +396,12 @@ class CachedDependencySource(DependencySource):
             if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
                 cached_commit = locked_dep.resolved_commit
         if not cached_commit:
-            cached_commit = dep_ref.reference
+            # Registry deps identify by resolved_hash+version, not a commit SHA.
+            # dep_ref.reference is a semver range (e.g. "^1.0.0") for registry
+            # deps -- storing it as resolved_commit would corrupt the lockfile
+            # and cause the update plan to show a spurious "^1.0.0 -> -" diff.
+            if dep_ref.source != "registry":
+                cached_commit = dep_ref.reference
         return cached_commit
 
     def acquire(self) -> Materialization | None:
@@ -420,7 +425,21 @@ class CachedDependencySource(DependencySource):
         logger = ctx.logger
 
         display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
-        _ref = dep_ref.reference or ""
+        _rref = getattr(dep_ref, "resolved_reference", None)
+        if _rref and getattr(_rref, "ref_name", None):
+            _ref = _rref.ref_name
+        elif dep_locked_chk and getattr(dep_locked_chk, "resolved_ref", None):
+            _ref = dep_locked_chk.resolved_ref
+        elif dep_ref.source == "registry":
+            # Fresh install: exact version lives in the resolver's last_resolutions
+            # map (populated by the BFS callback). Fall back to dep_ref.reference
+            # only if the resolver has no record (should not normally happen).
+            from apm_cli.install.registry_wiring import resolver_last_registry_resolution
+
+            _reg_res = resolver_last_registry_resolution(ctx, dep_key)
+            _ref = _reg_res.version if _reg_res else (dep_ref.reference or "")
+        else:
+            _ref = dep_ref.reference or ""
         # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
         # Prefer the lockfile-recorded SHA when present; otherwise fall
         # back to the SHA captured by the parallel resolver callback in
@@ -641,6 +660,10 @@ class FreshDependencySource(DependencySource):
             if dep_key in ctx.pre_download_results:
                 package_info = ctx.pre_download_results[dep_key]
             elif dep_ref.source == "registry":
+                if dep_key in ctx.callback_failures:
+                    # Resolve already surfaced the registry failure; do not
+                    # retry through the git fallback path.
+                    return None
                 from apm_cli.deps.registry.feature_gate import (
                     require_package_registry_enabled,
                 )

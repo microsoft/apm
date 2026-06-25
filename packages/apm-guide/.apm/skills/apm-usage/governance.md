@@ -62,9 +62,15 @@ registry_source:                        # experimental: requires `apm experiment
   require: []                           # registry names that MUST be reachable in the merged registry map
   allow_non_registry: true              # when false, blocks any dep not routed through a configured registry
 
-bin_deploy:                             # marketplace_plugin bin/ executable deployment (Claude, global installs)
+bin_deploy:                             # DEPRECATED alias, folded into executables.deny (bin type)
   deny_all: false                       # when true, suppress bin/ deploy for every plugin
   deny: []                              # canonical strings (owner/name) whose bin/ must not deploy
+
+executables:                            # org ceiling for executable-primitive trust (issue #1873)
+  deny_all: false                       # when true, block EVERY executable type for all packages
+  deny: []                              # packages whose executables must not deploy (deny is the ceiling)
+  require: []                           # packages whose executables MUST be present and trusted
+  recommend: []                         # org-vetted set; default-allow unless locally denied
 ```
 
 ## Registry source governance (experimental)
@@ -143,7 +149,75 @@ Notes:
   it (this avoids turning a checked-in policy file into a content-exfiltration
   channel).
 
-## Plugin bin/ deployment governance
+## Executable trust governance
+
+Issue #1873 unifies executable-primitive trust (hooks, `bin/` executables,
+self-defined MCP servers, canvas extensions) onto one noun, `executables`,
+across three layers. The org policy is the **ceiling on deny**: it can deny and
+require fleet-wide and recommend a vetted set, but personal or project consent
+can never widen past an org deny.
+
+```yaml
+# .github/apm-policy.yml
+executables:
+  deny_all: false                       # kill-switch: deny every executable type org-wide
+  deny: ["evil/*"]                      # packages whose executables must not deploy (ceiling)
+  require: ["acme/ci"]                  # executables MUST be present and trusted
+  recommend: ["acme/fmt"]               # org-vetted; default-allow unless locally denied
+```
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `deny_all` | `false` | When `true`, blocks every executable type for every package. |
+| `deny` | `[]` | Canonical package strings whose executables must not deploy. **Deny always wins** and is the only side that supports `fnmatch` globs in v1 (e.g. `evil/*` blocks every package under `evil/`). Union-merged across inheritance. |
+| `require` | `[]` | Packages whose executables MUST be present and trusted (exact-match in v1). Union-merged. `require` mandates presence + trust but does **not** grant execution -- it stays a developer-consent decision. To mandate AND auto-deploy fleet-wide, list the package in BOTH `require` and `recommend`. |
+| `recommend` | `[]` | Org-vetted set (exact-match in v1); default-allowed unless locally denied. Bulk-accepted with `apm approve --recommended`. Union-merged. |
+| `enforce` | `[]` | v2 mandate tier; **accepted but INERT in v1** -- degrades to `recommend` (no force-execute; a user deny still overrides). Writing it emits a deprecation-style warning. |
+
+Glob scope (v1): only `deny` supports glob patterns (the safety ceiling). `allow`, `recommend`, and `require` are exact-match only -- widening the GRANT side with a wildcard has a larger blast radius and is deferred.
+
+The install gate and `apm audit` resolve trust through one shared deny-wins,
+first-match-wins ladder:
+
+```
+1. org deny_all / org deny   -> denied (absolute ceiling)
+2. user deny                 -> denied
+3. project deny              -> denied
+4. project allow             -> allowed
+5. user allow                -> allowed
+6. org recommend             -> allowed (user-overridable)
+7. (no match)                -> gated pending approval (denied but approvable)
+```
+
+A package listed only in org `enforce` (the v2 mandate tier) collapses into
+rung 6: it resolves as allowed-but-user-overridable, and `apm policy explain`
+labels its deciding layer `org-enforce-degraded` to make the v1 degrade explicit.
+
+The project layer is `apm.yml` `executables.{allow,deny}` (committed, via
+`apm approve` / `apm deny`); the user layer is `~/.apm/config.json`
+`executables.{allow,deny}` (machine-local, via `--user`, lowest authority).
+Each locked dependency records its resolved state in the `exec_status` field of
+`apm.lock.yaml` (`deployed`, `gated_pending_approval`, `denied`, `absent`).
+
+In CI, `apm install` SUCCEEDS when a required package is present-but-parked
+(executables gated pending approval) and prints a one-command remedy
+(`apm approve <pkg>`); the `required-packages-deployed` audit check asserts
+package PRESENCE, not materialized files. A separate audit signal,
+`required-executable-untrusted`, hard-fails CI when a required package's
+executables are untrusted (denied or gated).
+
+There is no `enforce` mandate runtime, no cryptographic signing, and no
+content-hash binding in this release: an org `executables.enforce` rung is
+accepted but fail-safe degrades to `recommend` (allowed, still overridable by a
+deny). Inspect the deciding layer for one package with `apm policy explain
+<pkg>`, and surface fleet-wide layer conflicts (packages allowed locally but
+denied by org policy) with `apm doctor`.
+
+## Plugin bin/ deployment governance (deprecated alias)
+
+> `bin_deploy` is the bin-scoped predecessor of `executables`. It is folded into
+> `executables.deny` (bin type only) and honored as an alias for one minor
+> cycle. Prefer `executables.deny` for new policies.
 
 When a `marketplace_plugin` package ships a `bin/` directory, a global
 install (`apm install -g`) deploys those executables into
@@ -176,22 +250,21 @@ Behind the `canvas` experimental flag, a package may ship a Copilot CLI canvas
 extension under `.apm/extensions/<name>/extension.mjs` (executable Node.js).
 Because a canvas from a dependency is arbitrary executable code, APM blocks
 dependency-provided canvases when the project opts in to the executable gate:
-the project must add `allowExecutables: {}` to `apm.yml` and each developer
-must run `apm approve <pkg>` to deploy it. A first-party canvas in the root
-package being installed deploys once the flag is on; dependency canvases always
-require explicit approval.
+the project must add an `executables:` block to `apm.yml` and run
+`apm approve <pkg>` to deploy it. A first-party canvas in the root package being
+installed deploys once the flag is on; dependency canvases always require
+explicit approval.
 
-Approvals recorded by `apm approve` are stored in **`~/.apm/approvals.yml`**
-(user-local, never committed to source control). Adding `allowExecutables: {}`
-to `apm.yml` enables the gate for the project, but does not grant trust to any
-package; every developer cloning the project must approve packages themselves.
-CI pipelines may commit specific grants directly in `apm.yml` to bypass
-interactive approval in automated environments.
+By default `apm approve` records the grant in the project `apm.yml`
+`executables.allow` block (committed, shared with the team); `apm approve --user`
+records a personal grant in `~/.apm/config.json` (machine-local, never
+committed). Adding an empty `executables: {}` enables the gate but grants trust
+to nothing.
 
 At **project scope** a canvas deploys to `.github/extensions/<name>/`. With
 `--global`, a **dependency-provided** canvas deploys to
 `~/.copilot/extensions/<name>/` so it is available in every Copilot session;
-global install always requires `allowExecutables` approval (full-account blast
+global install always requires executable-trust approval (full-account blast
 radius), supports only the default `~/.copilot` location (a non-default
 `$COPILOT_HOME` is refused), and does not deploy first-party root canvases
 (package them as a dependency instead). `apm uninstall --global` prunes the
@@ -199,10 +272,11 @@ global canvas.
 
 The trust gate is enforced on every install path -- normal install and offline
 bundle install (`apm install <bundle>`) -- so a vendored bundle cannot smuggle
-an executable canvas past trust. Canvas trust is now unified with the
-`allowExecutables` default-deny gate (hooks, bin, mcp, canvas); approve once and
-all four executable types are governed consistently. An enterprise policy field
-for canvas trust is a deferred follow-up and is not part of this experimental
+an executable canvas past trust. Canvas trust is unified with the `executables`
+default-deny gate (hooks, bin, mcp, canvas); approve once and all four
+executable types are governed consistently. The org `executables:` policy block
+governs canvas trust alongside the other types (`deny_all`, `deny`, `require`,
+`recommend`); a canvas-only policy knob is not part of this experimental
 release.
 
 ## Local content governance

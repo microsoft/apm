@@ -70,6 +70,7 @@ from apm_cli.core.errors import (
 from apm_cli.core.target_detection import (
     detect_signals,
     expand_all_targets,
+    manifest_targets_from_target_option,
     resolve_targets,
 )
 
@@ -160,6 +161,24 @@ def test_resolution_priority_flag_over_yaml(tmp_path):
     assert "--target flag" in resolved.source
 
 
+def test_flag_source_label_overrides_default_provenance(tmp_path):
+    """A config-supplied flag value labels provenance as its own source.
+
+    When the resolved flag value originated from a configured default rather
+    than the CLI, the caller passes ``flag_source`` so the provenance line is
+    not misattributed to ``--target``.
+    """
+    resolved = resolve_targets(tmp_path, flag="claude", flag_source="apm config target")
+    assert resolved.targets == ["claude"]
+    assert resolved.source == "apm config target"
+
+
+def test_flag_source_defaults_to_cli_flag(tmp_path):
+    """Omitting ``flag_source`` keeps the explicit --target provenance label."""
+    resolved = resolve_targets(tmp_path, flag="claude")
+    assert resolved.source == "--target flag"
+
+
 def test_resolution_priority_yaml_over_autodetect(tmp_path):
     _touch(tmp_path / "CLAUDE.md")
     resolved = resolve_targets(tmp_path, flag=None, yaml_targets=["copilot"])
@@ -190,6 +209,27 @@ def test_resolution_autodetect_multi_signals_error(tmp_path):
 # ---------------------------------------------------------------------------
 # apm.yml schema
 # ---------------------------------------------------------------------------
+
+
+def test_manifest_targets_from_target_option_none_preserves_autodetect():
+    assert manifest_targets_from_target_option(None) is None
+
+
+def test_manifest_targets_from_target_option_aliases_to_manifest_names():
+    assert manifest_targets_from_target_option(["claude", "vscode"]) == ["claude", "copilot"]
+
+
+def test_manifest_targets_from_target_option_all_expands_to_manifest_names():
+    targets = manifest_targets_from_target_option("all")
+    assert targets is not None
+    assert "all" not in targets
+    assert "vscode" not in targets
+    assert "copilot" in targets
+    assert parse_targets_field({"targets": targets}) == targets
+
+
+def test_manifest_targets_from_target_option_filters_non_manifest_targets():
+    assert manifest_targets_from_target_option(["openclaw", "hermes", "agy"]) is None
 
 
 def test_schema_targets_list_valid():

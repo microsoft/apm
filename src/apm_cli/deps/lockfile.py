@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 _SELF_KEY = "."
 _ALLOWED_HOST_TYPES = {"gitlab"}
+_ALLOWED_EXEC_STATUS = {"deployed", "gated_pending_approval", "denied", "absent"}
 
 
 def _normalize_lockfile_host_type(raw: Any) -> str | None:
@@ -36,6 +37,21 @@ def _normalize_lockfile_host_type(raw: Any) -> str | None:
         raise ValueError(
             f"Unsupported lockfile host_type: {raw}. Supported values: "
             f"{', '.join(sorted(_ALLOWED_HOST_TYPES))}"
+        )
+    return value
+
+
+def _normalize_exec_status(raw: Any) -> str | None:
+    """Validate and normalize the optional executable-trust status."""
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("lockfile exec_status must be a non-empty string")
+    value = raw.strip()
+    if value not in _ALLOWED_EXEC_STATUS:
+        raise ValueError(
+            f"Unsupported lockfile exec_status: {raw}. Supported values: "
+            f"{', '.join(sorted(_ALLOWED_EXEC_STATUS))}"
         )
     return value
 
@@ -78,6 +94,7 @@ class LockedDependency:
     is_insecure: bool = False  # True when the locked source was http://
     allow_insecure: bool = False  # True when the manifest explicitly allowed HTTP
     skill_subset: list[str] = field(default_factory=list)  # Sorted skill names for SKILL_BUNDLE
+    target_subset: list[str] = field(default_factory=list)  # Audit-only consumer target subset
 
     # Registry resolver fields (design §6.1).
     # Populated when source == "registry"; absent otherwise. resolved_hash is
@@ -104,6 +121,12 @@ class LockedDependency:
     # rather than stored as a sentinel, so absence stays distinguishable from
     # an explicit declaration.
     declared_license: str | None = None
+    # Resolved executable-trust state (issue #1873). One of ``deployed`` |
+    # ``gated_pending_approval`` | ``denied`` | ``absent``, mirroring the
+    # resolver ``trust_state``. Absence (``None``) means the package declared
+    # no executable primitive; it is OMITTED from the serialized entry so a
+    # never-gated package stays distinguishable from an explicitly-cleared one.
+    exec_status: str | None = None
     # Forward-compat carrier: keys we don't recognise are preserved
     # through a from_dict / to_dict round-trip so an older APM build
     # reading a lockfile written by a newer build doesn't silently drop
@@ -191,6 +214,8 @@ class LockedDependency:
             result["allow_insecure"] = True
         if self.skill_subset:
             result["skill_subset"] = sorted(self.skill_subset)
+        if self.target_subset:
+            result["target_subset"] = sorted(self.target_subset)
         if self.resolved_url:
             result["resolved_url"] = self.resolved_url
         if self.resolved_hash:
@@ -203,6 +228,8 @@ class LockedDependency:
             result["resolved_at"] = self.resolved_at
         if self.declared_license:
             result["declared_license"] = self.declared_license
+        if self.exec_status:
+            result["exec_status"] = self.exec_status
         # Replay forward-compat unknown fields LAST so they never shadow a
         # known field that this build understands.
         for k, v in self._unknown_fields.items():
@@ -238,6 +265,7 @@ class LockedDependency:
                 port = _p_int
 
         host_type = _normalize_lockfile_host_type(data.get("host_type"))
+        exec_status = _normalize_exec_status(data.get("exec_status"))
 
         # Recognised keys this build knows about. Anything else is captured
         # as ``_unknown_fields`` so a re-emit preserves forward-introduced
@@ -270,12 +298,14 @@ class LockedDependency:
             "is_insecure",
             "allow_insecure",
             "skill_subset",
+            "target_subset",
             "resolved_url",
             "resolved_hash",
             "constraint",
             "resolved_tag",
             "resolved_at",
             "declared_license",
+            "exec_status",
             # legacy migration key handled above
             "deployed_skills",
         }
@@ -308,12 +338,14 @@ class LockedDependency:
             is_insecure=data.get("is_insecure", False),
             allow_insecure=data.get("allow_insecure", False),
             skill_subset=list(data.get("skill_subset") or []),
+            target_subset=list(data.get("target_subset") or []),
             resolved_url=data.get("resolved_url"),
             resolved_hash=data.get("resolved_hash"),
             constraint=data.get("constraint"),
             resolved_tag=data.get("resolved_tag"),
             resolved_at=data.get("resolved_at"),
             declared_license=data.get("declared_license"),
+            exec_status=exec_status,
             _unknown_fields=unknown_fields,
         )
 
@@ -387,12 +419,17 @@ class LockedDependency:
         else:
             source = None
 
-        # When a git-semver resolution is present, prefer the concrete
-        # resolved tag for ``resolved_ref`` (so subsequent installs see a
-        # literal tag, not the original range). The original constraint
-        # is preserved in the dedicated ``constraint`` field.
+        # Prefer the concrete resolved identifier for ``resolved_ref`` so that
+        # ``build_update_plan`` can detect real version changes by comparing
+        # old_ref (locked concrete) vs new_ref (freshly resolved concrete).
+        # Registry deps: store the resolved version (e.g. "1.0.3"), not the
+        # range ("^1.0.0").  Git-semver deps: store the resolved tag.  Both
+        # preserve the original selector in their dedicated fields
+        # (``version`` / ``constraint`` respectively).
         if git_semver_resolution is not None:
             resolved_ref_val: str | None = git_semver_resolution.resolved_tag
+        elif registry_resolution is not None:
+            resolved_ref_val = registry_resolution.version
         else:
             resolved_ref_val = dep_ref.reference
 
@@ -424,6 +461,9 @@ class LockedDependency:
             allow_insecure=dep_ref.allow_insecure,
             skill_subset=sorted(dep_ref.skill_subset)
             if isinstance(getattr(dep_ref, "skill_subset", None), list)
+            else [],
+            target_subset=sorted(dep_ref.target_subset)
+            if isinstance(getattr(dep_ref, "target_subset", None), list)
             else [],
             resolved_url=(
                 registry_resolution.resolved_url if registry_resolution is not None else None
@@ -470,6 +510,7 @@ class LockedDependency:
             is_insecure=self.is_insecure,
             allow_insecure=self.allow_insecure,
             source=self.source,
+            target_subset=sorted(self.target_subset) if self.target_subset else None,
         )
 
 

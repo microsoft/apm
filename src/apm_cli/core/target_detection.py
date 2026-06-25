@@ -401,6 +401,27 @@ TARGET_ALIASES: dict[str, str] = {
 }
 
 
+def manifest_targets_from_target_option(target: str | list[str] | None) -> list[str] | None:
+    """Return manifest-safe targets for an install-time ``--target`` value."""
+    if target is None:
+        return None
+
+    from apm_cli.core.apm_yml import CANONICAL_TARGETS
+    from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
+
+    raw_targets = [target] if isinstance(target, str) else list(target)
+    seen: set[str] = set()
+    manifest_targets: list[str] = []
+    for raw_target in raw_targets:
+        expanded = sorted(ALL_CANONICAL_TARGETS) if raw_target == "all" else [str(raw_target)]
+        for item in expanded:
+            canonical = RUNTIME_TO_CANONICAL_TARGET.get(item, item)
+            if canonical in CANONICAL_TARGETS and canonical not in seen:
+                seen.add(canonical)
+                manifest_targets.append(canonical)
+    return sorted(manifest_targets) if manifest_targets else None
+
+
 def normalize_target_list(
     value: str | list[str] | None,
 ) -> list[str] | None:
@@ -766,10 +787,17 @@ def resolve_targets(
     *,
     flag: str | list[str] | None = None,
     yaml_targets: list[str] | None = None,
+    flag_source: str = "--target flag",
 ) -> ResolvedTargets:
     """Resolve effective targets. Raises on error.
 
     Priority: flag > yaml_targets > auto-detect signals.
+
+    ``flag_source`` labels the provenance reported when ``flag`` wins. It
+    defaults to ``"--target flag"`` (an explicit CLI selector) but callers
+    pass a different label -- e.g. ``"apm config target"`` -- when the flag
+    value originated from a configured default rather than the CLI, so the
+    provenance line does not misattribute a config default to ``--target``.
     """
     from apm_cli.core.errors import (
         AmbiguousHarnessError,
@@ -784,7 +812,7 @@ def resolve_targets(
         _validate_canonical_v2(tokens)
         return ResolvedTargets(
             targets=sorted(tokens),
-            source="--target flag",
+            source=flag_source,
             auto_create=True,
         )
 

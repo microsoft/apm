@@ -9,7 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-dependency `targets:` scopes a dependency's target-specific primitives
+  to selected harnesses (for example `targets: [copilot, claude]`), preventing
+  hooks from leaking across tools. Filename-suffix hook routing
+  (`*-<harness>-hooks.json`) is deprecated. (#1902)
+- Executable Trust Governance v1 (#1873): executable trust is now one concept
+  with one resolver and deny-wins precedence. Organizations can now declare an
+  `executables:` block in `apm-policy.yml` (`deny_all`, `deny`, `require`,
+  `recommend`) that is carried through policy inheritance, closing the
+  GRANT/MANDATE asymmetry where projects could allow executables but orgs
+  could not deny them. Org `deny` patterns support `fnmatch` globs (e.g.
+  `evil/*`) so an admin can block a whole publisher fleet-wide; the GRANT
+  side (`allow`/`recommend`/`require`) is exact-match in v1. A single deny-wins precedence resolver
+  (`resolve_exec_decision`) is now shared by both the install gate and the
+  `apm audit` policy checks, so the gate and the audit can never disagree.
+  Precedence (first match wins): org `deny_all`/`deny` > user deny > project
+  deny > project allow > user allow > org `recommend` > default-deny. The lockfile records a
+  per-dependency `exec_status` (`deployed`, `gated_pending_approval`,
+  `denied`, `absent`). No cryptographic signing or `enforce`-mandate
+  execution is introduced in v1 (an unverified `enforce` rung fail-safe
+  degrades to `recommend`). (by @sergio-sisternes-epam) (#1873)
+- `apm policy explain <pkg>` prints the effective executable-trust decision
+  for a package: whether it is allowed, the deciding policy layer, and any
+  layers it shadows. `apm doctor` adds a fleet-level executable-trust drift
+  check that flags packages allowed locally but denied by org policy. (#1873)
+- `apm approve --recommended` bulk-accepts an organization's `recommend`
+  set, and `apm approve --list` shows the effective trust state of every
+  installed package with executables. (#1873)
 - The shared gh-aw workflow `.github/workflows/shared/apm.md` exposes an optional `apm-version` import input that pins the apm CLI version for both the pack and restore `microsoft/apm-action` steps (so the two cannot skew), surviving `gh aw update` without hand-editing the vendored file. Omitting it falls through to the action's pinned default via a gh-aw schema default, so non-opting consumers stay reproducible instead of floating to `latest`. (#1842)
+- `apm config set target <env>` configures a default install target so a bare
+  `apm install` deploys to it -- set the target once, then install everywhere
+  without repeating `--target`. Precedence is `--target` > `apm.yml` `target:` >
+  config default > auto-detect, and `apm config get/unset target` inspect and
+  clear it. (#1881)
 - Org-wide policy discovery now cascades through candidate repo names
   (`.github`, then `.apm`, then `_apm`) and speaks the Azure DevOps Items
   API, so Azure DevOps organizations -- which forbid repo names that begin
@@ -22,6 +54,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Items API instead of cloning the whole repo, with transparent fallback to
   the existing git path when REST is unavailable. (by @Aaryan-Dadu; closes
   #1808) (#1852)
+- Executable-trust vocabulary is unified onto one noun, `executables`.
+  `apm approve` / `apm deny` now default to the project `apm.yml`
+  `executables: {allow, deny}` block (the committed, team-wide admin
+  decision); pass `--user` to write personal consent to
+  `~/.apm/config.json` (the lowest-authority, machine-local override that
+  can only narrow). (#1873)
+- The `required-packages-deployed` audit check now asserts package
+  PRESENCE in the lockfile rather than materialized `deployed_files`, so an
+  install SUCCEEDS when a required package is present-but-parked (its
+  executables gated pending approval) and prints a one-command remedy
+  instead of hard-failing. A separate `required-executable-untrusted`
+  signal hard-fails CI when a required package's executables are untrusted.
+  (#1873)
+
+### Deprecated
+
+- The project `allowExecutables:` block is deprecated in favor of
+  `executables.allow`. It remains a read alias for one minor cycle and is
+  migrated to `executables.allow` on the next `apm approve`/`apm deny`
+  write. The org `bin_deploy` deny policy is folded into
+  `executables.deny[bin]` as a deprecated alias. (#1873)
+- The org `executables.enforce` tier (the v2 mandate rung) is accepted but
+  INERT in v1: writing it emits a validation warning and the resolver
+  degrades it to `recommend` (no force-execute; a user deny still
+  overrides). (#1873)
 
 ### Removed
 
@@ -29,22 +86,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   canvas extensions -- now require explicit, persistent approval via `apm approve`,
   closing the gap where canvas extensions were trusted per-run. The
   `--trust-canvas-extensions` flag is removed as a consequence; canvas extensions
-  are now governed by the `allowExecutables` gate like every other executable
-  surface. Add an `allowExecutables: {}` block to `apm.yml` and run
-  `apm approve <pkg>` to trust them. (by @sergio-sisternes-epam) (#1865)
+  are now governed by the executable-trust gate like every other executable
+  surface. (by @sergio-sisternes-epam) (#1865)
 
   ```diff
   - apm install --trust-canvas-extensions   # before: per-run trust flag
-  + apm approve <pkg>                        # after: one-time, user-local approval
+  + apm approve <pkg>                        # after: one-time, persistent approval
   ```
 
   CI / non-interactive pipelines that previously passed the flag should
   instead pre-seed approvals before `apm install`, e.g.
-  `apm approve <pkg>` (writes `~/.apm/approvals.yml` directly, no prompt),
-  so the gate finds the package already trusted and never prompts.
+  `apm approve <pkg>`, so the gate finds the package already trusted and
+  never prompts.
+- The standalone `~/.apm/approvals.yml` personal-consent file is removed;
+  its contents are migrated into `~/.apm/config.json` under
+  `executables: {allow, deny}` on first read (net-new control-surface
+  files = 0). (#1873)
 
 ### Fixed
 
+- `apm update` no longer shows a spurious update for registry semver deps already at the latest matching version. (#1897)
 - `apm install <pkg>@<marketplace>` now preserves GitLab and other
   non-GitHub hosts from url-type marketplace plugin sources, so auth
   resolution no longer falls back to `github.com` for those installs.
@@ -63,6 +124,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install -g --target codex` now honors `CODEX_HOME` for user-scope
   Codex MCP config writes, falling back to `~/.codex/config.toml` when unset.
   (closes #1861) (#1863)
+- Windows installer staging now honors `APM_TEMP_DIR` and reports actionable
+  guidance when the temporary staging root is not writable. (closes #1874)
+  (#1876)
+- Windows pip fallback no longer terminates early when native pip writes stderr
+  under `$ErrorActionPreference = "Stop"`. (closes #1874) (#1876)
 
 ### Security
 
@@ -97,6 +163,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm lock export --format cyclonedx|spdx` emits a standard SBOM inventory of installed packages, and a new declared-license recorder stores each package's manifest-declared license (`apm.yml` `license:` / `plugin.json`) in the lockfile after offline SPDX-id validation. APM records what a package declares -- it does not scan LICENSE text or gate installs on a license. (closes #1777) (#1820)
 - `apm install` / `apm pack` can now deploy an experimental Copilot-only `canvas` primitive: a package declaring `.apm/extensions/<name>/` ships verbatim to `.github/extensions/<name>/` (or `~/.copilot/extensions/<name>/` with `--global`), where Copilot CLI discovers it in-session. The surface is gated twice -- `apm experimental enable canvas` plus `--trust-canvas-extensions` for dependency-provided canvases -- and is fail-closed when the flag is off. (#1689)
 - `apm install` now blocks dependency-provided executables (hooks and `bin/`) by default, mirroring npm v12's default-deny model. A dependency's hooks or binaries deploy only after explicit approval in an `allowExecutables` block of `apm.yml`, managed via `apm approve` / `apm deny`; root-authored content and text-only primitives are unaffected. (#1723)
+- `apm compile --global` / `-g` compiles user-scope root context files such as
+  `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.gemini/GEMINI.md` from
+  globally installed instructions. Compilation stays explicit; `apm install -g`
+  prints a one-line hint pointing at `apm compile -g` when global instructions
+  land on a root-context-only target, but writes no root context file. (#1632)
 
 ### Changed
 

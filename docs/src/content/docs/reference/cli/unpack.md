@@ -25,7 +25,7 @@ Extraction is **additive-only**: only files listed in the bundle's lockfile are 
 
 :::caution[Bundles are self-contained and deploy executable surfaces directly]
 `apm unpack` materializes a complete, self-contained bundle into your
-project. Unlike `apm install`, there is no upstream `allowExecutables`
+project. Unlike `apm install`, there is no upstream executable-trust
 approval prompt at unpack time -- a bundle that contains a canvas
 `extension.mjs` (executable Node.js code) deploys that file when the
 `canvas` experimental flag is enabled. Only unpack bundles from sources

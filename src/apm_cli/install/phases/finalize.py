@@ -18,6 +18,66 @@ if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
     from apm_cli.models.results import InstallResult
 
+# compile_family values whose user-scope surface for global instructions can
+# require a root context file (AGENTS.md / CLAUDE.md / GEMINI.md).  The excluded
+# target names deploy user-scope instructions natively or have no verified
+# user-scope root-context reader, so they should not receive the hint.
+_ROOT_CONTEXT_ONLY_FAMILIES = frozenset({"agents", "claude", "gemini"})
+_ROOT_CONTEXT_HINT_EXCLUDED_TARGETS = frozenset(
+    {"antigravity", "copilot", "cursor", "kiro", "windsurf"}
+)
+
+
+def _hint_global_root_context(ctx: InstallContext) -> None:
+    """Print a one-line hint pointing at ``apm compile -g`` after ``install -g``.
+
+    The hint is emitted only when BOTH conditions hold:
+
+    1. At least one global (apply_to-less) instruction was installed under the
+       user-scope ``apm_modules`` tree.
+    2. At least one active target is root-context-only -- its user-scope
+       ``compile_family`` is in :data:`_ROOT_CONTEXT_ONLY_FAMILIES`.
+
+    No file is written.  Compilation stays explicit: the user runs
+    ``apm compile -g`` to materialise the root context files.  Imports are
+    kept lazy to avoid pulling the compilation package into the hot install
+    path and to prevent import cycles.
+    """
+    if ctx.dry_run:
+        return
+
+    from apm_cli.compilation.user_root_context import discover_global_instructions
+    from apm_cli.core.scope import InstallScope, get_apm_dir
+
+    source_root = get_apm_dir(InstallScope.USER)
+    if not discover_global_instructions(source_root):
+        return
+
+    target_names: list[str] = []
+    seen: set[str] = set()
+    for target in ctx.targets:
+        scoped = target.for_scope(user_scope=True)
+        if scoped is None:
+            continue
+        if scoped.name.lower() in _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS:
+            continue
+        if scoped.compile_family not in _ROOT_CONTEXT_ONLY_FAMILIES:
+            continue
+        if scoped.name not in seen:
+            seen.add(scoped.name)
+            target_names.append(scoped.name)
+
+    if not target_names:
+        return
+
+    if ctx.logger:
+        targets = ", ".join(target_names)
+        message = (
+            "Global instructions installed. Run 'apm compile -g' "
+            f"to update root context files for: {targets}."
+        )
+        ctx.logger.info(message, symbol="info")
+
 
 def run(ctx: InstallContext) -> InstallResult:
     """Emit verbose stats, fallback success, unpinned warning, and return final result."""
@@ -82,6 +142,15 @@ def run(ctx: InstallContext) -> InstallResult:
             ctx.diagnostics.warn(
                 f"{ctx.unpinned_count} {noun} unpinned -- add #tag or #sha to prevent drift"
             )
+
+    # User-scope post-install: when global instructions land on a
+    # root-context-only target, print a one-line hint pointing at
+    # ``apm compile -g``.  No context file is written on install --
+    # compilation stays explicit.
+    from apm_cli.core.scope import InstallScope
+
+    if ctx.scope is InstallScope.USER:
+        _hint_global_root_context(ctx)
 
     return InstallResult(
         ctx.installed_count,
