@@ -86,6 +86,30 @@ class TestAuditOnInstallConfig:
         assert config_mod.get_audit_on_install() == "off"
 
 
+class TestInstallTargetConfig:
+    """get/set/unset for install default target."""
+
+    def test_default_is_none(self, isolated_config):
+        assert config_mod.get_install_target() is None
+
+    def test_set_and_get_roundtrip(self, isolated_config):
+        config_mod.set_install_target("claude")
+        assert config_mod.get_install_target() == "claude"
+
+    def test_set_rejects_invalid(self, isolated_config):
+        with pytest.raises(ValueError, match="is not a valid target"):
+            config_mod.set_install_target("MyAIProvider")
+
+    def test_unset_removes_key(self, isolated_config):
+        config_mod.set_install_target("claude")
+        config_mod.unset_install_target()
+        assert config_mod.get_install_target() is None
+
+    def test_corrupt_value_falls_back_to_none(self, isolated_config):
+        config_mod.update_config({"install_target": "not-a-target"})
+        assert config_mod.get_install_target() is None
+
+
 class TestExternalScannerOptions:
     """Round-trip the external_scanners config helpers."""
 

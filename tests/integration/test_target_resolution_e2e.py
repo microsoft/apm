@@ -495,3 +495,61 @@ def test_s25_copilot_alias_in_greenfield(tmp_path):
     result = _invoke(["install", "--target", "copilot"], project)
     assert result.exit_code == 0, result.output
     assert_provenance(result.output, targets=["copilot"], source="--target flag")
+
+
+# ---------------------------------------------------------------------------
+# S26, S27: configurable default install target via `apm config target`
+# ---------------------------------------------------------------------------
+
+
+def test_s26_config_default_fills_greenfield_no_harness(tmp_path, monkeypatch):
+    """S26: `apm config target` default makes bare install succeed in greenfield.
+
+    Without --target and without apm.yml target, a configured default target
+    must fill the gap that would otherwise error with 'no harness detected'.
+    Provenance must report 'apm config target', not '--target flag'.
+    """
+    import apm_cli.config as config_mod
+
+    project = _setup(tmp_path, "s04_greenfield_explicit")
+
+    # Redirect config to tmp to avoid touching ~/.apm
+    config_dir = tmp_path / ".apm"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(config_mod, "CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr(config_mod, "CONFIG_FILE", str(config_dir / "config.json"))
+    monkeypatch.setattr(config_mod, "_config_cache", None)
+
+    config_mod.set_install_target("claude")
+
+    result = _invoke(["install"], project)
+    assert result.exit_code == 0, result.output
+    assert_provenance(result.output, targets=["claude"], source="apm config target")
+    assert (project / ".claude").is_dir()
+
+
+def test_s27_cli_target_overrides_config_default(tmp_path, monkeypatch):
+    """S27: --target flag takes precedence over `apm config target` default.
+
+    Even when a config default is set, the explicit CLI --target must win.
+    Provenance must report '--target flag', not 'apm config target'.
+    This is the regression trap for the precedence chain:
+    CLI --target > apm.yml > apm config target > auto-detect.
+    """
+    import apm_cli.config as config_mod
+
+    project = _setup(tmp_path, "s04_greenfield_explicit")
+
+    # Set config default to copilot (deliberately different from CLI flag)
+    config_dir = tmp_path / ".apm"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(config_mod, "CONFIG_DIR", str(config_dir))
+    monkeypatch.setattr(config_mod, "CONFIG_FILE", str(config_dir / "config.json"))
+    monkeypatch.setattr(config_mod, "_config_cache", None)
+
+    config_mod.set_install_target("copilot")
+
+    result = _invoke(["install", "--target", "claude"], project)
+    assert result.exit_code == 0, result.output
+    assert_provenance(result.output, targets=["claude"], source="--target flag")
+    assert (project / ".claude").is_dir()
