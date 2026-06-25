@@ -428,7 +428,10 @@ jobs:
           # in bundle/packer.py. Read the CLI surface, then assert the dataclass
           # default stays consistent so a future split is caught here too.
           pack_cli=src/apm_cli/commands/pack.py
-          producer_fmt=$(grep -A8 '"--archive-format"' "$pack_cli" \
+          # Read the whole @click.option("--archive-format", ...) block (to the
+          # next decorator or def) rather than a fixed -A window, so reordering
+          # the option kwargs can never slip default= out of range.
+          producer_fmt=$(sed -nE '/"--archive-format"/,/^(@|def )/p' "$pack_cli" \
             | grep -m1 -E '^[[:space:]]*default="' | sed -E 's/.*default="([^"]+)".*/\1/')
           case "$producer_fmt" in
             zip)    producer_ext=".zip" ;;
@@ -444,7 +447,11 @@ jobs:
           # path -- fail loudly rather than trust a single side.
           packer_fmt=$(grep -m1 -E '^[[:space:]]*archive_format: str = "' \
             src/apm_cli/bundle/packer.py | sed -E 's/.*= "([^"]+)".*/\1/')
-          if [ -n "$packer_fmt" ] && [ "$packer_fmt" != "$producer_fmt" ]; then
+          if [ -z "$packer_fmt" ]; then
+            echo "::error file=src/apm_cli/bundle/packer.py::could not read the archive_format dataclass default -- the field may have been renamed or moved; update this guard so the consistency check cannot silently go inert."
+            exit 1
+          fi
+          if [ "$packer_fmt" != "$producer_fmt" ]; then
             echo "::error file=src/apm_cli/bundle/packer.py::archive_format dataclass default '$packer_fmt' disagrees with the --archive-format CLI default '$producer_fmt' (commands/pack.py) -- reconcile the two before relying on the drift guard."
             exit 1
           fi
@@ -457,26 +464,35 @@ jobs:
           if [ -z "$action_ref" ]; then
             echo "::error file=$src::could not extract microsoft/apm-action ref"; exit 1
           fi
-          bundler=$(gh api "repos/microsoft/apm-action/contents/src/bundler.ts?ref=${action_ref}" --jq '.content' | base64 -d)
+          # Resolve the tag to the immutable SHA the production locks pin, so the
+          # guard reads bundler.ts at the exact commit the workflows execute --
+          # not a mutable tag that could be force-moved out from under the check.
+          # Fall back to the tag only if the lock entry is absent.
+          lock=.github/aw/actions-lock.json
+          action_sha=$(jq -r --arg k "microsoft/apm-action@${action_ref}" '.entries[$k].sha // empty' "$lock" 2>/dev/null || true)
+          fetch_ref="${action_sha:-$action_ref}"
+          bundler=$(gh api "repos/microsoft/apm-action/contents/src/bundler.ts?ref=${fetch_ref}" --jq '.content' | base64 -d)
           # Consumer contract anchor: the ARCHIVE_EXTENSIONS constant lists the
           # extensions apm-action's findBundleOrNull() accepts in archive mode
           # (e.g. const ARCHIVE_EXTENSIONS = ['.zip', '.tar.gz']). Older releases
           # inline the set as archives = entries.filter(e => e.endsWith('.x') ...);
-          # fall back to that shape so the guard reads both.
+          # fall back to that shape so the guard reads both. Accept single- OR
+          # double-quoted string literals so a prettier reformat in apm-action
+          # cannot blind the guard.
           detected=$(printf '%s\n' "$bundler" \
             | grep -E 'ARCHIVE_EXTENSIONS[[:space:]]*=[[:space:]]*\[' \
-            | grep -oE "'\.[A-Za-z.]+'" | tr -d "'" | sort -u)
+            | grep -oE "['\"]\.[A-Za-z.]+['\"]" | tr -d "'\"" | sort -u)
           if [ -z "$detected" ]; then
             detected=$(printf '%s\n' "$bundler" \
               | grep -E 'archives[[:space:]]*=[[:space:]]*entries\.filter' \
-              | grep -oE "endsWith\('\.[A-Za-z.]+'\)" \
-              | grep -oE "'\.[A-Za-z.]+'" | tr -d "'" | sort -u)
+              | grep -oE "endsWith\(['\"]\.[A-Za-z.]+['\"]\)" \
+              | grep -oE "['\"]\.[A-Za-z.]+['\"]" | tr -d "'\"" | sort -u)
           fi
           if [ -z "$detected" ]; then
             echo "::error::could not read apm-action's archive-mode extension set (ARCHIVE_EXTENSIONS constant or archives = entries.filter ... endsWith) from microsoft/apm-action@${action_ref} src/bundler.ts -- the consumer contract may have moved; update this guard"
             exit 1
           fi
-          echo "consumer: apm-action@${action_ref} detects archive extensions:"
+          echo "consumer: apm-action@${action_ref} (src/bundler.ts @ ${fetch_ref}) detects archive extensions:"
           printf '  %s\n' $detected
 
           if printf '%s\n' "$detected" | grep -Fxq "$producer_ext"; then
