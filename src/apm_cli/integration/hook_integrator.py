@@ -432,6 +432,10 @@ _HOOK_FILE_TARGET_SUFFIXES: dict[str, set[str]] = {
 def _filter_hook_files_for_target(
     hook_files: list[Path],
     target_key: str,
+    *,
+    package_name: str = "",
+    package_identity: str = "",
+    warned_packages: set[str] | None = None,
 ) -> list[Path]:
     """Return only hook files intended for *target_key*.
 
@@ -497,6 +501,11 @@ class HookIntegrator(BaseIntegrator):
         "linux",
         "osx",
     )
+
+    def __init__(self) -> None:
+        """Initialize per-install hook integration state."""
+        super().__init__()
+        self._deprecated_hook_routing_warnings: set[str] = set()
 
     @staticmethod
     def _iter_hook_entries(payload: dict) -> list[tuple[str, dict]]:
@@ -1185,6 +1194,7 @@ class HookIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         target=None,
+        dep_targets_active: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks from a package into hooks dir (Copilot target).
 
@@ -1202,7 +1212,15 @@ class HookIntegrator(BaseIntegrator):
             HookIntegrationResult: Results of the integration operation
         """
         hook_files = self.find_hook_files(package_info.install_path)
-        hook_files = _filter_hook_files_for_target(hook_files, "copilot")
+        package_name = self._get_package_name(package_info, project_root)
+        if not dep_targets_active:
+            hook_files = _filter_hook_files_for_target(
+                hook_files,
+                "copilot",
+                package_name=package_name,
+                warned_packages=self._deprecated_hook_routing_warnings,
+                package_identity=package_info.get_canonical_dependency_string(),
+            )
 
         if not hook_files:
             return HookIntegrationResult(
@@ -1216,7 +1234,6 @@ class HookIntegrator(BaseIntegrator):
         hooks_dir = project_root / root_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
 
-        package_name = self._get_package_name(package_info, project_root)
         hooks_integrated = 0
         scripts_copied = 0
         scripts_adopted = 0
@@ -1308,6 +1325,7 @@ class HookIntegrator(BaseIntegrator):
         diagnostics=None,
         target=None,
         user_scope: bool = False,
+        dep_targets_active: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks by merging into a target-specific JSON config.
 
@@ -1343,11 +1361,18 @@ class HookIntegrator(BaseIntegrator):
         _deploy_root_for_rewrite = project_root if user_scope else None
 
         hook_files = self.find_hook_files(package_info.install_path)
-        hook_files = _filter_hook_files_for_target(hook_files, config.target_key)
+        package_name = self._get_package_name(package_info, project_root)
+        if not dep_targets_active:
+            hook_files = _filter_hook_files_for_target(
+                hook_files,
+                config.target_key,
+                package_name=package_name,
+                warned_packages=self._deprecated_hook_routing_warnings,
+                package_identity=package_info.get_canonical_dependency_string(),
+            )
         if not hook_files:
             return _empty
 
-        package_name = self._get_package_name(package_info, project_root)
         source_marker = self._get_hook_source_marker(package_info, project_root, package_name)
         heal_stale_root_source = self._is_root_local_package(package_info, project_root)
         dependency_sources = (
@@ -1778,6 +1803,8 @@ class HookIntegrator(BaseIntegrator):
         diagnostics=None,
         scope=None,
         user_scope: bool = False,
+        dep_targets_active: bool = False,
+        allowed_targets: set[str] | None = None,
     ) -> "HookIntegrationResult":
         """Integrate hooks for a single *target*.
 
@@ -1791,6 +1818,9 @@ class HookIntegrator(BaseIntegrator):
         repo-relative so checked-in project-scope configs stay portable
         across clones, contributors, and CI runners (#1394).
         """
+        if dep_targets_active and target.name not in (allowed_targets or {target.name}):
+            raise AssertionError(f"BUG: target {target.name} bypassed chokepoint filter")
+
         if target.name == "copilot":
             return self.integrate_package_hooks(
                 package_info,
@@ -1799,6 +1829,7 @@ class HookIntegrator(BaseIntegrator):
                 managed_files=managed_files,
                 diagnostics=diagnostics,
                 target=target,
+                dep_targets_active=dep_targets_active,
             )
 
         if target.name == "kiro":
@@ -1813,6 +1844,7 @@ class HookIntegrator(BaseIntegrator):
                 diagnostics=diagnostics,
                 target=target,
                 user_scope=user_scope,
+                dep_targets_active=dep_targets_active,
             )
 
         config = _MERGE_HOOK_TARGETS.get(target.name)
@@ -1826,6 +1858,7 @@ class HookIntegrator(BaseIntegrator):
                 diagnostics=diagnostics,
                 target=target,
                 user_scope=user_scope,
+                dep_targets_active=dep_targets_active,
             )
 
         return HookIntegrationResult(

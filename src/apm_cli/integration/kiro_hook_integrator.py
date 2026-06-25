@@ -250,6 +250,7 @@ def integrate_kiro_hooks(
     diagnostics=None,
     target=None,
     user_scope: bool = False,
+    dep_targets_active: bool = False,
 ) -> HookIntegrationResult:
     """Integrate hooks as one Kiro JSON file per hook action."""
     root_dir = target.root_dir if target else ".kiro"
@@ -258,13 +259,20 @@ def integrate_kiro_hooks(
         return HookIntegrationResult(0, 0, 0, [])
 
     hook_files = integrator.find_hook_files(package_info.install_path)
-    hook_files = _filter_hook_files_for_target(hook_files, "kiro")
+    package_name = integrator._get_package_name(package_info, project_root)
+    if not dep_targets_active:
+        hook_files = _filter_hook_files_for_target(
+            hook_files,
+            "kiro",
+            package_name=package_name,
+            warned_packages=integrator._deprecated_hook_routing_warnings,
+            package_identity=package_info.get_canonical_dependency_string(),
+        )
     if not hook_files:
         return HookIntegrationResult(0, 0, 0, [])
 
     hooks_dir = target_dir / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
-    package_name = integrator._get_package_name(package_info, project_root)
     deploy_root_for_rewrite = project_root if user_scope else None
 
     files_integrated = 0

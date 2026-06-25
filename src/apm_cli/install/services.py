@@ -248,6 +248,26 @@ def _log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger
         )
 
 
+def _filter_targets_for_dependency(
+    targets: Any,
+    dep_target_subset: list[str] | None,
+    diagnostics: DiagnosticCollector,
+    package_name: str,
+) -> tuple[Any, set[str], bool]:
+    """Apply the consumer-manifest dependency target filter."""
+    allowed_dep_targets = builtins.set(dep_target_subset or [])
+    if not dep_target_subset:
+        return targets, allowed_dep_targets, False
+
+    filtered_targets = [target for target in targets if target.name in allowed_dep_targets]
+    if not filtered_targets:
+        diagnostics.warn(
+            "per-dependency targets do not overlap active install targets; skipping",
+            package=package_name,
+        )
+    return filtered_targets, allowed_dep_targets, True
+
+
 def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -266,6 +286,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     policy: Any = None,
     is_first_party: bool = False,
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
+    dep_target_subset: list[str] | None = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -308,6 +329,14 @@ def integrate_package_primitives(  # noqa: PLR0913
 
     deployed = result["deployed_files"]
 
+    # SECURITY: dep_target_subset comes from CONSUMER manifest only.
+    # Package-side targets are advisory metadata; never a routing input.
+    targets, allowed_dep_targets, dep_targets_active = _filter_targets_for_dependency(
+        targets,
+        dep_target_subset,
+        diagnostics,
+        package_name,
+    )
     if not targets:
         return result
 
@@ -472,6 +501,8 @@ def integrate_package_primitives(  # noqa: PLR0913
             # don't accept this kwarg, so include it only for hooks.
             if _prim_name == "hooks":
                 _call_kwargs["user_scope"] = scope is InstallScope.USER
+                _call_kwargs["dep_targets_active"] = dep_targets_active
+                _call_kwargs["allowed_targets"] = allowed_dep_targets
             # Canvas integration: always pass is_first_party.  Approval
             # is enforced by the gate above (canvas already skipped if
             # not approved and not is_first_party), so here we always
