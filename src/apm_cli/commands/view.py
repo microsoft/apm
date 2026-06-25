@@ -90,7 +90,7 @@ def resolve_package_path(
 
 
 def _lookup_lockfile_ref(package: str, project_root: Path):
-    """Return (ref, commit) from the lockfile for *package*, or ("", "")."""
+    """Return (ref, commit, source) from the lockfile for *package*, or ("", "", "")."""
     try:
         from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
 
@@ -98,7 +98,7 @@ def _lookup_lockfile_ref(package: str, project_root: Path):
         lockfile_path = get_lockfile_path(project_root)
         lockfile = LockFile.read(lockfile_path)
         if lockfile is None:
-            return "", ""
+            return "", "", ""
 
         # Try exact key first, then substring match
         dep = lockfile.dependencies.get(package)
@@ -109,10 +109,10 @@ def _lookup_lockfile_ref(package: str, project_root: Path):
                     break
 
         if dep is not None:
-            return dep.resolved_ref or "", dep.resolved_commit or ""
+            return dep.resolved_ref or "", dep.resolved_commit or "", dep.source or ""
     except Exception:
         pass
-    return "", ""
+    return "", "", ""
 
 
 def display_package_info(
@@ -130,11 +130,12 @@ def display_package_info(
     try:
         package_info = _get_detailed_package_info(package_path)
 
-        # Look up lockfile entry for ref/commit info
+        # Look up lockfile entry for ref/commit/source info
         locked_ref = ""
         locked_commit = ""
+        locked_source = ""
         if project_root is not None:
-            locked_ref, locked_commit = _lookup_lockfile_ref(package, project_root)
+            locked_ref, locked_commit, locked_source = _lookup_lockfile_ref(package, project_root)
 
         try:
             from rich.console import Console
@@ -147,7 +148,7 @@ def display_package_info(
             content_lines.append(f"[bold]Version:[/bold] {package_info['version']}")
             content_lines.append(f"[bold]Description:[/bold] {package_info['description']}")
             content_lines.append(f"[bold]Author:[/bold] {package_info['author']}")
-            content_lines.append(f"[bold]Source:[/bold] {package_info['source']}")
+            content_lines.append(f"[bold]Source:[/bold] {locked_source or package_info['source']}")
             if locked_ref:
                 content_lines.append(f"[bold]Ref:[/bold] {locked_ref}")
             if locked_commit:
@@ -191,7 +192,7 @@ def display_package_info(
             click.echo(f"Version: {package_info['version']}")
             click.echo(f"Description: {package_info['description']}")
             click.echo(f"Author: {package_info['author']}")
-            click.echo(f"Source: {package_info['source']}")
+            click.echo(f"Source: {locked_source or package_info['source']}")
             if locked_ref:
                 click.echo(f"Ref: {locked_ref}")
             if locked_commit:

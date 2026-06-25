@@ -425,7 +425,13 @@ class CachedDependencySource(DependencySource):
         logger = ctx.logger
 
         display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
-        _ref = dep_ref.reference or ""
+        _rref = getattr(dep_ref, "resolved_reference", None)
+        if _rref and getattr(_rref, "ref_name", None):
+            _ref = _rref.ref_name
+        elif dep_locked_chk and getattr(dep_locked_chk, "resolved_ref", None):
+            _ref = dep_locked_chk.resolved_ref
+        else:
+            _ref = dep_ref.reference or ""
         # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
         # Prefer the lockfile-recorded SHA when present; otherwise fall
         # back to the SHA captured by the parallel resolver callback in
@@ -646,6 +652,8 @@ class FreshDependencySource(DependencySource):
             if dep_key in ctx.pre_download_results:
                 package_info = ctx.pre_download_results[dep_key]
             elif dep_ref.source == "registry":
+                if dep_key in ctx.callback_failures:
+                    return None
                 from apm_cli.deps.registry.feature_gate import (
                     require_package_registry_enabled,
                 )

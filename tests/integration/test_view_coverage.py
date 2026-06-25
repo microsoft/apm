@@ -136,7 +136,7 @@ class TestLookupLockfileRef:
                     mock_get_path.return_value = tmp_path / "apm.lock.yaml"
                     mock_lf_class.read.return_value = mock_lockfile
 
-                    ref, commit = _lookup_lockfile_ref("owner/repo", tmp_path)
+                    ref, commit, _source = _lookup_lockfile_ref("owner/repo", tmp_path)
 
                     assert ref == "v1.0.0"
                     assert commit == "abc123def456"
@@ -149,7 +149,7 @@ class TestLookupLockfileRef:
                     mock_get_path.return_value = tmp_path / "nonexistent.lock.yaml"
                     mock_lf_class.read.return_value = None
 
-                    ref, commit = _lookup_lockfile_ref("owner/repo", tmp_path)
+                    ref, commit, _source = _lookup_lockfile_ref("owner/repo", tmp_path)
 
                     assert ref == ""
                     assert commit == ""
@@ -159,7 +159,7 @@ class TestLookupLockfileRef:
         with patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed") as mock_migrate:
             mock_migrate.side_effect = Exception("Lockfile error")
 
-            ref, commit = _lookup_lockfile_ref("owner/repo", tmp_path)
+            ref, commit, _source = _lookup_lockfile_ref("owner/repo", tmp_path)
 
             assert ref == ""
             assert commit == ""
