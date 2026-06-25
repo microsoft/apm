@@ -1,8 +1,7 @@
-"""Write-back helper for persisting skill subset selection in apm.yml.
+"""Write-back helpers for persisting dependency subset selection in apm.yml.
 
-Single helper ``set_skill_subset_for_entry`` is the one source of truth
-for promoting entries to dict form and setting/clearing the ``skills:``
-field.  Keeps write-back logic isolated and unit-testable.
+The helpers promote entries to dict form and set/clear the ``skills:`` or
+``targets:`` fields.  Keeping write-back logic isolated makes it unit-testable.
 """
 
 from pathlib import Path
@@ -23,6 +22,31 @@ def set_skill_subset_for_entry(
 
     Returns True if file was modified.
     """
+    return _set_subset_for_entry(manifest_path, repo_url, "skills", subset)
+
+
+def set_target_subset_for_entry(
+    manifest_path: Path,
+    repo_url: str,
+    subset: list[str] | None,
+) -> bool:
+    """Promote entry to dict form and set/clear targets: field.
+
+    subset=None or empty list -> remove targets: from entry (reset to all).
+    subset=[...] -> set targets: to sorted+deduped lowercase list.
+
+    Returns True if file was modified.
+    """
+    return _set_subset_for_entry(manifest_path, repo_url, "targets", subset)
+
+
+def _set_subset_for_entry(
+    manifest_path: Path,
+    repo_url: str,
+    field: str,
+    subset: list[str] | None,
+) -> bool:
+    """Promote a matching entry to dict form and set/clear one subset field."""
     data = load_yaml(manifest_path) or {}
     deps_section = data.get("dependencies")
     if deps_section is None:
@@ -45,7 +69,7 @@ def set_skill_subset_for_entry(
 
     for entry in apm_deps:
         if _entry_matches(entry, repo_url):
-            entry = _apply_subset(entry, subset)
+            entry = _apply_subset(entry, field, subset)
             modified = True
         new_deps.append(entry)
 
@@ -72,8 +96,8 @@ def _entry_matches(entry, repo_url: str) -> bool:
         return False
 
 
-def _apply_subset(entry, subset: list[str] | None):
-    """Apply skill subset to an entry, promoting to dict form if needed."""
+def _apply_subset(entry, field: str, subset: list[str] | None):
+    """Apply a dependency subset field, promoting to dict form if needed."""
     # Parse current entry to get canonical info
     if isinstance(entry, str):
         ref = DependencyReference.parse(entry)
@@ -83,9 +107,11 @@ def _apply_subset(entry, subset: list[str] | None):
         return entry
 
     # Determine if we should set or clear
-    if subset:
-        ref.skill_subset = sorted(set(subset))
+    if field == "skills":
+        ref.skill_subset = sorted(set(subset)) if subset else None
+    elif field == "targets":
+        ref.target_subset = sorted({name.strip().lower() for name in subset}) if subset else None
     else:
-        ref.skill_subset = None
+        raise ValueError(f"Unsupported dependency subset field: {field}")
 
     return ref.to_apm_yml_entry()
