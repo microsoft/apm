@@ -67,7 +67,7 @@
 #          packages:
 #            - microsoft/apm-sample-package
 #
-# 5. Pin a specific apm CLI version (newer than the action's default):
+# 5. Pin a specific apm CLI version (overrides the action's built-in default):
 #
 #    imports:
 #      - uses: shared/apm.md
@@ -172,11 +172,19 @@ import-schema:
   apm-version:
     type: string
     required: false
+    # MAINTENANCE: this default MUST mirror the apm-version default shipped
+    # by the pinned microsoft/apm-action ref used in the Pack and Restore
+    # steps below. gh-aw substitutes this value at compile time when a
+    # consumer omits apm-version, so an empty string is never forwarded to
+    # apm-action (an empty apm-version floats the action to 'latest', the
+    # opposite of the pinned default). Bump this in lockstep with the action.
+    default: '0.12.4'
     description: >
-      apm CLI version for apm-action to install (e.g. '0.20.0'). Omit to use
-      the action's pinned default. Pin explicitly for reproducibility. Applied
-      to both the Pack and Restore apm-action steps so the CLI version cannot
-      skew between packing and restoring.
+      apm CLI version for apm-action to install, as a bare semver tag (e.g.
+      '0.12.4'); pass 'latest' to opt into floating to the newest release.
+      Omit to use apm-action's pinned default. Applied to both the Pack and
+      Restore apm-action steps so the CLI version cannot skew between packing
+      and restoring.
 
 jobs:
   apm-prep:
