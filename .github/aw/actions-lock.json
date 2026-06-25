@@ -40,10 +40,10 @@
       "version": "v0.80.9",
       "sha": "8c7d04ebf1ece56cd381446125da3e0f6896294a"
     },
-    "microsoft/apm-action@v1.7.2": {
+    "microsoft/apm-action@v1.10.0": {
       "repo": "microsoft/apm-action",
-      "version": "v1.7.2",
-      "sha": "b48dd081eb0050f6d7f32d0e7caa0a59a2d419fd"
+      "version": "v1.10.0",
+      "sha": "d723bb64ed70c135bbaf87d126b721dd2dae0439"
     }
   }
 }
