@@ -6,8 +6,10 @@ sidebar:
 ---
 
 APM supports **lifecycle scripts** -- custom actions that fire automatically
-at key moments during install, update, and uninstall operations. Scripts are
-fire-and-forget: a failing script never blocks the CLI.
+at key moments during install, update, and uninstall operations. A failing
+script never aborts the CLI operation. HTTP scripts dispatch in a background
+thread (fire-and-forget), while command scripts run synchronously and can
+delay the operation until they finish or their timeout elapses.
 
 Scripts are defined in standalone JSON files and discovered from well-known
 directories, following the same pattern as GitHub Copilot CLI extensions.
@@ -209,10 +211,11 @@ trends -- without any changes to individual project configurations.
 
 - HTTP script URLs must use `https://`.
 - Tokens are never stored in script files -- use env-var expansion in headers.
-- All scripts are fire-and-forget with configurable timeouts (10s for HTTP,
-  30s for commands by default).
-- Script failures are logged in verbose mode (`--verbose`) and never
-  block the CLI.
+- Scripts have configurable timeouts (10s for HTTP, 30s for commands by
+  default). HTTP scripts dispatch in the background; command scripts run
+  synchronously and can delay the operation up to their timeout.
+- A script failure never aborts the CLI operation; failures are logged in
+  verbose mode (`--verbose`).
 
 ## Script output log
 
