@@ -207,6 +207,34 @@ class TestBuildUpdatePlan:
         assert entry.old_resolved_ref == "1.1.0"
         assert entry.new_resolved_ref == "1.3.0"
 
+    def test_source_transition_to_registry_is_not_masked_as_unchanged(self):
+        """A git -> registry source change under the same key is a real change.
+
+        The unannotated-registry fallback must not borrow the locked ref when the
+        locked entry is git-sourced; otherwise a dependency that transitions
+        sources while keeping the same key would be masked as unchanged.
+        """
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="acme/moved",
+                resolved_ref="v1.0.0",
+                resolved_commit="a" * 40,
+                depth=1,
+                source=None,  # git-sourced lock (None == git)
+            )
+        )
+        # Now resolved as a registry dep, but unannotated (no resolved_reference).
+        dep = DependencyReference(repo_url="acme/moved", reference="^1.0.0", source="registry")
+        assert getattr(dep, "resolved_reference", None) is None
+
+        plan = build_update_plan(lock, [dep])
+
+        entry = plan.entries[0]
+        # The git lock's ref must not be borrowed; this is a real change.
+        assert entry.new_resolved_ref != "v1.0.0"
+        assert entry.action == "update"
+
 
 # -----------------------------------------------------------------------------
 # render_plan_text

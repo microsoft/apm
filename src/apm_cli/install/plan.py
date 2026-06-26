@@ -198,7 +198,15 @@ def build_update_plan(
         new_ref, new_commit = _extract_new_ref_and_commit(dep)
         # Unannotated registry dep (cached, not re-downloaded): no concrete
         # version was resolved this run, so treat the locked value as current.
-        if new_ref is None and old is not None and getattr(dep, "source", None) == "registry":
+        # Require the locked entry to also be registry-sourced -- otherwise a
+        # dep that transitions sources (e.g. git -> registry) while keeping the
+        # same key would be masked as unchanged.
+        if (
+            new_ref is None
+            and old is not None
+            and getattr(dep, "source", None) == "registry"
+            and old.source == "registry"
+        ):
             new_ref = old.resolved_ref
 
         if old is None:
