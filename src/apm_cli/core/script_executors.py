@@ -22,6 +22,7 @@ import os
 import re
 import subprocess
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -321,8 +322,6 @@ def _execute_command(
     timeout = script.effective_timeout
     cwd = _resolve_cwd(script, project_root)
 
-    import time
-
     start = time.monotonic()
     try:
         result = subprocess.run(
@@ -355,8 +354,12 @@ def _execute_command(
     except subprocess.TimeoutExpired:
         _logger.debug("Command script timed out: %s", cmd)
         _append_to_script_log(event.event, "command", cmd, status="timeout")
-        if verbose and logger:
-            logger.verbose_detail(f"[i] Lifecycle command script timed out: {cmd}")
+        if logger:
+            warn = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
+            if warn is not None:
+                warn(
+                    f"[!] Lifecycle command script timed out after {script.effective_timeout}s: {cmd}"
+                )
     except Exception as exc:
         _logger.debug("Command script failed: %s", cmd, exc_info=True)
         _append_to_script_log(event.event, "command", cmd, stderr=str(exc), status="error")

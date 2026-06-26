@@ -10,11 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Lifecycle scripts (`apm scripts`): run shell commands or HTTPS webhooks at
-  `pre/post-install/update/uninstall` events. Project `.apm/scripts.json` is
-  gated behind `apm scripts trust` (content-hash, direnv model) to prevent
-  arbitrary code execution on clone; `APM_NO_SCRIPTS=1` kills all scripts for
-  one run; org `executables.deny_all` suppresses scripts as a one-directional
-  safety ceiling. (#1798, #1919)
+  `pre/post-install/update/uninstall` events. Project `apm-scripts.yml` (at
+  repo root) is gated behind `apm scripts trust` (SHA-256 content-hash,
+  direnv model) to prevent arbitrary code execution on clone; `APM_NO_SCRIPTS=1`
+  kills all scripts for one run; org `executables.deny_all` suppresses scripts
+  as a one-directional safety ceiling. (#1798, #1919)
 
 - Per-dependency `targets:` scopes a dependency's target-specific primitives
   to selected harnesses (for example `targets: [copilot, claude]`), preventing

@@ -132,6 +132,18 @@ Security:
 - **HTTPS only** -- `http://` URLs are rejected
 - **No redirects** -- redirect following is disabled
 - Headers support env-var expansion (`$VAR` or `${VAR}`)
+- **Credential denylist** -- variable names matching `TOKEN`, `SECRET`, `PAT`,
+  `KEY`, `PASSWORD`, `CREDENTIAL`, or `AUTHTOKEN` patterns are blocked from
+  expansion by default. To opt in, add the variable name to `allowedEnvVars`:
+
+  ```yaml
+  type: http
+  url: "https://analytics.corp.net/apm/events"
+  headers:
+    Authorization: "Bearer $APM_ANALYTICS_TOKEN"
+  allowedEnvVars:
+    - APM_ANALYTICS_TOKEN
+  ```
 
 ## Discovery locations
 

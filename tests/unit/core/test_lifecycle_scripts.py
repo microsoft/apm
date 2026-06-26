@@ -112,6 +112,23 @@ class TestScriptEntry:
         script = ScriptEntry(script_type="http", event="post-install", url="https://x.com")
         assert script.effective_command is None
 
+    def test_effective_command_windows_prefers_command_over_bash(self) -> None:
+        """On Windows, `command` takes priority over `bash`."""
+        script = ScriptEntry(
+            script_type="command",
+            event="post-install",
+            bash="./unix.sh",
+            command="powershell.exe -File win.ps1",
+        )
+        with patch("platform.system", return_value="Windows"):
+            assert script.effective_command == "powershell.exe -File win.ps1"
+
+    def test_effective_command_windows_falls_back_to_bash(self) -> None:
+        """On Windows without `command`, falls back to `bash`."""
+        script = ScriptEntry(script_type="command", event="post-install", bash="./unix.sh")
+        with patch("platform.system", return_value="Windows"):
+            assert script.effective_command == "./unix.sh"
+
     def test_effective_timeout_http(self) -> None:
         script = ScriptEntry(script_type="http", event="post-install")
         assert script.effective_timeout == 10
