@@ -142,6 +142,71 @@ class TestBuildUpdatePlan:
 
         assert plan.entries == ()
 
+    def test_unannotated_registry_dep_is_unchanged_not_range_diff(self):
+        """A cached registry dep with no fresh resolution must stay 'unchanged'.
+
+        Regression: on ``apm update``, only direct semver deps get their cache
+        purged and re-resolved, so transitive registry deps are NOT re-downloaded
+        and never receive a ``resolved_reference`` annotation. The plan must fall
+        back to the locked concrete version (``1.0.0``) rather than the manifest
+        range (``^1.0.0``), which would otherwise render as a spurious
+        ``1.0.0 -> ^1.0.0`` update.
+        """
+        lock = _new_lockfile()
+        locked = LockedDependency(
+            repo_url="acme/transitive",
+            resolved_ref="1.0.0",
+            resolved_commit=None,
+            depth=2,
+            source="registry",
+            version="1.0.0",
+        )
+        lock.add_dependency(locked)
+
+        # Cached transitive: source=registry, range reference, NO annotation.
+        dep = DependencyReference(repo_url="acme/transitive", reference="^1.0.0", source="registry")
+        assert getattr(dep, "resolved_reference", None) is None
+
+        plan = build_update_plan(lock, [dep])
+
+        assert plan.has_changes is False
+        entry = plan.entries[0]
+        assert entry.action == "unchanged"
+        assert entry.new_resolved_ref == "1.0.0"
+
+    def test_annotated_registry_dep_still_shows_real_version_change(self):
+        """A re-resolved registry dep with a new version must still show as update.
+
+        Guards that the unchanged fallback above does not mask genuine updates:
+        when the resolver re-downloads a registry dep it annotates a concrete
+        ``resolved_reference``, and a higher version must surface as a change.
+        """
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="acme/direct",
+                resolved_ref="1.1.0",
+                resolved_commit=None,
+                depth=1,
+                source="registry",
+                version="1.1.0",
+            )
+        )
+        dep = DependencyReference(repo_url="acme/direct", reference="^1.0.0", source="registry")
+        dep.resolved_reference = ResolvedReference(
+            original_ref="^1.0.0",
+            ref_type=GitReferenceType.TAG,
+            ref_name="1.3.0",
+        )
+
+        plan = build_update_plan(lock, [dep])
+
+        assert plan.has_changes is True
+        entry = plan.entries[0]
+        assert entry.action == "update"
+        assert entry.old_resolved_ref == "1.1.0"
+        assert entry.new_resolved_ref == "1.3.0"
+
 
 # -----------------------------------------------------------------------------
 # render_plan_text

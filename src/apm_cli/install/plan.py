@@ -196,6 +196,10 @@ def build_update_plan(
         seen_keys.add(key)
         old = old_entries.get(key)
         new_ref, new_commit = _extract_new_ref_and_commit(dep)
+        # Unannotated registry dep (cached, not re-downloaded): no concrete
+        # version was resolved this run, so treat the locked value as current.
+        if new_ref is None and old is not None and getattr(dep, "source", None) == "registry":
+            new_ref = old.resolved_ref
 
         if old is None:
             plan_entries.append(
@@ -280,6 +284,11 @@ def _extract_new_ref_and_commit(dep: DependencyReference) -> tuple[str | None, s
     """
     resolved = getattr(dep, "resolved_reference", None)
     if resolved is None:
+        # Registry deps identify by resolved version, not the manifest range.
+        # Return None so the caller can fall back to the locked concrete version
+        # rather than treating the range as a ref change.
+        if getattr(dep, "source", None) == "registry":
+            return (None, None)
         return (getattr(dep, "reference", None), None)
     new_ref = (
         getattr(resolved, "ref_name", None)
