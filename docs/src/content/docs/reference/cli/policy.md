@@ -15,13 +15,15 @@ rules -- without running a full `apm install` or `apm audit`.
 ```bash
 apm policy status [--policy-source SOURCE] [--no-cache]
                   [-o table|json] [--json] [--check]
+apm policy explain PACKAGE
 ```
 
 ## Description
 
 `apm policy` groups diagnostic subcommands for the organization-level
-policy APM resolves at install / audit time. Today the group exposes a
-single subcommand, `status`.
+policy APM resolves at install / audit time. The group exposes two
+subcommands: `status` (the policy-chain view) and `explain` (the
+per-package executable-trust decision).
 
 The command is **always exit 0 by default**. Discovery failures are
 reported in the output (table or JSON), never via process exit code, so
@@ -78,6 +80,30 @@ The table and JSON renderers expose the same fields:
 To gate on rule violations rather than resolvability, use
 [`apm audit --ci`](../audit/) instead.
 
+### `apm policy explain`
+
+Explain the effective executable-trust decision for a single installed
+package. For each executable type the package declares, it prints whether
+that primitive is allowed, the deciding precedence layer (a compound
+label such as `org-deny`, `project-allow`, or `default-deny`), and any
+lower-authority layers that decision shadowed. This is
+the per-package companion to `apm policy status` (the policy-chain view) and
+the fleet-level executable-trust drift check in `apm doctor`.
+
+```bash
+apm policy explain PACKAGE
+```
+
+| Argument | Description |
+|---|---|
+| `PACKAGE` | Package reference (e.g. `owner/repo`) to resolve. Only packages installed in the current project resolve; an uninstalled reference reports no decision. |
+
+The effective decision follows the deny-wins precedence: an organization
+`executables.deny` / `deny_all` is the ceiling no project or user grant can
+widen. See [Executable approval](../approve/) for the trust model and
+[apm-policy.yml schema](../policy-schema/#executables) for the
+`executables` ceiling.
+
 ## Examples
 
 ```bash
@@ -98,6 +124,9 @@ apm policy status --policy-source acme-corp/apm-policies
 
 # CI pre-check: fail the job when no usable policy is resolved
 apm policy status --check
+
+# Explain the effective executable-trust decision for an installed package
+apm policy explain owner/repo
 ```
 
 Sample table output:

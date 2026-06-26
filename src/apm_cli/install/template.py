@@ -13,39 +13,66 @@ This is the Template Method companion to the Strategy pattern in
 
 from __future__ import annotations
 
-import contextlib
-
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.install.sources import DependencySource, Materialization
 
-_EFFECTIVE_ALLOW_UNSET = object()
-
 
 def _effective_allow(ctx) -> dict | None:
-    """Return the effective allowExecutables map for the install context.
+    """Return the effective (deny-wins) allow-map for the install context.
 
-    Reads the gate opt-in signal from the project ``apm.yml`` via
-    ``ctx.apm_package.allow_executables`` and merges it with the
-    user-local approvals from ``~/.apm/approvals.yml``.  Returns
-    ``None`` when the gate is disabled (backward-compatible behaviour).
+    Builds the #1873 trust context from three layers and materialises the
+    decision map via the shared resolver:
 
-    The merged map is memoized on ``ctx`` for the duration of the install
-    run: it is read once per dependency during materialization and the
-    approvals file does not change mid-run, so re-reading it per dep is
-    pure overhead.
+    * org policy -- ``ctx.policy_fetch.policy`` (the deny ceiling, Gap A);
+    * project ``apm.yml`` -- the ``executables`` block (or legacy
+      ``allowExecutables`` alias) read from disk;
+    * user consent -- ``~/.apm/config.json`` (lowest authority).
+
+    Returns ``None`` when the gate is disabled (backward-compatible: every
+    executable deploys).
     """
-    cached = getattr(ctx, "_effective_allow_cache", _EFFECTIVE_ALLOW_UNSET)
-    if cached is not _EFFECTIVE_ALLOW_UNSET:
-        return cached
+    from apm_cli.security.executables import (
+        build_exec_trust_context,
+        materialize_exec_map,
+    )
+    from apm_cli.utils.yaml_io import load_yaml
 
-    from apm_cli.security.executables import effective_allow_executables
+    if getattr(ctx, "exec_trust_ctx", None) is not None:
+        return getattr(ctx, "exec_allow_map", None)
 
-    project_val = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
-    result = effective_allow_executables(project_val)
-    with contextlib.suppress(Exception):
-        ctx._effective_allow_cache = result
-    return result
+    project_data: dict | None = None
+    manifest = getattr(ctx, "project_root", None)
+    if manifest is not None:
+        manifest_path = manifest / "apm.yml"
+        if manifest_path.is_file():
+            data = load_yaml(manifest_path)
+            if isinstance(data, dict):
+                project_data = data
+                if data.get("allowExecutables") is not None:
+                    from apm_cli.security.executables import (
+                        warn_allow_executables_alias_once,
+                    )
+
+                    warn_allow_executables_alias_once(getattr(ctx, "logger", None))
+
+    # Fall back to the in-memory gate signal when apm.yml is unreadable so a
+    # project that opted in via allowExecutables still gates.
+    if project_data is None:
+        project_val = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
+        if isinstance(project_val, dict):
+            project_data = {"allowExecutables": project_val}
+
+    policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
+    trust_ctx = build_exec_trust_context(policy=policy, project_data=project_data)
+    allow_map = materialize_exec_map(trust_ctx)
+    # Cache the resolved context and allow map once per install so each
+    # dependency uses the same precedence ladder without re-reading policy files.
+    if hasattr(ctx, "exec_trust_ctx"):
+        ctx.exec_trust_ctx = trust_ctx
+    if hasattr(ctx, "exec_allow_map"):
+        ctx.exec_allow_map = allow_map
+    return allow_map
 
 
 def run_integration_template(
@@ -130,6 +157,7 @@ def _integrate_materialization(
                 if ctx.skill_subset_from_cli
                 else (tuple(dep_ref.skill_subset) if dep_ref.skill_subset else None)
             ),
+            dep_target_subset=dep_ref.target_subset,
             ctx=ctx,
             allow_executables=_effective_allow(ctx),
         )

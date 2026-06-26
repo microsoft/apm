@@ -13,10 +13,12 @@ Covers:
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 from apm_cli.security.executables import (
@@ -27,14 +29,11 @@ from apm_cli.security.executables import (
     ExecutableDeclaration,
     _is_fully_approved,
     build_approval_key,
-    effective_allow_executables,
     filter_mcp_by_allow_executables,
     is_any_type_approved,
     is_package_approved,
-    load_user_approvals,
     parse_allow_executables,
     prompt_executable_approval,
-    save_user_approvals,
     scan_package_executables,
     write_allow_executables,
 )
@@ -537,53 +536,79 @@ class TestPromptExecutableApproval:
         result = prompt_executable_approval([decl])
         assert "pkg#1.0" not in result
 
+    @patch("apm_cli.security.executables._is_interactive", return_value=False)
+    def test_non_interactive_message_uses_unified_vocab(self, _mock, capsys) -> None:
+        # M4 (#1873): the live install-gate message must drop the retired
+        # ``allowExecutables`` noun, lead with the bulk one-liner, and offer
+        # the introspection hatch.
+        decl = self._make_decl()
+        with pytest.raises(SystemExit):
+            prompt_executable_approval([decl])
+        out = capsys.readouterr().out
+        assert "allowExecutables" not in out
+        assert "apm approve --recommended" in out
+        assert "apm policy explain" in out
+
+
+class TestAliasDeprecationWarning:
+    """S1 (#1873): the allowExecutables alias warns once, not per-package."""
+
+    def test_warns_once(self, capsys) -> None:
+        import apm_cli.security.executables as ex
+
+        ex._ALIAS_DEPRECATION_WARNED = False
+        ex.warn_allow_executables_alias_once()
+        ex.warn_allow_executables_alias_once()
+        out = capsys.readouterr().out
+        assert out.count("allowExecutables") == 1
+        assert "deprecated" in out
+        assert "executables.allow" in out
+
+    def test_uses_logger_when_given(self) -> None:
+        import apm_cli.security.executables as ex
+
+        ex._ALIAS_DEPRECATION_WARNED = False
+        calls = []
+
+        class _Logger:
+            def warning(self, msg, symbol=None):
+                calls.append(msg)
+
+        ex.warn_allow_executables_alias_once(_Logger())
+        assert len(calls) == 1
+        assert "deprecated" in calls[0]
+
+
+class TestSaveUserExecutablesAtomic:
+    """S3 (#1873): personal consent writes are atomic and owner-only."""
+
+    def test_atomic_write_sets_owner_only_mode(self, tmp_path, monkeypatch) -> None:
+        import json
+
+        import apm_cli.security.executables as ex
+
+        cfg = tmp_path / "config.json"
+        monkeypatch.setattr(ex, "_user_config_file", lambda: cfg)
+        ex.save_user_executables({"pkg#1.0": {"hooks": True}}, {})
+        assert cfg.is_file()
+        # Owner-only perms on the freshly-created file. POSIX mode bits are not
+        # enforced on Windows, where atomic_write_text documents that the mode
+        # hint is silently ignored, so only assert the permission contract on
+        # platforms that honour it.
+        if os.name != "nt":
+            assert (cfg.stat().st_mode & 0o777) == 0o600
+        # Content round-trips and preserves co-resident keys on rewrite.
+        cfg.write_text(json.dumps({"default_client": "vscode"}), encoding="utf-8")
+        ex.save_user_executables({"pkg#1.0": {"hooks": True}}, {})
+        data = json.loads(cfg.read_text(encoding="utf-8"))
+        assert data["default_client"] == "vscode"
+        assert data["executables"]["allow"]["pkg#1.0"]["hooks"] is True
+        # No leftover temp files in the dir.
+        assert [p.name for p in tmp_path.iterdir()] == ["config.json"]
+
 
 # ---------------------------------------------------------------------------
-# effective_allow_executables (project + user-local merge)
-# ---------------------------------------------------------------------------
-
-
-class TestEffectiveAllowExecutables:
-    """Tests for effective_allow_executables merge precedence."""
-
-    def test_none_project_returns_none(self) -> None:
-        # Gate disabled -> None regardless of user approvals.
-        with patch(
-            "apm_cli.security.executables.load_user_approvals",
-            return_value={"x#1.0": {"mcp": True}},
-        ):
-            assert effective_allow_executables(None) is None
-
-    def test_user_approvals_overlay_project(self) -> None:
-        project = {"a#1.0": {"mcp": True}}
-        with patch(
-            "apm_cli.security.executables.load_user_approvals",
-            return_value={"b#1.0": {"canvas": True}},
-        ):
-            merged = effective_allow_executables(project)
-        assert merged == {"a#1.0": {"mcp": True}, "b#1.0": {"canvas": True}}
-
-    def test_user_approval_wins_on_overlap(self) -> None:
-        project = {"a#1.0": {"mcp": False}}
-        with patch(
-            "apm_cli.security.executables.load_user_approvals",
-            return_value={"a#1.0": {"mcp": True}},
-        ):
-            merged = effective_allow_executables(project)
-        # User-local approval takes precedence over a stale project entry.
-        assert merged == {"a#1.0": {"mcp": True}}
-
-    def test_empty_project_plus_user(self) -> None:
-        with patch(
-            "apm_cli.security.executables.load_user_approvals",
-            return_value={"a#1.0": {"bin": True}},
-        ):
-            merged = effective_allow_executables({})
-        assert merged == {"a#1.0": {"bin": True}}
-
-
-# ---------------------------------------------------------------------------
-# filter_mcp_by_allow_executables
+# filter_mcp_by_allow_executables (fail-closed under v1 deny-wins)
 # ---------------------------------------------------------------------------
 
 
@@ -608,8 +633,13 @@ class _RecordingLogger:
         self.warnings.append(message)
 
 
-class TestFilterMcpByAllowExecutables:
-    """Tests for filter_mcp_by_allow_executables (fail-closed gate)."""
+class TestFilterMcpFailClosed:
+    """filter_mcp_by_allow_executables stays fail-closed under v1 deny-wins.
+
+    The v1 resolver drives the effective map from the project-level
+    ``executables`` block (personal consent merges in elsewhere); these
+    tests confirm the gate filters unapproved and unnamed deps regardless.
+    """
 
     def test_none_gate_passes_all(self) -> None:
         deps = [_FakeMcpDep("a"), _FakeMcpDep("b")]
@@ -620,22 +650,14 @@ class TestFilterMcpByAllowExecutables:
     def test_unapproved_filtered_out(self) -> None:
         deps = [_FakeMcpDep("a")]
         logger = _RecordingLogger()
-        with patch(
-            "apm_cli.security.executables.load_user_approvals",
-            return_value={},
-        ):
-            result = filter_mcp_by_allow_executables(deps, {}, logger)
+        result = filter_mcp_by_allow_executables(deps, {}, logger)
         assert result == []
         assert logger.warnings  # surfaced a remediation warning
 
-    def test_approved_slug_passes(self) -> None:
+    def test_project_allowed_slug_passes(self) -> None:
         deps = [_FakeMcpDep("a")]
         logger = _RecordingLogger()
-        with patch(
-            "apm_cli.security.executables.load_user_approvals",
-            return_value={"a": {"mcp": True}},
-        ):
-            result = filter_mcp_by_allow_executables(deps, {}, logger)
+        result = filter_mcp_by_allow_executables(deps, {"a": {"mcp": True}}, logger)
         assert result == deps
         assert logger.warnings == []
 
@@ -643,48 +665,6 @@ class TestFilterMcpByAllowExecutables:
         # A falsy/missing name must never bypass the gate.
         deps = [_FakeMcpDep(None), _FakeMcpDep("")]
         logger = _RecordingLogger()
-        with patch(
-            "apm_cli.security.executables.load_user_approvals",
-            return_value={"a": {"mcp": True}},
-        ):
-            result = filter_mcp_by_allow_executables(deps, {}, logger)
+        result = filter_mcp_by_allow_executables(deps, {"a": {"mcp": True}}, logger)
         assert result == []
         assert logger.warnings
-
-
-class TestLoadUserApprovalsShapeValidation:
-    """``load_user_approvals`` must drop malformed entries (fail-closed)."""
-
-    def test_drops_malformed_entries(self) -> None:
-        raw = {
-            "good": {"mcp": True, "canvas": False},
-            "bad_value": {"mcp": "yes"},
-            "bad_inner_key": {5: True},
-            "not_a_dict": ["mcp"],
-            7: {"mcp": True},
-        }
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "approvals.yml"
-            with open(path, "w", encoding="utf-8") as handle:  # yaml-io-exempt
-                yaml.safe_dump(raw, handle)
-            with patch(
-                "apm_cli.security.executables.get_user_approvals_path",
-                return_value=path,
-            ):
-                result = load_user_approvals()
-        assert result == {"good": {"mcp": True, "canvas": False}}
-
-
-class TestSaveUserApprovalsDirMode:
-    """``save_user_approvals`` must create ``~/.apm`` as user-private (0o700)."""
-
-    def test_creates_dir_mode_0o700(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "nested" / "approvals.yml"
-            with patch(
-                "apm_cli.security.executables.get_user_approvals_path",
-                return_value=path,
-            ):
-                save_user_approvals({"a": {"mcp": True}})
-            assert path.exists()
-            assert (path.parent.stat().st_mode & 0o777) == 0o700

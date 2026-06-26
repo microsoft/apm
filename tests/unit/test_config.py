@@ -110,6 +110,53 @@ class TestInstallTargetConfig:
         assert config_mod.get_install_target() is None
 
 
+class TestSelfUpdateInstallerConfig:
+    """get/set/unset for non-secret self-update installer preferences."""
+
+    def test_defaults_are_none_or_stable(self, isolated_config):
+        assert config_mod.get_self_update_install_dir() is None
+        assert config_mod.get_self_update_channel() == "stable"
+
+    def test_install_dir_roundtrip_normalizes_path(self, isolated_config, tmp_path):
+        bin_dir = tmp_path / "bin"
+        config_mod.set_self_update_install_dir(str(bin_dir))
+
+        assert config_mod.get_self_update_install_dir() == str(bin_dir)
+
+    @pytest.mark.parametrize(
+        "bad_path",
+        [
+            "/some/path\x00evil",
+            "/some\npath",
+            "/some\rpath",
+            "",
+            "   ",
+        ],
+    )
+    def test_install_dir_rejects_malformed_paths(self, isolated_config, bad_path):
+        with pytest.raises(ValueError):
+            config_mod.set_self_update_install_dir(bad_path)
+
+    def test_update_channel_roundtrip(self, isolated_config):
+        config_mod.set_self_update_channel("prerelease")
+
+        assert config_mod.get_self_update_channel() == "prerelease"
+
+    def test_update_channel_rejects_invalid(self, isolated_config):
+        with pytest.raises(ValueError, match="Invalid self-update channel"):
+            config_mod.set_self_update_channel("nightly")
+
+    def test_unset_removes_self_update_keys(self, isolated_config, tmp_path):
+        config_mod.set_self_update_install_dir(str(tmp_path / "bin"))
+        config_mod.set_self_update_channel("prerelease")
+
+        config_mod.unset_self_update_install_dir()
+        config_mod.unset_self_update_channel()
+
+        assert config_mod.get_self_update_install_dir() is None
+        assert config_mod.get_self_update_channel() == "stable"
+
+
 class TestExternalScannerOptions:
     """Round-trip the external_scanners config helpers."""
 

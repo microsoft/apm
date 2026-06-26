@@ -211,6 +211,23 @@ class TestFailurePaths:
             resolver.download_package(_make_dep(), tmp_path / "p")
         assert "no package" in str(excinfo.value)
 
+    def test_404_git_ref_hint_names_registry_first(self, tmp_path):
+        fake = MagicMock(spec=RegistryClient)
+        fake.list_versions.side_effect = RegistryError(
+            "not found",
+            status=404,
+            url="https://reg.example.com/apm/v1/packages/acme/web-skills/versions",
+        )
+        resolver = _make_resolver(fake)
+
+        with pytest.raises(RegistryResolutionError) as excinfo:
+            resolver.download_package(_make_dep("main"), tmp_path / "p")
+
+        msg = str(excinfo.value)
+        assert "verify the package name and registry configuration" in msg
+        assert "looks like a git ref" in msg
+        assert "- git: acme/web-skills#main" in msg
+
     def test_unconfigured_registry_name(self, tmp_path):
         # Resolver knows about 'corp-main', dep references 'corp-other'.
         fake = MagicMock(spec=RegistryClient)

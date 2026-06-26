@@ -5,7 +5,12 @@ from pathlib import Path  # noqa: F401
 
 import pytest
 
-from apm_cli.utils.content_hash import compute_package_hash, verify_package_hash
+from apm_cli.utils.content_hash import (
+    _EMPTY_HASH,
+    compute_file_hash,
+    compute_package_hash,
+    verify_package_hash,
+)
 
 # ---------------------------------------------------------------------------
 # compute_package_hash
@@ -212,6 +217,46 @@ class TestVerifyPackageHash:
         expected = compute_package_hash(tmp_path)
         (tmp_path / "extra.txt").write_text("injected")
         assert verify_package_hash(tmp_path, expected) is False
+
+
+# ---------------------------------------------------------------------------
+# compute_file_hash (per-deployed-file provenance)
+# ---------------------------------------------------------------------------
+
+
+class TestComputeFileHash:
+    def test_prefix_and_length(self, tmp_path):
+        """Returns the canonical ``sha256:<64-hex>`` form."""
+        f = tmp_path / "a.md"
+        f.write_bytes(b"# Title\n\nbody\n")
+        result = compute_file_hash(f)
+        assert result.startswith("sha256:")
+        assert len(result) == len("sha256:") + 64
+
+    def test_hashes_raw_bytes_as_written(self, tmp_path):
+        """Hash is over the exact on-disk bytes (req-lk-012), no normalization.
+
+        CRLF and LF variants of the same text are distinct on disk, so they
+        MUST hash differently -- the provenance hash binds the bytes as
+        written, which is what ``apm audit`` re-verifies.
+        """
+        lf = tmp_path / "lf.md"
+        lf.write_bytes(b"# H\n\ntext\n")
+        crlf = tmp_path / "crlf.md"
+        crlf.write_bytes(b"# H\r\n\r\ntext\r\n")
+        assert compute_file_hash(lf) != compute_file_hash(crlf)
+
+    def test_real_content_change_differs(self, tmp_path):
+        """A genuine content edit changes the hash."""
+        a = tmp_path / "a.md"
+        a.write_bytes(b"# H\n\noriginal\n")
+        h1 = compute_file_hash(a)
+        a.write_bytes(b"# H\n\nedited\n")
+        assert compute_file_hash(a) != h1
+
+    def test_missing_file_returns_empty_hash(self, tmp_path):
+        """A path that does not exist yields the empty-content hash."""
+        assert compute_file_hash(tmp_path / "nope.md") == _EMPTY_HASH
 
 
 # ---------------------------------------------------------------------------

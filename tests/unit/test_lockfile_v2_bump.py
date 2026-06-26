@@ -223,6 +223,39 @@ class TestFromDependencyRefWithResolution:
         assert locked.resolved_url == resolution.resolved_url
         assert locked.resolved_hash == "sha256:def"
         assert locked.version == "1.5.0"
+        # resolved_ref must be the concrete version, not the semver range.
+        # Storing the range causes build_update_plan to see a perpetual
+        # old_ref/new_ref mismatch after fix #2 annotates the BFS dep_ref.
+        assert locked.resolved_ref == "1.5.0"
+
+    def test_registry_resolution_resolved_ref_is_version_not_range(self):
+        """resolved_ref stores the concrete version for registry deps.
+
+        Regression guard for the fix that prevents storing the semver range
+        (e.g. '^1.0.0') as resolved_ref.  If resolved_ref were the range,
+        build_update_plan would compare old_ref='range' vs new_ref='version'
+        and show a spurious UPDATE on every apm update run.
+        """
+        dep = DependencyReference(
+            repo_url="acme/tool",
+            reference="^2.0.0",
+            source="registry",
+            registry_name="corp",
+        )
+        resolution = RegistryResolution(
+            resolved_url="https://r/v1/packages/acme/tool/versions/2.3.1/tarball",
+            resolved_hash="sha256:abc",
+            version="2.3.1",
+        )
+        locked = LockedDependency.from_dependency_ref(
+            dep,
+            resolved_commit=None,
+            depth=1,
+            resolved_by=None,
+            registry_resolution=resolution,
+        )
+        assert locked.resolved_ref == "2.3.1"
+        assert locked.resolved_ref != dep.reference
 
     def test_no_resolution_means_no_registry_fields(self):
         # Existing git-resolver call site (no registry_resolution arg)
@@ -273,3 +306,41 @@ class TestToDependencyRefRestoresSource:
         ref = locked.to_dependency_ref()
         assert ref.source == "local"
         assert ref.is_local
+
+
+# ---------------------------------------------------------------------------
+# Issue #1888 (d): no v2 bump for name-carrying deps
+# ---------------------------------------------------------------------------
+
+
+class TestNoBumpForPkgMetadata:
+    """Test (d): a lockfile whose only new content is name-carrying git deps
+    must NOT be promoted to lockfile_version "2".
+    """
+
+    def test_git_dep_with_name_and_version_stays_v1(self):
+        lock = LockFile()
+        lock.add_dependency(_git_dep(name="foo-package", version="1.0.0"))
+        assert lock.lockfile_version == "1"
+        yaml_out = lock.to_yaml()
+        assert "lockfile_version: '1'" in yaml_out
+
+    def test_local_dep_with_name_stays_v1(self):
+        lock = LockFile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="_local/x",
+                source="local",
+                local_path="./local/x",
+                name="local-pkg",
+                version="0.1.0",
+            )
+        )
+        assert lock.lockfile_version == "1"
+
+    def test_name_in_yaml_output_for_git_dep(self):
+        lock = LockFile()
+        lock.add_dependency(_git_dep(name="foo-package"))
+        yaml_out = lock.to_yaml()
+        assert "name: foo-package" in yaml_out
+        assert "lockfile_version: '1'" in yaml_out

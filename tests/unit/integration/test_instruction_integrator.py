@@ -1135,6 +1135,55 @@ class TestClaudeRulesIntegration:
         assert "# General" in deployed
         assert "Always lint." in deployed
 
+    def test_crlf_rule_file_rewritten_to_lf_not_adopted(self):
+        """A stale CRLF rule file is rewritten to LF, not adopted (apm#1889).
+
+        read_text() collapses CRLF->LF, so a text-mode equality check would
+        wrongly adopt a CRLF file left by a pre-fix Windows install and pin a
+        platform-dependent hash in the lockfile. The adopt check compares the
+        on-disk bytes against the LF output, so the file is re-written as LF.
+        """
+        (self.project_root / ".claude").mkdir()
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text(
+            "---\napplyTo: '**/*.py'\n---\n\n# Python rules\n"
+        )
+        pkg_info = _make_package_info(pkg)
+
+        # First install writes the canonical LF output.
+        self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+        target = self.project_root / ".claude" / "rules" / "python.md"
+        lf_bytes = target.read_bytes()
+        assert b"\r\n" not in lf_bytes
+
+        # Simulate a pre-fix Windows deploy: identical content, CRLF endings.
+        target.write_bytes(lf_bytes.replace(b"\n", b"\r\n"))
+        assert b"\r\n" in target.read_bytes()
+
+        # Re-install must rewrite (not adopt) so bytes converge back to LF.
+        result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+        assert result.files_integrated == 1
+        assert result.files_adopted == 0
+        assert target.read_bytes() == lf_bytes
+
+    def test_lf_rule_file_adopted_unchanged(self):
+        """An up-to-date LF rule file is adopted on re-install (no churn)."""
+        (self.project_root / ".claude").mkdir()
+        pkg = self.project_root / "package"
+        inst_dir = pkg / ".apm" / "instructions"
+        inst_dir.mkdir(parents=True)
+        (inst_dir / "python.instructions.md").write_text(
+            "---\napplyTo: '**/*.py'\n---\n\n# Python rules\n"
+        )
+        pkg_info = _make_package_info(pkg)
+
+        self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+        result = self.integrator.integrate_package_instructions_claude(pkg_info, self.project_root)
+        assert result.files_adopted == 1
+        assert result.files_integrated == 0
+
 
 class TestClaudeRulesSyncIntegration:
     """Test sync_integration_claude (manifest-based removal)."""

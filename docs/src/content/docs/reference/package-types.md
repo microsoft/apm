@@ -152,6 +152,10 @@ dependencies:
         - functions
 ```
 
+The sibling per-dependency `targets:` list uses the same object form to
+limit which active harnesses receive a dependency's target-scoped
+primitives.
+
 **Validation rules:**
 - Frontmatter `name` field (if present) must match the directory name.
 - Frontmatter `description` should be present (warning if absent).

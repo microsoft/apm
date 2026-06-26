@@ -70,6 +70,7 @@ from apm_cli.core.errors import (
 from apm_cli.core.target_detection import (
     detect_signals,
     expand_all_targets,
+    manifest_targets_from_target_option,
     resolve_targets,
 )
 
@@ -208,6 +209,27 @@ def test_resolution_autodetect_multi_signals_error(tmp_path):
 # ---------------------------------------------------------------------------
 # apm.yml schema
 # ---------------------------------------------------------------------------
+
+
+def test_manifest_targets_from_target_option_none_preserves_autodetect():
+    assert manifest_targets_from_target_option(None) is None
+
+
+def test_manifest_targets_from_target_option_aliases_to_manifest_names():
+    assert manifest_targets_from_target_option(["claude", "vscode"]) == ["claude", "copilot"]
+
+
+def test_manifest_targets_from_target_option_all_expands_to_manifest_names():
+    targets = manifest_targets_from_target_option("all")
+    assert targets is not None
+    assert "all" not in targets
+    assert "vscode" not in targets
+    assert "copilot" in targets
+    assert parse_targets_field({"targets": targets}) == targets
+
+
+def test_manifest_targets_from_target_option_filters_non_manifest_targets():
+    assert manifest_targets_from_target_option(["openclaw", "hermes", "agy"]) is None
 
 
 def test_schema_targets_list_valid():

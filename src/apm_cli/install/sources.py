@@ -307,6 +307,8 @@ class LocalDependencySource(DependencySource):
                 resolved_by=resolved_by,
                 is_dev=_is_dev,
                 registry_config=None,
+                package_name=local_info.package.name if local_info.package else None,
+                package_version=local_info.package.version if local_info.package else None,
             )
         )
         if install_path.is_dir() and not dep_ref.is_local:
@@ -396,7 +398,12 @@ class CachedDependencySource(DependencySource):
             if locked_dep and locked_dep.resolved_commit and locked_dep.resolved_commit != "cached":
                 cached_commit = locked_dep.resolved_commit
         if not cached_commit:
-            cached_commit = dep_ref.reference
+            # Registry deps identify by resolved_hash+version, not a commit SHA.
+            # dep_ref.reference is a semver range (e.g. "^1.0.0") for registry
+            # deps -- storing it as resolved_commit would corrupt the lockfile
+            # and cause the update plan to show a spurious "^1.0.0 -> -" diff.
+            if dep_ref.source != "registry":
+                cached_commit = dep_ref.reference
         return cached_commit
 
     def acquire(self) -> Materialization | None:
@@ -420,7 +427,21 @@ class CachedDependencySource(DependencySource):
         logger = ctx.logger
 
         display_name = str(dep_ref) if dep_ref.is_virtual else dep_ref.repo_url
-        _ref = dep_ref.reference or ""
+        _rref = getattr(dep_ref, "resolved_reference", None)
+        if _rref and getattr(_rref, "ref_name", None):
+            _ref = _rref.ref_name
+        elif dep_locked_chk and getattr(dep_locked_chk, "resolved_ref", None):
+            _ref = dep_locked_chk.resolved_ref
+        elif dep_ref.source == "registry":
+            # Fresh install: exact version lives in the resolver's last_resolutions
+            # map (populated by the BFS callback). Fall back to dep_ref.reference
+            # only if the resolver has no record (should not normally happen).
+            from apm_cli.install.registry_wiring import resolver_last_registry_resolution
+
+            _reg_res = resolver_last_registry_resolution(ctx, dep_key)
+            _ref = _reg_res.version if _reg_res else (dep_ref.reference or "")
+        else:
+            _ref = dep_ref.reference or ""
         # F3 (#1116): centralised hex/sentinel-aware short SHA helper.
         # Prefer the lockfile-recorded SHA when present; otherwise fall
         # back to the SHA captured by the parallel resolver callback in
@@ -544,6 +565,12 @@ class CachedDependencySource(DependencySource):
                 registry_config=_cached_registry,
                 registry_resolution=_cached_resolution,
                 git_semver_resolution=_cached_semver,
+                package_name=cached_package_info.package.name
+                if cached_package_info.package
+                else None,
+                package_version=cached_package_info.package.version
+                if cached_package_info.package
+                else None,
             )
         )
         if install_path.is_dir():
@@ -641,6 +668,10 @@ class FreshDependencySource(DependencySource):
             if dep_key in ctx.pre_download_results:
                 package_info = ctx.pre_download_results[dep_key]
             elif dep_ref.source == "registry":
+                if dep_key in ctx.callback_failures:
+                    # Resolve already surfaced the registry failure; do not
+                    # retry through the git fallback path.
+                    return None
                 from apm_cli.deps.registry.feature_gate import (
                     require_package_registry_enabled,
                 )
@@ -781,6 +812,12 @@ class FreshDependencySource(DependencySource):
                     registry_config=(ctx.registry_config if not dep_ref.is_local else None),
                     registry_resolution=_registry_resolution,
                     git_semver_resolution=_git_semver_resolution,
+                    package_name=package_info.package.name
+                    if package_info and package_info.package
+                    else None,
+                    package_version=package_info.package.version
+                    if package_info and package_info.package
+                    else None,
                 )
             )
             if install_path.is_dir():

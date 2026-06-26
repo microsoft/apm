@@ -325,6 +325,26 @@ def test_consumer_must_persist_approvals_user_locally_not_in_project_manifest():
     )
 
 
+@pytest.mark.req("req-sc-011")
+def test_consumer_must_resolve_executable_trust_through_deny_wins_precedence():
+    # Verbatim single-line substrings of the Section 10.14 normative text
+    # (the authored sentences are line-wrapped; these needles fit one line each).
+    assert_spec_contains(
+        "through a single deny-wins",
+        "overrides any project-level or user-level grant for the same package",
+        "identical allow-or-deny",
+    )
+
+
+@pytest.mark.req("req-sc-012")
+def test_consumer_required_package_audit_asserts_presence_not_deployment():
+    assert_spec_contains(
+        "evaluates a governance requirement mandating the presence of a package",
+        "satisfaction of that requirement from the presence of the package in",
+        "distinct from any missing-package violation",
+    )
+
+
 @pytest.mark.req("req-tg-001")
 def test_consumer_target_detection_predicate_binding():
     assert_spec_contains(

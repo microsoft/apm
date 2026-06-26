@@ -14,6 +14,9 @@ _ENV_GIT_PROTOCOL = "APM_GIT_PROTOCOL"
 CONFIG_DIR = os.path.expanduser("~/.apm")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 _INSTALL_TARGET_KEY = "install_target"
+_SELF_UPDATE_CHANNEL_KEY = "self_update_channel"
+_SELF_UPDATE_INSTALL_DIR_KEY = "self_update_install_dir"
+_SELF_UPDATE_CHANNELS = {"stable", "prerelease"}
 
 _config_cache: dict | None = None
 
@@ -212,6 +215,85 @@ def unset_install_target() -> None:
     _unset_config_key(_INSTALL_TARGET_KEY)
 
 
+def normalize_self_update_channel(channel: str) -> str:
+    """Normalize and validate a self-update channel name.
+
+    Args:
+        channel: Channel token supplied by the user or environment.
+
+    Returns:
+        The normalized channel token.
+
+    Raises:
+        ValueError: If *channel* is not one of the supported non-secret channels.
+    """
+    normalized = channel.strip().lower()
+    if normalized not in _SELF_UPDATE_CHANNELS:
+        valid = ", ".join(sorted(_SELF_UPDATE_CHANNELS))
+        raise ValueError(f"Invalid self-update channel: {channel!r}. Valid values: {valid}")
+    return normalized
+
+
+def get_self_update_channel() -> str:
+    """Get the configured self-update channel preference.
+
+    Returns:
+        ``stable`` when unset or invalid, otherwise the persisted channel.
+    """
+    value = get_config().get(_SELF_UPDATE_CHANNEL_KEY)
+    if not isinstance(value, str):
+        return "stable"
+    try:
+        return normalize_self_update_channel(value)
+    except ValueError:
+        return "stable"
+
+
+def set_self_update_channel(channel: str) -> str:
+    """Persist the non-secret self-update channel preference."""
+    normalized = normalize_self_update_channel(channel)
+    update_config({_SELF_UPDATE_CHANNEL_KEY: normalized})
+    return normalized
+
+
+def unset_self_update_channel() -> None:
+    """Remove the self-update channel preference from the config file."""
+    _unset_config_key(_SELF_UPDATE_CHANNEL_KEY)
+
+
+def get_self_update_install_dir() -> str | None:
+    """Get the configured self-update installer target directory."""
+    value = get_config().get(_SELF_UPDATE_INSTALL_DIR_KEY)
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value
+
+
+def set_self_update_install_dir(path: str) -> str:
+    """Persist the non-secret self-update installer target directory.
+
+    The value is expanded and stored as an absolute path, but the directory is
+    not required to exist because the installer creates the target directory
+    when possible.
+    """
+    if "\x00" in path or "\n" in path or "\r" in path:
+        raise ValueError("self-update.install-dir must be a single filesystem path")
+    stripped = path.strip()
+    if not stripped:
+        raise ValueError("self-update.install-dir must not be empty")
+    resolved = os.path.abspath(os.path.expanduser(stripped))
+    from .utils.path_security import validate_path_segments
+
+    validate_path_segments(resolved, context="self-update.install-dir")
+    update_config({_SELF_UPDATE_INSTALL_DIR_KEY: resolved})
+    return resolved
+
+
+def unset_self_update_install_dir() -> None:
+    """Remove the self-update installer target directory preference."""
+    _unset_config_key(_SELF_UPDATE_INSTALL_DIR_KEY)
+
+
 # ---------------------------------------------------------------------------
 # Protocol transport preferences (issue #1243)
 # ---------------------------------------------------------------------------
@@ -321,7 +403,7 @@ def get_apm_protocol_pref() -> str | None:
 
     Resolution order:
       1. ``APM_GIT_PROTOCOL`` environment variable
-         (``"ssh"``, ``"https"``, or ``"http"`` — ``"http"`` is treated
+         (``"ssh"``, ``"https"``, or ``"http"`` -- ``"http"`` is treated
          as an alias for ``"https"`` by the transport selector)
       2. ``prefer_ssh`` boolean in ``~/.apm/config.json`` (maps to ``"ssh"`` when True)
       3. ``None`` (let the transport selector use git insteadOf rules)
