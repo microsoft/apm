@@ -86,7 +86,7 @@ HTTP servers are written with `url` and optional `headers` instead of `command`/
 
 - Skills deploy as `SKILL.md` content, unchanged from the agentskills.io format APM already produces.
 - Instructions compile to `AGENTS.md`, which Hermes reads as a first-class context file.
-- Agents, prompts, hooks, commands, and chatmodes are not part of the Hermes surface and are skipped for this target.
+- Agents, prompts, hooks, and commands are not part of the Hermes surface and are skipped for this target.
 
 ## Troubleshooting
 

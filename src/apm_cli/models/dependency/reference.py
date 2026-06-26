@@ -158,7 +158,6 @@ class DependencyReference:
     VIRTUAL_FILE_EXTENSIONS = (
         ".prompt.md",
         ".instructions.md",
-        ".chatmode.md",
         ".agent.md",
     )
 
@@ -183,7 +182,6 @@ class DependencyReference:
             "agents",
             "prompts",
             "instructions",
-            "chatmodes",
             "collections",
             "contexts",
             "memory",
@@ -205,7 +203,7 @@ class DependencyReference:
         """Return the type of virtual package, or None if not virtual.
 
         Classification is by extension only -- never by path segment.
-        ``.prompt.md``/``.instructions.md``/``.chatmode.md``/``.agent.md``
+        ``.prompt.md``/``.instructions.md``/``.agent.md``
         is FILE; everything else is SUBDIRECTORY (resolved at fetch time
         by probing for ``apm.yml``, ``SKILL.md``, ``plugin.json``, etc).
         Paths like ``collections/foo`` (no extension) are SUBDIRECTORY.
@@ -1125,7 +1123,7 @@ class DependencyReference:
 
         The only parse-time inference kept is **structural**: a path whose
         last segment ends in a virtual file extension
-        (``.prompt.md``/``.instructions.md``/``.chatmode.md``/``.agent.md``)
+        (``.prompt.md``/``.instructions.md``/``.agent.md``)
         is by shape a virtual file dep -- the file is the last segment and
         the repo is everything before it.  This is not a directory-marker
         heuristic; the file extension is the type.  The shallower boundary

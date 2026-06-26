@@ -53,18 +53,18 @@ class TestEnhancedPrimitiveDiscovery(unittest.TestCase):
     def _create_directory_structure(self):
         """Create basic test directory structure."""
         # Local .apm directory
-        (self.temp_dir_path / ".apm" / "chatmodes").mkdir(parents=True, exist_ok=True)
+        (self.temp_dir_path / ".apm" / "agents").mkdir(parents=True, exist_ok=True)
         (self.temp_dir_path / ".apm" / "instructions").mkdir(parents=True, exist_ok=True)
         (self.temp_dir_path / ".apm" / "context").mkdir(parents=True, exist_ok=True)
 
         # Dependency directories
-        (self.temp_dir_path / "apm_modules" / "dep1" / ".apm" / "chatmodes").mkdir(
+        (self.temp_dir_path / "apm_modules" / "dep1" / ".apm" / "agents").mkdir(
             parents=True, exist_ok=True
         )
         (self.temp_dir_path / "apm_modules" / "dep1" / ".apm" / "instructions").mkdir(
             parents=True, exist_ok=True
         )
-        (self.temp_dir_path / "apm_modules" / "dep2" / ".apm" / "chatmodes").mkdir(
+        (self.temp_dir_path / "apm_modules" / "dep2" / ".apm" / "agents").mkdir(
             parents=True, exist_ok=True
         )
         (self.temp_dir_path / "apm_modules" / "dep2" / ".apm" / "context").mkdir(
@@ -112,7 +112,7 @@ description: Test {primitive_type} for {name}
         # Test chatmode with source
         chatmode = Chatmode(
             name="test-chatmode",
-            file_path=Path("test.chatmode.md"),
+            file_path=Path("test.agent.md"),
             description="Test chatmode",
             apply_to="**/*.py",
             content="# Test content",
@@ -144,7 +144,7 @@ description: Test {primitive_type} for {name}
         # Add first primitive (local)
         local_chatmode = Chatmode(
             name="assistant",
-            file_path=Path("local.chatmode.md"),
+            file_path=Path("local.agent.md"),
             description="Local assistant",
             apply_to="**/*.py",
             content="Local content",
@@ -155,7 +155,7 @@ description: Test {primitive_type} for {name}
         # Add conflicting primitive (dependency)
         dep_chatmode = Chatmode(
             name="assistant",
-            file_path=Path("dep.chatmode.md"),
+            file_path=Path("dep.agent.md"),
             description="Dependency assistant",
             apply_to="**/*.py",
             content="Dependency content",
@@ -195,7 +195,7 @@ description: Test {primitive_type} for {name}
         """Test scanning only local primitives."""
         # Create local primitives
         self._create_primitive_file(
-            self.temp_dir_path / ".apm" / "chatmodes" / "local-assistant.chatmode.md",
+            self.temp_dir_path / ".apm" / "agents" / "local-assistant.agent.md",
             "chatmode",
             "local-assistant",
         )
@@ -224,7 +224,7 @@ description: Test {primitive_type} for {name}
         self._create_apm_yml(dependencies)
 
         # Create dependency primitives with proper org-namespaced structure
-        (self.temp_dir_path / "apm_modules" / "company" / "dep1" / ".apm" / "chatmodes").mkdir(
+        (self.temp_dir_path / "apm_modules" / "company" / "dep1" / ".apm" / "agents").mkdir(
             parents=True, exist_ok=True
         )
         self._create_primitive_file(
@@ -233,8 +233,8 @@ description: Test {primitive_type} for {name}
             / "company"
             / "dep1"
             / ".apm"
-            / "chatmodes"
-            / "dep-assistant.chatmode.md",
+            / "agents"
+            / "dep-assistant.agent.md",
             "chatmode",
             "dep-assistant",
         )
@@ -277,14 +277,14 @@ description: Test {primitive_type} for {name}
 
         # Create conflicting primitives - same name in local and dependency
         self._create_primitive_file(
-            self.temp_dir_path / ".apm" / "chatmodes" / "assistant.chatmode.md",
+            self.temp_dir_path / ".apm" / "agents" / "assistant.agent.md",
             "chatmode",
             "assistant",
             "Local assistant content",
         )
 
         # Create dependency primitive with proper org-namespaced structure
-        (self.temp_dir_path / "apm_modules" / "company" / "dep1" / ".apm" / "chatmodes").mkdir(
+        (self.temp_dir_path / "apm_modules" / "company" / "dep1" / ".apm" / "agents").mkdir(
             parents=True, exist_ok=True
         )
         self._create_primitive_file(
@@ -293,8 +293,8 @@ description: Test {primitive_type} for {name}
             / "company"
             / "dep1"
             / ".apm"
-            / "chatmodes"
-            / "assistant.chatmode.md",
+            / "agents"
+            / "assistant.agent.md",
             "chatmode",
             "assistant",
             "Dependency assistant content",
@@ -398,11 +398,11 @@ description: Test {primitive_type} for {name}
         """Test scanning a specific directory with source tracking."""
         # Create dependency directory with primitives
         dep_dir = self.temp_dir_path / "test_dep"
-        (dep_dir / ".apm" / "chatmodes").mkdir(parents=True, exist_ok=True)
+        (dep_dir / ".apm" / "agents").mkdir(parents=True, exist_ok=True)
         (dep_dir / ".apm" / "instructions").mkdir(parents=True, exist_ok=True)
 
         self._create_primitive_file(
-            dep_dir / ".apm" / "chatmodes" / "test-chatmode.chatmode.md",
+            dep_dir / ".apm" / "agents" / "test-chatmode.agent.md",
             "chatmode",
             "test-chatmode",
         )
@@ -426,7 +426,7 @@ description: Test {primitive_type} for {name}
         """Test discovery when apm_modules directory doesn't exist."""
         # Create local primitive only
         self._create_primitive_file(
-            self.temp_dir_path / ".apm" / "chatmodes" / "local.chatmode.md", "chatmode", "local"
+            self.temp_dir_path / ".apm" / "agents" / "local.agent.md", "chatmode", "local"
         )
 
         # Don't create apm_modules directory

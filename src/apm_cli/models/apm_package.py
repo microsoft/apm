@@ -612,7 +612,7 @@ class PackageInfo:
             # Check for any primitive files in .apm/ subdirectories
             for primitive_type in [
                 "instructions",
-                "chatmodes",
+                "agents",
                 "contexts",
                 "prompts",
                 "hooks",

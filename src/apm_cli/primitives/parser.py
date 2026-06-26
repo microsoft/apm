@@ -75,7 +75,7 @@ def parse_primitive_file(file_path: str | Path, source: str = None) -> Primitive
         content = post.content
 
         # Determine primitive type based on file extension
-        if file_path.name.endswith(".chatmode.md") or file_path.name.endswith(".agent.md"):
+        if file_path.name.endswith(".agent.md"):
             return _parse_chatmode(name, file_path, metadata, content, source)
         elif file_path.name.endswith(".instructions.md"):
             return _parse_instruction(name, file_path, metadata, content, source)
@@ -242,19 +242,16 @@ def _extract_primitive_name(file_path: Path) -> str:
             else:
                 base_idx = path_parts.index(".github")
 
-            # For structured directories like .apm/chatmodes/name.chatmode.md
+            # For structured directories like .apm/agents/name.agent.md
             if base_idx + 2 < len(path_parts) and path_parts[base_idx + 1] in [
-                "chatmodes",
                 "instructions",
                 "context",
                 "memory",
                 "agents",
             ]:
                 basename = file_path.name
-                # Remove the double extension (.chatmode.md, .instructions.md, .agent.md, etc.)
-                if basename.endswith(".chatmode.md"):
-                    return basename.replace(".chatmode.md", "")
-                elif basename.endswith(".instructions.md"):
+                # Remove the double extension (.instructions.md, .agent.md, etc.)
+                if basename.endswith(".instructions.md"):
                     return basename.replace(".instructions.md", "")
                 elif basename.endswith(".context.md"):
                     return basename.replace(".context.md", "")
@@ -269,14 +266,14 @@ def _extract_primitive_name(file_path: Path) -> str:
 
     # Fallback: extract from filename
     basename = file_path.name
-    if basename.endswith(".chatmode.md"):
-        return basename.replace(".chatmode.md", "")
-    elif basename.endswith(".instructions.md"):
+    if basename.endswith(".instructions.md"):
         return basename.replace(".instructions.md", "")
     elif basename.endswith(".context.md"):
         return basename.replace(".context.md", "")
     elif basename.endswith(".memory.md"):
         return basename.replace(".memory.md", "")
+    elif basename.endswith(".agent.md"):
+        return basename.replace(".agent.md", "")
     elif basename.endswith(".md"):
         return basename.replace(".md", "")
 

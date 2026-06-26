@@ -229,7 +229,7 @@ ls /tmp/agents-out   # AGENTS.md / per-target files; the source tree stays clean
 re-runs compilation automatically.
 
 - Watched directories (when present): `.apm/`, `.github/instructions/`,
-  `.github/agents/`, `.github/chatmodes/`.
+  `.github/agents/`.
 - Triggers on changes to `.md` files and `apm.yml`.
 - Editing `apm.yml`'s `target:` / `targets:` mid-session takes effect on
   the next file event; no need to restart the watcher. The CLI `--target`

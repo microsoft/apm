@@ -1761,7 +1761,7 @@ class TestVirtualFilePackageYamlGeneration:
         dep_ref.VIRTUAL_FILE_EXTENSIONS = [
             ".prompt.md",
             ".instructions.md",
-            ".chatmode.md",
+            ".agent.md",
             ".agent.md",
         ]
         return dep_ref

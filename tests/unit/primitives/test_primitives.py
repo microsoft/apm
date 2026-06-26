@@ -29,7 +29,7 @@ class TestPrimitiveModels(unittest.TestCase):
         # Valid chatmode
         chatmode = Chatmode(
             name="test-chatmode",
-            file_path=Path("test.chatmode.md"),
+            file_path=Path("test.agent.md"),
             description="Test chatmode",
             apply_to="**/*.py",
             content="# Test content",
@@ -40,7 +40,7 @@ class TestPrimitiveModels(unittest.TestCase):
         # Missing description
         chatmode_no_desc = Chatmode(
             name="test",
-            file_path=Path("test.chatmode.md"),
+            file_path=Path("test.agent.md"),
             description="",
             apply_to=None,
             content="# Test content",
@@ -52,7 +52,7 @@ class TestPrimitiveModels(unittest.TestCase):
         # Empty content
         chatmode_no_content = Chatmode(
             name="test",
-            file_path=Path("test.chatmode.md"),
+            file_path=Path("test.agent.md"),
             description="Test",
             apply_to=None,
             content="",
@@ -110,7 +110,7 @@ class TestPrimitiveModels(unittest.TestCase):
         self.assertEqual(len(collection.all_primitives()), 0)
 
         # Add primitives
-        chatmode = Chatmode("test", Path("test.chatmode.md"), "desc", None, "content")
+        chatmode = Chatmode("test", Path("test.agent.md"), "desc", None, "content")
         instruction = Instruction(
             "test", Path("test.instructions.md"), "desc", "**/*.py", "content"
         )
@@ -207,7 +207,7 @@ class TestPrimitiveModels(unittest.TestCase):
             primitive_type="chatmode",
             winning_source="local",
             losing_sources=["dependency:pkg-a", "dependency:pkg-b"],
-            file_path=Path(".github/chatmodes/my-chatmode.chatmode.md"),
+            file_path=Path(".github/agents/my-chatmode.agent.md"),
         )
         result = str(conflict)
         self.assertIn("chatmode", result)
@@ -233,7 +233,7 @@ class TestPrimitiveModels(unittest.TestCase):
         collection = PrimitiveCollection()
         dep_chatmode = Chatmode(
             name="assistant",
-            file_path=Path("dep.chatmode.md"),
+            file_path=Path("dep.agent.md"),
             description="dep version",
             apply_to=None,
             content="dep content",
@@ -241,7 +241,7 @@ class TestPrimitiveModels(unittest.TestCase):
         )
         local_chatmode = Chatmode(
             name="assistant",
-            file_path=Path("local.chatmode.md"),
+            file_path=Path("local.agent.md"),
             description="local version",
             apply_to=None,
             content="local content",
@@ -263,7 +263,7 @@ class TestPrimitiveModels(unittest.TestCase):
         collection = PrimitiveCollection()
         local_chatmode = Chatmode(
             name="assistant",
-            file_path=Path("local.chatmode.md"),
+            file_path=Path("local.agent.md"),
             description="local version",
             apply_to=None,
             content="local content",
@@ -271,7 +271,7 @@ class TestPrimitiveModels(unittest.TestCase):
         )
         dep_chatmode = Chatmode(
             name="assistant",
-            file_path=Path("dep.chatmode.md"),
+            file_path=Path("dep.agent.md"),
             description="dep version",
             apply_to=None,
             content="dep content",
@@ -290,7 +290,7 @@ class TestPrimitiveModels(unittest.TestCase):
         collection = PrimitiveCollection()
         dep_a = Chatmode(
             name="shared",
-            file_path=Path("a.chatmode.md"),
+            file_path=Path("a.agent.md"),
             description="from a",
             apply_to=None,
             content="content a",
@@ -298,7 +298,7 @@ class TestPrimitiveModels(unittest.TestCase):
         )
         dep_b = Chatmode(
             name="shared",
-            file_path=Path("b.chatmode.md"),
+            file_path=Path("b.agent.md"),
             description="from b",
             apply_to=None,
             content="content b",
@@ -322,7 +322,7 @@ class TestPrimitiveModels(unittest.TestCase):
         # Trigger a conflict for chatmode
         dep = Chatmode(
             name="x",
-            file_path=Path("dep.chatmode.md"),
+            file_path=Path("dep.agent.md"),
             description="d",
             apply_to=None,
             content="c",
@@ -330,7 +330,7 @@ class TestPrimitiveModels(unittest.TestCase):
         )
         local = Chatmode(
             name="x",
-            file_path=Path("local.chatmode.md"),
+            file_path=Path("local.agent.md"),
             description="d",
             apply_to=None,
             content="c",
@@ -349,7 +349,7 @@ class TestPrimitiveModels(unittest.TestCase):
         collection = PrimitiveCollection()
         local_c = Chatmode(
             name="a",
-            file_path=Path("a.chatmode.md"),
+            file_path=Path("a.agent.md"),
             description="d",
             apply_to=None,
             content="c",
@@ -357,7 +357,7 @@ class TestPrimitiveModels(unittest.TestCase):
         )
         dep_c = Chatmode(
             name="b",
-            file_path=Path("b.chatmode.md"),
+            file_path=Path("b.agent.md"),
             description="d",
             apply_to=None,
             content="c",
@@ -412,7 +412,7 @@ Provide constructive feedback and suggestions for improvement.
 """
 
         # Create test file
-        file_path = os.path.join(self.temp_dir_path, "code-review.chatmode.md")
+        file_path = os.path.join(self.temp_dir_path, "code-review.agent.md")
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(chatmode_content)
 
@@ -518,7 +518,7 @@ This project is a command-line tool for managing AI workflows.
         """Test primitive name extraction from various path formats."""
         # Test structured .apm/ paths
         self.assertEqual(
-            _extract_primitive_name(Path(".apm/chatmodes/code-review.chatmode.md")),
+            _extract_primitive_name(Path(".apm/agents/code-review.agent.md")),
             "code-review",
         )
         self.assertEqual(
@@ -532,7 +532,7 @@ This project is a command-line tool for managing AI workflows.
 
         # Test .github/ paths (VSCode compatibility)
         self.assertEqual(
-            _extract_primitive_name(Path(".github/chatmodes/assistant.chatmode.md")),
+            _extract_primitive_name(Path(".github/agents/assistant.agent.md")),
             "assistant",
         )
 
@@ -543,7 +543,7 @@ This project is a command-line tool for managing AI workflows.
         )
 
         # Test generic files
-        self.assertEqual(_extract_primitive_name(Path("my-chatmode.chatmode.md")), "my-chatmode")
+        self.assertEqual(_extract_primitive_name(Path("my-chatmode.agent.md")), "my-chatmode")
 
     def test_malformed_files(self):
         """Test handling of malformed files."""
@@ -556,7 +556,7 @@ invalid yaml: [
 # Test content
 """
 
-        file_path = os.path.join(self.temp_dir_path, "malformed.chatmode.md")
+        file_path = os.path.join(self.temp_dir_path, "malformed.agent.md")
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(malformed_content)
 
@@ -574,10 +574,10 @@ class TestPrimitiveDiscovery(unittest.TestCase):
         self.temp_dir_path = self.temp_dir.name
 
         # Create directory structure
-        os.makedirs(os.path.join(self.temp_dir_path, ".apm", "chatmodes"), exist_ok=True)
+        os.makedirs(os.path.join(self.temp_dir_path, ".apm", "agents"), exist_ok=True)
         os.makedirs(os.path.join(self.temp_dir_path, ".apm", "instructions"), exist_ok=True)
         os.makedirs(os.path.join(self.temp_dir_path, ".apm", "context"), exist_ok=True)
-        os.makedirs(os.path.join(self.temp_dir_path, ".github", "chatmodes"), exist_ok=True)
+        os.makedirs(os.path.join(self.temp_dir_path, ".github", "agents"), exist_ok=True)
 
     def tearDown(self):
         """Tear down test fixtures."""
@@ -610,7 +610,7 @@ description: Test context
 
         # Write files
         with open(
-            os.path.join(self.temp_dir_path, ".apm", "chatmodes", "assistant.chatmode.md"),
+            os.path.join(self.temp_dir_path, ".apm", "agents", "assistant.agent.md"),
             "w",
         ) as f:
             f.write(chatmode_content)
@@ -628,7 +628,7 @@ description: Test context
             f.write(context_content)
 
         with open(
-            os.path.join(self.temp_dir_path, ".github", "chatmodes", "vscode.chatmode.md"),
+            os.path.join(self.temp_dir_path, ".github", "agents", "vscode.agent.md"),
             "w",
         ) as f:
             f.write(chatmode_content)
@@ -658,7 +658,7 @@ description: Test context
         # Create test files
         os.makedirs(os.path.join(self.temp_dir_path, "custom"), exist_ok=True)
 
-        test_files = ["test1.chatmode.md", "custom/test2.chatmode.md"]
+        test_files = ["test1.agent.md", "custom/test2.agent.md"]
 
         for file_rel_path in test_files:
             file_path = os.path.join(self.temp_dir_path, file_rel_path)
@@ -667,7 +667,7 @@ description: Test context
                 f.write("---\ndescription: Test\n---\n\n# Test")
 
         # Test pattern matching
-        patterns = ["**/*.chatmode.md"]
+        patterns = ["**/*.agent.md"]
         found_files = find_primitive_files(self.temp_dir_path, patterns)
 
         # Should find 2 files (glob doesn't match hidden directories by default)
@@ -676,22 +676,22 @@ description: Test context
         # Verify all are Path objects
         for file_path in found_files:
             self.assertIsInstance(file_path, Path)
-            self.assertTrue(file_path.name.endswith(".chatmode.md"))
+            self.assertTrue(file_path.name.endswith(".agent.md"))
 
     def test_find_primitive_files_specific_patterns(self):
         """Test finding primitive files with specific patterns."""
         # Test with .apm specific pattern
-        apm_file = os.path.join(self.temp_dir_path, ".apm", "chatmodes", "test.chatmode.md")
+        apm_file = os.path.join(self.temp_dir_path, ".apm", "agents", "test.agent.md")
         with open(apm_file, "w") as f:
             f.write("---\ndescription: Test\n---\n\n# Test")
 
         # Test .apm specific pattern
-        patterns = ["**/.apm/chatmodes/*.chatmode.md"]
+        patterns = ["**/.apm/agents/*.agent.md"]
         found_files = find_primitive_files(self.temp_dir_path, patterns)
 
         # Should find the .apm file
         self.assertEqual(len(found_files), 1)
-        self.assertTrue(found_files[0].name.endswith(".chatmode.md"))
+        self.assertTrue(found_files[0].name.endswith(".agent.md"))
 
 
 class TestListValuedFrontmatterNormalization(unittest.TestCase):
@@ -761,7 +761,7 @@ class TestListValuedFrontmatterNormalization(unittest.TestCase):
         self.assertIsInstance(primitive, Instruction)
         self.assertEqual(primitive.apply_to, "")
 
-    # -- applyTo normalization for .agent.md / .chatmode.md -------------------
+    # -- applyTo normalization for .agent.md / .agent.md -------------------
 
     def test_chatmode_apply_to_list_normalizes(self):
         """applyTo list in .agent.md normalizes to a string (not None)."""

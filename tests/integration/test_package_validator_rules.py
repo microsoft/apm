@@ -129,7 +129,7 @@ class TestValidatePackageStructure:
     def test_with_chatmode_primitive(self, tmp_path):
         _make_minimal_pkg(tmp_path)
         apm_dir = _make_apm_dir(tmp_path)
-        _add_primitive(apm_dir, "chatmodes", "my.chatmode.md")
+        _add_primitive(apm_dir, "agents", "my.agent.md")
         v = PackageValidator()
         result = v.validate_package_structure(tmp_path)
         assert result.is_valid
@@ -275,7 +275,7 @@ class TestValidatePrimitiveStructure:
 
     def test_all_primitive_types_detected(self, tmp_path):
         apm_dir = _make_apm_dir(tmp_path)
-        _add_primitive(apm_dir, "chatmodes", "my.chatmode.md")
+        _add_primitive(apm_dir, "agents", "my.agent.md")
         _add_primitive(apm_dir, "contexts", "my.context.md")
         _add_primitive(apm_dir, "prompts", "my.prompt.md")
         v = PackageValidator()
@@ -295,7 +295,7 @@ class TestIsValidPrimitiveName:
 
     def test_valid_chatmode_name(self):
         v = PackageValidator()
-        assert v._is_valid_primitive_name("my.chatmode.md", "chatmodes") is True
+        assert v._is_valid_primitive_name("my.agent.md", "agents") is True
 
     def test_valid_context_name(self):
         v = PackageValidator()
@@ -315,7 +315,7 @@ class TestIsValidPrimitiveName:
 
     def test_name_wrong_suffix(self):
         v = PackageValidator()
-        assert v._is_valid_primitive_name("my.chatmode.md", "instructions") is False
+        assert v._is_valid_primitive_name("my.agent.md", "instructions") is False
 
     def test_name_unknown_primitive_type_passes(self):
         v = PackageValidator()

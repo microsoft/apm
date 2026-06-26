@@ -448,7 +448,7 @@ def _validate_project(logger: CommandLogger, dry_run: bool, source_root: Path) -
     # Check if .apm directory has actual content
     apm_dir = source_root / APM_DIR
     local_apm_has_content = apm_dir.exists() and (
-        any(apm_dir.rglob("*.instructions.md")) or any(apm_dir.rglob("*.chatmode.md"))
+        any(apm_dir.rglob("*.instructions.md")) or any(apm_dir.rglob("*.agent.md"))
     )
 
     # If no primitive sources exist, check deeper to provide better feedback
@@ -457,20 +457,20 @@ def _validate_project(logger: CommandLogger, dry_run: bool, source_root: Path) -
         has_empty_apm = (
             apm_dir.exists()
             and not any(apm_dir.rglob("*.instructions.md"))
-            and not any(apm_dir.rglob("*.chatmode.md"))
+            and not any(apm_dir.rglob("*.agent.md"))
         )
 
         if has_empty_apm:
             logger.error("No instruction files found in .apm/ directory")
             logger.progress(" To add instructions, create files like:")
             logger.progress("   .apm/instructions/coding-standards.instructions.md")
-            logger.progress("   .apm/chatmodes/backend-engineer.chatmode.md")
+            logger.progress("   .apm/agents/backend-engineer.agent.md")
         else:
             logger.error("No APM content found to compile")
             logger.progress(" To get started:")
             logger.progress("   1. Install APM dependencies: apm install <owner>/<repo>")
             logger.progress("   2. Or create local instructions: mkdir -p .apm/instructions")
-            logger.progress("   3. Then create .instructions.md or .chatmode.md files")
+            logger.progress("   3. Then create .instructions.md or .agent.md files")
 
         if not dry_run:  # Don't exit on dry-run to allow testing
             sys.exit(1)

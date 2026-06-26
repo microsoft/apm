@@ -31,12 +31,11 @@ class AgentIntegrator(BaseIntegrator):
     _LF_NORMALIZED_DEPLOY = True
 
     def find_agent_files(self, package_path: Path) -> list[Path]:
-        """Find all .agent.md and .chatmode.md files in a package.
+        """Find all .agent.md files in a package.
 
         Searches in:
-        - Package root directory (.agent.md and .chatmode.md)
-        - .apm/agents/ subdirectory (new standard, recursive)
-        - .apm/chatmodes/ subdirectory (legacy)
+        - Package root directory (.agent.md)
+        - .apm/agents/ subdirectory (recursive)
 
         Args:
             package_path: Path to the package directory
@@ -47,7 +46,6 @@ class AgentIntegrator(BaseIntegrator):
         files: list[Path] = []
         # Flat search in package root
         files += self.find_files_by_glob(package_path, "*.agent.md")
-        files += self.find_files_by_glob(package_path, "*.chatmode.md")
         # Recursive search in .apm/agents/ (use ** glob for subdirectories)
         apm_agents = package_path / ".apm" / "agents"
         if apm_agents.exists():
@@ -56,10 +54,6 @@ class AgentIntegrator(BaseIntegrator):
             for f in self.find_files_by_glob(apm_agents, "**/*.md"):
                 if not f.name.endswith(".agent.md") and f not in files:
                     files.append(f)
-        # Flat search in .apm/chatmodes/ (legacy)
-        apm_chatmodes = package_path / ".apm" / "chatmodes"
-        if apm_chatmodes.exists():
-            files += self.find_files_by_glob(apm_chatmodes, "*.chatmode.md")
         return files
 
     # NOTE: find_skill_file(), integrate_skill(), and _generate_skill_agent_content()
@@ -83,12 +77,7 @@ class AgentIntegrator(BaseIntegrator):
         """Generate target filename using the extension from *target*'s agents mapping."""
         mapping = target.primitives.get("agents")
         ext = mapping.extension if mapping else ".agent.md"
-        if source_file.name.endswith(".agent.md"):
-            stem = source_file.name[:-9]
-        elif source_file.name.endswith(".chatmode.md"):
-            stem = source_file.name[:-12]
-        else:
-            stem = source_file.stem
+        stem = source_file.name[:-9] if source_file.name.endswith(".agent.md") else source_file.stem
         return f"{stem}{ext}"
 
     def integrate_agents_for_target(

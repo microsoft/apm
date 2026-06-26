@@ -19,14 +19,10 @@ from ..models.apm_package import APMPackage  # noqa: E402
 # Common primitive patterns for local discovery (with recursive search)
 LOCAL_PRIMITIVE_PATTERNS: dict[str, list[str]] = {
     "chatmode": [
-        # New standard (.agent.md)
+        # Standard (.agent.md)
         "**/.apm/agents/*.agent.md",
         "**/.github/agents/*.agent.md",
         "**/*.agent.md",  # Generic .agent.md files
-        # Legacy support (.chatmode.md)
-        "**/.apm/chatmodes/*.chatmode.md",
-        "**/.github/chatmodes/*.chatmode.md",
-        "**/*.chatmode.md",  # Generic .chatmode.md files
     ],
     "instruction": [
         "**/.apm/instructions/*.instructions.md",
@@ -61,8 +57,7 @@ PRIMITIVE_SUFFIXES: frozenset[str] = frozenset(
 # Dependency primitive patterns (for .apm directory within dependencies)
 DEPENDENCY_PRIMITIVE_PATTERNS: dict[str, list[str]] = {
     "chatmode": [
-        "agents/*.agent.md",  # New standard
-        "chatmodes/*.chatmode.md",  # Legacy
+        "agents/*.agent.md",
     ],
     "instruction": ["instructions/*.instructions.md"],
     "context": ["context/*.context.md", "memory/*.memory.md"],
@@ -73,7 +68,6 @@ DEPENDENCY_PRIMITIVE_PATTERNS: dict[str, list[str]] = {
 DEPENDENCY_GITHUB_PRIMITIVE_PATTERNS: dict[str, list[str]] = {
     "chatmode": [
         "agents/*.agent.md",
-        "chatmodes/*.chatmode.md",
     ],
     "instruction": ["instructions/*.instructions.md"],
     "context": [
@@ -120,7 +114,7 @@ def discover_primitives(
 ) -> PrimitiveCollection:
     """Find all APM primitive files in the project.
 
-    Searches for .chatmode.md, .instructions.md, .context.md, .memory.md files
+    Searches for .agent.md, .instructions.md, .context.md, .memory.md files
     in both .apm/ and .github/ directory structures, plus SKILL.md at root.
 
     Results are memoized per ``(realpath(base_dir), exclude_patterns)`` for

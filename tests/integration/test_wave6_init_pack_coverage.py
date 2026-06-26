@@ -704,9 +704,9 @@ dependencies:
             tmp_path,
             "name: chatmode-pkg\nversion: 1.0.0\ndescription: Chatmode package\ndependencies:\n  apm: []\n",
         )
-        chatmode_dir = tmp_path / ".apm" / "chatmodes"
+        chatmode_dir = tmp_path / ".apm" / "agents"
         chatmode_dir.mkdir(parents=True)
-        (chatmode_dir / "backend.chatmode.md").write_text(
+        (chatmode_dir / "backend.agent.md").write_text(
             "---\ndescription: Backend mode\n---\n# Backend\nBackend focus.\n",
             encoding="utf-8",
         )

@@ -88,9 +88,9 @@ def _make_project(
         )
 
     if with_chatmodes:
-        chatmode_dir = root / ".apm" / "chatmodes"
+        chatmode_dir = root / ".apm" / "agents"
         chatmode_dir.mkdir(parents=True, exist_ok=True)
-        (chatmode_dir / "backend.chatmode.md").write_text(
+        (chatmode_dir / "backend.agent.md").write_text(
             "---\ndescription: Backend engineer mode\n---\n\n"
             "# Backend Engineer\n\n"
             "You specialise in backend development.\n",
@@ -518,7 +518,7 @@ class TestCompileDisplayHelpers:
             "primitives_found": 5,
             "instructions": 3,
             "contexts": 2,
-            "chatmodes": 0,
+            "agents": 0,
         }
         with mock.patch("apm_cli.commands.compile.cli._get_console", return_value=None):
             _display_single_file_summary(stats, "Matched", "abc123", Path("AGENTS.md"), False)
@@ -532,7 +532,7 @@ class TestCompileDisplayHelpers:
             "primitives_found": 5,
             "instructions": 3,
             "contexts": 2,
-            "chatmodes": 1,
+            "agents": 1,
         }
         mock_console = mock.MagicMock()
         with mock.patch("apm_cli.commands.compile.cli._get_console", return_value=mock_console):

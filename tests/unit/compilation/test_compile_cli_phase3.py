@@ -33,7 +33,7 @@ def _make_stats(**kwargs: Any) -> dict[str, Any]:
         "primitives_found": 3,
         "instructions": 2,
         "contexts": 1,
-        "chatmodes": 0,
+        "agents": 0,
     }
     base.update(kwargs)
     return base

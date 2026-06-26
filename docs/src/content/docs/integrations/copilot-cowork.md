@@ -112,7 +112,7 @@ If you try project scope, APM stops with a clean error that tells you to rerun w
 
 ## Skills-only behaviour
 
-Cowork deploys only `SKILL.md` content. Instructions, agents, prompts, hooks, commands, chatmodes, and MCP material are skipped for this target.
+Cowork deploys only `SKILL.md` content. Instructions, agents, prompts, hooks, commands, and MCP material are skipped for this target.
 
 If any selected package contains non-skill primitives, APM emits one `[!]` summary warning for the whole install run. The install still succeeds, and the skill content still deploys.
 

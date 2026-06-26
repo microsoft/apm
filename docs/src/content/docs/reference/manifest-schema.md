@@ -495,7 +495,7 @@ A dependency MAY target a subdirectory or a file within a repository rather than
 
 | Kind | Detection rule | Example |
 |---|---|---|
-| **File** | `virtual_path` ends in `.prompt.md`, `.instructions.md`, `.agent.md`, or `.chatmode.md` | `owner/repo/prompts/review.prompt.md` |
+| **File** | `virtual_path` ends in `.prompt.md`, `.instructions.md`, or `.agent.md` | `owner/repo/prompts/review.prompt.md` |
 | **Subdirectory** | `virtual_path` does not match any file extension above | `owner/repo/skills/security` |
 
 Classification is by extension only, never by path segment. A path like `owner/repo/collections/security` (no extension) is a **Subdirectory**: the on-disk shape (APM package with `apm.yml`, skill bundle, or plugin) is resolved at fetch time by probing for `apm.yml` first.

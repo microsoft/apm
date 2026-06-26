@@ -21,7 +21,7 @@ def package_with_symlinks(tmp_path: Path) -> Path:
     pkg = tmp_path / "pkg"
     (pkg / ".apm" / "prompts").mkdir(parents=True)
     (pkg / ".apm" / "agents").mkdir(parents=True)
-    (pkg / ".apm" / "chatmodes").mkdir(parents=True)
+    (pkg / ".apm" / "agents").mkdir(parents=True)
 
     # Create a sentinel file outside the package
     sentinel = tmp_path / "sentinel.txt"
@@ -30,12 +30,12 @@ def package_with_symlinks(tmp_path: Path) -> Path:
     # Create legitimate files
     (pkg / ".apm" / "prompts" / "legit.prompt.md").write_text("legit prompt")
     (pkg / ".apm" / "agents" / "legit.agent.md").write_text("legit agent")
-    (pkg / ".apm" / "chatmodes" / "legit.chatmode.md").write_text("legit chatmode")
+    (pkg / ".apm" / "agents" / "legit.agent.md").write_text("legit chatmode")
 
     # Create symlinks pointing outside
     (pkg / ".apm" / "prompts" / "leak.prompt.md").symlink_to(sentinel)
     (pkg / ".apm" / "agents" / "leak.agent.md").symlink_to(sentinel)
-    (pkg / ".apm" / "chatmodes" / "leak.chatmode.md").symlink_to(sentinel)
+    (pkg / ".apm" / "agents" / "leak.agent.md").symlink_to(sentinel)
 
     # Create a symlink with absolute path target
     (pkg / "abs.agent.md").symlink_to(sentinel)
@@ -76,10 +76,10 @@ class TestAgentIntegratorSymlinkRejection:
         # Should find legit files but not symlinks
         assert all(not p.is_symlink() for p in result)
         assert not any(p.name == "leak.agent.md" for p in result)
-        assert not any(p.name == "leak.chatmode.md" for p in result)
+        assert not any(p.name == "leak.agent.md" for p in result)
         assert not any(p.name == "abs.agent.md" for p in result)
         assert any(p.name == "legit.agent.md" for p in result)
-        assert any(p.name == "legit.chatmode.md" for p in result)
+        assert any(p.name == "legit.agent.md" for p in result)
 
     def test_copy_agent_rejects_symlink_source(
         self, package_with_symlinks: Path, tmp_path: Path

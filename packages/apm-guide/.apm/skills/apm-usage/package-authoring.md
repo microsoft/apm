@@ -45,8 +45,8 @@ my-package/
     instructions/
       security.instructions.md
       python.instructions.md
-    chatmodes/
-      architect.chatmode.md
+    agents/
+      architect.agent.md
     contexts/
       codebase.context.md
     prompts/
@@ -76,7 +76,7 @@ Per-primitive scan paths for `apm install`:
 | instruction | `.apm/instructions/` | No |
 | command (prompt) | `.apm/prompts/` | No |
 | hook | `.apm/hooks/` | Yes: `hooks/` |
-| agent | `.apm/agents/`, `.apm/chatmodes/` | Yes: `*.agent.md` and `*.chatmode.md` at root |
+| agent | `.apm/agents/` | Yes: `*.agent.md` at root |
 | skill | `.apm/skills/<name>/` | Yes: `skills/<name>/` (SKILL_BUNDLE or MARKETPLACE_PLUGIN) |
 
 **Recommendation for marketplace publishers:** use `.apm/<type>/` for
@@ -229,9 +229,9 @@ and are NOT separators -- only top-level commas split the list. On Copilot
 the value is preserved verbatim; on Claude/Cursor/Windsurf/Kiro comma-lists are
 expanded to a YAML array under `paths:` / `globs:` / `fileMatchPattern:`.
 
-### 2. Chatmode (`*.chatmode.md`)
+### 2. Agent (`*.agent.md`)
 
-Chat persona configuration.
+Chat persona configuration. Place in `.apm/agents/`.
 
 ```yaml
 ---

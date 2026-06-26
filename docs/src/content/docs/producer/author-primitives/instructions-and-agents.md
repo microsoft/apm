@@ -128,9 +128,7 @@ my-package/
       migration-assistant.agent.md
 ```
 
-File names end in `.agent.md`. APM also accepts `.chatmode.md` and the
-legacy `.apm/chatmodes/` directory for backward compatibility; new
-work should use `.agent.md` under `.apm/agents/`.
+File names end in `.agent.md` and live under `.apm/agents/`.
 
 ### Frontmatter
 

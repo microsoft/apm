@@ -43,7 +43,7 @@ into the native rules surface each target expects:
   `applyTo:` glob: `.github/instructions/`, `.claude/rules/`,
   `.cursor/rules/*.mdc`, `.windsurf/rules/`, `.kiro/steering/`.
 
-Other primitive types -- prompts, skills, agents, chatmodes, hooks,
+Other primitive types -- prompts, skills, agents, hooks,
 commands -- are NOT compiled by this command. They are deployed by
 `apm install` directly into the harness directories that consume them
 (`.github/prompts/`, `.agents/skills/`, `.claude/commands/`, etc.).
@@ -287,7 +287,7 @@ be written without modifying files.
 ## Pitfalls
 
 - **Confusing compile's scope.** Compile only handles **instructions**
-  (and optionally a single chatmode to prepend). If you edit a prompt,
+  (and optionally a single agent to prepend via `--chatmode`). If you edit a prompt,
   skill, agent, hook, or command, `apm compile` will not redeploy it
   -- run `apm install` for that.
 - **Forgetting `--target` on a clean workspace.** With no harness

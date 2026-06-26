@@ -143,7 +143,7 @@ dependencies:
     # virtual sub-path -- no marker-segment heuristic involved.
     - group/subgroup/project/skills/<name>
     # Files ending in ``.prompt.md`` / ``.instructions.md`` /
-    # ``.chatmode.md`` / ``.agent.md`` are structurally a virtual file
+    # ``.agent.md`` are structurally a virtual file
     # at parse time; the probe still confirms which directory the file
     # sits under is part of the repo path.
     - group/subgroup/project/<name>.prompt.md

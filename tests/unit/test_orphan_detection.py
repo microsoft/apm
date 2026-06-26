@@ -63,7 +63,7 @@ class TestAgentIntegratorOrphanDetection:
     """Test nuke-and-regenerate sync in AgentIntegrator.
 
     AgentIntegrator now uses nuke approach: removes ALL *-apm.agent.md
-    and *-apm.chatmode.md files. The caller re-integrates from installed packages.
+    and *-apm.agent.md files. The caller re-integrates from installed packages.
     """
 
     def test_sync_removes_all_apm_agent_files(self):
@@ -125,7 +125,7 @@ class TestAgentIntegratorOrphanDetection:
             assert not (agents_dir / "test-apm.agent.md").exists()
 
     def test_sync_removes_chatmode_files(self):
-        """Legacy .chatmode.md files deployed as .agent.md are removed correctly."""
+        """Legacy .agent.md files deployed as .agent.md are removed correctly."""
         with tempfile.TemporaryDirectory() as tmpdir:
             project_root = Path(tmpdir)
             agents_dir = project_root / ".github" / "agents"

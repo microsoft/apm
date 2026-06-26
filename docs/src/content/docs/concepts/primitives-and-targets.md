@@ -33,7 +33,7 @@ Executable, parameterized AI workflows. Equivalent to a callable program for an 
 
 Specialized AI personalities with tool boundaries and expertise scope.
 
-- Source: `.apm/agents/*.agent.md` (legacy: `.chatmode.md`)
+- Source: `.apm/agents/*.agent.md`
 - Deep dive: [Agent workflows](/apm/producer/author-primitives/instructions-and-agents/)
 
 ### Skills

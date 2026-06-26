@@ -48,7 +48,6 @@ my-pkg/
 |   +-- skills/                   # Multi-file capabilities (SKILL.md + assets).
 |   +-- prompts/                  # Reusable prompt templates.
 |   +-- agents/                   # Named agents (model + system prompt + tools).
-|   +-- chatmodes/                # Chat-mode configurations.
 |   +-- context/                  # Shared context fragments.
 |   +-- hooks/                    # Lifecycle hooks (pre/post events).
 +-- .github/                      # Compiled output for Copilot. Generated.
@@ -247,8 +246,6 @@ Per-dependency fields:
   Invocable via `apm run <script>` or directly by the harness CLI.
 - **`agents/`** -- Named agent definitions: model choice, system prompt,
   tool whitelist. One `.agent.md` per agent.
-- **`chatmodes/`** -- Chat-mode configurations for harnesses that expose
-  modes (e.g. Copilot Chat).
 - **`context/`** -- Shared context fragments that other primitives can
   reference. Not loaded standalone.
 - **`hooks/`** -- Host-harness lifecycle hooks, such as tool-use or stop events.

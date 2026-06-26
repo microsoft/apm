@@ -559,7 +559,7 @@ rather than the whole repository.
 **[req-mf-008]** A conforming **consumer** implementation MUST
 classify virtual packages by **file extension only** and MUST NOT
 infer kind from path segments. A `virtual_path` ending in
-`.prompt.md`, `.instructions.md`, `.agent.md`, or `.chatmode.md` is a
+`.prompt.md`, `.instructions.md`, or `.agent.md` is a
 file; any other path is a subdirectory. On-disk shape of a
 subdirectory virtual package is resolved by probing for `apm.yml`
 first.

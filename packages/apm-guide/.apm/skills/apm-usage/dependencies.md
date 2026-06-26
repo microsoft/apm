@@ -279,7 +279,7 @@ Virtual packages reference a subset of a repository.
 
 | Type | Detection rule | Example |
 |------|---------------|---------|
-| File | Ends in `.prompt.md`, `.instructions.md`, `.agent.md`, `.chatmode.md` | `owner/repo/prompts/review.prompt.md` |
+| File | Ends in `.prompt.md`, `.instructions.md`, or `.agent.md` | `owner/repo/prompts/review.prompt.md` |
 | Subdirectory | Does not match a file extension above | `owner/repo/skills/security` |
 
 Classification is by extension only. A path like `owner/repo/collections/security` (no extension) is a Subdirectory; the actual shape -- APM package (incl. dep-only `apm.yml` with no `.apm/`), skill bundle, or plugin -- is resolved at fetch time by probing for `apm.yml`.

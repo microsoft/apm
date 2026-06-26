@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Removed legacy `.chatmode.md` primitive format and `chatmodes/` subdirectory
+  support. Use `.agent.md` files in `.apm/agents/` instead. All discovery
+  patterns, integrator file-scan paths, watcher watch-paths, and extension maps
+  have been updated to the `agents/` + `.agent.md` convention. (#840)
+
 ### Fixed
 
 - Fixed spurious version-range diffs for cached transitive registry
