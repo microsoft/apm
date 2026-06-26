@@ -488,9 +488,14 @@ def test_run_replay_threads_dep_target_subset(monkeypatch, tmp_path):
 
     project_root = tmp_path / "proj"
     project_root.mkdir()
-    (project_root / ".github").mkdir()  # simulate unrelated .github/ dir
+    # Explicit apm.yml with targets: [claude, copilot] makes target resolution
+    # deterministic (not directory-based) and matches the real bug scenario where
+    # a copilot target is active but the dep is narrowed to claude only.
+    (project_root / "apm.yml").write_text(
+        "name: test-project\ntargets:\n  - claude\n  - copilot\n", encoding="utf-8"
+    )
 
-    # Use a local dep whose path resolves to the project root itself so
+    # Use a local dep whose path resolves under project_root so
     # _materialize_install_path does not need network or apm_modules cache.
     lock = LockFile()
     dep = LockedDependency(
@@ -509,7 +514,15 @@ def test_run_replay_threads_dep_target_subset(monkeypatch, tmp_path):
     captured: list = []
 
     def _spy_integrate(*args, **kwargs):
-        captured.append(kwargs.get("dep_target_subset"))
+        # Capture both the resolved targets list and dep_target_subset so the
+        # test confirms (a) the full target set includes copilot (subset is
+        # meaningful) and (b) dep_target_subset is passed through correctly.
+        captured.append(
+            {
+                "target_names": sorted(t.name for t in kwargs.get("targets", [])),
+                "dep_target_subset": kwargs.get("dep_target_subset"),
+            }
+        )
         return {"deployed_files": []}
 
     monkeypatch.setattr(
@@ -527,4 +540,12 @@ def test_run_replay_threads_dep_target_subset(monkeypatch, tmp_path):
     run_replay(config, logger)
 
     assert len(captured) >= 1, "integrate_package_primitives was not called"
-    assert captured[0] == ["claude"], f"dep_target_subset should be ['claude'], got {captured[0]}"
+    call = captured[0]
+    # The resolved target set must include both claude and copilot so the
+    # dep_target_subset=['claude'] actually narrows integration.
+    assert "copilot" in call["target_names"], (
+        f"expected copilot in resolved targets, got {call['target_names']}"
+    )
+    assert call["dep_target_subset"] == ["claude"], (
+        f"dep_target_subset should be ['claude'], got {call['dep_target_subset']}"
+    )
