@@ -134,13 +134,13 @@ apm compile -g
 `GEMINI.md`, `.github/copilot-instructions.md` (see
 [Output layout per target](#output-layout-per-target) below for the
 full per-target breakdown). Teams that commit these files into source
-control face a consistency problem: without `targets:` set in `apm.yml`,
-auto-detection decides which files to produce based on which tool folders
-exist on the current machine. A contributor with only `.claude/` locally
+control face a consistency problem: without `target:` or `targets:` set in
+`apm.yml`, auto-detection decides which files to produce based on which tool
+folders exist on the current machine. A contributor with only `.claude/` locally
 produces `claude` output only; a developer who also has `.github/`
 triggers the two-or-more-folders rule and gets the full `all` expansion
--- producing `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
-`.github/copilot-instructions.md`, and every other target. The committed
+-- producing `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and
+`.github/copilot-instructions.md`. The committed
 set silently tracks whoever last ran `apm compile`.
 
 Set `targets:` in `apm.yml` to declare exactly which agent formats the
@@ -157,8 +157,7 @@ This makes the committed generated files deterministic for humans,
 cloud agents, and contributors who do not run `apm compile` locally
 and rely on the checked-in artifacts.
 
-Accepted values: `copilot`, `claude`, `cursor`, `opencode`, `codex`,
-`gemini`, `antigravity`, `windsurf`, `kiro`, `all`. Full reference:
+For the full list of accepted `targets:` values, see
 [manifest schema -- targets](../../../reference/manifest-schema/#36-target).
 
 ## Examples

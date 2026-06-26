@@ -177,8 +177,8 @@ A plural alias `targets:` (YAML list only) is also accepted and takes precedence
 
 :::tip[Deterministic committed output]
 Teams that commit the files `apm compile` generates face a consistency problem:
-without `targets:` set, auto-detection decides which files to produce based on
-which tool folders exist on the local machine. The committed set silently tracks
+without `target:` or `targets:` set, auto-detection decides which files to produce
+based on which tool folders exist on the local machine. The committed set silently tracks
 whoever last ran `apm compile`. Setting `targets:` makes the output deterministic
 for every developer, CI runner, and cloud agent that relies on the checked-in
 generated files without running `apm compile` locally. See
