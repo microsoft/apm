@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed spurious version-range diffs for cached transitive registry
+  dependencies during `apm update`. (by @nadav-y) (#1921)
+
 ## [0.22.0] - 2026-06-26
 
 ### Added
