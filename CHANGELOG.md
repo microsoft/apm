@@ -7,13 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-06-26
+
 ### Added
 
 - Per-dependency `targets:` scopes a dependency's target-specific primitives
   to selected harnesses (for example `targets: [copilot, claude]`), preventing
   hooks from leaking across tools. Filename-suffix hook routing
   (`*-<harness>-hooks.json`) is deprecated. (#1902)
-- Executable Trust Governance v1 (#1873): executable trust is now one concept
+- Executable Trust Governance v1 (#1875): executable trust is now one concept
   with one resolver and deny-wins precedence. Organizations can now declare an
   `executables:` block in `apm-policy.yml` (`deny_all`, `deny`, `require`,
   `recommend`) that is carried through policy inheritance, closing the
@@ -28,14 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-dependency `exec_status` (`deployed`, `gated_pending_approval`,
   `denied`, `absent`). No cryptographic signing or `enforce`-mandate
   execution is introduced in v1 (an unverified `enforce` rung fail-safe
-  degrades to `recommend`). (by @sergio-sisternes-epam) (#1873)
+  degrades to `recommend`). (by @sergio-sisternes-epam; closes #1873) (#1875)
 - `apm policy explain <pkg>` prints the effective executable-trust decision
   for a package: whether it is allowed, the deciding policy layer, and any
   layers it shadows. `apm doctor` adds a fleet-level executable-trust drift
-  check that flags packages allowed locally but denied by org policy. (#1873)
+  check that flags packages allowed locally but denied by org policy. (#1875)
 - `apm approve --recommended` bulk-accepts an organization's `recommend`
   set, and `apm approve --list` shows the effective trust state of every
-  installed package with executables. (#1873)
+  installed package with executables. (#1875)
 - The shared gh-aw workflow `.github/workflows/shared/apm.md` exposes an optional `apm-version` import input that pins the apm CLI version for both the pack and restore `microsoft/apm-action` steps (so the two cannot skew), surviving `gh aw update` without hand-editing the vendored file. Omitting it falls through to the action's pinned default via a gh-aw schema default, so non-opting consumers stay reproducible instead of floating to `latest`. (#1842)
 - `apm config set target <env>` configures a default install target so a bare
   `apm install` deploys to it -- set the target once, then install everywhere
@@ -47,9 +49,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API, so Azure DevOps organizations -- which forbid repo names that begin
   or end with `.` -- can host an APM governance policy repo for the first
   time. (by @sergio-sisternes-epam; closes #1813) (#1830)
+- `apm compile -g` / `--global` compiles global (apply_to-less) instructions
+  into user-scope root context files (`~/.claude/CLAUDE.md`,
+  `~/.codex/AGENTS.md`, ...). `apm install -g` now prints a read-only hint
+  pointing at it; no root context file is written on install. (closes #1485)
+  (#1632)
+- Each `apm.lock.yaml` dependency entry now records the installed package's own
+  `name` and `version` -- for direct and transitive deps across git, local,
+  registry, and cached sources -- so dependency inventory and upgrade planning
+  are answerable straight from the lockfile. (closes #1888) (#1904)
+- `apm config` gains `self-update.channel` and `self-update.install-dir` keys
+  so `apm self-update` reads persisted non-secret installer defaults;
+  credentials, tokens, and mirror URLs stay out of persisted config. (closes
+  #667) (#1915)
 
 ### Changed
 
+- **BREAKING:** Windsurf (Devin Desktop) skills now deploy to the cross-tool
+  `.agents/skills/<name>/SKILL.md` path instead of `.windsurf/skills/`, joining
+  the other five harnesses. Existing `.windsurf/skills/` deployments are
+  orphaned (not auto-migrated) on next `apm install`; opt out with
+  `--legacy-skill-paths`. (refs #1520) (#1802)
 - Azure DevOps marketplace metadata now resolves through the Azure DevOps
   Items API instead of cloning the whole repo, with transparent fallback to
   the existing git path when REST is unavailable. (by @Aaryan-Dadu; closes
@@ -59,14 +79,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `executables: {allow, deny}` block (the committed, team-wide admin
   decision); pass `--user` to write personal consent to
   `~/.apm/config.json` (the lowest-authority, machine-local override that
-  can only narrow). (#1873)
+  can only narrow). (#1875)
 - The `required-packages-deployed` audit check now asserts package
   PRESENCE in the lockfile rather than materialized `deployed_files`, so an
   install SUCCEEDS when a required package is present-but-parked (its
   executables gated pending approval) and prints a one-command remedy
   instead of hard-failing. A separate `required-executable-untrusted`
   signal hard-fails CI when a required package's executables are untrusted.
-  (#1873)
+  (#1875)
 
 ### Deprecated
 
@@ -74,11 +94,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `executables.allow`. It remains a read alias for one minor cycle and is
   migrated to `executables.allow` on the next `apm approve`/`apm deny`
   write. The org `bin_deploy` deny policy is folded into
-  `executables.deny[bin]` as a deprecated alias. (#1873)
+  `executables.deny[bin]` as a deprecated alias. (#1875)
 - The org `executables.enforce` tier (the v2 mandate rung) is accepted but
   INERT in v1: writing it emits a validation warning and the resolver
   degrades it to `recommend` (no force-execute; a user deny still
-  overrides). (#1873)
+  overrides). (#1875)
 
 ### Removed
 
@@ -101,7 +121,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The standalone `~/.apm/approvals.yml` personal-consent file is removed;
   its contents are migrated into `~/.apm/config.json` under
   `executables: {allow, deny}` on first read (net-new control-surface
-  files = 0). (#1873)
+  files = 0). (#1875)
 
 ### Fixed
 
@@ -110,11 +130,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (text-mode checkout or `core.autocrlf`) now adopts the already-deployed LF
   file, so no-op installs report `(files unchanged)` as they do on
   Linux/macOS. (#1916)
-- `apm update` no longer shows a spurious update for registry semver deps already at the latest matching version. (#1897)
+- `apm update` on a registry semver dependency now re-resolves and re-downloads
+  when a newer matching version exists, instead of leaving the old version in
+  place; registry deps are now first-class across install, update, and every
+  display surface. (by @nadav-y) (#1908)
 - APM-written deployed text files now use LF line endings on every platform,
   so identical content no longer produces different
   `local_deployed_file_hashes` / `deployed_file_hashes` between Windows and
   Linux (which previously churned the lockfile across machines and CI).
+  (#1913)
 - `apm install <pkg>@<marketplace>` now preserves GitLab and other
   non-GitHub hosts from url-type marketplace plugin sources, so auth
   resolution no longer falls back to `github.com` for those installs.
@@ -145,8 +169,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GitHub-family hosts (ref appended to canonical as `#ref`) and GitLab-hosted
   marketplaces (ref injected into `DependencyReference`). Guards prevent
   double-injection when a plugin's own dict source already carries an explicit
-  `ref`, and skip `main`/`HEAD` as implicit defaults. (by @chkp-roniz;
-  mirrors #1824)
+  `ref`, and skip `main`/`HEAD` as implicit defaults. (by @chkp-roniz,
+  #1880; mirrors #1824)
 - GitLab archive URLs with slash-containing branch names (e.g.
   `feat/my-feature`) now produce correctly-formed Artifactory-proxyable
   filenames. The slash is preserved in the path segment (as the GitLab
@@ -154,7 +178,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matching GitLab's own naming convention. Previously,
   `PROXY_REGISTRY_ONLY=1` installs from such branches returned HTTP 404
   from the proxy because the generated filename contained a literal slash.
-  (by @chkp-roniz; fixes the proxy scenario not covered by #1824)
+  (by @chkp-roniz, #1880; fixes the proxy scenario not covered by #1824)
+- `apm install <pkg> --target X` in a directory with no `apm.yml` now persists
+  the selected harness(es) into the auto-created manifest's `targets:`, so a
+  later bare `apm update` redeploys to the same targets without re-specifying
+  `--target`. (closes #1743) (#1901)
+- `apm update` / self-update on macOS no longer prints `-e` literally before
+  each colored line (caused by invoking `install.sh` under `/bin/sh`), and now
+  shows a progress bar during binary download. (by @nadav-y) (#1872)
 
 ### Security
 
