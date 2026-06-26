@@ -171,7 +171,9 @@ class TestCommandExecutor:
             side_effect=subprocess.TimeoutExpired("slow", 30),
         ):
             _execute_command(script, _make_event(), logger=logger, verbose=True)
-        logger.verbose_detail.assert_called_once()
+        # Timeout warning always emits (not verbose-gated); uses logger.warning.
+        logger.warning.assert_called_once()
+        assert "[!]" in logger.warning.call_args[0][0]
 
     def test_merges_script_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("EXISTING_VAR", "original")
