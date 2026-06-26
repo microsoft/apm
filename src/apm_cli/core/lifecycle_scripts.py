@@ -2,18 +2,28 @@
 
 APM supports lifecycle scripts that fire at key moments during install,
 update, and uninstall operations.  Scripts are configured via standalone
-JSON files discovered from three directories (Copilot CLI pattern):
+files discovered from three directories (Copilot CLI pattern):
 
 1. **Policy** -- ``/etc/apm/policy.d/*.json`` (admin-owned, cannot be disabled)
 2. **User**   -- ``~/.apm/scripts/*.json``
-3. **Project** -- ``.apm/scripts.json`` (single file)
+3. **Project** -- ``apm-scripts.yml`` (repo root, YAML, single file)
 
-Each file uses ``{ "version": 1, "scripts": { "<event>": [...] } }``.
+Per-tier format split (intentional):
+- Project tier uses YAML (``apm-scripts.yml`` at repo root, human-authored,
+  trust-audited).
+- Admin (policy.d) and user (~/.apm/scripts/) tiers use JSON, suited for
+  machine/fleet-managed configuration.
 
-Two script types are supported:
+Each file uses ``{ version: 1, scripts: { "<event>": [...] } }``.
 
-- ``command`` -- shell command (``bash`` / ``command`` fields)
-- ``http``    -- HTTPS POST to a URL with optional headers
+Two script types are supported; each entry must declare its kind via a
+``type`` field:
+
+- ``type: command`` -- shell command (``bash`` / ``command`` fields)
+- ``type: http``    -- HTTPS POST to a URL with optional headers
+
+An optional ``description`` field may be added to any entry as a
+free-text annotation (surfaced in dry-run output; otherwise ignored).
 
 Scripts run in source order at each event.  Failures are isolated: a
 script error is logged (verbose) but never aborts the CLI operation.
@@ -127,9 +137,11 @@ class ScriptEntry:
         allowed_env_vars: Opt-in allowlist of env var names that may be
                      passed through / expanded even if they match the
                      credential denylist (e.g. ``ANALYTICS_TOKEN``).
+        description: Optional free-text annotation for the script entry.
+                     Surfaced in dry-run output; otherwise ignored.
         source:      Where this script was defined: ``policy``, ``user``,
                      or ``project``.
-        source_file: Path of the JSON file that declared this script.
+        source_file: Path of the file that declared this script.
     """
 
     script_type: str
@@ -142,6 +154,7 @@ class ScriptEntry:
     cwd: str | None = None
     env: dict[str, str] | None = None
     allowed_env_vars: list[str] | None = None
+    description: str | None = None
     source: str = "project"
     source_file: str | None = None
 
@@ -175,19 +188,13 @@ def _parse_allowed_env_vars(raw: object) -> list[str] | None:
     return names or None
 
 
-def parse_script_file(path: Path, source: str = "project") -> list[ScriptEntry]:
-    """Parse a single JSON script file into a list of :class:`ScriptEntry`.
+def _entries_from_data(data: object, path: Path, source: str) -> list[ScriptEntry]:
+    """Build :class:`ScriptEntry` list from an already-parsed data dict.
 
-    Returns an empty list if the file is malformed or uses an
-    unsupported version.
+    Shared by both JSON (admin/user) and YAML (project) loaders so the
+    entry-building logic is not duplicated.  Returns an empty list if
+    *data* is malformed or uses an unsupported version.
     """
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
-        _logger.debug("Failed to load script file %s: %s", path, e)
-        return []
-
     if not isinstance(data, dict):
         return []
 
@@ -210,7 +217,11 @@ def parse_script_file(path: Path, source: str = "project") -> list[ScriptEntry]:
         for raw in script_list:
             if not isinstance(raw, dict):
                 continue
-            script_type = raw.get("type", "command")
+            # Explicit ``type`` field is canonical; infer from key presence as
+            # a backward-compatible fallback so legacy fixtures still parse.
+            script_type = raw.get("type")
+            if script_type is None:
+                script_type = "http" if raw.get("url") else "command"
             if script_type not in SCRIPT_TYPES:
                 _logger.debug("Ignoring unknown script type %s in %s", script_type, path)
                 continue
@@ -226,11 +237,48 @@ def parse_script_file(path: Path, source: str = "project") -> list[ScriptEntry]:
                     cwd=raw.get("cwd"),
                     env=raw.get("env"),
                     allowed_env_vars=_parse_allowed_env_vars(raw.get("allowedEnvVars")),
+                    description=raw.get("description"),
                     source=source,
                     source_file=str(path),
                 )
             )
     return entries
+
+
+def parse_script_file(path: Path, source: str = "project") -> list[ScriptEntry]:
+    """Parse a single JSON script file into a list of :class:`ScriptEntry`.
+
+    Used for the admin (policy.d) and user (~/.apm/scripts/) tiers which
+    remain JSON.  Returns an empty list if the file is malformed or uses
+    an unsupported version.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        _logger.debug("Failed to load script file %s: %s", path, e)
+        return []
+
+    return _entries_from_data(data, path, source)
+
+
+def parse_project_script_file(path: Path) -> list[ScriptEntry]:
+    """Parse the project-tier ``apm-scripts.yml`` YAML file.
+
+    The project tier uses YAML (human-authored, trust-audited).  All
+    admin and user tier files remain JSON and use :func:`parse_script_file`.
+    Returns an empty list if the file is missing, malformed, or uses an
+    unsupported version.
+    """
+    from apm_cli.utils.yaml_io import load_yaml
+
+    try:
+        data = load_yaml(path)
+    except Exception as e:
+        _logger.debug("Failed to load project script file %s: %s", path, e)
+        return []
+
+    return _entries_from_data(data, path, "project")
 
 
 # -- Script discovery ------------------------------------------------------
@@ -253,9 +301,9 @@ def _get_user_scripts_dir() -> Path:
 
 
 def _get_project_scripts_file(project_root: str | None = None) -> Path:
-    """Return the project-level scripts file (``.apm/scripts.json``)."""
+    """Return the project-level scripts file (``apm-scripts.yml`` at repo root)."""
     root = Path(project_root) if project_root else Path.cwd()
-    return root / ".apm" / "scripts.json"
+    return root / "apm-scripts.yml"
 
 
 def _load_scripts_from_dir(
@@ -278,9 +326,9 @@ def discover_scripts(
     """Discover and merge scripts from all three sources.
 
     Load order (all additive, policy first):
-      1. Policy  -- ``/etc/apm/policy.d/*.json`` (directory)
-      2. User    -- ``~/.apm/scripts/*.json`` (directory)
-      3. Project -- ``.apm/scripts.json`` (single file)
+      1. Policy  -- ``/etc/apm/policy.d/*.json`` (directory, JSON)
+      2. User    -- ``~/.apm/scripts/*.json`` (directory, JSON)
+      3. Project -- ``apm-scripts.yml`` (repo root, YAML)
     """
     scripts: list[ScriptEntry] = []
     scripts.extend(_load_scripts_from_dir(_get_policy_scripts_dir(), source="policy"))
@@ -288,7 +336,7 @@ def discover_scripts(
 
     project_file = _get_project_scripts_file(project_root)
     if project_file.is_file():
-        scripts.extend(parse_script_file(project_file, source="project"))
+        scripts.extend(parse_project_script_file(project_file))
 
     return scripts
 
@@ -399,7 +447,7 @@ def build_runner_from_context(
 ) -> LifecycleScriptRunner:
     """Create a :class:`LifecycleScriptRunner` via file-based discovery.
 
-    Scans policy, user, and project script directories for JSON files.
+    Scans policy (JSON), user (JSON), and project (YAML) script sources.
 
     Three safeguards are applied at this firing boundary:
 
@@ -410,7 +458,7 @@ def build_runner_from_context(
       suppresses all lifecycle scripts as a one-directional safety
       ceiling. Best-effort: any discovery error is silently ignored so
       the install flow is never blocked.
-    - Project-source scripts (``.apm/scripts.json``) are dropped unless
+    - Project-source scripts (``apm-scripts.yml``) are dropped unless
       their exact contents have been explicitly trusted via ``apm scripts
       trust`` (see :mod:`apm_cli.core.script_trust`). Policy and user
       scripts come from developer-controlled locations and are never gated.

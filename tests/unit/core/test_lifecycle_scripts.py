@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import yaml
+
 from apm_cli.core.lifecycle_scripts import (
     LIFECYCLE_EVENTS,
     SCRIPT_TYPES,
@@ -15,8 +17,17 @@ from apm_cli.core.lifecycle_scripts import (
     ScriptEntry,
     build_runner_from_context,
     discover_scripts,
+    parse_project_script_file,
     parse_script_file,
 )
+
+
+def _write_yaml(path: Path, data: dict) -> Path:
+    """Write *data* as YAML to *path* and return *path*."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(data, default_flow_style=False), encoding="utf-8")
+    return path
+
 
 # -- PackageInfo -----------------------------------------------------------
 
@@ -239,15 +250,12 @@ class TestParseScriptFile:
 
 class TestDiscoverScripts:
     def test_discovers_from_project_file(self, tmp_path: Path) -> None:
-        apm_dir = tmp_path / ".apm"
-        apm_dir.mkdir(parents=True)
-        (apm_dir / "scripts.json").write_text(
-            json.dumps(
-                {
-                    "version": 1,
-                    "scripts": {"post-install": [{"type": "command", "bash": "echo project"}]},
-                }
-            )
+        _write_yaml(
+            tmp_path / "apm-scripts.yml",
+            {
+                "version": 1,
+                "scripts": {"post-install": [{"type": "command", "bash": "echo project"}]},
+            },
         )
         entries = discover_scripts(project_root=str(tmp_path))
         assert len(entries) >= 1
@@ -282,15 +290,13 @@ class TestDiscoverScripts:
             )
         )
         project_dir = tmp_path / "project"
-        project_apm = project_dir / ".apm"
-        project_apm.mkdir(parents=True)
-        (project_apm / "scripts.json").write_text(
-            json.dumps(
-                {
-                    "version": 1,
-                    "scripts": {"post-install": [{"type": "command", "bash": "echo project"}]},
-                }
-            )
+        project_dir.mkdir(parents=True)
+        _write_yaml(
+            project_dir / "apm-scripts.yml",
+            {
+                "version": 1,
+                "scripts": {"post-install": [{"type": "command", "bash": "echo project"}]},
+            },
         )
         with patch(
             "apm_cli.core.lifecycle_scripts._get_user_scripts_dir", return_value=user_scripts
@@ -420,16 +426,13 @@ class TestBuildRunnerFromContext:
         """org executables.deny_all=True -> zero scripts fired regardless of source."""
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
         # Put a project script file in place (would otherwise be loaded)
-        apm_dir = tmp_path / ".apm"
-        apm_dir.mkdir(parents=True)
-        script_file = apm_dir / "scripts.json"
-        script_file.write_text(
-            json.dumps(
-                {
-                    "version": 1,
-                    "scripts": {"post-install": [{"type": "command", "bash": "echo hi"}]},
-                }
-            )
+        script_file = tmp_path / "apm-scripts.yml"
+        _write_yaml(
+            script_file,
+            {
+                "version": 1,
+                "scripts": {"post-install": [{"type": "command", "bash": "echo hi"}]},
+            },
         )
 
         mock_policy = MagicMock()
@@ -498,16 +501,13 @@ class TestBuildRunnerFromContext:
         """Project scripts without trust record are excluded from the runner."""
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
 
-        apm_dir = tmp_path / ".apm"
-        apm_dir.mkdir(parents=True)
-        script_file = apm_dir / "scripts.json"
-        script_file.write_text(
-            json.dumps(
-                {
-                    "version": 1,
-                    "scripts": {"post-install": [{"type": "command", "bash": "echo from-project"}]},
-                }
-            )
+        script_file = tmp_path / "apm-scripts.yml"
+        _write_yaml(
+            script_file,
+            {
+                "version": 1,
+                "scripts": {"post-install": [{"type": "command", "bash": "echo from-project"}]},
+            },
         )
 
         # is_project_scripts_trusted returns False (no trust record)
@@ -530,16 +530,13 @@ class TestBuildRunnerFromContext:
         """Project scripts with a valid trust record are included in the runner."""
         monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
 
-        apm_dir = tmp_path / ".apm"
-        apm_dir.mkdir(parents=True)
-        script_file = apm_dir / "scripts.json"
-        script_file.write_text(
-            json.dumps(
-                {
-                    "version": 1,
-                    "scripts": {"post-install": [{"type": "command", "bash": "echo trusted"}]},
-                }
-            )
+        script_file = tmp_path / "apm-scripts.yml"
+        _write_yaml(
+            script_file,
+            {
+                "version": 1,
+                "scripts": {"post-install": [{"type": "command", "bash": "echo trusted"}]},
+            },
         )
 
         with (
@@ -585,3 +582,176 @@ class TestBuildRunnerFromContext:
             runner = build_runner_from_context(project_root=str(tmp_path))
 
         assert any(s.bash == "echo user-notify" for s in runner._scripts)
+
+
+# -- New tests for YAML project tier, type discriminator, description ------
+
+
+class TestParseProjectScriptFile:
+    def test_parses_yaml_project_file(self, tmp_path: Path) -> None:
+        script_file = _write_yaml(
+            tmp_path / "apm-scripts.yml",
+            {
+                "version": 1,
+                "scripts": {
+                    "post-install": [
+                        {"type": "command", "bash": "echo done"},
+                        {"type": "http", "url": "https://x.com/hook"},
+                    ],
+                },
+            },
+        )
+        entries = parse_project_script_file(script_file)
+        assert len(entries) == 2
+        assert entries[0].script_type == "command"
+        assert entries[0].bash == "echo done"
+        assert entries[0].source == "project"
+        assert entries[1].script_type == "http"
+        assert entries[1].url == "https://x.com/hook"
+
+    def test_description_field_round_trips(self, tmp_path: Path) -> None:
+        script_file = _write_yaml(
+            tmp_path / "apm-scripts.yml",
+            {
+                "version": 1,
+                "scripts": {
+                    "post-install": [
+                        {
+                            "type": "command",
+                            "bash": "make setup",
+                            "description": "Set up local build deps",
+                        }
+                    ],
+                },
+            },
+        )
+        entries = parse_project_script_file(script_file)
+        assert len(entries) == 1
+        assert entries[0].description == "Set up local build deps"
+
+    def test_explicit_type_command(self, tmp_path: Path) -> None:
+        script_file = _write_yaml(
+            tmp_path / "apm-scripts.yml",
+            {
+                "version": 1,
+                "scripts": {
+                    "post-install": [{"type": "command", "bash": "echo hi"}],
+                },
+            },
+        )
+        entries = parse_project_script_file(script_file)
+        assert entries[0].script_type == "command"
+
+    def test_explicit_type_http(self, tmp_path: Path) -> None:
+        script_file = _write_yaml(
+            tmp_path / "apm-scripts.yml",
+            {
+                "version": 1,
+                "scripts": {
+                    "post-install": [{"type": "http", "url": "https://example.com/hook"}],
+                },
+            },
+        )
+        entries = parse_project_script_file(script_file)
+        assert entries[0].script_type == "http"
+
+    def test_infers_http_type_from_url_key_when_type_absent(self, tmp_path: Path) -> None:
+        """Backward-compat: url-only entry without explicit type is inferred as http."""
+        script_file = _write_yaml(
+            tmp_path / "apm-scripts.yml",
+            {
+                "version": 1,
+                "scripts": {
+                    "post-install": [{"url": "https://example.com/hook"}],
+                },
+            },
+        )
+        entries = parse_project_script_file(script_file)
+        assert len(entries) == 1
+        assert entries[0].script_type == "http"
+
+    def test_infers_command_type_when_type_absent_and_no_url(self, tmp_path: Path) -> None:
+        """Backward-compat: command-only entry without explicit type is inferred as command."""
+        script_file = _write_yaml(
+            tmp_path / "apm-scripts.yml",
+            {
+                "version": 1,
+                "scripts": {
+                    "post-install": [{"bash": "echo hi"}],
+                },
+            },
+        )
+        entries = parse_project_script_file(script_file)
+        assert len(entries) == 1
+        assert entries[0].script_type == "command"
+
+    def test_returns_empty_for_missing_file(self, tmp_path: Path) -> None:
+        missing = tmp_path / "apm-scripts.yml"
+        entries = parse_project_script_file(missing)
+        assert entries == []
+
+    def test_returns_empty_for_wrong_version(self, tmp_path: Path) -> None:
+        script_file = _write_yaml(
+            tmp_path / "apm-scripts.yml",
+            {"version": 99, "scripts": {}},
+        )
+        entries = parse_project_script_file(script_file)
+        assert entries == []
+
+    def test_admin_user_tiers_still_parse_json(self, tmp_path: Path) -> None:
+        """Admin/user tiers use parse_script_file (JSON), not the YAML loader."""
+        json_file = tmp_path / "global.json"
+        json_file.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "scripts": {"post-install": [{"type": "command", "bash": "echo user"}]},
+                }
+            ),
+            encoding="utf-8",
+        )
+        entries = parse_script_file(json_file, source="user")
+        assert len(entries) == 1
+        assert entries[0].source == "user"
+        assert entries[0].bash == "echo user"
+
+
+class TestTrustHashYamlFile:
+    def test_trust_hash_gates_apm_scripts_yml(self, tmp_path: Path, monkeypatch) -> None:
+        """SHA-256 trust gate works for the new YAML project file path."""
+        import hashlib
+
+        from apm_cli.core.script_trust import (
+            is_project_scripts_trusted,
+            trust_project_scripts,
+        )
+
+        monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+        script_file = _write_yaml(
+            tmp_path / "apm-scripts.yml",
+            {"version": 1, "scripts": {}},
+        )
+
+        trust_store = tmp_path / "home" / "scripts-trust.json"
+        with patch("apm_cli.core.script_trust._trust_store_path", return_value=trust_store):
+            assert not is_project_scripts_trusted(script_file)
+            fp = trust_project_scripts(script_file)
+            assert fp is not None
+            expected = hashlib.sha256(script_file.read_bytes()).hexdigest()
+            assert fp == expected
+            assert is_project_scripts_trusted(script_file)
+
+
+class TestScriptEntryDescriptionField:
+    def test_description_defaults_to_none(self) -> None:
+        entry = ScriptEntry(script_type="command", event="post-install", bash="echo")
+        assert entry.description is None
+
+    def test_description_stored_and_accessible(self) -> None:
+        entry = ScriptEntry(
+            script_type="command",
+            event="post-install",
+            bash="echo",
+            description="Run the build",
+        )
+        assert entry.description == "Run the build"

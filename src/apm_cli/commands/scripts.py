@@ -4,15 +4,14 @@ Sub-commands:
 
 * ``apm scripts``          -- list discovered scripts
 * ``apm scripts test``     -- preview (dry-run) a synthetic event; --execute to run
-* ``apm scripts init``     -- scaffold a starter script JSON file
+* ``apm scripts init``     -- scaffold a starter apm-scripts.yml file at repo root
 * ``apm scripts validate`` -- check all script files for errors
-* ``apm scripts trust``    -- trust .apm/scripts.json so its scripts run on install
-* ``apm scripts untrust``  -- revoke trust for .apm/scripts.json
+* ``apm scripts trust``    -- trust apm-scripts.yml so its scripts run on install
+* ``apm scripts untrust``  -- revoke trust for apm-scripts.yml
 """
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -28,19 +27,25 @@ from apm_cli.utils.console import (
     _rich_warning,
 )
 
-# Default scaffold template.
-_INIT_TEMPLATE = {
-    "version": 1,
-    "scripts": {
-        "post-install": [
-            {
-                "type": "command",
-                "bash": "echo 'Installed:' && cat",
-                "timeoutSec": 10,
-            }
-        ],
-    },
-}
+# Scaffold template header and body for apm-scripts.yml.
+# No $schema comment -- no scripts JSON-schema artifact exists yet in the repo.
+_INIT_TEMPLATE_HEADER = "# APM lifecycle scripts -- see docs: apm scripts --help\n"
+_INIT_TEMPLATE_BODY = """\
+version: 1
+scripts:
+  post-install:
+    # Example command entry -- remove or customise:
+    # - type: command
+    #   description: "Set up local build deps"
+    #   command: "make setup"
+    #   timeoutSec: 30
+    # Example http webhook entry -- remove or customise:
+    # - type: http
+    #   description: "Notify internal dashboard"
+    #   url: "https://hooks.example.com/installed"
+    #   headers:
+    #     X-Token: "$APM_HOOK_TOKEN"
+"""
 
 
 @click.group(
@@ -190,13 +195,12 @@ def scripts_test(event: str, verbose: bool, execute: bool) -> None:
 
 @scripts.command(
     name="init",
-    help="Scaffold a starter script JSON file at .apm/scripts.json.",
+    help="Scaffold a starter apm-scripts.yml file at the repo root.",
 )
 @click.option("--force", is_flag=True, help="Overwrite if file already exists.")
 def scripts_init(force: bool) -> None:
-    """Create a starter script JSON file in the project."""
-    apm_dir = Path.cwd() / ".apm"
-    target_file = apm_dir / "scripts.json"
+    """Create a starter apm-scripts.yml file at the project root."""
+    target_file = Path.cwd() / "apm-scripts.yml"
 
     if target_file.exists() and not force:
         _rich_warning(
@@ -206,9 +210,7 @@ def scripts_init(force: bool) -> None:
         _rich_echo("  Use --force to overwrite.", style="dim")
         return
 
-    apm_dir.mkdir(parents=True, exist_ok=True)
-
-    content = json.dumps(_INIT_TEMPLATE, indent=2) + "\n"
+    content = _INIT_TEMPLATE_HEADER + _INIT_TEMPLATE_BODY
     target_file.write_text(content, encoding="utf-8")
 
     _rich_success(
@@ -232,7 +234,8 @@ def scripts_init(force: bool) -> None:
                 f"  1. Edit [cyan]{target_file.relative_to(Path.cwd())}[/cyan] "
                 "to add your scripts\n"
                 "  2. Run [cyan]apm scripts validate[/cyan] to check for errors\n"
-                "  3. Run [cyan]apm scripts test post-install[/cyan] to dry-run\n",
+                "  3. Run [cyan]apm scripts test post-install[/cyan] to dry-run\n"
+                "  4. Run [cyan]apm scripts trust[/cyan] to allow scripts to run\n",
                 title="Getting Started",
                 style="cyan",
             )
@@ -242,6 +245,7 @@ def scripts_init(force: bool) -> None:
         click.echo(f"  1. Edit {target_file.relative_to(Path.cwd())} to add your scripts")
         click.echo("  2. Run `apm scripts validate` to check for errors")
         click.echo("  3. Run `apm scripts test post-install` to dry-run")
+        click.echo("  4. Run `apm scripts trust` to allow scripts to run")
 
 
 @scripts.command(
@@ -249,7 +253,7 @@ def scripts_init(force: bool) -> None:
     help="Validate all discovered script files for errors.",
 )
 def scripts_validate() -> None:
-    """Check all script JSON files across discovery sources for errors."""
+    """Check all script files across discovery sources for errors."""
     from apm_cli.core.lifecycle_scripts import (
         _get_policy_scripts_dir,
         _get_project_scripts_file,
@@ -266,27 +270,28 @@ def scripts_validate() -> None:
     total_errors = 0
     total_scripts = 0
 
-    def _process_file(json_file: Path, source: str) -> None:
+    def _process_file(script_file: Path, source: str) -> None:
         nonlocal total_files, total_errors, total_scripts
         total_files += 1
-        errors = _validate_script_file(json_file, source)
+        errors = _validate_script_file(script_file, source)
         if errors:
             total_errors += len(errors)
-            rel = json_file.relative_to(Path.cwd()) if source == "project" else json_file
+            rel = script_file.relative_to(Path.cwd()) if source == "project" else script_file
             _rich_error(f"{rel}:", symbol="error")
             for err in errors:
                 _rich_echo(f"    {err}", style="red")
         else:
             try:
-                data = json.loads(json_file.read_text(encoding="utf-8"))
-                script_count = sum(
-                    len(v) for v in data.get("scripts", {}).values() if isinstance(v, list)
-                )
-                total_scripts += script_count
+                data = _load_file_data(script_file, source)
+                if isinstance(data, dict):
+                    script_count = sum(
+                        len(v) for v in data.get("scripts", {}).values() if isinstance(v, list)
+                    )
+                    total_scripts += script_count
             except Exception:
                 pass
 
-    # Check directory-based sources (policy, user).
+    # Check directory-based sources (policy, user) -- always JSON.
     for source, directory in dirs:
         if not directory.is_dir():
             continue
@@ -294,7 +299,7 @@ def scripts_validate() -> None:
             if json_file.is_file():
                 _process_file(json_file, source)
 
-    # Check project-level single file.
+    # Check project-level single file (YAML).
     project_file = _get_project_scripts_file(project_root)
     if project_file.is_file():
         _process_file(project_file, "project")
@@ -317,8 +322,21 @@ def scripts_validate() -> None:
         )
 
 
+def _load_file_data(path: Path, source: str) -> object:
+    """Load raw data from a script file (JSON for admin/user, YAML for project)."""
+    import json
+
+    if source == "project" or path.suffix in (".yml", ".yaml"):
+        from apm_cli.utils.yaml_io import load_yaml
+
+        return load_yaml(path)
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def _validate_script_file(path: Path, source: str) -> list[str]:
-    """Validate a single script JSON file. Returns a list of error messages."""
+    """Validate a single script file. Returns a list of error messages."""
+    import json
+
     from apm_cli.core.lifecycle_scripts import (
         LIFECYCLE_EVENTS,
         SCRIPT_FILE_VERSION,
@@ -328,17 +346,27 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
     errors: list[str] = []
 
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw_text = path.read_text(encoding="utf-8")
     except OSError as e:
         return [f"Cannot read file: {e}"]
 
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        return [f"Invalid JSON: {e}"]
+    # Project tier is YAML; admin/user tiers are JSON.
+    is_yaml = source == "project" or path.suffix in (".yml", ".yaml")
+    if is_yaml:
+        try:
+            from apm_cli.utils.yaml_io import load_yaml
+
+            data = load_yaml(path)
+        except Exception as e:
+            return [f"Invalid YAML: {e}"]
+    else:
+        try:
+            data = json.loads(raw_text)
+        except json.JSONDecodeError as e:
+            return [f"Invalid JSON: {e}"]
 
     if not isinstance(data, dict):
-        return ["Root must be a JSON object"]
+        return ["Root must be a mapping object"]
 
     version = data.get("version")
     if version is None:
@@ -352,7 +380,7 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
         return errors
 
     if not isinstance(scripts_dict, dict):
-        errors.append("'scripts' must be a JSON object")
+        errors.append("'scripts' must be a mapping object")
         return errors
 
     for event_name, script_list in scripts_dict.items():
@@ -368,10 +396,13 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
             prefix = f"{event_name}[{i}]"
 
             if not isinstance(entry, dict):
-                errors.append(f"{prefix}: must be a JSON object")
+                errors.append(f"{prefix}: must be a mapping object")
                 continue
 
-            script_type = entry.get("type", "command")
+            # Explicit ``type`` is canonical; infer from key presence as fallback.
+            script_type = entry.get("type")
+            if script_type is None:
+                script_type = "http" if entry.get("url") else "command"
             if script_type not in SCRIPT_TYPES:
                 errors.append(f"{prefix}: unknown type '{script_type}'")
                 continue
@@ -396,10 +427,10 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
 
 @scripts.command(
     name="trust",
-    help="Trust the project's .apm/scripts.json so its scripts run on install.",
+    help="Trust the project's apm-scripts.yml so its scripts run on install.",
 )
 def scripts_trust() -> None:
-    """Record trust for the current contents of ``.apm/scripts.json``.
+    """Record trust for the current contents of ``apm-scripts.yml``.
 
     Project scripts are skipped on ``apm install`` until trusted, because a
     cloned repository could otherwise run arbitrary commands. Trust is
@@ -412,7 +443,7 @@ def scripts_trust() -> None:
     project_file = _get_project_scripts_file(str(Path.cwd()))
     if not project_file.is_file():
         _rich_warning(
-            "No project scripts file found at .apm/scripts.json.",
+            "No project scripts file found at apm-scripts.yml.",
             symbol="warning",
         )
         _rich_echo("  Create one with: apm scripts init", style="dim")
@@ -424,21 +455,21 @@ def scripts_trust() -> None:
     )
     fingerprint = trust_project_scripts(project_file)
     if fingerprint is None:
-        _rich_error("Could not read .apm/scripts.json to record trust.", symbol="error")
+        _rich_error("Could not read apm-scripts.yml to record trust.", symbol="error")
         sys.exit(1)
 
     _rich_success(
-        f"Trusted .apm/scripts.json ({fingerprint[:12]}...). Its scripts will now run.",
+        f"Trusted apm-scripts.yml ({fingerprint[:12]}...). Its scripts will now run.",
         symbol="check",
     )
 
 
 @scripts.command(
     name="untrust",
-    help="Revoke trust for the project's .apm/scripts.json.",
+    help="Revoke trust for the project's apm-scripts.yml.",
 )
 def scripts_untrust() -> None:
-    """Revoke trust for ``.apm/scripts.json`` so its scripts stop running."""
+    """Revoke trust for ``apm-scripts.yml`` so its scripts stop running."""
     from apm_cli.core.lifecycle_scripts import _get_project_scripts_file
     from apm_cli.core.script_trust import untrust_project_scripts
 
@@ -446,7 +477,7 @@ def scripts_untrust() -> None:
     removed = untrust_project_scripts(project_file)
     if removed:
         _rich_success(
-            "Revoked trust for .apm/scripts.json. Its scripts will no longer run.",
+            "Revoked trust for apm-scripts.yml. Its scripts will no longer run.",
             symbol="check",
         )
     else:

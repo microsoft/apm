@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import click.testing
 import pytest
+import yaml
 
 from apm_cli.commands.scripts import _validate_script_file, scripts
 
@@ -17,8 +17,17 @@ def cli_runner():
     return click.testing.CliRunner()
 
 
-def _write_script_file(path: Path, data: dict) -> Path:
-    """Write a script JSON file and return the path."""
+def _write_script_yaml(path: Path, data: dict) -> Path:
+    """Write a script YAML file and return the path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(data, default_flow_style=False), encoding="utf-8")
+    return path
+
+
+def _write_script_json(path: Path, data: dict) -> Path:
+    """Write a script JSON file (for admin/user tier tests) and return the path."""
+    import json
+
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
     return path
@@ -36,8 +45,8 @@ class TestScriptsList:
 
     def test_shows_discovered_scripts(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        _write_script_file(
-            tmp_path / ".apm" / "scripts.json",
+        _write_script_yaml(
+            tmp_path / "apm-scripts.yml",
             {
                 "version": 1,
                 "scripts": {
@@ -63,8 +72,8 @@ class TestScriptsTest:
     def test_dry_run_is_default(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
-        _write_script_file(
-            tmp_path / ".apm" / "scripts.json",
+        _write_script_yaml(
+            tmp_path / "apm-scripts.yml",
             {
                 "version": 1,
                 "scripts": {
@@ -81,8 +90,8 @@ class TestScriptsTest:
     def test_fires_synthetic_event(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
-        _write_script_file(
-            tmp_path / ".apm" / "scripts.json",
+        _write_script_yaml(
+            tmp_path / "apm-scripts.yml",
             {
                 "version": 1,
                 "scripts": {
@@ -131,16 +140,16 @@ class TestScriptsInit:
         result = cli_runner.invoke(scripts, ["init"])
         assert result.exit_code == 0
         assert "Created script file" in result.output
-        script_file = tmp_path / ".apm" / "scripts.json"
+        script_file = tmp_path / "apm-scripts.yml"
         assert script_file.exists()
-        data = json.loads(script_file.read_text())
+        data = yaml.safe_load(script_file.read_text())
         assert data["version"] == 1
         assert "post-install" in data["scripts"]
 
     def test_refuses_overwrite_without_force(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        _write_script_file(
-            tmp_path / ".apm" / "scripts.json",
+        _write_script_yaml(
+            tmp_path / "apm-scripts.yml",
             {"version": 1, "scripts": {}},
         )
         result = cli_runner.invoke(scripts, ["init"])
@@ -149,15 +158,30 @@ class TestScriptsInit:
 
     def test_force_overwrites(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        _write_script_file(
-            tmp_path / ".apm" / "scripts.json",
+        _write_script_yaml(
+            tmp_path / "apm-scripts.yml",
             {"version": 1, "scripts": {}},
         )
         result = cli_runner.invoke(scripts, ["init", "--force"])
         assert result.exit_code == 0
         assert "Created script file" in result.output
-        data = json.loads((tmp_path / ".apm" / "scripts.json").read_text())
+        data = yaml.safe_load((tmp_path / "apm-scripts.yml").read_text())
         assert "post-install" in data["scripts"]
+
+    def test_init_creates_at_repo_root_not_apm_dir(self, cli_runner, tmp_path, monkeypatch):
+        """apm-scripts.yml must be at repo root, not inside .apm/."""
+        monkeypatch.chdir(tmp_path)
+        result = cli_runner.invoke(scripts, ["init"])
+        assert result.exit_code == 0
+        assert (tmp_path / "apm-scripts.yml").exists()
+        assert not (tmp_path / ".apm" / "scripts.json").exists()
+
+    def test_init_file_is_valid_yaml_with_version(self, cli_runner, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        cli_runner.invoke(scripts, ["init"])
+        content = (tmp_path / "apm-scripts.yml").read_text()
+        data = yaml.safe_load(content)
+        assert data["version"] == 1
 
 
 # -- apm scripts validate --------------------------------------------------
@@ -172,8 +196,8 @@ class TestScriptsValidate:
 
     def test_valid_file_passes(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        _write_script_file(
-            tmp_path / ".apm" / "scripts.json",
+        _write_script_yaml(
+            tmp_path / "apm-scripts.yml",
             {
                 "version": 1,
                 "scripts": {
@@ -185,19 +209,17 @@ class TestScriptsValidate:
         assert result.exit_code == 0
         assert "valid" in result.output.lower()
 
-    def test_invalid_json_fails(self, cli_runner, tmp_path, monkeypatch):
+    def test_invalid_yaml_fails(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        apm_dir = tmp_path / ".apm"
-        apm_dir.mkdir(parents=True)
-        (apm_dir / "scripts.json").write_text("{not valid json", encoding="utf-8")
+        (tmp_path / "apm-scripts.yml").write_text(": - bad: yaml:\n  :", encoding="utf-8")
         result = cli_runner.invoke(scripts, ["validate"])
         assert result.exit_code != 0
-        assert "Invalid JSON" in result.output
+        assert "Invalid YAML" in result.output or "YAML" in result.output
 
     def test_wrong_version_fails(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        _write_script_file(
-            tmp_path / ".apm" / "scripts.json",
+        _write_script_yaml(
+            tmp_path / "apm-scripts.yml",
             {"version": 99, "scripts": {}},
         )
         result = cli_runner.invoke(scripts, ["validate"])
@@ -206,8 +228,8 @@ class TestScriptsValidate:
 
     def test_unknown_event_fails(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        _write_script_file(
-            tmp_path / ".apm" / "scripts.json",
+        _write_script_yaml(
+            tmp_path / "apm-scripts.yml",
             {
                 "version": 1,
                 "scripts": {"on-banana": [{"type": "command", "bash": "echo"}]},
@@ -219,8 +241,8 @@ class TestScriptsValidate:
 
     def test_command_without_bash_or_command_fails(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        _write_script_file(
-            tmp_path / ".apm" / "scripts.json",
+        _write_script_yaml(
+            tmp_path / "apm-scripts.yml",
             {
                 "version": 1,
                 "scripts": {"post-install": [{"type": "command"}]},
@@ -232,8 +254,8 @@ class TestScriptsValidate:
 
     def test_http_without_url_fails(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        _write_script_file(
-            tmp_path / ".apm" / "scripts.json",
+        _write_script_yaml(
+            tmp_path / "apm-scripts.yml",
             {
                 "version": 1,
                 "scripts": {"post-install": [{"type": "http"}]},
@@ -245,8 +267,8 @@ class TestScriptsValidate:
 
     def test_http_url_rejects_plain_http(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        _write_script_file(
-            tmp_path / ".apm" / "scripts.json",
+        _write_script_yaml(
+            tmp_path / "apm-scripts.yml",
             {
                 "version": 1,
                 "scripts": {
@@ -260,8 +282,8 @@ class TestScriptsValidate:
 
     def test_multiple_errors_reported(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        _write_script_file(
-            tmp_path / ".apm" / "scripts.json",
+        _write_script_yaml(
+            tmp_path / "apm-scripts.yml",
             {
                 "version": 1,
                 "scripts": {
@@ -278,28 +300,28 @@ class TestScriptsValidate:
 
 class TestValidateScriptFile:
     def test_missing_version(self, tmp_path):
-        f = _write_script_file(tmp_path / "t.json", {"scripts": {}})
-        errors = _validate_script_file(f, "project")
+        f = _write_script_json(tmp_path / "t.json", {"scripts": {}})
+        errors = _validate_script_file(f, "admin")
         assert any("version" in e.lower() for e in errors)
 
     def test_missing_scripts_field(self, tmp_path):
-        f = _write_script_file(tmp_path / "t.json", {"version": 1})
-        errors = _validate_script_file(f, "project")
+        f = _write_script_json(tmp_path / "t.json", {"version": 1})
+        errors = _validate_script_file(f, "admin")
         assert any("scripts" in e.lower() for e in errors)
 
     def test_non_dict_root(self, tmp_path):
         path = tmp_path / "t.json"
         path.write_text("[]", encoding="utf-8")
-        errors = _validate_script_file(path, "project")
+        errors = _validate_script_file(path, "admin")
         assert any("object" in e.lower() for e in errors)
 
     def test_unreadable_file(self, tmp_path):
         path = tmp_path / "missing.json"
-        errors = _validate_script_file(path, "project")
+        errors = _validate_script_file(path, "admin")
         assert any("read" in e.lower() for e in errors)
 
     def test_valid_file_returns_empty(self, tmp_path):
-        f = _write_script_file(
+        f = _write_script_json(
             tmp_path / "t.json",
             {
                 "version": 1,
@@ -309,19 +331,32 @@ class TestValidateScriptFile:
                 },
             },
         )
-        errors = _validate_script_file(f, "project")
+        errors = _validate_script_file(f, "admin")
         assert errors == []
 
     def test_unknown_script_type(self, tmp_path):
-        f = _write_script_file(
+        f = _write_script_json(
             tmp_path / "t.json",
             {
                 "version": 1,
                 "scripts": {"post-install": [{"type": "magic"}]},
             },
         )
-        errors = _validate_script_file(f, "project")
+        errors = _validate_script_file(f, "admin")
         assert any("unknown type" in e.lower() for e in errors)
+
+    def test_project_yaml_file_returns_empty(self, tmp_path):
+        f = _write_script_yaml(
+            tmp_path / "apm-scripts.yml",
+            {
+                "version": 1,
+                "scripts": {
+                    "post-install": [{"type": "command", "bash": "echo ok"}],
+                },
+            },
+        )
+        errors = _validate_script_file(f, "project")
+        assert errors == []
 
 
 # -- apm scripts trust / untrust -------------------------------------------
@@ -337,8 +372,8 @@ class TestScriptsTrustUntrust:
     def test_trust_existing_file(self, cli_runner, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
-        _write_script_file(
-            tmp_path / ".apm" / "scripts.json",
+        _write_script_yaml(
+            tmp_path / "apm-scripts.yml",
             {"version": 1, "scripts": {}},
         )
         result = cli_runner.invoke(scripts, ["trust"])

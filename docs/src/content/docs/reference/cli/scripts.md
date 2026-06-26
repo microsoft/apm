@@ -10,7 +10,7 @@ moments during `apm install`, `apm update`, and `apm uninstall`. This command
 group provides all tooling to discover, validate, test, scaffold, and manage
 trust for lifecycle script files.
 
-Project-source scripts (`.apm/scripts.json`) are **skipped by default** until
+Project-source scripts (`apm-scripts.yml`) are **skipped by default** until
 explicitly trusted, preventing arbitrary command execution on clone.
 
 For the full conceptual guide, schema reference, and security model, see
@@ -45,21 +45,22 @@ Returns an informational message when no scripts are discovered.
 
 ### `apm scripts init`
 
-Scaffold a starter script JSON file at `.apm/scripts.json` in the current
-project. Creates the `.apm/` directory if it does not exist.
+Scaffold a starter `apm-scripts.yml` file at the repo root (sibling of
+`apm.yml`).
 
 ```bash
-apm scripts init            # creates .apm/scripts.json
+apm scripts init            # creates apm-scripts.yml at the repo root
 apm scripts init --force    # overwrite an existing file
 ```
 
 | Flag | Description |
 |---|---|
-| `--force` | Overwrite an existing `.apm/scripts.json`. |
+| `--force` | Overwrite an existing `apm-scripts.yml`. |
 
 ### `apm scripts validate`
 
-Validate all discovered script JSON files for schema errors.
+Validate all discovered script files (project `apm-scripts.yml`, admin/user
+`*.json`) for schema errors.
 
 ```bash
 apm scripts validate
@@ -105,7 +106,7 @@ Script output is written to `~/.apm/logs/scripts.log`.
 
 ### `apm scripts trust`
 
-Trust the project script file at `.apm/scripts.json` so its scripts run during
+Trust the project script file at `apm-scripts.yml` so its scripts run during
 `apm install`, `apm update`, and `apm uninstall`.
 
 ```bash
@@ -113,7 +114,7 @@ apm scripts trust
 ```
 
 Trust is bound to the exact file contents (SHA-256). Any edit to
-`.apm/scripts.json` revokes trust and requires re-running this command.
+`apm-scripts.yml` revokes trust and requires re-running this command.
 
 Trust records are stored at `~/.apm/scripts-trust.json` (or
 `$APM_HOME/scripts-trust.json`). To audit or reset trust manually, edit or
@@ -121,7 +122,7 @@ delete that file.
 
 ### `apm scripts untrust`
 
-Revoke trust for `.apm/scripts.json`. Project scripts will stop running on
+Revoke trust for `apm-scripts.yml`. Project scripts will stop running on
 the next install/update/uninstall.
 
 ```bash

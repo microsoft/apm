@@ -2,7 +2,7 @@
 
 Policy scripts (``/etc/apm/policy.d``) and user scripts (``~/.apm/scripts``)
 originate from sources the developer already controls, so they run
-without a gate.  A project ``.apm/scripts.json`` file, however, is
+without a gate.  A project ``apm-scripts.yml`` file, however, is
 committed into a repository -- cloning an untrusted repo and running
 ``apm install`` would otherwise execute attacker-controlled shell
 commands with no consent.
@@ -16,7 +16,7 @@ scripts re-arms the gate and must be re-trusted.
 Trust records live in ``$APM_HOME/scripts-trust.json`` (default
 ``~/.apm/scripts-trust.json``)::
 
-    {"version": 1, "projects": {"<abs scripts.json path>": "<sha256>"}}
+    {"version": 1, "projects": {"<abs apm-scripts.yml path>": "<sha256>"}}
 """
 
 from __future__ import annotations

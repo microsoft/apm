@@ -11,8 +11,13 @@ script never aborts the CLI operation. HTTP scripts dispatch in a background
 thread (fire-and-forget), while command scripts run synchronously and can
 delay the operation until they finish or their timeout elapses.
 
-Scripts are defined in standalone JSON files and discovered from well-known
+Scripts are defined in standalone files and discovered from well-known
 directories, following the same pattern as GitHub Copilot CLI extensions.
+The **project tier** uses a YAML file at the repository root (`apm-scripts.yml`),
+intentionally kept outside `.apm/` so it is not packaged when you publish a
+primitive. The **admin** (`/etc/apm/policy.d/*.json`) and **user**
+(`~/.apm/scripts/*.json`) tiers remain JSON, suited for machine- and
+fleet-managed deployment.
 
 ## Supported events
 
@@ -27,7 +32,33 @@ directories, following the same pattern as GitHub Copilot CLI extensions.
 
 ## Script file format
 
-Script files are JSON with a versioned schema:
+Script files use a versioned schema. The **project tier** (`apm-scripts.yml`)
+is YAML; the **admin and user tiers** (`policy.d/*.json`,
+`~/.apm/scripts/*.json`) are JSON. All tiers share the same field names and
+`type` discriminator.
+
+Each entry declares its kind via `type: command` (shell subprocess) or
+`type: http` (HTTPS webhook). An optional `description` field documents
+the entry for reviewers and `apm scripts list` output.
+
+**Project tier -- YAML (`apm-scripts.yml` at repo root):**
+
+```yaml
+version: 1
+scripts:
+  post-install:
+    - type: command
+      description: "Set up local build deps"
+      command: "make setup"
+      timeoutSec: 30
+    - type: http
+      description: "Notify internal dashboard"
+      url: "https://hooks.example.com/installed"
+      headers:
+        X-Token: "$APM_HOOK_TOKEN"
+```
+
+**Admin/user tiers -- JSON (`policy.d/*.json`, `~/.apm/scripts/*.json`):**
 
 ```json
 {
@@ -56,17 +87,19 @@ Script files are JSON with a versioned schema:
 
 Run a shell command. The event payload is piped via **stdin** as JSON:
 
-```json
-{
-  "type": "command",
-  "bash": "./scripts/notify.sh",
-  "cwd": "./scripts",
-  "env": { "LOG_LEVEL": "INFO" },
-  "timeoutSec": 10
-}
+```yaml
+type: command
+description: "Run post-install setup"
+bash: "./scripts/notify.sh"
+cwd: "./scripts"
+env:
+  LOG_LEVEL: "INFO"
+timeoutSec: 10
 ```
 
 Fields:
+- `type` -- must be `command`
+- `description` -- (optional) human annotation shown in `apm scripts list`
 - `bash` -- command string for bash (use this on Linux/macOS)
 - `command` -- fallback command string (cross-platform)
 - `cwd` -- working directory (relative paths resolve against project root)
@@ -79,16 +112,18 @@ If both `bash` and `command` are present, `bash` takes priority.
 
 Send a JSON POST to an HTTPS endpoint:
 
-```json
-{
-  "type": "http",
-  "url": "https://analytics.corp.net/apm/events",
-  "headers": { "Authorization": "Bearer $APM_ANALYTICS_TOKEN" },
-  "timeoutSec": 5
-}
+```yaml
+type: http
+description: "Ping analytics dashboard"
+url: "https://analytics.corp.net/apm/events"
+headers:
+  Authorization: "Bearer $APM_ANALYTICS_TOKEN"
+timeoutSec: 5
 ```
 
 Fields:
+- `type` -- must be `http`
+- `description` -- (optional) human annotation shown in `apm scripts list`
 - `url` -- HTTPS endpoint (**http:// is rejected**)
 - `headers` -- request headers; values support `$ENV_VAR` expansion
 - `timeoutSec` -- request timeout (default: 10s)
@@ -103,14 +138,15 @@ Security:
 Script files are loaded from three directories. All files are **additive** --
 every script from every file runs. Policy scripts cannot be disabled.
 
-| Priority     | Path                        | Who controls     |
-|--------------|-----------------------------|------------------|
-| 1 (highest)  | `/etc/apm/policy.d/*.json`  | Platform/IT team |
-| 2            | `~/.apm/scripts/*.json`     | Individual user  |
-| 3            | `.apm/scripts.json`         | Project          |
+| Priority     | Path                        | Who controls     | Format |
+|--------------|-----------------------------|------------------|--------|
+| 1 (highest)  | `/etc/apm/policy.d/*.json`  | Platform/IT team | JSON   |
+| 2            | `~/.apm/scripts/*.json`     | Individual user  | JSON   |
+| 3            | `apm-scripts.yml` (root)    | Project          | YAML   |
 
 Policy and user sources are directories (all `*.json` files are loaded).
-The project source is a single file.
+The project source is a single YAML file at the repository root, intentionally
+outside `.apm/` so it is never bundled when publishing a primitive package.
 
 ## Event payload
 
@@ -140,12 +176,12 @@ Lifecycle scripts from different sources are subject to different trust rules:
   by the developer.
 - **User scripts** (`~/.apm/scripts/*.json`) -- controlled by the developer.
   Run without a gate.
-- **Project scripts** (`.apm/scripts.json`) -- committed in the repository.
-  **Skipped by default.** Cloning an untrusted repo and running `apm install`
-  would otherwise execute attacker-controlled shell commands. Trust is
-  explicit, file-content-bound, and revocable:
+- **Project scripts** (`apm-scripts.yml`) -- a YAML file at the repository
+  root. **Skipped by default.** Cloning an untrusted repo and running
+  `apm install` would otherwise execute attacker-controlled shell commands.
+  Trust is explicit, file-content-bound, and revocable:
   - Run `apm scripts trust` to record trust for the current file contents.
-  - Any edit to `.apm/scripts.json` revokes trust and requires re-approval.
+  - Any edit to `apm-scripts.yml` revokes trust and requires re-approval.
   - Run `apm scripts untrust` to revoke without editing the file.
   - Trust records are stored in `~/.apm/scripts-trust.json` (or
     `$APM_HOME/scripts-trust.json`).
@@ -251,10 +287,10 @@ apm scripts
 
 ### `apm scripts init` -- scaffold a starter script file
 
-Generate a starter JSON script file at `.apm/scripts.json`:
+Generate a starter YAML script file at `apm-scripts.yml` (repo root):
 
 ```bash
-apm scripts init            # creates .apm/scripts.json
+apm scripts init            # creates apm-scripts.yml
 apm scripts init --force    # overwrite existing file
 ```
 
@@ -285,7 +321,7 @@ Script output is written to `~/.apm/logs/scripts.log` as usual.
 ### `apm scripts trust` -- trust the project script file
 
 ```bash
-apm scripts trust    # trusts .apm/scripts.json at its current contents
+apm scripts trust    # trusts apm-scripts.yml at its current contents
 ```
 
 ### `apm scripts untrust` -- revoke trust for the project script file
