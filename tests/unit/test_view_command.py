@@ -218,6 +218,23 @@ class TestViewCommand(_InfoCmdBase):
         assert result.exit_code == 0
         assert "main" in result.output
 
+    def test_view_versions_routes_registry_dep_to_registry_api(self):
+        """display_versions delegates to the registry API for a lockfile-confirmed registry dep."""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch(
+                    "apm_cli.commands.view._lookup_lockfile_ref",
+                    return_value=("^1.0.0", "", "registry"),
+                ),
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                result = self.runner.invoke(cli, ["view", "myorg/myrepo", "versions"])
+        assert result.exit_code == 0
+        mock_reg.assert_called_once()
+        mock_gh.return_value.list_remote_refs.assert_not_called()
+
     # -- invalid field ----------------------------------------------------
 
     def test_view_invalid_field(self):
@@ -411,7 +428,7 @@ class TestViewCommand(_InfoCmdBase):
             with (
                 patch(
                     "apm_cli.commands.view._lookup_lockfile_ref",
-                    return_value=("v2.0.0", "abcdef1234567890deadbeef"),
+                    return_value=("v2.0.0", "abcdef1234567890deadbeef", ""),
                 ),
                 _force_rich_fallback(),
             ):
@@ -434,9 +451,10 @@ class TestLookupLockfileRef(_InfoCmdBase):
         from apm_cli.commands.view import _lookup_lockfile_ref
 
         with self._chdir_tmp() as tmp:
-            ref, commit = _lookup_lockfile_ref("org/repo", tmp)
+            ref, commit, _source = _lookup_lockfile_ref("org/repo", tmp)
         assert ref == ""
         assert commit == ""
+        assert _source == ""
 
     def test_exact_match(self):
         """Returns ref/commit for exact lockfile key match."""
@@ -454,7 +472,7 @@ class TestLookupLockfileRef(_InfoCmdBase):
             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
         ):  # patched to prevent real I/O
             mock_lf.read.return_value = mock_lockfile
-            ref, commit = _lookup_lockfile_ref("org/repo", Path("/fake"))
+            ref, commit, _source = _lookup_lockfile_ref("org/repo", Path("/fake"))
         assert ref == "v1.0.0"
         assert commit == "abc123"
 
@@ -477,7 +495,7 @@ class TestLookupLockfileRef(_InfoCmdBase):
             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
         ):  # patched to prevent real I/O
             mock_lf.read.return_value = mock_lockfile
-            ref, commit = _lookup_lockfile_ref("org/repo", Path("/fake"))
+            ref, commit, _source = _lookup_lockfile_ref("org/repo", Path("/fake"))
         assert ref == "main"
         assert commit == "deadbeef"
 
@@ -494,7 +512,7 @@ class TestLookupLockfileRef(_InfoCmdBase):
             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
         ):  # patched to prevent real I/O
             mock_lf.read.return_value = mock_lockfile
-            ref, commit = _lookup_lockfile_ref("nomatch", Path("/fake"))
+            ref, commit, _source = _lookup_lockfile_ref("nomatch", Path("/fake"))
         assert ref == ""
         assert commit == ""
 
@@ -506,7 +524,7 @@ class TestLookupLockfileRef(_InfoCmdBase):
             "apm_cli.deps.lockfile.migrate_lockfile_if_needed",
             side_effect=RuntimeError("boom"),
         ):
-            ref, commit = _lookup_lockfile_ref("x", Path("/fake"))
+            ref, commit, _source = _lookup_lockfile_ref("x", Path("/fake"))
         assert ref == ""
         assert commit == ""
 
@@ -520,7 +538,7 @@ class TestLookupLockfileRef(_InfoCmdBase):
             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
         ):  # patched to prevent real I/O
             mock_lf.read.return_value = None
-            ref, commit = _lookup_lockfile_ref("org/repo", Path("/fake"))
+            ref, commit, _source = _lookup_lockfile_ref("org/repo", Path("/fake"))
         assert ref == ""
         assert commit == ""
 

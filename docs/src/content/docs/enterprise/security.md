@@ -30,7 +30,7 @@ APM has no runtime footprint. Once `apm install` or `apm compile` completes, the
 
 - **No runtime component.** APM generates files then terminates. It does not run alongside your application.
 - **No network calls after install.** All network activity (git clone/fetch) occurs during dependency resolution. There are no callbacks, webhooks, or phone-home requests.
-- **No arbitrary code execution.** APM does not execute scripts from packages, evaluate expressions in templates, or run downloaded code. (**Canvas exception:** the experimental `canvas` primitive deploys executable `extension.mjs` (Node.js) code to `.github/extensions/` or `~/.copilot/extensions/`; this surface is gated by both the `canvas` experimental flag and `--trust-canvas-extensions` for dependency-provided canvases. See [Canvas extensions](/apm/integrations/canvas/).)
+- **No arbitrary code execution.** APM does not execute scripts from packages, evaluate expressions in templates, or run downloaded code. (**Canvas exception:** the experimental `canvas` primitive deploys executable `extension.mjs` (Node.js) code to `.github/extensions/` or `~/.copilot/extensions/`; this surface is gated by both the `canvas` experimental flag and the [executable trust gate](#executable-trust-gate) for dependency-provided canvases. See [Canvas extensions](/apm/integrations/canvas/).)
 - **No access to application data.** APM never reads databases, API responses, application state, or user data.
 - **No persistent background processes.** APM does not install daemons, services, or scheduled tasks.
 - **No telemetry or data collection.** APM collects no usage data, analytics, or diagnostics. Nothing is transmitted to Microsoft or any third party.
@@ -136,6 +136,12 @@ download → scan source → block or deploy → report
 Content scanning extends beyond install:
 
 - **`apm compile`** scans compiled output (AGENTS.md, CLAUDE.md, `.github/copilot-instructions.md`, commands) before writing to disk. Critical findings cause `apm compile` to exit with code 1 after writing — defense-in-depth since source files were already scanned at install, but compilation assembles content from multiple sources. `.github/copilot-instructions.md` is assembled from global instructions in `.apm/instructions/`, including those installed under `apm_modules/`.
+- **`apm compile --global`** scans user-scope root context files assembled from
+  globally installed instructions before writing them. Critical findings stop
+  the write and exit with code 1. Existing hand-authored root context files are
+  skipped unless they carry APM's generated marker, so opting into global
+  compilation does not clobber user-managed `CLAUDE.md`, `AGENTS.md`, or
+  `GEMINI.md` files.
 - **`apm pack`** scans files before bundling. This catches hidden characters before a package is published, preventing authors from accidentally distributing tainted content.
 - **`apm unpack`** scans bundle contents before deployment. This is a pre-deployment gate matching `apm install` — critical findings block deployment unless `--force` is used. (Note: `apm unpack` is DEPRECATED; prefer `apm install <bundle-path>` for new pipelines -- it applies the same scan plus lockfile integration. See [Pack and distribute](../producer/pack-a-bundle/).)
 
@@ -303,6 +309,53 @@ across targets.
 | **Cursor** | `.cursor/commands/*.md` | Deployed when `.cursor/` exists. Cursor 1.6+ only; Cursor is de-emphasizing commands in favor of rules/skills -- monitor [Cursor release notes](https://cursor.com/changelog) for changes. The shared command transformer keeps the Claude-compatible frontmatter subset (`description`, `allowed-tools`, `model`, `argument-hint`, `input`); Cursor-specific keys (`author`, `mcp`, `parameters`, ...) are dropped with an install-time warning per file. |
 | **OpenCode** | `.opencode/commands/*.md` | Deployed when `.opencode/` exists. |
 | **Gemini CLI** | `.gemini/commands/*.toml` | Deployed when `.gemini/` exists. |
+
+## Executable trust gate
+
+APM blocks executable primitives from dependency packages by default: hooks,
+`bin/` executables, self-defined MCP servers (`registry: false`), and canvas
+extensions. Text primitives (skills, agents, instructions) are never gated, and
+local root `.apm/` content is always trusted.
+
+Trust is expressed through one noun, `executables`, across three layers, and the
+install gate and `apm audit` resolve it through a single deny-wins,
+first-match-wins ladder:
+
+```
+1. org deny_all / org deny   -> denied (absolute ceiling)
+2. user deny                 -> denied
+3. project deny              -> denied
+4. project allow             -> allowed
+5. user allow                -> allowed
+6. org recommend             -> allowed (user-overridable)
+7. (no match)                -> gated pending approval (denied but approvable)
+```
+
+- **Org** (`apm-policy.yml` `executables:`) is the ceiling on deny. It can
+  `deny_all`, `deny` packages, `require` packages be present and trusted, and
+  `recommend` a vetted set. See [executables](../reference/policy-schema/#executables) in the policy
+  schema.
+- **Project** (`apm.yml` `executables.{allow,deny}`) is committed admin trust,
+  shared with the team.
+- **User** (`~/.apm/config.json` `executables.{allow,deny}`) is the lowest
+  authority -- a machine-local override that can only narrow, never widen past
+  an org or project deny.
+
+Personal consent can never widen past an org deny, and the default (rung 7) is
+**gated pending approval** -- a package with executables and no opinion anywhere
+is parked until approved, not hard-denied. This release ships no `enforce`
+mandate runtime, no signing, and no content-hash binding; an org
+`executables.enforce` rung degrades to `recommend`.
+
+Each locked dependency records its resolved state in the `exec_status` field of
+`apm.lock.yaml` (`deployed`, `gated_pending_approval`, `denied`, or `absent`).
+For CI, `apm install` succeeds when a required package is present-but-parked and
+prints a one-command remedy (e.g. `apm approve <pkg>`); a separate audit signal,
+`required-executable-untrusted`, hard-fails when a required package's
+executables are untrusted. Manage trust with [`apm approve` / `apm
+deny`](../reference/cli/approve/), inspect the deciding layer for one
+package with `apm policy explain <pkg>`, and surface fleet-wide layer
+conflicts with `apm doctor`.
 
 ## MCP server trust model
 

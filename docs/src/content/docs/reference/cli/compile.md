@@ -109,6 +109,57 @@ The dry-run output shows `[dry-run] would remove stale CLAUDE.md -- instructions
 | `--dry-run` | Show placement decisions without writing files. |
 | `-v, --verbose` | Show source attribution and optimizer analysis. |
 
+### Global compilation
+
+Global compilation keeps supported user-scope root-context targets in sync with
+globally installed instruction packages -- one command, no per-tool setup.
+
+| Flag | Description |
+|------|-------------|
+| `-g, --global` | Compile user-scope root context files from `~/.apm/apm_modules`. Reads globally installed packages and writes one root context file per supported user-scope target (e.g. `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`). Not valid with project-output flags such as `--target`, `--all`, `--watch`, `--root`, or `--output`. Exits non-zero if `~/.apm/apm_modules` does not exist. |
+
+`apm compile --global` is explicit. `apm install -g` does not run it; instead,
+when global instructions land on a root-context-only target, install prints a
+one-line hint pointing at `apm compile -g`. Run it manually after adding or
+removing global packages. Hand-authored files (files that do not carry the
+APM-generated marker) are never overwritten.
+
+```bash
+apm compile -g
+```
+
+## Pin committed output with targets:
+
+`apm compile` generates root context files: `AGENTS.md`, `CLAUDE.md`,
+`GEMINI.md`, `.github/copilot-instructions.md` (see
+[Output layout per target](#output-layout-per-target) below for the
+full per-target breakdown). Teams that commit these files into source
+control face a consistency problem: without `target:` or `targets:` set in
+`apm.yml`, auto-detection decides which files to produce based on which tool
+folders exist on the current machine. A contributor with only `.claude/` locally
+produces `claude` output only; a developer who also has `.github/`
+triggers the two-or-more-folders rule and gets the full `all` expansion
+-- producing `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and
+`.github/copilot-instructions.md`. The committed
+set silently tracks whoever last ran `apm compile`.
+
+Set `targets:` in `apm.yml` to declare exactly which agent formats the
+project supports. Every run of `apm compile` -- local developer, CI,
+cloud agent -- then writes the same files regardless of which tool
+folders exist on that machine:
+
+```yaml
+# apm.yml
+targets: [claude, cursor]   # compile writes exactly these two sets; nothing else
+```
+
+This makes the committed generated files deterministic for humans,
+cloud agents, and contributors who do not run `apm compile` locally
+and rely on the checked-in artifacts.
+
+For the full list of accepted `targets:` values, see
+[manifest schema -- targets](../../../reference/manifest-schema/#36-target).
+
 ## Examples
 
 Compile for whatever the project is set up for:

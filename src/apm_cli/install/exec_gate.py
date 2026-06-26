@@ -21,8 +21,8 @@ def check_executable_approval(
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
     *,
     ctx: InstallContext | None = None,
-) -> tuple[bool, bool]:
-    """Return ``(hooks_approved, bin_approved)`` for a package.
+) -> tuple[bool, bool, bool, bool]:
+    """Return ``(hooks_approved, bin_approved, mcp_approved, canvas_approved)`` for a package.
 
     Local project content (``_local``) is always trusted.  Dependency
     packages are checked against the ``allowExecutables`` block.  When
@@ -34,19 +34,30 @@ def check_executable_approval(
     """
     is_local = package_name == "_local"
     if is_local or allow_executables is None:
-        return True, True
+        return True, True, True, True
 
     from apm_cli.security.executables import (
         EXEC_TYPE_BIN,
+        EXEC_TYPE_CANVAS,
         EXEC_TYPE_HOOKS,
+        EXEC_TYPE_MCP,
         build_approval_key,
         is_package_approved,
     )
 
     # Build candidate keys: the dep-ref canonical key AND the name#version
-    # fallback so that approvals stored under either format are honoured.
+    # fallback so that approvals stored under either format are honoured. The
+    # version-blind name and the bare package name are also probed so that
+    # version-blind grants (org recommend, ``apm approve <name>``) match
+    # regardless of the installed version (#1873).
     pkg_key = resolve_package_key(package_info, package_name)
     candidate_keys = [pkg_key]
+
+    name_blind = pkg_key.split("#", 1)[0]
+    if name_blind not in candidate_keys:
+        candidate_keys.append(name_blind)
+    if package_name and package_name not in candidate_keys:
+        candidate_keys.append(package_name)
 
     # Add name#version fallback when it differs from the primary key.
     _pkg = getattr(package_info, "package", None)
@@ -56,14 +67,23 @@ def check_executable_approval(
         alt_key = build_approval_key(_name, _ver)
         if alt_key != pkg_key:
             candidate_keys.append(alt_key)
+        if _name and _name not in candidate_keys:
+            candidate_keys.append(_name)
 
     hooks_ok = any(
         is_package_approved(allow_executables, k, EXEC_TYPE_HOOKS) for k in candidate_keys
     )
     bin_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_BIN) for k in candidate_keys)
+    mcp_ok = any(is_package_approved(allow_executables, k, EXEC_TYPE_MCP) for k in candidate_keys)
+    canvas_ok = any(
+        is_package_approved(allow_executables, k, EXEC_TYPE_CANVAS) for k in candidate_keys
+    )
 
-    # Track blocked packages for the post-loop approval prompt.
-    if ctx is not None and (not hooks_ok or not bin_ok):
+    # Track blocked packages for the post-loop approval prompt, and record the
+    # lockfile exec_status for the audit (Gap B) from the same scan.
+    blocked = not hooks_ok or not bin_ok or not mcp_ok or not canvas_ok
+    needs_status = ctx is not None and getattr(ctx, "exec_trust_ctx", None) is not None
+    if ctx is not None and (blocked or needs_status):
         from apm_cli.security.executables import scan_package_executables
 
         _install = Path(package_info.install_path)
@@ -72,10 +92,18 @@ def check_executable_approval(
         if _pkg:
             _version = getattr(_pkg, "version", "") or ""
         _decl = scan_package_executables(_install, package_name, _version)
-        if _decl.has_executables:
+        if _decl.has_executables and blocked:
             ctx.blocked_executables.append(_decl)
+        if _decl.has_executables and needs_status:
+            from apm_cli.security.executables import exec_status_for_declaration
 
-    return hooks_ok, bin_ok
+            status = exec_status_for_declaration(
+                ctx.exec_trust_ctx, candidate_keys, _decl.exec_types
+            )
+            if status is not None:
+                ctx.package_exec_status[package_name] = status
+
+    return hooks_ok, bin_ok, mcp_ok, canvas_ok
 
 
 def resolve_package_key(package_info: Any, package_name: str) -> str:

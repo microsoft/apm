@@ -465,6 +465,36 @@ class TestResolveCachedCommit:
         result = source._resolve_cached_commit()
         assert result == "sha-xyz"
 
+    def test_registry_dep_skips_reference_fallback(self) -> None:
+        """Registry deps must not store dep_ref.reference as resolved_commit.
+
+        dep_ref.reference is a semver range (e.g. '^1.0.0') for registry deps.
+        Storing it as resolved_commit corrupts the lockfile and causes the
+        update plan to show a spurious '^1.0.0 -> -' diff.
+        """
+        ctx = _make_ctx(existing_lockfile=None)
+        dep_ref = _make_dep_ref(reference="^1.0.0")
+        dep_ref.source = "registry"
+        source = self._make_source(ctx, dep_ref, fetched_this_run=False)
+
+        result = source._resolve_cached_commit()
+        assert result is None
+
+    def test_registry_dep_with_lockfile_sha_still_uses_sha(self) -> None:
+        """Registry dep: when lockfile has a real SHA, carry it forward."""
+        locked_dep = MagicMock()
+        locked_dep.resolved_commit = "abc1234def5678"
+        existing_lockfile = MagicMock()
+        existing_lockfile.get_dependency.return_value = locked_dep
+
+        ctx = _make_ctx(existing_lockfile=existing_lockfile)
+        dep_ref = _make_dep_ref(reference="^1.0.0")
+        dep_ref.source = "registry"
+        source = self._make_source(ctx, dep_ref, fetched_this_run=False)
+
+        result = source._resolve_cached_commit()
+        assert result == "abc1234def5678"
+
 
 # ---------------------------------------------------------------------------
 # CachedDependencySource.acquire

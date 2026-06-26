@@ -70,7 +70,7 @@ Model Context Protocol servers declared as dependencies. APM writes the per-harn
 
 ### Canvas extensions (experimental)
 
-GitHub Copilot CLI canvas extensions: a directory bundle whose entry file is `extension.mjs` (executable Node.js). Copilot-only. Behind the `canvas` experimental flag; dependency-provided canvases are blocked unless `--trust-canvas-extensions` is passed, because they are arbitrary executable code. Project scope deploys to `.github/extensions/`; `--global` deploys a dependency canvas to `~/.copilot/extensions/` (always requiring the trust flag).
+GitHub Copilot CLI canvas extensions: a directory bundle whose entry file is `extension.mjs` (executable Node.js). Copilot-only. Behind the `canvas` experimental flag; dependency-provided canvases are blocked unless approved via the `executables` block in `apm.yml` and `apm approve <pkg>`, because they are arbitrary executable code. Project scope deploys to `.github/extensions/`; `--global` deploys a dependency canvas to `~/.copilot/extensions/` (always requiring approval).
 
 - Source: `.apm/extensions/<name>/extension.mjs`
 - Deploys to: `.github/extensions/<name>/` (project) or `~/.copilot/extensions/<name>/` (`--global`)
@@ -135,7 +135,7 @@ How to read a cell:
 - `commands / copilot = unsupported` -- Copilot has no commands primitive; the same source `.prompt.md` reaches Copilot as a native prompt instead.
 - `plugins / *` -- APM unpacks the plugin at install time into the primitives in the rows above; routing then follows those rows.
 - `MCP servers / *` -- APM writes the harness's standard MCP config. Transitive MCP servers brought in by deep dependencies must be explicitly declared or trusted with `--trust-transitive-mcp` -- effectively `gated` for those, `native` for direct dependencies.
-- `canvas / copilot = gated` -- requires the `canvas` experimental flag; a canvas shipped by a dependency is executable code, so it stays blocked until you pass `--trust-canvas-extensions`. First-party canvases in your own package deploy at project scope once the flag is on. With `--global`, a dependency canvas deploys to `~/.copilot/extensions/` and always requires the trust flag (first-party global install is not supported). Every other harness is `unsupported`: a canvas is a Copilot CLI construct only.
+- `canvas / copilot = gated` -- requires the `canvas` experimental flag; a canvas shipped by a dependency is executable code, so it stays blocked until the package is approved via the `executables` block in `apm.yml` (`apm approve <pkg>`). First-party canvases in your own package deploy at project scope once the flag is on. With `--global`, a dependency canvas deploys to `~/.copilot/extensions/` and always requires approval (first-party global install is not supported). Every other harness is `unsupported`: a canvas is a Copilot CLI construct only.
 
 ## Where compiled context files land
 

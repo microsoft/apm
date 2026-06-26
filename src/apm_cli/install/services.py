@@ -23,6 +23,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .deployed_paths import deployed_path_entry as _deployed_path_entry
+from .deployed_paths import skill_bundle_file_entries as _skill_bundle_file_entries
+from .target_filter import filter_targets_for_dependency
+
 if TYPE_CHECKING:
     from ..core.command_logger import InstallLogger
     from ..core.scope import InstallScope
@@ -59,72 +63,6 @@ class IntegratorBundle:
     # keep working. Production sites (template.py, integrate_local_content,
     # drift.py) pass a real CanvasIntegrator; when None the loop skips canvas.
     canvas: BaseIntegrator | None = None
-
-
-def _deployed_path_entry(
-    target_path: Path,
-    project_root: Path,
-    targets: Any,
-) -> str:
-    """Return the lockfile-safe path string for a deployed file."""
-
-    def _try_dynamic_root(tgts, *, strict: bool = False) -> str | None:
-        for _t in tgts:
-            if _t.resolved_deploy_root is None:
-                continue
-            if not strict:
-                try:
-                    target_path.relative_to(_t.resolved_deploy_root)
-                except ValueError:
-                    continue
-            if _t.name == "copilot-app":
-                from apm_cli.integration.copilot_app_db import to_lockfile_uri
-
-                return to_lockfile_uri(target_path.name)
-            from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
-
-            return to_lockfile_path(target_path, _t.resolved_deploy_root)
-        return None
-
-    if targets:
-        result = _try_dynamic_root(targets)
-        if result is not None:
-            return result
-    try:
-        return target_path.relative_to(project_root).as_posix()
-    except ValueError:
-        # Fallback: let to_lockfile_path run its own security
-        # validation (PathTraversalError) without pre-filtering.
-        if targets:
-            result = _try_dynamic_root(targets, strict=True)
-            if result is not None:
-                return result
-        raise RuntimeError(  # noqa: B904
-            f"Cannot translate {target_path!r} to a lockfile path: "
-            f"path is outside the project tree and no dynamic-root "
-            f"target matched. This is a bug -- please report it."
-        )
-
-
-def _skill_bundle_file_entries(
-    skill_dir: Path,
-    project_root: Path,
-    targets: Any,
-) -> list[str]:
-    """Expand a deployed skill directory into per-file lockfile entries."""
-    try:
-        if not (skill_dir.is_dir() and not skill_dir.is_symlink()):
-            return []
-    except OSError:
-        return []
-    entries: list[str] = []
-    for bundle_file in sorted(skill_dir.rglob("*")):
-        try:
-            if bundle_file.is_file() and not bundle_file.is_symlink():
-                entries.append(_deployed_path_entry(bundle_file, project_root, targets))
-        except OSError:
-            continue
-    return entries
 
 
 def _log_hook_display_payloads(
@@ -188,7 +126,7 @@ def _check_executable_approval(
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None,
     *,
     ctx: InstallContext | None = None,
-) -> tuple[bool, bool]:
+) -> tuple[bool, bool, bool, bool]:
     """Delegate to ``exec_gate.check_executable_approval``."""
     from apm_cli.install.exec_gate import check_executable_approval
 
@@ -227,6 +165,27 @@ def _log_hooks_skip(
         )
 
 
+def _log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger | None) -> None:
+    """Warn about skipped canvas extensions when the package ships them."""
+    _install = Path(package_info.install_path)
+    extensions_root = _install / ".apm" / "extensions"
+    try:
+        has_canvas = extensions_root.is_dir() and any(
+            (d / "extension.mjs").is_file() for d in extensions_root.iterdir() if d.is_dir()
+        )
+    except OSError:
+        has_canvas = False
+    if not has_canvas:
+        return
+    _pkg_label = package_name or getattr(package_info, "name", "unknown")
+    if logger:
+        logger.warning(
+            f"{_pkg_label}: canvas extension(s) skipped (not approved in allowExecutables). "
+            f"Run 'apm approve {_pkg_label}' to approve.",
+            symbol="warning",
+        )
+
+
 def integrate_package_primitives(  # noqa: PLR0913
     package_info: Any,
     project_root: Path,
@@ -245,6 +204,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     policy: Any = None,
     is_first_party: bool = False,
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
+    dep_target_subset: list[str] | None = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -261,9 +221,9 @@ def integrate_package_primitives(  # noqa: PLR0913
     contain non-skill primitives when the cowork target is active.
 
     When *allow_executables* is provided, executable primitives (hooks,
-    bin/) are only deployed for packages whose key appears in the dict
-    with the matching type set to ``True``.  Local project content
-    (``package_name == "_local"``) is always trusted.
+    bin/, MCP servers, canvas extensions) are only deployed for packages
+    whose key appears in the dict with the matching type set to ``True``.
+    Local project content (``package_name == "_local"``) is always trusted.
 
     Returns a dict with integration counters and the list of deployed file paths.
     """
@@ -287,6 +247,14 @@ def integrate_package_primitives(  # noqa: PLR0913
 
     deployed = result["deployed_files"]
 
+    # SECURITY: dep_target_subset comes from CONSUMER manifest only.
+    # Package-side targets are advisory metadata; never a routing input.
+    targets, allowed_dep_targets, dep_targets_active = filter_targets_for_dependency(
+        targets,
+        dep_target_subset,
+        diagnostics,
+        package_name,
+    )
     if not targets:
         return result
 
@@ -307,8 +275,9 @@ def integrate_package_primitives(  # noqa: PLR0913
         # OR sit inside it.  ensure_path_within(child, parent) raises if not.
         ensure_path_within(Path(project_root).resolve(), scratch_root)
 
-    # Executable approval gate (npm v12-style default-deny).
-    _hooks_approved, _bin_approved = _check_executable_approval(
+    # Executable approval gate (npm v12-style default-deny). hooks/bin gate
+    # below (~424, ~585); mcp/canvas unused (mcp filtered upstream, canvas re-derived ~433).
+    _hooks_approved, _bin_approved, _mcp_approved, _canvas_approved = _check_executable_approval(
         package_name, package_info, allow_executables, ctx=ctx
     )
 
@@ -403,6 +372,25 @@ def integrate_package_primitives(  # noqa: PLR0913
         if _prim_name == "hooks" and not _hooks_approved:
             _log_hooks_skip(package_name, package_info, targets, logger)
             continue
+        # Executable approval gate: skip canvas if not approved.
+        # First-party (is_first_party=True) always deploys.
+        # Dependency canvas requires allowExecutables approval; the _local
+        # name shortcut in check_executable_approval does NOT bypass this
+        # gate when is_first_party=False (defence-in-depth: a malicious dep
+        # named _local must not bypass canvas trust via the name alone).
+        if _prim_name == "canvas" and not is_first_party:
+            if allow_executables is None:
+                _dep_canvas_ok = True
+            else:
+                from apm_cli.install.exec_gate import resolve_package_key as _rpk
+                from apm_cli.security.executables import EXEC_TYPE_CANVAS, is_package_approved
+
+                _dep_canvas_ok = is_package_approved(
+                    allow_executables, _rpk(package_info, package_name), EXEC_TYPE_CANVAS
+                ) or is_package_approved(allow_executables, package_name, EXEC_TYPE_CANVAS)
+            if not _dep_canvas_ok:
+                _log_canvas_skip(package_name, package_info, logger)
+                continue
         _integrator = _INTEGRATOR_KWARGS[_prim_name]
         # A primitive can be statically present on a target (e.g. the
         # copilot canvas mapping) while a given IntegratorBundle omits its
@@ -431,15 +419,14 @@ def integrate_package_primitives(  # noqa: PLR0913
             # don't accept this kwarg, so include it only for hooks.
             if _prim_name == "hooks":
                 _call_kwargs["user_scope"] = scope is InstallScope.USER
-            # Canvas alone needs the trust signal: dependency-provided
-            # canvases are executable code blocked unless the operator
-            # passed --trust-canvas-extensions. First-party (root/local)
-            # status is decided by the CALL PATH, not by a package-name
-            # string a dependency could spoof: only integrate_local_content
-            # passes is_first_party=True. Every dependency call defaults to
-            # False, so a dependency canvas always requires the trust flag.
+                _call_kwargs["dep_targets_active"] = dep_targets_active
+                _call_kwargs["allowed_targets"] = allowed_dep_targets
+            # Canvas integration: always pass is_first_party.  Approval
+            # is enforced by the gate above (canvas already skipped if
+            # not approved and not is_first_party), so here we always
+            # pass trust_canvas=True to let the integrator proceed.
             if _prim_name == "canvas":
-                _call_kwargs["trust_canvas"] = bool(getattr(ctx, "trust_canvas", False))
+                _call_kwargs["trust_canvas"] = True
                 _call_kwargs["is_first_party"] = is_first_party
                 _call_kwargs["package_name"] = package_name
             _int_result = getattr(_integrator, _entry.integrate_method)(
@@ -710,7 +697,7 @@ def integrate_local_bundle(
     logger: InstallLogger | None = None,
     scope: InstallScope | None = None,
     alias: str | None = None,
-    trust_canvas: bool = False,
+    allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
 ) -> dict:
     """Integrate a detected local bundle into project / user scope.
 
@@ -740,11 +727,11 @@ def integrate_local_bundle(
         logger: Install-flow logger.
         scope: ``InstallScope`` (project vs user) for downstream consumers.
         alias: Slug override from ``--as``.
-        trust_canvas: When ``True``, allow executable canvas extension
-            bundles (``extensions/<name>/extension.mjs``) to deploy from the
-            offline bundle.  Defaults to ``False`` (fail closed) so a
-            vendored bundle cannot smuggle executable canvas code past the
-            dependency trust gate.
+        allow_executables: The ``allowExecutables`` block from the consuming
+            project's ``apm.yml``.  When ``None`` (no enforcement), all
+            executable primitives including canvas are allowed.  When
+            provided, canvas extensions from the bundle are only deployed if
+            the bundle slug is approved for the ``canvas`` exec type.
 
     Returns:
         Dict with keys ``deployed_files`` (list[str]),
@@ -754,6 +741,7 @@ def integrate_local_bundle(
     import hashlib
     import shutil
 
+    from apm_cli.utils.atomic_io import normalize_crlf_to_lf, write_text_lf
     from apm_cli.utils.content_hash import compute_file_hash
 
     from ..core.scope import InstallScope
@@ -788,6 +776,16 @@ def integrate_local_bundle(
                 continue
             pack_files[rel] = hashlib.sha256(fp.read_bytes()).hexdigest()
 
+    text_bundle_suffixes = {".json", ".md", ".toml", ".txt", ".yaml", ".yml"}
+
+    def _normalized_bundle_text(path: Path) -> str | None:
+        if path.suffix.lower() not in text_bundle_suffixes:
+            return None
+        try:
+            return normalize_crlf_to_lf(path.read_bytes().decode("utf-8"))
+        except UnicodeDecodeError:
+            return None
+
     deployed_files: list[str] = []
     deployed_hashes: dict[str, str] = {}
     skipped = 0
@@ -809,33 +807,39 @@ def integrate_local_bundle(
 
     # Security + feature gate: canvas extensions are executable Node bundles
     # (``extension.mjs``).  A local / offline bundle copies its files
-    # verbatim WITHOUT routing through ``CanvasIntegrator``, so neither the
-    # experimental feature flag nor its trust gate would otherwise apply
-    # here.  Require BOTH gates: the ``canvas`` experimental flag must be ON
-    # (feature availability) AND ``--trust-canvas-extensions`` must be set
-    # (executable-code trust).  Fail closed -- drop canvas paths when either
-    # gate is missing.
+    # verbatim WITHOUT routing through ``CanvasIntegrator``, so the
+    # experimental feature flag and the allowExecutables gate must be
+    # checked explicitly here.  When the canvas feature flag is OFF, drop
+    # paths silently (no-op; canvas type does not exist yet).  When ON,
+    # check allowExecutables: if no enforcement block is present (None)
+    # canvas deploys freely; otherwise the bundle slug must be approved for
+    # the ``canvas`` exec type.
     from ..core.experimental import is_enabled
     from ..integration.canvas_integrator import is_canvas_bundle_path
 
     _canvas_enabled = is_enabled("canvas")
-    if not (_canvas_enabled and trust_canvas):
+    if _canvas_enabled:
+        from ..security.executables import EXEC_TYPE_CANVAS, is_package_approved
+
+        _canvas_approved_bundle = allow_executables is None or is_package_approved(
+            allow_executables, slug, EXEC_TYPE_CANVAS
+        )
+    else:
+        _canvas_approved_bundle = False
+
+    if not (_canvas_enabled and _canvas_approved_bundle):
         _blocked = sorted(r for r in pack_files if is_canvas_bundle_path(r))
         if _blocked:
             for _r in _blocked:
                 pack_files.pop(_r, None)
-            # Flag ON but untrusted: this is a genuine blocked deploy, so
-            # count it as skipped and surface the trust opt-in.  Flag OFF:
-            # the canvas type does not exist yet, so drop the paths silently
-            # WITHOUT inflating the skip count -- mirroring the silent no-op
-            # of the normal CanvasIntegrator path when the flag is off.
             if _canvas_enabled:
+                # Canvas feature on but not approved: block and surface message.
                 skipped += len(_blocked)
                 _msg = (
                     f"Blocked {len(_blocked)} canvas extension file(s) from bundle "
                     f"'{slug}': canvas extensions are executable extension.mjs code "
-                    "and are not deployed from bundles by default. Re-run with "
-                    "'--trust-canvas-extensions' to deploy them to .github/extensions/."
+                    f"and are not approved in allowExecutables. "
+                    f"Run 'apm approve {slug}' to approve them."
                 )
                 if diagnostics is not None:
                     diagnostics.warn(message=_msg, package=str(slug))
@@ -994,15 +998,21 @@ def integrate_local_bundle(
             except ValueError:
                 record = dest.as_posix()
 
+            normalized_text = _normalized_bundle_text(src)
+            if normalized_text is None:
+                desired_hash = expected_hash
+            else:
+                desired_hash = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
+
             if dry_run:
                 deployed_files.append(record)
                 # Normalize to "sha256:<hex>" so the dry-run lockfile preview
                 # matches the format written by ``compute_file_hash`` on the
-                # real deploy path.  ``expected_hash`` here is bare hex from
-                # ``pack.bundle_files``; without the prefix, downstream
+                # real deploy path.  ``desired_hash`` here is bare hex for
+                # the bytes this deploy path writes; without the prefix, downstream
                 # exact-match comparisons (e.g. ``cleanup.py`` provenance
                 # check) treat the file as user-edited and skip cleanup.
-                deployed_hashes[record] = f"sha256:{expected_hash}"
+                deployed_hashes[record] = f"sha256:{desired_hash}"
                 if logger:
                     logger.verbose_detail(f"[dry-run] would deploy {record}")
                 continue
@@ -1014,7 +1024,7 @@ def integrate_local_bundle(
                     existing_hash = hashlib.sha256(dest.read_bytes()).hexdigest()
                 except OSError:
                     existing_hash = None
-                if existing_hash and existing_hash != expected_hash:
+                if existing_hash and existing_hash != desired_hash:
                     skipped += 1
                     msg = (
                         f"Skipped {record}: file exists with different "
@@ -1026,12 +1036,14 @@ def integrate_local_bundle(
                         logger.warning(msg)
                     continue
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest, follow_symlinks=False)
-            # IM4: hash the deployed file (post-copy) rather than trusting
-            # the source bundle's expected_hash.  Today the integrator is a
-            # raw copy so the values match, but documenting deployed-file
-            # provenance now keeps the lockfile honest if future transforms
-            # (frontmatter injection, etc.) mutate content during deploy.
+            if normalized_text is None:
+                shutil.copy2(src, dest, follow_symlinks=False)
+            else:
+                write_text_lf(dest, normalized_text)
+            # IM4: hash the deployed file after the deploy transform rather
+            # than trusting the source bundle's expected_hash.  Local bundle
+            # text files may be LF-normalized during deploy, so the lockfile
+            # must bind the actual on-disk bytes.
             deployed_files.append(record)
             # Use ``compute_file_hash`` so the recorded value carries the
             # canonical ``sha256:<hex>`` prefix.  Matches the format written

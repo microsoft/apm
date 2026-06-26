@@ -254,11 +254,25 @@ class TestCheckRequiredPackagesDeployed:
         result = _check_required_packages_deployed([dep], lf, policy)
         assert result.passed
 
-    def test_required_not_deployed(self):
+    def test_required_present_but_parked(self):
+        # Gap B (issue #1873): a required package PRESENT in the lockfile but
+        # with no deployed_files (executables gated pending approval) is a
+        # healthy present-but-parked state -- presence passes; trust is audited
+        # separately by required-executable-untrusted.
         policy = DependencyPolicy(require=("acme/pkg",))
         dep = _dep("acme/pkg")
         locked = _locked("acme/pkg", deployed_files=[])  # no deployed files
         lf = _lock(locked)
+        result = _check_required_packages_deployed([dep], lf, policy)
+        assert result.passed
+        assert "present in lockfile" in result.message
+
+    def test_required_absent_from_lockfile(self):
+        # Presence check fails only when the required package is missing from
+        # the lockfile entirely.
+        policy = DependencyPolicy(require=("acme/pkg",))
+        dep = _dep("acme/pkg")
+        lf = _lock()  # empty lockfile -- acme/pkg absent
         result = _check_required_packages_deployed([dep], lf, policy)
         assert not result.passed
         assert "1 required package" in result.message

@@ -1,4 +1,5 @@
 import re
+from urllib.parse import urlparse
 
 import pytest
 
@@ -146,6 +147,7 @@ def test_is_azure_devops_hostname():
     """Test Azure DevOps hostname detection."""
     # Valid Azure DevOps hosts
     assert github_host.is_azure_devops_hostname("dev.azure.com")
+    assert github_host.is_azure_devops_hostname("ssh.dev.azure.com")
     assert github_host.is_azure_devops_hostname("mycompany.visualstudio.com")
     assert github_host.is_azure_devops_hostname("contoso.visualstudio.com")
 
@@ -308,6 +310,97 @@ def test_build_ado_api_url():
     assert "path=apm.yml" in url
     assert "versionDescriptor.version=main" in url
     assert "api-version=7.0" in url
+
+    encoded_url = github_host.build_ado_api_url("my org", "My Project", "repo/name", "path/file.md")
+    assert "my%20org/My%20Project/_apis/git/repositories/repo%2Fname/items" in encoded_url
+    encoded_ref_url = github_host.build_ado_api_url(
+        "myorg", "project", "repo", "path/file.md", ref="feature/a&b"
+    )
+    assert "versionDescriptor.version=feature%2Fa%26b" in encoded_ref_url
+
+    legacy_url = github_host.build_ado_api_url(
+        "contoso", "_apm", "_apm", "apm-policy.yml", host="contoso.visualstudio.com"
+    )
+    assert legacy_url.startswith(
+        "https://contoso.visualstudio.com/_apm/_apis/git/repositories/_apm/items"
+    )
+
+    ssh_url = github_host.build_ado_api_url(
+        "contoso", "_apm", "_apm", "apm-policy.yml", host="ssh.dev.azure.com"
+    )
+    assert ssh_url.startswith("https://dev.azure.com/contoso/_apm/_apis/")
+
+
+def test_parse_ado_repo_url_dev_azure():
+    """dev.azure.com encodes the org as the first path segment."""
+    assert github_host.parse_ado_repo_url("https://dev.azure.com/contoso/platform/_git/tools") == (
+        "contoso",
+        "platform",
+        "tools",
+    )
+
+
+def test_parse_ado_repo_url_visualstudio_legacy():
+    """*.visualstudio.com encodes the org in the subdomain."""
+    assert github_host.parse_ado_repo_url(
+        "https://contoso.visualstudio.com/platform/_git/tools"
+    ) == ("contoso", "platform", "tools")
+
+
+def test_parse_ado_repo_url_strips_git_suffix_and_subpath():
+    assert github_host.parse_ado_repo_url(
+        "https://dev.azure.com/contoso/platform/_git/tools.git"
+    ) == ("contoso", "platform", "tools")
+    # Extra (virtual) segments after the repo are ignored.
+    assert github_host.parse_ado_repo_url(
+        "https://dev.azure.com/contoso/platform/_git/tools/sub/dir"
+    ) == ("contoso", "platform", "tools")
+
+
+def test_parse_ado_repo_url_percent_decodes_segments():
+    assert github_host.parse_ado_repo_url(
+        "https://dev.azure.com/contoso/my%20project/_git/tools"
+    ) == ("contoso", "my project", "tools")
+
+
+def test_parse_ado_repo_url_round_trips_through_build_ado_api_url():
+    org, project, repo = github_host.parse_ado_repo_url(
+        "https://dev.azure.com/contoso/platform/_git/tools"
+    )
+    url = github_host.build_ado_api_url(org, project, repo, "marketplace.json", "main")
+    assert urlparse(url).path == "/contoso/platform/_apis/git/repositories/tools/items"
+
+
+def test_parse_ado_repo_url_round_trips_visualstudio_legacy_api_url():
+    org, project, repo = github_host.parse_ado_repo_url(
+        "https://contoso.visualstudio.com/platform/_git/tools"
+    )
+    url = github_host.build_ado_api_url(
+        org,
+        project,
+        repo,
+        "marketplace.json",
+        "main",
+        host="contoso.visualstudio.com",
+    )
+    parsed = urlparse(url)
+    assert parsed.hostname == "contoso.visualstudio.com"
+    assert parsed.path == "/platform/_apis/git/repositories/tools/items"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/owner/repo",  # not an ADO host
+        "https://dev.azure.com/contoso/platform/tools",  # missing _git marker
+        "https://dev.azure.com/contoso/_git/tools",  # missing project segment
+        "https://dev.azure.com/contoso/platform/_git",  # missing repo segment
+        "",
+        None,
+    ],
+)
+def test_parse_ado_repo_url_returns_none_for_non_ado_or_malformed(url):
+    assert github_host.parse_ado_repo_url(url) is None
 
 
 def test_build_authorization_header_git_env_bearer():

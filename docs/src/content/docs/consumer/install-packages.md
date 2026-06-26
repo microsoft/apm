@@ -93,7 +93,7 @@ For the deeper view of how compile fits in, see
 `apm install` mirrors `npm install` deliberately. The big difference:
 APM also runs a security scan and, if present, an org policy gate
 before writing anything to disk. To refresh dependencies to their
-latest matching refs, use `apm update` (mirrors `npm update`). To
+latest matching versions or refs, use `apm update` (mirrors `npm update`). To
 upgrade the `apm` CLI binary itself, use `apm self-update`.
 :::
 
@@ -177,6 +177,12 @@ apm install --dev                      # treat positional args as devDependencie
 apm install -g <package>               # install to user scope (~/.apm/)
 apm install -v                         # verbose: show resolution and integration
 ```
+
+Targets with native user-scope instruction files pick up global instructions
+during install. Targets whose user-scope instruction surface is a root context
+file require explicit
+[`apm compile --global`](../../reference/cli/compile/#global-compilation);
+`apm install -g` prints a hint and writes no root context file.
 
 For the full flag reference, run `apm install --help` or see
 [CLI commands](../../reference/cli/install/).

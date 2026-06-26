@@ -136,11 +136,11 @@ class TestCrossTargetMapping:
         assert len(mappings) == 2  # skills and agents mapped
 
     def test_cursor_mapping(self):
-        """Skills under .github/ are remapped to .cursor/ when target=cursor."""
+        """Skills under .github/ are remapped to .agents/ when target=cursor."""
         files = [".github/skills/x/SKILL.md"]
         result, mappings = _filter_files_by_target(files, "cursor")
-        assert result == [".cursor/skills/x/SKILL.md"]
-        assert mappings == {".cursor/skills/x/SKILL.md": ".github/skills/x/SKILL.md"}
+        assert result == [".agents/skills/x/SKILL.md"]
+        assert mappings == {".agents/skills/x/SKILL.md": ".github/skills/x/SKILL.md"}
 
     def test_opencode_mapping(self):
         """Skills under .github/ are remapped to .opencode/ when target=opencode."""

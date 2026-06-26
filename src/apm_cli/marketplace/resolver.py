@@ -246,8 +246,9 @@ def _source_needs_explicit_git_path(source: MarketplaceSource) -> bool:
     For URL-first sources, the ``kind`` derivation already encodes the routing
     decision: any host APM doesn't classify as github-family needs the explicit
     git+path canonical (mirrors the existing GitLab self-managed pattern), and
-    that now includes Azure DevOps and generic git hosts since their
-    ``marketplace.json`` is fetched via subprocess git instead of an API.
+    that includes Azure DevOps (``ado``) and generic git hosts. ADO metadata is
+    read via the REST items fast path with a subprocess-git fallback, but its
+    plugin sources still need the explicit git+path canonical like generic git.
 
     Local marketplaces handle relative sources via :func:`_resolve_local_relative_source`
     on the fast path and never reach this helper.
@@ -255,7 +256,7 @@ def _source_needs_explicit_git_path(source: MarketplaceSource) -> bool:
     kind = source.kind
     if kind == "github":
         return False
-    if kind in ("gitlab", "git"):
+    if kind in ("gitlab", "git", "ado"):
         return True
     # Fall back to legacy host-based behaviour for any kind we don't recognise
     return _marketplace_host_needs_explicit_git_path(source.host)
@@ -832,6 +833,34 @@ def resolve_marketplace_plugin(
                 source, in_repo_path, effective_ref
             )
             canonical = dep_ref.to_canonical()
+
+    # ---- Build dep_ref for url-type sources on non-GitHub-family hosts ----
+    # When the plugin declares a ``url`` source and the marketplace is on a
+    # host that needs explicit git paths (GitLab, generic git), the URL
+    # already carries the full clone target.  Build a structured dep_ref so
+    # downstream auth resolves at the correct host instead of defaulting to
+    # github.com.
+    if dep_ref is None and _source_needs_explicit_git_path(source):
+        if isinstance(plugin.source, dict):
+            _src_type = _coerce_dict_plugin_type(plugin.source)
+            if _src_type == "url":
+                _url = (plugin.source.get("url", "") or "").strip()
+                if _url:
+                    _ref = plugin.source.get("ref", "")
+                    _effective_ref = version_spec or (
+                        _ref.strip() if isinstance(_ref, str) and _ref.strip() else ""
+                    )
+                    _entry: dict = {"git": _url}
+                    if _effective_ref:
+                        _entry["ref"] = _effective_ref
+                    dep_ref = DependencyReference.parse_from_dict(_entry)
+                    canonical = dep_ref.to_canonical()
+                    logger.debug(
+                        "Built dep_ref from url source for %s@%s -> %s (non-github-host url source)",
+                        plugin_name,
+                        marketplace_name,
+                        canonical,
+                    )
 
     # ---- Backfill host on canonical for GitHub-family enterprise hosts ----
     # ``*.ghe.com`` marketplaces keep virtual shorthand (no structured ``dep_ref``)

@@ -30,6 +30,9 @@ from ..version import get_version
 _DEFAULT_GITHUB_URL = "https://github.com"
 _DEFAULT_APM_REPO = "microsoft/apm"
 _INSTALL_SCRIPT_REF = "main"
+_ENV_SELF_UPDATE_CHANNEL = "APM_SELF_UPDATE_CHANNEL"
+_ENV_INSTALL_DIR = "APM_INSTALL_DIR"
+_ENV_VERSION = "VERSION"
 
 
 def _is_windows_platform() -> bool:
@@ -108,8 +111,53 @@ def _get_installer_run_command(script_path: str) -> list[str]:
             raise FileNotFoundError("PowerShell executable not found in PATH")
         return [powershell_path, "-ExecutionPolicy", "Bypass", "-File", script_path]
 
-    shell_path = "/bin/sh" if os.path.exists("/bin/sh") else "sh"
+    shell_path = shutil.which("bash")
+    if not shell_path:
+        if os.path.exists("/bin/bash"):
+            shell_path = "/bin/bash"
+        else:
+            raise FileNotFoundError("bash executable not found; cannot run installer script")
     return [shell_path, script_path]
+
+
+def _get_effective_self_update_channel() -> str:
+    """Return the invocation-scoped or persisted self-update channel."""
+    from ..config import get_self_update_channel, normalize_self_update_channel
+
+    env_value = os.environ.get(_ENV_SELF_UPDATE_CHANNEL, "").strip()
+    if env_value:
+        return normalize_self_update_channel(env_value)
+    return get_self_update_channel()
+
+
+def get_latest_version_for_self_update(channel: str) -> str | None:
+    """Return the latest version for a supported self-update channel."""
+    from ..utils.version_checker import get_latest_version_from_github
+
+    return get_latest_version_from_github(include_prerelease=(channel == "prerelease"))
+
+
+def _build_self_update_installer_env(latest_version: str) -> dict[str, str]:
+    """Build the installer subprocess environment from non-secret preferences.
+
+    Invocation-scoped environment variables win over persisted config. This
+    helper only maps the bounded non-secret installer preferences accepted by
+    ``apm config``; credentials and mirror URLs stay on the existing auth/env
+    paths and are never read from persisted self-update config.
+    """
+    from ..config import get_self_update_install_dir
+
+    env = external_process_env()
+    install_dir = get_self_update_install_dir()
+    if install_dir and _ENV_INSTALL_DIR not in env:
+        env[_ENV_INSTALL_DIR] = install_dir
+
+    channel = _get_effective_self_update_channel()
+    if _ENV_SELF_UPDATE_CHANNEL not in env:
+        env[_ENV_SELF_UPDATE_CHANNEL] = channel
+    if channel == "prerelease" and _ENV_VERSION not in env:
+        env[_ENV_VERSION] = f"v{latest_version}"
+    return env
 
 
 @click.command(
@@ -164,6 +212,14 @@ def self_update(check):
         _release_metadata_url = get_release_metadata_url()
         if _release_metadata_url:
             logger.progress("APM_RELEASE_METADATA_URL override active -- using mirrored metadata")
+        try:
+            _channel = _get_effective_self_update_channel()
+        except ValueError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
+        if _channel != "stable":
+            logger.progress(f"Self-update channel: {_channel}")
+
         _pinned = os.environ.get("VERSION", "")
         if _pinned:
             logger.progress(f"VERSION env var set -- API call skipped, using: {_pinned!r}")
@@ -173,15 +229,19 @@ def self_update(check):
             sys.exit(1)
 
         # Check for latest version
-        from ..utils.version_checker import get_latest_version_from_github
-
-        latest_version = get_latest_version_from_github()
+        latest_version = get_latest_version_for_self_update(_channel)
 
         if not latest_version:
             if _release_metadata_url:
                 logger.error("Unable to fetch latest version from APM_RELEASE_METADATA_URL mirror")
                 logger.info(
                     "Check the mirror URL, publish latest.json, or set VERSION to a pinned release."
+                )
+            elif _channel == "prerelease":
+                logger.error("Unable to fetch a prerelease version from remote")
+                logger.info(
+                    "No prerelease was found or the lookup failed; switch to stable with "
+                    "`apm config set self-update.channel stable`."
                 )
             else:
                 logger.error("Unable to fetch latest version from remote")
@@ -249,7 +309,7 @@ def self_update(check):
             result = subprocess.run(
                 _get_installer_run_command(temp_script),
                 check=False,
-                env=external_process_env(),
+                env=_build_self_update_installer_env(latest_version),
             )
 
             # Clean up temp file

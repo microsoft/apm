@@ -26,8 +26,9 @@ issues, pull requests, CI pipelines, and panel reviews in real time.
 # Enable the experimental canvas feature
 apm experimental enable canvas
 
-# Install at project level (deploys to .github/extensions/)
-apm install microsoft/apm/packages/apm-contributor-dashboard --trust-canvas-extensions
+# Approve the canvas extension in apm.yml, then install
+apm approve microsoft/apm/packages/apm-contributor-dashboard
+apm install microsoft/apm/packages/apm-contributor-dashboard
 ```
 
 The deployed `.github/extensions/` directory is auto-generated and should
@@ -39,8 +40,8 @@ After installing, open the dashboard in Copilot CLI by asking:
 > "Open the APM Contributor Dashboard"
 
 The canvas registers as `issue-monitor` and appears as
-"APM Contributor Dashboard" in the canvas list. The `--trust-canvas-extensions`
-flag grants the extension permission to execute `gh` CLI commands on your
+"APM Contributor Dashboard" in the canvas list. The `allowExecutables` approval
+grants the extension permission to execute `gh` CLI commands on your
 behalf (e.g. posting comments, approving PRs). Only install extensions you
 trust.
 

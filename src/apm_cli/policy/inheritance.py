@@ -4,7 +4,7 @@ Supports three-level chains: enterprise hub -> org -> repo.
 Each level can tighten but never relax the parent.
 
 extends: values:
-- "org"              -> same org's .github repo (repo-level override)
+- "org"              -> same org's policy repo (.github, .apm, or _apm)
 - "<owner>/<repo>"   -> cross-org reference (enterprise policy hub)
 - "https://..."      -> direct URL
 """
@@ -19,6 +19,7 @@ from .schema import (
     CompilationStrategyPolicy,
     CompilationTargetPolicy,
     DependencyPolicy,
+    ExecutablesPolicy,
     IntegrityPolicy,
     ManifestPolicy,
     McpPolicy,
@@ -73,6 +74,7 @@ def merge_policies(parent: ApmPolicy, child: ApmPolicy) -> ApmPolicy:
         registry_source=_merge_registry_source(parent.registry_source, child.registry_source),
         security=_merge_security(parent.security, child.security),
         bin_deploy=_merge_bin_deploy(parent.bin_deploy, child.bin_deploy),
+        executables=_merge_executables(parent.executables, child.executables),
     )
 
 
@@ -172,6 +174,24 @@ def _merge_bin_deploy(parent: BinDeployPolicy, child: BinDeployPolicy) -> BinDep
     return BinDeployPolicy(
         deny_all=parent.deny_all or child.deny_all,
         deny=_union(parent.deny, child.deny),
+    )
+
+
+def _merge_executables(parent: ExecutablesPolicy, child: ExecutablesPolicy) -> ExecutablesPolicy:
+    """Merge the executable-trust policy block: tighten-only ratchet (#1873).
+
+    ``deny_all`` OR-merges so any ancestor's kill-switch (``True``) sticks;
+    ``deny``/``require``/``recommend``/``enforce`` union-merge so a child can
+    add packages but never drop a parent's. ``recommend`` growing the vetted
+    set is safe (it is user-overridable); ``enforce`` is union-merged for v2
+    but in v1 the resolver degrades it to ``recommend`` with no force path.
+    """
+    return ExecutablesPolicy(
+        deny_all=parent.deny_all or child.deny_all,
+        deny=_union(parent.deny, child.deny),
+        require=_union(parent.require, child.require),
+        recommend=_union(parent.recommend, child.recommend),
+        enforce=_union(parent.enforce, child.enforce),
     )
 
 

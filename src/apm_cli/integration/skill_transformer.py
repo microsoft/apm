@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from ..primitives.models import Skill
+from ..utils.atomic_io import write_text_lf
 
 
 def to_hyphen_case(name: str) -> str:
@@ -67,7 +68,7 @@ class SkillTransformer:
 
         # Create directory and write file
         agent_path.parent.mkdir(parents=True, exist_ok=True)
-        agent_path.write_text(agent_content, encoding="utf-8")
+        write_text_lf(agent_path, agent_content)
 
         return agent_path
 
