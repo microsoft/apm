@@ -171,6 +171,60 @@ class TestIsContentIdenticalToSource:
 
 
 # ---------------------------------------------------------------------------
+# try_adopt_identical -- deploy-mode contract for byte-preserving integrators
+# ---------------------------------------------------------------------------
+
+
+class TestTryAdoptIdenticalDeployMode:
+    """Pins the ``try_adopt_identical`` deploy-mode contract that the
+    byte-preserving integrators (hook / kiro-hook / canvas) depend on.
+
+    Those integrators call ``try_adopt_identical`` WITHOUT
+    ``lf_normalized_deploy`` and then deploy with ``shutil.copy2`` (verbatim),
+    so a CRLF source must NOT be adopted against an LF target -- a verbatim
+    copy would leave CRLF on disk and churn the lockfile. The LF-normalizing
+    integrators pass ``lf_normalized_deploy=True`` and DO adopt the same pair.
+    This pins the byte-preserving reject path at the wrapper that
+    ``hook_integrator`` actually calls, complementing the helper-level tests
+    on :meth:`is_content_identical_to_source`.
+    """
+
+    def test_byte_preserving_default_rejects_crlf_against_lf(self, tmp_path: Path) -> None:
+        target = tmp_path / "hook.sh"
+        source = tmp_path / "src.sh"
+        target.write_bytes(b"#!/bin/sh\necho hi\n")
+        source.write_bytes(b"#!/bin/sh\r\necho hi\r\n")
+        adopted: list[Path] = []
+        # Default mode is how hook_integrator calls it: no adopt, no append.
+        assert BaseIntegrator.try_adopt_identical(target, source, adopted) is False
+        assert adopted == []
+
+    def test_byte_preserving_default_adopts_raw_identical(self, tmp_path: Path) -> None:
+        target = tmp_path / "hook.sh"
+        source = tmp_path / "src.sh"
+        target.write_bytes(b"#!/bin/sh\r\necho hi\r\n")
+        source.write_bytes(b"#!/bin/sh\r\necho hi\r\n")
+        adopted: list[Path] = []
+        assert BaseIntegrator.try_adopt_identical(target, source, adopted) is True
+        assert adopted == [target]
+
+    def test_lf_normalized_flag_adopts_crlf_against_lf(self, tmp_path: Path) -> None:
+        """Contrast: the SAME CRLF-source/LF-target pair the byte-preserving
+        default rejects IS adopted when the caller opts into LF normalization
+        (instruction/agent/prompt/command)."""
+        target = tmp_path / "x.md"
+        source = tmp_path / "src.md"
+        target.write_bytes(b"# h\nbody\n")
+        source.write_bytes(b"# h\r\nbody\r\n")
+        adopted: list[Path] = []
+        assert (
+            BaseIntegrator.try_adopt_identical(target, source, adopted, lf_normalized_deploy=True)
+            is True
+        )
+        assert adopted == [target]
+
+
+# ---------------------------------------------------------------------------
 # Instruction integrator -- the user's reproducer (zava-storefront)
 # ---------------------------------------------------------------------------
 

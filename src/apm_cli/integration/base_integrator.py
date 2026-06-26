@@ -97,6 +97,15 @@ class BaseIntegrator:
     handled here.
     """
 
+    # Deploy-mode for the shared adopt predicate (:meth:`_check_adopt_or_skip`).
+    # ``False`` = byte-preserving identity (the safe default any future
+    # byte-preserving integrator inherits). Integrators that deploy via
+    # ``write_text_lf`` (instruction / command / agent) override this to
+    # ``True`` so a CRLF-source file already deployed as LF is adopted rather
+    # than churned. Making the mode an explicit, named class attribute keeps
+    # it out of a hardcoded literal buried inside the predicate.
+    _LF_NORMALIZED_DEPLOY = False
+
     def __init__(self):
         self.link_resolver: UnifiedLinkResolver | None = None
 
@@ -339,11 +348,16 @@ class BaseIntegrator:
         When adopting, *target_path* is appended to *target_paths* as a
         side effect so the caller's bookkeeping stays correct.
 
+        The adopt comparison runs in this integrator's deploy mode
+        (:attr:`_LF_NORMALIZED_DEPLOY`): LF-normalizing integrators compare
+        the on-disk target against the LF-normalized source, while
+        byte-preserving integrators compare raw bytes.
+
         Args:
             target_path: Destination path on disk.
             source_file: Source file to compare against; the file is adopted
-                when the on-disk target already matches the deployed (LF-
-                normalized) form of this source.
+                when the on-disk target already matches the deployed form of
+                this source.
             rel_path: Relative path string used for collision detection and
                 diagnostics.
             managed_files: Set of APM-managed relative paths; ``None`` means
@@ -354,12 +368,14 @@ class BaseIntegrator:
             target_paths: Mutable list; *target_path* is appended on adopt.
 
         Returns:
-            ``(skip, adopted)`` — when ``skip`` is ``True`` the caller must
+            ``(skip, adopted)`` -- when ``skip`` is ``True`` the caller must
             ``continue`` (or otherwise skip writing this file); ``adopted``
             is ``True`` only when the existing file already matched the
             deployed content and has been silently adopted.
         """
-        if self.is_content_identical_to_source(target_path, source_file, lf_normalized_deploy=True):
+        if self.is_content_identical_to_source(
+            target_path, source_file, lf_normalized_deploy=self._LF_NORMALIZED_DEPLOY
+        ):
             target_paths.append(target_path)
             return True, True
         if self.check_collision(

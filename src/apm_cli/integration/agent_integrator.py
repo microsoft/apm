@@ -27,6 +27,9 @@ if TYPE_CHECKING:
 class AgentIntegrator(BaseIntegrator):
     """Handles integration of APM package agents into .github/agents/, .claude/agents/, and .cursor/agents/."""
 
+    # Deploys via write_text_lf -> compare adopt candidates in LF mode.
+    _LF_NORMALIZED_DEPLOY = True
+
     def find_agent_files(self, package_path: Path) -> list[Path]:
         """Find all .agent.md and .chatmode.md files in a package.
 

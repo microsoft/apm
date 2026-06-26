@@ -145,6 +145,9 @@ class CommandIntegrator(BaseIntegrator):
     during package installation, following the same pattern as PromptIntegrator.
     """
 
+    # Deploys via write_text_lf -> compare adopt candidates in LF mode.
+    _LF_NORMALIZED_DEPLOY = True
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Track which (target_name) values have already received the
