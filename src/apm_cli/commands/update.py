@@ -576,16 +576,26 @@ def _run_dep_update(
             except Exception as e:
                 _rich_error(f"Failed to record revision-pin tags in apm.lock.yaml: {e}")
                 sys.exit(1)
+        # Report the number of dependencies that actually changed (per the
+        # plan), not the total tree re-materialized (result.installed_count).
+        # The latter counts unchanged deps that were re-integrated, which
+        # contradicts the "N updated" line the plan just printed.
+        # installed_count is still the guard for whether anything materialized:
+        # a proceeded run that installed nothing reports the no-op outcome even
+        # if the plan predicted changes.
         installed = getattr(result, "installed_count", 0)
-        if installed and revision_pin_updates:
+        changed = len(plan.changed_entries)
+        applied = bool(installed) and changed > 0
+        if applied and revision_pin_updates:
             count = len(revision_pin_updates)
-            dep_noun = "dependency" if installed == 1 else "dependencies"
+            dep_noun = "dependency" if changed == 1 else "dependencies"
             pin_noun = "pin" if count == 1 else "pins"
             _rich_success(
-                f"Updated {installed} APM {dep_noun} and {count} revision {pin_noun} in apm.yml."
+                f"Updated {changed} APM {dep_noun} and {count} revision {pin_noun} in apm.yml."
             )
-        elif installed:
-            _rich_success(f"Updated {installed} APM dependencies.")
+        elif applied:
+            dep_noun = "dependency" if changed == 1 else "dependencies"
+            _rich_success(f"Updated {changed} APM {dep_noun}.")
         elif revision_pin_updates:
             count = len(revision_pin_updates)
             noun = "pin" if count == 1 else "pins"
