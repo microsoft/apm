@@ -956,9 +956,10 @@ def _run_compilation(
     default=False,
     help=(
         "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
+        "already populated, and in AGENTS.md even when .github/instructions/ is "
         "already populated. Overrides the default deduplication that normally omits "
-        "the section to avoid duplicate context in Claude Code. Affects the Claude "
-        "target only. Alias: --no-dedup."
+        "these sections to avoid duplicate context. Affects both the Claude and "
+        "Copilot (AGENTS.md) deduplication paths. Alias: --no-dedup."
     ),
 )
 @click.option(
@@ -1072,7 +1073,7 @@ def compile(  # noqa: PLR0913 -- Click handler
             "compile_all": "--all",
             "legacy_skill_paths": "--legacy-skill-paths",
             "local_only": "--local-only",
-            "no_dedup": "--force-instructions/--no-dedup",
+            "no_dedup": "--force-instructions/--no-force-instructions",
             "no_links": "--no-links",
             "output": "--output",
             "root": "--root",
