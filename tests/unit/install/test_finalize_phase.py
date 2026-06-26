@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from apm_cli.core.scope import InstallScope
 from apm_cli.install.phases.finalize import run
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
@@ -33,6 +34,7 @@ class _FakeCtx:
     diagnostics: Any = field(default_factory=DiagnosticCollector)
     logger: Any = None
     package_types: dict[str, str] = field(default_factory=dict)
+    scope: Any = field(default_factory=lambda: InstallScope.PROJECT)
 
 
 # ---------------------------------------------------------------------------

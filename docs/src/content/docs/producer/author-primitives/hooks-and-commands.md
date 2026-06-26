@@ -80,7 +80,32 @@ authors notice empty merges during development.
 
 The `${PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, and `${KIRO_PLUGIN_ROOT}`
 tokens resolve to the installed package root and are rewritten per
-target. Plain `./script.sh` resolves relative to the hook file.
+target. Plain `./script.sh` resolves relative to the hook file. If the hook
+file lives in `hooks/` or `.apm/hooks/`, a path like
+`./hooks/run-hook.sh` resolves from the package root so the deployed
+path is not doubled.
+
+For multi-target packages, prefer simple hook filenames plus consumer
+per-dependency `targets:` in `dependencies.apm` to limit reach. If the
+same manifest stem is mirrored in both `hooks/` and `.apm/hooks/`, APM
+integrates the `.apm/hooks/` copy once per target.
+
+:::note
+See the object-form dependency field in
+[Manifest Schema](../../reference/manifest-schema/#412-object-form) and
+the target vocabulary in
+[Primitives and targets](../../concepts/primitives-and-targets/).
+:::
+
+:::caution[Deprecated]
+Hook filename routing (`*-<harness>-hooks.json`) is deprecated. Ship one
+hook manifest; consumers scope harness reach with the per-dependency
+`targets:` field. The filename router still works during the deprecation
+window and warns at install time.
+
+Before: name the manifest `my-pkg-codex-hooks.json`. After: keep
+`hooks.json` generic and let the consumer set `targets: [codex]`.
+:::
 
 Supported targets and where the integrator writes:
 

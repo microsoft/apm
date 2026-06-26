@@ -175,6 +175,16 @@ A plural alias `targets:` (YAML list only) is also accepted and takes precedence
 | `all` | All targets. Cannot be combined with other values in a list. |
 | `minimal` | `AGENTS.md` only at project root. **Auto-detected only**: this value MUST NOT be set explicitly in manifests; it is an internal fallback when no target folder is detected. |
 
+:::tip[Deterministic committed output]
+Teams that commit the files `apm compile` generates face a consistency problem:
+without `target:` or `targets:` set, auto-detection decides which files to produce
+based on which tool folders exist on the local machine. The committed set silently tracks
+whoever last ran `apm compile`. Setting `targets:` makes the output deterministic
+for every developer, CI runner, and cloud agent that relies on the checked-in
+generated files without running `apm compile` locally. See
+[Pin committed output with targets:](./cli/compile/#pin-committed-output-with-targets).
+:::
+
 ### 3.7. `type`
 
 | | |
@@ -386,6 +396,19 @@ REQUIRED when the shorthand is ambiguous (e.g. direct nested-group repos with vi
 | `path` | `string` | OPTIONAL / REQUIRED (local) | Relative path within the repo, or local filesystem path | When `git` is present: subdirectory or file (virtual package). When `git` is absent: local filesystem path (must start with `./`, `../`, `/`, or `~/`). |
 | `ref` | `string` | OPTIONAL | Branch, tag, or commit SHA | Git reference to checkout. |
 | `alias` | `string` | OPTIONAL | `^[a-zA-Z0-9._-]+$` | Local alias. |
+| `targets` | `list<string>` | OPTIONAL | Subset of canonical target keys (`copilot`, `claude`, `cursor`, `kiro`, `opencode`, `gemini`, `antigravity`, `codex`, `windsurf`, `agent-skills`, `openclaw`, `hermes`, `copilot-cowork`, `copilot-app`) | Restricts which install targets receive this dependency's target-scoped primitives. Omitted = all active install targets. Effective reach = install targets INTERSECT this list. |
+
+`targets:` on a dependency is intersected with the active install targets
+(`--target`, config default, package-level `targets:`, or auto-detect).
+Listing a harness the install did not select does not add it; omitting
+`targets:` means the dependency reaches every active install target. An empty
+list `targets: []` is rejected at parse time -- omit the key to mean
+"all".
+
+```yaml
+- git: my-team/review-hooks
+  targets: [copilot, claude]
+```
 
 Remote dependency (git URL plus sub-path):
 

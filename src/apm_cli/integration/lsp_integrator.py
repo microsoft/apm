@@ -17,6 +17,7 @@ from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.integration._shared import deduplicate_deps, resolve_locked_apm_yml_paths
 from apm_cli.runtime.utils import find_runtime_binary
+from apm_cli.utils.atomic_io import write_text_lf
 
 _log = logging.getLogger(__name__)
 
@@ -341,7 +342,7 @@ class LSPIntegrator:
             existing[name] = server_config
 
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        write_text_lf(config_path, json.dumps(config, indent=2) + "\n")
         return changed
 
     @staticmethod
@@ -369,7 +370,7 @@ class LSPIntegrator:
         if removed:
             if servers_key is not None:
                 config[servers_key] = servers
-            config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+            write_text_lf(config_path, json.dumps(config, indent=2) + "\n")
         return removed
 
     # ------------------------------------------------------------------

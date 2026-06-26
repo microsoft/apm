@@ -110,22 +110,23 @@ apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
 | `--verbose`, `-v` | Show detailed output. |
 
 **Trust boundary.** APM forwards its authentication tokens
-(`GITHUB_APM_PAT`, `GITLAB_APM_PAT`) only when the marketplace
-host is classified as GitHub or GitLab family. For any other git
-host -- generic HTTPS, SSH, Azure DevOps, self-hosted -- the
-marketplace is fetched via subprocess `git` through `GitCache`,
-and authentication falls through to the host's local git credential
-helper and matching `*_APM_PAT` variables such as `ADO_APM_PAT`.
-Hosted `marketplace.json` URLs are public HTTPS only: APM sends no auth
-headers. Use a git-backed marketplace for private catalogs. When packages
-are installed from a hosted JSON URL, the lockfile records the source URL and
-fetched content digest. See
+(`GITHUB_APM_PAT`, `GITLAB_APM_PAT`, `ADO_APM_PAT`) only when the
+marketplace host is classified as GitHub, GitLab, or Azure DevOps.
+Other git hosts -- generic HTTPS, SSH, self-hosted -- are fetched via
+subprocess `git` through `GitCache`, and authentication falls through
+to the host's local git credential helper. Hosted `marketplace.json`
+URLs are public HTTPS only: APM sends no auth headers. Use a
+git-backed marketplace for private catalogs. When packages are
+installed from a hosted JSON URL, the lockfile records the source URL
+and fetched content digest. See
 [`getting-started/authentication`](../../../getting-started/authentication/).
 
 **Azure DevOps.** ADO-hosted marketplaces fetch `marketplace.json`
-via a sparse-cone git clone (not the ADO REST API), so authentication
-uses `ADO_APM_PAT` -- identical to how `apm install` handles
-ADO-hosted package dependencies. See
+through the Azure DevOps Items API first. Authentication uses
+`ADO_APM_PAT`, with the same `az` bearer fallback as ADO package
+dependencies. If the REST request is unavailable, forbidden, or cannot
+read the repo shape, APM transparently falls back to the existing
+subprocess git path. See
 [`consumer/private-and-org-packages`](../../../consumer/private-and-org-packages/).
 
 ### `apm marketplace list`

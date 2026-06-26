@@ -16,7 +16,7 @@ to remember the flag matrix.
 | You want to... | Run | Notes |
 |---|---|---|
 | Reproduce the lockfile exactly (CI gate) | `apm install --frozen` | Refuses to install when `apm.lock.yaml` is missing or out of sync with `apm.yml`. Equivalent in spirit to `npm ci` / `pnpm install --frozen-lockfile`. |
-| Refresh refs and rewrite the lockfile | `apm update` (or `apm update --yes` for CI) | Restructures the dependency graph against latest matching refs. |
+| Refresh versions or refs and rewrite the lockfile | `apm update` (or `apm update --yes` for CI) | Restructures the dependency graph against latest matching versions or refs. |
 | Validate lockfile integrity for CI | `apm audit --ci` | Lockfile-consistency check + on-disk integrity. Pair with `--format sarif --output audit.sarif` for GitHub Code Scanning. |
 | See what is installed | `apm deps list` | Project scope. Add `--global` for `~/.apm/`. |
 | Inspect the dependency tree | `apm deps tree` | Hierarchical view of direct + transitive deps. |

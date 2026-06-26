@@ -471,9 +471,9 @@ class CanvasIntegrator(BaseIntegrator):
         diagnostics.warn(
             message=(
                 f"Blocked {len(bundles)} canvas extension(s) ({names}) from '{pkg}': "
-                f"canvas extensions run {CANVAS_MARKER} code and require approval "
-                f"before deployment. Run 'apm approve {pkg}' to record approval in "
-                f"~/.apm/approvals.yml and deploy them to {deploy_dir}."
+                f"canvas extensions are executable {CANVAS_MARKER} code and are not "
+                f"trusted by default. Run 'apm approve {pkg}' to trust '{pkg}' and "
+                f"deploy them to {deploy_dir}."
             ),
             package=package_name or "",
         )

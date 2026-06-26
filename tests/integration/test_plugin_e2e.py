@@ -36,6 +36,45 @@ from apm_cli.utils.helpers import find_plugin_json
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "mock-marketplace-plugin"
 
 
+def _run_apm_command(
+    apm_command: str, args: list[str], cwd: Path, timeout: int = 120
+) -> subprocess.CompletedProcess[str]:
+    """Run the real APM CLI in a project directory."""
+    return subprocess.run(
+        [apm_command, *args],
+        capture_output=True,
+        text=True,
+        cwd=str(cwd),
+        timeout=timeout,
+    )
+
+
+def _locked_dependency_key(entry: dict) -> str:
+    """Return the canonical dependency key used in list-format lockfiles."""
+    virtual_path = entry.get("virtual_path")
+    return f"{entry['repo_url']}/{virtual_path}" if virtual_path else entry["repo_url"]
+
+
+def _locked_dependency(lockfile: dict, key: str) -> dict:
+    """Return one dependency entry from a parsed lockfile."""
+    for entry in lockfile["dependencies"]:
+        if _locked_dependency_key(entry) == key:
+            return entry
+    raise AssertionError(f"Dependency {key!r} missing from lockfile")
+
+
+def _existing_deployed_file_paths(project_root: Path, deployed_files: list[str]) -> list[Path]:
+    """Return deployed file paths that exist on disk and are regular filesystem paths."""
+    existing: list[Path] = []
+    for rel_path in deployed_files:
+        if "://" in rel_path:
+            continue
+        candidate = project_root / rel_path
+        if candidate.exists():
+            existing.append(candidate)
+    return existing
+
+
 def _make_package_info(
     package: APMPackage, install_path: Path, package_type: PackageType
 ) -> PackageInfo:
@@ -61,6 +100,17 @@ def _run_integrators(package_info: PackageInfo, project_root: Path):
     skill_result = SkillIntegrator().integrate_package_skill(package_info, project_root)
     command_result = CommandIntegrator().integrate_package_commands(package_info, project_root)
     return prompt_result, agent_result, skill_result, command_result
+
+
+def _write_local_skill_package(skill_dir: Path) -> None:
+    """Create a small standalone skill package for sequential-install tests."""
+    skill_dir.mkdir()
+    (skill_dir / "apm.yml").write_text(
+        "name: local-review-skill\nversion: 1.0.0\ndescription: local review skill\n"
+    )
+    skill_content = skill_dir / ".apm" / "skills" / "review-and-refactor"
+    skill_content.mkdir(parents=True)
+    (skill_content / "SKILL.md").write_text("# Review and Refactor\n")
 
 
 # ===========================================================================
@@ -366,6 +416,62 @@ class TestPluginHeroScenarios:
         parsed = yaml_lib.safe_load((plugin_dir / "apm.yml").read_text())
         assert parsed["type"] == "hybrid", f"Expected type 'hybrid', got '{parsed.get('type')}'"
 
+    @pytest.mark.requires_apm_binary
+    def test_local_plugin_uninstall_after_sequential_skill_install_cleans_deployed_files(
+        self, apm_command, tmp_path
+    ):
+        """Sequential CLI installs must retain plugin deployed_files for uninstall cleanup."""
+        import yaml as yaml_lib
+
+        if not FIXTURE_DIR.exists():
+            pytest.skip("mock-marketplace-plugin fixture not found")
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        plugin_dir = workspace / "plugin-src"
+        shutil.copytree(FIXTURE_DIR, plugin_dir)
+        skill_dir = workspace / "skill-src"
+        _write_local_skill_package(skill_dir)
+
+        project = workspace / "project"
+        project.mkdir()
+        (project / "apm.yml").write_text(
+            "name: local-sequential-plugin-test\nversion: 1.0.0\ndependencies:\n  apm: []\n"
+        )
+        (project / ".github").mkdir()
+        (project / ".github" / "copilot-instructions.md").write_text("# test\n")
+
+        plugin_install = _run_apm_command(
+            apm_command, ["install", str(plugin_dir)], project, timeout=120
+        )
+        assert plugin_install.returncode == 0, (
+            f"Plugin install failed:\n{plugin_install.stdout}\n{plugin_install.stderr}"
+        )
+        skill_install = _run_apm_command(
+            apm_command, ["install", str(skill_dir)], project, timeout=120
+        )
+        assert skill_install.returncode == 0, (
+            f"Skill install failed:\n{skill_install.stdout}\n{skill_install.stderr}"
+        )
+
+        lockfile = yaml_lib.safe_load((project / "apm.lock.yaml").read_text())
+        plugin_dep = _locked_dependency(lockfile, "_local/plugin-src")
+        deployed_files = plugin_dep.get("deployed_files", [])
+        assert ".github/agents/test-agent.agent.md" in deployed_files
+
+        deployed_paths = _existing_deployed_file_paths(project, deployed_files)
+        assert project / ".github" / "agents" / "test-agent.agent.md" in deployed_paths
+
+        uninstall = _run_apm_command(
+            apm_command, ["uninstall", str(plugin_dir)], project, timeout=60
+        )
+        assert uninstall.returncode == 0, (
+            f"Uninstall failed:\n{uninstall.stdout}\n{uninstall.stderr}"
+        )
+        combined = uninstall.stdout + uninstall.stderr
+        assert "Cleaned up 1 integrated agents" in combined
+        assert all(not path.exists() for path in deployed_paths)
+
 
 # ===========================================================================
 # Class 2 — NETWORK E2E tests (real CLI, requires GitHub token)
@@ -613,15 +719,17 @@ class TestPluginNetworkE2E:
         import yaml
 
         lockfile = yaml.safe_load((temp_project / "apm.lock.yaml").read_text())
-        dep_keys = {
-            f"{d['repo_url']}/{d.get('virtual_path', '')}" for d in lockfile["dependencies"]
-        }
-        assert "github/awesome-copilot/plugins/context-engineering" in dep_keys, (
+        dep_keys = {_locked_dependency_key(d) for d in lockfile["dependencies"]}
+        plugin_key = "github/awesome-copilot/plugins/context-engineering"
+        assert plugin_key in dep_keys, (
             f"Plugin missing from lockfile after sequential install. Keys: {dep_keys}"
         )
         assert "github/awesome-copilot/skills/review-and-refactor" in dep_keys, (
             f"Skill missing from lockfile after sequential install. Keys: {dep_keys}"
         )
+        plugin_dep = _locked_dependency(lockfile, plugin_key)
+        plugin_deployed_files = plugin_dep.get("deployed_files", [])
+        plugin_deployed_paths = _existing_deployed_file_paths(temp_project, plugin_deployed_files)
 
         # deps tree should show both
         tree = subprocess.run(
@@ -635,7 +743,9 @@ class TestPluginNetworkE2E:
         assert "context-engineering" in combined, "Plugin missing from deps tree"
         assert "review-and-refactor" in combined, "Skill missing from deps tree"
 
-        # Uninstall plugin should clean up agent files
+        # The live SAML-protected plugin can change which primitive types it ships.
+        # Verify cleanup for the files that were actually deployed instead of
+        # hard-coding that it must currently contain an agent primitive.
         r3 = subprocess.run(
             [apm_command, "uninstall", self.PLUGIN_REF],
             capture_output=True,
@@ -645,7 +755,12 @@ class TestPluginNetworkE2E:
         )
         assert r3.returncode == 0, f"Uninstall failed:\n{r3.stderr}"
         combined = r3.stdout + r3.stderr
-        assert "agent" in combined.lower(), f"Uninstall should report agent cleanup:\n{combined}"
+        if plugin_deployed_paths:
+            assert "Cleaned up" in combined and "integrated" in combined.lower(), (
+                f"Uninstall should report integration cleanup:\n{combined}"
+            )
+        remaining = [path.as_posix() for path in plugin_deployed_paths if path.exists()]
+        assert not remaining, f"Plugin deployed files remained after uninstall: {remaining}"
 
     # ---- Test 7: compile includes plugin primitives ---------------------
 

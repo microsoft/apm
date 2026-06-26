@@ -15,6 +15,7 @@ import frontmatter
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
+from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.path_security import (
     PathTraversalError,
     ensure_path_within,
@@ -143,6 +144,9 @@ class CommandIntegrator(BaseIntegrator):
     Transforms .prompt.md files into Claude Code custom slash commands
     during package installation, following the same pattern as PromptIntegrator.
     """
+
+    # Deploys via write_text_lf -> compare adopt candidates in LF mode.
+    _LF_NORMALIZED_DEPLOY = True
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -694,7 +698,7 @@ class CommandIntegrator(BaseIntegrator):
             doc = {"description": description, "prompt": prompt_text}
 
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(_toml.dumps(doc), encoding="utf-8")
+        write_text_lf(target, _toml.dumps(doc))
 
     # ------------------------------------------------------------------
     # Legacy per-target API (DEPRECATED)
