@@ -471,3 +471,60 @@ def test_run_replay_wraps_loop_with_readonly_guard(monkeypatch, tmp_path):
         run_replay(config, logger)
 
     assert "leaked.md" in str(exc_info.value) or "created:" in str(exc_info.value)
+
+
+def test_run_replay_threads_dep_target_subset(monkeypatch, tmp_path):
+    """run_replay must pass dep_target_subset from the lockfile to integrate_package_primitives.
+
+    A dependency narrowed to ``targets: [claude]`` in apm.yml stores
+    ``target_subset: [claude]`` in the lockfile.  The replay must forward
+    this list so the per-dependency target filter applies -- otherwise
+    copilot-governed paths (e.g. ``.agents/skills/``) are written to
+    scratch even though the dep was never installed there, producing
+    false ``unintegrated`` drift (#1923).
+    """
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.drift import CheckLogger, ReplayConfig, run_replay
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / ".github").mkdir()  # simulate unrelated .github/ dir
+
+    # Use a local dep whose path resolves to the project root itself so
+    # _materialize_install_path does not need network or apm_modules cache.
+    lock = LockFile()
+    dep = LockedDependency(
+        repo_url="./my-skill",
+        source="local",
+        local_path="./my-skill",
+        resolved_commit=None,
+        target_subset=["claude"],
+    )
+    lock.add_dependency(dep)
+    # Create the local package dir so path resolution succeeds.
+    (project_root / "my-skill").mkdir()
+    lockfile_path = project_root / "apm.lock.yaml"
+    lock.write(lockfile_path)
+
+    captured: list = []
+
+    def _spy_integrate(*args, **kwargs):
+        captured.append(kwargs.get("dep_target_subset"))
+        return {"deployed_files": []}
+
+    monkeypatch.setattr(
+        "apm_cli.install.services.integrate_package_primitives",
+        _spy_integrate,
+    )
+
+    config = ReplayConfig(
+        project_root=project_root,
+        lockfile_path=lockfile_path,
+        targets=None,
+        cache_only=True,
+    )
+    logger = CheckLogger(verbose=False)
+    run_replay(config, logger)
+
+    assert len(captured) >= 1, "integrate_package_primitives was not called"
+    assert captured[0] == ["claude"], f"dep_target_subset should be ['claude'], got {captured[0]}"
