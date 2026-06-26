@@ -158,7 +158,7 @@ cloud agents, and contributors who do not run `apm compile` locally
 and rely on the checked-in artifacts.
 
 Accepted values: `copilot`, `claude`, `cursor`, `opencode`, `codex`,
-`gemini`, `windsurf`, `all`. Full reference:
+`gemini`, `antigravity`, `windsurf`, `kiro`, `all`. Full reference:
 [manifest schema -- targets](../../../reference/manifest-schema/#36-target).
 
 ## Examples
