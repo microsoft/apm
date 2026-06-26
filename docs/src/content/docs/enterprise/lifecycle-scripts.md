@@ -145,6 +145,8 @@ Lifecycle scripts from different sources are subject to different trust rules:
   - Run `apm scripts trust` to record trust for the current file contents.
   - Any edit to `.apm/scripts.json` revokes trust and requires re-approval.
   - Run `apm scripts untrust` to revoke without editing the file.
+  - Trust records are stored in `~/.apm/scripts-trust.json` (or
+    `$APM_HOME/scripts-trust.json`).
 
 Two environment-level kill-switches are also available:
 
@@ -168,6 +170,13 @@ Create `/etc/apm/policy.d/analytics.json`:
   "version": 1,
   "scripts": {
     "post-install": [
+      {
+        "type": "http",
+        "url": "https://analytics.internal.company.com/apm/events",
+        "headers": { "Authorization": "Bearer $APM_ANALYTICS_TOKEN" }
+      }
+    ],
+    "post-update": [
       {
         "type": "http",
         "url": "https://analytics.internal.company.com/apm/events",
@@ -228,7 +237,7 @@ The log file is created automatically on first script execution.
 
 APM provides commands to work with lifecycle scripts:
 
-### ``apm scripts`` -- list discovered scripts
+### `apm scripts` -- list discovered scripts
 
 Run without a sub-command to see all scripts discovered from policy, user,
 and project directories:
@@ -237,16 +246,16 @@ and project directories:
 apm scripts
 ```
 
-### ``apm scripts init`` -- scaffold a starter script file
+### `apm scripts init` -- scaffold a starter script file
 
-Generate a starter JSON script file at ``.apm/scripts.json``:
+Generate a starter JSON script file at `.apm/scripts.json`:
 
 ```bash
 apm scripts init            # creates .apm/scripts.json
 apm scripts init --force    # overwrite existing file
 ```
 
-### ``apm scripts validate`` -- check script files for errors
+### `apm scripts validate` -- check script files for errors
 
 Validate all discovered script files across policy, user, and project
 directories. Reports schema errors, unknown events, missing fields, and
@@ -258,7 +267,7 @@ apm scripts validate
 
 Exits with a non-zero code if any errors are found.
 
-### ``apm scripts test`` -- dry-run a synthetic event
+### `apm scripts test` -- dry-run a synthetic event
 
 Fire a synthetic event through all discovered scripts to verify wiring
 without performing a real install/update/uninstall:
@@ -268,15 +277,15 @@ apm scripts test                    # fires post-install (default)
 apm scripts test pre-uninstall      # fires a specific event
 ```
 
-Script output is written to ``~/.apm/logs/scripts.log`` as usual.
+Script output is written to `~/.apm/logs/scripts.log` as usual.
 
-### ``apm scripts trust`` -- trust the project script file
+### `apm scripts trust` -- trust the project script file
 
 ```bash
 apm scripts trust    # trusts .apm/scripts.json at its current contents
 ```
 
-### ``apm scripts untrust`` -- revoke trust for the project script file
+### `apm scripts untrust` -- revoke trust for the project script file
 
 ```bash
 apm scripts untrust  # revokes trust; project scripts will no longer run

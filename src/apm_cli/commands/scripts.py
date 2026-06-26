@@ -418,15 +418,15 @@ def scripts_trust() -> None:
         _rich_echo("  Create one with: apm scripts init", style="dim")
         return
 
+    _rich_warning(
+        "Project scripts can run arbitrary commands during apm install/update/uninstall.",
+        symbol="warning",
+    )
     fingerprint = trust_project_scripts(project_file)
     if fingerprint is None:
         _rich_error("Could not read .apm/scripts.json to record trust.", symbol="error")
         sys.exit(1)
 
-    _rich_warning(
-        "Project scripts can run arbitrary commands during apm install/update/uninstall.",
-        symbol="warning",
-    )
     _rich_success(
         f"Trusted .apm/scripts.json ({fingerprint[:12]}...). Its scripts will now run.",
         symbol="check",

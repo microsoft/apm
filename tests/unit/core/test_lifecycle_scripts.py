@@ -493,3 +493,95 @@ class TestBuildRunnerFromContext:
 
         # Should not have raised; runner is returned normally
         assert runner is not None
+
+    def test_untrusted_project_scripts_are_skipped(self, tmp_path: Path, monkeypatch) -> None:
+        """Project scripts without trust record are excluded from the runner."""
+        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+
+        apm_dir = tmp_path / ".apm"
+        apm_dir.mkdir(parents=True)
+        script_file = apm_dir / "scripts.json"
+        script_file.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "scripts": {"post-install": [{"type": "command", "bash": "echo from-project"}]},
+                }
+            )
+        )
+
+        # is_project_scripts_trusted returns False (no trust record)
+        with (
+            patch(
+                "apm_cli.core.script_trust.is_project_scripts_trusted",
+                return_value=False,
+            ),
+            patch(
+                "apm_cli.policy.discovery.discover_policy_with_chain",
+                return_value=None,
+            ),
+        ):
+            runner = build_runner_from_context(project_root=str(tmp_path))
+
+        assert runner._scripts == []
+        assert runner._skipped_project_scripts == 1
+
+    def test_trusted_project_scripts_are_included(self, tmp_path: Path, monkeypatch) -> None:
+        """Project scripts with a valid trust record are included in the runner."""
+        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+
+        apm_dir = tmp_path / ".apm"
+        apm_dir.mkdir(parents=True)
+        script_file = apm_dir / "scripts.json"
+        script_file.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "scripts": {"post-install": [{"type": "command", "bash": "echo trusted"}]},
+                }
+            )
+        )
+
+        with (
+            patch(
+                "apm_cli.core.script_trust.is_project_scripts_trusted",
+                return_value=True,
+            ),
+            patch(
+                "apm_cli.policy.discovery.discover_policy_with_chain",
+                return_value=None,
+            ),
+        ):
+            runner = build_runner_from_context(project_root=str(tmp_path))
+
+        assert any(s.bash == "echo trusted" for s in runner._scripts)
+        assert runner._skipped_project_scripts == 0
+
+    def test_user_scripts_bypass_trust_gate(self, tmp_path: Path, monkeypatch) -> None:
+        """User-source scripts are never subject to the project trust gate."""
+        monkeypatch.delenv("APM_NO_SCRIPTS", raising=False)
+
+        user_scripts_dir = tmp_path / "user_scripts"
+        user_scripts_dir.mkdir()
+        (user_scripts_dir / "notify.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "scripts": {"post-install": [{"type": "command", "bash": "echo user-notify"}]},
+                }
+            )
+        )
+
+        with (
+            patch(
+                "apm_cli.core.lifecycle_scripts._get_user_scripts_dir",
+                return_value=user_scripts_dir,
+            ),
+            patch(
+                "apm_cli.policy.discovery.discover_policy_with_chain",
+                return_value=None,
+            ),
+        ):
+            runner = build_runner_from_context(project_root=str(tmp_path))
+
+        assert any(s.bash == "echo user-notify" for s in runner._scripts)

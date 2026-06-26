@@ -185,8 +185,12 @@ def _expand_env_vars(
                 f"[!] Script: refusing to expand credential variable "
                 f"'{var_name}'. Add it to the script's 'allowedEnvVars' to opt in."
             )
-            if logger is not None and verbose:
-                logger.verbose_detail(warning)
+            if logger is not None:
+                warn_fn = getattr(logger, "warning", None) or getattr(
+                    logger, "verbose_detail", None
+                )
+                if warn_fn is not None:
+                    warn_fn(warning)
             _logger.debug("Blocked credential variable expansion: %s", var_name)
             return ""
         return os.environ.get(var_name, "")
@@ -377,6 +381,11 @@ def _build_script_env(script: ScriptEntry) -> dict[str, str]:
     allowed = frozenset(script.allowed_env_vars or ())
     env = {k: v for k, v in os.environ.items() if not _is_denylisted(k, allowed)}
     if script.env:
+        # script.env values are merged last and may reintroduce credential-named
+        # variables deliberately set by the script author. This is intentional
+        # best-effort convenience (the user configured it explicitly), NOT a
+        # security boundary: a command script can read any file it has permission
+        # to regardless of env filtering.
         env.update(script.env)
     return env
 

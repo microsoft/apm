@@ -32,7 +32,7 @@ import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import CommandLogger
@@ -167,7 +167,7 @@ class ScriptEntry:
 # -- Script file parsing ---------------------------------------------------
 
 
-def _parse_allowed_env_vars(raw: Any) -> list[str] | None:
+def _parse_allowed_env_vars(raw: object) -> list[str] | None:
     """Normalise the optional ``allowedEnvVars`` field to a str list."""
     if not isinstance(raw, list):
         return None
@@ -339,7 +339,7 @@ class LifecycleScriptRunner:
             if emit is not None:
                 emit(msg)
         else:
-            _logger.debug("%s", msg)
+            _logger.warning("%s", msg)
 
     def fire(self, event_name: str, event: LifecycleEvent) -> list[threading.Thread]:
         """Execute all scripts registered for *event_name*.
@@ -393,7 +393,7 @@ class LifecycleScriptRunner:
 
 def build_runner_from_context(
     *,
-    logger: Any = None,
+    logger: CommandLogger | None = None,
     verbose: bool = False,
     project_root: str | None = None,
 ) -> LifecycleScriptRunner:
@@ -420,6 +420,18 @@ def build_runner_from_context(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )
 
+    from apm_cli.core.script_trust import is_project_scripts_trusted
+
+    scripts = discover_scripts(project_root=project_root)
+
+    # Short-circuit: skip the org policy network call when there are no scripts
+    # to run. This avoids a potential RPC on cold cache in the no-scripts case,
+    # which is the common case for most projects.
+    if not scripts:
+        return LifecycleScriptRunner(
+            scripts=[], logger=logger, verbose=verbose, project_root=project_root
+        )
+
     # Org deny_all ceiling: best-effort, never raises into the install flow.
     org_deny_all = False
     try:
@@ -439,10 +451,6 @@ def build_runner_from_context(
         return LifecycleScriptRunner(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )
-
-    from apm_cli.core.script_trust import is_project_scripts_trusted
-
-    scripts = discover_scripts(project_root=project_root)
 
     project_file = _get_project_scripts_file(project_root)
     project_trusted = project_file.is_file() and is_project_scripts_trusted(project_file)
