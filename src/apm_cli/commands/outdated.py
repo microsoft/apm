@@ -57,7 +57,7 @@ def _package_basename(dep: LockedDependency) -> str:
         return dep.marketplace_plugin_name
     # For virtual subdirectory packages, derive the name from the virtual path
     # (e.g. "packages/agent-dev-workflow" -> "agent-dev-workflow").
-    if dep.is_virtual and dep.virtual_path:
+    if dep.is_virtual is True and dep.virtual_path:
         dep_ref = dep.to_dependency_ref()
         if dep_ref.is_virtual_subdirectory():
             return dep.virtual_path.rstrip("/").rsplit("/", 1)[-1]
