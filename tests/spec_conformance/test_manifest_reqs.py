@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
 Covers req-mf-001..021, req-ext-001..002, req-sc-001..010,
-req-tg-001..004, req-cf-001..002.
+req-tg-001..006, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -375,6 +375,24 @@ def test_consumer_routes_vendor_target_identifiers_to_handlers():
         "x-[a-z][a-z0-9-]*-[a-z][a-z0-9-]*",
         "MUST route detection",
         "MUST NOT silently",
+    )
+
+
+@pytest.mark.req("req-tg-005")
+def test_consumer_yaml_config_mcp_uses_target_schema():
+    assert_spec_contains(
+        "YAML-config targets",
+        "registered config key",
+        "MUST NOT write JSON-format",
+    )
+
+
+@pytest.mark.req("req-tg-006")
+def test_consumer_compiles_agents_to_target_native_format():
+    assert_spec_contains(
+        "registered native agent format",
+        "MUST NOT emit a different",
+        "target's registered deploy root",
     )
 
 
