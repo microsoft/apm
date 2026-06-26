@@ -166,10 +166,10 @@ AGENTS.md consumer is Copilot. When compiling for targets that do not read
 `.github/instructions/` (Codex, OpenCode, Windsurf, etc.), instructions
 are always included in `AGENTS.md` regardless of whether
 `.github/instructions/` exists. To opt out of deduplication even for
-Copilot-only compiles, pass `--no-dedup` (alias: `--force-instructions`):
+Copilot-only compiles, pass `--force-instructions` (alias: `--no-dedup`):
 
 ```bash
-apm compile --target copilot --no-dedup
+apm compile --target copilot --force-instructions
 ```
 :::
 
@@ -188,10 +188,10 @@ re-running `apm compile` restores the instructions section to
 
 To opt out of the deduplication and always include the instructions
 section in `CLAUDE.md` (for debugging or when you intentionally want
-both copies), pass `--no-dedup` (alias: `--force-instructions`):
+both copies), pass `--force-instructions` (alias: `--no-dedup`):
 
 ```bash
-apm compile --target claude --no-dedup
+apm compile --target claude --force-instructions
 ```
 
 This flag affects both the Claude and Copilot deduplication paths (see

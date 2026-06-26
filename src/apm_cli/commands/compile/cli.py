@@ -951,23 +951,22 @@ def _run_compilation(
     help="Compile for all canonical targets. Equivalent to --target all.",
 )
 @click.option(
-    "--no-dedup/--no-force-instructions",
+    "--force-instructions/--no-force-instructions",
     "no_dedup",
-    is_flag=True,
     default=False,
     help=(
         "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
         "already populated. Overrides the default deduplication that normally omits "
         "the section to avoid duplicate context in Claude Code. Affects the Claude "
-        "target only. Alias: --force-instructions."
+        "target only. Alias: --no-dedup."
     ),
 )
 @click.option(
-    "--force-instructions",
+    "--no-dedup",
     "no_dedup",
     is_flag=True,
     default=False,
-    help="Alias for --no-dedup.",
+    help="Alias for --force-instructions.",
     hidden=True,
 )
 @click.option(
@@ -1073,7 +1072,7 @@ def compile(  # noqa: PLR0913 -- Click handler
             "compile_all": "--all",
             "legacy_skill_paths": "--legacy-skill-paths",
             "local_only": "--local-only",
-            "no_dedup": "--no-dedup/--force-instructions",
+            "no_dedup": "--force-instructions/--no-dedup",
             "no_links": "--no-links",
             "output": "--output",
             "root": "--root",

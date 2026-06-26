@@ -718,7 +718,9 @@ def clean(dry_run: bool, yes: bool):
         sys.exit(1)
 
 
-@deps.command(help="Update APM dependencies to latest refs")
+@deps.command(
+    help="Update APM dependencies to latest refs (deprecated: use 'apm update' instead, which is a strict superset)"
+)
 @click.argument("packages", nargs=-1)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed update information")
 @click.option(
@@ -914,7 +916,9 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
         logger.success("All packages already at latest refs.")
 
 
-@deps.command(help="Show detailed package information")
+@deps.command(
+    help="Show detailed package information (alias for 'apm view PACKAGE' for installed packages; prefer 'apm view' in new scripts)"
+)
 @click.argument("package", required=True)
 def info(package: str):
     """Show detailed information about a specific package including context files and workflows."""
