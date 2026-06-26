@@ -761,7 +761,7 @@ class TestListValuedFrontmatterNormalization(unittest.TestCase):
         self.assertIsInstance(primitive, Instruction)
         self.assertEqual(primitive.apply_to, "")
 
-    # -- applyTo normalization for .agent.md / .agent.md -------------------
+    # -- applyTo normalization for .agent.md -------------------
 
     def test_chatmode_apply_to_list_normalizes(self):
         """applyTo list in .agent.md normalizes to a string (not None)."""

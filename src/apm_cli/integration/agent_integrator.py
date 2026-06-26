@@ -31,11 +31,11 @@ class AgentIntegrator(BaseIntegrator):
     _LF_NORMALIZED_DEPLOY = True
 
     def find_agent_files(self, package_path: Path) -> list[Path]:
-        """Find all .agent.md files in a package.
+        """Find all agent files in a package.
 
         Searches in:
-        - Package root directory (.agent.md)
-        - .apm/agents/ subdirectory (recursive)
+        - Package root directory (*.agent.md files)
+        - .apm/agents/ subdirectory (recursive): *.agent.md and plain *.md files
 
         Args:
             package_path: Path to the package directory

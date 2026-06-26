@@ -69,8 +69,8 @@ def _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run):
             "[+] All validated",
         )
         table.add_row(
-            "Chatmodes",
-            str(stats.get("chatmodes", 0)),
+            "Agents",
+            str(stats.get("agents", 0)),
             "[+] All validated",
         )
 

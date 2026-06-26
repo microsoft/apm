@@ -1762,7 +1762,6 @@ class TestVirtualFilePackageYamlGeneration:
             ".prompt.md",
             ".instructions.md",
             ".agent.md",
-            ".agent.md",
         ]
         return dep_ref
 
