@@ -67,7 +67,11 @@ class LockfileBuilder:
 
     def build_and_save(self) -> None:
         """Assemble lockfile from ctx state and write it (no-op when nothing was installed)."""
-        if not self.ctx.installed_packages and not self.ctx.lockfile_only:
+        if (
+            not self.ctx.installed_packages
+            and not self.ctx.lockfile_only
+            and not self._has_orphan_lockfile_entries()
+        ):
             # Even with nothing newly installed, a pre-existing
             # lockfile may need its cache pin markers refreshed --
             # e.g. user upgraded APM and their cache pre-dates the
@@ -79,6 +83,12 @@ class LockfileBuilder:
             # promise is to always materialise an ``apm.lock.yaml`` (an
             # empty one for a depless project), mirroring
             # ``cargo generate-lockfile``.
+            #
+            # We also fall through when the existing lockfile records deps
+            # that the manifest no longer declares (orphans): removing every
+            # dependency leaves installed_packages empty, but the lockfile
+            # must still be pruned to match apm.yml (see
+            # ``_has_orphan_lockfile_entries``).
             self._sync_cache_pin_markers_from_disk()
             return
         try:
@@ -136,6 +146,24 @@ class LockfileBuilder:
             self._handle_failure(e)
 
     # -- private helpers (verbatim from original inline block) ----------
+
+    def _has_orphan_lockfile_entries(self) -> bool:
+        """True when the existing lockfile records apm deps no longer intended.
+
+        Guards the "nothing installed" early-return: when every apm dependency
+        is removed from the manifest, ``installed_packages`` is empty, yet the
+        lockfile still lists the dropped deps. Falling through lets the normal
+        prune path (``_merge_existing``) rebuild a lockfile that matches the
+        manifest. Skipped for partial (``only_packages``) installs, which
+        intentionally preserve unlisted entries.
+        """
+        existing = self.ctx.existing_lockfile
+        if existing is None or self.ctx.only_packages:
+            return False
+        from apm_cli.deps.lockfile import _SELF_KEY
+
+        intended = self.ctx.intended_dep_keys or set()
+        return any(key != _SELF_KEY and key not in intended for key in existing.dependencies)
 
     def _attach_deployed_files(self, lockfile: LockFile) -> None:
         """Attach per-dependency deployed-file manifests, unioning targets.
