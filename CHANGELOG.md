@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm outdated` tag-pattern matching for monorepo virtual subdirectory
+  dependencies now derives the `{name}` segment from the `virtual_path`
+  basename (e.g., `packages/my-pkg` -> `my-pkg`), aligning with `apm update`
+  behavior. (by @kevinbeier-enbw; closes #1893) (#1893)
 - Skipped startup update checks for unknown `apm` commands and bare help
   invocations so invalid CLI input fails without update-check latency. (by
   @maro114510) (#1541)
