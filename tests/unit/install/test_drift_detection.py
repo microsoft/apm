@@ -294,16 +294,24 @@ class TestReadApmYmlTarget:
         result = _read_apm_yml_target(tmp_path)
         assert result is None
 
-    def test_apm_yml_with_target_returns_value(self, tmp_path: Path) -> None:
+    def test_apm_yml_with_singular_target_returns_list(self, tmp_path: Path) -> None:
+        # Singular 'target: copilot' form -- returns a one-element list.
         (tmp_path / "apm.yml").write_text("name: pkg\ntarget: copilot\n", encoding="utf-8")
-        with patch("apm_cli.core.target_detection.parse_target_field", return_value="copilot"):
-            result = _read_apm_yml_target(tmp_path)
-        assert result == "copilot"
+        result = _read_apm_yml_target(tmp_path)
+        assert result == ["copilot"]
 
-    def test_parse_target_field_exception_returns_none(self, tmp_path: Path) -> None:
-        (tmp_path / "apm.yml").write_text("name: pkg\ntarget: invalid\n", encoding="utf-8")
+    def test_apm_yml_with_targets_list_returns_list(self, tmp_path: Path) -> None:
+        # Plural 'targets: [claude, codex]' form -- both tokens returned (#1924).
+        (tmp_path / "apm.yml").write_text(
+            "name: pkg\ntargets:\n  - claude\n  - codex\n", encoding="utf-8"
+        )
+        result = _read_apm_yml_target(tmp_path)
+        assert result == ["claude", "codex"]
+
+    def test_parse_targets_field_exception_returns_none(self, tmp_path: Path) -> None:
+        (tmp_path / "apm.yml").write_text("name: pkg\ntarget: copilot\n", encoding="utf-8")
         with patch(
-            "apm_cli.core.target_detection.parse_target_field",
+            "apm_cli.core.apm_yml.parse_targets_field",
             side_effect=ValueError("bad"),
         ):
             result = _read_apm_yml_target(tmp_path)
