@@ -14,6 +14,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.install.context import InstallContext
 from apm_cli.install.phases.lockfile import LockfileBuilder
 
 
@@ -76,3 +77,21 @@ class TestHasOrphanLockfileEntries:
         lf.dependencies[_SELF_KEY] = LockedDependency(repo_url=_SELF_KEY, resolved_ref="")
         ctx = _ctx(existing_lockfile=lf, intended_dep_keys=set())
         assert LockfileBuilder(ctx)._has_orphan_lockfile_entries() is False
+
+    def test_build_and_save_prunes_orphans_when_manifest_is_empty(self, tmp_path) -> None:
+        existing = _existing_with("acme/pkg")
+        lockfile_path = tmp_path / "apm.lock.yaml"
+        existing.write(lockfile_path)
+        ctx = InstallContext(
+            project_root=tmp_path,
+            apm_dir=tmp_path,
+            installed_packages=[],
+            existing_lockfile=existing,
+            intended_dep_keys=set(),
+        )
+
+        LockfileBuilder(ctx).build_and_save()
+
+        written = LockFile.read(lockfile_path)
+        assert written is not None
+        assert written.get_package_dependencies() == []

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed `apm install` lockfile pruning when all `apm.yml` dependencies are
+  removed, so stale `apm.lock.yaml` entries no longer survive. (by @nadav-y)
+  (#1926)
 - Fixed spurious version-range diffs for cached transitive registry
   dependencies during `apm update`. (by @nadav-y) (#1921)
 
