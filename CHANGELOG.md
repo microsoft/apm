@@ -162,35 +162,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install -g --target codex` now honors `CODEX_HOME` for user-scope
   Codex MCP config writes, falling back to `~/.codex/config.toml` when unset.
   (closes #1861) (#1863)
-- Windows installer staging now honors `APM_TEMP_DIR` and reports actionable
-  guidance when the temporary staging root is not writable. (closes #1874)
-  (#1876)
-- Windows pip fallback no longer terminates early when native pip writes stderr
-  under `$ErrorActionPreference = "Stop"`. (closes #1874) (#1876)
-- `apm install plugin@marketplace` now correctly fetches from the
-  marketplace's registered `--ref` branch instead of silently falling back
-  to the repository's default branch. Root cause: `resolve_marketplace_plugin`
-  did not propagate `source.ref` to downstream resolution calls. Covers both
-  GitHub-family hosts (ref appended to canonical as `#ref`) and GitLab-hosted
-  marketplaces (ref injected into `DependencyReference`). Guards prevent
-  double-injection when a plugin's own dict source already carries an explicit
-  `ref`, and skip `main`/`HEAD` as implicit defaults. (by @chkp-roniz,
-  #1880; mirrors #1824)
-- GitLab archive URLs with slash-containing branch names (e.g.
-  `feat/my-feature`) now produce correctly-formed Artifactory-proxyable
-  filenames. The slash is preserved in the path segment (as the GitLab
-  archive API expects) but replaced with `-` in the archive filename,
-  matching GitLab's own naming convention. Previously,
-  `PROXY_REGISTRY_ONLY=1` installs from such branches returned HTTP 404
-  from the proxy because the generated filename contained a literal slash.
-  (by @chkp-roniz, #1880; fixes the proxy scenario not covered by #1824)
-- `apm install <pkg> --target X` in a directory with no `apm.yml` now persists
-  the selected harness(es) into the auto-created manifest's `targets:`, so a
-  later bare `apm update` redeploys to the same targets without re-specifying
-  `--target`. (closes #1743) (#1901)
 - `apm update` / self-update on macOS no longer prints `-e` literally before
   each colored line (caused by invoking `install.sh` under `/bin/sh`), and now
   shows a progress bar during binary download. (by @nadav-y) (#1872)
+- `apm outdated` tag-pattern matching for monorepo virtual subdirectory
+  dependencies now derives the `{name}` segment from the `virtual_path`
+  basename (e.g., `packages/my-pkg` → `my-pkg`), aligning with `apm update`
+  behavior. (by @kevinbeier-enbw; closes #1893) (#1893)
 
 ### Security
 

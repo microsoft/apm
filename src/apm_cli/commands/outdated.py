@@ -51,16 +51,18 @@ def _strip_v(ref: str) -> str:
     return ref[1:] if ref and ref.startswith("v") else (ref or "")
 
 
-def _package_basename(dep: LockedDependency) -> str:
+def _package_basename(dep: LockedDependency, dep_ref=None) -> str:
     """Return the display name used in ``{name}`` tag patterns."""
     if dep.marketplace_plugin_name:
         return dep.marketplace_plugin_name
     # For virtual subdirectory packages, derive the name from the virtual path
     # (e.g. "packages/agent-dev-workflow" -> "agent-dev-workflow").
-    if dep.is_virtual is True and dep.virtual_path:
-        dep_ref = dep.to_dependency_ref()
+    if dep.is_virtual and dep.virtual_path:
+        if dep_ref is None:
+            dep_ref = dep.to_dependency_ref()
         if dep_ref.is_virtual_subdirectory():
-            return dep.virtual_path.rstrip("/").rsplit("/", 1)[-1]
+            from ..deps.revision_pins import _package_name
+            return _package_name(dep_ref)
     repo = dep.repo_url or ""
     if not repo:
         return ""
@@ -301,7 +303,7 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
             package=package_name, current=current_ref or "(none)", latest="-", status="unknown"
         )
 
-    package_basename = _package_basename(dep)
+    package_basename = _package_basename(dep, dep_ref=dep_ref)
     revision_pin_row = _check_revision_pin_ref(
         current_ref=current_ref,
         package_name=package_name,
