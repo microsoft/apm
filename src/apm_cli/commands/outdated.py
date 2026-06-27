@@ -22,6 +22,10 @@ from ..deps.revision_pins import (
     find_latest_annotated_tag,
     is_full_revision_pin,
 )
+from ..deps.revision_pins import (
+    package_name as revision_pin_package_name,
+)
+from ..models.dependency.reference import DependencyReference
 from ..models.dependency.types import RemoteRef
 
 logger = logging.getLogger(__name__)
@@ -51,7 +55,7 @@ def _strip_v(ref: str) -> str:
     return ref[1:] if ref and ref.startswith("v") else (ref or "")
 
 
-def _package_basename(dep: LockedDependency, dep_ref=None) -> str:
+def _package_basename(dep: LockedDependency, dep_ref: DependencyReference | None = None) -> str:
     """Return the display name used in ``{name}`` tag patterns."""
     if dep.marketplace_plugin_name:
         return dep.marketplace_plugin_name
@@ -61,8 +65,7 @@ def _package_basename(dep: LockedDependency, dep_ref=None) -> str:
         if dep_ref is None:
             dep_ref = dep.to_dependency_ref()
         if dep_ref.is_virtual_subdirectory():
-            from ..deps.revision_pins import _package_name
-            return _package_name(dep_ref)
+            return revision_pin_package_name(dep_ref)
     repo = dep.repo_url or ""
     if not repo:
         return ""
