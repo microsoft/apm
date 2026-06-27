@@ -371,11 +371,14 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
 
 
 def _read_apm_yml_target(project_root: Path):
-    """Return the ``target:`` field from ``apm.yml`` if present, else ``None``.
+    """Return the explicit target list from ``apm.yml`` if declared, else ``None``.
 
-    This lets ``run_replay`` reproduce the SAME target set the install
-    pipeline used, instead of falling back to directory auto-detection
-    that misses targets whose deployment directories are still empty.
+    Handles both the singular ``target:`` and plural ``targets:`` forms so
+    that the replay uses the same target set the install pipeline used.
+    Without this, a project with ``targets: [claude, codex]`` (no copilot)
+    that also has a ``.github/`` directory for unrelated CI workflows would
+    have copilot auto-detected during replay, producing false
+    ``unintegrated`` findings for ``.github/instructions/`` (#1924).
     """
     apm_yml = project_root / "apm.yml"
     if not apm_yml.exists():
@@ -389,13 +392,13 @@ def _read_apm_yml_target(project_root: Path):
         # than crashing the replay; the caller still surfaces a useful
         # error elsewhere if the project is truly broken.
         return None
-    raw = data.get("target")
-    if raw is None:
-        return None
+    # parse_targets_field handles both 'target:' (singular) and 'targets:'
+    # (plural list) and validates the tokens against the canonical set.
     try:
-        from apm_cli.core.target_detection import parse_target_field
+        from apm_cli.core.apm_yml import parse_targets_field
 
-        return parse_target_field(raw, source_path=apm_yml)
+        tokens = parse_targets_field(data)
+        return tokens if tokens else None
     except Exception:
         return None
 
@@ -509,6 +512,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     skill_subset=None,
                     ctx=None,
                     scratch_root=scratch_root,
+                    # Honor per-dependency 'targets:' narrowing from apm.yml so the
+                    # replay does not write to targets excluded by the consumer (#1923).
+                    dep_target_subset=lock_dep.target_subset or None,
                 )
                 replayed_count += 1
     finally:
