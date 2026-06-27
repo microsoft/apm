@@ -931,6 +931,61 @@ class TestUpdatePlanStatePaths:
             assert result.exit_code == 0, result.output
             assert "no dependency changes were applied" in result.output.lower()
 
+    def test_summary_reports_plan_changed_count_not_install_count(self, runner, tmp_path) -> None:
+        """Summary reflects the plan's changed count, not the re-materialized tree.
+
+        Regression: a single-dep change in a multi-dep tree printed "Updated 3
+        APM dependencies" (installed_count, the whole tree) -- contradicting the
+        plan's "1 updated" line. The summary must report the changed count.
+        """
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            _make_apm_yml(Path.cwd())
+
+            def fake_install(_apm, **kwargs):
+                from apm_cli.models.results import InstallResult
+
+                plan = UpdatePlan(
+                    entries=(
+                        PlanEntry(
+                            dep_key="o/r",
+                            action="update",
+                            display_name="o/r",
+                            old_resolved_ref="1.1.0",
+                            new_resolved_ref="1.3.0",
+                        ),
+                        PlanEntry(
+                            dep_key="o/t1",
+                            action="unchanged",
+                            display_name="o/t1",
+                            old_resolved_ref="1.0.0",
+                            new_resolved_ref="1.0.0",
+                        ),
+                        PlanEntry(
+                            dep_key="o/t2",
+                            action="unchanged",
+                            display_name="o/t2",
+                            old_resolved_ref="1.0.0",
+                            new_resolved_ref="1.0.0",
+                        ),
+                    )
+                )
+                kwargs["plan_callback"](plan)
+                # Whole 3-dep tree re-materialized, but only one changed.
+                return InstallResult(installed_count=3)
+
+            with (
+                _patch(
+                    "apm_cli.commands.install._install_apm_dependencies",
+                    side_effect=fake_install,
+                ),
+                _patch("apm_cli.commands.update._stdin_is_tty", return_value=True),
+                _patch("apm_cli.commands.update.click.confirm", return_value=True),
+            ):
+                result = runner.invoke(cli, ["update"])
+            assert result.exit_code == 0, result.output
+            assert "Updated 1 APM dependency." in result.output
+            assert "Updated 3" not in result.output
+
 
 # -----------------------------------------------------------------------------
 # apm update -- superset flags from issue #1525:
