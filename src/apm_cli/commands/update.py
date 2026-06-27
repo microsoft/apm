@@ -586,15 +586,14 @@ def _run_dep_update(
         installed = getattr(result, "installed_count", 0)
         changed = len(plan.changed_entries)
         applied = bool(installed) and changed > 0
+        dep_noun = "dependency" if changed == 1 else "dependencies"
         if applied and revision_pin_updates:
             count = len(revision_pin_updates)
-            dep_noun = "dependency" if changed == 1 else "dependencies"
             pin_noun = "pin" if count == 1 else "pins"
             _rich_success(
                 f"Updated {changed} APM {dep_noun} and {count} revision {pin_noun} in apm.yml."
             )
         elif applied:
-            dep_noun = "dependency" if changed == 1 else "dependencies"
             _rich_success(f"Updated {changed} APM {dep_noun}.")
         elif revision_pin_updates:
             count = len(revision_pin_updates)
