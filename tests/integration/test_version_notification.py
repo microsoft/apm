@@ -4,6 +4,7 @@ import os  # noqa: F401
 import unittest
 from unittest.mock import patch
 
+import click
 from click.testing import CliRunner
 
 
@@ -80,6 +81,19 @@ class TestUpdateCheckSkippedOnInvalidCommand(unittest.TestCase):
         self.assertIn("invalid", result.output)
 
     @patch("apm_cli.cli._check_and_notify_updates")
+    def test_callback_skips_update_check_on_unresolved_command(self, mock_check):
+        """Update check must not run before Click reports an unknown command."""
+        from apm_cli.cli import cli
+
+        ctx = click.Context(cli, info_name="apm")
+        ctx.invoked_subcommand = "invalid"
+
+        with ctx:
+            cli.callback(verbose=False)
+
+        mock_check.assert_not_called()
+
+    @patch("apm_cli.cli._check_and_notify_updates")
     def test_update_check_runs_on_valid_command(self, mock_check):
         """Update check must still run when a known command is invoked."""
         from apm_cli.cli import cli
@@ -90,11 +104,15 @@ class TestUpdateCheckSkippedOnInvalidCommand(unittest.TestCase):
         mock_check.assert_called_once()
 
     @patch("apm_cli.cli._check_and_notify_updates")
-    def test_no_update_check_without_subcommand(self, mock_check):
-        """Update check must not run when no subcommand is given (help display)."""
+    def test_callback_skips_update_check_without_subcommand(self, mock_check):
+        """Update check must not run when no subcommand is given."""
         from apm_cli.cli import cli
 
-        self.runner.invoke(cli, [])
+        ctx = click.Context(cli, info_name="apm")
+        ctx.invoked_subcommand = None
+
+        with ctx:
+            cli.callback(verbose=False)
 
         mock_check.assert_not_called()
 
