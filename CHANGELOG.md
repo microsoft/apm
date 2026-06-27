@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependencies now derives the `{name}` segment from the `virtual_path`
   basename (e.g., `packages/my-pkg` -> `my-pkg`), aligning with `apm update`
   behavior. (by @kevinbeier-enbw; closes #1893) (#1893)
+- Skipped startup update checks for unknown `apm` commands and bare help
+  invocations so invalid CLI input fails without update-check latency. (by
+  @maro114510) (#1541)
 - Fixed `apm install` lockfile pruning when all `apm.yml` dependencies are
   removed, so stale `apm.lock.yaml` entries no longer survive. (by @nadav-y)
   (#1926)
