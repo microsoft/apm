@@ -18,7 +18,7 @@ apm outdated [OPTIONS]
 `apm outdated` reads `apm.lock.yaml` and queries each remote to detect staleness:
 
 - **Plain tag-pinned deps** (e.g. `v1.2.3` or `1.2.3`): semver compare against the latest matching remote tag.
-- **Patterned tag-pinned deps** (e.g. `my-pkg_v1.2.3`, `my-pkg--v1.2.3`, or `my-pkg-v1.2.3`): semver compare against the latest tag matching the package-specific pattern inferred from the locked ref. For virtual subdirectory packages (installed via `path:` in `apm.yml`), `{name}` is derived from the final path segment, so a dep with `path: packages/my-pkg` resolves tags like `my-pkg_v1.2.3`.
+- **Patterned tag-pinned deps** (e.g. `my-pkg_v1.2.3`, `my-pkg--v1.2.3`, or `my-pkg-v1.2.3`): semver compare against the latest tag matching the package-specific pattern inferred from the locked ref. For virtual subdirectory packages (installed via `path:` in `apm.yml`), `{name}` is derived from the final path segment (path values are validated; traversal sequences are rejected), so a dep with `path: packages/my-pkg` resolves tags like `my-pkg_v1.2.3`.
 - **Full-SHA revision-pinned deps**: compare the pinned SHA against the commit behind the latest annotated semver tag. Branches and lightweight tags are ignored.
 - **Branch-pinned deps** (e.g. `main`): compare the locked commit SHA against the remote branch tip.
 - **Default-branch deps** (no ref): compare against `main`/`master` tip.
@@ -51,19 +51,19 @@ Sample output:
 
 ```
                         Dependency Status
-  Package                       Current   Latest             Status      Source
-  ----------------------------- --------- ------------------ ----------- ---------------
-  acme/agent-skills             v1.2.0    v1.4.1            outdated    git tags
-  acme/prompt-pack              main      9c1ab2f0          outdated    git branch
-  acme/sha-pinned               a1b2c3d4  v2.0.0 (9e8d7c6b) outdated    git tags
-  acme/lint-rules               v0.3.0    v0.3.0            up-to-date  git tags
-  org/monorepo/packages/my-pkg  my-pkg_v1.0.0  my-pkg_v1.1.0  outdated    git tags
-  nadavy/e2e-demo               1.0.1     1.1.1            outdated    registry: corp
-  microsoft/apm-review-panel    0.1.1     0.1.2            outdated    registry: corp (lockfile)
-  acme/deploy-helpers           stable    -                unknown     registry (pinned ref)
-  pirate-skill@apm-marketplace  v0.2.1    v0.3.0 (...)     outdated    marketplace: apm-marketplace
+  Package                       Current          Latest             Status       Source
+  ----------------------------- ---------------- ------------------ ------------ -----------------------
+  acme/agent-skills             v1.2.0           v1.4.1             outdated     git tags
+  acme/prompt-pack              main             9c1ab2f0           outdated     git branch
+  acme/sha-pinned               a1b2c3d4         v2.0.0 (9e8d7c6b)  outdated     git tags
+  acme/lint-rules               v0.3.0           v0.3.0             up-to-date   git tags
+  org/monorepo/packages/my-pkg  my-pkg_v1.0.0    my-pkg_v1.1.0      outdated     git tags
+  nadavy/e2e-demo               1.0.1            1.1.1              outdated     registry: corp
+  microsoft/apm-review-panel    0.1.1            0.1.2              outdated     registry: corp (lockfile)
+  acme/deploy-helpers           stable           -                  unknown      registry (pinned ref)
+  pirate-skill@apm-marketplace  v0.2.1           v0.3.0 (...)       outdated     marketplace: apm-marketplace
 
-  [!] 2 outdated dependencies found
+  [!] 7 outdated dependencies found
 ```
 
 Check user-scope deps installed under `~/.apm/`:
@@ -80,6 +80,8 @@ Show available tags for outdated packages:
 apm outdated --verbose
 ```
 
+#### Monorepo subdirectory packages
+
 Monorepo dependency installed via `path:` (tag name derived from virtual path):
 
 ```yaml
@@ -88,6 +90,9 @@ Monorepo dependency installed via `path:` (tag name derived from virtual path):
   path: packages/my-pkg
   ref: my-pkg_v1.0.0
 ```
+
+`apm.lock.yaml` records the resolved commit SHA at lock time; the tag ref drives
+`outdated` detection only and is not the integrity pin.
 
 With a newer tag `my-pkg_v1.1.0` on the remote, `apm outdated` reports it as outdated.
 
