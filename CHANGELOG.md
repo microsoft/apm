@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Skipped startup update checks for unknown `apm` commands and bare help
   invocations so invalid CLI input fails without update-check latency. (by
   @maro114510) (#1541)
+- Fixed `apm install` lockfile pruning when all `apm.yml` dependencies are
+  removed, so stale `apm.lock.yaml` entries no longer survive. (by @nadav-y)
+  (#1926)
+- Fixed `apm update` final summary counts so unchanged re-materialized
+  dependencies are not reported as updated. (by @nadav-y) (#1927)
 - Fixed spurious version-range diffs for cached transitive registry
   dependencies during `apm update`. (by @nadav-y) (#1921)
 
