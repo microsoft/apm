@@ -11,13 +11,11 @@ script never aborts the CLI operation. HTTP scripts dispatch in a background
 thread (fire-and-forget), while command scripts run synchronously and can
 delay the operation until they finish or their timeout elapses.
 
-Scripts are defined in standalone files and discovered from well-known
-directories, following the same pattern as GitHub Copilot CLI extensions.
-The **project tier** uses a YAML file at the repository root (`apm-scripts.yml`),
-intentionally kept outside `.apm/` so it is not packaged when you publish a
-primitive. The **admin** (`/etc/apm/policy.d/*.json`) and **user**
-(`~/.apm/scripts/*.json`) tiers remain JSON, suited for machine- and
-fleet-managed deployment.
+Scripts are defined in three tiers. The **project tier** uses the repository `apm.yml`
+manifest under a top-level `lifecycle:` key. The **user tier** uses
+`~/.apm/apm.yml` (or `$APM_HOME/apm.yml`) under the same `lifecycle:` key.
+The **admin** tier remains `/etc/apm/policy.d/*.json`, suited for machine-
+and fleet-managed deployment.
 
 ## Supported events
 
@@ -32,20 +30,19 @@ fleet-managed deployment.
 
 ## Script file format
 
-Script files use a versioned schema. The **project tier** (`apm-scripts.yml`)
-is YAML; the **admin and user tiers** (`policy.d/*.json`,
-`~/.apm/scripts/*.json`) are JSON. All tiers share the same field names and
-`type` discriminator.
+Project and user manifests embed lifecycle scripts under a top-level
+`lifecycle:` key in `apm.yml`. The admin tier keeps the versioned JSON
+`{version: 1, scripts: {...}}` wrapper in `/etc/apm/policy.d/*.json`. All
+entries share the same field names and `type` discriminator.
 
 Each entry declares its kind via `type: command` (shell subprocess) or
 `type: http` (HTTPS webhook). An optional `description` field documents
-the entry for reviewers and `apm scripts list` output.
+the entry for reviewers and `apm lifecycle` output.
 
-**Project tier -- YAML (`apm-scripts.yml` at repo root):**
+**Project/user tier -- `apm.yml` `lifecycle:` block:**
 
 ```yaml
-version: 1
-scripts:
+lifecycle:
   post-install:
     - type: command
       description: "Set up local build deps"
@@ -58,7 +55,7 @@ scripts:
         X-Token: "$APM_HOOK_TOKEN"
 ```
 
-**Admin/user tiers -- JSON (`policy.d/*.json`, `~/.apm/scripts/*.json`):**
+**Admin tier -- JSON (`policy.d/*.json`):**
 
 ```json
 {
@@ -99,7 +96,7 @@ timeoutSec: 10
 
 Fields:
 - `type` -- must be `command`
-- `description` -- (optional) human annotation shown in `apm scripts list`
+- `description` -- (optional) human annotation shown in `apm lifecycle`
 - `bash` -- command string for bash (use this on Linux/macOS)
 - `command` -- fallback command string (cross-platform)
 - `cwd` -- working directory (relative paths resolve against project root)
@@ -123,7 +120,7 @@ timeoutSec: 5
 
 Fields:
 - `type` -- must be `http`
-- `description` -- (optional) human annotation shown in `apm scripts list`
+- `description` -- (optional) human annotation shown in `apm lifecycle`
 - `url` -- HTTPS endpoint (**http:// is rejected**)
 - `headers` -- request headers; values support `$ENV_VAR` expansion
 - `timeoutSec` -- request timeout (default: 10s)
@@ -153,12 +150,11 @@ every script from every file runs. Policy scripts cannot be disabled.
 | Priority     | Path                        | Who controls     | Format |
 |--------------|-----------------------------|------------------|--------|
 | 1 (highest)  | `/etc/apm/policy.d/*.json`  | Platform/IT team | JSON   |
-| 2            | `~/.apm/scripts/*.json`     | Individual user  | JSON   |
-| 3            | `apm-scripts.yml` (root)    | Project          | YAML   |
+| 2            | `~/.apm/apm.yml`            | Individual user  | YAML   |
+| 3            | `apm.yml` `lifecycle:`      | Project          | YAML   |
 
-Policy and user sources are directories (all `*.json` files are loaded).
-The project source is a single YAML file at the repository root, intentionally
-outside `.apm/` so it is never bundled when publishing a primitive package.
+Policy is a directory of JSON files. User and project sources are single
+`apm.yml` files that embed the `lifecycle:` subtree.
 
 ## Event payload
 
@@ -186,15 +182,16 @@ Lifecycle scripts from different sources are subject to different trust rules:
 - **Policy scripts** (`/etc/apm/policy.d/*.json`) -- controlled by your
   platform/IT team. Run without any consent gate; they cannot be disabled
   by the developer.
-- **User scripts** (`~/.apm/scripts/*.json`) -- controlled by the developer.
+- **User scripts** (`~/.apm/apm.yml`) -- controlled by the developer.
   Run without a gate.
-- **Project scripts** (`apm-scripts.yml`) -- a YAML file at the repository
-  root. **Skipped by default.** Cloning an untrusted repo and running
+- **Project scripts** (`apm.yml` `lifecycle:`) -- committed into the repo and
+  **skipped by default.** Cloning an untrusted repo and running
   `apm install` would otherwise execute attacker-controlled shell commands.
-  Trust is explicit, file-content-bound, and revocable:
-  - Run `apm scripts trust` to record trust for the current file contents.
-  - Any edit to `apm-scripts.yml` revokes trust and requires re-approval.
-  - Run `apm scripts untrust` to revoke without editing the file.
+  Trust is explicit, lifecycle-subtree-bound, and revocable:
+  - Run `apm lifecycle trust` to record trust for the current `lifecycle:` block.
+  - Any edit to `lifecycle:` revokes trust and requires re-approval.
+  - Editing other `apm.yml` keys does not revoke trust.
+  - Run `apm lifecycle untrust` to revoke without editing the file.
   - Trust records are stored in `~/.apm/scripts-trust.json` (or
     `$APM_HOME/scripts-trust.json`).
 
@@ -288,56 +285,56 @@ The log file is created automatically on first script execution.
 
 APM provides commands to work with lifecycle scripts:
 
-### `apm scripts` -- list discovered scripts
+### `apm lifecycle` -- list discovered scripts
 
 Run without a sub-command to see all scripts discovered from policy, user,
 and project directories:
 
 ```bash
-apm scripts
+apm lifecycle
 ```
 
-### `apm scripts init` -- scaffold a starter script file
+### `apm lifecycle init` -- scaffold a starter lifecycle block
 
-Generate a starter YAML script file at `apm-scripts.yml` (repo root):
+Inject a starter `lifecycle:` block into `apm.yml`:
 
 ```bash
-apm scripts init            # creates apm-scripts.yml
-apm scripts init --force    # overwrite existing file
+apm lifecycle init            # inject lifecycle: into apm.yml
+apm lifecycle init --force    # overwrite existing lifecycle: block
 ```
 
-### `apm scripts validate` -- check script files for errors
+### `apm lifecycle validate` -- check script files for errors
 
 Validate all discovered script files across policy, user, and project
 directories. Reports schema errors, unknown events, missing fields, and
 non-HTTPS URLs:
 
 ```bash
-apm scripts validate
+apm lifecycle validate
 ```
 
 Exits with a non-zero code if any errors are found.
 
-### `apm scripts test` -- dry-run a synthetic event
+### `apm lifecycle test` -- dry-run a synthetic event
 
 Fire a synthetic event through all discovered scripts to verify wiring
 without performing a real install/update/uninstall:
 
 ```bash
-apm scripts test                    # fires post-install (default)
-apm scripts test pre-uninstall      # fires a specific event
+apm lifecycle test                    # fires post-install (default)
+apm lifecycle test pre-uninstall      # fires a specific event
 ```
 
 Script output is written to `~/.apm/logs/scripts.log` as usual.
 
-### `apm scripts trust` -- trust the project script file
+### `apm lifecycle trust` -- trust the project lifecycle block
 
 ```bash
-apm scripts trust    # trusts apm-scripts.yml at its current contents
+apm lifecycle trust    # trusts apm.yml lifecycle: at its current contents
 ```
 
-### `apm scripts untrust` -- revoke trust for the project script file
+### `apm lifecycle untrust` -- revoke trust for the project lifecycle block
 
 ```bash
-apm scripts untrust  # revokes trust; project scripts will no longer run
+apm lifecycle untrust  # revokes trust; project scripts will no longer run
 ```

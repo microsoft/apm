@@ -1,13 +1,13 @@
-"""``apm scripts`` -- inspect, test, and scaffold lifecycle scripts.
+"""``apm lifecycle`` -- inspect, test, and scaffold lifecycle scripts.
 
 Sub-commands:
 
-* ``apm scripts``          -- list discovered scripts
-* ``apm scripts test``     -- preview (dry-run) a synthetic event; --execute to run
-* ``apm scripts init``     -- scaffold a starter apm-scripts.yml file at repo root
-* ``apm scripts validate`` -- check all script files for errors
-* ``apm scripts trust``    -- trust apm-scripts.yml so its scripts run on install
-* ``apm scripts untrust``  -- revoke trust for apm-scripts.yml
+* ``apm lifecycle``          -- list discovered scripts
+* ``apm lifecycle test``     -- preview (dry-run) a synthetic event; --execute to run
+* ``apm lifecycle init``     -- inject a starter lifecycle: block into apm.yml
+* ``apm lifecycle validate`` -- check all script files for errors
+* ``apm lifecycle trust``    -- trust apm.yml lifecycle: so its scripts run on install
+* ``apm lifecycle untrust``  -- revoke trust for apm.yml lifecycle:
 """
 
 from __future__ import annotations
@@ -27,33 +27,13 @@ from apm_cli.utils.console import (
     _rich_warning,
 )
 
-# Scaffold template header and body for apm-scripts.yml.
-# No $schema comment -- no scripts JSON-schema artifact exists yet in the repo.
-_INIT_TEMPLATE_HEADER = "# APM lifecycle scripts -- see docs: apm scripts --help\n"
-_INIT_TEMPLATE_BODY = """\
-version: 1
-scripts:
-  post-install:
-    # Example command entry -- remove or customise:
-    # - type: command
-    #   description: "Set up local build deps"
-    #   command: "make setup"
-    #   timeoutSec: 30
-    # Example http webhook entry -- remove or customise:
-    # - type: http
-    #   description: "Notify internal dashboard"
-    #   url: "https://hooks.example.com/installed"
-    #   headers:
-    #     X-Token: "$APM_HOOK_TOKEN"
-"""
-
 
 @click.group(
     invoke_without_command=True,
     help="Inspect, test, and scaffold lifecycle scripts.",
 )
 @click.pass_context
-def scripts(ctx: click.Context) -> None:
+def lifecycle(ctx: click.Context) -> None:
     """List discovered lifecycle scripts when invoked without a sub-command."""
     if ctx.invoked_subcommand is not None:
         return
@@ -66,7 +46,7 @@ def scripts(ctx: click.Context) -> None:
     if not entries:
         _rich_info("No lifecycle scripts discovered.", symbol="info")
         _rich_echo(
-            "  Create one with: apm scripts init",
+            "  Create one with: apm lifecycle init",
             style="dim",
         )
         return
@@ -106,7 +86,7 @@ def scripts(ctx: click.Context) -> None:
             click.echo(f"  {entry.event:20s} {entry.script_type:10s} {target} ({entry.source})")
 
 
-@scripts.command(
+@lifecycle.command(
     name="test",
     help="Dry-run a synthetic lifecycle event through discovered scripts.",
 )
@@ -132,7 +112,7 @@ def scripts(ctx: click.Context) -> None:
     is_flag=True,
     help="Actually run the scripts (default is a non-executing dry-run).",
 )
-def scripts_test(event: str, verbose: bool, execute: bool) -> None:
+def lifecycle_test(event: str, verbose: bool, execute: bool) -> None:
     """Preview (or, with --execute, fire) a synthetic event through scripts."""
     from apm_cli.core.lifecycle_scripts import (
         LifecycleEvent,
@@ -142,16 +122,13 @@ def scripts_test(event: str, verbose: bool, execute: bool) -> None:
     )
 
     project_root = str(Path.cwd())
-    # `test` is an explicit, opt-in inspection of the developer's own repo,
-    # so it is NOT subject to the install-time project-script trust gate (that
-    # gate exists to stop scripts auto-firing on `apm install` of a clone).
     all_scripts = discover_scripts(project_root=project_root)
     runner = LifecycleScriptRunner(scripts=all_scripts, verbose=verbose, project_root=project_root)
 
     matching = runner.scripts_for_event(event)
     if not matching:
         _rich_warning(
-            f"No scripts registered for '{event}'. Create one with: apm scripts init",
+            f"No scripts registered for '{event}'. Create one with: apm lifecycle init",
             symbol="warning",
         )
         return
@@ -183,7 +160,6 @@ def scripts_test(event: str, verbose: bool, execute: bool) -> None:
 
     threads = runner.fire(event, synthetic_event)
 
-    # Drain HTTP daemon threads so log entries are written before exit.
     for t in threads:
         t.join(timeout=15)
 
@@ -193,28 +169,53 @@ def scripts_test(event: str, verbose: bool, execute: bool) -> None:
     )
 
 
-@scripts.command(
+@lifecycle.command(
     name="init",
-    help="Scaffold a starter apm-scripts.yml file at the repo root.",
+    help="Inject a starter lifecycle: block into apm.yml.",
 )
-@click.option("--force", is_flag=True, help="Overwrite if file already exists.")
-def scripts_init(force: bool) -> None:
-    """Create a starter apm-scripts.yml file at the project root."""
-    target_file = Path.cwd() / "apm-scripts.yml"
+@click.option("--force", is_flag=True, help="Overwrite existing lifecycle: block if present.")
+def lifecycle_init(force: bool) -> None:
+    """Inject a starter lifecycle: block into the project apm.yml file."""
+    from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 
-    if target_file.exists() and not force:
+    target_file = Path.cwd() / "apm.yml"
+
+    if not target_file.is_file():
+        _rich_error(
+            "No apm.yml found in the current directory.",
+            symbol="error",
+        )
+        _rich_echo("  Run 'apm init' first to create apm.yml.", style="dim")
+        sys.exit(1)
+
+    try:
+        data = load_yaml(target_file) or {}
+    except Exception as exc:
+        _rich_error(f"Cannot read apm.yml: {exc}", symbol="error")
+        sys.exit(1)
+
+    if "lifecycle" in data and not force:
         _rich_warning(
-            f"Script file already exists: {target_file.relative_to(Path.cwd())}",
+            "apm.yml already has a lifecycle: block.",
             symbol="warning",
         )
         _rich_echo("  Use --force to overwrite.", style="dim")
         return
 
-    content = _INIT_TEMPLATE_HEADER + _INIT_TEMPLATE_BODY
-    target_file.write_text(content, encoding="utf-8")
+    data["lifecycle"] = {
+        "post-install": [
+            {
+                "type": "command",
+                "description": "Example: set up local build deps",
+                "command": "echo 'apm lifecycle: edit this entry'",
+                "timeoutSec": 30,
+            }
+        ]
+    }
+    dump_yaml(data, target_file)
 
     _rich_success(
-        f"Created script file: {target_file.relative_to(Path.cwd())}",
+        "Injected lifecycle: block into apm.yml.",
         symbol="check",
     )
     _rich_echo("")
@@ -231,40 +232,36 @@ def scripts_init(force: bool) -> None:
         console.print(
             Panel(
                 "[bold]Next steps:[/bold]\n\n"
-                f"  1. Edit [cyan]{target_file.relative_to(Path.cwd())}[/cyan] "
-                "to add your scripts\n"
-                "  2. Run [cyan]apm scripts validate[/cyan] to check for errors\n"
-                "  3. Run [cyan]apm scripts test post-install[/cyan] to dry-run\n"
-                "  4. Run [cyan]apm scripts trust[/cyan] to allow scripts to run\n",
+                "  1. Edit [cyan]apm.yml[/cyan] to customise the lifecycle: block\n"
+                "  2. Run [cyan]apm lifecycle validate[/cyan] to check for errors\n"
+                "  3. Run [cyan]apm lifecycle test post-install[/cyan] to dry-run\n"
+                "  4. Run [cyan]apm lifecycle trust[/cyan] to allow scripts to run\n",
                 title="Getting Started",
                 style="cyan",
             )
         )
     except (ImportError, NameError):
         click.echo("Next steps:")
-        click.echo(f"  1. Edit {target_file.relative_to(Path.cwd())} to add your scripts")
-        click.echo("  2. Run `apm scripts validate` to check for errors")
-        click.echo("  3. Run `apm scripts test post-install` to dry-run")
-        click.echo("  4. Run `apm scripts trust` to allow scripts to run")
+        click.echo("  1. Edit apm.yml to customise the lifecycle: block")
+        click.echo("  2. Run `apm lifecycle validate` to check for errors")
+        click.echo("  3. Run `apm lifecycle test post-install` to dry-run")
+        click.echo("  4. Run `apm lifecycle trust` to allow scripts to run")
 
 
-@scripts.command(
+@lifecycle.command(
     name="validate",
     help="Validate all discovered script files for errors.",
 )
-def scripts_validate() -> None:
+def lifecycle_validate() -> None:
     """Check all script files across discovery sources for errors."""
     from apm_cli.core.lifecycle_scripts import (
         _get_policy_scripts_dir,
-        _get_project_scripts_file,
-        _get_user_scripts_dir,
+        _get_project_apm_yml,
+        _get_user_apm_yml,
     )
 
     project_root = str(Path.cwd())
-    dirs = [
-        ("policy", _get_policy_scripts_dir()),
-        ("user", _get_user_scripts_dir()),
-    ]
+    policy_dir = _get_policy_scripts_dir()
 
     total_files = 0
     total_errors = 0
@@ -283,7 +280,15 @@ def scripts_validate() -> None:
         else:
             try:
                 data = _load_file_data(script_file, source)
-                if isinstance(data, dict):
+                if source in ("project", "user"):
+                    if isinstance(data, dict):
+                        lifecycle = data.get("lifecycle", {})
+                        if isinstance(lifecycle, dict):
+                            script_count = sum(
+                                len(v) for v in lifecycle.values() if isinstance(v, list)
+                            )
+                            total_scripts += script_count
+                elif isinstance(data, dict):
                     script_count = sum(
                         len(v) for v in data.get("scripts", {}).values() if isinstance(v, list)
                     )
@@ -291,22 +296,22 @@ def scripts_validate() -> None:
             except Exception:
                 pass
 
-    # Check directory-based sources (policy, user) -- always JSON.
-    for source, directory in dirs:
-        if not directory.is_dir():
-            continue
-        for json_file in sorted(directory.glob("*.json")):
+    if policy_dir.is_dir():
+        for json_file in sorted(policy_dir.glob("*.json")):
             if json_file.is_file():
-                _process_file(json_file, source)
+                _process_file(json_file, "policy")
 
-    # Check project-level single file (YAML).
-    project_file = _get_project_scripts_file(project_root)
-    if project_file.is_file():
-        _process_file(project_file, "project")
+    user_yml = _get_user_apm_yml()
+    if user_yml.is_file():
+        _process_file(user_yml, "user")
+
+    project_yml = _get_project_apm_yml(project_root)
+    if project_yml.is_file():
+        _process_file(project_yml, "project")
 
     if total_files == 0:
         _rich_info("No script files found.", symbol="info")
-        _rich_echo("  Create one with: apm scripts init", style="dim")
+        _rich_echo("  Create one with: apm lifecycle init", style="dim")
         return
 
     if total_errors > 0:
@@ -315,27 +320,27 @@ def scripts_validate() -> None:
             symbol="error",
         )
         sys.exit(1)
-    else:
-        _rich_success(
-            f"All {total_files} script file(s) valid ({total_scripts} script(s) configured).",
-            symbol="check",
-        )
+
+    _rich_success(
+        f"All {total_files} script file(s) valid ({total_scripts} script(s) configured).",
+        symbol="check",
+    )
 
 
 def _load_file_data(path: Path, source: str) -> object:
-    """Load raw data from a script file (JSON for admin/user, YAML for project)."""
-    import json
+    """Load raw data from a script file (JSON for policy, YAML for project/user)."""
+    import json as _json
 
-    if source == "project" or path.suffix in (".yml", ".yaml"):
+    if source in ("project", "user") or path.suffix in (".yml", ".yaml"):
         from apm_cli.utils.yaml_io import load_yaml
 
         return load_yaml(path)
-    return json.loads(path.read_text(encoding="utf-8"))
+    return _json.loads(path.read_text(encoding="utf-8"))
 
 
 def _validate_script_file(path: Path, source: str) -> list[str]:
     """Validate a single script file. Returns a list of error messages."""
-    import json
+    import json as _json
 
     from apm_cli.core.lifecycle_scripts import (
         LIFECYCLE_EVENTS,
@@ -350,9 +355,8 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
     except OSError as e:
         return [f"Cannot read file: {e}"]
 
-    # Project tier is YAML; admin/user tiers are JSON.
-    is_yaml = source == "project" or path.suffix in (".yml", ".yaml")
-    if is_yaml:
+    is_apm_yml = source in ("project", "user") or path.suffix in (".yml", ".yaml")
+    if is_apm_yml:
         try:
             from apm_cli.utils.yaml_io import load_yaml
 
@@ -361,27 +365,35 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
             return [f"Invalid YAML: {e}"]
     else:
         try:
-            data = json.loads(raw_text)
-        except json.JSONDecodeError as e:
+            data = _json.loads(raw_text)
+        except _json.JSONDecodeError as e:
             return [f"Invalid JSON: {e}"]
 
     if not isinstance(data, dict):
         return ["Root must be a mapping object"]
 
-    version = data.get("version")
-    if version is None:
-        errors.append("Missing 'version' field")
-    elif version != SCRIPT_FILE_VERSION:
-        errors.append(f"Unsupported version: {version} (expected {SCRIPT_FILE_VERSION})")
+    if is_apm_yml:
+        lifecycle = data.get("lifecycle")
+        if lifecycle is None:
+            return []
+        if not isinstance(lifecycle, dict):
+            return ["lifecycle: must be a mapping object"]
+        scripts_dict = lifecycle
+    else:
+        version = data.get("version")
+        if version is None:
+            errors.append("Missing 'version' field")
+        elif version != SCRIPT_FILE_VERSION:
+            errors.append(f"Unsupported version: {version} (expected {SCRIPT_FILE_VERSION})")
 
-    scripts_dict = data.get("scripts")
-    if scripts_dict is None:
-        errors.append("Missing 'scripts' field")
-        return errors
-
-    if not isinstance(scripts_dict, dict):
-        errors.append("'scripts' must be a mapping object")
-        return errors
+        scripts_dict_raw = data.get("scripts")
+        if scripts_dict_raw is None:
+            errors.append("Missing 'scripts' field")
+            return errors
+        if not isinstance(scripts_dict_raw, dict):
+            errors.append("'scripts' must be a mapping object")
+            return errors
+        scripts_dict = scripts_dict_raw
 
     for event_name, script_list in scripts_dict.items():
         if event_name not in LIFECYCLE_EVENTS:
@@ -399,7 +411,6 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
                 errors.append(f"{prefix}: must be a mapping object")
                 continue
 
-            # Explicit ``type`` is canonical; infer from key presence as fallback.
             script_type = entry.get("type")
             if script_type is None:
                 script_type = "http" if entry.get("url") else "command"
@@ -408,10 +419,12 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
                 continue
 
             if script_type == "command":
-                if not entry.get("bash") and not entry.get("command"):
-                    errors.append(f"{prefix}: command script needs 'bash' or 'command' field")
+                if not entry.get("bash") and not entry.get("command") and not entry.get("run"):
+                    errors.append(
+                        f"{prefix}: command script needs 'bash', 'command', or 'run' field"
+                    )
 
-            elif script_type == "http":
+            if script_type == "http":
                 url = entry.get("url")
                 if not url:
                     errors.append(f"{prefix}: http script needs 'url' field")
@@ -425,60 +438,66 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
     return errors
 
 
-@scripts.command(
+@lifecycle.command(
     name="trust",
-    help="Trust the project's apm-scripts.yml so its scripts run on install.",
+    help="Trust the project apm.yml lifecycle: block so its scripts run on install.",
 )
-def scripts_trust() -> None:
-    """Record trust for the current contents of ``apm-scripts.yml``.
+def lifecycle_trust() -> None:
+    """Record trust for the current lifecycle: subtree of apm.yml.
 
-    Project scripts are skipped on ``apm install`` until trusted, because a
+    Project scripts are skipped on apm install until trusted, because a
     cloned repository could otherwise run arbitrary commands. Trust is
-    bound to the file's exact contents -- editing the scripts re-arms the
-    gate.
+    bound to the lifecycle: subtree -- editing other keys does not revoke
+    trust, but editing lifecycle: re-arms the gate.
     """
-    from apm_cli.core.lifecycle_scripts import _get_project_scripts_file
+    from apm_cli.core.lifecycle_scripts import _get_project_apm_yml
     from apm_cli.core.script_trust import trust_project_scripts
 
-    project_file = _get_project_scripts_file(str(Path.cwd()))
+    project_file = _get_project_apm_yml(str(Path.cwd()))
     if not project_file.is_file():
         _rich_warning(
-            "No project scripts file found at apm-scripts.yml.",
+            "No apm.yml found in the current directory.",
             symbol="warning",
         )
-        _rich_echo("  Create one with: apm scripts init", style="dim")
+        _rich_echo(
+            "  Create one with: apm init, then add lifecycle: with apm lifecycle init",
+            style="dim",
+        )
         return
 
     _rich_warning(
-        "Project scripts can run arbitrary commands during apm install/update/uninstall.",
+        "Project lifecycle scripts can run arbitrary commands during apm install/update/uninstall.",
         symbol="warning",
     )
     fingerprint = trust_project_scripts(project_file)
     if fingerprint is None:
-        _rich_error("Could not read apm-scripts.yml to record trust.", symbol="error")
+        _rich_error(
+            "Could not read apm.yml lifecycle: block to record trust.",
+            symbol="error",
+        )
         sys.exit(1)
 
     _rich_success(
-        f"Trusted apm-scripts.yml ({fingerprint[:12]}...). Its scripts will now run.",
+        f"Trusted apm.yml lifecycle: ({fingerprint[:12]}...). Its scripts will now run.",
         symbol="check",
     )
 
 
-@scripts.command(
+@lifecycle.command(
     name="untrust",
-    help="Revoke trust for the project's apm-scripts.yml.",
+    help="Revoke trust for the project apm.yml lifecycle: block.",
 )
-def scripts_untrust() -> None:
-    """Revoke trust for ``apm-scripts.yml`` so its scripts stop running."""
-    from apm_cli.core.lifecycle_scripts import _get_project_scripts_file
+def lifecycle_untrust() -> None:
+    """Revoke trust for the apm.yml lifecycle: block so its scripts stop running."""
+    from apm_cli.core.lifecycle_scripts import _get_project_apm_yml
     from apm_cli.core.script_trust import untrust_project_scripts
 
-    project_file = _get_project_scripts_file(str(Path.cwd()))
+    project_file = _get_project_apm_yml(str(Path.cwd()))
     removed = untrust_project_scripts(project_file)
     if removed:
         _rich_success(
-            "Revoked trust for apm-scripts.yml. Its scripts will no longer run.",
+            "Revoked trust for apm.yml lifecycle:. Its scripts will no longer run.",
             symbol="check",
         )
     else:
-        _rich_info("Project scripts were not trusted; nothing to revoke.", symbol="info")
+        _rich_info("Project lifecycle scripts were not trusted; nothing to revoke.", symbol="info")

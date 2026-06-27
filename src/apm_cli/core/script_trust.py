@@ -1,22 +1,23 @@
 """Trust gate for project-source lifecycle scripts.
 
-Policy scripts (``/etc/apm/policy.d``) and user scripts (``~/.apm/scripts``)
+Policy scripts (/etc/apm/policy.d) and user scripts (~/.apm/apm.yml)
 originate from sources the developer already controls, so they run
-without a gate.  A project ``apm-scripts.yml`` file, however, is
+without a gate.  The project apm.yml lifecycle: block, however, is
 committed into a repository -- cloning an untrusted repo and running
-``apm install`` would otherwise execute attacker-controlled shell
+apm install would otherwise execute attacker-controlled shell
 commands with no consent.
 
-To close that supply-chain hole, project-source scripts are **skipped**
-unless the developer has explicitly trusted the exact contents of the
-project script file (direnv / VS Code Workspace Trust model).  Trust is
-keyed by the SHA-256 of the script file, so any edit to the committed
-scripts re-arms the gate and must be re-trusted.
+To close that supply-chain hole, project-source scripts are skipped
+unless the developer has explicitly trusted the exact lifecycle: subtree
+of apm.yml (direnv / VS Code Workspace Trust model).  Trust is keyed
+by the SHA-256 of the canonical JSON-serialised lifecycle: subtree, so
+editing dependencies: or any other apm.yml key does NOT revoke trust,
+but editing lifecycle: DOES.
 
-Trust records live in ``$APM_HOME/scripts-trust.json`` (default
-``~/.apm/scripts-trust.json``)::
+Trust records live in $APM_HOME/scripts-trust.json (default
+~/.apm/scripts-trust.json)::
 
-    {"version": 1, "projects": {"<abs apm-scripts.yml path>": "<sha256>"}}
+    {"version": 1, "projects": {"<abs apm.yml path>": "<sha256>"}}
 """
 
 from __future__ import annotations
@@ -40,12 +41,25 @@ def _trust_store_path() -> Path:
 
 
 def script_file_fingerprint(path: Path) -> str | None:
-    """Return the SHA-256 hex digest of *path*, or None if unreadable."""
+    """Return the SHA-256 hex digest of the lifecycle: subtree of apm.yml.
+
+    Returns None if the file is unreadable, has no lifecycle: key, or
+    the lifecycle: value is falsy/empty.
+    """
+    from apm_cli.utils.yaml_io import load_yaml
+
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError as e:
-        _logger.debug("Cannot fingerprint script file %s: %s", path, e)
+        data = load_yaml(path)
+    except Exception as e:
+        _logger.debug("Cannot fingerprint apm.yml lifecycle %s: %s", path, e)
         return None
+
+    lifecycle = (data or {}).get("lifecycle")
+    if not lifecycle:
+        return None
+
+    canonical = json.dumps(lifecycle, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _load_trust_store() -> dict[str, str]:
@@ -72,10 +86,11 @@ def _write_trust_store(projects: dict[str, str]) -> None:
 
 
 def is_project_scripts_trusted(script_file: Path) -> bool:
-    """Return True only when *script_file* contents are explicitly trusted.
+    """Return True only when the lifecycle: subtree of script_file is trusted.
 
-    The stored fingerprint must match the file's current SHA-256, so any
-    edit to the committed scripts revokes trust until re-approved.
+    The stored fingerprint must match the current lifecycle: subtree SHA-256,
+    so any edit to lifecycle: revokes trust until re-approved.
+    Editing other keys (e.g. dependencies:) does not affect trust.
     """
     fingerprint = script_file_fingerprint(script_file)
     if fingerprint is None:
@@ -85,10 +100,10 @@ def is_project_scripts_trusted(script_file: Path) -> bool:
 
 
 def trust_project_scripts(script_file: Path) -> str | None:
-    """Record trust for the current contents of *script_file*.
+    """Record trust for the current lifecycle: subtree of script_file.
 
     Returns the recorded fingerprint, or None when the file cannot be
-    read (nothing is recorded in that case).
+    read or has no lifecycle: key (nothing is recorded in that case).
     """
     fingerprint = script_file_fingerprint(script_file)
     if fingerprint is None:
@@ -100,7 +115,7 @@ def trust_project_scripts(script_file: Path) -> str | None:
 
 
 def untrust_project_scripts(script_file: Path) -> bool:
-    """Revoke trust for *script_file*. Returns True if a record was removed."""
+    """Revoke trust for script_file. Returns True if a record was removed."""
     key = str(script_file.resolve())
     projects = _load_trust_store()
     if key not in projects:

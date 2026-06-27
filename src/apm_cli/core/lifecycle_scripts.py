@@ -1,35 +1,32 @@
 """Lifecycle script models, runner, and discovery.
 
 APM supports lifecycle scripts that fire at key moments during install,
-update, and uninstall operations.  Scripts are configured via standalone
-files discovered from three directories (Copilot CLI pattern):
+update, and uninstall operations.  Scripts are configured in well-known
+locations discovered from three tiers:
 
-1. **Policy** -- ``/etc/apm/policy.d/*.json`` (admin-owned, cannot be disabled)
-2. **User**   -- ``~/.apm/scripts/*.json``
-3. **Project** -- ``apm-scripts.yml`` (repo root, YAML, single file)
+1. Policy  -- /etc/apm/policy.d/*.json (admin-owned, JSON drop-ins, unchanged)
+2. User    -- ~/.apm/apm.yml (or $APM_HOME/apm.yml) lifecycle: key
+3. Project -- apm.yml lifecycle: key (repo root)
 
-Per-tier format split (intentional):
-- Project tier uses YAML (``apm-scripts.yml`` at repo root, human-authored,
-  trust-audited).
-- Admin (policy.d) and user (~/.apm/scripts/) tiers use JSON, suited for
-  machine/fleet-managed configuration.
-
-Each file uses ``{ version: 1, scripts: { "<event>": [...] } }``.
+Admin tier uses {version:1, scripts:{...}} JSON files in a directory.
+Project and user tiers embed scripts under a top-level lifecycle: key
+in apm.yml -- the manifest is the envelope, so there is no version/scripts
+wrapper inside the lifecycle block.
 
 Two script types are supported; each entry must declare its kind via a
-``type`` field:
+type field:
 
-- ``type: command`` -- shell command (``bash`` / ``command`` fields)
-- ``type: http``    -- HTTPS POST to a URL with optional headers
+- type: command -- shell command (bash / command / run fields)
+- type: http    -- HTTPS POST to a URL with optional headers
 
-An optional ``description`` field may be added to any entry as a
+An optional description field may be added to any entry as a
 free-text annotation (surfaced in dry-run output; otherwise ignored).
 
 Scripts run in source order at each event.  Failures are isolated: a
 script error is logged (verbose) but never aborts the CLI operation.
-HTTP scripts dispatch asynchronously (daemon thread); ``command`` scripts
-run **synchronously** and can therefore delay the operation up to their
-timeout.  Use ``APM_NO_SCRIPTS=1`` to disable all scripts for one run.
+HTTP scripts dispatch asynchronously (daemon thread); command scripts
+run synchronously and can therefore delay the operation up to their
+timeout.  Use APM_NO_SCRIPTS=1 to disable all scripts for one run.
 """
 
 from __future__ import annotations
@@ -59,10 +56,10 @@ LIFECYCLE_EVENTS = (
     "post-uninstall",
 )
 
-# Supported script action types (Copilot CLI aligned).
+# Supported script action types.
 SCRIPT_TYPES = ("command", "http")
 
-# Current script-file schema version.
+# Current script-file schema version (used by admin/user JSON tier only).
 SCRIPT_FILE_VERSION = 1
 
 
@@ -82,7 +79,7 @@ class LifecycleEvent:
     """Data payload passed to every lifecycle script.
 
     HTTP scripts receive this as a JSON POST body.  Command scripts
-    receive it via **stdin** (JSON-encoded).
+    receive it via stdin (JSON-encoded).
     """
 
     schema_version: int = 1
@@ -122,25 +119,24 @@ class LifecycleEvent:
 
 @dataclass
 class ScriptEntry:
-    """One configured lifecycle script action (Copilot CLI schema).
+    """One configured lifecycle script action.
 
     Attributes:
-        script_type: ``command`` or ``http``.
-        event:       Lifecycle event name (e.g. ``post-install``).
-        bash:        Shell command for Unix (``command`` type).
+        script_type: command or http.
+        event:       Lifecycle event name (e.g. post-install).
+        bash:        Shell command for Unix (command type).
         command:     Cross-platform fallback command string.
-        url:         HTTP endpoint URL (``http`` type).
-        headers:     HTTP headers dict; values support ``$ENV_VAR`` expansion.
+        url:         HTTP endpoint URL (http type).
+        headers:     HTTP headers dict; values support $ENV_VAR expansion.
         timeout_sec: Timeout in seconds (default 30 for commands, 10 for http).
         cwd:         Working directory for the command (relative or absolute).
         env:         Extra environment variables for the command.
         allowed_env_vars: Opt-in allowlist of env var names that may be
                      passed through / expanded even if they match the
-                     credential denylist (e.g. ``ANALYTICS_TOKEN``).
+                     credential denylist (e.g. ANALYTICS_TOKEN).
         description: Optional free-text annotation for the script entry.
                      Surfaced in dry-run output; otherwise ignored.
-        source:      Where this script was defined: ``policy``, ``user``,
-                     or ``project``.
+        source:      Where this script was defined: policy, user, or project.
         source_file: Path of the file that declared this script.
     """
 
@@ -162,8 +158,8 @@ class ScriptEntry:
     def effective_command(self) -> str | None:
         """Resolve the command to run on the current platform.
 
-        On Windows, prefer ``command`` (cross-platform) over ``bash``
-        because bash may not be available.  On Unix, prefer ``bash``.
+        On Windows, prefer command (cross-platform) over bash
+        because bash may not be available.  On Unix, prefer bash.
         """
         if platform.system() == "Windows":
             return self.command or self.bash
@@ -181,19 +177,52 @@ class ScriptEntry:
 
 
 def _parse_allowed_env_vars(raw: object) -> list[str] | None:
-    """Normalise the optional ``allowedEnvVars`` field to a str list."""
+    """Normalise the optional allowedEnvVars field to a str list."""
     if not isinstance(raw, list):
         return None
     names = [str(v) for v in raw if isinstance(v, str) and v.strip()]
     return names or None
 
 
-def _entries_from_data(data: object, path: Path, source: str) -> list[ScriptEntry]:
-    """Build :class:`ScriptEntry` list from an already-parsed data dict.
+def _build_entry(raw: object, event_name: str, path: Path, source: str) -> ScriptEntry | None:
+    """Build a single ScriptEntry from a raw mapping.
 
-    Shared by both JSON (admin/user) and YAML (project) loaders so the
-    entry-building logic is not duplicated.  Returns an empty list if
-    *data* is malformed or uses an unsupported version.
+    Returns None if raw is not a dict or has an unknown type.
+    """
+    if not isinstance(raw, dict):
+        return None
+    script_type = raw.get("type")
+    if script_type is None:
+        script_type = "http" if raw.get("url") else "command"
+    if script_type not in SCRIPT_TYPES:
+        _logger.debug("Ignoring unknown script type %s in %s", script_type, path)
+        return None
+    # run: is an accepted alias for bash/command
+    run_val = raw.get("run")
+    bash_val = raw.get("bash") or (run_val if run_val and not raw.get("bash") else None)
+    command_val = raw.get("command") or (run_val if run_val and not raw.get("command") else None)
+    return ScriptEntry(
+        script_type=script_type,
+        event=event_name,
+        bash=bash_val,
+        command=command_val,
+        url=raw.get("url"),
+        headers=raw.get("headers"),
+        timeout_sec=raw.get("timeoutSec") or raw.get("timeout"),
+        cwd=raw.get("cwd"),
+        env=raw.get("env"),
+        allowed_env_vars=_parse_allowed_env_vars(raw.get("allowedEnvVars")),
+        description=raw.get("description"),
+        source=source,
+        source_file=str(path),
+    )
+
+
+def _entries_from_data(data: object, path: Path, source: str) -> list[ScriptEntry]:
+    """Build ScriptEntry list from an already-parsed data dict.
+
+    Used by the admin/user JSON tier (version+scripts wrapper required).
+    Returns an empty list if data is malformed or uses an unsupported version.
     """
     if not isinstance(data, dict):
         return []
@@ -215,42 +244,59 @@ def _entries_from_data(data: object, path: Path, source: str) -> list[ScriptEntr
         if not isinstance(script_list, list):
             continue
         for raw in script_list:
-            if not isinstance(raw, dict):
-                continue
-            # Explicit ``type`` field is canonical; infer from key presence as
-            # a backward-compatible fallback so legacy fixtures still parse.
-            script_type = raw.get("type")
-            if script_type is None:
-                script_type = "http" if raw.get("url") else "command"
-            if script_type not in SCRIPT_TYPES:
-                _logger.debug("Ignoring unknown script type %s in %s", script_type, path)
-                continue
-            entries.append(
-                ScriptEntry(
-                    script_type=script_type,
-                    event=event_name,
-                    bash=raw.get("bash"),
-                    command=raw.get("command"),
-                    url=raw.get("url"),
-                    headers=raw.get("headers"),
-                    timeout_sec=raw.get("timeoutSec") or raw.get("timeout"),
-                    cwd=raw.get("cwd"),
-                    env=raw.get("env"),
-                    allowed_env_vars=_parse_allowed_env_vars(raw.get("allowedEnvVars")),
-                    description=raw.get("description"),
-                    source=source,
-                    source_file=str(path),
-                )
-            )
+            entry = _build_entry(raw, event_name, path, source)
+            if entry is not None:
+                entries.append(entry)
     return entries
 
 
-def parse_script_file(path: Path, source: str = "project") -> list[ScriptEntry]:
-    """Parse a single JSON script file into a list of :class:`ScriptEntry`.
+def _entries_from_lifecycle_map(lifecycle: object, path: Path, source: str) -> list[ScriptEntry]:
+    """Build ScriptEntry list from the lifecycle: subtree of an apm.yml dict.
 
-    Used for the admin (policy.d) and user (~/.apm/scripts/) tiers which
-    remain JSON.  Returns an empty list if the file is malformed or uses
-    an unsupported version.
+    No version check -- apm.yml has no version field for the lifecycle block.
+    Returns an empty list if lifecycle is not a dict.
+    """
+    if not isinstance(lifecycle, dict):
+        return []
+
+    entries: list[ScriptEntry] = []
+    for event_name, script_list in lifecycle.items():
+        if event_name not in LIFECYCLE_EVENTS:
+            _logger.debug("Ignoring unknown lifecycle event %s in %s", event_name, path)
+            continue
+        if not isinstance(script_list, list):
+            continue
+        for raw in script_list:
+            entry = _build_entry(raw, event_name, path, source)
+            if entry is not None:
+                entries.append(entry)
+    return entries
+
+
+def parse_apm_yml_lifecycle(path: Path, source: str) -> list[ScriptEntry]:
+    """Parse the lifecycle: subtree from an apm.yml file.
+
+    Used for both project (apm.yml at repo root) and user
+    (~/.apm/apm.yml) tiers.  Returns an empty list if the file is
+    missing, malformed, or has no lifecycle: key.
+    """
+    from apm_cli.utils.yaml_io import load_yaml
+
+    try:
+        data = load_yaml(path)
+    except Exception as e:
+        _logger.debug("Failed to load apm.yml lifecycle from %s: %s", path, e)
+        return []
+
+    return _entries_from_lifecycle_map((data or {}).get("lifecycle"), path, source)
+
+
+def parse_script_file(path: Path, source: str = "project") -> list[ScriptEntry]:
+    """Parse a single JSON script file into a list of ScriptEntry.
+
+    Used for JSON-backed sources such as the admin policy tier
+    (/etc/apm/policy.d/*.json). Returns an empty list if the file is
+    malformed or uses an unsupported version.
     """
     try:
         with open(path, encoding="utf-8") as f:
@@ -263,22 +309,11 @@ def parse_script_file(path: Path, source: str = "project") -> list[ScriptEntry]:
 
 
 def parse_project_script_file(path: Path) -> list[ScriptEntry]:
-    """Parse the project-tier ``apm-scripts.yml`` YAML file.
+    """Parse the project-tier apm.yml lifecycle: key.
 
-    The project tier uses YAML (human-authored, trust-audited).  All
-    admin and user tier files remain JSON and use :func:`parse_script_file`.
-    Returns an empty list if the file is missing, malformed, or uses an
-    unsupported version.
+    Thin alias for parse_apm_yml_lifecycle kept for backward compatibility.
     """
-    from apm_cli.utils.yaml_io import load_yaml
-
-    try:
-        data = load_yaml(path)
-    except Exception as e:
-        _logger.debug("Failed to load project script file %s: %s", path, e)
-        return []
-
-    return _entries_from_data(data, path, "project")
+    return parse_apm_yml_lifecycle(path, "project")
 
 
 # -- Script discovery ------------------------------------------------------
@@ -292,25 +327,25 @@ def _get_policy_scripts_dir() -> Path:
     return Path("/etc/apm/policy.d")
 
 
-def _get_user_scripts_dir() -> Path:
-    """Return the user-level scripts directory (~/.apm/scripts/)."""
+def _get_user_apm_yml() -> Path:
+    """Return the user-level apm.yml path (~/.apm/apm.yml or $APM_HOME/apm.yml)."""
     apm_home = os.environ.get("APM_HOME")
     if apm_home:
-        return Path(apm_home) / "scripts"
-    return Path.home() / ".apm" / "scripts"
+        return Path(apm_home) / "apm.yml"
+    return Path.home() / ".apm" / "apm.yml"
 
 
-def _get_project_scripts_file(project_root: str | None = None) -> Path:
-    """Return the project-level scripts file (``apm-scripts.yml`` at repo root)."""
+def _get_project_apm_yml(project_root: str | None = None) -> Path:
+    """Return the project-level apm.yml path at the repo root."""
     root = Path(project_root) if project_root else Path.cwd()
-    return root / "apm-scripts.yml"
+    return root / "apm.yml"
 
 
 def _load_scripts_from_dir(
     directory: Path,
     source: str,
 ) -> list[ScriptEntry]:
-    """Load all ``*.json`` script files from *directory*, sorted by name."""
+    """Load all *.json script files from directory, sorted by name."""
     if not directory.is_dir():
         return []
     entries: list[ScriptEntry] = []
@@ -326,17 +361,20 @@ def discover_scripts(
     """Discover and merge scripts from all three sources.
 
     Load order (all additive, policy first):
-      1. Policy  -- ``/etc/apm/policy.d/*.json`` (directory, JSON)
-      2. User    -- ``~/.apm/scripts/*.json`` (directory, JSON)
-      3. Project -- ``apm-scripts.yml`` (repo root, YAML)
+      1. Policy  -- /etc/apm/policy.d/*.json (directory, JSON)
+      2. User    -- ~/.apm/apm.yml (or $APM_HOME/apm.yml) lifecycle: key
+      3. Project -- apm.yml lifecycle: key (repo root)
     """
     scripts: list[ScriptEntry] = []
     scripts.extend(_load_scripts_from_dir(_get_policy_scripts_dir(), source="policy"))
-    scripts.extend(_load_scripts_from_dir(_get_user_scripts_dir(), source="user"))
 
-    project_file = _get_project_scripts_file(project_root)
-    if project_file.is_file():
-        scripts.extend(parse_project_script_file(project_file))
+    user_yml = _get_user_apm_yml()
+    if user_yml.is_file():
+        scripts.extend(parse_apm_yml_lifecycle(user_yml, "user"))
+
+    project_yml = _get_project_apm_yml(project_root)
+    if project_yml.is_file():
+        scripts.extend(parse_apm_yml_lifecycle(project_yml, "project"))
 
     return scripts
 
@@ -348,8 +386,8 @@ class LifecycleScriptRunner:
     """Collects scripts and fires them for lifecycle events.
 
     Scripts run with error isolation: a failure in one script never blocks
-    the CLI or the remaining scripts.  ``http`` scripts dispatch
-    asynchronously; ``command`` scripts run synchronously and may delay
+    the CLI or the remaining scripts.  http scripts dispatch
+    asynchronously; command scripts run synchronously and may delay
     the operation up to their per-script timeout.
     """
 
@@ -378,7 +416,7 @@ class LifecycleScriptRunner:
         count = self._skipped_project_scripts
         msg = (
             f"[!] Skipped {count} untrusted project script(s). "
-            "Run 'apm scripts trust' to enable them."
+            "Run 'apm lifecycle trust' to enable them."
         )
         if self._logger is not None:
             emit = getattr(self._logger, "warning", None) or getattr(
@@ -390,7 +428,7 @@ class LifecycleScriptRunner:
             _logger.warning("%s", msg)
 
     def fire(self, event_name: str, event: LifecycleEvent) -> list[threading.Thread]:
-        """Execute all scripts registered for *event_name*.
+        """Execute all scripts registered for event_name.
 
         Each script runs in isolation -- a failure in one script does not
         prevent subsequent scripts from running.
@@ -432,7 +470,7 @@ class LifecycleScriptRunner:
         return threads
 
     def scripts_for_event(self, event_name: str) -> list[ScriptEntry]:
-        """Return scripts registered for *event_name* (public API)."""
+        """Return scripts registered for event_name (public API)."""
         return [s for s in self._scripts if s.event == event_name]
 
 
@@ -445,23 +483,25 @@ def build_runner_from_context(
     verbose: bool = False,
     project_root: str | None = None,
 ) -> LifecycleScriptRunner:
-    """Create a :class:`LifecycleScriptRunner` via file-based discovery.
+    """Create a LifecycleScriptRunner via file-based discovery.
 
-    Scans policy (JSON), user (JSON), and project (YAML) script sources.
+    Scans policy (JSON), user (apm.yml lifecycle:), and project (apm.yml
+    lifecycle:) script sources.
 
     Three safeguards are applied at this firing boundary:
 
-    - ``APM_NO_SCRIPTS`` (env, any non-empty value) disables ALL scripts
+    - APM_NO_SCRIPTS (env, any non-empty value) disables ALL scripts
       for the current invocation -- a blanket escape hatch for CI and
       untrusted clones.
-    - Org ``executables.deny_all`` (org policy kill-switch): when set,
+    - Org executables.deny_all (org policy kill-switch): when set,
       suppresses all lifecycle scripts as a one-directional safety
       ceiling. Best-effort: any discovery error is silently ignored so
       the install flow is never blocked.
-    - Project-source scripts (``apm-scripts.yml``) are dropped unless
-      their exact contents have been explicitly trusted via ``apm scripts
-      trust`` (see :mod:`apm_cli.core.script_trust`). Policy and user
-      scripts come from developer-controlled locations and are never gated.
+    - Project-source scripts (apm.yml lifecycle:) are dropped unless
+      their exact lifecycle: subtree has been explicitly trusted via
+      apm lifecycle trust (see apm_cli.core.script_trust). Policy and
+      user scripts come from developer-controlled locations and are
+      never gated.
     """
     if os.environ.get("APM_NO_SCRIPTS"):
         return LifecycleScriptRunner(
@@ -472,9 +512,6 @@ def build_runner_from_context(
 
     scripts = discover_scripts(project_root=project_root)
 
-    # Short-circuit: skip the org policy network call when there are no scripts
-    # to run. This avoids a potential RPC on cold cache in the no-scripts case,
-    # which is the common case for most projects.
     if not scripts:
         return LifecycleScriptRunner(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
@@ -500,8 +537,8 @@ def build_runner_from_context(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )
 
-    project_file = _get_project_scripts_file(project_root)
-    project_trusted = project_file.is_file() and is_project_scripts_trusted(project_file)
+    project_yml = _get_project_apm_yml(project_root)
+    project_trusted = project_yml.is_file() and is_project_scripts_trusted(project_yml)
 
     kept: list[ScriptEntry] = []
     skipped = 0
@@ -517,5 +554,5 @@ def build_runner_from_context(
         verbose=verbose,
         project_root=project_root,
         skipped_project_scripts=skipped,
-        skipped_project_file=str(project_file) if skipped else None,
+        skipped_project_file=str(project_yml) if skipped else None,
     )

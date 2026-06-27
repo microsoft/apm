@@ -1,5 +1,5 @@
 ---
-title: apm scripts
+title: apm lifecycle
 description: Inspect, test, and scaffold lifecycle scripts for install/update/uninstall events.
 sidebar:
   order: 22
@@ -10,7 +10,7 @@ moments during `apm install`, `apm update`, and `apm uninstall`. This command
 group provides all tooling to discover, validate, test, scaffold, and manage
 trust for lifecycle script files.
 
-Project-source scripts (`apm-scripts.yml`) are **skipped by default** until
+Project-source scripts (`apm.yml` `lifecycle:`) are **skipped by default** until
 explicitly trusted, preventing arbitrary command execution on clone.
 
 For the full conceptual guide, schema reference, and security model, see
@@ -19,23 +19,23 @@ For the full conceptual guide, schema reference, and security model, see
 ## Synopsis
 
 ```bash
-apm scripts
-apm scripts init [--force]
-apm scripts validate
-apm scripts test [EVENT] [--verbose] [--execute]
-apm scripts trust
-apm scripts untrust
+apm lifecycle
+apm lifecycle init [--force]
+apm lifecycle validate
+apm lifecycle test [EVENT] [--verbose] [--execute]
+apm lifecycle trust
+apm lifecycle untrust
 ```
 
 ## Subcommands
 
-### `apm scripts` (list)
+### `apm lifecycle` (list)
 
 List all lifecycle scripts discovered from policy, user, and project sources.
-Equivalent to `apm scripts list`.
+Equivalent to `apm lifecycle list`.
 
 ```bash
-apm scripts
+apm lifecycle
 ```
 
 Output columns: event name, script type (`command` or `http`), target (command
@@ -43,33 +43,31 @@ string or URL), and source (`policy`, `user`, or `project`).
 
 Returns an informational message when no scripts are discovered.
 
-### `apm scripts init`
+### `apm lifecycle init`
 
-Scaffold a starter `apm-scripts.yml` file at the repo root (sibling of
-`apm.yml`).
+Scaffold a starter `lifecycle:` block into the existing `apm.yml` manifest.
 
 ```bash
-apm scripts init            # creates apm-scripts.yml at the repo root
-apm scripts init --force    # overwrite an existing file
+apm lifecycle init            # injects lifecycle: into apm.yml
+apm lifecycle init --force    # overwrite an existing file
 ```
 
 | Flag | Description |
 |---|---|
-| `--force` | Overwrite an existing `apm-scripts.yml`. |
+| `--force` | Overwrite an existing `lifecycle:` block. |
 
-### `apm scripts validate`
+### `apm lifecycle validate`
 
-Validate all discovered script files (project `apm-scripts.yml`, admin/user
-`*.json`) for schema errors.
+Validate all discovered script files (project/user `apm.yml`, admin `*.json`) for schema errors.
 
 ```bash
-apm scripts validate
+apm lifecycle validate
 ```
 
 Checks across all three discovery sources (policy, user, project). Reports:
 
-- Missing or unsupported `version` field
-- Missing `scripts` object
+- Missing or unsupported `version` field (admin JSON only)
+- Missing `scripts` object (admin JSON only)
 - Unknown lifecycle event names
 - Unknown script types
 - Missing `bash`/`command` for command scripts
@@ -78,17 +76,17 @@ Checks across all three discovery sources (policy, user, project). Reports:
 
 Exits `1` if any errors are found.
 
-### `apm scripts test`
+### `apm lifecycle test`
 
 Fire a synthetic lifecycle event through all discovered scripts. Dry-run by
 default: shows which scripts would run without executing them. Pass `--execute`
 to actually run them.
 
 ```bash
-apm scripts test                        # dry-run post-install (default event)
-apm scripts test post-update            # dry-run a specific event
-apm scripts test post-install --execute # actually run post-install scripts
-apm scripts test pre-install -v         # verbose dry-run
+apm lifecycle test                        # dry-run post-install (default event)
+apm lifecycle test post-update            # dry-run a specific event
+apm lifecycle test post-install --execute # actually run post-install scripts
+apm lifecycle test pre-install -v         # verbose dry-run
 ```
 
 | Flag | Description |
@@ -99,34 +97,34 @@ apm scripts test pre-install -v         # verbose dry-run
 Supported events: `pre-install`, `post-install`, `pre-update`, `post-update`,
 `pre-uninstall`, `post-uninstall`. Default: `post-install`.
 
-Note: `apm scripts test` bypasses the project-script trust gate -- it is an
+Note: `apm lifecycle test` bypasses the project-script trust gate -- it is an
 explicit developer inspection tool for their own repository.
 
 Script output is written to `~/.apm/logs/scripts.log`.
 
-### `apm scripts trust`
+### `apm lifecycle trust`
 
-Trust the project script file at `apm-scripts.yml` so its scripts run during
+Trust the project `apm.yml` `lifecycle:` block so its scripts run during
 `apm install`, `apm update`, and `apm uninstall`.
 
 ```bash
-apm scripts trust
+apm lifecycle trust
 ```
 
-Trust is bound to the exact file contents (SHA-256). Any edit to
-`apm-scripts.yml` revokes trust and requires re-running this command.
+Trust is bound to the canonical `lifecycle:` subtree (SHA-256). Editing
+other `apm.yml` keys does not revoke trust; editing `lifecycle:` does.
 
 Trust records are stored at `~/.apm/scripts-trust.json` (or
 `$APM_HOME/scripts-trust.json`). To audit or reset trust manually, edit or
 delete that file.
 
-### `apm scripts untrust`
+### `apm lifecycle untrust`
 
-Revoke trust for `apm-scripts.yml`. Project scripts will stop running on
-the next install/update/uninstall.
+Revoke trust for the `apm.yml` `lifecycle:` block. Project scripts will stop
+running on the next install/update/uninstall.
 
 ```bash
-apm scripts untrust
+apm lifecycle untrust
 ```
 
 ## Environment variables
@@ -134,7 +132,7 @@ apm scripts untrust
 | Variable | Effect |
 |---|---|
 | `APM_NO_SCRIPTS=1` | Disable all lifecycle scripts for one invocation. Useful in CI and untrusted clone environments. |
-| `APM_HOME` | Override the base directory for user scripts (`$APM_HOME/scripts/`) and trust store (`$APM_HOME/scripts-trust.json`). |
+| `APM_HOME` | Override the base directory for user `apm.yml` (`$APM_HOME/apm.yml`) and trust store (`$APM_HOME/scripts-trust.json`). |
 
 ## Exit codes
 
@@ -145,7 +143,7 @@ apm scripts untrust
 
 ## Security notes
 
-- Project scripts are skipped until explicitly trusted (`apm scripts trust`).
+- Project scripts are skipped until explicitly trusted (`apm lifecycle trust`).
 - Org policy `executables.deny_all: true` suppresses all lifecycle scripts.
 - Set `APM_NO_SCRIPTS=1` for a per-run disable without touching policy.
 - HTTP script URLs must use `https://`.

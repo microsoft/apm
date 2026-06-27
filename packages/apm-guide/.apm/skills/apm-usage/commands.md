@@ -91,14 +91,14 @@ When `apm install --target copilot` has already deployed instructions to `.githu
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm scripts` | List all discovered lifecycle scripts across policy, user, and project sources | -- |
-| `apm scripts init` | Scaffold a starter `apm-scripts.yml` file at the repo root | `--force` (overwrite existing file) |
-| `apm scripts test EVENT` | Fire a synthetic event through all discovered scripts (dry-run) | `--verbose`, `--execute` (actually run scripts) |
-| `apm scripts validate` | Check all discovered script files for schema errors, unknown events, missing fields, and non-HTTPS URLs | -- |
-| `apm scripts trust` | Trust `apm-scripts.yml` at its current contents so project scripts run on install | -- |
-| `apm scripts untrust` | Revoke trust for `apm-scripts.yml`; project scripts will stop running | -- |
+| `apm lifecycle` | List all discovered lifecycle scripts across policy, user, and project sources | -- |
+| `apm lifecycle init` | Inject a starter `lifecycle:` block into `apm.yml` | `--force` (overwrite existing block) |
+| `apm lifecycle test EVENT` | Fire a synthetic event through all discovered scripts (dry-run) | `--verbose`, `--execute` (actually run scripts) |
+| `apm lifecycle validate` | Check all discovered script files for schema errors, unknown events, missing fields, and non-HTTPS URLs | -- |
+| `apm lifecycle trust` | Trust `apm.yml` `lifecycle:` at its current contents so project scripts run on install | -- |
+| `apm lifecycle untrust` | Revoke trust for `apm.yml` `lifecycle:`; project scripts will stop running | -- |
 
-Lifecycle scripts fire on six events: `pre-install`, `post-install`, `pre-update`, `post-update`, `pre-uninstall`, `post-uninstall`. Script files are discovered from three sources (additive): policy (`/etc/apm/policy.d/*.json`, JSON), user (`~/.apm/scripts/*.json`, JSON), project (`apm-scripts.yml` at repo root, YAML). Two script types: `command` (shell via subprocess, event JSON on stdin) and `http` (HTTPS POST). Script output is appended to `~/.apm/logs/scripts.log`. See the [Lifecycle scripts](/apm/enterprise/lifecycle-scripts/) guide for full documentation.
+Lifecycle scripts fire on six events: `pre-install`, `post-install`, `pre-update`, `post-update`, `pre-uninstall`, `post-uninstall`. Script files are discovered from three sources (additive): policy (`/etc/apm/policy.d/*.json`, JSON), user (`~/.apm/apm.yml`, YAML), project (`apm.yml` `lifecycle:` at repo root, YAML). Two script types: `command` (shell via subprocess, event JSON on stdin) and `http` (HTTPS POST). Script output is appended to `~/.apm/logs/scripts.log`. See the [Lifecycle scripts](/apm/enterprise/lifecycle-scripts/) guide for full documentation.
 
 ## Distribution
 
