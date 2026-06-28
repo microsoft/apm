@@ -381,7 +381,7 @@ def _load_file_data(path: Path, source: str) -> object:
 
 
 def _safe_token(value: object) -> str:
-    """Render *value* for an error message without ever raising.
+    """Render *value* for an error message without ever raising or hanging.
 
     A YAML manifest can carry a non-string ``type`` value or event key
     expressed as a hex/octal/sexagesimal integer literal -- those bases
@@ -392,12 +392,22 @@ def _safe_token(value: object) -> str:
     ``apm lifecycle validate``. Strings pass through; anything that cannot
     be stringified cheaply degrades to its type name, so a hostile
     manifest is reported as a structured error, never a traceback.
+
+    A container value (``list`` / ``dict`` / ``set`` / ``tuple``) is NEVER
+    stringified: a parsed YAML value can be a pure-alias billion-laughs DAG
+    (shared references) whose ``str()`` re-expands O(2^N) and hangs/OOMs the
+    command. The loader already fails such a manifest closed at parse time
+    (see ``_BoundedSafeLoader._guard_expansion``); rendering only the type
+    name here is an independent guard so this error path can never itself
+    materialize a bomb, even if a future caller bypasses ``load_yaml``.
     """
     if isinstance(value, str):
         return value
+    if isinstance(value, (list, tuple, dict, set, frozenset)):
+        return f"<{type(value).__name__}>"
     try:
         return str(value)
-    except (ValueError, RecursionError):
+    except (ValueError, RecursionError, MemoryError, OverflowError):
         return f"<{type(value).__name__}>"
 
 

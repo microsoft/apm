@@ -58,11 +58,18 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za
 #   - canonical: GOOGLE_APPLICATION_CREDENTIALS (CREDENTIAL + plural S)
 #   - key passphrases: GPG_PASSPHRASE, SSH_KEY_PASSPHRASE (PASSPHRASE is the
 #     same secret class as PASSWORD/PASSWD/PWD, which are already covered)
+#   - bare PASS shorthand: DB_PASS, MYSQL_PASS, REDIS_PASS, SMTP_PASS,
+#     ROOT_PASS (ubiquitous in docker-compose / 12-factor stacks). The bare
+#     ``PASS`` token is anchored to a ``_``-or-start boundary (``(?:^|_)PASS``)
+#     so the real ``*_PASS`` family is swept WITHOUT catching the common-
+#     English suffix words SURPASS / BYPASS / COMPASS / TRESPASS / PASSAGE.
 # The trailing ``S?`` does not over-match unrelated names (e.g. PATH keeps
 # a stray ``H`` after PAT and so never matches; TRACE_ID has no credential
-# token before ``_ID`` and is left alone).
+# token before ``_ID`` and is left alone). The looser tokens (KEY, PAT, ...)
+# keep their suffix-match behaviour as a deliberate fail-safe: over-redacting
+# a non-secret env var is harmless, under-redacting a secret is not.
 _CREDENTIAL_DENYLIST = re.compile(
-    r"(?:TOKEN|SECRET|PAT|KEY|PASSWORD|PASSWD|PASSPHRASE|PWD|CREDENTIAL|AUTHTOKEN)S?(?:_IDS?)?$",
+    r"(?:(?:^|_)PASS|TOKEN|SECRET|PAT|KEY|PASSWORD|PASSWD|PASSPHRASE|PWD|CREDENTIAL|AUTHTOKEN)S?(?:_IDS?)?$",
     re.IGNORECASE,
 )
 

@@ -7,11 +7,19 @@ anchors/aliases (classic billion-laughs). If the sanctioned loader
 parsing a few hundred bytes would balloon into 9**12 nodes = a memory /
 CPU DoS.
 
-Result on head: SECURE. ``load_yaml`` uses ``yaml.safe_load``, which
-resolves aliases to *shared references* (a DAG), so parse cost is linear
-in the document text, not in the notional expansion. The lifecycle parser
-additionally ignores unknown top-level event keys and only shallow-iterates
-a real event's script list, so the bomb never forces a deep walk.
+Result on head: SECURE, by an EXPLICIT loader budget. The original
+analysis here assumed ``yaml.safe_load`` was safe because it resolves
+aliases to *shared references* (a DAG), making parse cost linear in the
+document text. Round-13 (r13-parser-1) disproved that comfort: the
+shared-ref DAG is a LATENT bomb that detonates in any consumer that
+materializes it (``str()`` in ``_safe_token``, ``deepcopy``, re-serialize)
+-- ``apm lifecycle validate`` / ``test`` hung for minutes on a sub-kilobyte
+manifest. So ``load_yaml`` (``_BoundedSafeLoader``) now walks the composed
+node graph and FAILS CLOSED with ``yaml.YAMLError`` the instant the
+per-occurrence expansion weight crosses a fixed budget -- the bomb is
+rejected at parse, before any consumer can re-expand it. Every
+``load_yaml`` consumer already treats ``yaml.YAMLError`` as fail-closed
+(empty / None / exit 1), so the lifecycle parser still yields zero entries.
 
 Every test here is wall-clock guarded: a vulnerable loader that actually
 expanded would blow the time bound and fail fast in a daemon thread,
@@ -38,20 +46,25 @@ def test_bomb_fixtures_present():
     assert BOMB_UNDER_EVENT.stat().st_size < 4096
 
 
-def test_safe_load_keeps_shared_refs_not_copies():
-    """Aliases must resolve to the SAME object, proving no expansion."""
+def test_load_yaml_fails_closed_on_alias_bomb():
+    """A depth-12 9-way alias bomb is REJECTED at parse (fail closed).
+
+    The fixture's notional expansion is 9**12 (~2.8e11 leaves). The
+    round-13 expansion-weight budget rejects it the instant the weight
+    crosses the cap -- ``load_yaml`` raises ``yaml.YAMLError`` fast rather
+    than returning a shared-ref DAG that a downstream ``str()`` could
+    detonate. (The pre-r13 contract -- parse succeeds, aliases stay shared
+    -- was the disproven non-goal.)
+    """
+    import yaml
+
     from apm_cli.utils.yaml_io import load_yaml
 
     finished, result, exc = run_guarded(lambda: load_yaml(BOMB_UNDER_EVENT), timeout=8.0)
     assert finished, "load_yaml did not finish in time -- alias-expansion DoS"
-    assert exc is None, f"load_yaml raised: {exc!r}"
-
-    post_install = result["lifecycle"]["post-install"]
-    # 9 siblings, every one the identical shared child list (a DAG node).
-    assert len(post_install) == 9
-    first = post_install[0]
-    assert all(sibling is first for sibling in post_install), (
-        "alias targets were copied, not shared -- billion-laughs expansion"
+    assert result is None
+    assert isinstance(exc, yaml.YAMLError), (
+        f"alias bomb must fail closed with yaml.YAMLError, got {exc!r}"
     )
 
 
@@ -76,14 +89,23 @@ def test_parser_shallow_iterates_bomb_under_real_event():
     )
     assert finished, "parser hung on event-anchored bomb"
     assert exc is None, f"parser raised: {exc!r}"
-    # The 9 top-level elements are lists (shared sub-bombs), not dicts, so
-    # _build_entry drops them all -- bounded, never a deep traversal.
+    # load_yaml now fails closed on the bomb (expansion-weight budget), so the
+    # parser catches the YAMLError internally and yields zero entries -- the
+    # bomb's value list is never even reached.
     assert result == []
 
 
 @pytest.mark.parametrize("levels", [8, 14, 20])
-def test_parse_time_is_linear_in_depth(tmp_path: Path, levels: int):
-    """Parse cost grows ~linearly with depth, never exponentially."""
+def test_deep_alias_bomb_fails_closed_fast(tmp_path: Path, levels: int):
+    """A 9-way alias chain past the weight budget fails closed, never hangs.
+
+    9**8 (~43M) already exceeds the 5M expansion-weight budget, so every
+    one of these depths is rejected at parse with ``yaml.YAMLError`` -- a
+    bounded, fast fail-closed, never the exponential materialization a
+    copying (or unbounded) loader would suffer.
+    """
+    import yaml
+
     from apm_cli.utils.yaml_io import load_yaml
 
     lines = ['  l0: &b0 "x"']
@@ -95,7 +117,28 @@ def test_parse_time_is_linear_in_depth(tmp_path: Path, levels: int):
     doc = tmp_path / "apm.yml"
     doc.write_text("lifecycle:\n" + "\n".join(lines) + "\n", encoding="utf-8")
 
-    # Generous per-depth bound; a copying loader would explode long before.
     finished, _result, exc = run_guarded(lambda: load_yaml(doc), timeout=6.0)
     assert finished, f"depth={levels}: load did not finish -- expansion DoS"
-    assert exc is None, f"depth={levels}: loader raised {exc!r}"
+    assert isinstance(exc, yaml.YAMLError), (
+        f"depth={levels}: bomb must fail closed with yaml.YAMLError, got {exc!r}"
+    )
+
+
+@pytest.mark.parametrize("levels", [1, 2, 3])
+def test_shallow_alias_doc_still_parses_under_budget(tmp_path: Path, levels: int):
+    """A shallow 9-way alias doc (9**3 = 729 << budget) parses, no false positive."""
+    from apm_cli.utils.yaml_io import load_yaml
+
+    lines = ['  l0: &b0 "x"']
+    prev = "b0"
+    for i in range(1, levels + 1):
+        refs = ", ".join([f"*{prev}"] * 9)
+        lines.append(f"  l{i}: &b{i} [{refs}]")
+        prev = f"b{i}"
+    doc = tmp_path / "apm.yml"
+    doc.write_text("lifecycle:\n" + "\n".join(lines) + "\n", encoding="utf-8")
+
+    finished, result, exc = run_guarded(lambda: load_yaml(doc), timeout=6.0)
+    assert finished, f"depth={levels}: load did not finish"
+    assert exc is None, f"depth={levels}: shallow doc wrongly rejected: {exc!r}"
+    assert isinstance(result, dict)

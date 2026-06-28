@@ -49,15 +49,86 @@ class _BoundedSafeLoader(yaml.SafeLoader):
     fail-closed) within a small fixed budget instead of hanging. Both budgets
     are orders of magnitude above any legitimate hand-written config, so real
     ``<<`` merges still resolve correctly.
+
+    A sibling vector needs no ``<<`` at all: a PURE-ALIAS billion-laughs graph
+    (``lN: &lN [*l(N-1), *l(N-1)]``) is only O(N) shared-reference objects, so
+    ``flatten_mapping`` and the merge budget never see it, yet it expands to
+    O(2^N) when any consumer materializes the value (``str()``, deepcopy,
+    re-serialize). ``construct_document`` therefore first walks the composed
+    node graph with a memoized expansion-weight budget (``_guard_expansion``)
+    and fails the document closed before construction -- protecting every
+    ``load_yaml`` consumer uniformly, including the non-trust
+    ``apm lifecycle validate`` / ``test`` paths that never run
+    ``_is_fingerprint_safe``.
     """
 
     _MAX_MERGE_ENTRIES = 100_000
     _MAX_FLATTEN_DEPTH = 200
+    _MAX_EXPANSION_WEIGHT = 5_000_000
+    _EXPANSION_INPROGRESS = -1
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._merge_entries = 0
         self._flatten_depth = 0
+
+    def _raise_expansion(self, node: Any) -> None:
+        raise yaml.constructor.ConstructorError(
+            "while constructing a node",
+            getattr(node, "start_mark", None),
+            "YAML alias/anchor expansion exceeded the safe budget "
+            "(possible billion-laughs expansion bomb)",
+            getattr(node, "start_mark", None),
+        )
+
+    def _guard_expansion(self, root: Any) -> None:
+        # Bound the LOGICAL (alias-expanded) size of the composed node graph
+        # BEFORE construction. PyYAML shares one node object across every
+        # ``*alias`` reference, so a pure-alias billion-laughs graph
+        # (``lN: &lN [*l(N-1), *l(N-1)]``) is only O(N) objects yet expands
+        # to O(2^N) the moment any consumer materializes it (``str()``,
+        # deepcopy, re-serialize). It carries no ``<<`` so the merge-entry
+        # budget never engages, and non-trust consumers
+        # (``apm lifecycle validate`` / ``test``) never run the post-parse
+        # ``_is_fingerprint_safe`` guard -- so without this the bomb wedges
+        # them. We compute a memoized per-node expansion weight (shared nodes
+        # are walked once but summed per occurrence by each parent) and fail
+        # closed as a ``yaml.YAMLError`` the instant the running total crosses
+        # the budget. A self-referential anchor (``a: &a [*a]``) is a cycle in
+        # the node graph; the in-progress sentinel detects it and fails closed
+        # rather than recursing forever. The budget is orders of magnitude
+        # above any legitimate config, so real anchors/aliases still resolve.
+        weights: dict[int, int] = {}
+
+        def weight(node: Any) -> int:
+            nid = id(node)
+            cached = weights.get(nid)
+            if cached is not None:
+                if cached == self._EXPANSION_INPROGRESS:
+                    self._raise_expansion(node)
+                return cached
+            weights[nid] = self._EXPANSION_INPROGRESS
+            total = 1
+            if isinstance(node, yaml.nodes.MappingNode):
+                for key_node, value_node in node.value:
+                    total += weight(key_node) + weight(value_node)
+                    if total > self._MAX_EXPANSION_WEIGHT:
+                        self._raise_expansion(node)
+            elif isinstance(node, yaml.nodes.SequenceNode):
+                for child in node.value:
+                    total += weight(child)
+                    if total > self._MAX_EXPANSION_WEIGHT:
+                        self._raise_expansion(node)
+            weights[nid] = total
+            return total
+
+        weight(root)
+
+    def construct_document(self, node: Any) -> Any:
+        # Fail closed on an alias/anchor expansion bomb before the stock
+        # constructor materializes the shared-reference graph.
+        self._guard_expansion(node)
+        return super().construct_document(node)
 
     def _merge_budget_guard(self, node: Any) -> None:
         if (
