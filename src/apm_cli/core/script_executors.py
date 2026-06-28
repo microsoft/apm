@@ -175,6 +175,22 @@ def _redact_url_credentials(url: str) -> str:
         return url
 
 
+# Matches ``scheme://userinfo@`` embedded anywhere in free text so a
+# tokenized URL printed by a script (e.g. git progress echoing
+# ``https://ci-bot:ghp_xxx@github.com/...``) cannot persist its credential
+# to scripts.log in cleartext. The scheme prefix is required so a bare
+# ``user@host`` (e.g. an email address) is never over-redacted, and the
+# userinfo run stops at the first ``/`` so a ``?next=a@b`` query is ignored.
+_EMBEDDED_URL_CRED_PATTERN = re.compile(r"([a-zA-Z][a-zA-Z0-9+.\-]*://)[^/\s@]+@")
+
+
+def _redact_embedded_url_credentials(text: str) -> str:
+    """Mask ``user:pass@`` userinfo of any URL embedded in *text*."""
+    if not text or "@" not in text:
+        return text
+    return _EMBEDDED_URL_CRED_PATTERN.sub(lambda m: m.group(1) + "[REDACTED]@", text)
+
+
 # -- Script output log -----------------------------------------------------
 
 # Per-entry stdout/stderr is truncated to this many characters before being
@@ -233,6 +249,25 @@ def _neutralize_newlines(text: str) -> str:
     return _LINE_BREAK_PATTERN.sub(_escape, text)
 
 
+def _escape_header_field(text: str) -> str:
+    """Neutralize a ``key=value`` lookalike inside a header-line field.
+
+    The scripts.log header is a single space-delimited ``key=value`` line
+    (``[ts] event=... type=... target=<cmd> status=... exit_code=...``).
+    ``target`` is the effective command -- attacker-controlled for a
+    dependency-supplied entry -- and sits MID-LINE among the fixed fields.
+    Without neutralization a command like ``evil status=ok event=deploy``
+    smuggles forged ``status=``/``event=`` tokens onto the header line, so a
+    first-match ``status=(\\S+)`` regex, a whitespace-tokenized key=value
+    parser, or a logfmt consumer reads the attacker's value instead of the
+    real one. Escaping ``=`` to ``\\x3d`` means no ``<word>=`` lookalike can
+    appear in the field, while spaces (and thus benign multi-word commands
+    like ``echo hi``) stay readable. Newlines are handled separately by
+    :func:`_neutralize_newlines`.
+    """
+    return text.replace("=", "\\x3d")
+
+
 def _truncate_log_field(text: str) -> str:
     """Clamp a stdout/stderr field to a bounded length for the log.
 
@@ -277,16 +312,22 @@ def _append_to_script_log(
         _rotate_log_if_large(log_path)
 
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        safe_target = _neutralize_newlines(_redact_secrets(target))
+        safe_target = _escape_header_field(
+            _neutralize_newlines(_redact_embedded_url_credentials(_redact_secrets(target)))
+        )
         lines = [
             f"[{ts}] event={event_name} type={script_type} target={safe_target} status={status}"
         ]
         if exit_code is not None:
             lines[0] += f" exit_code={exit_code}"
         if stdout and stdout.strip():
-            lines.append(f"  stdout: {_truncate_log_field(_redact_secrets(stdout.strip()))}")
+            lines.append(
+                f"  stdout: {_truncate_log_field(_redact_embedded_url_credentials(_redact_secrets(stdout.strip())))}"
+            )
         if stderr and stderr.strip():
-            lines.append(f"  stderr: {_truncate_log_field(_redact_secrets(stderr.strip()))}")
+            lines.append(
+                f"  stderr: {_truncate_log_field(_redact_embedded_url_credentials(_redact_secrets(stderr.strip())))}"
+            )
         lines.append("")  # blank line separator
 
         flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
@@ -623,6 +664,50 @@ def _get_guarded_session():
 MAX_HTTP_DISPATCH_THREADS = 32
 
 
+def _connect_layer_host(url: str) -> str | None:
+    """Return the host ``requests``/``urllib3`` would actually dial.
+
+    The up-front SSRF guard validates ``urllib.parse.urlparse(url).hostname``,
+    but the request layer connects to ``urllib3.util.parse_url(url).host``.
+    The two parsers disagree on a hostile authority -- notably a backslash,
+    which ``urllib3`` treats as an authority terminator while ``urllib.parse``
+    folds it into the host -- so ``https://169.254.169.254\\.evil/`` can pass
+    the guard (host looks public/unresolvable) yet dial bare
+    ``169.254.169.254``. Returning urllib3's host lets the caller validate the
+    SAME value the socket layer uses and reject any mismatch. Returns ``None``
+    if urllib3 is unavailable or cannot parse the URL (the caller then falls
+    back to the urllib.parse host alone).
+    """
+    try:
+        from urllib3.util import parse_url
+
+        return parse_url(url).host
+    except Exception:
+        return None
+
+
+def _normalize_host(host: str | None) -> str:
+    """Lower-case and strip IPv6 brackets for a parser-agnostic comparison."""
+    if not host:
+        return ""
+    return host.strip("[]").lower()
+
+
+def _safe_urlparse(url: str):
+    """``urlparse`` that fails closed to ``None`` instead of raising.
+
+    ``urllib.parse.urlparse`` raises ``ValueError`` on a malformed authority
+    (e.g. ``https://[::1\\.evil/`` -> "Invalid IPv6 URL"). In the fire path
+    that would be an uncaught crash, so callers treat a parse failure as a
+    refused (skipped) script -- the same fail-closed posture ``validate`` took
+    for this URL class.
+    """
+    try:
+        return urlparse(url)
+    except ValueError:
+        return None
+
+
 def _prepare_http(
     script: ScriptEntry,
     event: LifecycleEvent,
@@ -642,7 +727,12 @@ def _prepare_http(
         _logger.debug("HTTP script has no URL, skipping")
         return None
 
-    parsed = urlparse(url)
+    parsed = _safe_urlparse(url)
+    if parsed is None:
+        if verbose and logger:
+            logger.verbose_detail("[i] HTTP script rejected: malformed URL")
+        _logger.debug("Rejecting malformed script URL: %s", url)
+        return None
     if parsed.scheme != "https":
         if verbose and logger:
             logger.verbose_detail(
@@ -655,6 +745,27 @@ def _prepare_http(
         _logger.debug("HTTP script URL has no hostname: %s", url)
         return None
 
+    # Validate the host the CONNECT layer (urllib3) will actually dial, not
+    # just urllib.parse's view: a backslash or other authority-confusing
+    # character makes them disagree, and the fallback request path would
+    # otherwise reach an internal literal the guard was tricked into allowing.
+    connect_host = _connect_layer_host(url)
+    if connect_host is not None and _normalize_host(connect_host) != _normalize_host(
+        parsed.hostname
+    ):
+        if verbose and logger:
+            logger.verbose_detail("[i] HTTP script rejected: ambiguous URL authority")
+        _logger.debug(
+            "Rejecting URL: guard/connect host mismatch (%r vs %r)",
+            parsed.hostname,
+            connect_host,
+        )
+        return None
+
+    # The mismatch gate above guarantees the connect-layer host equals the
+    # guard host once we reach here, so a single SSRF resolution on
+    # parsed.hostname covers both views -- resolving twice would needlessly
+    # widen the DNS-rebind window.
     reason = _ssrf_block_reason(parsed.hostname)
     if reason is not None:
         if verbose and logger:
@@ -893,12 +1004,20 @@ def _kill_process_group(proc: subprocess.Popen | None) -> None:
     also reaps backgrounded grandchildren that would otherwise orphan
     (the shell may have already exited while a grandchild lives on).
     Best-effort -- never raises into the install flow.
+
+    The group is signalled by ``proc.pid`` directly rather than via
+    ``os.getpgid(proc.pid)``: under ``start_new_session`` the child's
+    PGID equals its PID, and the group persists as long as ANY member
+    is alive. If the shell leader has already exited (a zombie) while a
+    ``&``-backgrounded grandchild lives on, ``os.getpgid`` would raise
+    ``ProcessLookupError`` and strand the live grandchild;
+    ``killpg(proc.pid, ...)`` reaps the whole group regardless.
     """
     if proc is None:
         return
     try:
         if hasattr(os, "killpg"):
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            os.killpg(proc.pid, signal.SIGKILL)
         else:
             proc.kill()
     except (ProcessLookupError, PermissionError, OSError):

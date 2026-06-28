@@ -344,6 +344,27 @@ def _load_file_data(path: Path, source: str) -> object:
     return _json.loads(path.read_text(encoding="utf-8"))
 
 
+def _safe_token(value: object) -> str:
+    """Render *value* for an error message without ever raising.
+
+    A YAML manifest can carry a non-string ``type`` value or event key
+    expressed as a hex/octal/sexagesimal integer literal -- those bases
+    bypass CPython's ``int_max_str_digits`` parse-time limit, so
+    ``yaml.safe_load`` materializes an arbitrarily large ``int``.
+    Interpolating that value with ``str()`` (which forces a *decimal*
+    conversion) then raises ``ValueError`` past 4300 digits and crashes
+    ``apm lifecycle validate``. Strings pass through; anything that cannot
+    be stringified cheaply degrades to its type name, so a hostile
+    manifest is reported as a structured error, never a traceback.
+    """
+    if isinstance(value, str):
+        return value
+    try:
+        return str(value)
+    except (ValueError, RecursionError):
+        return f"<{type(value).__name__}>"
+
+
 def _validate_script_file(path: Path, source: str) -> list[str]:
     """Validate a single script file. Returns a list of error messages."""
     import json as _json
@@ -406,7 +427,7 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
 
     for event_name, script_list in scripts_dict.items():
         if event_name not in LIFECYCLE_EVENTS:
-            errors.append(f"Unknown event: '{event_name}'")
+            errors.append(f"Unknown event: '{_safe_token(event_name)}'")
             continue
 
         if not isinstance(script_list, list):
@@ -424,7 +445,7 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
             if script_type is None:
                 script_type = "http" if entry.get("url") else "command"
             if script_type not in SCRIPT_TYPES:
-                errors.append(f"{prefix}: unknown type '{script_type}'")
+                errors.append(f"{prefix}: unknown type '{_safe_token(script_type)}'")
                 continue
 
             if script_type == "command":
