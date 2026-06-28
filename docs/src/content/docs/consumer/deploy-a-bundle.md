@@ -12,7 +12,7 @@ apm install ./path/to/bundle
 apm install ./dist/my-pkg-1.0.0.zip
 ```
 
-This is a sibling flow to [Install packages](../install-packages/). Instead
+This is a sibling flow to [Install packages](./install-packages/). Instead
 of declaring a dependency in `apm.yml` and resolving it from a registry, you
 deploy a self-contained bundle directly. `apm.yml` is **not modified** --
 the install is imperative, like `dpkg -i` next to `apt install`.
@@ -34,7 +34,7 @@ my-bundle/
 
 `plugin.json` requires only a `name`. APM also recognises `plugin.json`
 under `.github/plugin/`, `.claude-plugin/`, or `.cursor-plugin/`. For the
-full schema see [Package anatomy](../../concepts/package-anatomy/).
+full schema see [Package anatomy](../concepts/package-anatomy/).
 
 The optional `apm.lock.yaml` carries `pack.bundle_files` -- a SHA-256
 manifest written by `apm pack --format plugin`. When present, APM verifies
@@ -59,7 +59,7 @@ Steps APM runs:
 3. **Deploy.** Map `agents/`, `skills/`, `commands/`, `hooks/` into the
    harness layout for each `--target` you passed.
 4. **Record.** Write a lockfile entry under the project's `apm.lock.yaml`
-   so [drift detection](../drift-and-secure-by-default/) can audit the
+   so [drift detection](./drift-and-secure-by-default/) can audit the
    deployed files later.
 
 `apm.yml` is never touched. Re-running the same command re-deploys (use
@@ -85,7 +85,7 @@ Flags like `--update`, `--only`, `--dev`, `--mcp`, `--registry`, and
 does not run the resolver, MCP registry lookup, or policy chain that those
 flags configure. APM rejects them up front with one consolidated error.
 
-For the full flag list see the [`apm install` reference](../../reference/cli/install/).
+For the full flag list see the [`apm install` reference](../reference/cli/install/).
 
 ## Targets
 
@@ -120,12 +120,12 @@ Two ways forward:
 
 A plain directory without `plugin.json` is not treated as a bundle at all.
 APM falls through to the dependency resolver and treats the path as a
-local-path dependency -- a different flow covered in [Install packages](../install-packages/).
+local-path dependency -- a different flow covered in [Install packages](./install-packages/).
 
 ## What to read next
 
-- [Install packages](../install-packages/) -- the manifest-driven flow.
-- [Drift and secure by default](../drift-and-secure-by-default/) -- audit
+- [Install packages](./install-packages/) -- the manifest-driven flow.
+- [Drift and secure by default](./drift-and-secure-by-default/) -- audit
   what a bundle deployed.
-- [Package anatomy](../../concepts/package-anatomy/) -- the file layout
+- [Package anatomy](../concepts/package-anatomy/) -- the file layout
   reference.

@@ -174,14 +174,15 @@ phone home; the harness is yours.
 
 ## Reporting formats
 
-`apm audit --ci` and `apm audit` both accept `--format` and `--output`.
+`apm audit --ci` accepts `--format text|json|sarif` and `--output`;
+non-CI `apm audit` also accepts `markdown`.
 
 | Format | Use |
 |---|---|
 | `text` (default) | Terminal review, pull-request logs |
 | `json` | Custom dashboards, ticketing integrations |
 | `sarif` | GitHub code scanning, Defender for Cloud, any SARIF-aware viewer |
-| `markdown` | Pull-request comments, weekly status digests |
+| `markdown` | Pull-request comments, weekly status digests (non-CI `apm audit` only) |
 
 `--format json|sarif|markdown` cannot be combined with `--strip` or
 `--dry-run`; those modes are interactive by design.

@@ -156,9 +156,9 @@ for...
 | `handoffs` | optional | List of agent names (or VS Code structured handoff objects) this agent can hand off to |
 
 `model` and `tools` reach Copilot, Claude, Cursor, and OpenCode
-verbatim. Codex receives a TOML translation. Windsurf and Gemini do
-not receive `.agent.md` files at all -- Cascade auto-invokes any
-`SKILL.md` by its description, and Gemini CLI has no agents primitive.
+verbatim. Codex receives a TOML translation. Windsurf, Kiro, and
+Gemini do not receive `.agent.md` files at all -- use skills for
+Windsurf or Kiro personas; Gemini CLI has no agents primitive.
 
 OpenCode is the strictest of the verbatim targets: it requires
 `tools` as a `tool-name: boolean` **mapping** (not a list, not a

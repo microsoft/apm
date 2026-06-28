@@ -113,8 +113,8 @@ prints an actionable warning; on the **consuming** path (install/export of
 other people's deps) APM stays silent -- it never nags about transitive
 licenses it cannot fix. Source: `src/apm_cli/export/authoring.py`.
 
-See [`apm lock export`](../../reference/cli/lock/#export-sbom-inventory) and
-the [`license` manifest field](../../reference/manifest-schema/#35-license)
+See [`apm lock export`](../reference/cli/lock/#export-sbom-inventory) and
+the [`license` manifest field](../reference/manifest-schema/#35-license)
 for the per-command reference.
 
 ## Secret handling

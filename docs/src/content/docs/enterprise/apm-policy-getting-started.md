@@ -65,8 +65,8 @@ are ready to enforce, flip `enforcement: block`. See
 
 ## 3. The schema in one screen
 
-Every top-level key, and what it does. Field names come straight from
-the schema -- do not invent others.
+Every current non-deprecated top-level key, and what it does. Field
+names come straight from the schema -- do not invent others.
 
 ```yaml
 name: ""                  # display name
@@ -95,7 +95,7 @@ mcp:
 
 compilation:
   target:
-    allow: null           # vscode | claude | all
+    allow: null           # claude | copilot | cursor | opencode | codex | gemini | windsurf | kiro | agent-skills
     enforce: null
   strategy:
     enforce: null         # distributed | single-file
@@ -113,6 +113,10 @@ unmanaged_files:
 registry_source:
   require: []             # registry names every dep must use
   allow_non_registry: true
+security:
+  audit: {}               # on_install, fail_on_drift, external scanners
+  integrity: {}           # require_hashes
+executables: {}           # deny_all, deny, require, recommend, enforce (accepted; degrades to recommend)
 ```
 
 Allow-list semantics: `null` means "no opinion", an empty list means

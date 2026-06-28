@@ -24,7 +24,7 @@ The 30-second picture:
         v                                             v
    apm install                                  apm audit --ci
    (install gate                                (8 baselines +
-    + transitive                                 19 policy checks
+    + transitive                                 20 policy checks
     MCP preflight)                               in CI)
         |                                             |
         v                                             v
@@ -38,7 +38,7 @@ Four surfaces, four owners.
 
 - **`apm-policy.yml`** -- the schema. Allow/deny lists for dependencies and MCP servers, MCP transport restrictions, compilation-target rules, registry-source requirements, manifest shape constraints, unmanaged-files action. Authored by the platform or security team in `<org>/.github/`. Schema: `src/apm_cli/policy/schema.py`.
 - **Install-time enforcement** -- the gate. Three code paths share one outcome table: the install pipeline gate (`install/phases/policy_gate.py`, delegating to `policy/install_preflight.py`), the `--mcp <ref>` direct-install preflight, and the transitive-MCP second pass that runs after APM packages resolve their own MCP dependencies. Source: `src/apm_cli/policy/install_preflight.py`.
-- **CI enforcement** -- `apm audit --ci`. Eight baseline lockfile checks always; nineteen policy checks when a policy is discovered or supplied. It also enforces audit-only fields such as `compilation.strategy.enforce`, `manifest.required_fields`, `manifest.scripts`, and `unmanaged_files.action`. Source: `src/apm_cli/policy/ci_checks.py`.
+- **CI enforcement** -- `apm audit --ci`. Eight baseline lockfile checks always; twenty policy checks when a policy is discovered or supplied. It also enforces audit-only fields such as `compilation.strategy.enforce`, `manifest.required_fields`, `manifest.scripts`, and `unmanaged_files.action`. Source: `src/apm_cli/policy/ci_checks.py`.
 - **Built-in security gate** -- runs on every install regardless of policy. `SecurityGate` (`src/apm_cli/security/gate.py`) scans all primitive files for hidden Unicode and other content findings using `BLOCK_POLICY` before any file is written to a harness directory. Zero configuration. This sits underneath the policy engine: it cannot be turned off by `apm-policy.yml`.
 
 A registry proxy (Artifactory or compatible) is the optional fifth surface for organizations that need all dependency traffic to flow through a single egress. See [Registry proxy](./registry-proxy/).
@@ -51,7 +51,7 @@ A registry proxy (Artifactory or compatible) is the optional fifth surface for o
 | Install pipeline gate          | Every install, after resolve, before targets | `dependencies.*`, `mcp.*` (direct), compilation-target after targets phase | `[x]` `enforcement: block` -> exit 1; `[!]` `warn` -> continue with summary |
 | `--mcp <ref>` preflight        | `apm install --mcp owner/repo` only       | Same `mcp.*` rules as the gate, separate code path              | `[x]` Exit 1 before any MCP config is written |
 | Transitive MCP preflight       | After APM packages resolve their MCPs     | `mcp.*` against transitive MCP servers                          | `[x]` Exit 1; APM packages stay, MCP configs not written |
-| `apm audit --ci [--policy ...]`| In CI, on every PR                        | 8 lockfile baselines + 19 policy checks (incl. audit-only fields) | Exit 1; PR check fails                  |
+| `apm audit --ci [--policy ...]`| In CI, on every PR                        | 8 lockfile baselines + 20 policy checks (incl. audit-only fields) | Exit 1; PR check fails                  |
 | Registry proxy (optional)      | Every install download                    | All dependency traffic flows through the proxy; lockfile guard catches bypass | Bypass attempt -> `content_hash` mismatch on next install |
 
 `apm compile`, `apm run`, and `apm pack` enforce zero policy. They trust what install placed on disk. APM is an install-time and CI gate, not a runtime sandbox. If you need runtime tool restriction, govern it through `mcp.*` and `dependencies.*` so the disallowed tooling never reaches the harness.

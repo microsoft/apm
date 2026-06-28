@@ -30,6 +30,7 @@ It declares:
 - Manifest rules (required `apm.yml` fields and explicit `includes:` requirements).
 - Behaviour for unmanaged files in governed directories.
 - Registry-source rules for requiring named registries and blocking non-registry sources.
+- Install-time audit/integrity rules under `security.*`, plus executable-trust controls under `executables.*`.
 
 It does **not** scan code semantics or behave like an antivirus. It enforces declarations against an allow/deny list before APM writes any file.
 
@@ -108,7 +109,7 @@ Policy is evaluated at two points. Both use the same policy file and the same me
 
 `apm install` resolves the dependency tree, then runs the policy gate against the resolved set, then writes any files. A blocking violation halts the install with a non-zero exit code; nothing is written to disk. This protects developers who run `apm install` locally — they cannot accidentally deploy a denied package even without CI.
 
-> **Bypass note:** `apm install --no-policy` and the `APM_POLICY_DISABLE=1` environment variable skip this gate locally. The env var also skips all 19 policy checks when `apm audit --ci` runs in the same shell; the 8 baseline lockfile checks still run. See the [Governance Guide bypass contract](./governance-guide/#7-the-bypass--non-bypass-contract) for the full surface.
+> **Bypass note:** `apm install --no-policy` and the `APM_POLICY_DISABLE=1` environment variable skip this gate locally. The env var also skips all 20 policy checks when `apm audit --ci` runs in the same shell; the 8 baseline lockfile checks still run. See the [Governance Guide bypass contract](./governance-guide/#7-the-bypass--non-bypass-contract) for the full surface.
 
 ### CI time (audit gate)
 

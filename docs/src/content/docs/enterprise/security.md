@@ -70,7 +70,7 @@ The experimental `registries` feature adds REST-based package sources. When enab
 **Known limitations:**
 
 - **No package signing.** The `resolved_hash` detects corruption and post-download tampering but does not verify publisher identity. Package signing is a planned hardening item.
-- **No SBOM or provenance attestations.** The lockfile records resolved version and hash, which is suitable for internal audit, but is not a standards-format SBOM (SPDX/CycloneDX) and does not include SLSA provenance.
+- **SBOM inventory, not provenance attestations.** `apm lock export` can emit CycloneDX or SPDX from the lockfile, but this is not signed and does not include SLSA provenance.
 - **SHA-256 floor only.** The hash algorithm is fixed at SHA-256 with no upgrade path to SHA-384/512.
 
 APM provides **dependency governance**: controlled sources, locked versions, and byte-level verification of downloaded content. It does not sign packages or emit SLSA-compliant provenance. Treat installed packages with the same diligence you apply to any external dependency, and describe the guarantees as **APM dependency governance** in compliance documentation rather than as supply-chain signing or attestation.

@@ -48,7 +48,8 @@ your platform team can set, and what each one does to your install:
 - **`mcp.trust_transitive`** -- whether MCP servers shipped by deep
   dependencies are trusted automatically.
 - **`compilation.target.allow`** -- which harness targets your repo can
-  compile to (`vscode`, `claude`, `all`).
+  compile to (`claude`, `copilot`, `cursor`, `opencode`, `codex`,
+  `gemini`, `windsurf`, `kiro`, `agent-skills`).
 - **`compilation.strategy.enforce`** -- `distributed` or `single-file`.
 - **`manifest.required_fields`** / **`manifest.scripts`** /
   **`manifest.require_explicit_includes`** -- shape constraints on
@@ -146,6 +147,6 @@ Two escape hatches exist:
 Neither hides anything from `apm audit --ci` running in CI. They only
 relax local enforcement.
 
-If you are the one writing the policy, see [Governance overview](../../enterprise/governance-overview/)
+If you are the one writing the policy, see [Governance overview](../enterprise/governance-overview/)
 for the platform-team view -- this page is the consumer's view of a policy
 that is already in place.
