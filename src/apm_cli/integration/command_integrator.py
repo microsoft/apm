@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import frontmatter
+import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.security.gate import BLOCK_POLICY, SecurityGate
@@ -22,6 +23,7 @@ from apm_cli.utils.path_security import (
     validate_path_segments,
 )
 from apm_cli.utils.paths import portable_relpath
+from apm_cli.utils.yaml_io import load_frontmatter
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
@@ -202,7 +204,7 @@ class CommandIntegrator(BaseIntegrator):
         """
         warnings: list[str] = []
 
-        post = frontmatter.load(source)
+        post = load_frontmatter(source)
 
         # Extract command name from filename
         filename = source.name
@@ -523,7 +525,7 @@ class CommandIntegrator(BaseIntegrator):
             try:
                 from apm_cli.integration.prompt_integrator import _is_workflow_shape
 
-                _meta = frontmatter.load(str(prompt_file)).metadata
+                _meta = load_frontmatter(str(prompt_file)).metadata
             except Exception:
                 _meta = {}
             if _is_workflow_shape(_meta):
@@ -580,7 +582,19 @@ class CommandIntegrator(BaseIntegrator):
                 continue
 
             if mapping.format_id == "gemini_command":
-                self._write_gemini_command(prompt_file, target_path)
+                try:
+                    self._write_gemini_command(prompt_file, target_path)
+                except yaml.YAMLError as exc:
+                    if diagnostics is not None:
+                        diagnostics.warn(
+                            message=(
+                                f"Skipped command {prompt_file.name}: malformed or "
+                                f"over-budget YAML frontmatter ({exc})."
+                            ),
+                            package=getattr(getattr(package_info, "package", None), "name", ""),
+                        )
+                    files_skipped += 1
+                    continue
                 links_resolved = 0
                 written = True
                 had_dropped = False
@@ -590,14 +604,33 @@ class CommandIntegrator(BaseIntegrator):
                 # target-agnostic (no Claude branding for Cursor
                 # installs).  See the cursor-command-format TODO on
                 # KNOWN_TARGETS["cursor"]["commands"] in targets.py.
-                links_resolved, written, had_dropped = self.integrate_command(
-                    prompt_file,
-                    target_path,
-                    package_info,
-                    prompt_file,
-                    diagnostics=diagnostics,
-                    target_name=target.name,
-                )
+                try:
+                    links_resolved, written, had_dropped = self.integrate_command(
+                        prompt_file,
+                        target_path,
+                        package_info,
+                        prompt_file,
+                        diagnostics=diagnostics,
+                        target_name=target.name,
+                    )
+                except yaml.YAMLError as exc:
+                    # A malformed / over-budget frontmatter block must fail
+                    # CLOSED with a per-file diagnostic, never abort the whole
+                    # run.  ``apm install`` already degrades this way via the
+                    # per-package wrapper in install/template.py; the audit
+                    # drift-replay loop (install/drift.py::run_replay) has no
+                    # such catcher, so an unwrapped raise here would crash the
+                    # entire audit with a traceback.
+                    if diagnostics is not None:
+                        diagnostics.warn(
+                            message=(
+                                f"Skipped command {prompt_file.name}: malformed or "
+                                f"over-budget YAML frontmatter ({exc})."
+                            ),
+                            package=getattr(getattr(package_info, "package", None), "name", ""),
+                        )
+                    files_skipped += 1
+                    continue
             if not written:
                 # Critical post-transform finding -- defense-in-depth
                 # skip already surfaced via diagnostics.security().
@@ -681,7 +714,7 @@ class CommandIntegrator(BaseIntegrator):
         """
         import toml as _toml
 
-        post = frontmatter.load(source)
+        post = load_frontmatter(source)
 
         description = post.metadata.get("description", "")
         prompt_text = post.content.strip()

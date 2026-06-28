@@ -150,18 +150,28 @@ _MIN_REDACT_LEN = 8
 # the path-guarded ``_CONN_STR_PWD_PATTERN`` below (the ODBC ``PWD=`` keyword),
 # so the shell ``$PWD`` working-directory echo is preserved while a real DSN
 # secret is still masked.
-_CONN_STR_PASSWORD_PATTERN = re.compile(r"(?i)\b(password|passwd)(\s*=\s*)([^\s;]+)")
+_CONN_STR_PASSWORD_PATTERN = re.compile(r"(?i)\b(password|passwd)(\s*=\s*)(\{[^}]*\}|[^\s;]+)")
 
 # The canonical Microsoft ODBC / SQL Server password keyword is ``PWD=`` (e.g.
 # ``Driver={ODBC Driver 18};Server=db;UID=sa;PWD=secret;``). We mask ``PWD=<value>``
-# too, but ONLY when the value is not a filesystem path: the shell ``$PWD`` is
-# routinely echoed as ``PWD=/home/user`` (or ``PWD=.``, ``PWD=~/x``, ``PWD=C:\Users``),
-# and masking that would corrupt the benign working-directory path. A connection-
-# string password is not a path, so the path-prefix guard keeps the two apart.
+# too, but the shell ``$PWD`` is routinely echoed as ``PWD=/home/user`` (or
+# ``PWD=.``, ``PWD=~/x``, ``PWD=C:\Users``), and masking that would corrupt the
+# benign working-directory path. So the value is preserved ONLY for the
+# standalone ``$PWD`` echo form: a ``PWD=`` that is preceded by a ``;`` DSN
+# delimiter (``UID=sa;PWD=...``) is ALWAYS a connection-string credential and is
+# masked even when its value starts with ``/``, ``.`` or ``~`` -- otherwise an
+# attacker (or a real ODBC password that legitimately starts with ``/``) could
+# prefix a path char to dodge the guard. The value class also consumes an ODBC
+# brace-escaped value (``PWD={p;w@d}``) through the closing ``}`` so an embedded
+# ``;`` cannot leak the password tail.
 # (``\bpwd`` cannot match inside ``OLDPWD`` -- the ``D`` before ``PWD`` is a word
 # char, so there is no word boundary -- leaving ``OLDPWD=/x`` untouched as well.)
-_CONN_STR_PWD_PATTERN = re.compile(r"(?i)\b(pwd)(\s*=\s*)([^\s;]+)")
+_CONN_STR_PWD_PATTERN = re.compile(r"(?i)\b(pwd)(\s*=\s*)(\{[^}]*\}|[^\s;]+)")
 _PWD_PATH_VALUE = re.compile(r"^(?:[/~.]|[A-Za-z]:[\\/])")
+# A ``;`` (optionally trailing whitespace) immediately before ``PWD=`` marks an
+# ODBC connection-string delimiter, distinguishing ``UID=sa;PWD=/secret`` (a DSN
+# credential, masked) from a standalone ``PWD=/home/user`` shell echo (preserved).
+_PWD_DSN_DELIMITER = re.compile(r";\s*$")
 
 
 def _redact_connection_string_password(text: str) -> str:
@@ -171,6 +181,12 @@ def _redact_connection_string_password(text: str) -> str:
     masked = _CONN_STR_PASSWORD_PATTERN.sub(lambda m: m.group(1) + m.group(2) + "[REDACTED]", text)
 
     def _mask_pwd(match: re.Match[str]) -> str:
+        # A ';' delimiter before PWD= marks an ODBC DSN credential -- mask it
+        # unconditionally (an attacker, or a real password, may start the value
+        # with '/' to dodge the path guard). Only a standalone PWD= echo with a
+        # filesystem-path value is the benign shell $PWD and is preserved.
+        if _PWD_DSN_DELIMITER.search(match.string[: match.start()]):
+            return match.group(1) + match.group(2) + "[REDACTED]"
         if _PWD_PATH_VALUE.match(match.group(3)):
             return match.group(0)  # filesystem path -- the $PWD echo, leave intact
         return match.group(1) + match.group(2) + "[REDACTED]"
@@ -220,6 +236,52 @@ def _is_denylisted(name: str, allowed: frozenset[str]) -> bool:
     return _matches_credential(name)
 
 
+# Incoming-webhook URLs (Slack, Discord, Teams, generic O365) carry a
+# bearer-grade secret in the URL PATH -- no userinfo, no query -- so neither the
+# URL-userinfo masker nor the DSN masker sees it, and the env-var NAME
+# (``SLACK_WEBHOOK``, ``*_WEBHOOK_URL``) ends in a benign token the suffix
+# denylist does not list. Adding ``WEBHOOK`` to the denylist would strip the URL
+# from the post-install child env too (a functional regression for a script that
+# legitimately posts to the hook), so we mask the SECRET PATH SEGMENT
+# structurally in log output instead, keyed on the known webhook hosts. The host
+# and a short routing prefix stay readable; the token tail is redacted.
+_WEBHOOK_URL_PATTERN = re.compile(
+    r"(?i)(https://"
+    r"(?:hooks\.slack\.com/services"
+    r"|(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks"
+    r"|[a-z0-9.\-]+\.webhook\.office\.com/webhookb2"
+    r"|outlook\.office\.com/webhook)"
+    r"/)[^\s\"'<>]+"
+)
+
+
+def _redact_webhook_urls(text: str) -> str:
+    """Mask the secret path/token of known incoming-webhook URLs in *text*."""
+    if not text:
+        return text
+    return _WEBHOOK_URL_PATTERN.sub(lambda m: m.group(1) + "[REDACTED]", text)
+
+
+# A private-key blob (an env var whose value is a PEM, an inline key a script
+# echoes) is a multi-line secret with no ``=`` key and no URL, so neither the DSN
+# nor the URL masker sees it; a name like ``SSH_PRIVATE_KEY_PEM`` also ends in a
+# benign token the suffix-anchored denylist misses. Redact the key MATERIAL
+# between the PEM armor markers structurally, independent of the env-var name, so
+# it cannot persist in cleartext in scripts.log. The BEGIN/END armor lines stay
+# (they carry no secret) so the log still records that a key was present.
+_PEM_PRIVATE_KEY_PATTERN = re.compile(
+    r"(-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----)(.*?)(-----END [A-Z0-9 ]*PRIVATE KEY-----)",
+    re.DOTALL,
+)
+
+
+def _redact_pem_private_keys(text: str) -> str:
+    """Mask the key material inside any PEM PRIVATE KEY armor in *text*."""
+    if not text or "PRIVATE KEY" not in text:
+        return text
+    return _PEM_PRIVATE_KEY_PATTERN.sub(lambda m: m.group(1) + "[REDACTED]" + m.group(3), text)
+
+
 def _redact_secrets(text: str) -> str:
     """Mask any denylisted env-var *values* appearing in script output.
 
@@ -260,7 +322,9 @@ def _redact_secrets(text: str) -> str:
     redacted = text
     for value in sorted(set(secrets), key=len, reverse=True):
         redacted = redacted.replace(value, "[REDACTED]")
-    return _redact_connection_string_password(redacted)
+    return _redact_pem_private_keys(
+        _redact_webhook_urls(_redact_connection_string_password(redacted))
+    )
 
 
 def _redact_url_credentials(url: str) -> str:

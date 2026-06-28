@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-import frontmatter
+from apm_cli.utils.yaml_io import load_frontmatter
 
 from .models import Chatmode, Context, Instruction, Primitive, Skill
 
@@ -27,7 +27,7 @@ def parse_skill_file(file_path: str | Path, source: str = None) -> Skill:  # noq
 
     try:
         with open(file_path, encoding="utf-8") as f:
-            post = frontmatter.load(f)
+            post = load_frontmatter(f)
 
         metadata = post.metadata
         content = post.content
@@ -67,7 +67,7 @@ def parse_primitive_file(file_path: str | Path, source: str = None) -> Primitive
 
     try:
         with open(file_path, encoding="utf-8") as f:
-            post = frontmatter.load(f)
+            post = load_frontmatter(f)
 
         # Extract name based on file structure
         name = _extract_primitive_name(file_path)

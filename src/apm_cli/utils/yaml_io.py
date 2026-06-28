@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from frontmatter.default_handlers import YAMLHandler as _FrontmatterYAMLHandler
 
 # Shared defaults matching existing codebase convention.
 _DUMP_DEFAULTS: dict[str, Any] = dict(
@@ -227,6 +228,49 @@ def load_yaml_str(text: str) -> dict[str, Any] | None:
     on malformed or over-budget input.
     """
     return yaml.load(text, Loader=_BoundedSafeLoader)  # noqa: S506 - SafeLoader subclass
+
+
+class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
+    """python-frontmatter YAML handler bound to ``_BoundedSafeLoader``.
+
+    The stock ``YAMLHandler.load`` defaults to ``yaml.SafeLoader``, which has
+    no merge / alias / expansion budget. Every ``frontmatter.load`` call in
+    apm_cli (the primitive parsers, the install + audit-replay integrators,
+    skill validation, the packer) reads an UNTRUSTED installed package's
+    ``.md`` frontmatter, so a sub-kilobyte merge-key or pure-alias
+    billion-laughs bomb in that frontmatter wedges the parser in an
+    uncatchable ``O(2^N)`` construction loop -- a CPU DoS the integrators'
+    ``except`` clauses cannot preempt because the loop holds the GIL and never
+    yields. ``load_yaml`` / ``load_yaml_str`` already route their callers
+    through ``_BoundedSafeLoader``; this handler closes the SAME class for the
+    ``python-frontmatter`` entrypoint so the bomb fails closed as a
+    ``yaml.YAMLError`` within the fixed budget instead of hanging
+    ``apm install`` / ``apm audit``.
+    """
+
+    def load(self, fm: str, **kwargs: Any) -> Any:
+        kwargs["Loader"] = _BoundedSafeLoader
+        return yaml.load(fm, **kwargs)  # noqa: S506 - SafeLoader subclass
+
+
+_BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
+
+
+def load_frontmatter(fd: Any, encoding: str = "utf-8") -> Any:
+    """Parse Markdown front matter with the bounded YAML loader.
+
+    Drop-in for ``frontmatter.load(fd)``: accepts a path string or an open
+    file object and splits the ``---``-fenced YAML front matter, but parses
+    that block with ``_BoundedSafeLoader`` (see ``_BoundedYAMLHandler``) so an
+    untrusted installed package's hostile ``.md`` front matter cannot hang the
+    parser via an eager ``<<`` merge or a pure-alias expansion bomb. Returns
+    the same ``frontmatter.Post`` (``.metadata`` / ``.content``) as the stock
+    call; raises ``yaml.YAMLError`` on malformed or over-budget front matter,
+    which every existing caller already treats as fail-closed.
+    """
+    import frontmatter
+
+    return frontmatter.load(fd, encoding=encoding, handler=_BOUNDED_FRONTMATTER_HANDLER)
 
 
 def dump_yaml(
