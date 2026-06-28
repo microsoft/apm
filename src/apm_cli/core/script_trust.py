@@ -54,10 +54,20 @@ def script_file_fingerprint(path: Path) -> str | None:
         _logger.debug("Cannot fingerprint apm.yml lifecycle %s: %s", path, e)
         return None
 
-    lifecycle = (data or {}).get("lifecycle")
+    if not isinstance(data, dict):
+        return None
+    return fingerprint_lifecycle_subtree(data.get("lifecycle"))
+
+
+def fingerprint_lifecycle_subtree(lifecycle: object) -> str | None:
+    """Return the SHA-256 of a canonicalised lifecycle: subtree.
+
+    Single source of truth for the trust fingerprint so the bytes that
+    are EXECUTED can be fingerprinted directly (no independent re-read).
+    Returns None for a falsy/empty subtree.
+    """
     if not lifecycle:
         return None
-
     canonical = json.dumps(lifecycle, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -93,7 +103,16 @@ def is_project_scripts_trusted(script_file: Path) -> bool:
     so any edit to lifecycle: revokes trust until re-approved.
     Editing other keys (e.g. dependencies:) does not affect trust.
     """
-    fingerprint = script_file_fingerprint(script_file)
+    return is_fingerprint_trusted(script_file, script_file_fingerprint(script_file))
+
+
+def is_fingerprint_trusted(script_file: Path, fingerprint: str | None) -> bool:
+    """Return True when *fingerprint* matches the trusted record for script_file.
+
+    Lets a caller fingerprint the EXACT content it has already parsed and
+    will execute, instead of forcing an independent re-read of the file
+    (which opens a TOCTOU window between the executed and trusted bytes).
+    """
     if fingerprint is None:
         return False
     trusted = _load_trust_store().get(str(script_file.resolve()))

@@ -280,15 +280,35 @@ def parse_apm_yml_lifecycle(path: Path, source: str) -> list[ScriptEntry]:
     (~/.apm/apm.yml) tiers.  Returns an empty list if the file is
     missing, malformed, or has no lifecycle: key.
     """
+    return parse_apm_yml_lifecycle_with_fingerprint(path, source)[0]
+
+
+def parse_apm_yml_lifecycle_with_fingerprint(
+    path: Path, source: str
+) -> tuple[list[ScriptEntry], str | None]:
+    """Parse the lifecycle: subtree AND fingerprint it from a single read.
+
+    Returning both from one ``load_yaml`` call lets the trust gate
+    fingerprint the EXACT content that will execute -- closing the
+    TOCTOU window that exists when discovery and the trust check read
+    the file independently. A non-dict top-level degrades to empty
+    (no crash on a malformed/hostile manifest).
+    """
+    from apm_cli.core.script_trust import fingerprint_lifecycle_subtree
     from apm_cli.utils.yaml_io import load_yaml
 
     try:
         data = load_yaml(path)
     except Exception as e:
         _logger.debug("Failed to load apm.yml lifecycle from %s: %s", path, e)
-        return []
+        return [], None
 
-    return _entries_from_lifecycle_map((data or {}).get("lifecycle"), path, source)
+    if not isinstance(data, dict):
+        return [], None
+
+    lifecycle = data.get("lifecycle")
+    entries = _entries_from_lifecycle_map(lifecycle, path, source)
+    return entries, fingerprint_lifecycle_subtree(lifecycle)
 
 
 def parse_script_file(path: Path, source: str = "project") -> list[ScriptEntry]:
@@ -365,16 +385,27 @@ def discover_scripts(
       2. User    -- ~/.apm/apm.yml (or $APM_HOME/apm.yml) lifecycle: key
       3. Project -- apm.yml lifecycle: key (repo root)
     """
+    scripts = _discover_non_project_scripts(project_root)
+    project_yml = _get_project_apm_yml(project_root)
+    if project_yml.is_file():
+        scripts.extend(parse_apm_yml_lifecycle(project_yml, "project"))
+    return scripts
+
+
+def _discover_non_project_scripts(
+    project_root: str | None = None,
+) -> list[ScriptEntry]:
+    """Discover policy + user scripts (everything except the project tier).
+
+    Kept separate so the firing path can read the project tier ONCE (for
+    both execution and the trust fingerprint) without re-reading it here.
+    """
     scripts: list[ScriptEntry] = []
     scripts.extend(_load_scripts_from_dir(_get_policy_scripts_dir(), source="policy"))
 
     user_yml = _get_user_apm_yml()
     if user_yml.is_file():
         scripts.extend(parse_apm_yml_lifecycle(user_yml, "user"))
-
-    project_yml = _get_project_apm_yml(project_root)
-    if project_yml.is_file():
-        scripts.extend(parse_apm_yml_lifecycle(project_yml, "project"))
 
     return scripts
 
@@ -518,9 +549,21 @@ def build_runner_from_context(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )
 
-    from apm_cli.core.script_trust import is_project_scripts_trusted
+    from apm_cli.core.script_trust import is_fingerprint_trusted
 
-    scripts = discover_scripts(project_root=project_root)
+    # Single read of the project tier: the entries that EXECUTE and the
+    # fingerprint that GATES them come from one parse, so a swap between
+    # an independent discovery read and trust read cannot run malicious
+    # scripts under a stale "trusted" verdict (TOCTOU).
+    scripts = _discover_non_project_scripts(project_root)
+    project_yml = _get_project_apm_yml(project_root)
+    project_entries: list[ScriptEntry] = []
+    project_fp: str | None = None
+    if project_yml.is_file():
+        project_entries, project_fp = parse_apm_yml_lifecycle_with_fingerprint(
+            project_yml, "project"
+        )
+    scripts.extend(project_entries)
 
     if not scripts:
         return LifecycleScriptRunner(
@@ -547,8 +590,7 @@ def build_runner_from_context(
             scripts=[], logger=logger, verbose=verbose, project_root=project_root
         )
 
-    project_yml = _get_project_apm_yml(project_root)
-    project_trusted = project_yml.is_file() and is_project_scripts_trusted(project_yml)
+    project_trusted = is_fingerprint_trusted(project_yml, project_fp)
 
     kept: list[ScriptEntry] = []
     skipped = 0

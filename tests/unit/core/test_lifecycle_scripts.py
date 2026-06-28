@@ -273,7 +273,7 @@ class TestBuildRunnerFromContext:
             {"lifecycle": {"post-install": [{"type": "command", "bash": "echo from-project"}]}},
         )
         with (
-            patch("apm_cli.core.script_trust.is_project_scripts_trusted", return_value=False),
+            patch("apm_cli.core.script_trust.is_fingerprint_trusted", return_value=False),
             patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=None),
         ):
             runner = build_runner_from_context(project_root=str(tmp_path))
@@ -287,7 +287,7 @@ class TestBuildRunnerFromContext:
             {"lifecycle": {"post-install": [{"type": "command", "bash": "echo trusted"}]}},
         )
         with (
-            patch("apm_cli.core.script_trust.is_project_scripts_trusted", return_value=True),
+            patch("apm_cli.core.script_trust.is_fingerprint_trusted", return_value=True),
             patch("apm_cli.policy.discovery.discover_policy_with_chain", return_value=None),
         ):
             runner = build_runner_from_context(project_root=str(tmp_path))
