@@ -40,6 +40,16 @@ _logger = logging.getLogger(__name__)
 
 TRUST_FILE_VERSION = 1
 
+# Upper bound on the number of nodes the lifecycle: subtree may expand to
+# when serialised as a tree (the way json.dumps walks it -- shared YAML
+# aliases are re-serialised once per reference, NOT deduplicated). A
+# legitimate lifecycle block is a few dozen nodes; a billion-laughs alias
+# bomb (``&a [*a,*a,...]`` nested) explodes past this within microseconds.
+# Exceeding the budget means the manifest cannot be safely canonicalised,
+# so it is treated as untrusted (fail-closed) rather than allowed to OOM
+# the process inside json.dumps.
+_MAX_FINGERPRINT_NODES = 100_000
+
 # Serialises the load -> modify -> write window of the trust store for
 # threads in this process; the file lock below covers other processes.
 _TRUST_STORE_THREAD_LOCK = threading.Lock()
@@ -71,16 +81,57 @@ def script_file_fingerprint(path: Path) -> str | None:
     return fingerprint_lifecycle_subtree(data.get("lifecycle"))
 
 
+def _within_node_budget(obj: object, budget: int) -> bool:
+    """True if *obj* expands to at most *budget* nodes as a TREE.
+
+    Walks the structure the way ``json.dumps`` serialises it -- every
+    container edge is followed even when a child is a shared reference
+    (a YAML alias), so an alias bomb is counted at its true expanded
+    size rather than its compact in-memory DAG size. The walk pops one
+    node per iteration and bails the instant the budget is exceeded, so
+    both the work done and the explicit stack stay bounded; it never
+    materialises the expansion.
+    """
+    stack: list[object] = [obj]
+    count = 0
+    while stack:
+        node = stack.pop()
+        count += 1
+        if count > budget:
+            return False
+        if isinstance(node, dict):
+            stack.extend(node.values())
+        elif isinstance(node, (list, tuple)):
+            stack.extend(node)
+    return True
+
+
 def fingerprint_lifecycle_subtree(lifecycle: object) -> str | None:
     """Return the SHA-256 of a canonicalised lifecycle: subtree.
 
     Single source of truth for the trust fingerprint so the bytes that
     are EXECUTED can be fingerprinted directly (no independent re-read).
-    Returns None for a falsy/empty subtree.
+    Returns None for a falsy/empty subtree, for a subtree that cannot
+    be canonicalised (e.g. a YAML scalar that safe_load decoded into a
+    non-JSON-serializable Python object such as datetime.date or set),
+    or for a subtree whose tree-expansion exceeds the node budget (a
+    YAML alias bomb) -- an un-fingerprintable manifest is treated as
+    untrusted (fail-closed).
     """
     if not lifecycle:
         return None
-    canonical = json.dumps(lifecycle, sort_keys=True, separators=(",", ":"))
+    if not _within_node_budget(lifecycle, _MAX_FINGERPRINT_NODES):
+        _logger.debug(
+            "lifecycle subtree exceeds the %d-node fingerprint budget "
+            "(alias bomb?) -- treating as untrusted",
+            _MAX_FINGERPRINT_NODES,
+        )
+        return None
+    try:
+        canonical = json.dumps(lifecycle, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError) as e:
+        _logger.debug("Cannot canonicalise lifecycle subtree for fingerprint: %s", e)
+        return None
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 

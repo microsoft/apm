@@ -75,6 +75,9 @@ class TestHeaderCrlfRejected:
             raise requests.exceptions.InvalidHeader("Invalid header value")
 
         monkeypatch.setattr(requests, "post", _raise)
+        from apm_cli.core import script_executors
+
+        monkeypatch.setattr(script_executors, "_get_guarded_session", lambda: None)
         thread = _execute_http(script, make_event())
         if thread is not None:
             thread.join(timeout=5)

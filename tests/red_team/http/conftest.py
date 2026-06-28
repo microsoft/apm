@@ -119,7 +119,10 @@ def dispatch():
             recorder.calls.append(PostCall(url=url, args=args, kwargs=kwargs))
             return _fake_response(status_code)
 
-        with patch("requests.post", side_effect=_fake_post):
+        with (
+            patch("requests.post", side_effect=_fake_post),
+            patch.object(script_executors, "_get_guarded_session", return_value=None),
+        ):
             thread = script_executors._execute_http(
                 script,
                 event if event is not None else make_event(),
@@ -157,7 +160,12 @@ def blocking_post():
             release.wait(timeout=10)
             return _fake_response(200)
 
-        with patch("requests.post", side_effect=_fake_post):
+        from apm_cli.core import script_executors
+
+        with (
+            patch("requests.post", side_effect=_fake_post),
+            patch.object(script_executors, "_get_guarded_session", return_value=None),
+        ):
             try:
                 yield release, started, live, lock
             finally:

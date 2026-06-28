@@ -30,6 +30,22 @@ from apm_cli.utils.yaml_io import dump_yaml
 PYEXE = sys.executable
 
 
+@pytest.fixture(autouse=True)
+def _neutralize_guarded_session():
+    """Route HTTP dispatch back through the mockable ``requests.post``.
+
+    Production wraps dispatch in a DNS-pinned ``requests.Session`` (the
+    round-2 rebinding fix), which bypasses ``monkeypatch.setattr(requests,
+    "post", ...)``. Forcing ``_get_guarded_session`` to ``None`` keeps the
+    firing-path tests hermetic; the pin is covered directly in
+    ``http_sweep/test_dns_rebinding_pinned.py``.
+    """
+    from apm_cli.core import script_executors
+
+    with patch.object(script_executors, "_get_guarded_session", return_value=None):
+        yield
+
+
 @pytest.fixture
 def apm_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect APM_HOME into the sandbox and clear APM_NO_SCRIPTS."""

@@ -358,7 +358,7 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
 
     try:
         raw_text = path.read_text(encoding="utf-8")
-    except OSError as e:
+    except (OSError, UnicodeDecodeError, ValueError) as e:
         return [f"Cannot read file: {e}"]
 
     is_apm_yml = source in ("project", "user") or path.suffix in (".yml", ".yaml")

@@ -60,9 +60,49 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za
 # a stray ``H`` after PAT and so never matches; TRACE_ID has no credential
 # token before ``_ID`` and is left alone).
 _CREDENTIAL_DENYLIST = re.compile(
-    r"(?:TOKEN|SECRET|PAT|KEY|PASSWORD|CREDENTIAL|AUTHTOKEN)S?(?:_IDS?)?$",
+    r"(?:TOKEN|SECRET|PAT|KEY|PASSWORD|PASSWD|PWD|CREDENTIAL|AUTHTOKEN)S?(?:_IDS?)?$",
     re.IGNORECASE,
 )
+
+# Bare shell variables that end in a denylist token (``PWD``) yet hold no
+# secret -- they are the current/previous working directory. Without this
+# exemption the ``PWD`` token would sweep the ubiquitous ``$PWD``/``$OLDPWD``
+# out of every command env and corrupt logs that echo a path.
+_DENYLIST_EXEMPT: frozenset[str] = frozenset({"PWD", "OLDPWD"})
+
+# Credential *blobs* whose NAME ends in a benign suffix (CONFIG / AUTH /
+# STRING) that the suffix-token regex cannot express, yet whose VALUE is a
+# secret: base64 registry auth (DOCKER_AUTH_CONFIG), a basic-auth header
+# (BASIC_AUTH), or a DSN with an embedded password (*_CONNECTION_STRING).
+_CREDENTIAL_BLOB_NAMES: frozenset[str] = frozenset({"DOCKER_AUTH_CONFIG", "BASIC_AUTH"})
+_CREDENTIAL_BLOB_SUFFIX = re.compile(
+    r"(?:_AUTH_CONFIG|_CONNECTION_STRING|CONNECTIONSTRING)$",
+    re.IGNORECASE,
+)
+
+# Minimum value length that is substring-masked in the audit log. Short
+# values (e.g. a 4-char ``test``) are common substrings of ordinary words
+# and masking them would corrupt unrelated log text; real credential
+# values are long, so an 8-char floor catches secrets without false hits.
+_MIN_REDACT_LEN = 8
+
+
+def _matches_credential(name: str) -> bool:
+    """True if *name* conventionally holds a credential value.
+
+    Combines the suffix-token regex with a curated set of credential-blob
+    names whose benign suffix the regex cannot express. Bare shell
+    working-directory vars (``PWD`` / ``OLDPWD``) are exempt.
+    """
+    upper = name.upper()
+    if upper in _DENYLIST_EXEMPT:
+        return False
+    if _CREDENTIAL_DENYLIST.search(name):
+        return True
+    if upper in _CREDENTIAL_BLOB_NAMES:
+        return True
+    return bool(_CREDENTIAL_BLOB_SUFFIX.search(name))
+
 
 # Known APM auth variables that must NEVER be expanded even when listed in
 # allowedEnvVars -- these are the credentials APM itself uses and must not
@@ -86,7 +126,7 @@ def _is_denylisted(name: str, allowed: frozenset[str]) -> bool:
         return True
     if name in allowed:
         return False
-    return bool(_CREDENTIAL_DENYLIST.search(name))
+    return _matches_credential(name)
 
 
 def _redact_secrets(text: str) -> str:
@@ -94,23 +134,22 @@ def _redact_secrets(text: str) -> str:
 
     Scripts frequently echo their environment; without this, a command
     that prints ``$ANALYTICS_TOKEN`` would persist the cleartext secret
-    into ``~/.apm/logs/scripts.log``. We replace occurrences of every
-    denylisted variable's value (length >= 4) with ``[REDACTED]``.
+    into ``~/.apm/logs/scripts.log``. We replace raw occurrences of every
+    denylisted variable's value with ``[REDACTED]``.
 
-    Replacement is boundary-aware: the value is only masked when it is not
-    flanked by additional word characters, so a short secret value (e.g.
-    ``test``) that happens to be a substring of an ordinary word (``tests``,
-    ``latest``) does not corrupt unrelated log text.
+    Replacement is a raw substring match (not boundary-aware): the value
+    is a KNOWN secret, so it must be masked even when glued to adjacent
+    word characters. A length floor (``_MIN_REDACT_LEN``) keeps short,
+    common values from corrupting unrelated text.
     """
     if not text:
         return text
     redacted = text
     for name, value in os.environ.items():
-        if not value or len(value) < 4:
+        if not value or len(value) < _MIN_REDACT_LEN:
             continue
-        if _CREDENTIAL_DENYLIST.search(name):
-            pattern = re.compile(rf"(?<!\w){re.escape(value)}(?!\w)")
-            redacted = pattern.sub("[REDACTED]", redacted)
+        if _matches_credential(name):
+            redacted = redacted.replace(value, "[REDACTED]")
     return redacted
 
 
@@ -130,12 +169,36 @@ def _redact_url_credentials(url: str) -> str:
 
 # -- Script output log -----------------------------------------------------
 
+# Per-entry stdout/stderr is truncated to this many characters before being
+# written, so a single lifecycle command that prints a large blob cannot
+# bloat the audit log (or be used for a local disk-fill DoS).
+_MAX_LOG_FIELD_CHARS = 4096
+
+# When the log grows past this size it is rotated to ``scripts.log.1`` so it
+# never grows without bound across many noisy events.
+_MAX_LOG_BYTES = 5 * 1024 * 1024
+
 
 def _get_scripts_log_path() -> Path:
     """Return the path to the scripts output log file."""
     apm_home = os.environ.get("APM_HOME")
     base = Path(apm_home) if apm_home else Path.home() / ".apm"
     return base / "logs" / "scripts.log"
+
+
+def _truncate_log_field(text: str) -> str:
+    """Clamp a stdout/stderr field to a bounded length for the log."""
+    if len(text) <= _MAX_LOG_FIELD_CHARS:
+        return text
+    return text[:_MAX_LOG_FIELD_CHARS] + " ...[truncated]"
+
+
+def _rotate_log_if_large(log_path: Path) -> None:
+    """Rotate the log to ``.1`` once it exceeds the size cap."""
+    with contextlib.suppress(OSError):
+        if log_path.stat().st_size >= _MAX_LOG_BYTES:
+            rotated = log_path.with_name(log_path.name + ".1")
+            os.replace(log_path, rotated)
 
 
 def _append_to_script_log(
@@ -150,12 +213,16 @@ def _append_to_script_log(
 ) -> None:
     """Append a timestamped entry to the scripts log file.
 
-    Creates ``~/.apm/logs/`` on first write.  Errors are silently
-    swallowed -- logging must never break the CLI.
+    Creates ``~/.apm/logs/`` (mode ``0700``) on first write and opens the
+    log ``0600`` with ``O_NOFOLLOW`` so it cannot be world-readable nor
+    redirected through a pre-planted symlink. Per-entry output is truncated
+    and the file is size-rotated. Errors are silently swallowed -- logging
+    must never break the CLI.
     """
     try:
         log_path = _get_scripts_log_path()
-        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        _rotate_log_if_large(log_path)
 
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         safe_target = _redact_secrets(target)
@@ -165,13 +232,17 @@ def _append_to_script_log(
         if exit_code is not None:
             lines[0] += f" exit_code={exit_code}"
         if stdout and stdout.strip():
-            lines.append(f"  stdout: {_redact_secrets(stdout.strip())}")
+            lines.append(f"  stdout: {_truncate_log_field(_redact_secrets(stdout.strip()))}")
         if stderr and stderr.strip():
-            lines.append(f"  stderr: {_redact_secrets(stderr.strip())}")
+            lines.append(f"  stderr: {_truncate_log_field(_redact_secrets(stderr.strip()))}")
         lines.append("")  # blank line separator
 
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write("\n".join(lines) + "\n")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(log_path, flags, 0o600)
+        try:
+            os.write(fd, ("\n".join(lines) + "\n").encode("utf-8"))
+        finally:
+            os.close(fd)
     except Exception:
         _logger.debug("Failed to write to scripts log", exc_info=True)
 
@@ -343,6 +414,138 @@ def _ssrf_block_reason(host: str) -> str | None:
     return None
 
 
+class _SSRFConnectError(OSError):
+    """Raised at connect time when a resolved address is internal.
+
+    Subclasses ``OSError`` so the ``requests`` layer treats it as an
+    ordinary connection failure (the dispatch is logged ``status=error``,
+    never an internal host reached).
+    """
+
+
+def _ssrf_safe_connect(
+    address: tuple[str, int],
+    timeout: object = None,
+    source_address: tuple[str, int] | None = None,
+    socket_options: list | None = None,
+) -> socket.socket:
+    """Resolve *address* ONCE, refuse any internal result, then connect.
+
+    Closes the DNS-rebinding TOCTOU left open by the up-front
+    :func:`_ssrf_block_reason` guard: ``requests``/``urllib3`` would
+    otherwise re-resolve the hostname independently at connect time, so a
+    low-TTL name can answer a public A record to the guard and
+    ``169.254.169.254`` to the socket. Here the SAME resolution that is
+    validated is the one connected to. Raises :class:`_SSRFConnectError`
+    when every resolved address is internal, or the last ``OSError`` when
+    no permitted address could be reached.
+    """
+    host, port = address
+    infos = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+    last_err: OSError | None = None
+    blocked = False
+    for family, socktype, proto, _canon, sockaddr in infos:
+        try:
+            resolved = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            continue
+        if _ip_is_internal(resolved):
+            blocked = True
+            continue
+        sock = None
+        try:
+            sock = socket.socket(family, socktype, proto)
+            if socket_options:
+                for opt in socket_options:
+                    sock.setsockopt(*opt)
+            if isinstance(timeout, (int, float)):
+                sock.settimeout(timeout)
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as exc:
+            last_err = exc
+            if sock is not None:
+                sock.close()
+    if blocked and last_err is None:
+        raise _SSRFConnectError(f"blocked internal address for host {host}")
+    if last_err is not None:
+        raise last_err
+    raise _SSRFConnectError(f"could not resolve {host} to a permitted address")
+
+
+# Lazily-built, process-cached ``requests.Session`` whose HTTPS adapter
+# pins each connection to the validated resolution (see _ssrf_safe_connect).
+_GUARDED_SESSION = None
+_GUARDED_SESSION_LOCK = threading.Lock()
+
+
+def _build_guarded_session():
+    """Build a ``requests.Session`` that resolve-and-pins every HTTPS conn.
+
+    The custom ``urllib3`` connection overrides ``_new_conn`` to delegate
+    to :func:`_ssrf_safe_connect`, so TLS SNI / certificate validation
+    still runs against the ORIGINAL hostname while the socket only ever
+    connects to a guard-approved address.
+    """
+    import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.connection import HTTPSConnection
+    from urllib3.connectionpool import HTTPSConnectionPool
+    from urllib3.poolmanager import PoolManager
+
+    class _PinnedHTTPSConnection(HTTPSConnection):
+        def _new_conn(self):  # type: ignore[override]
+            return _ssrf_safe_connect(
+                (self._dns_host, self.port),
+                self.timeout,
+                source_address=self.source_address,
+                socket_options=self.socket_options,
+            )
+
+    class _PinnedHTTPSConnectionPool(HTTPSConnectionPool):
+        ConnectionCls = _PinnedHTTPSConnection
+
+    class _PinnedPoolManager(PoolManager):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.pool_classes_by_scheme = {
+                **self.pool_classes_by_scheme,
+                "https": _PinnedHTTPSConnectionPool,
+            }
+
+    class _SSRFGuardAdapter(HTTPAdapter):
+        def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+            self.poolmanager = _PinnedPoolManager(
+                num_pools=connections,
+                maxsize=maxsize,
+                block=block,
+                **pool_kwargs,
+            )
+
+    session = requests.Session()
+    session.mount("https://", _SSRFGuardAdapter())
+    return session
+
+
+def _get_guarded_session():
+    """Return the process-cached resolve-and-pin session, or None on failure.
+
+    A None return means the custom adapter could not be constructed (e.g.
+    an incompatible ``urllib3`` build); callers fall back to the up-front
+    guard, which still blocks literal and pre-resolved internal targets.
+    """
+    global _GUARDED_SESSION
+    if _GUARDED_SESSION is not None:
+        return _GUARDED_SESSION
+    with _GUARDED_SESSION_LOCK:
+        if _GUARDED_SESSION is None:
+            with contextlib.suppress(Exception):
+                _GUARDED_SESSION = _build_guarded_session()
+    return _GUARDED_SESSION
+
+
 # Upper bound on simultaneous HTTP dispatch worker threads started for a
 # single lifecycle event. Without a cap, an event file with N http entries
 # spawns N threads + sockets at once (resource exhaustion).
@@ -421,7 +624,9 @@ def _dispatch_http_request(
     try:
         import requests
 
-        resp = requests.post(
+        session = _get_guarded_session()
+        post = session.post if session is not None else requests.post
+        resp = post(
             url,
             data=payload,
             headers=request_headers,
