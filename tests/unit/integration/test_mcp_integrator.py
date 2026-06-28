@@ -878,6 +878,26 @@ class TestGateProjectScopedRuntimes:
         )
         assert result == []
 
+    def test_user_scope_explicit_target_all_passes_all_runtimes(self, tmp_path):
+        result = self._gate(
+            ["claude", "copilot", "vscode", "codex"],
+            user_scope=True,
+            project_root=tmp_path,
+            apm_config={"targets": ["claude"]},
+            explicit_target="all",
+        )
+        assert result == ["claude", "copilot", "vscode", "codex"]
+
+    def test_user_scope_explicit_target_all_in_list_passes_all_runtimes(self, tmp_path):
+        result = self._gate(
+            ["claude", "copilot", "vscode"],
+            user_scope=True,
+            project_root=tmp_path,
+            apm_config={},
+            explicit_target=["all"],
+        )
+        assert result == ["claude", "copilot", "vscode"]
+
     # -- explicit targets: (plural) gates all runtimes ---------------------
 
     def test_targets_plural_filters_unlisted_runtimes(self, tmp_path):

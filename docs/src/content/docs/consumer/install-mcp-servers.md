@@ -144,15 +144,17 @@ fails closed with the same `[x]` voice -- consistent with how
 `apm install` treats the same input. Pin a target with `--target` or
 declare one in `apm.yml`. (#1335)
 
-`apm install -g --mcp NAME` is a deliberate carve-out: it routes the
-write to each runtime's user-scope MCP config (for example, Copilot CLI to
+`apm install -g --mcp NAME` routes the write to each runtime's
+user-scope MCP config (for example, Copilot CLI to
 `~/.copilot/mcp-config.json`, Claude Code to `~/.claude.json`, Codex CLI to
 `$CODEX_HOME/config.toml` when `CODEX_HOME` is set to a non-whitespace value or `~/.codex/config.toml` otherwise, Gemini CLI to `~/.gemini/settings.json`, Antigravity CLI to `~/.gemini/config/mcp_config.json`, Windsurf to
 `~/.codeium/windsurf/mcp_config.json`, Kiro to `~/.kiro/settings/mcp.json`,
-and JetBrains Copilot to its OS-specific user config). It does not consult
-the project-scope `targets:` whitelist -- user-scope writes are by
-definition not project-bound. Workspace-only runtimes (VS Code,
-Cursor, OpenCode) are skipped at user scope.
+and JetBrains Copilot to its OS-specific user config). When the
+package declares a `targets:` field (or the CLI passes `--target`),
+only the matching runtimes receive the config write. When neither
+restricts targets, all detected user-scope-capable runtimes are
+configured. Workspace-only runtimes (VS Code, Cursor, OpenCode) are
+skipped at user scope.
 
 ## stdio vs HTTP servers
 

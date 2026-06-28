@@ -1076,7 +1076,11 @@ class MCPIntegrator:
             # Collect the canonical target names from flag / yaml.
             active: set[str] | None = None
             if flag is not None:
-                active = set(flag) if isinstance(flag, list) else {flag}
+                tokens_list = flag if isinstance(flag, list) else [flag]
+                # "all" is a special passthrough -- mirror resolve_targets.
+                if "all" in tokens_list:
+                    return target_runtimes
+                active = set(tokens_list)
             elif yaml_targets is not None:
                 active = set(yaml_targets)
 
