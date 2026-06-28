@@ -98,6 +98,7 @@ The dry-run output shows `[dry-run] would remove stale CLAUDE.md -- instructions
 | `--no-links` | Skip markdown link resolution. |
 | `--with-constitution` / `--no-constitution` | Include or omit the Spec Kit `memory/constitution.md` block at the top. Default: included. When disabled, an existing block is preserved but not regenerated. |
 | `--local-only` | Ignore `apm_modules/`; compile only `.apm/` primitives. |
+| `--force-instructions` / `--no-force-instructions` | Include the instructions section in CLAUDE.md and AGENTS.md even when `.claude/rules/` or `.github/instructions/` already covers that content (overrides the default deduplication). `--no-dedup` is a hidden backward-compat alias for `--force-instructions`. |
 | `--legacy-skill-paths` | Accepted for compatibility; skill deployment happens in `apm install` / `apm deps update`, not `apm compile`. |
 
 ### Modes

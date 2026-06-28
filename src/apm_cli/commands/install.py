@@ -888,8 +888,8 @@ def _handle_mcp_install(
 @click.option(
     "--runtime",
     help=(
-        "(Legacy alias for --target, single value only; prefer --target) "
-        "Target specific runtime only (copilot, claude, codex, cursor, gemini, antigravity, intellij, kiro, opencode, windsurf)"
+        "Target specific runtime only (copilot, claude, codex, cursor, gemini, antigravity, intellij, kiro, opencode, windsurf) "
+        "(legacy alias for --target, single value only; prefer --target)"
     ),
 )
 @click.option("--exclude", help="Exclude specific runtime from installation")

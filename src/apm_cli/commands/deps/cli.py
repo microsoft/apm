@@ -719,7 +719,7 @@ def clean(dry_run: bool, yes: bool):
 
 
 @deps.command(
-    help="Update APM dependencies to latest refs (deprecated: use 'apm update' instead, which is a strict superset)"
+    help="DEPRECATED: use 'apm update' instead (strict superset). Update APM dependencies to latest refs"
 )
 @click.argument("packages", nargs=-1)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed update information")
