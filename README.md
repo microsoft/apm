@@ -110,7 +110,7 @@ curl -sSL https://aka.ms/apm-unix | sh
 irm https://aka.ms/apm-windows | iex
 ```
 
-Native release binaries are published for macOS, Linux, and Windows x86_64. `apm update` reuses the matching platform installer.
+Native release binaries are published for macOS, Linux, and Windows x86_64. `apm self-update` reuses the matching platform installer.
 
 <details>
 <summary>Other install methods</summary>

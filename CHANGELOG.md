@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed startup version-check hint to reference `apm self-update` instead
+  of the deprecated `apm update` command. (by @syf2211; closes #1939) (#1943)
 - `apm outdated` tag-pattern matching for monorepo virtual subdirectory
   dependencies now derives the `{name}` segment from the `virtual_path`
   basename (e.g., `packages/my-pkg` -> `my-pkg`), aligning with `apm update`
