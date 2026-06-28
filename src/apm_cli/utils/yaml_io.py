@@ -99,6 +99,19 @@ class _BoundedSafeLoader(yaml.SafeLoader):
         # the node graph; the in-progress sentinel detects it and fails closed
         # rather than recursing forever. The budget is orders of magnitude
         # above any legitimate config, so real anchors/aliases still resolve.
+        #
+        # Leaf weight is BYTE-AWARE, not a flat 1: PyYAML's representer reports
+        # ``ignore_aliases() == True`` for ``str`` / ``int`` / ``float`` /
+        # ``bytes`` / ``bool``, so on the dump side (``dump_yaml`` /
+        # ``yaml_to_str``) a shared scalar is NOT re-anchored -- its full text
+        # is re-emitted once PER alias occurrence. A single ~50KB anchored
+        # scalar aliased tens of thousands of times therefore composes as only
+        # O(N) nodes (passing a node-count guard) yet re-serializes to ~GBs and
+        # hangs/OOMs the emitter -- reachable pre-trust on the
+        # ``apm install`` / ``apm uninstall`` apm.yml round-trip. Charging each
+        # scalar occurrence its emitted byte length makes the budget model the
+        # real dump-amplification cost, so the bomb fails closed at parse while
+        # a single large scalar (referenced a handful of times) still resolves.
         weights: dict[int, int] = {}
 
         def weight(node: Any) -> int:
@@ -109,21 +122,39 @@ class _BoundedSafeLoader(yaml.SafeLoader):
                     self._raise_expansion(node)
                 return cached
             weights[nid] = self._EXPANSION_INPROGRESS
-            total = 1
             if isinstance(node, yaml.nodes.MappingNode):
+                total = 1
                 for key_node, value_node in node.value:
                     total += weight(key_node) + weight(value_node)
                     if total > self._MAX_EXPANSION_WEIGHT:
                         self._raise_expansion(node)
             elif isinstance(node, yaml.nodes.SequenceNode):
+                total = 1
                 for child in node.value:
                     total += weight(child)
                     if total > self._MAX_EXPANSION_WEIGHT:
                         self._raise_expansion(node)
+            else:
+                total = self._leaf_byte_cost(node)
+                if total > self._MAX_EXPANSION_WEIGHT:
+                    self._raise_expansion(node)
             weights[nid] = total
             return total
 
         weight(root)
+
+    @staticmethod
+    def _leaf_byte_cost(node: Any) -> int:
+        # Emitted-size proxy for a scalar leaf: the length of its source text.
+        # ScalarNode.value is the raw scalar string PyYAML will re-emit, so a
+        # huge int written as a long decimal / hex literal, or a multi-KB
+        # block scalar, is charged its true re-serialization cost. Floor at 1
+        # so an empty scalar still counts as one node.
+        value = getattr(node, "value", "")
+        try:
+            return max(1, len(value))
+        except TypeError:
+            return 1
 
     def construct_document(self, node: Any) -> Any:
         # Fail closed on an alias/anchor expansion bomb before the stock

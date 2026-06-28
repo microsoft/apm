@@ -133,6 +133,44 @@ _CREDENTIAL_BLOB_SUFFIX = re.compile(
     re.IGNORECASE,
 )
 
+# Some ecosystems key a credential by HOST as a NAME SUFFIX, so the credential
+# token sits in a fixed PREFIX rather than the suffix the denylist anchors on.
+# Terraform Cloud / Enterprise reads ``TF_TOKEN_<host>`` (dots -> ``_``, e.g.
+# ``TF_TOKEN_app_terraform_io``) as the API bearer for ``terraform init``; the
+# ``_TOKEN`` is an infix, so the suffix-anchored denylist misses it and the
+# bearer both leaks to scripts.log AND expands into an outbound HTTP header with
+# no warning. A START-anchored prefix match closes both: nothing benign begins
+# with ``TF_TOKEN_`` (Terraform's other vars are ``TF_VAR_*`` / ``TF_CLI_*`` /
+# ``TF_LOG*``), so there is zero false-positive risk.
+_CREDENTIAL_NAME_PREFIX = re.compile(r"^TF_TOKEN_", re.IGNORECASE)
+
+# Bundler keys a per-gem-source basic-auth credential by HOST in the NAME
+# (dots/dashes -> ``__``): ``BUNDLE_GEMS__CONTRIBSYS__COM=user:password`` for the
+# private Sidekiq gem source, ``BUNDLE_GEM__FURY__IO``, etc. The host-suffixed
+# name matches NO denylist token, so the ``user:password`` pair leaks to
+# scripts.log when a script echoes its env. It cannot be routed through
+# ``_matches_credential`` (which would STRIP it from the child env and break the
+# legitimate ``bundle install`` the source credential authenticates), and the
+# ``BUNDLE_`` prefix is shared with benign config (``BUNDLE_PATH``,
+# ``BUNDLE_JOBS``, ``BUNDLE_BUILD__*``). So mask the secret STRUCTURALLY in the
+# log text instead: a ``BUNDLE_<name>=<user>:<password>`` assignment whose value
+# is a ``user:password`` colon pair (config values are never colon pairs) has its
+# password half redacted while the var still reaches the child env intact. The
+# password half must not start with ``/`` so a mirror URL value (``https://...``)
+# is not mistaken for a credential pair.
+_BUNDLER_SOURCE_CRED_PATTERN = re.compile(
+    r"(\bBUNDLE_[A-Z0-9_]*[A-Z0-9]\s*=\s*[^\s:;/]+:)([^\s;/][^\s;]*)",
+    re.IGNORECASE,
+)
+
+
+def _redact_bundler_source_credentials(text: str) -> str:
+    """Mask the password half of a Bundler ``BUNDLE_<host>=user:password`` pair."""
+    if not text or "BUNDLE_" not in text.upper():
+        return text
+    return _BUNDLER_SOURCE_CRED_PATTERN.sub(lambda m: m.group(1) + "[REDACTED]", text)
+
+
 # Minimum value length that is substring-masked in the audit log. Short
 # values (e.g. a 4-char ``test``) are common substrings of ordinary words
 # and masking them would corrupt unrelated log text; real credential
@@ -215,6 +253,8 @@ def _matches_credential(name: str) -> bool:
     if upper in _DENYLIST_EXEMPT:
         return False
     if _CREDENTIAL_DENYLIST.search(name):
+        return True
+    if _CREDENTIAL_NAME_PREFIX.search(name):
         return True
     if upper in _CREDENTIAL_BLOB_NAMES:
         return True
@@ -357,7 +397,11 @@ def _redact_secrets(text: str) -> str:
     for value in sorted(set(secrets), key=len, reverse=True):
         redacted = redacted.replace(value, "[REDACTED]")
     return _redact_pem_private_keys(
-        _redact_sas_signatures(_redact_webhook_urls(_redact_connection_string_password(redacted)))
+        _redact_bundler_source_credentials(
+            _redact_sas_signatures(
+                _redact_webhook_urls(_redact_connection_string_password(redacted))
+            )
+        )
     )
 
 

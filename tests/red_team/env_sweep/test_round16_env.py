@@ -32,6 +32,8 @@ not damaged.
 
 from __future__ import annotations
 
+import urllib.parse
+
 import pytest
 
 from apm_cli.core import script_executors as se
@@ -84,7 +86,8 @@ def test_r16_env_1_webhook_token_masked_in_log(tmp_path, monkeypatch):
     assert _FAKE_TOKEN not in content, content
     assert "[REDACTED]" in content
     # The host stays readable for triage.
-    assert "hooks.slack.com" in content
+    masked = next(tok for tok in content.split() if tok.startswith("https://"))
+    assert urllib.parse.urlparse(masked).hostname == "hooks.slack.com"
 
 
 def test_r16_env_1_webhook_url_survives_in_child_env(monkeypatch):

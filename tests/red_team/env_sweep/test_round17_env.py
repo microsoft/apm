@@ -21,6 +21,8 @@ tokens so GitHub push-protection never sees a contiguous real-secret signature.
 
 from __future__ import annotations
 
+import urllib.parse
+
 import pytest
 
 from apm_cli.core import script_executors as se
@@ -95,7 +97,8 @@ def test_r17_env_2_slack_triggers_path_masked():
     out = se._redact_secrets("curl -X POST " + url)
     assert _FAKE not in out, out
     assert "[REDACTED]" in out
-    assert "hooks.slack.com" in out
+    masked = next(tok for tok in out.split() if tok.startswith("https://"))
+    assert urllib.parse.urlparse(masked).hostname == "hooks.slack.com"
 
 
 def test_r17_env_2_slack_services_still_masked():
