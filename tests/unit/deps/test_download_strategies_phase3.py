@@ -119,6 +119,7 @@ def _fake_response(
     resp.content = content
     resp.headers = headers or {}
     resp.text = content.decode("utf-8", errors="replace")
+    resp.iter_content.return_value = iter([content] if content else [])
     http_error = requests.exceptions.HTTPError(response=resp)
     resp.raise_for_status.side_effect = http_error if status_code >= 400 else None
     return resp
@@ -175,6 +176,13 @@ class TestResilientGet:
             result = self.delegate.resilient_get("https://example.com", {}, timeout=5)
         assert result is resp
         assert mock_get.call_count == 1
+
+    def test_passes_stream_flag_to_requests(self) -> None:
+        resp = _fake_response(200, b"ok")
+        with patch("requests.get", return_value=resp) as mock_get:
+            result = self.delegate.resilient_get("https://example.com", {}, stream=True)
+        assert result is resp
+        assert mock_get.call_args.kwargs["stream"] is True
 
     def test_429_triggers_retry_after_wait(self) -> None:
         """A 429 response should sleep and retry; second attempt succeeds."""
@@ -522,7 +530,7 @@ class TestDownloadArtifactoryArchive:
     def test_success_extracts_files_stripping_root_prefix(self, tmp_path: Path) -> None:
         zip_bytes = _make_zip({"apm.yml": b"name: test"}, root_prefix="repo-main/")
         resp = _fake_response(200, zip_bytes)
-        d, _ = self._delegate([resp])
+        d, host = self._delegate([resp])
         with patch(
             "apm_cli.deps.download_strategies.build_artifactory_archive_url",
             return_value=["https://art.example.com/repo.zip"],
@@ -531,6 +539,7 @@ class TestDownloadArtifactoryArchive:
                 "art.example.com", "apm", "owner", "repo", "main", tmp_path
             )
         assert (tmp_path / "apm.yml").read_bytes() == b"name: test"
+        assert host._resilient_get.call_args.kwargs["stream"] is True
 
     def test_http_non_200_tries_next_url(self, tmp_path: Path) -> None:
         zip_bytes = _make_zip({"apm.yml": b"name: test"})
@@ -582,15 +591,10 @@ class TestDownloadArtifactoryArchive:
         assert (tmp_path / "apm.yml").exists()
 
     def test_archive_too_large_skips_to_next(self, tmp_path: Path) -> None:
-        # Use a bytes subclass whose __len__ reports > 500 MB so the guard
-        # triggers the `continue` path without actually allocating 500 MB.
-        class _HugeContent(bytes):
-            def __len__(self) -> int:  # type: ignore[override]
-                return 600 * 1024 * 1024  # 600 MB > default 500 MB limit
-
         huge_resp = MagicMock()
         huge_resp.status_code = 200
-        huge_resp.content = _HugeContent()
+        huge_resp.headers = {"Content-Length": str(600 * 1024 * 1024)}
+        huge_resp.iter_content.return_value = iter(())
 
         zip_bytes = _make_zip({"apm.yml": b"ok"})
         ok_resp = _fake_response(200, zip_bytes)
@@ -601,6 +605,29 @@ class TestDownloadArtifactoryArchive:
                 "https://art.example.com/huge.zip",
                 "https://art.example.com/ok.zip",
             ],
+        ):
+            d.download_artifactory_archive(
+                "art.example.com", "apm", "owner", "repo", "main", tmp_path
+            )
+        assert (tmp_path / "apm.yml").exists()
+
+    def test_archive_stream_limit_skips_to_next_url(self, tmp_path: Path) -> None:
+        huge_resp = MagicMock()
+        huge_resp.status_code = 200
+        huge_resp.headers = {}
+        huge_resp.iter_content.return_value = iter([b"x" * (2 * 1024 * 1024)])
+
+        ok_resp = _fake_response(200, _make_zip({"apm.yml": b"ok"}))
+        d, _ = self._delegate([huge_resp, ok_resp])
+        with (
+            patch.dict("os.environ", {"ARTIFACTORY_MAX_ARCHIVE_MB": "1"}),
+            patch(
+                "apm_cli.deps.download_strategies.build_artifactory_archive_url",
+                return_value=[
+                    "https://art.example.com/huge.zip",
+                    "https://art.example.com/ok.zip",
+                ],
+            ),
         ):
             d.download_artifactory_archive(
                 "art.example.com", "apm", "owner", "repo", "main", tmp_path

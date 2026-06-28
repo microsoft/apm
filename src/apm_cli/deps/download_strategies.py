@@ -8,10 +8,12 @@ operations to it (Facade/Delegate pattern).
 """
 
 import base64
+import contextlib
 import json
 import os
 import random
 import sys
+import tempfile
 import threading
 import time
 import weakref
@@ -50,6 +52,9 @@ def _debug(message: str) -> None:
     """Print debug message if APM_DEBUG environment variable is set."""
     if os.environ.get("APM_DEBUG"):
         print(f"[DEBUG] {message}", file=sys.stderr)
+
+
+_ARTIFACTORY_DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 def _close_git_file_transports(transports: dict[object, object]) -> None:
@@ -112,6 +117,8 @@ class DownloadDelegate:
         headers: dict[str, str],
         timeout: int = 30,
         max_retries: int = 3,
+        *,
+        stream: bool = False,
     ) -> requests.Response:
         """HTTP GET with retry on 429/503 and rate-limit header awareness.
 
@@ -120,6 +127,7 @@ class DownloadDelegate:
             headers: HTTP headers
             timeout: Request timeout in seconds
             max_retries: Maximum retry attempts for transient failures
+            stream: Whether to stream the response body instead of buffering it
 
         Returns:
             requests.Response (caller should call .raise_for_status() as needed)
@@ -131,7 +139,7 @@ class DownloadDelegate:
         last_response = None
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, headers=headers, timeout=timeout)
+                response = requests.get(url, headers=headers, timeout=timeout, stream=stream)
 
                 # Handle rate limiting -- GitHub returns 429 for secondary limits
                 # and 403 with X-RateLimit-Remaining: 0 for primary limits.
@@ -165,6 +173,9 @@ class DownloadDelegate:
                         f"Rate limited ({response.status_code}), retry in "
                         f"{wait:.1f}s (attempt {attempt + 1}/{max_retries})"
                     )
+                    if attempt < max_retries - 1:
+                        with contextlib.suppress(Exception):
+                            response.close()
                     time.sleep(wait)
                     continue
 
@@ -322,6 +333,34 @@ class DownloadDelegate:
             headers["Authorization"] = f"Bearer {self._host.artifactory_token}"
         return headers
 
+    def _stream_artifactory_archive(
+        self,
+        response: requests.Response,
+        output_path: Path,
+        url: str,
+        max_archive_bytes: int,
+    ) -> None:
+        """Stream an Artifactory archive response to disk with a byte cap."""
+        content_length = response.headers.get("Content-Length", "")
+        if content_length:
+            try:
+                declared_size = int(content_length)
+            except (TypeError, ValueError):
+                declared_size = None
+            else:
+                if declared_size > max_archive_bytes:
+                    raise ArchiveError(f"Archive too large ({declared_size} bytes) from {url}")
+
+        total_bytes = 0
+        with open(output_path, "wb") as archive_file:
+            for chunk in response.iter_content(chunk_size=_ARTIFACTORY_DOWNLOAD_CHUNK_BYTES):
+                if not chunk:
+                    continue
+                total_bytes += len(chunk)
+                if total_bytes > max_archive_bytes:
+                    raise ArchiveError(f"Archive too large ({total_bytes} bytes) from {url}")
+                archive_file.write(chunk)
+
     def _extract_artifactory_zip(self, zf, target_path: Path, url: str) -> None:
         """Extract an Artifactory VCS archive with shared ZIP safety guards."""
         names = zf.namelist()
@@ -370,8 +409,9 @@ class DownloadDelegate:
 
         Raises RuntimeError on failure.
         """
-        import io
         import zipfile
+
+        from ..config import get_apm_temp_dir
 
         archive_urls = build_artifactory_archive_url(host, prefix, owner, repo, ref, scheme=scheme)
         headers = self.get_artifactory_headers()
@@ -382,16 +422,21 @@ class DownloadDelegate:
         last_error = None
         for url in archive_urls:
             _debug(f"Trying Artifactory archive: {url}")
+            resp = None
             try:
-                resp = self._host._resilient_get(url, headers=headers, timeout=60)
+                resp = self._host._resilient_get(url, headers=headers, timeout=60, stream=True)
                 if resp.status_code == 200:
-                    if len(resp.content) > max_archive_bytes:
-                        last_error = f"Archive too large ({len(resp.content)} bytes) from {url}"
-                        _debug(last_error)
-                        continue
                     target_path.mkdir(parents=True, exist_ok=True)
-                    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
-                        self._extract_artifactory_zip(zf, target_path, url)
+                    with tempfile.TemporaryDirectory(dir=get_apm_temp_dir()) as temp_dir:
+                        archive_path = Path(temp_dir) / "artifactory-download.zip"
+                        self._stream_artifactory_archive(
+                            resp,
+                            archive_path,
+                            url,
+                            max_archive_bytes,
+                        )
+                        with zipfile.ZipFile(archive_path) as zf:
+                            self._extract_artifactory_zip(zf, target_path, url)
                     _debug(f"Extracted Artifactory archive to {target_path}")
                     return
                 else:
@@ -406,6 +451,10 @@ class DownloadDelegate:
             except requests.RequestException as e:
                 last_error = str(e)
                 _debug(f"Request failed: {last_error}")
+            finally:
+                if resp is not None:
+                    with contextlib.suppress(Exception):
+                        resp.close()
 
         raise RuntimeError(
             f"Failed to download package {owner}/{repo}#{ref} from Artifactory "
