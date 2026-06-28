@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
 from pathlib import Path
@@ -93,6 +94,32 @@ def _patch_popen(**fake_kwargs):
     return patcher, fake
 
 
+@contextlib.contextmanager
+def _spy_capture(stdout: str = "", stderr: str = "", capped: bool = False, raise_exc=None):
+    """Patch the bounded-capture seam ``_capture_bounded``.
+
+    After the round-20 OOM-cap refactor the command executor no longer calls
+    ``proc.communicate(input=, timeout=)``; it drives the process through
+    ``_capture_bounded(proc, stdin_text, timeout)`` (threaded stdin-feed +
+    per-stream drain with a hard cap). This records the ``stdin_text`` payload
+    and the ``timeout`` budget threaded into capture, and returns the
+    configured ``(stdout, stderr, capped)`` tuple -- or raises ``raise_exc``
+    (e.g. ``subprocess.TimeoutExpired``) to model a timeout.
+    """
+    calls: dict = {}
+
+    def _fake(proc, stdin_text, timeout, cap=None):
+        calls["proc"] = proc
+        calls["stdin_text"] = stdin_text
+        calls["timeout"] = timeout
+        if raise_exc is not None:
+            raise raise_exc
+        return (stdout, stderr, capped)
+
+    with patch("apm_cli.core.script_executors._capture_bounded", side_effect=_fake):
+        yield calls
+
+
 # -- execute_script dispatcher ---------------------------------------------
 
 
@@ -167,11 +194,10 @@ class TestCommandExecutor:
     def test_runs_command_with_stdin_payload(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install", bash="echo done")
         event = _make_event()
-        patcher, fake = _patch_popen()
-        with patcher:
+        patcher, _ = _patch_popen()
+        with patcher, _spy_capture() as cap:
             _execute_command(script, event)
-        assert len(fake.communicate_calls) == 1
-        input_data = fake.communicate_calls[0]["input"]
+        input_data = cap["stdin_text"]
         assert input_data is not None
         payload = json.loads(input_data)
         assert payload["event"] == "post-install"
@@ -194,22 +220,22 @@ class TestCommandExecutor:
         script = ScriptEntry(
             script_type="command", event="post-install", bash="sleep", timeout_sec=5
         )
-        patcher, fake = _patch_popen()
-        with patcher:
+        patcher, _ = _patch_popen()
+        with patcher, _spy_capture() as cap:
             _execute_command(script, _make_event())
-        assert fake.communicate_calls[0]["timeout"] == 5
+        assert cap["timeout"] == 5
 
     def test_default_timeout(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install", bash="echo")
-        patcher, fake = _patch_popen()
-        with patcher:
+        patcher, _ = _patch_popen()
+        with patcher, _spy_capture() as cap:
             _execute_command(script, _make_event())
-        assert fake.communicate_calls[0]["timeout"] == 30
+        assert cap["timeout"] == 30
 
     def test_swallows_timeout_error(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install", bash="sleep")
-        patcher, _ = _patch_popen(communicate_exc=subprocess.TimeoutExpired("sleep", 30))
-        with patcher:
+        patcher, _ = _patch_popen()
+        with patcher, _spy_capture(raise_exc=subprocess.TimeoutExpired("sleep", 30)):
             _execute_command(script, _make_event())
 
     def test_swallows_generic_error(self) -> None:
@@ -229,8 +255,8 @@ class TestCommandExecutor:
     def test_verbose_logs_on_timeout(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install", bash="slow")
         logger = MagicMock()
-        patcher, _ = _patch_popen(communicate_exc=subprocess.TimeoutExpired("slow", 30))
-        with patcher:
+        patcher, _ = _patch_popen()
+        with patcher, _spy_capture(raise_exc=subprocess.TimeoutExpired("slow", 30)):
             _execute_command(script, _make_event(), logger=logger, verbose=True)
         # Timeout warning always emits (not verbose-gated); uses logger.warning.
         logger.warning.assert_called_once()
@@ -444,8 +470,8 @@ class TestCommandExecutorLogging:
     ) -> None:
         monkeypatch.setenv("APM_HOME", str(tmp_path))
         script = ScriptEntry(script_type="command", event="post-install", bash="echo done")
-        patcher, _ = _patch_popen(stdout="script output line", stderr="", returncode=0)
-        with patcher:
+        patcher, _ = _patch_popen(returncode=0)
+        with patcher, _spy_capture(stdout="script output line", stderr=""):
             _execute_command(script, _make_event())
         content = (tmp_path / "logs" / "scripts.log").read_text()
         assert "script output line" in content
@@ -455,8 +481,8 @@ class TestCommandExecutorLogging:
     def test_logs_failed_command(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("APM_HOME", str(tmp_path))
         script = ScriptEntry(script_type="command", event="post-install", bash="false")
-        patcher, _ = _patch_popen(stdout="", stderr="something broke", returncode=1)
-        with patcher:
+        patcher, _ = _patch_popen(returncode=1)
+        with patcher, _spy_capture(stdout="", stderr="something broke"):
             _execute_command(script, _make_event())
         content = (tmp_path / "logs" / "scripts.log").read_text()
         assert "something broke" in content
@@ -466,8 +492,8 @@ class TestCommandExecutorLogging:
     def test_logs_timeout(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("APM_HOME", str(tmp_path))
         script = ScriptEntry(script_type="command", event="post-install", bash="sleep 999")
-        patcher, _ = _patch_popen(communicate_exc=subprocess.TimeoutExpired("sleep", 30))
-        with patcher:
+        patcher, _ = _patch_popen()
+        with patcher, _spy_capture(raise_exc=subprocess.TimeoutExpired("sleep", 30)):
             _execute_command(script, _make_event())
         content = (tmp_path / "logs" / "scripts.log").read_text()
         assert "status=timeout" in content

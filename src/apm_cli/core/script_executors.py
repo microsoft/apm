@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import ipaddress
 import logging
+import math
 import os
 import re
 import signal
@@ -151,6 +152,20 @@ _CREDENTIAL_BLOB_SUFFIX = re.compile(
     r"(?:_AUTH|_AUTH_CONFIG|_CONNECTION_STRING|CONNECTIONSTRING|_DSN|_CONN_STR)"
     r"(?:_?(?:BASE64|B64|HEX|PEM|DER|ASC))?"
     r"|KUBE_?CONFIG_?(?:BASE64|B64|HEX)"
+    # Binary private-key CONTAINER names (Android app-signing + JVM/Windows
+    # code-signing): the signing key lives inside a keystore/PKCS#12 blob that
+    # CI base64-encodes into one var (ANDROID_KEYSTORE_BASE64, SIGNING_KEYSTORE,
+    # WINDOWS_PFX_BASE64, APPLE_CERT_P12, SERVER_JKS_BASE64). ``KEY`` is a token
+    # but only as the compound ``KEY+STORE`` -- the denylist tail cannot consume
+    # ``STORE`` so the token never reaches ``$``; PFX/P12/JKS carry no token and
+    # the value is binary base64 (no PEM armor / ``=`` key / URL) so no value-
+    # shape masker catches it either. The KEY_?STORE arm matches a bare keystore
+    # tail (RELEASE_KEYSTORE, SIGNING_KEY_STORE) OR a keystore token followed by
+    # an encoding tail anywhere to the end (KEYSTORE_FILE_BASE64), so the encoded
+    # blob is caught while the benign PATH/FILE/ALIAS file vars (no encoding
+    # tail) and TRUSTSTORE_* (public certs, no KEY) keep their suffixes and stay
+    # in the child env.
+    r"|(?:_PFX|_P12|_PKCS12|_JKS|KEY_?STORE)(?:[A-Z0-9_]*?(?:BASE64|B64|HEX|DER))?"
     r")$",
     re.IGNORECASE,
 )
@@ -471,6 +486,17 @@ _MAX_LOG_FIELD_CHARS = 4096
 # When the log grows past this size it is rotated to ``scripts.log.1`` so it
 # never grows without bound across many noisy events.
 _MAX_LOG_BYTES = 5 * 1024 * 1024
+
+# Hard ceiling on how much command-script stdout/stderr is read into memory.
+# ``proc.communicate()`` would otherwise buffer the ENTIRE child output (a
+# runaway or hostile lifecycle script printing GiBs OOMs the installer long
+# before the per-field log truncation -- which runs only on already-resident
+# text -- or the timeout/killpg reap can fire). The bounded reader caps each
+# stream at this many characters, discards the rest, and SIGKILLs the process
+# group so the installer's memory stays flat regardless of how much a script
+# prints. Comfortably above ``_MAX_LOG_FIELD_CHARS`` so the audit log is never
+# starved of legitimate output.
+_MAX_CAPTURE_CHARS = 1024 * 1024
 
 
 def _get_scripts_log_path() -> Path:
@@ -915,6 +941,12 @@ def _build_guarded_session():
             )
 
     session = requests.Session()
+    # trust_env=False so env HTTP(S)_PROXY/NO_PROXY cannot tunnel an https
+    # lifecycle dispatch through an unvetted proxy: a configured proxy uses
+    # urllib3's ProxyManager, which is NOT the resolve-and-pin pool above, so
+    # the SSRF guard + DNS pin would be silently nullified (the up-front
+    # _ssrf_block_reason only vets the TARGET host, never the proxy host).
+    session.trust_env = False
     session.mount("https://", _SSRFGuardAdapter())
     return session
 
@@ -1093,6 +1125,11 @@ def _dispatch_http_request(
             timeout=timeout,
             allow_redirects=False,
             stream=True,
+            # Defeat env-proxy tunneling on BOTH the guarded session and the
+            # bare requests.post fallback (the fallback session has the
+            # library default trust_env=True): never route a lifecycle http
+            # action through an HTTP(S)_PROXY the SSRF guard never vetted.
+            proxies={"http": None, "https": None},
         )
         _append_to_script_log(
             event_name,
@@ -1237,8 +1274,19 @@ def _execute_command(
             cwd=cwd,
             start_new_session=True,
         )
-        stdout, stderr = proc.communicate(input=event.to_json(), timeout=timeout)
+        stdout, stderr, capped = _capture_bounded(proc, event.to_json(), timeout)
         returncode = proc.returncode
+        if capped:
+            note = " ...[output capped: exceeded in-memory capture limit]"
+            stdout = stdout + note
+            stderr = stderr + note
+            if logger is not None:
+                warn = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
+                if warn is not None:
+                    warn(
+                        "[!] Lifecycle command script output exceeded the capture "
+                        "limit and was truncated; the script was terminated."
+                    )
         _append_to_script_log(
             event.event,
             "command",
@@ -1274,6 +1322,132 @@ def _execute_command(
             logger.verbose_detail(f"[i] Lifecycle command script failed: {cmd}")
 
 
+def _signal_kill_group(proc: subprocess.Popen | None) -> None:
+    """Send SIGKILL to the script's whole process group (no reap).
+
+    Split out of ``_kill_process_group`` so the bounded-capture reader can
+    terminate a runaway/over-cap writer WITHOUT also calling
+    ``proc.communicate`` -- the drain threads already own the stdout/stderr
+    pipes, so a second reader there would race. Best-effort, never raises.
+    """
+    if proc is None:
+        return
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+    except (ProcessLookupError, PermissionError, OSError):
+        with contextlib.suppress(OSError):
+            proc.kill()
+
+
+def _drain_capped(stream, sink: list[str], state: dict[str, int], cap: int) -> None:
+    """Read ``stream`` to EOF, retaining at most ``cap`` chars in ``sink``.
+
+    Past the cap the bytes are discarded but reading continues so the child
+    can never wedge on a full pipe -- the watchdog in ``_capture_bounded``
+    SIGKILLs the group once ``state['over']`` trips. ``state`` carries ``n``
+    (chars retained) and ``over`` (1 once the cap is hit).
+    """
+    try:
+        while True:
+            chunk = stream.read(65536)
+            if not chunk:
+                break
+            remaining = cap - state["n"]
+            if remaining > 0:
+                piece = chunk[:remaining]
+                sink.append(piece)
+                state["n"] += len(piece)
+                if state["n"] >= cap:
+                    state["over"] = 1
+            else:
+                state["over"] = 1
+    except (OSError, ValueError):
+        pass
+    finally:
+        with contextlib.suppress(OSError):
+            stream.close()
+
+
+def _capture_bounded(
+    proc: subprocess.Popen[str],
+    stdin_text: str,
+    timeout: float,
+    cap: int = _MAX_CAPTURE_CHARS,
+) -> tuple[str, str, bool]:
+    """Drive ``proc`` to completion with a hard per-stream capture cap.
+
+    A bounded replacement for ``proc.communicate(input=..., timeout=...)``:
+    stdin is fed and stdout/stderr are drained on separate daemon threads so
+    no single stream can deadlock, and each captured stream is clamped to
+    ``cap`` characters. If either stream overflows the cap the process group
+    is SIGKILLed promptly. Re-raises ``subprocess.TimeoutExpired`` on timeout
+    (after killing the group + joining the readers) so the caller's existing
+    timeout handling is unchanged. Returns ``(stdout, stderr, capped)``.
+    """
+    out: list[str] = []
+    err: list[str] = []
+    out_state = {"n": 0, "over": 0}
+    err_state = {"n": 0, "over": 0}
+
+    # Reject a non-finite / non-numeric deadline up front (NaN, inf, list,
+    # dict, str): a NaN deadline would make every `remaining <= 0` and
+    # `proc.wait(min(0.1, remaining))` comparison false-y and silently
+    # DISABLE the timeout bound, letting a slow script run unbounded. This
+    # mirrors the old `proc.communicate(timeout=...)` which raised promptly
+    # on such values; the caller's isolation handler reaps the process.
+    if not (
+        isinstance(timeout, (int, float))
+        and not isinstance(timeout, bool)
+        and math.isfinite(timeout)
+    ):
+        raise ValueError(f"invalid capture timeout: {timeout!r}")
+
+    def _feed() -> None:
+        try:
+            if proc.stdin is not None:
+                proc.stdin.write(stdin_text)
+                proc.stdin.close()
+        except (OSError, ValueError):
+            pass
+
+    workers = [
+        threading.Thread(target=_feed, daemon=True),
+        threading.Thread(
+            target=_drain_capped, args=(proc.stdout, out, out_state, cap), daemon=True
+        ),
+        threading.Thread(
+            target=_drain_capped, args=(proc.stderr, err, err_state, cap), daemon=True
+        ),
+    ]
+    for w in workers:
+        w.start()
+
+    deadline = time.monotonic() + timeout
+    killed_over = False
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _signal_kill_group(proc)
+            for w in workers:
+                w.join(timeout=5)
+            raise subprocess.TimeoutExpired(proc.args, timeout)
+        if (out_state["over"] or err_state["over"]) and not killed_over:
+            _signal_kill_group(proc)
+            killed_over = True
+        try:
+            proc.wait(timeout=min(0.1, remaining))
+            break
+        except subprocess.TimeoutExpired:
+            continue
+
+    for w in workers:
+        w.join(timeout=5)
+    return "".join(out), "".join(err), bool(out_state["over"] or err_state["over"])
+
+
 def _kill_process_group(proc: subprocess.Popen | None) -> None:
     """Kill the script's whole process group, then reap it.
 
@@ -1293,14 +1467,7 @@ def _kill_process_group(proc: subprocess.Popen | None) -> None:
     """
     if proc is None:
         return
-    try:
-        if hasattr(os, "killpg"):
-            os.killpg(proc.pid, signal.SIGKILL)
-        else:
-            proc.kill()
-    except (ProcessLookupError, PermissionError, OSError):
-        with contextlib.suppress(OSError):
-            proc.kill()
+    _signal_kill_group(proc)
     with contextlib.suppress(subprocess.TimeoutExpired, ValueError, OSError):
         proc.communicate(timeout=5)
 

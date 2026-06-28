@@ -361,11 +361,15 @@ class TestCommandExecutorFailureBranches:
         import subprocess
 
         fake = MagicMock()
-        fake.communicate.side_effect = subprocess.TimeoutExpired(cmd="x", timeout=1)
         fake.pid = 999999
         logger = MagicMock()
         with (
             patch.object(se.subprocess, "Popen", return_value=fake),
+            patch.object(
+                se,
+                "_capture_bounded",
+                side_effect=subprocess.TimeoutExpired(cmd="x", timeout=1),
+            ),
             patch.object(se, "_kill_process_group") as killer,
         ):
             se.execute_script(_cmd("sleep 100"), _event(), logger=logger)
@@ -374,11 +378,11 @@ class TestCommandExecutorFailureBranches:
 
     def test_generic_exception_logs_error_and_reaps(self, apm_log_home: Path) -> None:
         fake = MagicMock()
-        fake.communicate.side_effect = RuntimeError("boom")
         fake.pid = 999998
         logger = MagicMock()
         with (
             patch.object(se.subprocess, "Popen", return_value=fake),
+            patch.object(se, "_capture_bounded", side_effect=RuntimeError("boom")),
             patch.object(se, "_kill_process_group") as killer,
         ):
             se.execute_script(_cmd("do-thing"), _event(), logger=logger, verbose=True)
@@ -387,13 +391,13 @@ class TestCommandExecutorFailureBranches:
 
     def test_slow_command_emits_warning(self, apm_log_home: Path) -> None:
         fake = MagicMock()
-        fake.communicate.return_value = ("out", "")
         fake.returncode = 0
         fake.pid = 999997
         logger = MagicMock()
         times = iter([0.0, 999.0])
         with (
             patch.object(se.subprocess, "Popen", return_value=fake),
+            patch.object(se, "_capture_bounded", return_value=("out", "", False)),
             patch.object(se.time, "monotonic", side_effect=lambda: next(times)),
         ):
             se.execute_script(_cmd("slowcmd"), _event(), logger=logger)

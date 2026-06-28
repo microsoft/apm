@@ -47,6 +47,7 @@ from ..utils.github_host import (
     is_visualstudio_legacy_hostname,
 )
 from ..utils.path_security import PathTraversalError, ensure_path_within
+from ..utils.yaml_io import load_yaml_str
 from .parser import PolicyValidationError, load_policy
 from .project_config import (
     _DEFAULT_HASH_ALGORITHM,
@@ -1373,7 +1374,7 @@ def _detect_garbage(
         return None
 
     try:
-        raw_data = yaml.safe_load(content)
+        raw_data = load_yaml_str(content)
     except yaml.YAMLError:
         msg = f"Response from {identifier} is not valid YAML"
         if cache_entry is not None:

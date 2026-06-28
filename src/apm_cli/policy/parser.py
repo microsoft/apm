@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from ..utils.yaml_io import load_yaml_str
 from .schema import (
     ApmPolicy,
     AuditPolicy,
@@ -439,7 +440,7 @@ def load_policy(source: str | Path) -> tuple[ApmPolicy, list[str]]:
             raw = source
 
     try:
-        data = yaml.safe_load(raw)
+        data = load_yaml_str(raw)
     except yaml.YAMLError as exc:
         raise PolicyValidationError([f"YAML parse error: {exc}"]) from exc
 
