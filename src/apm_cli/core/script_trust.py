@@ -83,8 +83,8 @@ def script_file_fingerprint(path: Path) -> str | None:
 
     try:
         data = load_yaml(path)
-    except Exception as e:
-        _logger.debug("Cannot fingerprint apm.yml lifecycle %s: %s", path, type(e).__name__)
+    except Exception:
+        _logger.debug("Cannot fingerprint apm.yml lifecycle subtree (parse error)")
         return None
 
     if not isinstance(data, dict):
