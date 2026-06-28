@@ -73,11 +73,16 @@ _CREDENTIAL_DENYLIST = re.compile(
 _DENYLIST_EXEMPT: frozenset[str] = frozenset({"PWD", "OLDPWD"})
 
 # Credential *blobs* whose NAME ends in a benign suffix (CONFIG / AUTH /
-# STRING) that the suffix-token regex cannot express, yet whose VALUE is a
-# secret: base64 registry auth (DOCKER_AUTH_CONFIG), a basic-auth header
-# (BASIC_AUTH), or a DSN with an embedded password (*_CONNECTION_STRING).
+# STRING / BASE) that the suffix-token regex cannot express, yet whose VALUE
+# is a secret: base64 registry auth (DOCKER_AUTH_CONFIG), a basic-auth header
+# (BASIC_AUTH), a DSN with an embedded password (*_CONNECTION_STRING), or a
+# framework master secret whose credential token is an infix (SECRET_KEY_BASE
+# -- the Rails master secret; the suffix anchor sees only the benign _BASE
+# tail and its SECRET_KEY sibling is masked, so the exact name is curated
+# here). Exact-name membership keeps benign siblings (KEYBASE_*, CODEBASE_*,
+# DATABASE, RELEASE_BASE) unaffected.
 _CREDENTIAL_BLOB_NAMES: frozenset[str] = frozenset(
-    {"DOCKER_AUTH_CONFIG", "BASIC_AUTH", "NPM_AUTH", "REGISTRY_AUTH"}
+    {"DOCKER_AUTH_CONFIG", "BASIC_AUTH", "NPM_AUTH", "REGISTRY_AUTH", "SECRET_KEY_BASE"}
 )
 _CREDENTIAL_BLOB_SUFFIX = re.compile(
     r"(?:_AUTH_CONFIG|_CONNECTION_STRING|CONNECTIONSTRING)$",
@@ -521,12 +526,13 @@ def _ssrf_block_reason(host: str) -> str | None:
 
     try:
         infos = socket.getaddrinfo(host, None)
-    except (OSError, UnicodeError):
-        # OSError: name does not resolve. UnicodeError (a ValueError
-        # subclass): the host cannot be IDNA-encoded (empty label, a label
-        # over 63 octets, or a surrogate code point). Either way the host is
-        # unreachable, so allowing it is SSRF-safe and the request layer will
-        # fail to connect -- but it must fail CLOSED (return None) here, not
+    except (OSError, ValueError):
+        # OSError: name does not resolve. ValueError (covers its UnicodeError
+        # subclass and the bare ValueError CPython raises for an embedded NUL
+        # byte in the host): the host cannot be resolved or IDNA-encoded (empty
+        # label, a label over 63 octets, a surrogate, or a NUL). Either way the
+        # host is unreachable, so allowing it is SSRF-safe and the request layer
+        # will fail to connect -- but it must fail CLOSED (return None) here, not
         # propagate out of _prepare_http and crash the public execute_script
         # caller, matching the _safe_urlparse fail-closed contract.
         return None

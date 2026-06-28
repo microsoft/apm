@@ -211,6 +211,21 @@ def lifecycle_init(force: bool) -> None:
         _rich_error(f"Cannot read apm.yml: {exc}", symbol="error")
         sys.exit(1)
 
+    if not isinstance(data, dict):
+        # A non-mapping top-level apm.yml (list / scalar) cannot host a
+        # lifecycle: block; membership-test and item-assign below would raise
+        # an uncaught TypeError. Every sibling consumer (parse / validate /
+        # fingerprint) fails closed on this same guard.
+        _rich_error(
+            "apm.yml top level is not a mapping; cannot add a lifecycle: block.",
+            symbol="error",
+        )
+        _rich_echo(
+            "  Fix apm.yml so its root is a YAML mapping, then retry.",
+            style="dim",
+        )
+        sys.exit(1)
+
     if "lifecycle" in data and not force:
         _rich_warning(
             "apm.yml already has a lifecycle: block.",
