@@ -37,6 +37,7 @@ import pytest
 
 from apm_cli.deps.artifactory_orchestrator import ArtifactoryOrchestrator
 from apm_cli.models.apm_package import DependencyReference, PackageInfo, PackageType
+from apm_cli.utils.archive import ArchiveError, safe_extract_zip
 
 # ---------------------------------------------------------------------------
 # Helpers: build a minimal APM ZIP
@@ -201,23 +202,28 @@ class _LocalArchiveDownloader:
             if not names:
                 raise RuntimeError(f"Empty archive from {url}")
             root_prefix = names[0]
-            if not root_prefix.endswith("/"):
-                zf.extractall(target_path)
+            if root_prefix.endswith("/"):
+
+                def _strip_root(member_name: str) -> str | None:
+                    if member_name == root_prefix:
+                        return None
+                    if not member_name.startswith(root_prefix):
+                        raise ArchiveError(
+                            f"Archive member is outside root prefix {root_prefix!r}: "
+                            f"{member_name!r}"
+                        )
+                    rel = member_name[len(root_prefix) :]
+                    return rel or None
+
+                safe_extract_zip(
+                    zf,
+                    target_path,
+                    error_type=ArchiveError,
+                    member_name_transform=_strip_root,
+                )
                 return
-            for member in zf.infolist():
-                if member.filename == root_prefix:
-                    continue
-                rel = member.filename[len(root_prefix) :]
-                if not rel:
-                    continue
-                dest = target_path / rel
-                if not dest.resolve().is_relative_to(target_path.resolve()):
-                    continue
-                if member.is_dir():
-                    dest.mkdir(parents=True, exist_ok=True)
-                else:
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_bytes(zf.read(member.filename))
+
+            safe_extract_zip(zf, target_path, error_type=ArchiveError)
 
 
 # ---------------------------------------------------------------------------

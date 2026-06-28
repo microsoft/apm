@@ -22,6 +22,7 @@ import requests
 
 from ..core.auth import AuthResolver, HostInfo
 from ..models.apm_package import DependencyReference
+from ..utils.archive import ArchiveError, safe_extract_zip
 from ..utils.github_host import (
     build_ado_api_url,
     build_artifactory_archive_url,
@@ -321,6 +322,35 @@ class DownloadDelegate:
             headers["Authorization"] = f"Bearer {self._host.artifactory_token}"
         return headers
 
+    def _extract_artifactory_zip(self, zf, target_path: Path, url: str) -> None:
+        """Extract an Artifactory VCS archive with shared ZIP safety guards."""
+        names = zf.namelist()
+        if not names:
+            raise RuntimeError(f"Empty archive from {url}")
+
+        root_prefix = names[0]
+        if root_prefix.endswith("/"):
+
+            def _strip_root(member_name: str) -> str | None:
+                if member_name == root_prefix:
+                    return None
+                if not member_name.startswith(root_prefix):
+                    raise ArchiveError(
+                        f"Archive member is outside root prefix {root_prefix!r}: {member_name!r}"
+                    )
+                rel_path = member_name[len(root_prefix) :]
+                return rel_path or None
+
+            safe_extract_zip(
+                zf,
+                target_path,
+                error_type=ArchiveError,
+                member_name_transform=_strip_root,
+            )
+            return
+
+        safe_extract_zip(zf, target_path, error_type=ArchiveError)
+
     def download_artifactory_archive(
         self,
         host: str,
@@ -359,44 +389,17 @@ class DownloadDelegate:
                         last_error = f"Archive too large ({len(resp.content)} bytes) from {url}"
                         _debug(last_error)
                         continue
-                    # Extract zip, stripping the top-level directory
                     target_path.mkdir(parents=True, exist_ok=True)
                     with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
-                        # Identify the root prefix (e.g., "repo-main/")
-                        names = zf.namelist()
-                        if not names:
-                            raise RuntimeError(f"Empty archive from {url}")
-                        root_prefix = names[0]
-                        if not root_prefix.endswith("/"):
-                            # Single file archive; extract as-is
-                            zf.extractall(target_path)
-                            return
-                        for member in zf.infolist():
-                            # Strip root prefix
-                            if member.filename == root_prefix:
-                                continue
-                            rel = member.filename[len(root_prefix) :]
-                            if not rel:
-                                continue
-                            # Guard: prevent zip path traversal (CWE-22)
-                            dest = target_path / rel
-                            if not dest.resolve().is_relative_to(target_path.resolve()):
-                                _debug(f"Skipping zip entry escaping target: {member.filename}")
-                                continue
-                            unix_mode = (member.external_attr >> 16) & 0xFFFF
-                            if member.is_dir():
-                                dest.mkdir(parents=True, exist_ok=True)
-                            else:
-                                dest.parent.mkdir(parents=True, exist_ok=True)
-                                with zf.open(member) as src, open(dest, "wb") as dst:
-                                    dst.write(src.read())
-                                if unix_mode:
-                                    os.chmod(dest, unix_mode & 0o755)
+                        self._extract_artifactory_zip(zf, target_path, url)
                     _debug(f"Extracted Artifactory archive to {target_path}")
                     return
                 else:
                     last_error = f"HTTP {resp.status_code} from {url}"
                     _debug(last_error)
+            except ArchiveError as e:
+                last_error = f"Unsafe zip archive from {url}: {e}"
+                _debug(last_error)
             except zipfile.BadZipFile:
                 last_error = f"Invalid zip archive from {url}"
                 _debug(last_error)

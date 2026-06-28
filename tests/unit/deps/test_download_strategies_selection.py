@@ -36,6 +36,7 @@ import requests
 
 from apm_cli.deps.download_strategies import DownloadDelegate, _debug
 from apm_cli.models.apm_package import DependencyReference
+from apm_cli.utils.archive import safe_extract_zip
 from apm_cli.utils.path_security import PathTraversalError
 
 # ---------------------------------------------------------------------------
@@ -642,6 +643,40 @@ class TestDownloadArtifactoryArchive:
                 "art.example.com", "apm", "owner", "repo", "main", tmp_path
             )
         assert (tmp_path / "README.md").exists()
+
+    def test_single_file_archive_rejects_path_traversal(self, tmp_path: Path) -> None:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("../escape.txt", b"nope")
+        resp = _fake_response(200, buf.getvalue())
+        d, _ = self._delegate([resp])
+        with patch(
+            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
+            return_value=["https://art.example.com/single.zip"],
+        ):
+            with pytest.raises(RuntimeError, match="Failed to download"):
+                d.download_artifactory_archive(
+                    "art.example.com", "apm", "owner", "repo", "main", tmp_path
+                )
+        assert not (tmp_path.parent / "escape.txt").exists()
+
+    def test_archive_rejects_uncompressed_size_limit(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        zip_bytes = _make_zip({"big.bin": b"x" * 2048}, root_prefix="repo-main/")
+        resp = _fake_response(200, zip_bytes)
+        d, _ = self._delegate([resp])
+        monkeypatch.setitem(safe_extract_zip.__kwdefaults__, "max_uncompressed", 1024)
+        with patch(
+            "apm_cli.deps.download_strategies.build_artifactory_archive_url",
+            return_value=["https://art.example.com/repo.zip"],
+        ):
+            with pytest.raises(RuntimeError, match="Failed to download"):
+                d.download_artifactory_archive(
+                    "art.example.com", "apm", "owner", "repo", "main", tmp_path
+                )
 
     def test_request_exception_tries_next(self, tmp_path: Path) -> None:
         d, host_mock = self._delegate()
