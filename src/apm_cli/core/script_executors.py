@@ -468,7 +468,7 @@ _PROVIDER_TOKEN_PATTERN = re.compile(
     r"gh[posur]_[A-Za-z0-9]{36,}"  # GitHub PAT / OAuth / server / user / refresh
     r"|github_pat_[A-Za-z0-9_]{40,}"  # GitHub fine-grained PAT
     r"|xox[baprs]-[A-Za-z0-9-]{10,}"  # Slack bot/user/app/refresh token
-    r"|[sr]k_live_[A-Za-z0-9]{16,}"  # Stripe live secret / restricted key
+    r"|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}"  # Stripe live/test secret / restricted key
     r"|AIza[A-Za-z0-9_-]{35}"  # Google API key
     r"|glpat-[A-Za-z0-9_-]{20,}"  # GitLab personal access token
     r"|xapp-[A-Za-z0-9-]{10,}"  # Slack app-level token
@@ -482,6 +482,7 @@ _PROVIDER_TOKEN_PATTERN = re.compile(
     r"|sk-ant-[A-Za-z0-9-]{20,}"  # Anthropic API key
     r"|(?:AKIA|ASIA)[A-Z0-9]{16}"  # AWS access key id (long-term / STS)
     r"|SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}"  # SendGrid API key
+    r"|shp(?:at|ca|pa|ss)_[A-Fa-f0-9]{32}"  # Shopify access/custom/private/shared token
 )
 
 
@@ -796,19 +797,36 @@ def _append_to_script_log(
             | getattr(os, "O_NOFOLLOW", 0)
             | getattr(os, "O_NONBLOCK", 0)
         )
-        fd = os.open(log_path, flags, 0o600)
+        excl_flags = flags | getattr(os, "O_EXCL", 0)
+        payload = ("\n".join(lines) + "\n").encode("utf-8")
+        try:
+            fd = os.open(log_path, flags, 0o600)
+        except OSError:
+            # A no-reader FIFO planted at the log path makes the ``O_NONBLOCK``
+            # open raise ENXIO. Self-heal: unlink the hostile node and recreate
+            # a fresh ``0600`` regular file with ``O_EXCL`` so the audit log is
+            # NOT permanently blackholed (a bare drop here would silently lose
+            # every future append, for this AND all later actors).
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(log_path)
+            fd = os.open(log_path, excl_flags, 0o600)
         try:
             # Fail closed if the log path is not a regular file. ``O_NOFOLLOW``
             # rejects a symlink swap but NOT a FIFO; a hostile script that owns
-            # ~/.apm/logs can ``mkfifo`` over scripts.log and -- without
-            # ``O_NONBLOCK`` -- wedge the SYNCHRONOUS install audit append on a
-            # blocking ``open()``. ``O_NONBLOCK`` makes the no-reader FIFO open
-            # raise ENXIO (caught below); ``S_ISREG`` closes the reader-present
-            # window. ``O_NONBLOCK`` is a no-op for the subsequent append write
-            # on a regular file.
+            # ~/.apm/logs can ``mkfifo`` over scripts.log. A reader-present FIFO
+            # opens successfully, so ``S_ISREG`` on the held fd is the gate.
+            # Unlink + retry (``O_EXCL``) so future appends self-heal instead of
+            # being silently dropped forever.
             if not stat.S_ISREG(os.fstat(fd).st_mode):
-                return
-            os.write(fd, ("\n".join(lines) + "\n").encode("utf-8"))
+                os.close(fd)
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(log_path)
+                fd = os.open(log_path, excl_flags, 0o600)
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    # Same-instant adversarial re-plant on the retry: drop only
+                    # THIS racing write (bounded), never a persistent blackout.
+                    return
+            os.write(fd, payload)
         finally:
             os.close(fd)
     except Exception:

@@ -22,10 +22,9 @@ def _load_yaml_registries(yaml_path: Path) -> dict[str, str]:
     workspace file never blocks a project install.
     """
     try:
-        import yaml
+        from ...utils.yaml_io import load_yaml
 
-        with yaml_path.open(encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or {}
+        data = load_yaml(yaml_path) or {}
         if not isinstance(data, dict):
             return {}
         raw = data.get("registries")
