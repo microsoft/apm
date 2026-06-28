@@ -96,10 +96,11 @@ accepted in target lists for symmetry only. Unknown slugs are
 rejected before any work runs.
 
 Experimental targets (`hermes`, `openclaw`, `copilot-cowork`,
-`copilot-app`) are also accepted once their flag is enabled via
-`apm experimental enable <flag>`, but are excluded from `--all`.
-`apm compile -t hermes` emits `AGENTS.md` (the `hermes` target shares
-the `agents` compile family). See
+`copilot-app`) are deployment targets for `apm install --target <flag>`
+once enabled via `apm experimental enable <flag>`, and are excluded
+from `--all`. `apm compile` does not emit harness-specific output for
+them: Hermes and the other agents-family harnesses read the standard
+`AGENTS.md` your normal `apm compile` flow already produces. See
 [Hermes Agent](../integrations/hermes/).
 
 ## Detection cascade

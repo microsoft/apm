@@ -15,7 +15,7 @@ what APM does not defend against.
 APM defends the **build-time supply chain** for AI agent context:
 prompts, instructions, skills, hooks, and MCP server declarations
 flowing from a git source through `apm install` into your project tree
-and on into seven harnesses. The defended properties are reproducibility
+and on into eight harnesses. The defended properties are reproducibility
 (same install everywhere), integrity (downloaded content matches the
 lockfile), provenance (every dep traces to a pinned commit at a named
 host), and pre-deploy content safety (no hidden Unicode reaches the
