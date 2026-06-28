@@ -104,7 +104,19 @@ def _leaf_byte_cost(node: object) -> int:
         return len(node) + 2  # surrounding quotes
     if isinstance(node, (bytes, bytearray)):
         return len(node) + 2
-    # numbers / bool / None -> short repr; a small constant upper bound.
+    if isinstance(node, bool):
+        return 5  # "false"
+    if isinstance(node, int):
+        # json.dumps emits the FULL decimal expansion of an int, so a fat
+        # integer scalar aliased many times stays a small node count but
+        # serialises to enormous bytes. PyYAML decodes unbounded integer
+        # scalars to Python int, so this must be magnitude-aware or the byte
+        # cap is blind to it. Estimate the decimal digit count from the bit
+        # length (log10(2) ~ 0.30 digits/bit; // 3 over-estimates slightly,
+        # which is safe) without materialising the string. +3 covers the
+        # sign and a couple of guard chars.
+        return (node.bit_length() // 3) + 3
+    # float / None / other short-repr scalars -> small constant upper bound.
     return 8
 
 

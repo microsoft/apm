@@ -277,6 +277,58 @@ def test_fat_scalar_rejected_by_byte_cap():
     assert _is_fingerprint_safe(_fat_scalar_aliased()) is False
 
 
+def _fat_int_aliased(reps: int = 90_000, digits: int = 4000) -> dict:
+    """One fat INTEGER scalar leaf aliased *reps* times.
+
+    PyYAML safe_load decodes an unbounded integer scalar to a Python int, and
+    json.dumps emits its FULL decimal expansion per reference. The node count
+    stays small (reps + const) and a magnitude-blind byte estimate (every int
+    == a few bytes) under-counts the output, so both caps pass and json.dumps
+    then materialises hundreds of MB. The byte cost MUST be magnitude-aware so
+    the cumulative byte cap fires before json.dumps allocates.
+    """
+    big = int("9" * digits)
+    return {"post-install": [{"type": "command", "run": [big] * reps}]}
+
+
+def test_fat_int_rejected_by_byte_cap():
+    """A giant integer aliased many times must fail closed via the byte cap.
+
+    Regression trap for r4-trust-1: _leaf_byte_cost modelled every int as 8
+    bytes, so a 4000-digit int aliased 90k times slipped under both caps and
+    let json.dumps allocate ~360MB pre-trust. The fix makes int cost scale
+    with bit_length so the 1MB byte cap rejects it.
+    """
+    import threading
+
+    from apm_cli.core.script_trust import _is_fingerprint_safe, fingerprint_lifecycle_subtree
+
+    subtree = _fat_int_aliased()
+    assert _is_fingerprint_safe(subtree) is False
+
+    box: dict[str, object] = {}
+
+    def _run():
+        box["result"] = fingerprint_lifecycle_subtree(subtree)
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(timeout=5.0)
+    assert not worker.is_alive(), (
+        "big-int fingerprint did not bail fast -- byte cap not magnitude-aware"
+    )
+    assert box.get("result") is None
+
+
+def test_benign_small_int_still_accepted():
+    """A legit manifest with small integer fields (timeoutSec) must still pass."""
+    from apm_cli.core.script_trust import _is_fingerprint_safe, fingerprint_lifecycle_subtree
+
+    manifest = {"post-install": [{"type": "command", "run": "echo hi", "timeoutSec": 30}]}
+    assert _is_fingerprint_safe(manifest) is True
+    assert fingerprint_lifecycle_subtree(manifest) is not None
+
+
 def test_realistic_manifest_not_false_rejected():
     """A legit manifest with many entries reusing interned scalars must pass.
 

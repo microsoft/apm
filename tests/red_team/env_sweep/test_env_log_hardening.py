@@ -170,3 +170,51 @@ class TestPrefixFragmentationRedaction:
         assert longer not in out
         assert "efgh5678ijkl9012" not in out, "longer secret tail leaked (prefix fragmentation)"
         assert "[REDACTED]" in out
+
+
+# -- r4-env-1: audit-log line injection via stdout/stderr newlines ----------
+
+
+class TestLogLineInjection:
+    """Newlines in a script's stdout/stderr must not forge new log entries.
+
+    scripts.log is the audit trail that catches malicious scripts, so a field
+    derived from attacker-controlled output must never contain a raw CR/LF --
+    otherwise the script can emit a line that, at column 0, is byte-identical
+    to a genuine ``[ts] event=... status=ok`` entry and forge or bury records.
+    """
+
+    def _log_path(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("APM_HOME", str(tmp_path))
+        return script_executors._get_scripts_log_path()
+
+    def test_stdout_newline_cannot_forge_entry(self, tmp_path, monkeypatch) -> None:
+        log_path = self._log_path(tmp_path, monkeypatch)
+        forged = (
+            "step done\r\n"
+            "[2030-05-05T00:00:00Z] event=preinstall type=command "
+            "target=clean status=ok exit_code=0\r\n"
+            "  stdout: nothing to see\r\n"
+        )
+        _append_to_script_log(
+            "preinstall", "command", "attacker.sh", stdout=forged, status="error", exit_code=1
+        )
+        contents = log_path.read_text()
+        # No line may begin with the forged timestamp at column 0.
+        forged_at_col0 = [ln for ln in contents.splitlines() if ln.startswith("[2030-05-05")]
+        assert forged_at_col0 == [], "script forged a column-0 audit entry via stdout newlines"
+        # The real entry's header is the only bracketed line at column 0.
+        headers = [ln for ln in contents.splitlines() if ln.startswith("[") and "event=" in ln]
+        assert len(headers) == 1
+        assert "status=error" in headers[0]
+        # The injected payload survives as escaped text on the stdout field line.
+        assert "\\r\\n" in contents or "\\n" in contents
+
+    def test_target_newline_cannot_forge_entry(self, tmp_path, monkeypatch) -> None:
+        log_path = self._log_path(tmp_path, monkeypatch)
+        evil_cmd = (
+            "echo hi\n[2030-01-01T00:00:00Z] event=postinstall type=command target=x status=ok"
+        )
+        _append_to_script_log("post-install", "command", evil_cmd, status="ok")
+        contents = log_path.read_text()
+        assert [ln for ln in contents.splitlines() if ln.startswith("[2030-01-01")] == []

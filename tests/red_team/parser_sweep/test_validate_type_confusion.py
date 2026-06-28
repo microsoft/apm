@@ -49,6 +49,10 @@ def _validate(tmp_path, body):
         "lifecycle:\n  post-install:\n    - {type: http, url: 'https://x.example', headers: [a]}\n",
         "lifecycle:\n  post-install:\n    - [not, a, mapping]\n",
         "lifecycle:\n  post-install:\n    - null\n",
+        # r4-parser-1: an unbalanced IPv6 authority makes urlparse raise
+        # ValueError("Invalid IPv6 URL") AT PARSE TIME -- validate must catch it.
+        'lifecycle:\n  post-install:\n    - {type: http, url: "https://[::1"}\n',
+        'lifecycle:\n  post-install:\n    - {type: http, url: "https://[fe80::1"}\n',
     ],
 )
 def test_validate_never_raises_on_type_confusion(tmp_path, body):
@@ -58,6 +62,19 @@ def test_validate_never_raises_on_type_confusion(tmp_path, body):
     except Exception as exc:
         pytest.fail(f"BREAK: validate raised on type-confused entry: {type(exc).__name__}: {exc}")
     assert isinstance(errors, list)
+
+
+def test_validate_reports_malformed_ipv6_url_not_crash(tmp_path):
+    """r4-parser-1: a malformed-IPv6 https URL must be a structured error.
+
+    urlparse('https://[::1') raises ValueError at parse time; the fire path
+    already catches it, so validate must too -- emitting a normal error rather
+    than aborting the whole per-file loop with a traceback.
+    """
+    errors = _validate(
+        tmp_path, 'lifecycle:\n  post-install:\n    - {type: http, url: "https://[::1"}\n'
+    )
+    assert any("malformed URL" in e for e in errors), errors
 
 
 def test_validate_flags_non_string_url_structured(tmp_path):

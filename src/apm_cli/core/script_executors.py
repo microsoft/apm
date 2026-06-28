@@ -194,8 +194,27 @@ def _get_scripts_log_path() -> Path:
     return base / "logs" / "scripts.log"
 
 
+def _neutralize_newlines(text: str) -> str:
+    """Escape CR/LF so a log field cannot forge a new log line.
+
+    The scripts.log audit trail exists to catch malicious scripts, so a field
+    derived from attacker-controlled stdout/stderr (or a multi-line command)
+    must never contain a raw newline -- otherwise a script could emit output
+    that, at column 0, is byte-indistinguishable from a genuine
+    ``[ts] event=... status=ok`` entry and forge or bury audit records. The
+    header path already strips CR/LF from expanded values; this closes the
+    same gap for the output fields.
+    """
+    return text.replace("\r", "\\r").replace("\n", "\\n")
+
+
 def _truncate_log_field(text: str) -> str:
-    """Clamp a stdout/stderr field to a bounded length for the log."""
+    """Clamp a stdout/stderr field to a bounded length for the log.
+
+    Newlines are neutralized first so a single log event occupies a bounded,
+    single logical region no attacker field can break out of.
+    """
+    text = _neutralize_newlines(text)
     if len(text) <= _MAX_LOG_FIELD_CHARS:
         return text
     return text[:_MAX_LOG_FIELD_CHARS] + " ...[truncated]"
@@ -233,7 +252,7 @@ def _append_to_script_log(
         _rotate_log_if_large(log_path)
 
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        safe_target = _redact_secrets(target)
+        safe_target = _neutralize_newlines(_redact_secrets(target))
         lines = [
             f"[{ts}] event={event_name} type={script_type} target={safe_target} status={status}"
         ]
@@ -349,6 +368,12 @@ _METADATA_HOSTNAMES = frozenset(
 # is_private/is_global predicates, but an SSRF guard must refuse it.
 _CGNAT_NET = ipaddress.ip_network("100.64.0.0/10")
 
+# RFC 3879 deprecated IPv6 site-local space. The stdlib reports it as
+# is_global=True / is_private=False (only fe80::/10 link-local is flagged), so
+# an SSRF guard built on the stdlib predicates would let it through. Refuse it
+# explicitly for the same reason as the CGNAT block.
+_SITE_LOCAL_NET = ipaddress.ip_network("fec0::/10")
+
 
 def _host_to_ip_literal(host: str) -> ipaddress._BaseAddress | None:
     """Canonicalise *host* to an IP address if it denotes one literally.
@@ -388,6 +413,10 @@ def _ip_is_internal(ip: ipaddress._BaseAddress) -> bool:
     # is_global per the stdlib, yet it is shared ISP space an SSRF guard must
     # refuse (a request there can hit a sibling tenant behind the CGNAT).
     if isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT_NET:
+        return True
+    # RFC 3879 deprecated IPv6 site-local (fec0::/10): is_global per the stdlib,
+    # so the predicates below miss it. Refuse it as the link-local sibling.
+    if isinstance(ip, ipaddress.IPv6Address) and ip in _SITE_LOCAL_NET:
         return True
     return bool(
         ip.is_private

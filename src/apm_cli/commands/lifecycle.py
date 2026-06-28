@@ -437,11 +437,21 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
                 elif not isinstance(url, str):
                     errors.append(f"{prefix}: 'url' must be a string, got {type(url).__name__}")
                 else:
-                    parsed = urlparse(url)
-                    if parsed.scheme.lower() != "https":
-                        errors.append(f"{prefix}: URL must use https:// scheme")
-                    if parsed.username or parsed.password:
-                        errors.append(f"{prefix}: URL must not contain embedded credentials")
+                    try:
+                        parsed = urlparse(url)
+                        scheme = parsed.scheme.lower()
+                        has_creds = bool(parsed.username or parsed.password)
+                    except ValueError:
+                        # urlparse raises on a malformed authority (e.g. an
+                        # unbalanced IPv6 literal "https://[::1"). validate must
+                        # report it as an ordinary error, not crash the loop;
+                        # the fire path already treats it as a refused target.
+                        errors.append(f"{prefix}: malformed URL")
+                    else:
+                        if scheme != "https":
+                            errors.append(f"{prefix}: URL must use https:// scheme")
+                        if has_creds:
+                            errors.append(f"{prefix}: URL must not contain embedded credentials")
 
     return errors
 
