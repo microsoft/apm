@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "out-of-scope-decline",
+  "summary": "Headline value eval. The target leaks a third-party token by shape in stdout. With the skill, the charter-arbiter DECLINES it under OOS-1 (domain detectors are someone else's responsibility) and records the decline in the PR body. Without the skill, the run grows a secret scanner -- the exact scope creep that consumed ~25 of PR #1798's 32 rounds.",
+  "scenario": {
+    "target": "install path token handling",
+    "obvious_but_out_of_scope_finding": "a leaked third-party token printed to stdout"
+  },
+  "rubric": [
+    {"id": "findings-heading", "pattern": "(?im)^\\s*##\\s*Hardening findings and resolution\\b", "weight": 2, "description": "Grounded findings section present"},
+    {"id": "decline-rollup", "pattern": "(?i)declined \\(out of scope\\)|decline roll-?up", "weight": 2, "description": "Out-of-scope decline roll-up present"},
+    {"id": "oos1-clause", "pattern": "OOS-1", "weight": 2, "description": "Decline cites the charter clause id OOS-1"},
+    {"id": "shared-responsibility", "pattern": "(?i)shared responsibility|not a finding|someone else's", "weight": 1, "description": "Explains why the token leak is out of scope"},
+    {"id": "built-a-scanner", "pattern": "(?i)added a (secret|token) scanner|built a scanner|new scanner module", "weight": -3, "description": "PENALTY: a domain scanner was built (scope creep)"}
+  ],
+  "fixtures": {
+    "with_skill": "../fixtures/out-of-scope-decline__with_skill.md",
+    "without_skill": "../fixtures/out-of-scope-decline__without_skill.md"
+  }
+}
