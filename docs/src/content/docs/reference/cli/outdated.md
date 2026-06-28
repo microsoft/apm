@@ -18,7 +18,7 @@ apm outdated [OPTIONS]
 `apm outdated` reads `apm.lock.yaml` and queries each remote to detect staleness:
 
 - **Plain tag-pinned deps** (e.g. `v1.2.3` or `1.2.3`): semver compare against the latest matching remote tag.
-- **Patterned tag-pinned deps** (e.g. `my-pkg_v1.2.3`, `my-pkg--v1.2.3`, or `my-pkg-v1.2.3`): semver compare against the latest tag matching the package-specific pattern inferred from the locked ref. For virtual subdirectory packages (installed via `path:` in `apm.yml`), `{name}` is derived from the final path segment (path values are validated; traversal sequences are rejected), so a dep with `path: packages/my-pkg` resolves tags like `my-pkg_v1.2.3`.
+- **Patterned tag-pinned deps** (e.g. `my-pkg_v1.2.3`, `my-pkg--v1.2.3`, or `my-pkg-v1.2.3`): semver compare against the latest tag matching the package-specific pattern inferred from the locked ref. For virtual subdirectory packages (installed via `path:` in `apm.yml`), `{name}` is derived from the final path segment, so a dep with `path: packages/my-pkg` resolves tags like `my-pkg_v1.2.3`.
 - **Full-SHA revision-pinned deps**: compare the pinned SHA against the commit behind the latest annotated semver tag. Branches and lightweight tags are ignored.
 - **Branch-pinned deps** (e.g. `main`): compare the locked commit SHA against the remote branch tip.
 - **Default-branch deps** (no ref): compare against `main`/`master` tip.
@@ -80,9 +80,9 @@ Show available tags for outdated packages:
 apm outdated --verbose
 ```
 
-#### Monorepo subdirectory packages
+### Monorepo subdirectory packages
 
-Monorepo dependency installed via `path:` (tag name derived from virtual path):
+Monorepo dependency installed via `path:`:
 
 ```yaml
 # apm.yml
