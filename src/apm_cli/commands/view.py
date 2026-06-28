@@ -696,6 +696,10 @@ def view(package: str, field: str | None, global_: bool, registry: str | None):
 
     logger = CommandLogger("view")
 
+    # Warn if --registry is supplied without the versions field (flag is ignored).
+    if registry is not None and field != "versions":
+        logger.warning("--registry is only valid with the versions field; flag ignored")
+
     # --- field validation (before any I/O) ---
     if field is not None:
         if field not in VALID_FIELDS:

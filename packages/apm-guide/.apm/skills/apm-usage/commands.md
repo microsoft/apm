@@ -18,7 +18,7 @@
 | `apm deps tree` | Show dependency tree | -- |
 | `apm deps why PKG` | Explain why a package is installed (walks lockfile bottom-up to direct deps; analogue of `npm why` / `yarn why`) | `-g` global, `--json` |
 | `apm find <PATH>` | Trace a deployed file back to the package(s) that contributed it (inverse of install; reads `apm.lock.yaml` only) | `--source` show OCI/git/local origin, `--path` show full why-chain (same as `apm deps why`) |
-| `apm view PKG [FIELD]` | View package details, git refs, or registry versions | `-g` global, `FIELD=versions` |
+| `apm view PKG [FIELD]` | View package details, git refs, or registry versions | `-g` global, `FIELD=versions`, `--registry [NAME]` forces registry path for versions |
 | `apm outdated` | Check locked deps via SHA/semver comparison; patterned per-package tags are auto-detected; full-SHA pins compare against the latest annotated semver tag | `-g` global, `-v` verbose, `-j N` parallel checks |
 | `apm deps info PKG` | Alias for `apm view PKG` local metadata | -- |
 | `apm deps clean` | Clean dependency cache | `--dry-run`, `-y` skip confirm |

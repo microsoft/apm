@@ -899,3 +899,111 @@ class TestEffectiveDefaultRegistry:
             result = _effective_default_registry(tmp_path)
 
         assert result == "jfrog-demo"
+
+
+class TestDisplayRegistryVersions:
+    """Direct tests for _display_registry_versions error and output paths."""
+
+    runner = CliRunner()
+
+    def test_unknown_registry_name_exits_with_error(self, tmp_path) -> None:
+        """An explicit --registry NAME that does not exist in config exits 1."""
+        from apm_cli.commands.view import _display_registry_versions
+        from apm_cli.core.command_logger import CommandLogger
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep_ref = DependencyReference.parse("acme/web-skills")
+        logger = CommandLogger("test")
+
+        with (
+            patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=({"known-reg": "https://known.example"}, "known-reg"),
+            ),
+            pytest.raises(SystemExit, match=r"1"),
+        ):
+            _display_registry_versions(
+                dep_ref.repo_url, dep_ref, logger, registry_name="no-such-reg"
+            )
+
+    def test_no_registry_configured_exits_with_error(self, tmp_path) -> None:
+        """When no registry is configured at all, _display_registry_versions exits 1."""
+        from apm_cli.commands.view import _display_registry_versions
+        from apm_cli.core.command_logger import CommandLogger
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep_ref = DependencyReference.parse("acme/web-skills")
+        logger = CommandLogger("test")
+
+        with (
+            patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=(None, None),
+            ),
+            patch(
+                "apm_cli.deps.lockfile.LockFile.read",
+                return_value=None,
+            ),
+            pytest.raises(SystemExit, match=r"1"),
+        ):
+            _display_registry_versions("acme/web-skills", dep_ref, logger, registry_name=None)
+
+    def test_registry_client_error_exits_with_error(self) -> None:
+        """RegistryError from the client is caught and exits 1."""
+        from apm_cli.commands.view import _display_registry_versions
+        from apm_cli.core.command_logger import CommandLogger
+        from apm_cli.deps.registry.client import RegistryError
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep_ref = DependencyReference.parse("acme/web-skills")
+        logger = CommandLogger("test")
+
+        with (
+            patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=({"my-reg": "https://reg.example"}, "my-reg"),
+            ),
+            patch(
+                "apm_cli.deps.registry.auth.resolve_for_url",
+                return_value=None,
+            ),
+            patch(
+                "apm_cli.deps.registry.client.RegistryClient.list_versions",
+                side_effect=RegistryError("connection refused"),
+            ),
+            pytest.raises(SystemExit, match=r"1"),
+        ):
+            _display_registry_versions("acme/web-skills", dep_ref, logger, registry_name=None)
+
+    def test_happy_path_returns_versions(self) -> None:
+        """Happy path: RegistryClient returns versions and the function returns normally."""
+        from apm_cli.commands.view import _display_registry_versions
+        from apm_cli.core.command_logger import CommandLogger
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep_ref = DependencyReference.parse("acme/web-skills")
+        logger = CommandLogger("test")
+
+        version_entry = MagicMock()
+        version_entry.version = "1.2.3"
+        version_entry.published_at = "2025-01-01T00:00:00Z"
+
+        with (
+            patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=({"my-reg": "https://reg.example"}, "my-reg"),
+            ),
+            patch(
+                "apm_cli.deps.registry.auth.resolve_for_url",
+                return_value=None,
+            ),
+            patch(
+                "apm_cli.deps.registry.client.RegistryClient.list_versions",
+                return_value=[version_entry],
+            ),
+            patch("rich.console.Console") as mock_console_cls,
+        ):
+            mock_console = MagicMock()
+            mock_console_cls.return_value = mock_console
+            # Should not raise or exit
+            _display_registry_versions("acme/web-skills", dep_ref, logger, registry_name=None)
