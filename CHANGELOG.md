@@ -7,16 +7,164 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm outdated` tag-pattern matching for monorepo virtual subdirectory
+  dependencies now derives the `{name}` segment from the `virtual_path`
+  basename (e.g., `packages/my-pkg` -> `my-pkg`), aligning with `apm update`
+  behavior. (by @kevinbeier-enbw; closes #1893) (#1893)
+- Skipped startup update checks for unknown `apm` commands and bare help
+  invocations so invalid CLI input fails without update-check latency. (by
+  @maro114510) (#1541)
+- Fixed `apm install` lockfile pruning when all `apm.yml` dependencies are
+  removed, so stale `apm.lock.yaml` entries no longer survive. (by @nadav-y)
+  (#1926)
+- Fixed `apm update` final summary counts so unchanged re-materialized
+  dependencies are not reported as updated. (by @nadav-y) (#1927)
+- Fixed spurious version-range diffs for cached transitive registry
+  dependencies during `apm update`. (by @nadav-y) (#1921)
+
+### Security
+
+- Bumped `llm` to `>=0.28` (resolved to 0.31) to clear the Critical code-injection
+  advisory GHSA-g76p-4vg5-f4qh (Dependabot #62) affecting `llm <= 0.27.1`, and
+  raised the `llm-github-models` floor to `>=0.18.0`. Forced patched transitive
+  `vite` (`>=7.3.5`) and `esbuild` (`>=0.28.1`) in the `docs/` site via
+  `package.json` overrides to clear GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3,
+  and GHSA-g7r4-m6w7-qqqr (Dependabot #68, #69, #65). (#1936)
+
+## [0.22.0] - 2026-06-26
+
 ### Added
 
+- Per-dependency `targets:` scopes a dependency's target-specific primitives
+  to selected harnesses (for example `targets: [copilot, claude]`), preventing
+  hooks from leaking across tools. Filename-suffix hook routing
+  (`*-<harness>-hooks.json`) is deprecated. (#1902)
+- Executable Trust Governance v1 (#1875): executable trust is now one concept
+  with one resolver and deny-wins precedence. Organizations can now declare an
+  `executables:` block in `apm-policy.yml` (`deny_all`, `deny`, `require`,
+  `recommend`) that is carried through policy inheritance, closing the
+  GRANT/MANDATE asymmetry where projects could allow executables but orgs
+  could not deny them. Org `deny` patterns support `fnmatch` globs (e.g.
+  `evil/*`) so an admin can block a whole publisher fleet-wide; the GRANT
+  side (`allow`/`recommend`/`require`) is exact-match in v1. A single deny-wins precedence resolver
+  (`resolve_exec_decision`) is now shared by both the install gate and the
+  `apm audit` policy checks, so the gate and the audit can never disagree.
+  Precedence (first match wins): org `deny_all`/`deny` > user deny > project
+  deny > project allow > user allow > org `recommend` > default-deny. The lockfile records a
+  per-dependency `exec_status` (`deployed`, `gated_pending_approval`,
+  `denied`, `absent`). No cryptographic signing or `enforce`-mandate
+  execution is introduced in v1 (an unverified `enforce` rung fail-safe
+  degrades to `recommend`). (by @sergio-sisternes-epam; closes #1873) (#1875)
+- `apm policy explain <pkg>` prints the effective executable-trust decision
+  for a package: whether it is allowed, the deciding policy layer, and any
+  layers it shadows. `apm doctor` adds a fleet-level executable-trust drift
+  check that flags packages allowed locally but denied by org policy. (#1875)
+- `apm approve --recommended` bulk-accepts an organization's `recommend`
+  set, and `apm approve --list` shows the effective trust state of every
+  installed package with executables. (#1875)
+- The shared gh-aw workflow `.github/workflows/shared/apm.md` exposes an optional `apm-version` import input that pins the apm CLI version for both the pack and restore `microsoft/apm-action` steps (so the two cannot skew), surviving `gh aw update` without hand-editing the vendored file. Omitting it falls through to the action's pinned default via a gh-aw schema default, so non-opting consumers stay reproducible instead of floating to `latest`. (#1842)
+- `apm config set target <env>` configures a default install target so a bare
+  `apm install` deploys to it -- set the target once, then install everywhere
+  without repeating `--target`. Precedence is `--target` > `apm.yml` `target:` >
+  config default > auto-detect, and `apm config get/unset target` inspect and
+  clear it. (#1881)
 - Org-wide policy discovery now cascades through candidate repo names
   (`.github`, then `.apm`, then `_apm`) and speaks the Azure DevOps Items
   API, so Azure DevOps organizations -- which forbid repo names that begin
   or end with `.` -- can host an APM governance policy repo for the first
   time. (by @sergio-sisternes-epam; closes #1813) (#1830)
+- `apm compile -g` / `--global` compiles global (apply_to-less) instructions
+  into user-scope root context files (`~/.claude/CLAUDE.md`,
+  `~/.codex/AGENTS.md`, ...). `apm install -g` now prints a read-only hint
+  pointing at it; no root context file is written on install. (closes #1485)
+  (#1632)
+- Each `apm.lock.yaml` dependency entry now records the installed package's own
+  `name` and `version` -- for direct and transitive deps across git, local,
+  registry, and cached sources -- so dependency inventory and upgrade planning
+  are answerable straight from the lockfile. (closes #1888) (#1904)
+- `apm config` gains `self-update.channel` and `self-update.install-dir` keys
+  so `apm self-update` reads persisted non-secret installer defaults;
+  credentials, tokens, and mirror URLs stay out of persisted config. (closes
+  #667) (#1915)
+
+### Changed
+
+- **BREAKING:** Windsurf (Devin Desktop) skills now deploy to the cross-tool
+  `.agents/skills/<name>/SKILL.md` path instead of `.windsurf/skills/`, joining
+  the other five harnesses. Existing `.windsurf/skills/` deployments are
+  orphaned (not auto-migrated) on next `apm install`; opt out with
+  `--legacy-skill-paths`. (refs #1520) (#1802)
+- Azure DevOps marketplace metadata now resolves through the Azure DevOps
+  Items API instead of cloning the whole repo, with transparent fallback to
+  the existing git path when REST is unavailable. (by @Aaryan-Dadu; closes
+  #1808) (#1852)
+- Executable-trust vocabulary is unified onto one noun, `executables`.
+  `apm approve` / `apm deny` now default to the project `apm.yml`
+  `executables: {allow, deny}` block (the committed, team-wide admin
+  decision); pass `--user` to write personal consent to
+  `~/.apm/config.json` (the lowest-authority, machine-local override that
+  can only narrow). (#1875)
+- The `required-packages-deployed` audit check now asserts package
+  PRESENCE in the lockfile rather than materialized `deployed_files`, so an
+  install SUCCEEDS when a required package is present-but-parked (its
+  executables gated pending approval) and prints a one-command remedy
+  instead of hard-failing. A separate `required-executable-untrusted`
+  signal hard-fails CI when a required package's executables are untrusted.
+  (#1875)
+
+### Deprecated
+
+- The project `allowExecutables:` block is deprecated in favor of
+  `executables.allow`. It remains a read alias for one minor cycle and is
+  migrated to `executables.allow` on the next `apm approve`/`apm deny`
+  write. The org `bin_deploy` deny policy is folded into
+  `executables.deny[bin]` as a deprecated alias. (#1875)
+- The org `executables.enforce` tier (the v2 mandate rung) is accepted but
+  INERT in v1: writing it emits a validation warning and the resolver
+  degrades it to `recommend` (no force-execute; a user deny still
+  overrides). (#1875)
+
+### Removed
+
+- **Breaking (security):** executable dependencies -- including MCP servers and
+  canvas extensions -- now require explicit, persistent approval via `apm approve`,
+  closing the gap where canvas extensions were trusted per-run. The
+  `--trust-canvas-extensions` flag is removed as a consequence; canvas extensions
+  are now governed by the executable-trust gate like every other executable
+  surface. (by @sergio-sisternes-epam) (#1865)
+
+  ```diff
+  - apm install --trust-canvas-extensions   # before: per-run trust flag
+  + apm approve <pkg>                        # after: one-time, persistent approval
+  ```
+
+  CI / non-interactive pipelines that previously passed the flag should
+  instead pre-seed approvals before `apm install`, e.g.
+  `apm approve <pkg>`, so the gate finds the package already trusted and
+  never prompts.
+- The standalone `~/.apm/approvals.yml` personal-consent file is removed;
+  its contents are migrated into `~/.apm/config.json` under
+  `executables: {allow, deny}` on first read (net-new control-surface
+  files = 0). (#1875)
 
 ### Fixed
 
+- Reinstalling on Windows no longer falsely re-reports unchanged files as
+  freshly installed. A dependency whose source carries CRLF line endings
+  (text-mode checkout or `core.autocrlf`) now adopts the already-deployed LF
+  file, so no-op installs report `(files unchanged)` as they do on
+  Linux/macOS. (#1916)
+- `apm update` on a registry semver dependency now re-resolves and re-downloads
+  when a newer matching version exists, instead of leaving the old version in
+  place; registry deps are now first-class across install, update, and every
+  display surface. (by @nadav-y) (#1908)
+- APM-written deployed text files now use LF line endings on every platform,
+  so identical content no longer produces different
+  `local_deployed_file_hashes` / `deployed_file_hashes` between Windows and
+  Linux (which previously churned the lockfile across machines and CI).
+  (#1913)
 - `apm install <pkg>@<marketplace>` now preserves GitLab and other
   non-GitHub hosts from url-type marketplace plugin sources, so auth
   resolution no longer falls back to `github.com` for those installs.
@@ -35,6 +183,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install -g --target codex` now honors `CODEX_HOME` for user-scope
   Codex MCP config writes, falling back to `~/.codex/config.toml` when unset.
   (closes #1861) (#1863)
+- Windows installer staging now honors `APM_TEMP_DIR` and reports actionable
+  guidance when the temporary staging root is not writable. (closes #1874)
+  (#1876)
+- Windows pip fallback no longer terminates early when native pip writes stderr
+  under `$ErrorActionPreference = "Stop"`. (closes #1874) (#1876)
+- `apm install plugin@marketplace` now correctly fetches from the
+  marketplace's registered `--ref` branch instead of silently falling back
+  to the repository's default branch. Root cause: `resolve_marketplace_plugin`
+  did not propagate `source.ref` to downstream resolution calls. Covers both
+  GitHub-family hosts (ref appended to canonical as `#ref`) and GitLab-hosted
+  marketplaces (ref injected into `DependencyReference`). Guards prevent
+  double-injection when a plugin's own dict source already carries an explicit
+  `ref`, and skip `main`/`HEAD` as implicit defaults. (by @chkp-roniz,
+  #1880; mirrors #1824)
+- GitLab archive URLs with slash-containing branch names (e.g.
+  `feat/my-feature`) now produce correctly-formed Artifactory-proxyable
+  filenames. The slash is preserved in the path segment (as the GitLab
+  archive API expects) but replaced with `-` in the archive filename,
+  matching GitLab's own naming convention. Previously,
+  `PROXY_REGISTRY_ONLY=1` installs from such branches returned HTTP 404
+  from the proxy because the generated filename contained a literal slash.
+  (by @chkp-roniz, #1880; fixes the proxy scenario not covered by #1824)
+- `apm install <pkg> --target X` in a directory with no `apm.yml` now persists
+  the selected harness(es) into the auto-created manifest's `targets:`, so a
+  later bare `apm update` redeploys to the same targets without re-specifying
+  `--target`. (closes #1743) (#1901)
+- `apm update` / self-update on macOS no longer prints `-e` literally before
+  each colored line (caused by invoking `install.sh` under `/bin/sh`), and now
+  shows a progress bar during binary download. (by @nadav-y) (#1872)
+
+### Security
+
+- The `allowExecutables` default-deny gate now enforces `mcp` server writes and
+  `canvas` extensions in addition to `hooks` and `bin`, bringing all four executable
+  surfaces under one approval model. `apm approve` decisions are also stored
+  user-local in `~/.apm/approvals.yml` instead of the committed project `apm.yml`,
+  so cloning a repository no longer silently inherits another developer's executable
+  approvals. (by @sergio-sisternes-epam) (#1865)
 
 ## [0.21.0] - 2026-06-19
 
@@ -60,6 +246,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm lock export --format cyclonedx|spdx` emits a standard SBOM inventory of installed packages, and a new declared-license recorder stores each package's manifest-declared license (`apm.yml` `license:` / `plugin.json`) in the lockfile after offline SPDX-id validation. APM records what a package declares -- it does not scan LICENSE text or gate installs on a license. (closes #1777) (#1820)
 - `apm install` / `apm pack` can now deploy an experimental Copilot-only `canvas` primitive: a package declaring `.apm/extensions/<name>/` ships verbatim to `.github/extensions/<name>/` (or `~/.copilot/extensions/<name>/` with `--global`), where Copilot CLI discovers it in-session. The surface is gated twice -- `apm experimental enable canvas` plus `--trust-canvas-extensions` for dependency-provided canvases -- and is fail-closed when the flag is off. (#1689)
 - `apm install` now blocks dependency-provided executables (hooks and `bin/`) by default, mirroring npm v12's default-deny model. A dependency's hooks or binaries deploy only after explicit approval in an `allowExecutables` block of `apm.yml`, managed via `apm approve` / `apm deny`; root-authored content and text-only primitives are unaffected. (#1723)
+- `apm compile --global` / `-g` compiles user-scope root context files such as
+  `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.gemini/GEMINI.md` from
+  globally installed instructions. Compilation stays explicit; `apm install -g`
+  prints a one-line hint pointing at `apm compile -g` when global instructions
+  land on a root-context-only target, but writes no root context file. (#1632)
+
+### Changed
+
+- Windsurf skills now deploy to the cross-tool `.agents/skills/<name>/SKILL.md` path (was `.windsurf/skills/`), converging with Copilot, Cursor, Codex, Gemini, and OpenCode. Pass `--legacy-skill-paths` or set `APM_LEGACY_SKILL_PATHS=1` to restore the per-client `.windsurf/skills/` layout. The lockfile pack-time cross-target skill map for Windsurf is swept separately in #1805. (closes #1520) (#1802)
 
 ### Removed
 

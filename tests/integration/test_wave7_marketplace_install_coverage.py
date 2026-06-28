@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
@@ -991,6 +992,30 @@ class TestInstallAutoBootstrap:
             ):
                 result = runner.invoke(cli, ["install", "--dry-run", "owner/new-pkg"])
         assert result.exit_code == 0
+
+    def test_no_apm_yml_with_target_flag_persists_targets(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """Auto-bootstrap persists CLI targets through the integration path."""
+        from apm_cli.core.apm_yml import parse_targets_field
+
+        with runner.isolated_filesystem(temp_dir=str(tmp_path)):
+            with (
+                patch("apm_cli.commands.install.AuthResolver", autospec=True),
+                patch(
+                    "apm_cli.commands.install._validate_package_exists",
+                    return_value=True,
+                ),
+            ):
+                result = runner.invoke(
+                    cli, ["install", "--dry-run", "owner/new-pkg", "--target", "copilot"]
+                )
+
+            assert result.exit_code == 0
+            with open("apm.yml", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+            assert config.get("targets") == ["copilot"]
+            assert parse_targets_field(config) == ["copilot"]
 
 
 # ===========================================================================

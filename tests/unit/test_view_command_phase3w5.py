@@ -167,7 +167,7 @@ class TestDisplayPackageInfo:
             ),
             patch(
                 "apm_cli.commands.view._lookup_lockfile_ref",
-                return_value=("v1.0.0", "abc123456789"),
+                return_value=("v1.0.0", "abc123456789", ""),
             ),
         ):
             display_package_info("org/repo", tmp_path, logger, project_root=tmp_path)
@@ -184,7 +184,7 @@ class TestDisplayPackageInfo:
                 "apm_cli.commands.view._get_detailed_package_info",
                 return_value=pkg_info,
             ),
-            patch("apm_cli.commands.view._lookup_lockfile_ref", return_value=("", "")),
+            patch("apm_cli.commands.view._lookup_lockfile_ref", return_value=("", "", "")),
         ):
             display_package_info("org/repo", tmp_path, logger, project_root=tmp_path)
 
@@ -200,7 +200,7 @@ class TestDisplayPackageInfo:
                 "apm_cli.commands.view._get_detailed_package_info",
                 return_value=pkg_info,
             ),
-            patch("apm_cli.commands.view._lookup_lockfile_ref", return_value=("", "")),
+            patch("apm_cli.commands.view._lookup_lockfile_ref", return_value=("", "", "")),
         ):
             display_package_info("org/repo", tmp_path, logger, project_root=tmp_path)
 
@@ -232,7 +232,9 @@ class TestDisplayPackageInfo:
                 "apm_cli.commands.view._get_detailed_package_info",
                 return_value=pkg_info,
             ),
-            patch("apm_cli.commands.view._lookup_lockfile_ref", return_value=("v1.0", "abc123")),
+            patch(
+                "apm_cli.commands.view._lookup_lockfile_ref", return_value=("v1.0", "abc123", "")
+            ),
             patch.dict(sys.modules, {"rich.console": None, "rich.panel": None}),
         ):
             display_package_info("org/repo", tmp_path, logger, project_root=tmp_path)
@@ -432,7 +434,7 @@ class TestDisplayVersions:
         ):
             display_versions("org/repo", logger)
 
-    def test_no_refs_logs_progress(self):
+    def test_no_refs_logs_warning(self):
         from apm_cli.commands.view import display_versions
 
         logger = _make_logger()
@@ -447,7 +449,7 @@ class TestDisplayVersions:
             ),
         ):
             display_versions("org/repo", logger)
-        logger.progress.assert_called()
+        logger.warning.assert_called()
 
     def test_rich_table_rendered_with_refs(self):
         from apm_cli.commands.view import display_versions

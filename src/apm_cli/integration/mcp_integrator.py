@@ -23,6 +23,7 @@ from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.integration._shared import deduplicate_deps, resolve_locked_apm_yml_paths
 from apm_cli.runtime.utils import find_runtime_binary
+from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.console import (
     _get_console,  # noqa: F401 -- re-exported; mcp_integrator_install imports this via lazy import
     _rich_error,
@@ -86,7 +87,7 @@ def _clean_json_mcp_config(
             text = json.dumps(config, indent=2)
             if trailing_newline:
                 text += "\n"
-            config_path.write_text(text, encoding="utf-8")
+            write_text_lf(config_path, text)
             for name in removed:
                 msg = f"Removed stale MCP server '{name}' from {label}"
                 if use_rich:
@@ -131,7 +132,7 @@ def _clean_toml_mcp_config(
         for name in removed:
             del servers[name]
         if removed:
-            config_path.write_text(_toml.dumps(config), encoding="utf-8")
+            write_text_lf(config_path, _toml.dumps(config))
             for name in removed:
                 msg = f"Removed stale MCP server '{name}' from {label}"
                 if use_rich:
@@ -180,7 +181,7 @@ def _clean_claude_config(
         for name in removed:
             del servers[name]
         if removed:
-            config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+            write_text_lf(config_path, json.dumps(config, indent=2) + "\n")
             for name in removed:
                 logger.progress(f"Removed stale MCP server '{name}' from {label}")
         return len(removed)
@@ -717,7 +718,7 @@ class MCPIntegrator:
                     for name in removed:
                         del servers[name]
                     if removed:
-                        intellij_mcp.write_text(_json.dumps(config, indent=2), encoding="utf-8")
+                        write_text_lf(intellij_mcp, _json.dumps(config, indent=2))
                         for name in removed:
                             _rich_success(
                                 f"Removed stale MCP server '{name}' from {intellij_mcp}",

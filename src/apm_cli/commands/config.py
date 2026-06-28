@@ -29,6 +29,13 @@ _CONFIG_KEY_DISPLAY_NAMES = {
 }
 
 
+def _render_target_value(value: str | list[str]) -> str:
+    """Render a target value for CLI output."""
+    if isinstance(value, list):
+        return ",".join(value)
+    return value
+
+
 def _parse_bool_value(value: str) -> bool:
     """Parse a CLI boolean value."""
     normalized = value.strip().lower()
@@ -67,6 +74,9 @@ def _valid_config_keys() -> str:
 
     keys = [
         "auto-integrate",
+        "target",
+        "self-update.channel",
+        "self-update.install-dir",
         "mcp-registry-url",
         "temp-dir",
         "allow-protocol-fallback",
@@ -169,11 +179,23 @@ def config(ctx):
 
             from ..config import get_allow_protocol_fallback as _get_apf
             from ..config import get_prefer_ssh as _get_prefer_ssh_cfg
+            from ..config import get_self_update_channel as _get_self_update_channel_cfg
+            from ..config import get_self_update_install_dir as _get_self_update_install_dir_cfg
             from ..config import get_temp_dir as _get_temp_dir
 
             _temp_dir_val = _get_temp_dir()
             if _temp_dir_val:
                 config_table.add_row("", "Temp Directory", _temp_dir_val)
+            _self_update_channel_val = _get_self_update_channel_cfg()
+            if _self_update_channel_val != "stable":
+                config_table.add_row("", "Self-update Channel", _self_update_channel_val)
+            _self_update_install_dir_val = _get_self_update_install_dir_cfg()
+            if _self_update_install_dir_val:
+                config_table.add_row(
+                    "",
+                    "Self-update Install Dir",
+                    _self_update_install_dir_val,
+                )
 
             # Only surface transport keys when they have been enabled -- the
             # false-default rows add noise for users who never configured them.
@@ -219,11 +241,19 @@ def config(ctx):
 
             from ..config import get_allow_protocol_fallback as _get_apf_fb
             from ..config import get_prefer_ssh as _get_prefer_ssh_fb
+            from ..config import get_self_update_channel as _get_self_update_channel_fb
+            from ..config import get_self_update_install_dir as _get_self_update_install_dir_fb
             from ..config import get_temp_dir as _get_temp_dir_fb
 
             _temp_dir_fb = _get_temp_dir_fb()
             if _temp_dir_fb:
                 click.echo(f"  Temp Directory: {_temp_dir_fb}")
+            _self_update_channel_fb = _get_self_update_channel_fb()
+            if _self_update_channel_fb != "stable":
+                click.echo(f"  self-update.channel: {_self_update_channel_fb}")
+            _self_update_install_dir_fb = _get_self_update_install_dir_fb()
+            if _self_update_install_dir_fb:
+                click.echo(f"  self-update.install-dir: {_self_update_install_dir_fb}")
 
             click.echo(f"  allow-protocol-fallback: {str(_get_apf_fb()).lower()}")
             click.echo(f"  prefer-ssh: {str(_get_prefer_ssh_fb()).lower()}")
@@ -343,6 +373,50 @@ def set(key, value):  # noqa: F811
             logger.error(str(exc))
             sys.exit(1)
         return
+
+    if key == "target":
+        from ..config import set_install_target
+
+        try:
+            parsed = set_install_target(value)
+            rendered = _render_target_value(parsed)
+            logger.success(f"Default install target set to: {rendered}")
+        except ValueError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
+        return
+
+    if key == "self-update.channel":
+        from ..config import set_self_update_channel
+
+        try:
+            channel = set_self_update_channel(value)
+            logger.success(f"Self-update channel saved: {channel}")
+        except ValueError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
+        return
+
+    if key == "self-update.install-dir":
+        from ..config import set_self_update_install_dir
+
+        try:
+            install_dir = set_self_update_install_dir(value)
+            logger.success(f"Self-update install directory saved: {install_dir}")
+        except ValueError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
+        return
+
+    if key.startswith("self-update."):
+        logger.error(
+            "self-update config only supports non-secret installer preferences: "
+            "self-update.channel, self-update.install-dir"
+        )
+        logger.info(
+            "Credentials, tokens, mirror URLs, commands, and installer args are not persisted."
+        )
+        sys.exit(1)
 
     if key == "mcp-registry-url":
         from ..config import get_mcp_registry_url, set_mcp_registry_url
@@ -465,6 +539,32 @@ def get(key):
                 click.echo(f"temp-dir: {value}")
             return
 
+        if key == "target":
+            from ..config import get_install_target
+
+            value = get_install_target()
+            if value is None:
+                click.echo("target: Not set (using auto-detection)")
+            else:
+                click.echo(f"target: {_render_target_value(value)}")
+            return
+
+        if key == "self-update.channel":
+            from ..config import get_self_update_channel
+
+            click.echo(f"self-update.channel: {get_self_update_channel()}")
+            return
+
+        if key == "self-update.install-dir":
+            from ..config import get_self_update_install_dir
+
+            value = get_self_update_install_dir()
+            if value is None:
+                click.echo("self-update.install-dir: Not set (using installer default)")
+            else:
+                click.echo(f"self-update.install-dir: {value}")
+            return
+
         if key == "mcp-registry-url":
             from ..config import get_mcp_registry_url
 
@@ -526,6 +626,24 @@ def get(key):
         click.echo(
             f"  temp-dir: {temp_dir if temp_dir is not None else 'Not set (using system default)'}"
         )
+        from ..config import get_install_target as _get_install_target
+
+        _install_target = _get_install_target()
+        if _install_target is not None:
+            click.echo(f"  target: {_render_target_value(_install_target)}")
+        from ..config import (
+            get_self_update_channel as _get_self_update_channel,
+        )
+        from ..config import (
+            get_self_update_install_dir as _get_self_update_install_dir,
+        )
+
+        _self_update_channel = _get_self_update_channel()
+        if _self_update_channel != "stable":
+            click.echo(f"  self-update.channel: {_self_update_channel}")
+        _self_update_install_dir = _get_self_update_install_dir()
+        if _self_update_install_dir is not None:
+            click.echo(f"  self-update.install-dir: {_self_update_install_dir}")
         # Only show transport keys when non-default to reduce noise.
         _apf_val = get_allow_protocol_fallback()
         _ssh_val = get_prefer_ssh()
@@ -607,6 +725,27 @@ def unset(key):
 
         unset_temp_dir()
         logger.success("Temporary directory configuration removed")
+        return
+
+    if key == "target":
+        from ..config import unset_install_target
+
+        unset_install_target()
+        logger.success("Default install target removed (will fall back to auto-detection)")
+        return
+
+    if key == "self-update.channel":
+        from ..config import unset_self_update_channel
+
+        unset_self_update_channel()
+        logger.success("Self-update channel removed (defaults to stable)")
+        return
+
+    if key == "self-update.install-dir":
+        from ..config import unset_self_update_install_dir
+
+        unset_self_update_install_dir()
+        logger.success("Self-update install directory removed (will use installer default)")
         return
 
     if key == "mcp-registry-url":

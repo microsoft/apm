@@ -53,6 +53,13 @@ def _build_releases_api_url(
     return f"{github_url}/api/v3/repos/{repo}/releases/latest"
 
 
+def _build_releases_list_api_url(github_url: str, repo: str) -> str:
+    """Build the release-list metadata URL for prerelease channel lookup."""
+    if github_url == _PUBLIC_GITHUB_URL:
+        return f"{_PUBLIC_API_BASE}/repos/{repo}/releases?per_page=5"
+    return f"{github_url}/api/v3/repos/{repo}/releases?per_page=5"
+
+
 def _get_version_check_auth_resolver() -> AuthResolver:
     """Return the reusable resolver for non-blocking version checks."""
     global _VERSION_CHECK_AUTH_RESOLVER
@@ -89,7 +96,21 @@ def _get_github_token(github_url: str | None = None, repo: str | None = None) ->
     return context.token
 
 
-def get_latest_version_from_github(repo: str | None = None, timeout: int = 2) -> str | None:
+def _normalize_release_tag(tag_name: str) -> str | None:
+    """Normalize and validate a GitHub release tag."""
+    if tag_name.startswith("v"):
+        tag_name = tag_name[1:]
+    if re.match(r"^\d+\.\d+\.\d+(a\d+|b\d+|rc\d+)?$", tag_name):
+        return tag_name
+    return None
+
+
+def get_latest_version_from_github(
+    repo: str | None = None,
+    timeout: int = 2,
+    *,
+    include_prerelease: bool = False,
+) -> str | None:
     """Fetch the latest release version from GitHub or a configured mirror.
 
     Respects the following environment variables (matching install.sh semantics):
@@ -139,7 +160,10 @@ def get_latest_version_from_github(repo: str | None = None, timeout: int = 2) ->
         release_metadata_url = get_release_metadata_url()
         if release_metadata_public_lookup_blocked(github_url):
             return None
-        url = _build_releases_api_url(github_url, effective_repo, release_metadata_url)
+        if include_prerelease and release_metadata_url is None:
+            url = _build_releases_list_api_url(github_url, effective_repo)
+        else:
+            url = _build_releases_api_url(github_url, effective_repo, release_metadata_url)
         token = _get_github_token(github_url, effective_repo)
         headers = (
             {"Authorization": f"token {token}"} if token and release_metadata_url is None else {}
@@ -150,17 +174,23 @@ def get_latest_version_from_github(repo: str | None = None, timeout: int = 2) ->
             return None
 
         data = response.json()
+        if include_prerelease and release_metadata_url is None:
+            if not isinstance(data, list):
+                return None
+            for release in data:
+                if not isinstance(release, dict):
+                    continue
+                if release.get("draft"):
+                    continue
+                if not release.get("prerelease"):
+                    continue
+                normalized = _normalize_release_tag(str(release.get("tag_name", "")))
+                if normalized is not None:
+                    return normalized
+            return None
+
         tag_name = data.get("tag_name", "")
-
-        # Strip 'v' prefix if present (e.g., "v0.6.3" -> "0.6.3")
-        if tag_name.startswith("v"):
-            tag_name = tag_name[1:]
-
-        # Validate version format
-        if re.match(r"^\d+\.\d+\.\d+(a\d+|b\d+|rc\d+)?$", tag_name):
-            return tag_name
-
-        return None
+        return _normalize_release_tag(tag_name)
     except Exception:
         # Silently fail for any network/parsing errors
         return None

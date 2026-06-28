@@ -139,6 +139,119 @@ class TestInstallCommandAutoBootstrap:
                 assert "org1/pkg1" in config["dependencies"]["apm"]
                 assert "org2/pkg2" in config["dependencies"]["apm"]
 
+    @patch("apm_cli.commands.install._validate_package_exists")
+    @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
+    @patch("apm_cli.commands.install.APMPackage")
+    @patch("apm_cli.commands.install._install_apm_dependencies")
+    def test_install_no_apm_yml_persists_target_flag(
+        self, mock_install_apm, mock_apm_package, mock_validate, monkeypatch
+    ):
+        """#1743: install --target persists targets into the auto-created apm.yml.
+
+        Without this, a bare ``apm update`` re-prompts for --target because the
+        auto-bootstrapped apm.yml dropped the install-time target selection.
+        """
+        from apm_cli.core.apm_yml import parse_targets_field
+
+        with self._chdir_tmp():
+            mock_validate.return_value = True
+
+            mock_pkg_instance = MagicMock()
+            mock_pkg_instance.get_apm_dependencies.return_value = [
+                MagicMock(repo_url="test/package", reference="main")
+            ]
+            mock_pkg_instance.get_mcp_dependencies.return_value = []
+            mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
+
+            mock_install_apm.return_value = InstallResult(
+                diagnostics=MagicMock(
+                    has_diagnostics=False, has_critical_security=False, error_count=0
+                )
+            )
+
+            result = self.runner.invoke(
+                cli, ["install", "test/package", "--target", "claude,copilot"]
+            )
+            assert result.exit_code == 0
+            assert "Created apm.yml" in result.output
+            assert "Targets set: claude, copilot (persisted to apm.yml)" in result.output
+
+            with open("apm.yml", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+            # targets: persisted in the manifest-safe plural list form ...
+            assert config.get("targets") == ["claude", "copilot"]
+            # ... and round-trips through the same reader bare `apm update` uses.
+            assert parse_targets_field(config) == ["claude", "copilot"]
+
+    @patch("apm_cli.commands.install._validate_package_exists")
+    @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
+    @patch("apm_cli.commands.install.APMPackage")
+    @patch("apm_cli.commands.install._install_apm_dependencies")
+    def test_install_no_apm_yml_persists_all_as_manifest_targets(
+        self, mock_install_apm, mock_apm_package, mock_validate, monkeypatch
+    ):
+        """--target all expands to manifest-legal targets in auto-created apm.yml."""
+        from apm_cli.core.apm_yml import parse_targets_field
+
+        with self._chdir_tmp():
+            mock_validate.return_value = True
+
+            mock_pkg_instance = MagicMock()
+            mock_pkg_instance.get_apm_dependencies.return_value = [
+                MagicMock(repo_url="test/package", reference="main")
+            ]
+            mock_pkg_instance.get_mcp_dependencies.return_value = []
+            mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
+
+            mock_install_apm.return_value = InstallResult(
+                diagnostics=MagicMock(
+                    has_diagnostics=False, has_critical_security=False, error_count=0
+                )
+            )
+
+            result = self.runner.invoke(cli, ["install", "test/package", "--target", "all"])
+            assert result.exit_code == 0
+
+            with open("apm.yml", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+            assert "all" not in config["targets"]
+            assert "vscode" not in config["targets"]
+            assert "copilot" in config["targets"]
+            assert parse_targets_field(config) == config["targets"]
+
+    @patch("apm_cli.commands.install._validate_package_exists")
+    @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
+    @patch("apm_cli.commands.install.APMPackage")
+    @patch("apm_cli.commands.install._install_apm_dependencies")
+    def test_install_no_apm_yml_without_target_omits_targets(
+        self, mock_install_apm, mock_apm_package, mock_validate, monkeypatch
+    ):
+        """No --target flag must NOT write a targets: key (preserve auto-detect)."""
+        with self._chdir_tmp():
+            mock_validate.return_value = True
+
+            mock_pkg_instance = MagicMock()
+            mock_pkg_instance.get_apm_dependencies.return_value = [
+                MagicMock(repo_url="test/package", reference="main")
+            ]
+            mock_pkg_instance.get_mcp_dependencies.return_value = []
+            mock_apm_package.from_apm_yml.return_value = mock_pkg_instance
+
+            mock_install_apm.return_value = InstallResult(
+                diagnostics=MagicMock(
+                    has_diagnostics=False, has_critical_security=False, error_count=0
+                )
+            )
+
+            result = self.runner.invoke(cli, ["install", "test/package"])
+            assert result.exit_code == 0
+            assert "Created apm.yml" in result.output
+
+            with open("apm.yml", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+            assert "targets" not in config
+            assert "target" not in config
+
     @patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True)
     @patch("apm_cli.commands.install.APMPackage")
     @patch("apm_cli.commands.install._install_apm_dependencies")

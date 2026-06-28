@@ -21,6 +21,7 @@ import pytest
 
 from apm_cli.marketplace.client import (
     _FETCHERS,
+    _fetch_ado,
     _fetch_git,
     _fetch_github,
     _fetch_gitlab,
@@ -75,7 +76,12 @@ def test_fetch_git_calls_gitcache_with_sparse_path(
 def test_fetch_git_ado_url_routes_via_subprocess(
     tmp_path: Path, fake_host_info, fake_auth_resolver
 ) -> None:
-    """ADO URLs go through ``GitCache`` -- not the REST API."""
+    """``_fetch_git`` (the ADO REST fallback path) still clones via ``GitCache``.
+
+    ADO marketplace reads now prefer ``_fetch_ado`` (REST items API); this test
+    pins the generic-git fallback that ``_fetch_ado`` delegates to on REST
+    failure -- it must keep building the auth env and cloning.
+    """
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     (checkout / "marketplace.json").write_text("{}")
@@ -174,5 +180,6 @@ def test_fetchers_dispatch_table_routes_kinds_to_correct_callable() -> None:
     assert _FETCHERS["local"] is _fetch_local
     assert _FETCHERS["github"] is _fetch_github
     assert _FETCHERS["gitlab"] is _fetch_gitlab
+    assert _FETCHERS["ado"] is _fetch_ado
     # Defensive: no extra entries silently appearing.
-    assert set(_FETCHERS) == {"github", "gitlab", "git", "local"}
+    assert set(_FETCHERS) == {"github", "gitlab", "ado", "git", "local"}

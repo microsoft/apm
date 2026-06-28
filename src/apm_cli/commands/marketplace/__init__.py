@@ -791,6 +791,7 @@ def _display_source_kind(kind: str, is_direct_url: bool) -> str:
     labels = {
         "github": "GitHub repository",
         "gitlab": "GitLab repository",
+        "ado": "Azure DevOps repository",
         "git": "generic git repository",
         "local": "local filesystem path",
     }

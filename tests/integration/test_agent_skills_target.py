@@ -604,7 +604,7 @@ def test_install_target_all_writes_skills_once_to_agents_dir(
 def test_install_target_all_legacy_paths_writes_per_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With ``--legacy-skill-paths``, all 6 per-client skill dirs are populated."""
+    """With ``--legacy-skill-paths``, all 7 per-client skill dirs are populated."""
     bundle = _make_multi_target_bundle(tmp_path / "src")
     project = _make_project(tmp_path / "dst")
     for d in (".claude", ".cursor", ".opencode", ".codex", ".gemini"):
@@ -625,9 +625,48 @@ def test_install_target_all_legacy_paths_writes_per_client(
         ".opencode/skills",
         ".codex/skills",
         ".gemini/skills",
+        ".windsurf/skills",
     ):
         deployed = project / client_dir / SKILL_NAME / "SKILL.md"
         assert deployed.is_file(), f"expected skill at {deployed} with --legacy-skill-paths"
+
+
+# ---------------------------------------------------------------------------
+# I13 -- windsurf skills converge to .agents/skills/ (#1802)
+# ---------------------------------------------------------------------------
+
+
+def test_install_windsurf_skills_converge_to_agents_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``apm install --target windsurf`` deploys skills to ``.agents/skills/``.
+
+    Windsurf converged onto the cross-tool ``.agents/skills/<name>/SKILL.md``
+    path (``deploy_root='.agents'``).  A ``--target all`` test cannot catch a
+    windsurf-specific regression because copilot/codex write ``.agents/skills/``
+    first and mask it -- so this asserts the windsurf-only install path directly:
+    the converged dir is populated and the legacy ``.windsurf/skills/`` dir is
+    NOT created.
+    """
+    bundle = _make_multi_target_bundle(tmp_path / "src")
+    project = _make_project(tmp_path / "dst")
+
+    result = _invoke(
+        project,
+        ["install", str(bundle), "--target", "windsurf"],
+        monkeypatch,
+    )
+    assert result.exit_code == 0, f"output={result.output!r}"
+
+    # Skill lands in the converged .agents/skills/ dir.
+    deployed = project / ".agents" / "skills" / SKILL_NAME / "SKILL.md"
+    assert deployed.is_file(), f"expected converged skill at {deployed}"
+
+    # The legacy per-client windsurf skill dir must NOT be created.
+    legacy_dir = project / ".windsurf" / "skills" / SKILL_NAME
+    assert not legacy_dir.exists(), (
+        f"legacy skill dir {legacy_dir} should not exist with default convergence"
+    )
 
 
 # ---------------------------------------------------------------------------

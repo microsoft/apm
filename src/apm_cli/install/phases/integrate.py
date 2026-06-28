@@ -16,6 +16,8 @@ remains a sibling helper here rather than a fourth ``DependencySource``.
 from __future__ import annotations
 
 import builtins
+import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -468,41 +470,86 @@ def _run_executable_approval_prompt(ctx: InstallContext) -> None:
     After the integration loop, any package that had hooks or bin/
     blocked is collected in ``ctx.blocked_executables``.  This function
     runs the interactive approval flow (or hard-errors in CI) and
-    persists approved entries to ``apm.yml`` so the next install
-    deploys them.
+    persists approved entries to the personal ``~/.apm/config.json``
+    ``executables`` block (lowest authority, never committed to source
+    control) so the next install deploys them (#1873).
     """
     if not ctx.blocked_executables:
         return
 
+    if os.environ.get("APM_NON_INTERACTIVE") or os.environ.get("CI") or not sys.stdin.isatty():
+        first = ctx.blocked_executables[0].package_name
+        msg = (
+            f"{len(ctx.blocked_executables)} package(s) have executable primitives "
+            "parked pending approval; install completed without deploying them."
+        )
+        remedy = (
+            "Trust the org-vetted set: apm approve --recommended  |  "
+            f"Trust one: apm approve {first}  |  "
+            f"Inspect: apm policy explain {first}"
+        )
+        if ctx.logger:
+            ctx.logger.warning(msg, symbol="warning")
+            ctx.logger.info(remedy, symbol="info")
+        else:
+            from apm_cli.core.command_logger import CommandLogger
+
+            logger = CommandLogger("install")
+            logger.warning(msg, symbol="warning")
+            logger.info(remedy, symbol="info")
+        return
+
     from apm_cli.security.executables import (
+        load_user_executables,
         prompt_executable_approval,
-        write_allow_executables,
+        save_user_executables,
     )
 
-    allow_exec = None
-    if ctx.apm_package is not None:
-        allow_exec = getattr(ctx.apm_package, "allow_executables", None)
+    # Seed the prompt with existing personal consent (not project entries,
+    # which are read-only from the install pipeline's perspective).
+    allow_exec, deny_exec = load_user_executables()
 
     updated = prompt_executable_approval(
         ctx.blocked_executables,
         allow_executables=allow_exec,
     )
 
-    # Persist approvals to apm.yml if user approved anything new.
-    if updated and updated != (allow_exec or {}):
-        manifest_path = ctx.source_root or ctx.project_root
-        apm_yml = manifest_path / "apm.yml"
-        if apm_yml.is_file():
-            write_allow_executables(apm_yml, updated)
-            # Update the in-memory model so subsequent code sees the change.
-            if ctx.apm_package is not None:
-                ctx.apm_package.allow_executables = updated
-            if ctx.logger:
-                ctx.logger.info(
-                    "Updated allowExecutables in apm.yml. "
-                    "Run 'apm install' again to deploy approved executables.",
-                    symbol="info",
-                )
+    # Persist new approvals to the personal config if the user approved
+    # anything new.
+    if updated and updated != allow_exec:
+        save_user_executables(updated, deny_exec)
+        if ctx.logger:
+            ctx.logger.info(
+                "Updated ~/.apm/config.json. "
+                "Run 'apm install' again to deploy approved executables.",
+                symbol="info",
+            )
+
+    # Any package the user declined stays parked -- always surface a remedy
+    # so the present-but-parked path is actionable on the decline branch too.
+    parked = [d for d in ctx.blocked_executables if not _decl_fully_trusted(updated, d)]
+    if parked:
+        first = parked[0].package_name
+        logger = ctx.logger
+        if logger is None:
+            from apm_cli.core.command_logger import CommandLogger
+
+            logger = CommandLogger("install")
+        logger.info(
+            f"{len(parked)} package(s) left parked. Their executables will not run until trusted.",
+            symbol="info",
+        )
+        logger.info(
+            f"Deploy later: apm approve {first} (then re-run apm install)  |  "
+            f"Why parked?: apm policy explain {first}",
+            symbol="info",
+        )
+
+
+def _decl_fully_trusted(allow: dict, decl) -> bool:
+    """Return True when *allow* grants every exec type *decl* declares."""
+    grant = allow.get(decl.package_key) or allow.get(decl.package_name) or {}
+    return all(grant.get(t, False) for t in decl.exec_types)
 
 
 # ======================================================================

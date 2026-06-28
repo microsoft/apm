@@ -67,7 +67,11 @@ class LockfileBuilder:
 
     def build_and_save(self) -> None:
         """Assemble lockfile from ctx state and write it (no-op when nothing was installed)."""
-        if not self.ctx.installed_packages and not self.ctx.lockfile_only:
+        if (
+            not self.ctx.installed_packages
+            and not self.ctx.lockfile_only
+            and not self._has_orphan_lockfile_entries()
+        ):
             # Even with nothing newly installed, a pre-existing
             # lockfile may need its cache pin markers refreshed --
             # e.g. user upgraded APM and their cache pre-dates the
@@ -79,6 +83,12 @@ class LockfileBuilder:
             # promise is to always materialise an ``apm.lock.yaml`` (an
             # empty one for a depless project), mirroring
             # ``cargo generate-lockfile``.
+            #
+            # We also fall through when the existing lockfile records deps
+            # that the manifest no longer declares (orphans): removing every
+            # dependency leaves installed_packages empty, but the lockfile
+            # must still be pruned to match apm.yml (see
+            # ``_has_orphan_lockfile_entries``).
             self._sync_cache_pin_markers_from_disk()
             return
         try:
@@ -91,6 +101,8 @@ class LockfileBuilder:
             # Attach deployed_files and package_type to each LockedDependency
             self._attach_deployed_files(lockfile)
             self._attach_package_types(lockfile)
+            # Attach #1873 executable trust state captured at the gate.
+            self._attach_exec_status(lockfile)
             # Apply CLI --skill override to lockfile entries (skill_bundle only)
             self._attach_skill_subset_override(lockfile)
             # Attach content hashes captured at download/verify time
@@ -135,6 +147,24 @@ class LockfileBuilder:
 
     # -- private helpers (verbatim from original inline block) ----------
 
+    def _has_orphan_lockfile_entries(self) -> bool:
+        """True when the existing lockfile records apm deps no longer intended.
+
+        Guards the "nothing installed" early-return: when every apm dependency
+        is removed from the manifest, ``installed_packages`` is empty, yet the
+        lockfile still lists the dropped deps. Falling through lets the normal
+        prune path (``_merge_existing``) rebuild a lockfile that matches the
+        manifest. Skipped for partial (``only_packages``) installs, which
+        intentionally preserve unlisted entries.
+        """
+        existing = self.ctx.existing_lockfile
+        if existing is None or self.ctx.only_packages:
+            return False
+        from apm_cli.deps.lockfile import _SELF_KEY
+
+        intended = self.ctx.intended_dep_keys or set()
+        return any(key != _SELF_KEY and key not in intended for key in existing.dependencies)
+
     def _attach_deployed_files(self, lockfile: LockFile) -> None:
         """Attach per-dependency deployed-file manifests, unioning targets.
 
@@ -169,6 +199,22 @@ class LockfileBuilder:
         for dep_key, pkg_type in self.ctx.package_types.items():
             if dep_key in lockfile.dependencies:
                 lockfile.dependencies[dep_key].package_type = pkg_type
+
+    def _attach_exec_status(self, lockfile: LockFile) -> None:
+        """Attach the #1873 ``exec_status`` trust state computed at the gate.
+
+        ``ctx.package_exec_status`` is keyed by dep_key and holds the worst-case
+        trust state (``deployed`` / ``gated_pending_approval`` / ``denied``) for
+        each dependency that declared executables. Packages with no executables
+        are absent from the map and keep ``exec_status=None`` (the audit treats
+        them as trusted).
+        """
+        statuses = getattr(self.ctx, "package_exec_status", None)
+        if not statuses:
+            return
+        for dep_key, status in statuses.items():
+            if dep_key in lockfile.dependencies and status:
+                lockfile.dependencies[dep_key].exec_status = status
 
     def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
         """Apply CLI --skill override to lockfile skill_bundle entries.
