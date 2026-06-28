@@ -476,6 +476,8 @@ def _is_explicit_git_form(package: str) -> bool:
     (``owner/repo`` with an optional ``#ref``) has neither in that segment.
     """
     p = package.strip()
+    if p.startswith("./") or p.startswith("../") or p.startswith("/"):
+        return True
     if "://" in p or p.lower().endswith(".git"):
         return True
     head = p.split("/", 1)[0]
@@ -586,9 +588,14 @@ def display_versions(
     # reference is a plain shorthand -- consult the registry, mirroring how
     # `apm install` routes unscoped shorthands to the default registry. An
     # explicit git URL is the escape hatch to force the git path below.
-    if not _is_explicit_git_form(package) and _effective_default_registry(_pr):
-        _display_registry_versions(package, dep_ref, logger)
-        return
+    if not _is_explicit_git_form(package):
+        _default_reg = _effective_default_registry(_pr)
+        if _default_reg:
+            logger.info(
+                f"Routing to registry '{_default_reg}' (use a git URL to force the git path)"
+            )
+            _display_registry_versions(package, dep_ref, logger, registry_name=_default_reg)
+            return
 
     try:
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())

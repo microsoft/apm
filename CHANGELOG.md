@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm view <package> versions` now routes to the configured default registry for
+  plain shorthands (e.g., `acme/web-skills`) when a default registry is configured,
+  matching `apm install` routing behavior. Added `--registry [NAME]` for explicit
+  registry control: bare `--registry` uses the lockfile entry or configured default;
+  `--registry NAME` forces a named registry. Use a full git URL to force the git path
+  when a default registry is configured. (by @nadav-y) (#1938)
+
 ### Removed
 
 - Removed legacy `.chatmode.md` primitive format and `chatmodes/` subdirectory
