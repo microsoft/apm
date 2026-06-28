@@ -34,10 +34,21 @@ whose class is already in the ledger (no re-discovery spend).
 
 ## A12 gradient inside each lens
 
-Run the CHEAP recon front first (enumerate the attack surface +
-candidate vectors at researcher class). Promote to implementer class
-ONLY to author an actual probe on a SURVIVING surface. Do not burn a
-premium dispatch on a surface the recon front already cleared.
+Run the CHEAP recon front FIRST: enumerate the attack surface and the
+candidate vectors, then DISCARD any vector the enumeration already
+clears. Only on a SURVIVING vector do you spend effort authoring an
+actual probe. This is a SEQUENCING discipline, not a model switch -- it
+holds on whatever model the harness gives the child thread, because the
+saving comes from not authoring probes against already-cleared surface.
+
+[i] OPTIONAL (per-harness only): where the harness exposes per-subagent
+model selection, the recon front MAY additionally run on a cheaper
+model and probe-authoring on a stronger one (genesis B12 MODEL ROUTER).
+This is an enhancement, NOT a requirement. The common child-thread
+spawn affordance does not guarantee model selection, so a harness
+without it runs the whole lens on its default model and still gets the
+sequencing benefit above. Never make a finding's correctness depend on
+the model swap, and never name a model class the runtime cannot bind.
 
 ---
 

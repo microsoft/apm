@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-06-28T19:21:12.044450+00:00'
+generated_at: '2026-06-28T19:30:55.258650+00:00'
 apm_version: 0.22.0
 dependencies:
 - repo_url: _local/adversarial-hardening
@@ -49,7 +49,7 @@ dependencies:
     .agents/skills/adversarial-hardening/evals/results/.gitkeep: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
     .agents/skills/adversarial-hardening/evals/triggers.json: sha256:125ab7a7cc8227378813afe6d10a667e9579101134da46749ac4038db5c79c2a
     .agents/skills/adversarial-hardening/references/findings-ledger.md: sha256:14ba85f10c5b4a944f235c5872794547508c5e12d33a85432556239d712a12e9
-    .agents/skills/adversarial-hardening/references/lens-catalogue.md: sha256:05c68a8de5ae35f5a37a9ffa07fc7a73184b518bd56d63bb766b5ed8c31c588f
+    .agents/skills/adversarial-hardening/references/lens-catalogue.md: sha256:73c4e2e001a01fe50288bea5f1e1f682d5fded3f3aad9b1b99d03f83fbbd618b
     .agents/skills/adversarial-hardening/scripts/check-push-hygiene.sh: sha256:0a47e5f200476b1aecb781e2159a855add3a1233ba5504e8b1409f04bf36fa58
     .agents/skills/adversarial-hardening/scripts/render-dossier.py: sha256:0fb9fadd77a6fd649d3639c12dce92751f522da0ac700c94a85e21164edd777f
     .agents/skills/adversarial-hardening/scripts/run_evals.py: sha256:5ebe9c880506d3eaac27f9658a338208a07eb5ee7f1aa1ebade456fca0bea0f7
