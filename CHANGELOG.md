@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm outdated` tag-pattern matching for monorepo virtual subdirectory
+  dependencies now derives the `{name}` segment from the `virtual_path`
+  basename (e.g., `packages/my-pkg` -> `my-pkg`), aligning with `apm update`
+  behavior. (by @kevinbeier-enbw; closes #1893) (#1893)
+- Skipped startup update checks for unknown `apm` commands and bare help
+  invocations so invalid CLI input fails without update-check latency. (by
+  @maro114510) (#1541)
 - Fixed `apm install` lockfile pruning when all `apm.yml` dependencies are
   removed, so stale `apm.lock.yaml` entries no longer survive. (by @nadav-y)
   (#1926)
@@ -16,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependencies are not reported as updated. (by @nadav-y) (#1927)
 - Fixed spurious version-range diffs for cached transitive registry
   dependencies during `apm update`. (by @nadav-y) (#1921)
+
+### Security
+
+- Bumped `llm` to `>=0.28` (resolved to 0.31) to clear the Critical code-injection
+  advisory GHSA-g76p-4vg5-f4qh (Dependabot #62) affecting `llm <= 0.27.1`, and
+  raised the `llm-github-models` floor to `>=0.18.0`. Forced patched transitive
+  `vite` (`>=7.3.5`) and `esbuild` (`>=0.28.1`) in the `docs/` site via
+  `package.json` overrides to clear GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3,
+  and GHSA-g7r4-m6w7-qqqr (Dependabot #68, #69, #65). (#1936)
 
 ## [0.22.0] - 2026-06-26
 
