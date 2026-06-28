@@ -577,17 +577,18 @@ class InstructionIntegrator(BaseIntegrator):
 
         Ref: https://docs.windsurf.com/windsurf/cascade/memories
         """
-        import yaml
+        from ..utils.yaml_io import load_yaml_str
 
         body = content
         apply_to = ""
 
-        # Parse existing frontmatter with yaml.safe_load for consistency with the other frontmatter parsers across integrators.
+        # Parse existing frontmatter with the bounded loader so a hostile
+        # frontmatter block in an untrusted package cannot hang the parser.
         fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
         if fm_match:
             body = content[fm_match.end() :]
             try:
-                fm = yaml.safe_load(fm_match.group(1)) or {}
+                fm = load_yaml_str(fm_match.group(1)) or {}
             except Exception:
                 fm = {}
             apply_to = str(fm.get("applyTo", "")).strip()
@@ -634,7 +635,7 @@ class InstructionIntegrator(BaseIntegrator):
         path-scoped guidance. APM's ``applyTo`` frontmatter is the source of
         truth for that scoping.
         """
-        import yaml
+        from ..utils.yaml_io import load_yaml_str
 
         body = content
         apply_to = ""
@@ -643,7 +644,7 @@ class InstructionIntegrator(BaseIntegrator):
         if fm_match:
             body = content[fm_match.end() :]
             try:
-                fm = yaml.safe_load(fm_match.group(1)) or {}
+                fm = load_yaml_str(fm_match.group(1)) or {}
             except Exception:
                 fm = {}
             raw_apply_to = fm.get("applyTo", "")

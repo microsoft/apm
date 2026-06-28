@@ -18,6 +18,7 @@ from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatt
 from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
+from apm_cli.utils.yaml_io import load_yaml_str
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
@@ -282,7 +283,7 @@ class AgentIntegrator(BaseIntegrator):
         if not fm_match:
             return
         try:
-            fm = yaml.safe_load(fm_match.group(1)) or {}
+            fm = load_yaml_str(fm_match.group(1)) or {}
         except yaml.YAMLError:
             return
         if not isinstance(fm, dict):
@@ -322,7 +323,7 @@ class AgentIntegrator(BaseIntegrator):
         if fm_match:
             body = content[fm_match.end() :]
             try:
-                fm = yaml.safe_load(fm_match.group(1)) or {}
+                fm = load_yaml_str(fm_match.group(1)) or {}
                 name = fm.get("name", name)
                 description = fm.get("description", description)
             except Exception:

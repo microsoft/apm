@@ -210,6 +210,25 @@ def load_yaml(path: str | Path) -> dict[str, Any] | None:
         return yaml.load(fh, Loader=_BoundedSafeLoader)  # noqa: S506 - SafeLoader subclass
 
 
+def load_yaml_str(text: str) -> dict[str, Any] | None:
+    """Load YAML from an in-memory string with the bounded SafeLoader.
+
+    The string-input twin of :func:`load_yaml`, for callers that already hold
+    the YAML text rather than a path: a lockfile body (``LockFile.from_yaml``),
+    packed bundle metadata, or an installed package's ``.md`` frontmatter.
+    Routing those through ``_BoundedSafeLoader`` (instead of stock
+    ``yaml.safe_load``) means a hostile string -- a bundle ``apm.lock.yaml`` or
+    a crafted frontmatter block from an untrusted clone -- cannot wedge the
+    parser via an eager ``<<`` merge-key expansion; the bomb fails closed as a
+    ``yaml.YAMLError`` instead of hanging the caller in an uncatchable
+    ``O(2^N)`` construction loop.
+
+    Returns parsed data or ``None`` for empty input. Raises ``yaml.YAMLError``
+    on malformed or over-budget input.
+    """
+    return yaml.load(text, Loader=_BoundedSafeLoader)  # noqa: S506 - SafeLoader subclass
+
+
 def dump_yaml(
     data: Any,
     path: str | Path,

@@ -63,22 +63,31 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za
 #     ``PASS`` token is anchored to a ``_``-or-start boundary (``(?:^|_)PASS``)
 #     so the real ``*_PASS`` family is swept WITHOUT catching the common-
 #     English suffix words SURPASS / BYPASS / COMPASS / TRESPASS / PASSAGE.
-#   - wallet seed phrases: MNEMONIC, *_MNEMONIC, *_SEED_PHRASE (the hardhat /
-#     foundry / truffle deploy lifecycle secret -- a single token that, if
-#     leaked, drains a wallet; same secret class as PASSWORD).
+#   - wallet seed phrases: MNEMONIC, *_MNEMONIC, *_SEED_PHRASE, *_RECOVERY_PHRASE,
+#     *_BACKUP_PHRASE (the hardhat / foundry / truffle deploy lifecycle secret --
+#     a single token that, if leaked, drains a wallet; same secret class as
+#     PASSWORD). RECOVERY_PHRASE / BACKUP_PHRASE are the MetaMask / hardware-wallet
+#     spellings; the curated *_SEED wallet names (WALLET_SEED, MASTER_SEED,
+#     DERIVATION_SEED) live in _CREDENTIAL_BLOB_NAMES so a bare ``SEED`` token does
+#     NOT sweep the legitimate RNG seeds a build needs (PYTHONHASHSEED, RANDOM_SEED).
 # The trailing ``S?`` does not over-match unrelated names (e.g. PATH keeps
 # a stray ``H`` after PAT and so never matches; TRACE_ID has no credential
-# token before ``_ID`` and is left alone). The trailing ``[_0-9]*`` lets an
-# ENUMERATED / ROTATED credential (DB_PASS2, PASS_1, TOKEN_1, API_KEY2) keep
-# matching even though a digit/underscore now follows the token -- without it
-# a single trailing digit defeats the whole sweep. It only adds digit/under-
-# score-suffixed names, so SURPASS / PASSAGE (letters after PASS) stay benign.
+# token before ``_ID`` and is left alone). The trailing rotation tail
+# ``(?:_?(?:OLD|NEW|PREV|CURRENT))?(?:_?V[0-9]+)?[_0-9]*`` lets an ENUMERATED /
+# ROTATED credential keep matching even when a digit, an underscore, a rotation
+# word (DB_PASS_OLD, PASSWORD_NEW), or a version tag (DB_PASSV2, API_KEYV2) now
+# follows the token -- without it a single trailing word/digit defeats the whole
+# sweep. The rotation words and ``V<n>`` tag only ever apply AFTER a credential
+# token, so RENEW / PREVIEW / CURRENT alone (no token) stay benign, and
+# SURPASS / PASSAGE (letters after PASS) stay benign via the ``(?:^|_)PASS``
+# boundary anchor.
 # The looser tokens (KEY, PAT, ...) keep their suffix-match behaviour as a
 # deliberate fail-safe: over-redacting a non-secret env var is harmless,
 # under-redacting a secret is not.
 _CREDENTIAL_DENYLIST = re.compile(
     r"(?:(?:^|_)PASS|TOKEN|SECRET|PAT|KEY|PASSWORD|PASSWD|PASSPHRASE|PWD"
-    r"|CREDENTIAL|AUTHTOKEN|MNEMONIC|SEED_PHRASE)S?(?:_IDS?)?[_0-9]*$",
+    r"|CREDENTIAL|AUTHTOKEN|MNEMONIC|SEED_PHRASE|RECOVERY_PHRASE|BACKUP_PHRASE)"
+    r"S?(?:_IDS?)?(?:_?(?:OLD|NEW|PREV|CURRENT))?(?:_?V[0-9]+)?[_0-9]*$",
     re.IGNORECASE,
 )
 
@@ -100,6 +109,11 @@ _DENYLIST_EXEMPT: frozenset[str] = frozenset({"PWD", "OLDPWD"})
 # the real npm/registry auth vars (NPM_CONFIG__AUTH -- the actual ``npm_config__auth``
 # env name -- and ARTIFACTORY_AUTH) that the curated NPM_AUTH/REGISTRY_AUTH
 # names alone miss; over-redacting a non-secret ``*_AUTH`` name is harmless.
+# The curated wallet-seed names (WALLET_SEED, MASTER_SEED, DERIVATION_SEED) are
+# listed here -- rather than as a bare ``SEED`` regex token -- precisely so the
+# legitimate RNG seeds a build legitimately needs (PYTHONHASHSEED, RANDOM_SEED,
+# TEST_SEED) are NOT stripped from the child env (which would break reproducible
+# builds); exact-name membership masks the wallet secret without that collision.
 _CREDENTIAL_BLOB_NAMES: frozenset[str] = frozenset(
     {
         "DOCKER_AUTH_CONFIG",
@@ -109,6 +123,9 @@ _CREDENTIAL_BLOB_NAMES: frozenset[str] = frozenset(
         "SECRET_KEY_BASE",
         "DSN",
         "CONN_STR",
+        "WALLET_SEED",
+        "MASTER_SEED",
+        "DERIVATION_SEED",
     }
 )
 _CREDENTIAL_BLOB_SUFFIX = re.compile(
@@ -129,18 +146,36 @@ _MIN_REDACT_LEN = 8
 # value of a ``password=``/``passwd=`` key regardless of the env-var NAME, so a
 # DSN-style secret carried by an UN-denylisted var (a bare ``DSN``, an echoed
 # connection string) cannot persist in cleartext. The value runs to the next
-# whitespace, ``;`` or end-of-string. We deliberately do NOT match a bare
-# ``pwd=`` here: the shell ``$PWD`` is routinely echoed as ``PWD=/home/...`` and
-# masking it would corrupt the benign working-directory path (``PWD`` is exempt
-# from the credential denylist for the same reason).
+# whitespace, ``;`` or end-of-string. A bare ``pwd=`` is handled separately by
+# the path-guarded ``_CONN_STR_PWD_PATTERN`` below (the ODBC ``PWD=`` keyword),
+# so the shell ``$PWD`` working-directory echo is preserved while a real DSN
+# secret is still masked.
 _CONN_STR_PASSWORD_PATTERN = re.compile(r"(?i)\b(password|passwd)(\s*=\s*)([^\s;]+)")
+
+# The canonical Microsoft ODBC / SQL Server password keyword is ``PWD=`` (e.g.
+# ``Driver={ODBC Driver 18};Server=db;UID=sa;PWD=secret;``). We mask ``PWD=<value>``
+# too, but ONLY when the value is not a filesystem path: the shell ``$PWD`` is
+# routinely echoed as ``PWD=/home/user`` (or ``PWD=.``, ``PWD=~/x``, ``PWD=C:\Users``),
+# and masking that would corrupt the benign working-directory path. A connection-
+# string password is not a path, so the path-prefix guard keeps the two apart.
+# (``\bpwd`` cannot match inside ``OLDPWD`` -- the ``D`` before ``PWD`` is a word
+# char, so there is no word boundary -- leaving ``OLDPWD=/x`` untouched as well.)
+_CONN_STR_PWD_PATTERN = re.compile(r"(?i)\b(pwd)(\s*=\s*)([^\s;]+)")
+_PWD_PATH_VALUE = re.compile(r"^(?:[/~.]|[A-Za-z]:[\\/])")
 
 
 def _redact_connection_string_password(text: str) -> str:
-    """Mask ``password=<value>`` key=value pairs in connection strings / DSNs."""
+    """Mask ``password=``/``passwd=``/``PWD=`` values in connection strings / DSNs."""
     if not text:
         return text
-    return _CONN_STR_PASSWORD_PATTERN.sub(lambda m: m.group(1) + m.group(2) + "[REDACTED]", text)
+    masked = _CONN_STR_PASSWORD_PATTERN.sub(lambda m: m.group(1) + m.group(2) + "[REDACTED]", text)
+
+    def _mask_pwd(match: re.Match[str]) -> str:
+        if _PWD_PATH_VALUE.match(match.group(3)):
+            return match.group(0)  # filesystem path -- the $PWD echo, leave intact
+        return match.group(1) + match.group(2) + "[REDACTED]"
+
+    return _CONN_STR_PWD_PATTERN.sub(_mask_pwd, masked)
 
 
 def _matches_credential(name: str) -> bool:
