@@ -608,7 +608,7 @@ def _fetch_git(
     try:
         with open(target, encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (OSError, ValueError, RecursionError, MemoryError) as exc:
         raise MarketplaceFetchError(source.name, f"failed to read {file_path}: {exc}") from exc
 
 
@@ -841,7 +841,7 @@ def _fetch_local_file(source: MarketplaceSource, manifest_file: Path) -> dict | 
     try:
         with open(safe_file, encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (OSError, ValueError, RecursionError, MemoryError) as exc:
         raise MarketplaceFetchError(source.name, f"failed to read {safe_file}: {exc}") from exc
 
 
@@ -884,7 +884,7 @@ def _fetch_local_via_git_show(
 
     try:
         return json.loads(result.stdout.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (OSError, ValueError, RecursionError, MemoryError) as exc:
         raise MarketplaceFetchError(source.name, f"invalid JSON in {file_path}: {exc}") from exc
 
 
@@ -911,7 +911,7 @@ def _fetch_local_direct_read(
     try:
         with open(candidate, encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (OSError, ValueError, RecursionError, MemoryError) as exc:
         raise MarketplaceFetchError(source.name, f"failed to read {file_path}: {exc}") from exc
 
 

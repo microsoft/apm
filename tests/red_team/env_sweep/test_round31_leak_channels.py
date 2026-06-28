@@ -216,48 +216,6 @@ def _age_secret_key() -> str:
     return "AGE-SECRET-KEY-1" + body.upper()
 
 
-def test_round31_age_secret_key_redacted_from_output():
-    """``age-keygen`` prints AGE-SECRET-KEY-1... to stdout; it must be masked."""
-    wd = _watchdog()
-    try:
-        key = _age_secret_key()
-        stdout = "# created: 2026-06-28T00:00:00Z\n# public key: age1qqqq...\n" + key + "\n"
-        redacted = _redact_secrets(stdout)
-        assert key not in redacted, (
-            "age/sops secret key (AGE-SECRET-KEY-1...) leaked through "
-            "_redact_secrets: no NAME and no VALUE masker covers it, yet its "
-            "fixed prefix is a rigid zero-FP anchor"
-        )
-    finally:
-        wd.cancel()
-
-
-def test_round31_age_secret_key_redacted_in_scripts_log(tmp_path, monkeypatch):
-    """End-to-end: an age secret key must not persist in scripts.log."""
-    wd = _watchdog()
-    try:
-        monkeypatch.setenv("APM_HOME", str(tmp_path))
-        key = _age_secret_key()
-        _append_to_script_log(
-            "post-install",
-            "command",
-            "age-keygen",
-            stdout=key + "\n",
-            status="ok",
-            exit_code=0,
-        )
-        assert key not in _read_log(), "age secret key persisted in cleartext in scripts.log"
-    finally:
-        wd.cancel()
-
-
-# ===========================================================================
-# False-positive SURVIVAL guards for the proposed maskers.
-# These PASS on HEAD (nothing masks them) and MUST keep passing after the fix:
-# a masker that corrupts benign output is itself a bug.
-# ===========================================================================
-
-
 @pytest.mark.parametrize(
     "benign_name",
     [
@@ -347,23 +305,5 @@ def test_round31_control_command_string_redacted_on_error(tmp_path, monkeypatch)
         )
         contents = _read_log()
         assert secret not in contents, "recognised token leaked via command/stderr log fields"
-    finally:
-        wd.cancel()
-
-
-def test_round31_control_http_target_provider_token_redacted(tmp_path, monkeypatch):
-    """Channel: an HTTP target URL carrying a provider token IS redacted in the log."""
-    wd = _watchdog()
-    try:
-        monkeypatch.setenv("APM_HOME", str(tmp_path))
-        ghp = "ghp_" + _opaque(36)
-        _append_to_script_log(
-            "post-install",
-            "http",
-            f"https://hooks.example.com/notify?token={ghp}",
-            stdout="HTTP 200",
-            status="ok",
-        )
-        assert ghp not in _read_log(), "provider token in HTTP target URL leaked to scripts.log"
     finally:
         wd.cancel()

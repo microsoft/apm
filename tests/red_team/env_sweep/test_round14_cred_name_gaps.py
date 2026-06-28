@@ -140,23 +140,6 @@ def test_enumerated_pass_stripped_from_child_env(monkeypatch):
     assert se._is_denylisted("PASS_1", frozenset())
 
 
-def test_dsn_keyword_password_masked_name_independent():
-    """A libpq/JDBC ``password=<value>`` is masked regardless of var NAME."""
-    text = "stdout: DATABASE_URL host=db user=admin password=dsnSecret_9911Qz dbname=app"
-    out = se._redact_connection_string_password(text)
-    assert "dsnSecret_9911Qz" not in out, out
-    assert "[REDACTED]" in out
-    # The benign non-secret fields survive.
-    assert "dbname=app" in out
-    assert "user=admin" in out
-
-
-def test_conn_string_password_does_not_corrupt_pwd_path():
-    """The ``PWD=/path`` shell echo must NOT be mistaken for a ``pwd=`` secret."""
-    text = "PWD=/home/user/project/passwords env dumped"
-    assert se._redact_connection_string_password(text) == text
-
-
 def test_dsn_value_redacted_in_log(tmp_path, monkeypatch):
     """A DSN env var carrying a keyword password is masked end-to-end."""
     monkeypatch.setenv("APM_HOME", str(tmp_path))

@@ -7,7 +7,6 @@ suite (which CI does not collect), so this module pins their behaviour inside
 """
 
 import os
-from urllib.parse import urlparse
 
 from apm_cli.core import script_executors as se
 
@@ -77,66 +76,6 @@ class TestRedactSecretsValueMasking:
         assert se._redact_secrets("") == ""
 
 
-class TestStructuralMaskers:
-    """Name-independent structural maskers chained inside ``_redact_secrets``."""
-
-    def test_connection_string_password_masked(self):
-        out = se._redact_connection_string_password("host=db password=topSecretValue dbname=app")
-        assert "topSecretValue" not in out
-        assert "password=[REDACTED]" in out
-
-    def test_odbc_pwd_in_dsn_masked(self):
-        out = se._redact_connection_string_password("Driver=x;UID=sa;PWD=secretSlash123;")
-        assert "secretSlash123" not in out
-
-    def test_standalone_pwd_path_echo_preserved(self):
-        text = "PWD=/home/user/project"
-        assert se._redact_connection_string_password(text) == text
-
-    def test_webhook_url_token_masked(self):
-        host = "https://hooks.slack.com/services/"
-        url = host + "T000/B000/" + "XyZsecretWebhookToken99"
-        out = se._redact_webhook_urls("posting to " + url)
-        assert "XyZsecretWebhookToken99" not in out
-
-    def test_sas_signature_masked(self):
-        out = se._redact_sas_signatures(
-            "https://x.example/path?sv=2021&sig=HMACsecretValue123&se=z"
-        )
-        assert "HMACsecretValue123" not in out
-        assert "sig=[REDACTED]" in out
-
-    def test_pem_private_key_material_masked(self):
-        pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIsecretKeyBytes\n-----END RSA PRIVATE KEY-----"
-        out = se._redact_pem_private_keys(pem)
-        assert "MIIsecretKeyBytes" not in out
-        assert "BEGIN RSA PRIVATE KEY" in out
-
-    def test_bundler_source_credential_masked(self):
-        out = se._redact_bundler_source_credentials(
-            "BUNDLE_GEMS__CONTRIBSYS__COM=deploy:gemSourceSecret99"
-        )
-        assert "gemSourceSecret99" not in out
-        assert "deploy:" in out
-
-    def test_bundler_benign_config_untouched(self):
-        for text in ("BUNDLE_PATH=vendor/bundle", "BUNDLE_JOBS=4"):
-            assert se._redact_bundler_source_credentials(text) == text
-
-    def test_embedded_url_credentials_masked(self):
-        out = se._redact_embedded_url_credentials("clone https://bot:ghp_xZ9secret@github.com/o/r")
-        assert "ghp_xZ9secret" not in out
-
-    def test_bare_email_not_over_redacted(self):
-        text = "contact user@example.com please"
-        assert se._redact_embedded_url_credentials(text) == text
-
-    def test_url_credentials_stripped(self):
-        out = se._redact_url_credentials("https://bot:secretpw@example.com/path")
-        assert "secretpw" not in out
-        assert urlparse(out).hostname == "example.com"
-
-
 class TestNeutralizeNewlines:
     """``_neutralize_newlines`` -- prevent forged column-0 audit records."""
 
@@ -154,18 +93,23 @@ class TestNeutralizeNewlines:
         assert se._neutralize_newlines("plain text here") == "plain text here"
 
 
-class TestEndToEndChain:
-    """``_redact_secrets`` composes the value masker + all structural maskers."""
+class TestRedactSecretsScopeBoundary:
+    """``_redact_secrets`` masks known-named env-var VALUES only.
 
-    def test_value_and_structural_both_applied(self, monkeypatch):
+    Shared-responsibility: APM redacts the values of credentials it itself
+    manages (denylisted env-var names), but it does NOT shape-scan a script's
+    own third-party secrets out of stdout/stderr -- that is the script
+    author's responsibility, not the package manager's.
+    """
+
+    def test_known_named_value_masked(self, monkeypatch):
         monkeypatch.setenv("TF_TOKEN_app_terraform_io", "atlasv1.SeCretBearerToken123")
-        text = (
-            "TF_TOKEN_app_terraform_io=atlasv1.SeCretBearerToken123 "
-            "BUNDLE_GEMS__CONTRIBSYS__COM=deploy:anotherGemSecret88"
-        )
-        out = se._redact_secrets(text)
+        out = se._redact_secrets("TF_TOKEN_app_terraform_io=atlasv1.SeCretBearerToken123")
         assert "SeCretBearerToken123" not in out
-        assert "anotherGemSecret88" not in out
+
+    def test_unbacked_third_party_secret_not_shape_scanned(self):
+        text = "BUNDLE_GEMS__CONTRIBSYS__COM=deploy:anotherGemSecret88"
+        assert se._redact_secrets(text) == text
 
 
 def teardown_module(_mod):

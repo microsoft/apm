@@ -115,41 +115,6 @@ def test_r18_env_2_tf_var_still_expands(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "name",
-    [
-        "BUNDLE_GEMS__CONTRIBSYS__COM",
-        "BUNDLE_GEM__FURY__IO",
-        "BUNDLE_PRIVATE__EXAMPLE__COM",
-    ],
-)
-def test_r18_env_3_bundler_password_masked_in_log(tmp_path, monkeypatch, name):
-    """The Bundler source password half must not persist in scripts.log."""
-    monkeypatch.setenv("APM_HOME", str(tmp_path))
-    assignment = f"{name}={_BUNDLE_USER}:{_BUNDLE_SECRET}"
-    se._append_to_script_log(
-        "post-install",
-        "command",
-        "bundle-install",
-        stdout=assignment,
-        status="ok",
-    )
-    content = (tmp_path / "logs" / "scripts.log").read_text()
-    assert _BUNDLE_SECRET not in content, content
-    assert "[REDACTED]" in content
-    # The username half and var name stay readable for triage.
-    assert _BUNDLE_USER in content
-
-
-def test_r18_env_3_bundler_var_survives_in_child_env(monkeypatch):
-    """The Bundler source credential is log-masked only -- it must reach env."""
-    value = f"{_BUNDLE_USER}:{_BUNDLE_SECRET}"
-    monkeypatch.setenv("BUNDLE_GEMS__CONTRIBSYS__COM", value)
-    script = ScriptEntry(script_type="command", event="post-install", command="bundle install")
-    env = se._build_script_env(script)
-    assert env.get("BUNDLE_GEMS__CONTRIBSYS__COM") == value
-
-
-@pytest.mark.parametrize(
     "assignment",
     [
         "BUNDLE_PATH=vendor/bundle",

@@ -77,41 +77,6 @@ def test_benign_multiword_command_stays_readable(tmp_path, monkeypatch):
     assert "echo hi there" in content, content
 
 
-def test_url_credentials_in_stdout_are_redacted(tmp_path, monkeypatch):
-    monkeypatch.setenv("APM_HOME", str(tmp_path))
-    se._append_to_script_log(
-        "post-install",
-        "command",
-        "git clone",
-        stdout="Cloning into 'r'... https://ci-bot:ghp_SUPERSECRETVALUE@github.com/o/r ...",
-    )
-    content = (tmp_path / "logs" / "scripts.log").read_text()
-    assert "ghp_SUPERSECRETVALUE" not in content, content
-    assert "[REDACTED]@github.com" in content, content
-
-
-def test_url_credentials_in_stderr_are_redacted(tmp_path, monkeypatch):
-    monkeypatch.setenv("APM_HOME", str(tmp_path))
-    se._append_to_script_log(
-        "post-install",
-        "command",
-        "push",
-        stderr="fatal: https://user:p4ssw0rdTOKEN@gitlab.example/x not found",
-    )
-    content = (tmp_path / "logs" / "scripts.log").read_text()
-    assert "p4ssw0rdTOKEN" not in content, content
-    assert "[REDACTED]@gitlab.example" in content, content
-
-
-def test_url_credentials_in_target_are_redacted(tmp_path, monkeypatch):
-    monkeypatch.setenv("APM_HOME", str(tmp_path))
-    se._append_to_script_log(
-        "post-install", "http", "https://svc:tok_LEAKEDSECRET@api.example/ingest", status="ok"
-    )
-    content = (tmp_path / "logs" / "scripts.log").read_text()
-    assert "tok_LEAKEDSECRET" not in content, content
-
-
 def test_bare_email_in_output_is_not_over_redacted(tmp_path, monkeypatch):
     """No scheme:// -> a bare user@host (e.g. an email) must be left intact."""
     monkeypatch.setenv("APM_HOME", str(tmp_path))

@@ -159,36 +159,6 @@ def test_r15_env_1_rng_seed_preserved_in_child_env(monkeypatch):
     assert env.get("RANDOM_SEED") == "42"
 
 
-def test_r15_env_2_odbc_pwd_value_redacted_in_log(tmp_path, monkeypatch):
-    """An ODBC/SQL Server PWD= connection-string password must be masked."""
-    monkeypatch.setenv("APM_HOME", str(tmp_path))
-    se._append_to_script_log(
-        "post-install",
-        "command",
-        "migrate",
-        stdout="connecting Driver={ODBC Driver 18};Server=db;UID=sa;PWD=Hunter2Pass99;",
-        status="ok",
-    )
-    content = (tmp_path / "logs" / "scripts.log").read_text()
-    assert "Hunter2Pass99" not in content, content
-    assert "[REDACTED]" in content
-    # The non-secret connection fields survive.
-    assert "UID=sa" in content
-    assert "Server=db" in content
-
-
-def test_r15_env_2_pwd_path_echo_preserved():
-    """The shell ``PWD=/path`` echo must NOT be masked by the ODBC PWD= rule."""
-    for text in (
-        "PWD=/home/user/project/passwords here",
-        "PWD=. relative",
-        "PWD=~/work env",
-        "OLDPWD=/old/path here",
-        "PWD=C:\\Users\\me here",
-    ):
-        assert se._redact_connection_string_password(text) == text, text
-
-
 def test_r15_env_3_rotation_word_suffix_denylisted():
     """Rotation names with a word/version tail must not silently expand."""
     for name in ("PASSWORD_OLD", "DB_PASS_OLD", "DB_PASSV2", "API_KEYV2", "SECRET_CURRENT"):
@@ -219,15 +189,6 @@ def test_r15_env_3_rotation_stripped_from_child_env(monkeypatch):
     env = se._build_script_env(script)
     assert "PASSWORD_OLD" not in env
     assert "DB_PASSV2" not in env
-
-
-def test_r15_password_keyword_still_masked():
-    """The round-14 password=/passwd= keyword masker must remain intact."""
-    text = "host=db user=admin password=keywordSecret_9911Qz dbname=app"
-    out = se._redact_connection_string_password(text)
-    assert "keywordSecret_9911Qz" not in out, out
-    assert "[REDACTED]" in out
-    assert "dbname=app" in out
 
 
 def test_r15_env_2_round8_benign_still_clean():

@@ -32,7 +32,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 
 try:
     import fcntl
@@ -240,102 +240,11 @@ _CREDENTIAL_BLOB_SUFFIX = re.compile(
 # START-anchored treatment strips/masks/refuses every per-account session blob.
 _CREDENTIAL_NAME_PREFIX = re.compile(r"^(?:TF_TOKEN_|OP_SESSION_)", re.IGNORECASE)
 
-# Bundler keys a per-gem-source basic-auth credential by HOST in the NAME
-# (dots/dashes -> ``__``): ``BUNDLE_GEMS__CONTRIBSYS__COM=user:password`` for the
-# private Sidekiq gem source, ``BUNDLE_GEM__FURY__IO``, etc. The host-suffixed
-# name matches NO denylist token, so the ``user:password`` pair leaks to
-# scripts.log when a script echoes its env. It cannot be routed through
-# ``_matches_credential`` (which would STRIP it from the child env and break the
-# legitimate ``bundle install`` the source credential authenticates), and the
-# ``BUNDLE_`` prefix is shared with benign config (``BUNDLE_PATH``,
-# ``BUNDLE_JOBS``, ``BUNDLE_BUILD__*``). So mask the secret STRUCTURALLY in the
-# log text instead: a ``BUNDLE_<name>=<user>:<password>`` assignment whose value
-# is a ``user:password`` colon pair (config values are never colon pairs) has its
-# password half redacted while the var still reaches the child env intact. The
-# password half must not start with ``/`` so a mirror URL value (``https://...``)
-# is not mistaken for a credential pair.
-_BUNDLER_SOURCE_CRED_PATTERN = re.compile(
-    r"(\bBUNDLE_[A-Z0-9_]*[A-Z0-9]\s*=\s*[^\s:;/]+:)([^\s;/][^\s;]*)",
-    re.IGNORECASE,
-)
-
-
-def _redact_bundler_source_credentials(text: str) -> str:
-    """Mask the password half of a Bundler ``BUNDLE_<host>=user:password`` pair."""
-    if not text or "BUNDLE_" not in text.upper():
-        return text
-    return _BUNDLER_SOURCE_CRED_PATTERN.sub(lambda m: m.group(1) + "[REDACTED]", text)
-
-
 # Minimum value length that is substring-masked in the audit log. Short
 # values (e.g. a 4-char ``test``) are common substrings of ordinary words
 # and masking them would corrupt unrelated log text; real credential
 # values are long, so an 8-char floor catches secrets without false hits.
 _MIN_REDACT_LEN = 8
-
-
-# Connection-string / DSN passwords use a key=value form
-# (libpq ``password=secret dbname=app``, JDBC ``...;password=secret``) that the
-# URL-userinfo masker cannot see (there is no ``scheme://user:pass@``). Mask the
-# value of a ``password=``/``passwd=`` key regardless of the env-var NAME, so a
-# DSN-style secret carried by an UN-denylisted var (a bare ``DSN``, an echoed
-# connection string) cannot persist in cleartext. The value runs to the next
-# whitespace, ``;`` or end-of-string. A bare ``pwd=`` is handled separately by
-# the path-guarded ``_CONN_STR_PWD_PATTERN`` below (the ODBC ``PWD=`` keyword),
-# so the shell ``$PWD`` working-directory echo is preserved while a real DSN
-# secret is still masked.
-# The keyword group also matches libpq's ``sslpassword`` (the client-cert key
-# passphrase, PostgreSQL >= 13). A bare ``\b(password)`` would NOT fire inside
-# ``sslpassword`` because the ``l`` before ``password`` is a word char (no
-# boundary), leaking the passphrase; ``(?:ssl)?password`` consumes the ``ssl``
-# prefix while ``\b`` still anchors before it. The braced value class consumes an
-# ODBC value that escapes a literal ``}`` by DOUBLING it (``}}``) -- the true
-# terminator is the LAST single ``}``, so ``\{(?:[^}]|\}\})*\}`` walks past every
-# doubled brace instead of stopping at the first ``}`` and leaking the tail.
-_CONN_STR_PASSWORD_PATTERN = re.compile(
-    r"(?i)\b((?:ssl)?password|passwd)(\s*=\s*)(\{(?:[^}]|\}\})*\}|[^\s;]+)"
-)
-
-# The canonical Microsoft ODBC / SQL Server password keyword is ``PWD=`` (e.g.
-# ``Driver={ODBC Driver 18};Server=db;UID=sa;PWD=secret;``). We mask ``PWD=<value>``
-# too, but the shell ``$PWD`` is routinely echoed as ``PWD=/home/user`` (or
-# ``PWD=.``, ``PWD=~/x``, ``PWD=C:\Users``), and masking that would corrupt the
-# benign working-directory path. So the value is preserved ONLY for the
-# standalone ``$PWD`` echo form: a ``PWD=`` that is preceded by a ``;`` DSN
-# delimiter (``UID=sa;PWD=...``) is ALWAYS a connection-string credential and is
-# masked even when its value starts with ``/``, ``.`` or ``~`` -- otherwise an
-# attacker (or a real ODBC password that legitimately starts with ``/``) could
-# prefix a path char to dodge the guard. The value class also consumes an ODBC
-# brace-escaped value (``PWD={p;w@d}``) through the closing ``}`` so an embedded
-# ``;`` cannot leak the password tail.
-# (``\bpwd`` cannot match inside ``OLDPWD`` -- the ``D`` before ``PWD`` is a word
-# char, so there is no word boundary -- leaving ``OLDPWD=/x`` untouched as well.)
-_CONN_STR_PWD_PATTERN = re.compile(r"(?i)\b(pwd)(\s*=\s*)(\{(?:[^}]|\}\})*\}|[^\s;]+)")
-_PWD_PATH_VALUE = re.compile(r"^(?:[/~.]|[A-Za-z]:[\\/])")
-# A ``;`` (optionally trailing whitespace) immediately before ``PWD=`` marks an
-# ODBC connection-string delimiter, distinguishing ``UID=sa;PWD=/secret`` (a DSN
-# credential, masked) from a standalone ``PWD=/home/user`` shell echo (preserved).
-_PWD_DSN_DELIMITER = re.compile(r";\s*$")
-
-
-def _redact_connection_string_password(text: str) -> str:
-    """Mask ``password=``/``passwd=``/``PWD=`` values in connection strings / DSNs."""
-    if not text:
-        return text
-    masked = _CONN_STR_PASSWORD_PATTERN.sub(lambda m: m.group(1) + m.group(2) + "[REDACTED]", text)
-
-    def _mask_pwd(match: re.Match[str]) -> str:
-        # A ';' delimiter before PWD= marks an ODBC DSN credential -- mask it
-        # unconditionally (an attacker, or a real password, may start the value
-        # with '/' to dodge the path guard). Only a standalone PWD= echo with a
-        # filesystem-path value is the benign shell $PWD and is preserved.
-        if _PWD_DSN_DELIMITER.search(match.string[: match.start()]):
-            return match.group(1) + match.group(2) + "[REDACTED]"
-        if _PWD_PATH_VALUE.match(match.group(3)):
-            return match.group(0)  # filesystem path -- the $PWD echo, leave intact
-        return match.group(1) + match.group(2) + "[REDACTED]"
-
-    return _CONN_STR_PWD_PATTERN.sub(_mask_pwd, masked)
 
 
 def _matches_credential(name: str) -> bool:
@@ -382,139 +291,6 @@ def _is_denylisted(name: str, allowed: frozenset[str]) -> bool:
     return _matches_credential(name)
 
 
-# Incoming-webhook URLs (Slack, Discord, Teams, generic O365) carry a
-# bearer-grade secret in the URL PATH -- no userinfo, no query -- so neither the
-# URL-userinfo masker nor the DSN masker sees it, and the env-var NAME
-# (``SLACK_WEBHOOK``, ``*_WEBHOOK_URL``) ends in a benign token the suffix
-# denylist does not list. Adding ``WEBHOOK`` to the denylist would strip the URL
-# from the post-install child env too (a functional regression for a script that
-# legitimately posts to the hook), so we mask the SECRET PATH SEGMENT
-# structurally in log output instead, keyed on the known webhook hosts. The host
-# and a short routing prefix stay readable; the token tail is redacted.
-_WEBHOOK_URL_PATTERN = re.compile(
-    r"(?i)(https://"
-    r"(?:hooks\.slack\.com/(?:services|triggers)"
-    r"|(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks"
-    r"|[a-z0-9.\-]+\.webhook\.office\.com/webhookb2"
-    r"|outlook\.office\.com/webhook)"
-    r"/)[^\s\"'<>]+"
-)
-
-
-def _redact_webhook_urls(text: str) -> str:
-    """Mask the secret path/token of known incoming-webhook URLs in *text*."""
-    if not text:
-        return text
-    return _WEBHOOK_URL_PATTERN.sub(lambda m: m.group(1) + "[REDACTED]", text)
-
-
-# Microsoft retired the O365 connector webhooks (2024-2025); the replacement
-# Teams "Workflows" hooks are Power Automate / Logic Apps URLs whose secret is a
-# Shared Access Signature carried as a ``?sig=<HMAC>`` query token rather than a
-# path segment, so the host-keyed webhook masker above misses them. The same
-# ``sig=`` SAS token guards every Azure SAS URL (Storage, Service Bus, Event
-# Grid), so mask the signature value structurally and host-independently -- it is
-# unambiguously a secret in any URL query -- instead of chasing an ever-changing
-# Microsoft host set. The ``sig=`` key stays so the log still shows a SAS was
-# present; the value (to the next ``&``, whitespace or quote) is redacted.
-_SAS_SIGNATURE_PATTERN = re.compile(r"(?i)([?&]sig=)[^\s\"'<>&]+")
-
-
-def _redact_sas_signatures(text: str) -> str:
-    """Mask the ``sig=`` SAS token of Azure / Teams-Workflows webhook URLs."""
-    if not text:
-        return text
-    return _SAS_SIGNATURE_PATTERN.sub(lambda m: m.group(1) + "[REDACTED]", text)
-
-
-# A private-key blob (an env var whose value is a PEM, an inline key a script
-# echoes) is a multi-line secret with no ``=`` key and no URL, so neither the DSN
-# nor the URL masker sees it; a name like ``SSH_PRIVATE_KEY_PEM`` also ends in a
-# benign token the suffix-anchored denylist misses. Redact the key MATERIAL
-# between the PEM armor markers structurally, independent of the env-var name, so
-# it cannot persist in cleartext in scripts.log. The BEGIN/END armor lines stay
-# (they carry no secret) so the log still records that a key was present. The
-# trailing ``(?: BLOCK)?`` also covers OpenPGP/GnuPG armor
-# (``-----BEGIN PGP PRIVATE KEY BLOCK-----``), whose marker ends in ``KEY BLOCK``
-# rather than ``KEY`` -- a ``gpg --export-secret-keys --armor`` dump otherwise
-# carries no ``=`` key and no denylisted name, so nothing else would mask it.
-_PEM_PRIVATE_KEY_PATTERN = re.compile(
-    r"(-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----)(.*?)"
-    r"(-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----)",
-    re.DOTALL,
-)
-
-
-def _redact_pem_private_keys(text: str) -> str:
-    """Mask the key material inside any PEM PRIVATE KEY armor in *text*."""
-    if not text or "PRIVATE KEY" not in text:
-        return text
-    return _PEM_PRIVATE_KEY_PATTERN.sub(lambda m: m.group(1) + "[REDACTED]" + m.group(3), text)
-
-
-# A JWT/bearer token is ``base64url(header).base64url(payload).base64url(sig)``;
-# both the header and payload JSON begin with ``{"`` so BOTH leading segments
-# base64url-encode to a ``eyJ`` prefix. That DOUBLE ``eyJ`` anchor is what makes
-# this structural masker unambiguous -- a benign dotted value (a version string,
-# a file path, ``a.b.c``, a single-segment ``eyJ...`` blob) lacks the second
-# ``eyJ`` and never matches, while a genuine three-segment JWT always does.
-# Round-24 added the JWT NAME tokens to the denylist, but a JWT printed to
-# stdout with NO backing env var (``gcloud auth print-identity-token``,
-# ``kubectl create token``) or carried by a benign-named var (``AUTH_HEADER``)
-# is matched by no NAME and no other structural masker, so it would persist in
-# cleartext in scripts.log. Mask the VALUE shape directly, independent of name.
-_JWT_VALUE_PATTERN = re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}")
-
-
-def _redact_jwt_values(text: str) -> str:
-    """Mask any JWT/bearer token *value* (``eyJ...eyJ...``) in *text*."""
-    if not text or "eyJ" not in text:
-        return text
-    return _JWT_VALUE_PATTERN.sub("[REDACTED]", text)
-
-
-# Provider-credential VALUE shapes that carry no backing credential-named env
-# var (so the os.environ value-redactor never sees them) and no structural
-# delimiter (no ``@``-host, no ``password=``, no ``eyJ.eyJ``) -- a script that
-# prints ``gh auth token`` / ``vault kv get`` / ``cat .slack-token`` echoes the
-# raw secret to scripts.log otherwise. Each alternative is anchored on a
-# fixed provider prefix plus a long fixed-shape body so benign words that merely
-# start with the same letters (``ghpost-...``, ``AIzapod``) are not redacted.
-_PROVIDER_TOKEN_PATTERN = re.compile(
-    r"gh[posur]_[A-Za-z0-9]{36,}"  # GitHub PAT / OAuth / server / user / refresh
-    r"|github_pat_[A-Za-z0-9_]{40,}"  # GitHub fine-grained PAT
-    r"|xox[baprs]-[A-Za-z0-9-]{10,}"  # Slack bot/user/app/refresh token
-    r"|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}"  # Stripe live/test secret / restricted key
-    r"|AIza[A-Za-z0-9_-]{35}"  # Google API key
-    r"|glpat-[A-Za-z0-9_-]{20,}"  # GitLab personal access token
-    r"|xapp-[A-Za-z0-9-]{10,}"  # Slack app-level token
-    r"|ya29\.[A-Za-z0-9_-]{20,}"  # Google OAuth2 access token
-    r"|hf_[A-Za-z0-9]{30,}"  # Hugging Face access token
-    r"|dop_v1_[A-Za-z0-9]{40,}"  # DigitalOcean personal access token
-    r"|tskey-[A-Za-z0-9-]{10,}"  # Tailscale auth/api key
-    r"|hv[sbr]\.[A-Za-z0-9]{24,}"  # HashiCorp Vault service/batch/recovery token
-    r"|npm_[A-Za-z0-9]{36}"  # npm automation/access token
-    r"|pypi-[A-Za-z0-9_-]{32,}"  # PyPI API token
-    r"|sk-ant-[A-Za-z0-9-]{20,}"  # Anthropic API key
-    r"|(?:AKIA|ASIA)[A-Z0-9]{16}"  # AWS access key id (long-term / STS)
-    r"|SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}"  # SendGrid API key
-    r"|shp(?:at|ca|pa|ss)_[A-Fa-f0-9]{32}"  # Shopify access/custom/private/shared token
-    r"|AGE-SECRET-KEY-1[0-9A-Z]{55,65}"  # age/sops X25519 secret key (Bech32 body)
-)
-
-
-def _redact_provider_tokens(text: str) -> str:
-    """Mask fixed-prefix provider credential *values* (PAT, Slack, Stripe, GCP).
-
-    Name-independent structural masker in the same class as
-    :func:`_redact_jwt_values`: it catches a raw provider secret printed to
-    stdout/stderr with no backing env var and no surrounding delimiter.
-    """
-    if not text:
-        return text
-    return _PROVIDER_TOKEN_PATTERN.sub("[REDACTED]", text)
-
-
 def _redact_secrets(text: str) -> str:
     """Mask any denylisted env-var *values* appearing in script output.
 
@@ -555,51 +331,34 @@ def _redact_secrets(text: str) -> str:
     redacted = text
     for value in sorted(set(secrets), key=len, reverse=True):
         redacted = redacted.replace(value, "[REDACTED]")
-    return _redact_jwt_values(
-        _redact_provider_tokens(
-            _redact_pem_private_keys(
-                _redact_bundler_source_credentials(
-                    _redact_sas_signatures(
-                        _redact_webhook_urls(_redact_connection_string_password(redacted))
-                    )
-                )
-            )
-        )
-    )
+    return redacted
 
 
 def _redact_url_credentials(url: str) -> str:
-    """Strip ``user:password@`` from a URL before logging."""
+    """Strip ``user:password@`` userinfo from a URL before it is logged.
+
+    Deterministic log hygiene for a field APM itself writes to
+    ``scripts.log`` (the http event target): the URL is parsed with
+    ``urllib`` and the authority rebuilt from host (+ port) only. This is
+    NOT a shape-scan of script output -- it sanitizes one APM-owned value.
+    The credential-bearing URL is still used for the actual dispatch; only
+    the LOGGED form is sanitized.
+    """
     try:
-        parsed = urlparse(url)
-        if not parsed.netloc or "@" not in parsed.netloc:
-            return url
-        host = parsed.hostname or ""
-        if parsed.port is not None:
-            host = f"{host}:{parsed.port}"
-        return parsed._replace(netloc=host).geturl()
-    except (ValueError, TypeError):
+        parts = urlsplit(url)
+    except ValueError:
         return url
-
-
-# Matches ``scheme://userinfo@`` embedded anywhere in free text so a
-# tokenized URL printed by a script (e.g. git progress echoing
-# ``https://ci-bot:ghp_xxx@github.com/...``) cannot persist its credential
-# to scripts.log in cleartext. The scheme prefix is required so a bare
-# ``user@host`` (e.g. an email address) is never over-redacted, and the
-# userinfo run stops at the first ``/`` so a ``?next=a@b`` query is ignored.
-# The userinfo class is ``[^/\s]+`` (NOT ``[^/\s@]+``): a password may itself
-# contain a literal ``@`` (e.g. ``svc:p@ssw0rd@host``), and git/curl treat the
-# LAST ``@`` before the path as the separator, so the greedy class must anchor
-# there too -- otherwise the secret tail after the first ``@`` would leak.
-_EMBEDDED_URL_CRED_PATTERN = re.compile(r"([a-zA-Z][a-zA-Z0-9+.\-]*://)[^/\s]+@")
-
-
-def _redact_embedded_url_credentials(text: str) -> str:
-    """Mask ``user:pass@`` userinfo of any URL embedded in *text*."""
-    if not text or "@" not in text:
-        return text
-    return _EMBEDDED_URL_CRED_PATTERN.sub(lambda m: m.group(1) + "[REDACTED]@", text)
+    if "@" not in (parts.netloc or ""):
+        return url
+    try:
+        host = parts.hostname or ""
+        port = parts.port
+    except ValueError:
+        return url
+    if host and ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = f"{host}:{port}" if port is not None else host
+    return urlunsplit(parts._replace(netloc=netloc))
 
 
 # -- Script output log -----------------------------------------------------
@@ -789,22 +548,16 @@ def _append_to_script_log(
         _rotate_log_if_large(log_path)
 
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        safe_target = _escape_header_field(
-            _neutralize_newlines(_redact_embedded_url_credentials(_redact_secrets(target)))
-        )
+        safe_target = _escape_header_field(_neutralize_newlines(_redact_secrets(target)))
         lines = [
             f"[{ts}] event={event_name} type={script_type} target={safe_target} status={status}"
         ]
         if exit_code is not None:
             lines[0] += f" exit_code={exit_code}"
         if stdout and stdout.strip():
-            lines.append(
-                f"  stdout: {_truncate_log_field(_redact_embedded_url_credentials(_redact_secrets(stdout)).strip())}"
-            )
+            lines.append(f"  stdout: {_truncate_log_field(_redact_secrets(stdout).strip())}")
         if stderr and stderr.strip():
-            lines.append(
-                f"  stderr: {_truncate_log_field(_redact_embedded_url_credentials(_redact_secrets(stderr)).strip())}"
-            )
+            lines.append(f"  stderr: {_truncate_log_field(_redact_secrets(stderr).strip())}")
         lines.append("")  # blank line separator
 
         flags = (
@@ -819,13 +572,18 @@ def _append_to_script_log(
         try:
             fd = os.open(log_path, flags, 0o600)
         except OSError:
-            # A no-reader FIFO planted at the log path makes the ``O_NONBLOCK``
-            # open raise ENXIO. Self-heal: unlink the hostile node and recreate
-            # a fresh ``0600`` regular file with ``O_EXCL`` so the audit log is
-            # NOT permanently blackholed (a bare drop here would silently lose
-            # every future append, for this AND all later actors).
+            # A no-reader FIFO (ENXIO) or a planted DIRECTORY (EISDIR/EPERM) at
+            # the log path fails the open; self-heal by removing the hostile node
+            # and O_EXCL-recreating a fresh 0600 file so the audit log is not
+            # permanently blackholed. unlink clears a file/FIFO/symlink; rmdir
+            # clears an empty dir (unlink raises IsADirectoryError/PermissionError
+            # on a dir, so a ``mkdir scripts.log`` plant would otherwise blackout).
             with contextlib.suppress(FileNotFoundError):
-                os.unlink(log_path)
+                try:
+                    os.unlink(log_path)
+                except (IsADirectoryError, PermissionError):
+                    with contextlib.suppress(OSError):
+                        os.rmdir(log_path)
             fd = os.open(log_path, excl_flags, 0o600)
         try:
             # Fail closed if the log path is not a regular file OR a pre-planted
