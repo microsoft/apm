@@ -47,6 +47,7 @@ from ..utils.path_security import (
     ensure_path_within,
     validate_path_segments,
 )
+from ..utils.yaml_io import load_yaml_str
 
 _MAX_ZIP_ENTRIES = MAX_ZIP_ENTRIES
 _MAX_ZIP_UNCOMPRESSED = MAX_ZIP_UNCOMPRESSED
@@ -104,7 +105,7 @@ def _read_bundle_lockfile(bundle_dir: Path) -> dict[str, Any] | None:
     if not lf_path.is_file():
         return None
     try:
-        data = yaml.safe_load(lf_path.read_text(encoding="utf-8"))
+        data = load_yaml_str(lf_path.read_text(encoding="utf-8"))
     except (yaml.YAMLError, OSError):
         return None
     return data if isinstance(data, dict) else None

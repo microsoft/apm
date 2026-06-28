@@ -150,7 +150,17 @@ _MIN_REDACT_LEN = 8
 # the path-guarded ``_CONN_STR_PWD_PATTERN`` below (the ODBC ``PWD=`` keyword),
 # so the shell ``$PWD`` working-directory echo is preserved while a real DSN
 # secret is still masked.
-_CONN_STR_PASSWORD_PATTERN = re.compile(r"(?i)\b(password|passwd)(\s*=\s*)(\{[^}]*\}|[^\s;]+)")
+# The keyword group also matches libpq's ``sslpassword`` (the client-cert key
+# passphrase, PostgreSQL >= 13). A bare ``\b(password)`` would NOT fire inside
+# ``sslpassword`` because the ``l`` before ``password`` is a word char (no
+# boundary), leaking the passphrase; ``(?:ssl)?password`` consumes the ``ssl``
+# prefix while ``\b`` still anchors before it. The braced value class consumes an
+# ODBC value that escapes a literal ``}`` by DOUBLING it (``}}``) -- the true
+# terminator is the LAST single ``}``, so ``\{(?:[^}]|\}\})*\}`` walks past every
+# doubled brace instead of stopping at the first ``}`` and leaking the tail.
+_CONN_STR_PASSWORD_PATTERN = re.compile(
+    r"(?i)\b((?:ssl)?password|passwd)(\s*=\s*)(\{(?:[^}]|\}\})*\}|[^\s;]+)"
+)
 
 # The canonical Microsoft ODBC / SQL Server password keyword is ``PWD=`` (e.g.
 # ``Driver={ODBC Driver 18};Server=db;UID=sa;PWD=secret;``). We mask ``PWD=<value>``
@@ -166,7 +176,7 @@ _CONN_STR_PASSWORD_PATTERN = re.compile(r"(?i)\b(password|passwd)(\s*=\s*)(\{[^}
 # ``;`` cannot leak the password tail.
 # (``\bpwd`` cannot match inside ``OLDPWD`` -- the ``D`` before ``PWD`` is a word
 # char, so there is no word boundary -- leaving ``OLDPWD=/x`` untouched as well.)
-_CONN_STR_PWD_PATTERN = re.compile(r"(?i)\b(pwd)(\s*=\s*)(\{[^}]*\}|[^\s;]+)")
+_CONN_STR_PWD_PATTERN = re.compile(r"(?i)\b(pwd)(\s*=\s*)(\{(?:[^}]|\}\})*\}|[^\s;]+)")
 _PWD_PATH_VALUE = re.compile(r"^(?:[/~.]|[A-Za-z]:[\\/])")
 # A ``;`` (optionally trailing whitespace) immediately before ``PWD=`` marks an
 # ODBC connection-string delimiter, distinguishing ``UID=sa;PWD=/secret`` (a DSN
@@ -247,7 +257,7 @@ def _is_denylisted(name: str, allowed: frozenset[str]) -> bool:
 # and a short routing prefix stay readable; the token tail is redacted.
 _WEBHOOK_URL_PATTERN = re.compile(
     r"(?i)(https://"
-    r"(?:hooks\.slack\.com/services"
+    r"(?:hooks\.slack\.com/(?:services|triggers)"
     r"|(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks"
     r"|[a-z0-9.\-]+\.webhook\.office\.com/webhookb2"
     r"|outlook\.office\.com/webhook)"
@@ -262,15 +272,39 @@ def _redact_webhook_urls(text: str) -> str:
     return _WEBHOOK_URL_PATTERN.sub(lambda m: m.group(1) + "[REDACTED]", text)
 
 
+# Microsoft retired the O365 connector webhooks (2024-2025); the replacement
+# Teams "Workflows" hooks are Power Automate / Logic Apps URLs whose secret is a
+# Shared Access Signature carried as a ``?sig=<HMAC>`` query token rather than a
+# path segment, so the host-keyed webhook masker above misses them. The same
+# ``sig=`` SAS token guards every Azure SAS URL (Storage, Service Bus, Event
+# Grid), so mask the signature value structurally and host-independently -- it is
+# unambiguously a secret in any URL query -- instead of chasing an ever-changing
+# Microsoft host set. The ``sig=`` key stays so the log still shows a SAS was
+# present; the value (to the next ``&``, whitespace or quote) is redacted.
+_SAS_SIGNATURE_PATTERN = re.compile(r"(?i)([?&]sig=)[^\s\"'<>&]+")
+
+
+def _redact_sas_signatures(text: str) -> str:
+    """Mask the ``sig=`` SAS token of Azure / Teams-Workflows webhook URLs."""
+    if not text:
+        return text
+    return _SAS_SIGNATURE_PATTERN.sub(lambda m: m.group(1) + "[REDACTED]", text)
+
+
 # A private-key blob (an env var whose value is a PEM, an inline key a script
 # echoes) is a multi-line secret with no ``=`` key and no URL, so neither the DSN
 # nor the URL masker sees it; a name like ``SSH_PRIVATE_KEY_PEM`` also ends in a
 # benign token the suffix-anchored denylist misses. Redact the key MATERIAL
 # between the PEM armor markers structurally, independent of the env-var name, so
 # it cannot persist in cleartext in scripts.log. The BEGIN/END armor lines stay
-# (they carry no secret) so the log still records that a key was present.
+# (they carry no secret) so the log still records that a key was present. The
+# trailing ``(?: BLOCK)?`` also covers OpenPGP/GnuPG armor
+# (``-----BEGIN PGP PRIVATE KEY BLOCK-----``), whose marker ends in ``KEY BLOCK``
+# rather than ``KEY`` -- a ``gpg --export-secret-keys --armor`` dump otherwise
+# carries no ``=`` key and no denylisted name, so nothing else would mask it.
 _PEM_PRIVATE_KEY_PATTERN = re.compile(
-    r"(-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----)(.*?)(-----END [A-Z0-9 ]*PRIVATE KEY-----)",
+    r"(-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----)(.*?)"
+    r"(-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----)",
     re.DOTALL,
 )
 
@@ -323,7 +357,7 @@ def _redact_secrets(text: str) -> str:
     for value in sorted(set(secrets), key=len, reverse=True):
         redacted = redacted.replace(value, "[REDACTED]")
     return _redact_pem_private_keys(
-        _redact_webhook_urls(_redact_connection_string_password(redacted))
+        _redact_sas_signatures(_redact_webhook_urls(_redact_connection_string_password(redacted)))
     )
 
 

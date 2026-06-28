@@ -197,6 +197,30 @@ class _BoundedSafeLoader(yaml.SafeLoader):
             self._flatten_depth -= 1
 
 
+def _bounded_load(stream: Any) -> Any:
+    """Parse *stream* with the merge-bounded SafeLoader, failing closed.
+
+    Centralizes the round-16 bounded-loader entrypoint AND normalizes the
+    non-``YAMLError`` failure modes the bounded loader can still surface into a
+    ``yaml.YAMLError`` so every caller's fail-closed ``except yaml.YAMLError``
+    catches them as one class:
+
+    * a huge decimal-int scalar (``bignum: <6000 digits>``) reaches CPython's
+      ``int()`` and raises ``ValueError`` past ``sys.int_max_str_digits``;
+    * a deeply-nested document raises ``RecursionError`` during construction.
+
+    Without this, those escape the integrators' ``except yaml.YAMLError``
+    wrappers and abort a whole ``apm audit`` drift replay (one hostile
+    ``.prompt.md`` -> whole-run DoS) instead of the intended per-file skip.
+    """
+    try:
+        return yaml.load(stream, Loader=_BoundedSafeLoader)  # noqa: S506 - SafeLoader subclass
+    except yaml.YAMLError:
+        raise
+    except (ValueError, RecursionError) as exc:
+        raise yaml.YAMLError(f"bounded YAML parse failed: {type(exc).__name__}: {exc}") from exc
+
+
 def load_yaml(path: str | Path) -> dict[str, Any] | None:
     """Load a YAML file with explicit UTF-8 encoding.
 
@@ -205,10 +229,11 @@ def load_yaml(path: str | Path) -> dict[str, Any] | None:
 
     Uses a merge-bounded SafeLoader so a hostile manifest cannot wedge the
     parser via an eager ``<<`` merge-key expansion (see ``_BoundedSafeLoader``);
-    the bomb fails closed as a ``yaml.YAMLError`` instead of hanging.
+    the bomb -- and a huge-int / deep-nest scalar -- fails closed as a
+    ``yaml.YAMLError`` (see ``_bounded_load``) instead of hanging or escaping.
     """
     with open(path, encoding="utf-8") as fh:
-        return yaml.load(fh, Loader=_BoundedSafeLoader)  # noqa: S506 - SafeLoader subclass
+        return _bounded_load(fh)
 
 
 def load_yaml_str(text: str) -> dict[str, Any] | None:
@@ -216,18 +241,17 @@ def load_yaml_str(text: str) -> dict[str, Any] | None:
 
     The string-input twin of :func:`load_yaml`, for callers that already hold
     the YAML text rather than a path: a lockfile body (``LockFile.from_yaml``),
-    packed bundle metadata, or an installed package's ``.md`` frontmatter.
-    Routing those through ``_BoundedSafeLoader`` (instead of stock
-    ``yaml.safe_load``) means a hostile string -- a bundle ``apm.lock.yaml`` or
-    a crafted frontmatter block from an untrusted clone -- cannot wedge the
-    parser via an eager ``<<`` merge-key expansion; the bomb fails closed as a
-    ``yaml.YAMLError`` instead of hanging the caller in an uncatchable
+    a local bundle's ``apm.lock.yaml``, packed bundle metadata, or an installed
+    package's ``.md`` frontmatter. Routing those through ``_BoundedSafeLoader``
+    (instead of stock ``yaml.safe_load``) means a hostile string cannot wedge
+    the parser via an eager ``<<`` merge-key expansion; the bomb fails closed as
+    a ``yaml.YAMLError`` instead of hanging the caller in an uncatchable
     ``O(2^N)`` construction loop.
 
     Returns parsed data or ``None`` for empty input. Raises ``yaml.YAMLError``
-    on malformed or over-budget input.
+    on malformed, over-budget, huge-int, or deeply-nested input.
     """
-    return yaml.load(text, Loader=_BoundedSafeLoader)  # noqa: S506 - SafeLoader subclass
+    return _bounded_load(text)
 
 
 class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
@@ -250,7 +274,14 @@ class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
 
     def load(self, fm: str, **kwargs: Any) -> Any:
         kwargs["Loader"] = _BoundedSafeLoader
-        return yaml.load(fm, **kwargs)  # noqa: S506 - SafeLoader subclass
+        try:
+            return yaml.load(fm, **kwargs)  # noqa: S506 - SafeLoader subclass
+        except yaml.YAMLError:
+            raise
+        except (ValueError, RecursionError) as exc:
+            raise yaml.YAMLError(
+                f"bounded frontmatter parse failed: {type(exc).__name__}: {exc}"
+            ) from exc
 
 
 _BOUNDED_FRONTMATTER_HANDLER = _BoundedYAMLHandler()
