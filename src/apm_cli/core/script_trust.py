@@ -285,13 +285,16 @@ def is_fingerprint_trusted(script_file: Path, fingerprint: str | None) -> bool:
         return False
     try:
         key = str(script_file.resolve())
-    except OSError:
+    except (OSError, RuntimeError, ValueError):
         # A concurrent symlink swap (or any FS resolution error) on the
         # project apm.yml must fail CLOSED: treat the tier as untrusted and
         # let install/update/uninstall proceed. is_fingerprint_trusted sits
         # on the firing boundary (install/service.py is not wrapped like the
-        # update/uninstall callers), so a propagated OSError would abort the
+        # update/uninstall callers), so a propagated error would abort the
         # primary install path -- a fail-not-closed DoS, not a trust bypass.
+        # pathlib raises RuntimeError (not OSError) on an ELOOP symlink loop
+        # on CPython 3.12+, and ValueError on some embedded-null paths, so
+        # all three are caught here.
         return False
     trusted = _load_trust_store().get(key)
     return trusted == fingerprint

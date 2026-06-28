@@ -56,11 +56,13 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za
 #   - plurals: ...TOKENS, ...KEYS, ...SECRETS, ...CREDENTIALS, ...PATS
 #   - qualified: AWS_ACCESS_KEY_ID, ..._KEY_IDS
 #   - canonical: GOOGLE_APPLICATION_CREDENTIALS (CREDENTIAL + plural S)
+#   - key passphrases: GPG_PASSPHRASE, SSH_KEY_PASSPHRASE (PASSPHRASE is the
+#     same secret class as PASSWORD/PASSWD/PWD, which are already covered)
 # The trailing ``S?`` does not over-match unrelated names (e.g. PATH keeps
 # a stray ``H`` after PAT and so never matches; TRACE_ID has no credential
 # token before ``_ID`` and is left alone).
 _CREDENTIAL_DENYLIST = re.compile(
-    r"(?:TOKEN|SECRET|PAT|KEY|PASSWORD|PASSWD|PWD|CREDENTIAL|AUTHTOKEN)S?(?:_IDS?)?$",
+    r"(?:TOKEN|SECRET|PAT|KEY|PASSWORD|PASSWD|PASSPHRASE|PWD|CREDENTIAL|AUTHTOKEN)S?(?:_IDS?)?$",
     re.IGNORECASE,
 )
 
@@ -379,8 +381,8 @@ def _expand_env_vars(
     """Expand ``$VAR`` and ``${VAR}`` references in *value*.
 
     Variables whose names match the credential denylist pattern
-    (TOKEN, SECRET, PAT, KEY, PASSWORD, CREDENTIAL, AUTHTOKEN) are NOT
-    expanded unless their name is in *allowed* (the script's opt-in
+    (TOKEN, SECRET, PAT, KEY, PASSWORD, PASSPHRASE, CREDENTIAL, AUTHTOKEN)
+    are NOT expanded unless their name is in *allowed* (the script's opt-in
     ``allowedEnvVars``). A blocked expansion emits a visible warning so
     the failure is never silent.
     """
@@ -519,7 +521,14 @@ def _ssrf_block_reason(host: str) -> str | None:
 
     try:
         infos = socket.getaddrinfo(host, None)
-    except OSError:
+    except (OSError, UnicodeError):
+        # OSError: name does not resolve. UnicodeError (a ValueError
+        # subclass): the host cannot be IDNA-encoded (empty label, a label
+        # over 63 octets, or a surrogate code point). Either way the host is
+        # unreachable, so allowing it is SSRF-safe and the request layer will
+        # fail to connect -- but it must fail CLOSED (return None) here, not
+        # propagate out of _prepare_http and crash the public execute_script
+        # caller, matching the _safe_urlparse fail-closed contract.
         return None
     for info in infos:
         sockaddr = info[4]
@@ -1041,8 +1050,8 @@ def _build_script_env(script: ScriptEntry) -> dict[str, str]:
 
     Inherits the current process environment but strips any variables
     whose names match the credential denylist (TOKEN, SECRET, PAT, KEY,
-    PASSWORD, CREDENTIAL, AUTHTOKEN) to prevent accidental exfiltration
-    via scripts. A script may opt specific names back in via
+    PASSWORD, PASSPHRASE, CREDENTIAL, AUTHTOKEN) to prevent accidental
+    exfiltration via scripts. A script may opt specific names back in via
     ``allowedEnvVars`` (e.g. ``ANALYTICS_TOKEN``) -- this is best-effort
     convenience, NOT a security boundary: a command script can read any
     file it has permission to.

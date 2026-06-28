@@ -563,10 +563,18 @@ def build_runner_from_context(
     project_yml = _get_project_apm_yml(project_root)
     project_entries: list[ScriptEntry] = []
     project_fp: str | None = None
-    if project_yml.is_file():
-        project_entries, project_fp = parse_apm_yml_lifecycle_with_fingerprint(
-            project_yml, "project"
-        )
+    try:
+        if project_yml.is_file():
+            project_entries, project_fp = parse_apm_yml_lifecycle_with_fingerprint(
+                project_yml, "project"
+            )
+    except OSError:
+        # Path.is_file() only swallows ENOENT/ENOTDIR/EBADF/ELOOP; a
+        # concurrent symlink swap or a hostile parent can surface
+        # EINVAL/EACCES/ENAMETOOLONG here, on the firing boundary. The
+        # project tier must fail CLOSED (skip project scripts) rather than
+        # abort the install/update/uninstall flow.
+        project_entries, project_fp = [], None
     scripts.extend(project_entries)
 
     if not scripts:

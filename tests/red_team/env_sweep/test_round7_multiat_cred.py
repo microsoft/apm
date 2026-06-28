@@ -23,26 +23,33 @@ from apm_cli.core import script_executors as se
 
 
 @pytest.mark.parametrize(
-    ("url", "leaked_fragment"),
+    ("url", "leaked_fragment", "expected_redacted"),
     [
-        ("https://svc:p@ssw0rd_S3cretTail@registry.example.com/o/r", "ssw0rd_S3cretTail"),
-        ("https://u:a@b@c@host.example.com/path", "a@b@c"),
-        ("ssh://git:pa@ss@github.com/o/r", "pa@ss"),
+        (
+            "https://svc:p@ssw0rd_S3cretTail@registry.example.com/o/r",
+            "ssw0rd_S3cretTail",
+            "https://[REDACTED]@registry.example.com/o/r",
+        ),
+        (
+            "https://u:a@b@c@host.example.com/path",
+            "a@b@c",
+            "https://[REDACTED]@host.example.com/path",
+        ),
+        ("ssh://git:pa@ss@github.com/o/r", "pa@ss", "ssh://[REDACTED]@github.com/o/r"),
     ],
 )
-def test_multiat_password_fully_masked(tmp_path, monkeypatch, url, leaked_fragment):
+def test_multiat_password_fully_masked(
+    tmp_path, monkeypatch, url, leaked_fragment, expected_redacted
+):
     """A password containing literal '@' must be fully masked in the log."""
     monkeypatch.setenv("APM_HOME", str(tmp_path))
     se._append_to_script_log("post-install", "http", url, status="ok")
     content = (tmp_path / "logs" / "scripts.log").read_text()
     assert leaked_fragment not in content, content
     assert "[REDACTED]@" in content, content
-    # The real host survives so the audit entry is still useful.
-    assert (
-        "host.example.com" in content
-        or "registry.example.com" in content
-        or "github.com" in content
-    )
+    # Whole-string equality proves the secret is gone AND the real host
+    # survives -- without substring-matching a host inside a URL.
+    assert se._redact_embedded_url_credentials(url) == expected_redacted
 
 
 def test_multiat_in_stdout_masked(tmp_path, monkeypatch):

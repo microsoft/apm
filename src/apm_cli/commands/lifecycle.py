@@ -57,6 +57,7 @@ def lifecycle(ctx: click.Context) -> None:
     )
 
     try:
+        from rich.markup import escape
         from rich.table import Table
 
         from apm_cli.utils.console import _get_console
@@ -77,7 +78,17 @@ def lifecycle(ctx: click.Context) -> None:
 
         for entry in entries:
             target = _safe_token(entry.url or entry.effective_command or "(none)")
-            table.add_row(entry.event, entry.script_type, target, entry.source)
+            # Escape every cell: a hostile manifest can embed Rich console
+            # markup (e.g. a url/command containing ``[/]``) which the table
+            # renderer would otherwise parse, raising MarkupError and aborting
+            # the read-only audit listing. _safe_token stringifies but does
+            # not neutralize markup, so escaping is required here.
+            table.add_row(
+                escape(entry.event),
+                escape(entry.script_type),
+                escape(target),
+                escape(entry.source),
+            )
 
         console.print(table)
     except (ImportError, NameError):
