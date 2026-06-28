@@ -335,11 +335,11 @@ def _append_to_script_log(
             lines[0] += f" exit_code={exit_code}"
         if stdout and stdout.strip():
             lines.append(
-                f"  stdout: {_truncate_log_field(_redact_embedded_url_credentials(_redact_secrets(stdout.strip())))}"
+                f"  stdout: {_truncate_log_field(_redact_embedded_url_credentials(_redact_secrets(stdout)).strip())}"
             )
         if stderr and stderr.strip():
             lines.append(
-                f"  stderr: {_truncate_log_field(_redact_embedded_url_credentials(_redact_secrets(stderr.strip())))}"
+                f"  stderr: {_truncate_log_field(_redact_embedded_url_credentials(_redact_secrets(stderr)).strip())}"
             )
         lines.append("")  # blank line separator
 

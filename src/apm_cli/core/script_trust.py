@@ -205,7 +205,13 @@ def _load_trust_store() -> dict[str, str]:
     store = _trust_store_path()
     try:
         data = json.loads(store.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError, RecursionError):
+        # Fail closed (-> {}) on any malformed/oversized/non-UTF-8 trust store,
+        # matching every sibling JSON/YAML loader. json.JSONDecodeError is a
+        # ValueError subclass; the CPython int_max_str_digits limit and a
+        # non-UTF-8 read_text raise a *bare* ValueError that the narrower
+        # (OSError, json.JSONDecodeError) handler let escape and crash every
+        # trust-gated entrypoint (trust/untrust/test + the install fire gate).
         return {}
     if not isinstance(data, dict):
         return {}
