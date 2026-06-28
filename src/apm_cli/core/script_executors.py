@@ -64,6 +64,16 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za
 #     ``PASS`` token is anchored to a ``_``-or-start boundary (``(?:^|_)PASS``)
 #     so the real ``*_PASS`` family is swept WITHOUT catching the common-
 #     English suffix words SURPASS / BYPASS / COMPASS / TRESPASS / PASSAGE.
+#   - one-time passcodes: MFA_PASSCODE, VPN_PASSCODE, *_PASSCODE (a dedicated
+#     ``PASSCODE`` token; the ``(?:^|_)PASS`` arm cannot reach it because the
+#     trailing ``CODE`` blocks the end anchor). Same password secret class.
+#     Benign ``*_CODE`` names (BARCODE, ZIPCODE, QRCODE, STATUS_CODE,
+#     COUNTRY_CODE, ERROR_CODE) never contain ``PASSCODE`` and stay benign.
+#   - bare JWT bearer tokens: JWT, ACCESS_JWT, REFRESH_JWT, *_JWT (a trailing-
+#     anchored ``JWT`` token). The ``eyJ...`` value matches no structural
+#     masker, so a bare *_JWT name is the only signal; benign LEADING-JWT
+#     config names (JWT_ALGORITHM, JWT_ISSUER, JWT_AUDIENCE) keep a non-token
+#     tail and so stay benign. JWT_SECRET is already swept via SECRET.
 #   - wallet seed phrases: MNEMONIC, *_MNEMONIC, *_SEED_PHRASE, *_RECOVERY_PHRASE,
 #     *_BACKUP_PHRASE (the hardhat / foundry / truffle deploy lifecycle secret --
 #     a single token that, if leaked, drains a wallet; same secret class as
@@ -102,8 +112,8 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za
 # TOKEN-LESS asset (IMAGE_BASE64, LOGO_B64, CONFIG_JSON, PACKAGE_JSON, COLOR_HEX)
 # never matches and still reaches the child env.
 _CREDENTIAL_DENYLIST = re.compile(
-    r"(?:(?:^|_)PASS|TOKEN|SECRET|PAT|KEY|PASSWORD|PASSWD|PASSPHRASE|PWD"
-    r"|CREDENTIAL|AUTHTOKEN|AUTHORIZATION|MNEMONIC|SEED_PHRASE|RECOVERY_PHRASE|BACKUP_PHRASE)"
+    r"(?:(?:^|_)PASS|PASSCODE|TOKEN|SECRET|PAT|KEY|PASSWORD|PASSWD|PASSPHRASE|PWD"
+    r"|CREDENTIAL|AUTHTOKEN|AUTHORIZATION|JWT|MNEMONIC|SEED_PHRASE|RECOVERY_PHRASE|BACKUP_PHRASE)"
     r"S?(?:_IDS?)?(?:_?(?:OLD|NEW|PREV|CURRENT))?(?:_?V[0-9]+)?"
     r"(?:_?(?:BASE64|BASE32|BASE58|BASE62|B64|B32|HEX|PEM|DER|ASCII85|A85|Z85|URL_?SAFE|JSON|YAML|YML|TOML|ASC))?[_0-9]*$",
     re.IGNORECASE,
@@ -1793,9 +1803,18 @@ def _capture_bounded(
     # instead of the full 5s join budget, and -- unlike an unconditional reap --
     # does NOT kill a daemon that correctly redirected its stdio.
     grace_deadline = time.monotonic() + _CAPTURE_DRAIN_GRACE
-    for w in workers:
+    # Only the two stdout/stderr DRAINS (workers[1:]) decide the reap. workers[0]
+    # is the stdin _feed writer: a still-alive _feed means stdin is merely
+    # UNCONSUMED (e.g. a legitimately-detached daemon that inherited but never
+    # reads stdin, and on a many-package install the event JSON exceeds the OS
+    # pipe buffer so the write blocks). Abandoning that bounded daemon-thread
+    # write is harmless -- it does NOT hold our capture pipes -- so it must not
+    # drive the kill decision, else a redirected-stdio daemon (which DID EOF both
+    # drains, the npm/yarn-parity survival case) is wrongly reaped by killpg.
+    drains = workers[1:]
+    for w in drains:
         w.join(timeout=max(0.0, grace_deadline - time.monotonic()))
-    if any(w.is_alive() for w in workers):
+    if any(w.is_alive() for w in drains):
         # A group member still holds the pipes after the grace. Reap the group so
         # the drains hit EOF. If a grandchild ESCAPED the group -- e.g. it called
         # ``os.setsid()`` to form its OWN session/group -- ``killpg(proc.pid)``
@@ -1808,7 +1827,7 @@ def _capture_bounded(
         # cost, not an unbounded hang.
         _signal_kill_group(proc)
         reap_deadline = time.monotonic() + _CAPTURE_DRAIN_GRACE
-        for w in workers:
+        for w in drains:
             w.join(timeout=max(0.0, reap_deadline - time.monotonic()))
     return "".join(out), "".join(err), bool(out_state["over"] or err_state["over"])
 

@@ -2049,7 +2049,9 @@ class _FakeHTTPResponse:
     def __init__(self, data: bytes) -> None:
         self._data = data
 
-    def read(self) -> bytes:
+    def read(self, amt: int | None = None) -> bytes:
+        if amt is not None and amt >= 0:
+            return self._data[:amt]
         return self._data
 
     def __enter__(self):  # type: ignore[no-untyped-def]
