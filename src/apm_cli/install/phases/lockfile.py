@@ -67,6 +67,17 @@ class LockfileBuilder:
 
     def build_and_save(self) -> None:
         """Assemble lockfile from ctx state and write it (no-op when nothing was installed)."""
+        # Self-heal cache pin markers for remote deps recorded in the
+        # PRE-EXISTING on-disk lockfile whose cached payload survives on
+        # disk. This runs FIRST, before orphan-pruning (#1926) may rewrite
+        # the lockfile to drop deps no longer in the manifest: those deps'
+        # cached directories remain under apm_modules/, and the supply-chain
+        # contract (PR #1137) requires every cached remote dep to carry a
+        # ``.apm-pin`` marker so a later ``apm audit`` drift replay can
+        # fail-closed on a stale cache. Idempotent + best-effort; warnings
+        # for unpinned deps are surfaced by the primary post-build sync, so
+        # this secondary pass stays silent.
+        self._sync_cache_pin_markers_from_existing()
         if (
             not self.ctx.installed_packages
             and not self.ctx.lockfile_only
@@ -372,6 +383,44 @@ class LockfileBuilder:
         except Exception as exc:
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail(f"Cache pin marker sync skipped: {exc}")
+
+    def _sync_cache_pin_markers_from_existing(self) -> None:
+        """Self-heal markers from the pre-existing in-memory lockfile.
+
+        Runs at the very start of ``build_and_save`` so that remote deps
+        recorded in the on-disk lockfile get their ``.apm-pin`` markers
+        even when the imminent build prunes them (orphan removal, #1926):
+        the pruned dep's cache remains under ``apm_modules/`` and the
+        supply-chain contract (#1137) requires every cached remote dep to
+        be marked. Warnings are suppressed here -- the primary post-build
+        sync over the freshly-built lockfile surfaces unpinned deps, so a
+        second warning pass would be noise. Best-effort: a marker write
+        failure must never abort the install.
+        """
+        existing = self.ctx.existing_lockfile
+        if existing is None:
+            return
+        try:
+            from apm_cli.install.cache_pin import sync_markers_for_lockfile
+
+            apm_modules_dir = self.ctx.apm_modules_dir
+            if apm_modules_dir is None:
+                return
+            written = sync_markers_for_lockfile(
+                existing,
+                self.ctx.project_root,
+                apm_modules_dir,
+                warn_unpinned=False,
+            )
+            if self.ctx.logger and written:
+                self.ctx.logger.verbose_detail(
+                    f"Self-healed {written} cache pin marker(s) from existing lockfile"
+                )
+        except Exception as exc:
+            if self.ctx.logger:
+                self.ctx.logger.verbose_detail(
+                    f"Cache pin marker self-heal (existing) skipped: {exc}"
+                )
 
     def _sync_cache_pin_markers_from_disk(self) -> None:
         """Self-heal markers from the on-disk lockfile when no install ran.
