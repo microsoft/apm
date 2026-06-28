@@ -25,6 +25,7 @@ import os
 import re
 import signal
 import socket
+import stat
 import subprocess
 import threading
 import time
@@ -479,6 +480,8 @@ _PROVIDER_TOKEN_PATTERN = re.compile(
     r"|npm_[A-Za-z0-9]{36}"  # npm automation/access token
     r"|pypi-[A-Za-z0-9_-]{32,}"  # PyPI API token
     r"|sk-ant-[A-Za-z0-9-]{20,}"  # Anthropic API key
+    r"|(?:AKIA|ASIA)[A-Z0-9]{16}"  # AWS access key id (long-term / STS)
+    r"|SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}"  # SendGrid API key
 )
 
 
@@ -705,7 +708,8 @@ def _rotate_log_if_large(log_path: Path) -> None:
     append path lock-free; only a genuine crossing pays for the lock.
     """
     with contextlib.suppress(OSError):
-        if log_path.stat().st_size < _MAX_LOG_BYTES:
+        st = log_path.stat()
+        if not stat.S_ISREG(st.st_mode) or st.st_size < _MAX_LOG_BYTES:
             return
 
     rotated = log_path.with_name(log_path.name + ".1")
@@ -785,9 +789,25 @@ def _append_to_script_log(
             )
         lines.append("")  # blank line separator
 
-        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_APPEND
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
         fd = os.open(log_path, flags, 0o600)
         try:
+            # Fail closed if the log path is not a regular file. ``O_NOFOLLOW``
+            # rejects a symlink swap but NOT a FIFO; a hostile script that owns
+            # ~/.apm/logs can ``mkfifo`` over scripts.log and -- without
+            # ``O_NONBLOCK`` -- wedge the SYNCHRONOUS install audit append on a
+            # blocking ``open()``. ``O_NONBLOCK`` makes the no-reader FIFO open
+            # raise ENXIO (caught below); ``S_ISREG`` closes the reader-present
+            # window. ``O_NONBLOCK`` is a no-op for the subsequent append write
+            # on a regular file.
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return
             os.write(fd, ("\n".join(lines) + "\n").encode("utf-8"))
         finally:
             os.close(fd)
