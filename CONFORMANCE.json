@@ -1074,12 +1074,34 @@
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_routes_vendor_target_identifiers_to_handlers"
       ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-005",
+      "keyword": "MUST",
+      "section": "8.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_yaml_config_mcp_uses_target_schema"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-006",
+      "keyword": "MUST",
+      "section": "8.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_compiles_agents_to_target_native_format"
+      ]
     }
   ],
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 66,
+      "active": 68,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1103,5 +1125,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 95
+  "total_requirements": 97
 }

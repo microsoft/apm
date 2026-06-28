@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **95 normative statements** indexed in
+- OpenAPM v0.1 carries **97 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -1965,6 +1965,22 @@ explicitly opted out of skill-convergence via the documented
 opt-out switch. This cross-tool convergence ensures a single skill
 bundle serves every harness without per-target duplication.
 
+<a id="req-tg-005"></a>
+**[req-tg-005]** A conforming **consumer** implementation that installs
+MCP servers for a target whose native config is a YAML document MUST
+write each MCP server entry using the target's registered config key
+and per-server schema. The consumer MUST preserve all sibling keys
+present in the config document that are not managed by APM. The
+consumer MUST NOT write JSON-format `mcpServers` config to a
+YAML-config target's native file.
+
+<a id="req-tg-006"></a>
+**[req-tg-006]** A conforming **consumer** implementation that supports
+the `agents` primitive for a given target MUST compile each agent to the
+target's registered native agent format and emit the result under the
+target's registered deploy root. The consumer MUST NOT emit a different
+target's agent format when compiling for the active target.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -1977,7 +1993,8 @@ without a spec revision. The current matrix is in the companion
 - Consumer: [req-pr-001](#req-pr-001), [req-pr-002](#req-pr-002),
   [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
   [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
-  [req-tg-004](#req-tg-004).
+  [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
+  [req-tg-006](#req-tg-006).
 
 ---
 
@@ -2873,6 +2890,8 @@ renumbering of conformance classes.
 | [req-tg-002](#req-tg-002)                | MUST    | 8.5     | consumer    |
 | [req-tg-003](#req-tg-003)                | MUST    | 8.5     | consumer    |
 | [req-tg-004](#req-tg-004)                | MUST    | 4.2.1   | consumer    |
+| [req-tg-005](#req-tg-005)                | MUST    | 8.5     | consumer    |
+| [req-tg-006](#req-tg-006)                | MUST    | 8.5     | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -2889,7 +2908,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 95** (90 MUST, 5 SHOULD).
+**Total normative statements: 97** (92 MUST, 5 SHOULD).
 
 ---
 
@@ -2906,6 +2925,7 @@ renumbering of conformance classes.
 | 0.1.5   | 2026-06-20 | Spec-citation fold for the executable primitive approval gate. Added new Section 10.13 "Executable primitive approval gate" with two consumer MUSTs: [req-sc-009] (deny deployment of any hook, bin, MCP server, or canvas extension from a dependency not listed in the effective `allowExecutables` approval set when the block is present -- fail closed) and [req-sc-010] (persist interactive approval decisions user-locally, not in the project `apm.yml`, so one developer's approval cannot propagate via VCS to teammates). Added rows 11 and 12 to the Section 10.11 summary table. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 90 -> 92 (87 MUST, 5 SHOULD). |
 | 0.1.6   | 2026-06-25 | Spec-citation fold for executable trust precedence and audit fidelity. Added Section 10.14 with two consumer MUSTs: [req-sc-011] (executable trust resolves through one deny-wins precedence; an org executables.deny/deny_all overrides any project or user grant; the install gate and the audit MUST reach the identical outcome via the shared resolver) and [req-sc-012] (a required package's audit asserts lockfile presence, not executable deployment; a present-but-withheld required package satisfies the presence requirement and surfaces a distinct withheld-executable signal). Added rows 13 and 14 to the Section 10.11 summary table. Section 11.3.2 and Appendix C updated. Statement count 92 -> 94 (89 MUST, 5 SHOULD). |
 | 0.1.7   | 2026-06-27 | Spec-citation fold for lockfile inventory metadata (closes the #1888 Mode-B silent-extension gate). Added [req-lk-019] (Section 5.2, consumer MUST): the optional per-entry `name` and `version` fields are self-asserted inventory metadata only -- preserved on round-trip per [req-lk-011], never a trust anchor, and never an identity, deduplication, or frozen-replay key (identity/replay derive solely from `repo_url`, `resolved_commit`, `resolved_tag`/`constraint`, and the recorded hash envelopes); their presence is additive and MUST NOT change `lockfile_version`. Added the `name` row to the Section 5.2 per-entry field table and broadened the `version` row note to non-semver sources; added `name` to the `entry` `$defs` in `lockfile-v0.1.schema.json` (sibling of `declared_license`). Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 94 -> 95 (90 MUST, 5 SHOULD). |
+| 0.1.8   | 2026-06-27 | Spec-citation fold for YAML-config MCP targets and native agent format (closes the #1833 Mode-B silent-extension gate). Added [req-tg-005] (Section 8.5, consumer MUST): YAML-config targets -- a consumer writing MCP server entries to a YAML-based config file MUST use the target's registered config key and per-server schema, preserving sibling keys not managed by APM; JSON-format `mcpServers` MUST NOT be written to YAML-config target files. Added [req-tg-006] (Section 8.5, consumer MUST): a consumer supporting the `agents` primitive for a target MUST compile each agent to the target's registered native agent format and deploy under the target's registered root; a different target's format MUST NOT be emitted for the active target. Section 8.7 Consumer enumeration and Appendix C updated. Statement count: 95 -> 97 (92 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 

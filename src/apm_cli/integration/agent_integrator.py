@@ -172,6 +172,9 @@ class AgentIntegrator(BaseIntegrator):
             if mapping.format_id == "codex_agent":
                 self._write_codex_agent(source_file, target_path)
                 links_resolved = 0
+            elif mapping.format_id == "goose_recipe":
+                self._write_goose_recipe(source_file, target_path)
+                links_resolved = 0
             else:
                 if mapping.format_id == "opencode_agent":
                     self._warn_opencode_frontmatter(
@@ -303,15 +306,17 @@ class AgentIntegrator(BaseIntegrator):
     )
 
     @staticmethod
-    def _write_codex_agent(source: Path, target: Path) -> None:
-        """Transform an ``.agent.md`` file to Codex ``.toml`` format.
+    def _parse_agent_frontmatter(source: Path) -> tuple[str, str, str, dict]:
+        """Return ``(name, description, body, frontmatter)`` for an agent file.
 
-        Parses YAML frontmatter for ``name`` and ``description``, uses
-        the markdown body as ``developer_instructions``.
+        Shared by the per-target agent transformers (Codex TOML, Goose
+        recipe) so the frontmatter-parsing preamble lives in one place.
+        ``name`` falls back to the file stem (``.agent`` suffix stripped);
+        ``description`` defaults to empty; ``body`` is the markdown after the
+        frontmatter; ``frontmatter`` is the parsed mapping (``{}`` on error).
         """
         if source.is_symlink():
             raise ValueError(f"Refusing to read symlink source: {source}")
-        import toml as _toml
 
         content = source.read_text(encoding="utf-8")
 
@@ -320,16 +325,39 @@ class AgentIntegrator(BaseIntegrator):
             name = name[: -len(".agent")]
         description = ""
         body = content
+        fm: dict = {}
 
         fm_match = AgentIntegrator._FRONTMATTER_RE.match(content)
         if fm_match:
             body = content[fm_match.end() :]
             try:
                 fm = yaml.safe_load(fm_match.group(1)) or {}
-                name = fm.get("name", name)
-                description = fm.get("description", description)
+                if not isinstance(fm, dict):
+                    fm = {}
+                # ``name``/``description`` flow into generated files (recipe
+                # title, Codex name). Only honour string values -- a stray
+                # ``name: [a, b]`` must not propagate a list into the output.
+                fm_name = fm.get("name")
+                if isinstance(fm_name, str) and fm_name.strip():
+                    name = fm_name
+                fm_description = fm.get("description")
+                if isinstance(fm_description, str):
+                    description = fm_description
             except Exception:
-                pass
+                fm = {}
+
+        return name, description, body, fm
+
+    @staticmethod
+    def _write_codex_agent(source: Path, target: Path) -> None:
+        """Transform an ``.agent.md`` file to Codex ``.toml`` format.
+
+        Parses YAML frontmatter for ``name`` and ``description``, uses
+        the markdown body as ``developer_instructions``.
+        """
+        import toml as _toml
+
+        name, description, body, _fm = AgentIntegrator._parse_agent_frontmatter(source)
 
         doc = {
             "name": name,
@@ -337,6 +365,61 @@ class AgentIntegrator(BaseIntegrator):
             "developer_instructions": body.strip(),
         }
         write_text_lf(target, _toml.dumps(doc))
+
+    # Default ``prompt`` for recipes whose source agent declares none.  Goose
+    # requires a ``prompt`` to run a recipe headless (``goose run --recipe``);
+    # this generic kickoff makes every generated recipe headless-ready, and
+    # authors override it with a ``prompt:`` frontmatter key when they want a
+    # task-specific entry point.
+    _DEFAULT_RECIPE_PROMPT = "Begin and follow the instructions above to complete your task."
+
+    @staticmethod
+    def _write_goose_recipe(source: Path, target: Path) -> None:
+        """Transform an ``.agent.md`` file to a Goose recipe ``.yaml``.
+
+        Emits a valid, headless-runnable recipe (``goose run --recipe``) with
+        ``version``/``title``/``description``/``instructions``/``prompt``; a
+        pinned ``model`` becomes ``settings.goose_model``.  ``prompt`` is taken
+        from a ``prompt:`` frontmatter key when present, else defaults to
+        :data:`_DEFAULT_RECIPE_PROMPT` so the recipe always runs headless.
+
+        A ``parameters:`` frontmatter list is passed through verbatim to the
+        recipe's ``parameters`` block, so authors can template ``{{ key }}``
+        variables into the body/prompt (Goose's Jinja substitution).  ``{{ }}``
+        placeholders in the markdown are preserved untouched.
+
+        MCP ``extensions`` are intentionally not embedded -- an APM agent
+        declares no MCP servers, which live at package scope in
+        ``~/.config/goose/config.yaml``.
+        """
+        from ..utils.yaml_io import yaml_to_str
+
+        name, description, body, fm = AgentIntegrator._parse_agent_frontmatter(source)
+
+        prompt = fm.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            prompt = AgentIntegrator._DEFAULT_RECIPE_PROMPT
+
+        recipe: dict = {
+            "version": "1.0.0",
+            "title": name,
+            "description": description,
+            "instructions": body.strip(),
+            "prompt": prompt.strip(),
+        }
+        # Author-declared recipe parameters (key/input_type/requirement/
+        # description/default/options) pass through verbatim; Goose validates
+        # the shape at load time.
+        parameters = fm.get("parameters")
+        if isinstance(parameters, list) and parameters:
+            recipe["parameters"] = parameters
+        model = fm.get("model")
+        if isinstance(model, str) and model.strip():
+            recipe["settings"] = {"goose_model": model.strip()}
+
+        # multiline_block renders ``instructions``/``prompt`` as readable
+        # literal blocks (``key: |``) rather than quoted flow scalars.
+        target.write_text(yaml_to_str(recipe, multiline_block=True), encoding="utf-8")
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.
     def integrate_package_agents(

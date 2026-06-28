@@ -203,6 +203,28 @@ def _hermes_runtime_opted_in() -> bool:
         return False
 
 
+def _goose_runtime_opted_in() -> bool:
+    """Return ``True`` when Goose MCP writes are opted into.
+
+    Gate: the ``goose`` experimental flag is enabled AND Goose is actually
+    present on the host (its config dir ``~/.config/goose`` exists, honouring
+    ``$XDG_CONFIG_HOME``, or the ``goose`` binary is on PATH).  Goose stores
+    MCP servers ("extensions") only in that user-scope config, so it is
+    discovered regardless of install scope.  Any import/path error is treated
+    as "not opted in".
+    """
+    try:
+        from apm_cli.adapters.client.goose import GooseClientAdapter
+        from apm_cli.core.experimental import is_enabled
+
+        if not is_enabled("goose"):
+            return False
+        config_dir = Path(GooseClientAdapter().get_config_path()).parent
+        return config_dir.is_dir() or find_runtime_binary("goose") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list[str]:
     """Detect which MCP-capable runtimes are installed on the host.
 
@@ -240,6 +262,7 @@ def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list
             "claude",
             "intellij",
             "hermes",
+            "goose",
         ]:
             try:
                 if not _runtime_is_present(
@@ -285,6 +308,8 @@ def _runtime_is_present(
         return _intellij_config_dir().is_dir()
     if runtime_name == "hermes":
         return _hermes_runtime_opted_in()
+    if runtime_name == "goose":
+        return _goose_runtime_opted_in()
     return manager.is_runtime_available(runtime_name)
 
 
@@ -320,6 +345,9 @@ def _discover_installed_runtimes_fallback(
     # Hermes: experimental flag enabled AND home-dir/binary present.
     if _hermes_runtime_opted_in():
         installed_runtimes.append("hermes")
+    # Goose: experimental flag enabled AND config-dir/binary present.
+    if _goose_runtime_opted_in():
+        installed_runtimes.append("goose")
     return installed_runtimes
 
 
