@@ -36,13 +36,18 @@ def _neutralize_guarded_session():
 
     Production wraps dispatch in a DNS-pinned ``requests.Session`` (the
     round-2 rebinding fix), which bypasses ``monkeypatch.setattr(requests,
-    "post", ...)``. Forcing ``_get_guarded_session`` to ``None`` keeps the
-    firing-path tests hermetic; the pin is covered directly in
-    ``http_sweep/test_dns_rebinding_pinned.py``.
+    "post", ...)``. Forcing ``_get_guarded_session`` AND
+    ``_get_capturing_session`` to ``None`` keeps the firing-path tests
+    hermetic; the pin is covered directly in
+    ``http_sweep/test_dns_rebinding_pinned.py`` and the capturing-session
+    socket force-close in ``http_sweep/test_round23_semaphore_starvation.py``.
     """
     from apm_cli.core import script_executors
 
-    with patch.object(script_executors, "_get_guarded_session", return_value=None):
+    with (
+        patch.object(script_executors, "_get_guarded_session", return_value=None),
+        patch.object(script_executors, "_get_capturing_session", return_value=None),
+    ):
         yield
 
 

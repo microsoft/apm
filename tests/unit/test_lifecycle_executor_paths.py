@@ -428,15 +428,16 @@ class TestDispatchHttpRequest:
         resp.status_code = 200
         resp.ok = True
         with patch.object(se, "_get_guarded_session", return_value=None):
-            with patch("requests.post", return_value=resp) as post:
-                se._dispatch_http_request(
-                    "https://example.com/h",
-                    "{}",
-                    {"Content-Type": "application/json"},
-                    5.0,
-                    "post-install",
-                    "https://example.com/h",
-                )
+            with patch.object(se, "_get_capturing_session", return_value=None):
+                with patch("requests.post", return_value=resp) as post:
+                    se._dispatch_http_request(
+                        "https://example.com/h",
+                        "{}",
+                        {"Content-Type": "application/json"},
+                        5.0,
+                        "post-install",
+                        "https://example.com/h",
+                    )
         post.assert_called_once()
         log = apm_log_home.read_text()
         assert "HTTP 200" in log
@@ -447,18 +448,30 @@ class TestDispatchHttpRequest:
         resp.status_code = 503
         resp.ok = False
         with patch.object(se, "_get_guarded_session", return_value=None):
-            with patch("requests.post", return_value=resp):
-                se._dispatch_http_request(
-                    "https://example.com/h", "{}", {}, 5.0, "post-install", "https://example.com/h"
-                )
+            with patch.object(se, "_get_capturing_session", return_value=None):
+                with patch("requests.post", return_value=resp):
+                    se._dispatch_http_request(
+                        "https://example.com/h",
+                        "{}",
+                        {},
+                        5.0,
+                        "post-install",
+                        "https://example.com/h",
+                    )
         assert "status=error" in apm_log_home.read_text()
 
     def test_exception_logs_error(self, apm_log_home: Path) -> None:
         with patch.object(se, "_get_guarded_session", return_value=None):
-            with patch("requests.post", side_effect=RuntimeError("conn refused")):
-                se._dispatch_http_request(
-                    "https://example.com/h", "{}", {}, 5.0, "post-install", "https://example.com/h"
-                )
+            with patch.object(se, "_get_capturing_session", return_value=None):
+                with patch("requests.post", side_effect=RuntimeError("conn refused")):
+                    se._dispatch_http_request(
+                        "https://example.com/h",
+                        "{}",
+                        {},
+                        5.0,
+                        "post-install",
+                        "https://example.com/h",
+                    )
         assert "status=error" in apm_log_home.read_text()
 
 

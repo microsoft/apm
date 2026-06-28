@@ -85,9 +85,17 @@ def test_drift_read_target_fails_closed_on_bomb(tmp_path):
 
 
 def test_drift_read_target_legit_still_parses(tmp_path):
-    """A normal apm.yml target is unaffected by the bounded loader."""
-    (tmp_path / "apm.yml").write_text("target: vscode\n", encoding="utf-8")
-    assert _read_apm_yml_target(tmp_path) == "vscode"
+    """A normal apm.yml target is unaffected by the bounded loader.
+
+    Post #1924 ``_read_apm_yml_target`` routes through the bounded ``load_yaml``
+    and ``parse_targets_field``, returning the canonical token LIST (singular or
+    plural form) rather than a raw string; the bounded loader does not perturb
+    that contract for a benign manifest.
+    """
+    (tmp_path / "apm.yml").write_text("target: copilot\n", encoding="utf-8")
+    assert _read_apm_yml_target(tmp_path) == ["copilot"]
+    (tmp_path / "apm.yml").write_text("targets: [copilot, claude]\n", encoding="utf-8")
+    assert _read_apm_yml_target(tmp_path) == ["copilot", "claude"]
 
 
 def test_exporter_marketplace_probe_fails_closed_on_bomb(tmp_path):

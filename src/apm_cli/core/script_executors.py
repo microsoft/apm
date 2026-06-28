@@ -144,6 +144,18 @@ _CREDENTIAL_BLOB_NAMES: frozenset[str] = frozenset(
         "WALLET_SEED",
         "MASTER_SEED",
         "DERIVATION_SEED",
+        # Secret-manager CLI unlock-session keys. ``bw unlock``/``op signin``/
+        # fastlane emit an opaque session blob (BW_SESSION / OP_SESSION /
+        # FASTLANE_SESSION) that grants vault/keychain access for the shell's
+        # lifetime -- a bearer to every other secret, with no token marker in the
+        # value (no structural masker fires). Exact-name membership strips it from
+        # the child env (a lifecycle script should not silently inherit an unlocked
+        # vault session; opt in via allowedEnvVars), masks it in scripts.log, and
+        # refuses it for $VAR header expansion. ``OP_SESSION_<account>`` (1Password
+        # keys the session by account suffix) is handled by _CREDENTIAL_NAME_PREFIX.
+        "BW_SESSION",
+        "OP_SESSION",
+        "FASTLANE_SESSION",
     }
 )
 # A base64/hex-encoded CONFIG blob keyed by the bare ``KUBE_CONFIG`` /
@@ -184,8 +196,11 @@ _CREDENTIAL_BLOB_SUFFIX = re.compile(
 # bearer both leaks to scripts.log AND expands into an outbound HTTP header with
 # no warning. A START-anchored prefix match closes both: nothing benign begins
 # with ``TF_TOKEN_`` (Terraform's other vars are ``TF_VAR_*`` / ``TF_CLI_*`` /
-# ``TF_LOG*``), so there is zero false-positive risk.
-_CREDENTIAL_NAME_PREFIX = re.compile(r"^TF_TOKEN_", re.IGNORECASE)
+# ``TF_LOG*``), so there is zero false-positive risk. The 1Password CLI keys its
+# unlock session by account as ``OP_SESSION_<account>``; the ``OP_SESSION_``
+# namespace is 1Password-owned (nothing benign begins with it), so the same
+# START-anchored treatment strips/masks/refuses every per-account session blob.
+_CREDENTIAL_NAME_PREFIX = re.compile(r"^(?:TF_TOKEN_|OP_SESSION_)", re.IGNORECASE)
 
 # Bundler keys a per-gem-source basic-auth credential by HOST in the NAME
 # (dots/dashes -> ``__``): ``BUNDLE_GEMS__CONTRIBSYS__COM=user:password`` for the
@@ -911,6 +926,60 @@ def _ssrf_safe_connect(
 _GUARDED_SESSION = None
 _GUARDED_SESSION_LOCK = threading.Lock()
 
+# Per-thread handle to the in-flight dispatch's holder dict. The dispatch worker
+# runs the blocking ``requests.post`` on its OWN thread and creates the urllib3
+# connection on that same thread, so a recording connection mixin can stash the
+# live socket into ``holder["sock"]`` here. On total-deadline ABANDONMENT the
+# dispatcher then force-closes that socket (``_abort_dispatch_sock``) so the
+# wedged ``post`` unblocks and the worker's ``finally`` releases its
+# ``_HTTP_INFLIGHT`` permit PROMPTLY -- otherwise a CONTINUOUS slow-loris
+# endpoint (one that dribbles under the per-recv read timeout forever) would pin
+# its permit for the whole process lifetime, and 32 such endpoints would starve
+# ALL legitimate outbound http for the rest of the install (availability DoS).
+_DISPATCH_SOCK = threading.local()
+
+
+def _record_dispatch_sock(sock: object) -> None:
+    """Record the just-connected socket into the active dispatch holder.
+
+    Called from a recording connection's ``connect()`` on the worker thread.
+    Records only the FIRST socket of the dispatch (a redirect is disabled, so
+    there is normally exactly one) and only when a holder is registered.
+    """
+    holder = getattr(_DISPATCH_SOCK, "holder", None)
+    if holder is not None and sock is not None and "sock" not in holder:
+        holder["sock"] = sock
+
+
+def _abort_dispatch_sock(holder: dict) -> bool:
+    """Force-close an abandoned worker's socket so its ``post`` unblocks.
+
+    ``shutdown(SHUT_RDWR)`` (NOT ``close``) is deliberate: shutdown unblocks the
+    worker's in-progress read without freeing the fd, so the worker's own urllib3
+    cleanup closes it -- avoiding the fd-reuse race that a cross-thread ``close``
+    would open. Returns True iff a socket was present to abort.
+    """
+    sock = holder.get("sock")
+    if sock is None:
+        return False
+    with contextlib.suppress(OSError, AttributeError):
+        sock.shutdown(socket.SHUT_RDWR)
+    return True
+
+
+class _SockRecordingMixin:
+    """Connection mixin that records its socket after ``connect()`` completes.
+
+    Mixed in BEFORE the urllib3 connection base so ``connect`` resolves here
+    first, delegates to the real ``connect`` (which sets ``self.sock`` -- for
+    pinned HTTPS that is the TLS-wrapped socket), then records it. Pure stdlib:
+    references no urllib3 symbol, so it is safe to define at module import.
+    """
+
+    def connect(self):  # type: ignore[override]
+        super().connect()
+        _record_dispatch_sock(getattr(self, "sock", None))
+
 
 def _build_guarded_session():
     """Build a ``requests.Session`` that resolve-and-pins every HTTPS conn.
@@ -926,7 +995,7 @@ def _build_guarded_session():
     from urllib3.connectionpool import HTTPSConnectionPool
     from urllib3.poolmanager import PoolManager
 
-    class _PinnedHTTPSConnection(HTTPSConnection):
+    class _PinnedHTTPSConnection(_SockRecordingMixin, HTTPSConnection):
         def _new_conn(self):  # type: ignore[override]
             return _ssrf_safe_connect(
                 (self._dns_host, self.port),
@@ -1001,6 +1070,82 @@ def _get_guarded_session():
     return _GUARDED_SESSION
 
 
+# Lazily-built capturing ``requests.Session`` used for the two egress paths the
+# resolve-and-pin guarded session does NOT cover: the corporate-PROXY path
+# (urllib3 routes through a ProxyManager, not the pinned pool) and the direct
+# FALLBACK when the guarded session could not be built. It records the live
+# socket of each dispatch (see _SockRecordingMixin) so an abandoned slow-loris
+# worker can be force-closed at the deadline on these paths too -- WITHOUT the
+# DNS pin (the destination was already vetted up-front by _ssrf_block_reason,
+# and the proxy hop's rebind defense is delegated to the corporate proxy ACLs).
+_CAPTURING_SESSION = None
+_CAPTURING_SESSION_LOCK = threading.Lock()
+
+
+def _build_capturing_session():
+    """Build a non-pinning ``requests.Session`` that records each dispatch sock.
+
+    Recording connection classes stash ``self.sock`` after ``connect()`` for
+    BOTH schemes and BOTH the direct and proxy (ProxyManager) routings, so the
+    dispatcher can force-close an abandoned worker on the proxy / fallback paths.
+    """
+    import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.connection import HTTPConnection, HTTPSConnection
+    from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+    from urllib3.poolmanager import PoolManager
+
+    class _RecHTTPConnection(_SockRecordingMixin, HTTPConnection):
+        pass
+
+    class _RecHTTPSConnection(_SockRecordingMixin, HTTPSConnection):
+        pass
+
+    class _RecHTTPPool(HTTPConnectionPool):
+        ConnectionCls = _RecHTTPConnection
+
+    class _RecHTTPSPool(HTTPSConnectionPool):
+        ConnectionCls = _RecHTTPSConnection
+
+    rec_pools = {"http": _RecHTTPPool, "https": _RecHTTPSPool}
+
+    class _CapturingAdapter(HTTPAdapter):
+        def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+            self.poolmanager = PoolManager(
+                num_pools=connections, maxsize=maxsize, block=block, **pool_kwargs
+            )
+            self.poolmanager.pool_classes_by_scheme = dict(rec_pools)
+
+        def proxy_manager_for(self, proxy, **proxy_kwargs):
+            if proxy in self.proxy_manager:
+                return self.proxy_manager[proxy]
+            manager = super().proxy_manager_for(proxy, **proxy_kwargs)
+            with contextlib.suppress(Exception):
+                manager.pool_classes_by_scheme = dict(rec_pools)
+            return manager
+
+    session = requests.Session()
+    # Never auto-honor env proxies: the proxy is passed EXPLICITLY per-dispatch
+    # in _run, so a stray env var cannot silently re-route a dispatch here.
+    session.trust_env = False
+    adapter = _CapturingAdapter()
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+def _get_capturing_session():
+    """Return the process-cached capturing session, or None on build failure."""
+    global _CAPTURING_SESSION
+    if _CAPTURING_SESSION is not None:
+        return _CAPTURING_SESSION
+    with _CAPTURING_SESSION_LOCK:
+        if _CAPTURING_SESSION is None:
+            with contextlib.suppress(Exception):
+                _CAPTURING_SESSION = _build_capturing_session()
+    return _CAPTURING_SESSION
+
+
 # Upper bound on simultaneous HTTP dispatch worker threads started for a
 # single lifecycle event. Without a cap, an event file with N http entries
 # spawns N threads + sockets at once (resource exhaustion).
@@ -1030,6 +1175,12 @@ _HTTP_INFLIGHT = threading.BoundedSemaphore(MAX_HTTP_DISPATCH_THREADS)
 _MAX_HTTP_TIMEOUT = 30.0
 # Connect-phase timeout, bounded separately from the per-recv read timeout.
 _HTTP_CONNECT_TIMEOUT = 10.0
+# Grace given to an ABANDONED worker to finish after its socket is force-closed
+# at the total deadline. The shutdown() unblocks the wedged read within ms, so
+# this only needs to cover thread-scheduling jitter; if the worker somehow does
+# not finish in the grace (it will, in practice), its permit is still released
+# whenever it eventually does, and the in-flight cap bounds the residual.
+_HTTP_ABANDON_GRACE = 1.0
 
 
 def _coerce_http_deadline(timeout: float) -> float:
@@ -1216,6 +1367,7 @@ def _dispatch_http_request(
         return
 
     def _run() -> None:
+        _DISPATCH_SOCK.holder = holder
         try:
             import requests
 
@@ -1236,14 +1388,22 @@ def _dispatch_http_request(
                 # bounds WHERE the request may be sent. Influencing the process
                 # environment is RCE-equivalent here anyway (command-type lifecycle
                 # scripts run in this same env), so env integrity is a precondition,
-                # not a boundary we can meaningfully defend on this path.
-                post = requests.post
+                # not a boundary we can meaningfully defend on this path. The
+                # capturing session records the proxy socket so an abandoned
+                # slow-loris (a dribbling proxy) is force-closed at the deadline.
+                capt = _get_capturing_session()
+                post = capt.post if capt is not None else requests.post
                 proxies = env_proxies
             else:
                 # Direct-egress case: no env proxy applies. Use the resolve-and-pin
-                # guarded session and explicitly refuse any proxy so a stray env var
-                # cannot silently nullify the DNS pin.
+                # guarded session (records its pinned socket) and explicitly refuse
+                # any proxy so a stray env var cannot silently nullify the DNS pin.
+                # If the guarded session is unavailable, fall back to the capturing
+                # session (still records the socket; the up-front gate already
+                # blocked internal targets) rather than bare requests.
                 session = _get_guarded_session()
+                if session is None:
+                    session = _get_capturing_session()
                 post = session.post if session is not None else requests.post
                 proxies = {"http": None, "https": None}
 
@@ -1259,9 +1419,11 @@ def _dispatch_http_request(
         except BaseException as exc:
             holder["exc"] = exc
         finally:
-            # Release ONLY when the worker truly finishes -- an abandoned
-            # (timed-out) worker holds its permit until its own dribble loop
-            # eventually exits, which is exactly the leak bound we want.
+            _DISPATCH_SOCK.holder = None
+            # Release when the worker finishes. With the deadline force-close
+            # below, an abandoned slow-loris worker finishes within the abandon
+            # grace (its wedged read is unblocked), so its permit is reclaimed
+            # promptly rather than pinned for the process lifetime.
             _HTTP_INFLIGHT.release()
 
     worker = threading.Thread(target=_run, name="apm-http-post", daemon=True)
@@ -1276,11 +1438,21 @@ def _dispatch_http_request(
 
     if worker.is_alive():
         # A dribbling endpoint is still feeding bytes under the per-recv read
-        # timeout past the total deadline. Abandon the daemon worker rather than
-        # hang the dispatch; record a timeout. The leaked socket/fd is released
-        # when the worker's own dribble loop finally exits (it then releases its
-        # _HTTP_INFLIGHT permit), and the in-flight cap bounds how many such
-        # abandoned workers can accumulate across a flood of http entries.
+        # timeout past the total deadline. Force-close the worker's captured
+        # socket so its wedged read raises and the worker's finally releases its
+        # _HTTP_INFLIGHT permit PROMPTLY (a CONTINUOUS dribble would otherwise
+        # pin the permit for the whole process lifetime -> 32 such endpoints
+        # starve all legit outbound http). shutdown(SHUT_RDWR) unblocks the read
+        # within ms without freeing the fd (no cross-thread fd-reuse race); the
+        # worker's own urllib3 cleanup then closes it. A short re-join lets the
+        # worker run its finally before we return -- but ONLY when a socket was
+        # actually recorded (guarded/capturing path). With no recorded socket
+        # (bare-requests fallback) the force-close is a no-op, so the re-join
+        # would gain nothing and merely add _HTTP_ABANDON_GRACE of latency per
+        # serial dispatch; in that case we abandon at once (the worker is a
+        # daemon, reaped at process exit) and reclaim the permit when it dies.
+        if _abort_dispatch_sock(holder):
+            worker.join(_HTTP_ABANDON_GRACE)
         _append_to_script_log(
             event_name,
             "http",
@@ -1624,9 +1796,20 @@ def _capture_bounded(
     for w in workers:
         w.join(timeout=max(0.0, grace_deadline - time.monotonic()))
     if any(w.is_alive() for w in workers):
+        # A group member still holds the pipes after the grace. Reap the group so
+        # the drains hit EOF. If a grandchild ESCAPED the group -- e.g. it called
+        # ``os.setsid()`` to form its OWN session/group -- ``killpg(proc.pid)``
+        # cannot reach it and the drains stay wedged; so bound the post-kill wait
+        # to a short settle budget and RETURN rather than block the install ~5s
+        # per wedged drain. The escapee is a deliberately self-detached daemon (it
+        # severed its own group); npm/yarn cannot kill such a process either. Its
+        # two drain daemons are daemon threads (reaped at process exit) and the
+        # residual fds are bounded by scripts-per-install -- a bounded latency
+        # cost, not an unbounded hang.
         _signal_kill_group(proc)
+        reap_deadline = time.monotonic() + _CAPTURE_DRAIN_GRACE
         for w in workers:
-            w.join(timeout=5)
+            w.join(timeout=max(0.0, reap_deadline - time.monotonic()))
     return "".join(out), "".join(err), bool(out_state["over"] or err_state["over"])
 
 

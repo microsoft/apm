@@ -43,13 +43,18 @@ def _neutralize_guarded_session():
     Production wraps ``requests.post`` in a DNS-pinned ``requests.Session``
     (closing the rebinding TOCTOU); that bypasses module-level
     ``patch("requests.post", ...)``. Returning ``None`` from
-    ``_get_guarded_session`` routes every dispatch back through the mocked
-    ``requests.post`` so these tests stay hermetic. The pin itself is
-    covered directly in ``test_dns_rebinding_pinned.py``.
+    ``_get_guarded_session`` AND ``_get_capturing_session`` routes every
+    dispatch back through the mocked ``requests.post`` so these tests stay
+    hermetic. The pin itself is covered directly in
+    ``test_dns_rebinding_pinned.py``; the capturing-session socket force-close
+    is covered directly in ``test_round23_semaphore_starvation.py``.
     """
     from apm_cli.core import script_executors
 
-    with patch.object(script_executors, "_get_guarded_session", return_value=None):
+    with (
+        patch.object(script_executors, "_get_guarded_session", return_value=None),
+        patch.object(script_executors, "_get_capturing_session", return_value=None),
+    ):
         yield
 
 
