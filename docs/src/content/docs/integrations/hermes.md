@@ -47,13 +47,12 @@ Use `apm experimental list` to confirm whether `hermes` is enabled on the curren
 ```bash
 # Project scope: skills -> .agents/skills/, plus AGENTS.md on compile
 apm install --target hermes
-apm compile -t hermes
 
 # User scope: skills -> ~/.hermes/skills/, MCP servers -> ~/.hermes/config.yaml
 apm install --target hermes --global
 ```
 
-`apm compile -t hermes` emits `AGENTS.md` at the project root (the `hermes` target shares the `agents` compile family).
+Run your normal `apm compile` flow when you also need `AGENTS.md`; Hermes shares that standard context-file output.
 
 ## HERMES_HOME override
 

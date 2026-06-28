@@ -57,7 +57,8 @@ my-pkg/
 +-- .claude/                      # Compiled output for Claude Code. Generated.
 +-- .cursor/                      # Compiled output for Cursor. Generated.
 +-- .codex/                       # Compiled output for Codex. Generated.
-+-- AGENTS.md                     # Cross-tool spec read by OpenCode, Gemini, Codex.
++-- AGENTS.md                     # Compiled context for agents-family targets. Generated.
++-- GEMINI.md                     # Compiled context for Gemini. Generated.
 +-- apm-policy.yml                # Optional org/repo policy. See enterprise docs.
 +-- scripts/                      # Optional helper scripts you author.
 +-- tests/                        # Optional tests for your primitives.
@@ -160,7 +161,7 @@ by `apm install`; commit it.
 ```yaml
 lockfile_version: '1'
 generated_at: '2026-04-21T21:45:34.516938+00:00'
-apm_version: 0.16.0
+apm_version: 0.22.0
 
 dependencies:
   - repo_url: https://github.com/microsoft/apm-sample-package
@@ -168,7 +169,7 @@ dependencies:
     resolved_ref: v1.0.0                       # Tag/branch the SHA came from
     version: 1.0.0                             # SemVer if available
     depth: 1                                   # 1 = direct, 2+ = transitive
-    package_type: APM_PACKAGE
+    package_type: apm_package
     content_hash: sha256:9f...                 # Hash of the package file tree
     deployed_files:                            # What this dep wrote to disk
       - .github/skills/review/SKILL.md
@@ -221,7 +222,7 @@ Per-dependency fields:
 | `virtual_path`         | Subpath for single-primitive imports.          |
 | `is_virtual`           | True for primitive-form deps.                  |
 | `depth`                | 1 = direct dependency; >1 = transitive.        |
-| `package_type`         | `APM_PACKAGE`, `CLAUDE_SKILL`, `HYBRID`.       |
+| `package_type`         | `apm_package`, `claude_skill`, `hook_package`, `hybrid`, `marketplace_plugin`, `skill_bundle`. |
 | `deployed_files`       | Files this dep wrote to your tree.             |
 | `deployed_file_hashes` | SHA-256 of each deployed file.                 |
 | `source`, `local_path` | Set for `local_path:` deps.                    |

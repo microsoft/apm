@@ -229,7 +229,7 @@ See the [Pack a bundle guide](../../producer/pack-a-bundle/) for the full workfl
 
 ## Best Practices
 
-- **Pin APM version** in CI to avoid unexpected changes: `pip install apm-cli==0.16.0`
+- **Pin APM version** in CI to avoid unexpected changes: `pip install apm-cli==0.22.0`
 - **Commit `apm.lock.yaml`** so CI resolves the same dependency versions as local development
 - **Commit `.github/`, `.claude/`, `.cursor/`, `.opencode/`, and `.gemini/` deployed files** so contributors and cloud-based Copilot get agent context without running `apm install`
 - **If using `apm compile`** (for Codex, Gemini instructions), run it in CI and fail the build if the output differs from what's committed

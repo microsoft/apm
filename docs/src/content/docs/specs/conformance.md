@@ -25,10 +25,10 @@ git clone https://github.com/microsoft/apm.git
 cd apm
 uv run --extra dev pytest tests/spec_conformance
 uv run --extra dev python -m tests.spec_conformance.gen_statement
-diff CONFORMANCE.md  # compare to the in-repo copy
+git diff -- CONFORMANCE.md CONFORMANCE.json  # compare to the in-repo copies
 ```
 
-The first command runs every requirement-bound test and reports per-requirement results. The second regenerates the statement from those results.
+The first command runs every requirement-bound test and reports per-requirement results. The second regenerates the statement from those results; the final command shows whether the generated artifacts still match the checked-in copies.
 
 ## What conformance does NOT cover
 

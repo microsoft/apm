@@ -348,17 +348,14 @@ The canonical set of `target` identifiers registered by this
 specification at v0.1 is:
 
 ```
-copilot, claude, cursor, codex, gemini, opencode, windsurf, agent-skills, all
+claude, copilot, cursor, opencode, codex, gemini, windsurf, kiro, agent-skills
 ```
 
-The legacy aliases `vscode` and `agents` MAY appear in input manifests
-and MUST be normalised to `copilot` when the manifest is rewritten.
-The internal fallback value `minimal` MUST NOT be set explicitly in a
-manifest; it is reserved for the auto-detection fallback described in
-[Section 8.4](#84-target-detection-signals-normative). In an
-auto-detect context, `minimal` denotes the no-target-detected profile
-that emits `AGENTS.md` only; `all` denotes the union of every
-registered target.
+CLI-only selectors such as `all`, `antigravity`, `vscode`, `agents`,
+and `minimal` MUST NOT be written to input manifests. `minimal` is
+reserved for the auto-detection fallback described in
+[Section 8.4](#84-target-detection-signals-normative); `all` expands
+only at the CLI layer.
 
 Concrete per-target detection signals and deploy roots are documented
 in the non-normative companion **"OpenAPM Target Registry v0.1"**
@@ -369,8 +366,8 @@ specification binds the schema only.
 <a id="req-mf-005"></a>
 **[req-mf-005]** A conforming **producer** implementation MUST reject
 any value of `target` (or any element of a `target` list) that is not
-either: (a) a member of the canonical set or a recognised alias; OR
-(b) a vendor-extension identifier matching
+either: (a) a member of the canonical set; OR (b) a
+vendor-extension identifier matching
 `x-[a-z][a-z0-9-]*-[a-z][a-z0-9-]*` (the
 `x-<vendor>-<name>` form). The diagnostic MUST name the offending
 token.
@@ -386,7 +383,7 @@ ignore the entry. Vendors MAY register new targets without spec
 amendment via this namespace.
 
 > **Editorial note.** Editorial reconciliation between the canonical
-> set above and the legacy aliases is consolidated in
+> set above and target namespace reservations is consolidated in
 > [Appendix E](#appendix-e-editorial-reconciliation-notes).
 
 #### 4.2.2 `type` (advisory)
@@ -2649,8 +2646,7 @@ assertion that exercises it.
 ### 12.4 Fixture layout (informative)
 
 The conformance seed fixture tree shipped with this specification
-lives at `tests/fixtures/spec-conformance/`. Concrete on-disk
-files:
+lives at `tests/fixtures/spec-conformance/`. The v0.1 seed set includes:
 
 ```
 tests/fixtures/spec-conformance/
