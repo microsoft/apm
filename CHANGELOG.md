@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm view <package> versions` now routes to the configured default registry for
+  plain shorthands (e.g., `acme/web-skills`) when a default registry is configured,
+  matching `apm install` routing behavior. Added `--registry [NAME]` for explicit
+  registry control: bare `--registry` uses the lockfile entry or configured default;
+  `--registry NAME` forces a named registry. Use a full git URL to force the git path
+  when a default registry is configured. (by @nadav-y) (#1938)
+
 ### Removed
 
 - Removed legacy `.chatmode.md` primitive format and `chatmodes/` subdirectory
@@ -18,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed startup version-check hint to reference `apm self-update` instead
   of the deprecated `apm update` command. (by @syf2211; closes #1939) (#1943)
+- Fixed GFM table rendering in the documentation site by enabling `markdown.gfm` in the Astro
+  config, restoring pipe tables, strikethrough, and task-list support for all `.mdx` content.
+  (by @syf2211; closes #1940) (#1944)
 - `apm outdated` tag-pattern matching for monorepo virtual subdirectory
   dependencies now derives the `{name}` segment from the `virtual_path`
   basename (e.g., `packages/my-pkg` -> `my-pkg`), aligning with `apm update`
