@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-06-28T19:35:39.251156+00:00'
+generated_at: '2026-06-28T19:37:04.419680+00:00'
 apm_version: 0.22.0
 dependencies:
 - repo_url: _local/adversarial-hardening
@@ -31,7 +31,7 @@ dependencies:
   - .agents/skills/adversarial-hardening/scripts/render-dossier.py
   - .agents/skills/adversarial-hardening/scripts/run_evals.py
   deployed_file_hashes:
-    .agents/skills/adversarial-hardening/SKILL.md: sha256:f4fbb559387533c23d36632e47113e1954dacd5d2bc29dc51f011f7d6ef0006b
+    .agents/skills/adversarial-hardening/SKILL.md: sha256:d5d72168d42a7fadf58d3c1359543e83c0feeabcfd989c47cf279c144405a014
     .agents/skills/adversarial-hardening/apm.yml: sha256:2c661c9e3dd846fdba09884a6e4182dbefc651ac193c813e91fc1d27cf8626bd
     .agents/skills/adversarial-hardening/assets/scope-charter.template.md: sha256:7d5872531601b05f66678521076b3ee7367e852f1a98577180df81e1776252b4
     .agents/skills/adversarial-hardening/evals/.gitignore: sha256:dc810cf3561d22d2d47b89fd0697de46aff0068819b3514577842cb2a2a1c332
