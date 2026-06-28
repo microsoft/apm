@@ -84,7 +84,7 @@ def script_file_fingerprint(path: Path) -> str | None:
     try:
         data = load_yaml(path)
     except Exception as e:
-        _logger.debug("Cannot fingerprint apm.yml lifecycle %s: %s", path, e)
+        _logger.debug("Cannot fingerprint apm.yml lifecycle %s: %s", path, type(e).__name__)
         return None
 
     if not isinstance(data, dict):
@@ -195,7 +195,10 @@ def fingerprint_lifecycle_subtree(lifecycle: object) -> str | None:
     try:
         canonical = json.dumps(lifecycle, sort_keys=True, separators=(",", ":"))
     except (TypeError, ValueError, RecursionError, MemoryError) as e:
-        _logger.debug("Cannot canonicalise lifecycle subtree for fingerprint: %s", e)
+        _logger.debug(
+            "Cannot canonicalise lifecycle subtree for fingerprint: %s",
+            type(e).__name__,
+        )
         return None
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
