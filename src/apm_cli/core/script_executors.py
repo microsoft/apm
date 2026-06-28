@@ -127,7 +127,14 @@ _CREDENTIAL_DENYLIST = re.compile(
     r"|CREDENTIAL|AUTHTOKEN|AUTHORIZATION|JWT|MNEMONIC|SEED_PHRASE|RECOVERY_PHRASE|BACKUP_PHRASE"
     r"|(?:^|_)COOKIE)"
     r"S?(?:_IDS?)?(?:_?(?:OLD|NEW|PREV|CURRENT))?(?:_?V[0-9]+)?"
-    r"(?:_?(?:BASE64|BASE32|BASE58|BASE62|B64|B32|HEX|PEM|DER|ASCII85|A85|Z85|URL_?SAFE|JSON|YAML|YML|TOML|ASC))?[_0-9]*$",
+    r"(?:_?(?:BASE64|BASE32|BASE58|BASE62|B64|B32|HEX|PEM|DER|ASCII85|A85|Z85|URL_?SAFE|JSON|YAML|YML|TOML|ASC))?"
+    # A descriptive trailing word (AUTHORIZATION_HEADER, SECRET_VALUE,
+    # TOKEN_VALUE, PRIVATE_KEY_DATA) must not break the end-anchor and let an
+    # already-tokenised credential NAME escape redaction. Only appends after a
+    # credential token already matched, so benign names that merely END in one
+    # of these words (CONTENT_TYPE_HEADER, MAX_VALUE, USER_DATA) carry no token
+    # to anchor on and stay unmatched.
+    r"(?:_(?:HEADERS?|VALUES?|DATA))?[_0-9]*$",
     re.IGNORECASE,
 )
 
@@ -158,6 +165,15 @@ _CREDENTIAL_BLOB_NAMES: frozenset[str] = frozenset(
     {
         "DOCKER_AUTH_CONFIG",
         "BASIC_AUTH",
+        # ``AUTH`` alone is intentionally NOT a denylist token (too FP-prone),
+        # so the bare-stem Authorization-header carriers AUTH_HEADER /
+        # AUTH_HEADERS -- whose VALUE is a Basic/Bearer/opaque header secret --
+        # have no token to anchor the descriptive-suffix regex on. Curate the
+        # exact names so the header value is masked in scripts.log and stripped
+        # from the child env. Benign siblings (AUTH_HEADER_NAME, CONTENT_TYPE_HEADER)
+        # are not exact members and survive.
+        "AUTH_HEADER",
+        "AUTH_HEADERS",
         "NPM_AUTH",
         "REGISTRY_AUTH",
         "SECRET_KEY_BASE",
@@ -483,6 +499,7 @@ _PROVIDER_TOKEN_PATTERN = re.compile(
     r"|(?:AKIA|ASIA)[A-Z0-9]{16}"  # AWS access key id (long-term / STS)
     r"|SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}"  # SendGrid API key
     r"|shp(?:at|ca|pa|ss)_[A-Fa-f0-9]{32}"  # Shopify access/custom/private/shared token
+    r"|AGE-SECRET-KEY-1[0-9A-Z]{55,65}"  # age/sops X25519 secret key (Bech32 body)
 )
 
 
@@ -811,18 +828,24 @@ def _append_to_script_log(
                 os.unlink(log_path)
             fd = os.open(log_path, excl_flags, 0o600)
         try:
-            # Fail closed if the log path is not a regular file. ``O_NOFOLLOW``
-            # rejects a symlink swap but NOT a FIFO; a hostile script that owns
-            # ~/.apm/logs can ``mkfifo`` over scripts.log. A reader-present FIFO
-            # opens successfully, so ``S_ISREG`` on the held fd is the gate.
-            # Unlink + retry (``O_EXCL``) so future appends self-heal instead of
-            # being silently dropped forever.
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
+            # Fail closed if the log path is not a regular file OR a pre-planted
+            # regular file carries group/other permission bits. ``O_NOFOLLOW``
+            # rejects a symlink swap but NOT a FIFO, and an attacker who owns
+            # ~/.apm/logs can also seed a world-readable/writable (0666) regular
+            # ``scripts.log`` BEFORE the first append -- which would otherwise be
+            # appended to forever, defeating the audit log's documented "cannot
+            # be world-readable" tamper-evidence guarantee. Unlink + retry
+            # (``O_EXCL``, 0600) so a tampered/wide-mode node self-heals to a
+            # fresh 0600 file (also discarding any forged pre-seeded content)
+            # instead of being trusted or silently dropped forever.
+            _st = os.fstat(fd)
+            if not stat.S_ISREG(_st.st_mode) or (_st.st_mode & 0o077):
                 os.close(fd)
                 with contextlib.suppress(FileNotFoundError):
                     os.unlink(log_path)
                 fd = os.open(log_path, excl_flags, 0o600)
-                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                _st_retry = os.fstat(fd)
+                if not stat.S_ISREG(_st_retry.st_mode) or (_st_retry.st_mode & 0o077):
                     # Same-instant adversarial re-plant on the retry: drop only
                     # THIS racing write (bounded), never a persistent blackout.
                     return

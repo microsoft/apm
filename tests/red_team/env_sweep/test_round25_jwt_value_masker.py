@@ -11,7 +11,7 @@ genuine under-redaction paths the name-based denylist cannot close:
      only masks the VALUES of credential-NAMED os.environ vars, so a bearer
      that never lived in an env var is never masked.
 
-  2. A JWT carried by a BENIGN-named env var (``AUTH_HEADER``, ``IDENTITY``,
+  2. A JWT carried by a BENIGN-named env var (``RESPONSE_BODY``, ``IDENTITY``,
      ``API_RESPONSE``) -- the name dodges ``_matches_credential`` so the value
      is neither stripped from the child env nor added to the redaction set.
 
@@ -56,24 +56,26 @@ def test_jwt_in_stdout_no_env_var_masked(monkeypatch, tmp_path):
 
 
 def test_jwt_under_benign_name_masked_in_log(monkeypatch, tmp_path):
-    """A JWT carried by a benign-named var (AUTH_HEADER) the denylist misses
+    """A JWT carried by a benign-named var (RESPONSE_BODY) the denylist misses
     must still be masked structurally when echoed to the log."""
     secret = _fake_jwt()
     monkeypatch.setenv("APM_HOME", str(tmp_path))
-    # AUTH_HEADER is benign by NAME: AUTHORIZATION / AUTHTOKEN tokens do not
-    # match it, so the value is never added to the redaction set.
-    monkeypatch.setenv("AUTH_HEADER", "Bearer " + secret)
+    # RESPONSE_BODY is benign by NAME: no credential token matches it, so the
+    # value is never added to the redaction set. (AUTH_HEADER is NOT a valid
+    # benign example -- an Authorization header value is itself a bearer
+    # credential and is name-denylisted; see round-31 leak-channel sweep.)
+    monkeypatch.setenv("RESPONSE_BODY", "Bearer " + secret)
     se._append_to_script_log(
         "post-install",
         "command",
         "env",
-        stdout=f"AUTH_HEADER=Bearer {secret}",
+        stdout=f"RESPONSE_BODY=Bearer {secret}",
     )
     log = (tmp_path / "logs" / "scripts.log").read_text()
     assert secret not in log, "JWT under benign name leaked to scripts.log in cleartext"
 
 
 def test_benign_name_holding_jwt_is_not_swept_from_env(monkeypatch):
-    """Sanity: AUTH_HEADER is genuinely benign by NAME (so the leak is a VALUE
+    """Sanity: RESPONSE_BODY is genuinely benign by NAME (so the leak is a VALUE
     gap, not a NAME gap) -- it is NOT stripped from the child env."""
-    assert not se._matches_credential("AUTH_HEADER")
+    assert not se._matches_credential("RESPONSE_BODY")

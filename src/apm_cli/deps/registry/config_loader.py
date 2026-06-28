@@ -1,6 +1,6 @@
 """Registry configuration precedence chain.
 
-Merges registry name→URL maps from (highest to lowest precedence):
+Merges registry name->URL maps from (highest to lowest precedence):
   1. apm-policy.yml  (policy-level mandates)
   2. project apm.yml (already parsed by APMPackage.registries)
   3. workspace ~/.apm/apm.yml
@@ -44,28 +44,37 @@ def _load_yaml_registries(yaml_path: Path) -> dict[str, str]:
 
 
 def _load_config_json_registries() -> dict[str, str]:
-    """Return {name: url} from ~/.apm/config.json."""
-    from ...config import _get_registries_section
+    """Return {name: url} from ~/.apm/config.json.
 
-    result: dict[str, str] = {}
-    for name, body in _get_registries_section().items():
-        if not isinstance(name, str) or not name.strip():
-            continue
-        if isinstance(body, dict):
-            url = body.get("url")
-            if isinstance(url, str) and url.strip():
-                result[name] = url.strip()
-    return result
+    Silently returns an empty dict on any parse error (oversize, deep-nest
+    ``RecursionError``, >4300-digit-int ``ValueError``) so a broken or hostile
+    config.json never crashes a project install -- mirroring
+    ``_load_yaml_registries``' fail-closed contract.
+    """
+    try:
+        from ...config import _get_registries_section
+
+        result: dict[str, str] = {}
+        for name, body in _get_registries_section().items():
+            if not isinstance(name, str) or not name.strip():
+                continue
+            if isinstance(body, dict):
+                url = body.get("url")
+                if isinstance(url, str) and url.strip():
+                    result[name] = url.strip()
+        return result
+    except Exception:
+        return {}
 
 
 def load_merged_registries(
     project_registries: dict[str, str] | None = None,
     policy_registries: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    """Return merged registry name→URL map with precedence applied.
+    """Return merged registry name->URL map with precedence applied.
 
-    Build order: config.json (lowest) → workspace apm.yml → project apm.yml
-    → policy (highest). Later updates override earlier ones, so highest
+    Build order: config.json (lowest) -> workspace apm.yml -> project apm.yml
+    -> policy (highest). Later updates override earlier ones, so highest
     precedence lands last.
     """
     merged: dict[str, str] = {}
