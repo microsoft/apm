@@ -193,6 +193,8 @@ def lifecycle_test(event: str, verbose: bool, execute: bool) -> None:
 @click.option("--force", is_flag=True, help="Overwrite existing lifecycle: block if present.")
 def lifecycle_init(force: bool) -> None:
     """Inject a starter lifecycle: block into the project apm.yml file."""
+    import yaml
+
     from apm_cli.utils.yaml_io import dump_yaml, load_yaml
 
     target_file = Path.cwd() / "apm.yml"
@@ -244,7 +246,15 @@ def lifecycle_init(force: bool) -> None:
             }
         ]
     }
-    dump_yaml(data, target_file)
+    try:
+        dump_yaml(data, target_file)
+    except (ValueError, yaml.YAMLError) as exc:
+        # Serialization happens before the file is opened (dump_yaml renders
+        # the YAML string first), so the on-disk apm.yml is untouched here.
+        # A non-decimal huge-int field (hex/octal) trips int_max_str_digits
+        # at represent time; report it instead of crashing or truncating.
+        _rich_error(f"Cannot write apm.yml: {exc}", symbol="error")
+        sys.exit(1)
 
     _rich_success(
         "Injected lifecycle: block into apm.yml.",

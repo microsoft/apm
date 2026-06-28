@@ -44,9 +44,18 @@ def dump_yaml(
     *,
     sort_keys: bool = False,
 ) -> None:
-    """Write data to a YAML file with UTF-8 encoding and unicode support."""
+    """Write data to a YAML file with UTF-8 encoding and unicode support.
+
+    Serializes to a string FIRST, then opens the destination file. A
+    representer or value error (for example an integer whose decimal form
+    exceeds CPython's ``int_max_str_digits`` limit -- reachable via a hex or
+    octal literal that ``safe_load`` materialised without a digit cap) is
+    therefore raised BEFORE the file is opened, so an unserialisable payload
+    can never truncate the existing file to zero bytes.
+    """
+    text = yaml.safe_dump(data, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
     with open(path, "w", encoding="utf-8") as fh:
-        yaml.safe_dump(data, fh, **{**_DUMP_DEFAULTS, "sort_keys": sort_keys})
+        fh.write(text)
 
 
 def yaml_to_str(data: Any, *, sort_keys: bool = False) -> str:
