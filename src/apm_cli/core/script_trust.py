@@ -40,15 +40,26 @@ _logger = logging.getLogger(__name__)
 
 TRUST_FILE_VERSION = 1
 
-# Upper bound on the number of nodes the lifecycle: subtree may expand to
-# when serialised as a tree (the way json.dumps walks it -- shared YAML
-# aliases are re-serialised once per reference, NOT deduplicated). A
-# legitimate lifecycle block is a few dozen nodes; a billion-laughs alias
-# bomb (``&a [*a,*a,...]`` nested) explodes past this within microseconds.
-# Exceeding the budget means the manifest cannot be safely canonicalised,
-# so it is treated as untrusted (fail-closed) rather than allowed to OOM
-# the process inside json.dumps.
+# Bounds on the lifecycle: subtree the trust fingerprint will canonicalise.
+# The fingerprint is SHA-256(json.dumps(subtree)); json.dumps follows every
+# container edge (shared YAML aliases are re-serialised once per reference)
+# and recurses one Python frame per nesting level. A hostile project apm.yml
+# (attacker-controlled, committed) can therefore weaponise the canonicaliser
+# THREE ways, all of which must fail closed BEFORE json.dumps runs:
+#   - a high-fan-out recursive alias (``&a [*a,*a,...]``) -> exponential /
+#     unbounded WALK (the in-memory DAG is tiny but the tree is not);
+#   - a fat scalar aliased many times (``&s "..."; [*s,*s,...]``) -> the node
+#     COUNT is small but the serialised BYTE size is enormous;
+#   - a deep linear nest -> blows json.dumps' C-recursion stack (RecursionError).
+# A legitimate lifecycle block has NO shared/aliased references, nests only a
+# handful deep, and canonicalises to a few KB. So the guard rejects any subtree
+# that (a) reuses a container reference (alias/cycle), (b) nests deeper than the
+# depth cap, (c) exceeds the node cap, or (d) would serialise past the byte cap.
+# Any of these -> the manifest is treated as untrusted (fail-closed) rather than
+# allowed to exhaust memory or crash inside json.dumps.
 _MAX_FINGERPRINT_NODES = 100_000
+_MAX_FINGERPRINT_DEPTH = 64
+_MAX_FINGERPRINT_BYTES = 1_000_000
 
 # Serialises the load -> modify -> write window of the trust store for
 # threads in this process; the file lock below covers other processes.
@@ -81,29 +92,72 @@ def script_file_fingerprint(path: Path) -> str | None:
     return fingerprint_lifecycle_subtree(data.get("lifecycle"))
 
 
-def _within_node_budget(obj: object, budget: int) -> bool:
-    """True if *obj* expands to at most *budget* nodes as a TREE.
+def _leaf_byte_cost(node: object) -> int:
+    """Approximate the canonical-JSON byte contribution of a scalar leaf.
 
-    Walks the structure the way ``json.dumps`` serialises it -- every
-    container edge is followed even when a child is a shared reference
-    (a YAML alias), so an alias bomb is counted at its true expanded
-    size rather than its compact in-memory DAG size. The walk pops one
-    node per iteration and bails the instant the budget is exceeded, so
-    both the work done and the explicit stack stay bounded; it never
-    materialises the expansion.
+    Used to bound the serialised size BEFORE json.dumps allocates it, so a
+    fat scalar that is aliased many times (small node count, huge output)
+    cannot OOM the canonicaliser. An over-estimate is fine -- the goal is
+    only to bail before the cumulative size becomes dangerous.
     """
-    stack: list[object] = [obj]
-    count = 0
-    while stack:
-        node = stack.pop()
-        count += 1
-        if count > budget:
+    if isinstance(node, str):
+        return len(node) + 2  # surrounding quotes
+    if isinstance(node, (bytes, bytearray)):
+        return len(node) + 2
+    # numbers / bool / None -> short repr; a small constant upper bound.
+    return 8
+
+
+def _is_fingerprint_safe(obj: object) -> bool:
+    """True if *obj* can be canonicalised by json.dumps without abuse.
+
+    Bounded structural walk that fails closed on any property a legitimate
+    lifecycle block never has, while still ACCEPTING the benign YAML anchor /
+    alias sharing an author may use to de-duplicate a manifest:
+
+    * a CYCLE (a container reachable from itself -- direct self-reference or
+      a back-edge) is rejected via PATH-scoped id tracking: only ancestors on
+      the current descent path are checked, so a shared acyclic reference (a
+      benign anchor reused by two sibling keys) passes, but a self-alias bomb
+      (``&a [*a, ...]``) is rejected on its first child;
+    * the TRUE tree-expansion node count (no dedup -- json.dumps re-emits each
+      shared reference) is capped, catching a classic billion-laughs DAG;
+    * nesting DEPTH is capped before our own recursion can exceed it, so a deep
+      linear chain is rejected before json.dumps' C-recursion would crash;
+    * the cumulative serialised BYTE size is capped, catching a fat scalar
+      aliased many times (small node count, huge output).
+
+    Our recursion never exceeds _MAX_FINGERPRINT_DEPTH frames because the depth
+    cap is checked at entry, before descending further.
+    """
+    counters = {"nodes": 0, "bytes": 0}
+
+    def _walk(node: object, depth: int, path_ids: frozenset[int]) -> bool:
+        counters["nodes"] += 1
+        if counters["nodes"] > _MAX_FINGERPRINT_NODES or depth > _MAX_FINGERPRINT_DEPTH:
             return False
-        if isinstance(node, dict):
-            stack.extend(node.values())
-        elif isinstance(node, (list, tuple)):
-            stack.extend(node)
-    return True
+        if isinstance(node, (dict, list, tuple)):
+            node_id = id(node)
+            if node_id in path_ids:
+                # Container reachable from itself -> cycle / self-alias bomb.
+                return False
+            child_path = path_ids | {node_id}
+            child_depth = depth + 1
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if not _walk(key, child_depth, child_path):
+                        return False
+                    if not _walk(value, child_depth, child_path):
+                        return False
+            else:
+                for child in node:
+                    if not _walk(child, child_depth, child_path):
+                        return False
+            return True
+        counters["bytes"] += _leaf_byte_cost(node)
+        return counters["bytes"] <= _MAX_FINGERPRINT_BYTES
+
+    return _walk(obj, 0, frozenset())
 
 
 def fingerprint_lifecycle_subtree(lifecycle: object) -> str | None:
@@ -114,22 +168,21 @@ def fingerprint_lifecycle_subtree(lifecycle: object) -> str | None:
     Returns None for a falsy/empty subtree, for a subtree that cannot
     be canonicalised (e.g. a YAML scalar that safe_load decoded into a
     non-JSON-serializable Python object such as datetime.date or set),
-    or for a subtree whose tree-expansion exceeds the node budget (a
-    YAML alias bomb) -- an un-fingerprintable manifest is treated as
-    untrusted (fail-closed).
+    or for a subtree that fails the structural safety check (a YAML alias
+    bomb, a fat aliased scalar, or pathological nesting depth) -- an
+    un-fingerprintable manifest is treated as untrusted (fail-closed).
     """
     if not lifecycle:
         return None
-    if not _within_node_budget(lifecycle, _MAX_FINGERPRINT_NODES):
+    if not _is_fingerprint_safe(lifecycle):
         _logger.debug(
-            "lifecycle subtree exceeds the %d-node fingerprint budget "
-            "(alias bomb?) -- treating as untrusted",
-            _MAX_FINGERPRINT_NODES,
+            "lifecycle subtree failed the fingerprint safety check "
+            "(alias bomb / fat scalar / over-deep) -- treating as untrusted",
         )
         return None
     try:
         canonical = json.dumps(lifecycle, sort_keys=True, separators=(",", ":"))
-    except (TypeError, ValueError) as e:
+    except (TypeError, ValueError, RecursionError, MemoryError) as e:
         _logger.debug("Cannot canonicalise lifecycle subtree for fingerprint: %s", e)
         return None
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

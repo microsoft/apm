@@ -321,7 +321,7 @@ def parse_script_file(path: Path, source: str = "project") -> list[ScriptEntry]:
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as e:
         _logger.debug("Failed to load script file %s: %s", path, e)
         return []
 

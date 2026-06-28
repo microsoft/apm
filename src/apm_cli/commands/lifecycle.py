@@ -372,7 +372,7 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
     else:
         try:
             data = _json.loads(raw_text)
-        except _json.JSONDecodeError as e:
+        except (_json.JSONDecodeError, RecursionError) as e:
             return [f"Invalid JSON: {e}"]
 
     if not isinstance(data, dict):

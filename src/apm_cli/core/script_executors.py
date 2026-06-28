@@ -141,15 +141,23 @@ def _redact_secrets(text: str) -> str:
     is a KNOWN secret, so it must be masked even when glued to adjacent
     word characters. A length floor (``_MIN_REDACT_LEN``) keeps short,
     common values from corrupting unrelated text.
+
+    Values are redacted LONGEST-FIRST so a shorter credential that is a
+    prefix/substring of a longer one cannot fragment the longer value and
+    leak its tail (e.g. token ``abcd1234`` and ``abcd1234efgh5678`` -- if
+    the short one ran first it would split the long one, leaving
+    ``efgh5678`` in cleartext).
     """
     if not text:
         return text
+    secrets = [
+        value
+        for name, value in os.environ.items()
+        if value and len(value) >= _MIN_REDACT_LEN and _matches_credential(name)
+    ]
     redacted = text
-    for name, value in os.environ.items():
-        if not value or len(value) < _MIN_REDACT_LEN:
-            continue
-        if _matches_credential(name):
-            redacted = redacted.replace(value, "[REDACTED]")
+    for value in sorted(set(secrets), key=len, reverse=True):
+        redacted = redacted.replace(value, "[REDACTED]")
     return redacted
 
 
@@ -337,6 +345,10 @@ _METADATA_HOSTNAMES = frozenset(
     }
 )
 
+# RFC 6598 carrier-grade NAT shared address space. Not flagged by the stdlib
+# is_private/is_global predicates, but an SSRF guard must refuse it.
+_CGNAT_NET = ipaddress.ip_network("100.64.0.0/10")
+
 
 def _host_to_ip_literal(host: str) -> ipaddress._BaseAddress | None:
     """Canonicalise *host* to an IP address if it denotes one literally.
@@ -372,6 +384,11 @@ def _ip_is_internal(ip: ipaddress._BaseAddress) -> bool:
     """Return True for any address an SSRF guard must refuse to reach."""
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
+    # RFC 6598 carrier-grade NAT (100.64.0.0/10) is neither is_private nor
+    # is_global per the stdlib, yet it is shared ISP space an SSRF guard must
+    # refuse (a request there can hit a sibling tenant behind the CGNAT).
+    if isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT_NET:
+        return True
     return bool(
         ip.is_private
         or ip.is_loopback

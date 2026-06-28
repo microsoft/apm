@@ -176,16 +176,124 @@ def test_alias_bomb_fingerprint_fails_closed_fast():
     assert elapsed < 2.0, f"fingerprint took {elapsed:.2f}s -- budget guard not bailing early"
 
 
-def test_within_node_budget_bounds_expansion():
-    from apm_cli.core.script_trust import _MAX_FINGERPRINT_NODES, _within_node_budget
+def test_is_fingerprint_safe_bounds_expansion():
+    from apm_cli.core.script_trust import _is_fingerprint_safe
 
-    # A small legitimate subtree is well within budget.
+    # A small legitimate subtree passes the structural safety check.
     legit = {"post-install": [{"type": "command", "run": "echo hi"}]}
-    assert _within_node_budget(legit, _MAX_FINGERPRINT_NODES) is True
+    assert _is_fingerprint_safe(legit) is True
 
-    # The alias bomb's tree-expansion blows the budget.
+    # The alias bomb reuses a container reference -> rejected.
     bomb = _alias_bomb_subtree()
-    assert _within_node_budget(bomb, _MAX_FINGERPRINT_NODES) is False
+    assert _is_fingerprint_safe(bomb) is False
+
+
+# ---------------------------------------------------------------------------
+# VECTOR (ROUND-3 GENUINE BREAK): the node-COUNT-only guard was the wrong
+# metric. Three distinct alias/nesting shapes defeat a pure node-count cap and
+# OOM or crash json.dumps -- each must fail closed (return None) FAST. The fix
+# is a structural check that rejects any reused container reference, over-deep
+# nesting, or oversized serialised byte total before json.dumps runs.
+# ---------------------------------------------------------------------------
+
+
+def _high_fanout_self_alias(fanout: int = 50_000) -> dict:
+    """A single list that references ITSELF *fanout* times.
+
+    yaml.safe_load of ``a: &a [*a, *a, ...]`` decodes to a list whose every
+    element is the same list object. A node-count walk that pushes each child
+    without id-dedup grows its explicit stack to ~fanout per pop and explodes;
+    the container-id guard rejects on the second visit so the stack stays
+    bounded by a single fan-out width.
+    """
+    node: list = []
+    node.extend([node] * fanout)
+    return {"post-install": [{"type": "command", "run": node}]}
+
+
+def _fat_scalar_aliased(reps: int = 4000, size: int = 50_000) -> dict:
+    """One fat scalar leaf aliased *reps* times.
+
+    Node count is only reps+const, but json.dumps re-emits the scalar per
+    reference, so the serialised output is reps*size bytes (~200MB here) --
+    a byte-amplification OOM the node cap never sees. The byte cap catches it.
+    """
+    big = "A" * size
+    return {"post-install": [{"type": "command", "run": [big] * reps}]}
+
+
+def _deep_linear_chain(depth: int = 5000) -> dict:
+    """A deep nest of DISTINCT single-child containers.
+
+    Each container is referenced exactly once (no alias), so a container-id
+    guard alone would pass it -- but json.dumps recurses one C frame per level
+    and raises RecursionError past ~1000. The depth cap rejects it first.
+    """
+    node: object = "leaf"
+    for _ in range(depth):
+        node = [node]
+    return {"post-install": [{"type": "command", "run": node}]}
+
+
+@pytest.mark.parametrize(
+    "builder",
+    [_high_fanout_self_alias, _fat_scalar_aliased, _deep_linear_chain],
+    ids=["high_fanout_self_alias", "fat_scalar_aliased", "deep_linear_chain"],
+)
+def test_round3_fingerprint_vectors_fail_closed_fast(builder):
+    """Each round-3 abuse shape must fail closed (None) within a wall budget.
+
+    Run the fingerprint on a worker thread so a regression that actually OOMs
+    or hangs surfaces as a timeout assertion rather than killing the box.
+    """
+    import threading
+
+    from apm_cli.core.script_trust import fingerprint_lifecycle_subtree
+
+    payload = builder()["post-install"][0]["run"]
+    subtree = {"post-install": [{"type": "command", "run": payload}]}
+    box: dict[str, object] = {}
+
+    def _run():
+        box["result"] = fingerprint_lifecycle_subtree(subtree)
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(timeout=5.0)
+
+    assert not worker.is_alive(), "fingerprint did not bail fast -- guard not bounding the abuse"
+    assert box.get("result") is None
+
+
+def test_deep_chain_rejected_by_depth_cap():
+    from apm_cli.core.script_trust import _is_fingerprint_safe
+
+    assert _is_fingerprint_safe(_deep_linear_chain()) is False
+
+
+def test_fat_scalar_rejected_by_byte_cap():
+    from apm_cli.core.script_trust import _is_fingerprint_safe
+
+    assert _is_fingerprint_safe(_fat_scalar_aliased()) is False
+
+
+def test_realistic_manifest_not_false_rejected():
+    """A legit manifest with many entries reusing interned scalars must pass.
+
+    CPython interns short strings/small ints, so ``type: command`` repeats an
+    id across every entry. The guard dedups only CONTAINER ids, never scalars,
+    so a normal multi-event manifest must still fingerprint (no false reject).
+    """
+    from apm_cli.core.script_trust import _is_fingerprint_safe, fingerprint_lifecycle_subtree
+
+    manifest = {
+        event: [
+            {"type": "command", "run": f"echo {event} {i}", "timeoutSec": 30} for i in range(20)
+        ]
+        for event in ("post-install", "pre-install", "post-update", "pre-run")
+    }
+    assert _is_fingerprint_safe(manifest) is True
+    assert fingerprint_lifecycle_subtree(manifest) is not None
 
 
 # ---------------------------------------------------------------------------

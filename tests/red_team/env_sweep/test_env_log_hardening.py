@@ -143,3 +143,30 @@ class TestLogFileHardening:
         assert rotated.exists(), "log past the size cap must rotate to .1"
         # The fresh log holds only the new entry, not the seeded bytes.
         assert log_path.stat().st_size < 5 * 1024 * 1024
+
+
+# -- r3-env-1: prefix-fragmentation under-redaction ------------------------
+
+
+class TestPrefixFragmentationRedaction:
+    """A shorter secret that is a PREFIX of a longer one must not split it.
+
+    Left-to-right substring replacement is order-sensitive: if the short
+    credential is masked first it fragments the longer value, leaking the
+    longer value's tail to scripts.log. _redact_secrets must mask
+    longest-first so the longer value is fully redacted.
+    """
+
+    def test_longer_secret_not_fragmented_by_prefix(self, monkeypatch) -> None:
+        short = "abcd1234"
+        longer = short + "efgh5678ijkl9012"
+        monkeypatch.setenv("SHORT_TOKEN", short)
+        monkeypatch.setenv("LONG_TOKEN", longer)
+
+        out = _redact_secrets(f"see {longer} and {short} in output")
+
+        # No part of either secret may survive in cleartext.
+        assert short not in out
+        assert longer not in out
+        assert "efgh5678ijkl9012" not in out, "longer secret tail leaked (prefix fragmentation)"
+        assert "[REDACTED]" in out
