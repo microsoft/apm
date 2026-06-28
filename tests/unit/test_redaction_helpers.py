@@ -7,6 +7,7 @@ suite (which CI does not collect), so this module pins their behaviour inside
 """
 
 import os
+from urllib.parse import urlparse
 
 from apm_cli.core import script_executors as se
 
@@ -133,7 +134,7 @@ class TestStructuralMaskers:
     def test_url_credentials_stripped(self):
         out = se._redact_url_credentials("https://bot:secretpw@example.com/path")
         assert "secretpw" not in out
-        assert "example.com" in out
+        assert urlparse(out).hostname == "example.com"
 
 
 class TestNeutralizeNewlines:
