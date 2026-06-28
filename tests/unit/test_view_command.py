@@ -235,6 +235,93 @@ class TestViewCommand(_InfoCmdBase):
         mock_reg.assert_called_once()
         mock_gh.return_value.list_remote_refs.assert_not_called()
 
+    def test_view_versions_routes_unlocked_shorthand_to_default_registry(self):
+        """No lockfile signal, but a default registry is configured -> registry API.
+
+        Mirrors how ``apm install`` routes an unscoped shorthand to the default
+        registry. Without this the unlocked shorthand fell through to git.
+        """
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch(
+                    "apm_cli.commands.view._lookup_lockfile_ref",
+                    return_value=("", "", ""),  # not in lockfile
+                ),
+                patch(
+                    "apm_cli.commands.view._effective_default_registry",
+                    return_value="jfrog-demo",
+                ),
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                result = self.runner.invoke(cli, ["view", "myorg/myrepo", "versions"])
+        assert result.exit_code == 0
+        mock_reg.assert_called_once()
+        mock_gh.return_value.list_remote_refs.assert_not_called()
+
+    def test_view_versions_unlocked_shorthand_no_default_uses_git(self):
+        """No lockfile signal and no default registry -> git path (keeps git working)."""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch(
+                    "apm_cli.commands.view._lookup_lockfile_ref",
+                    return_value=("", "", ""),
+                ),
+                patch(
+                    "apm_cli.commands.view._effective_default_registry",
+                    return_value=None,
+                ),
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                mock_gh.return_value.list_remote_refs.return_value = []
+                result = self.runner.invoke(cli, ["view", "myorg/myrepo", "versions"])
+        assert result.exit_code == 0
+        mock_reg.assert_not_called()
+        mock_gh.return_value.list_remote_refs.assert_called_once()
+
+    def test_view_versions_explicit_registry_flag_forces_registry(self):
+        """--registry NAME forces the registry path and passes the name through."""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                result = self.runner.invoke(
+                    cli, ["view", "myorg/myrepo", "versions", "--registry", "myreg"]
+                )
+        assert result.exit_code == 0
+        mock_reg.assert_called_once()
+        assert mock_reg.call_args.kwargs.get("registry_name") == "myreg"
+        mock_gh.return_value.list_remote_refs.assert_not_called()
+
+    def test_view_versions_explicit_git_url_forces_git_even_with_default_registry(self):
+        """A full git URL routes to git even when a default registry is configured."""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch(
+                    "apm_cli.commands.view._lookup_lockfile_ref",
+                    return_value=("", "", ""),
+                ),
+                patch(
+                    "apm_cli.commands.view._effective_default_registry",
+                    return_value="jfrog-demo",
+                ),
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                mock_gh.return_value.list_remote_refs.return_value = []
+                result = self.runner.invoke(
+                    cli, ["view", "https://github.com/myorg/myrepo", "versions"]
+                )
+        assert result.exit_code == 0
+        mock_reg.assert_not_called()
+        mock_gh.return_value.list_remote_refs.assert_called_once()
+
     # -- invalid field ----------------------------------------------------
 
     def test_view_invalid_field(self):
