@@ -381,9 +381,12 @@ def _read_apm_yml_target(project_root: Path):
     if not apm_yml.exists():
         return None
     try:
-        import yaml as _yaml  # local import: drift module avoids top-level yaml dep
+        # Route through the merge/alias-bounded loader (not stock yaml.safe_load)
+        # so a hostile apm.yml shipped in a cloned repo cannot wedge the default-on
+        # ``apm audit`` drift replay with a billion-laughs merge/alias bomb.
+        from apm_cli.utils.yaml_io import load_yaml
 
-        data = _yaml.safe_load(apm_yml.read_text(encoding="utf-8")) or {}
+        data = load_yaml(apm_yml) or {}
     except Exception:
         # Manifest unreadable / corrupt: fall back to auto-detect rather
         # than crashing the replay; the caller still surfaces a useful

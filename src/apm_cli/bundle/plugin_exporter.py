@@ -356,7 +356,11 @@ def _has_marketplace_block(apm_yml_path: Path) -> bool:
     try:
         import yaml
 
-        data = yaml.safe_load(apm_yml_path.read_text(encoding="utf-8")) or {}
+        # Bounded loader so a hostile apm.yml cannot wedge the export with a
+        # merge/alias expansion bomb (fails closed as yaml.YAMLError).
+        from apm_cli.utils.yaml_io import load_yaml
+
+        data = load_yaml(apm_yml_path) or {}
     except (OSError, yaml.YAMLError):
         return False
     return bool(data.get("marketplace"))

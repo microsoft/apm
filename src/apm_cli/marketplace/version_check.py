@@ -112,7 +112,12 @@ def _read_local_version(project_root: Path, rel_source: str) -> tuple[str | None
     if not pkg_yml.is_file():
         return None, "no_apm_yml"
     try:
-        raw = yaml.safe_load(pkg_yml.read_text(encoding="utf-8"))
+        # Bounded loader: a malicious dependency's apm.yml cannot wedge the
+        # version check with a merge/alias expansion bomb (fails closed as
+        # yaml.YAMLError -> invalid_yaml).
+        from apm_cli.utils.yaml_io import load_yaml
+
+        raw = load_yaml(pkg_yml)
     except yaml.YAMLError:
         return None, "invalid_yaml"
     if not isinstance(raw, dict):

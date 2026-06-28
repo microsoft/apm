@@ -63,13 +63,22 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za
 #     ``PASS`` token is anchored to a ``_``-or-start boundary (``(?:^|_)PASS``)
 #     so the real ``*_PASS`` family is swept WITHOUT catching the common-
 #     English suffix words SURPASS / BYPASS / COMPASS / TRESPASS / PASSAGE.
+#   - wallet seed phrases: MNEMONIC, *_MNEMONIC, *_SEED_PHRASE (the hardhat /
+#     foundry / truffle deploy lifecycle secret -- a single token that, if
+#     leaked, drains a wallet; same secret class as PASSWORD).
 # The trailing ``S?`` does not over-match unrelated names (e.g. PATH keeps
 # a stray ``H`` after PAT and so never matches; TRACE_ID has no credential
-# token before ``_ID`` and is left alone). The looser tokens (KEY, PAT, ...)
-# keep their suffix-match behaviour as a deliberate fail-safe: over-redacting
-# a non-secret env var is harmless, under-redacting a secret is not.
+# token before ``_ID`` and is left alone). The trailing ``[_0-9]*`` lets an
+# ENUMERATED / ROTATED credential (DB_PASS2, PASS_1, TOKEN_1, API_KEY2) keep
+# matching even though a digit/underscore now follows the token -- without it
+# a single trailing digit defeats the whole sweep. It only adds digit/under-
+# score-suffixed names, so SURPASS / PASSAGE (letters after PASS) stay benign.
+# The looser tokens (KEY, PAT, ...) keep their suffix-match behaviour as a
+# deliberate fail-safe: over-redacting a non-secret env var is harmless,
+# under-redacting a secret is not.
 _CREDENTIAL_DENYLIST = re.compile(
-    r"(?:(?:^|_)PASS|TOKEN|SECRET|PAT|KEY|PASSWORD|PASSWD|PASSPHRASE|PWD|CREDENTIAL|AUTHTOKEN)S?(?:_IDS?)?$",
+    r"(?:(?:^|_)PASS|TOKEN|SECRET|PAT|KEY|PASSWORD|PASSWD|PASSPHRASE|PWD"
+    r"|CREDENTIAL|AUTHTOKEN|MNEMONIC|SEED_PHRASE)S?(?:_IDS?)?[_0-9]*$",
     re.IGNORECASE,
 )
 
@@ -80,19 +89,30 @@ _CREDENTIAL_DENYLIST = re.compile(
 _DENYLIST_EXEMPT: frozenset[str] = frozenset({"PWD", "OLDPWD"})
 
 # Credential *blobs* whose NAME ends in a benign suffix (CONFIG / AUTH /
-# STRING / BASE) that the suffix-token regex cannot express, yet whose VALUE
-# is a secret: base64 registry auth (DOCKER_AUTH_CONFIG), a basic-auth header
-# (BASIC_AUTH), a DSN with an embedded password (*_CONNECTION_STRING), or a
-# framework master secret whose credential token is an infix (SECRET_KEY_BASE
-# -- the Rails master secret; the suffix anchor sees only the benign _BASE
-# tail and its SECRET_KEY sibling is masked, so the exact name is curated
-# here). Exact-name membership keeps benign siblings (KEYBASE_*, CODEBASE_*,
-# DATABASE, RELEASE_BASE) unaffected.
+# STRING / BASE / DSN) that the suffix-token regex cannot express, yet whose
+# VALUE is a secret: base64 registry auth (DOCKER_AUTH_CONFIG), a basic-auth
+# header (BASIC_AUTH), a DSN with an embedded password (*_CONNECTION_STRING,
+# *_DSN, *_CONN_STR), or a framework master secret whose credential token is
+# an infix (SECRET_KEY_BASE -- the Rails master secret; the suffix anchor sees
+# only the benign _BASE tail and its SECRET_KEY sibling is masked, so the exact
+# name is curated here). Exact-name membership keeps benign siblings (KEYBASE_*,
+# CODEBASE_*, DATABASE, RELEASE_BASE) unaffected. The ``_AUTH`` suffix sweeps
+# the real npm/registry auth vars (NPM_CONFIG__AUTH -- the actual ``npm_config__auth``
+# env name -- and ARTIFACTORY_AUTH) that the curated NPM_AUTH/REGISTRY_AUTH
+# names alone miss; over-redacting a non-secret ``*_AUTH`` name is harmless.
 _CREDENTIAL_BLOB_NAMES: frozenset[str] = frozenset(
-    {"DOCKER_AUTH_CONFIG", "BASIC_AUTH", "NPM_AUTH", "REGISTRY_AUTH", "SECRET_KEY_BASE"}
+    {
+        "DOCKER_AUTH_CONFIG",
+        "BASIC_AUTH",
+        "NPM_AUTH",
+        "REGISTRY_AUTH",
+        "SECRET_KEY_BASE",
+        "DSN",
+        "CONN_STR",
+    }
 )
 _CREDENTIAL_BLOB_SUFFIX = re.compile(
-    r"(?:_AUTH_CONFIG|_CONNECTION_STRING|CONNECTIONSTRING)$",
+    r"(?:_AUTH|_AUTH_CONFIG|_CONNECTION_STRING|CONNECTIONSTRING|_DSN|_CONN_STR)$",
     re.IGNORECASE,
 )
 
@@ -101,6 +121,26 @@ _CREDENTIAL_BLOB_SUFFIX = re.compile(
 # and masking them would corrupt unrelated log text; real credential
 # values are long, so an 8-char floor catches secrets without false hits.
 _MIN_REDACT_LEN = 8
+
+
+# Connection-string / DSN passwords use a key=value form
+# (libpq ``password=secret dbname=app``, JDBC ``...;password=secret``) that the
+# URL-userinfo masker cannot see (there is no ``scheme://user:pass@``). Mask the
+# value of a ``password=``/``passwd=`` key regardless of the env-var NAME, so a
+# DSN-style secret carried by an UN-denylisted var (a bare ``DSN``, an echoed
+# connection string) cannot persist in cleartext. The value runs to the next
+# whitespace, ``;`` or end-of-string. We deliberately do NOT match a bare
+# ``pwd=`` here: the shell ``$PWD`` is routinely echoed as ``PWD=/home/...`` and
+# masking it would corrupt the benign working-directory path (``PWD`` is exempt
+# from the credential denylist for the same reason).
+_CONN_STR_PASSWORD_PATTERN = re.compile(r"(?i)\b(password|passwd)(\s*=\s*)([^\s;]+)")
+
+
+def _redact_connection_string_password(text: str) -> str:
+    """Mask ``password=<value>`` key=value pairs in connection strings / DSNs."""
+    if not text:
+        return text
+    return _CONN_STR_PASSWORD_PATTERN.sub(lambda m: m.group(1) + m.group(2) + "[REDACTED]", text)
 
 
 def _matches_credential(name: str) -> bool:
@@ -185,7 +225,7 @@ def _redact_secrets(text: str) -> str:
     redacted = text
     for value in sorted(set(secrets), key=len, reverse=True):
         redacted = redacted.replace(value, "[REDACTED]")
-    return redacted
+    return _redact_connection_string_password(redacted)
 
 
 def _redact_url_credentials(url: str) -> str:

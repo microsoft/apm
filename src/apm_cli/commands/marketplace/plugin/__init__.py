@@ -61,7 +61,11 @@ def _has_marketplace_block(apm_path: Path) -> bool:
     if not apm_path.exists():
         return False
     try:
-        data = yaml.safe_load(apm_path.read_text(encoding="utf-8"))
+        # Bounded loader so a hostile apm.yml cannot wedge this probe with a
+        # merge/alias expansion bomb (fails closed as yaml.YAMLError).
+        from apm_cli.utils.yaml_io import load_yaml
+
+        data = load_yaml(apm_path)
     except (OSError, yaml.YAMLError):
         return False
     return isinstance(data, dict) and "marketplace" in data and data["marketplace"] is not None
