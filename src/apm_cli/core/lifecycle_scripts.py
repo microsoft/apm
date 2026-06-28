@@ -436,7 +436,7 @@ class LifecycleScriptRunner:
         Returns a list of daemon threads started by HTTP scripts so
         callers can optionally join them (e.g. for test/dry-run).
         """
-        from apm_cli.core.script_executors import execute_script
+        from apm_cli.core.script_executors import dispatch_http_batch, execute_script
 
         self._emit_skip_notice()
 
@@ -444,18 +444,22 @@ class LifecycleScriptRunner:
         if not matching:
             return []
 
-        threads: list[threading.Thread] = []
+        # command scripts run synchronously (in declared order); http
+        # scripts dispatch through a bounded worker pool so a file with
+        # many http entries cannot spawn an unbounded number of threads.
+        http_scripts: list[ScriptEntry] = []
         for script in matching:
+            if script.script_type == "http":
+                http_scripts.append(script)
+                continue
             try:
-                thread = execute_script(
+                execute_script(
                     script,
                     event,
                     logger=self._logger,
                     verbose=self._verbose,
                     project_root=self._project_root,
                 )
-                if thread is not None:
-                    threads.append(thread)
             except Exception:
                 _logger.debug(
                     "Lifecycle script failed (type=%s, event=%s)",
@@ -467,7 +471,13 @@ class LifecycleScriptRunner:
                     self._logger.verbose_detail(
                         f"[i] Lifecycle script failed: {script.script_type} for {event_name}"
                     )
-        return threads
+
+        return dispatch_http_batch(
+            http_scripts,
+            event,
+            logger=self._logger,
+            verbose=self._verbose,
+        )
 
     def scripts_for_event(self, event_name: str) -> list[ScriptEntry]:
         """Return scripts registered for event_name (public API)."""

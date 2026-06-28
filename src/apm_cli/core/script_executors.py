@@ -17,9 +17,11 @@ produce without enabling verbose CLI output.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import re
+import socket
 import subprocess
 import threading
 import time
@@ -250,22 +252,114 @@ def _http_payload(event: LifecycleEvent) -> str:
     return replace(event, working_directory=safe_wd).to_json()
 
 
-def _execute_http(
+# Hostnames that resolve to cloud-metadata endpoints. Blocked by NAME
+# (independent of DNS) because a guard that only classifies resolved IPs
+# can be defeated when the host does not resolve in a sandbox yet routes
+# to the metadata service in production.
+_METADATA_HOSTNAMES = frozenset(
+    {
+        "metadata",
+        "metadata.google.internal",
+        "metadata.goog",
+    }
+)
+
+
+def _host_to_ip_literal(host: str) -> ipaddress._BaseAddress | None:
+    """Canonicalise *host* to an IP address if it denotes one literally.
+
+    Handles dotted IPv4/IPv6, bracket-stripped IPv6, trailing-dot forms,
+    and the decimal / hexadecimal integer encodings that defeat a naive
+    ``ipaddress.ip_address(hostname)`` guard (e.g. ``2130706433`` and
+    ``0x7f000001`` both denote ``127.0.0.1``). Returns ``None`` when the
+    host is a DNS name rather than an address literal.
+    """
+    h = host.strip().rstrip(".")
+    if not h:
+        return None
+    try:
+        return ipaddress.ip_address(h)
+    except ValueError:
+        pass
+    try:
+        if h.lower().startswith("0x"):
+            value = int(h, 16)
+        elif h.isdigit():
+            value = int(h, 10)
+        else:
+            return None
+        if 0 <= value <= 0xFFFFFFFF:
+            return ipaddress.ip_address(value)
+    except ValueError:
+        pass
+    return None
+
+
+def _ip_is_internal(ip: ipaddress._BaseAddress) -> bool:
+    """Return True for any address an SSRF guard must refuse to reach."""
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return bool(
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _ssrf_block_reason(host: str) -> str | None:
+    """Classify *host*; return a reason string if it must be refused.
+
+    Refuses cloud-metadata hostnames, then any literal/encoded address in
+    a private, loopback, link-local, reserved, multicast, unspecified, or
+    IPv4-mapped-internal range. For DNS names, every resolved address is
+    classified -- if ANY resolves internal the destination is refused.
+    A name that cannot be resolved is allowed to proceed (the request
+    layer will fail to connect; no internal host is reachable).
+    """
+    if host.rstrip(".").lower() in _METADATA_HOSTNAMES:
+        return "cloud-metadata hostname"
+
+    literal = _host_to_ip_literal(host)
+    if literal is not None:
+        return "internal address" if _ip_is_internal(literal) else None
+
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return None
+    for info in infos:
+        sockaddr = info[4]
+        try:
+            resolved = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            continue
+        if _ip_is_internal(resolved):
+            return "resolves to internal address"
+    return None
+
+
+# Upper bound on simultaneous HTTP dispatch worker threads started for a
+# single lifecycle event. Without a cap, an event file with N http entries
+# spawns N threads + sockets at once (resource exhaustion).
+MAX_HTTP_DISPATCH_THREADS = 32
+
+
+def _prepare_http(
     script: ScriptEntry,
     event: LifecycleEvent,
     *,
     logger: CommandLogger | None = None,
     verbose: bool = False,
-) -> threading.Thread | None:
-    """Send an HTTP POST to the script URL in a daemon thread.
+) -> tuple[str, str, dict[str, str], float, str, str, str] | None:
+    """Validate and build an HTTP dispatch, or return None if refused.
 
-    Returns the started thread so callers can optionally join it.
-
-    Security hardening:
-    - HTTPS-only (rejects ``http://``)
-    - No redirect following
-    - Configurable timeout (default 10s)
-    - Header values support ``$ENV_VAR`` expansion (credential vars blocked)
+    Security gates (all enforced before any network call): HTTPS-only,
+    hostname required, and an SSRF guard that refuses internal / metadata
+    destinations (including encoded-IP bypasses). Returns the tuple
+    ``(url, payload, headers, timeout, event_name, safe_url, hostname)``.
     """
     url = script.url
     if not url:
@@ -285,49 +379,150 @@ def _execute_http(
         _logger.debug("HTTP script URL has no hostname: %s", url)
         return None
 
-    # Build headers with env-var expansion.
+    reason = _ssrf_block_reason(parsed.hostname)
+    if reason is not None:
+        if verbose and logger:
+            logger.verbose_detail(f"[i] HTTP script rejected: {reason}")
+        _logger.debug("Rejecting internal/SSRF script URL (%s)", reason)
+        return None
+
     allowed = frozenset(script.allowed_env_vars or ())
     request_headers: dict[str, str] = {"Content-Type": "application/json"}
     if script.headers:
         for key, val in script.headers.items():
             request_headers[key] = _expand_env_vars(val, allowed, logger=logger, verbose=verbose)
 
-    payload = _http_payload(event)
-    timeout = script.effective_timeout
-    hostname = parsed.hostname
+    return (
+        url,
+        _http_payload(event),
+        request_headers,
+        script.effective_timeout,
+        event.event,
+        _redact_url_credentials(url),
+        parsed.hostname,
+    )
 
-    event_name = event.event
-    safe_url = _redact_url_credentials(url)
 
-    def _send() -> None:
-        try:
-            import requests
+def _dispatch_http_request(
+    url: str,
+    payload: str,
+    request_headers: dict[str, str],
+    timeout: float,
+    event_name: str,
+    safe_url: str,
+) -> None:
+    """Send the prepared POST synchronously and log the outcome.
 
-            resp = requests.post(
-                url,
-                data=payload,
-                headers=request_headers,
-                timeout=timeout,
-                allow_redirects=False,
-            )
-            _append_to_script_log(
-                event_name,
-                "http",
-                safe_url,
-                stdout=f"HTTP {resp.status_code}",
-                status="ok" if resp.ok else "error",
-            )
-        except Exception as exc:
-            _logger.debug("HTTP POST failed for %s", safe_url, exc_info=True)
-            _append_to_script_log(event_name, "http", safe_url, stderr=str(exc), status="error")
+    ``stream=True`` keeps a malicious endpoint from forcing the whole
+    response body into memory: only the status line is consumed.
+    """
+    try:
+        import requests
 
-    thread = threading.Thread(target=_send, daemon=True)
+        resp = requests.post(
+            url,
+            data=payload,
+            headers=request_headers,
+            timeout=timeout,
+            allow_redirects=False,
+            stream=True,
+        )
+        _append_to_script_log(
+            event_name,
+            "http",
+            safe_url,
+            stdout=f"HTTP {resp.status_code}",
+            status="ok" if resp.ok else "error",
+        )
+    except Exception as exc:
+        _logger.debug("HTTP POST failed for %s", safe_url, exc_info=True)
+        _append_to_script_log(event_name, "http", safe_url, stderr=str(exc), status="error")
+
+
+def _execute_http(
+    script: ScriptEntry,
+    event: LifecycleEvent,
+    *,
+    logger: CommandLogger | None = None,
+    verbose: bool = False,
+) -> threading.Thread | None:
+    """Send an HTTP POST to the script URL in a daemon thread.
+
+    Returns the started thread so callers can optionally join it, or
+    ``None`` when the destination is refused by a security gate.
+
+    Security hardening:
+    - HTTPS-only (rejects ``http://``)
+    - SSRF guard (refuses internal / loopback / link-local / metadata)
+    - No redirect following
+    - ``stream=True`` (response body never buffered)
+    - Configurable timeout (default 10s)
+    - Header values support ``$ENV_VAR`` expansion (credential vars blocked)
+    """
+    prepared = _prepare_http(script, event, logger=logger, verbose=verbose)
+    if prepared is None:
+        return None
+
+    url, payload, request_headers, timeout, event_name, safe_url, hostname = prepared
+
+    thread = threading.Thread(
+        target=_dispatch_http_request,
+        args=(url, payload, request_headers, timeout, event_name, safe_url),
+        daemon=True,
+    )
     thread.start()
 
     if verbose and logger:
         logger.verbose_detail(f"[i] {event.event} event dispatched to {hostname}")
 
     return thread
+
+
+def dispatch_http_batch(
+    scripts: list[ScriptEntry],
+    event: LifecycleEvent,
+    *,
+    logger: CommandLogger | None = None,
+    verbose: bool = False,
+) -> list[threading.Thread]:
+    """Dispatch many HTTP scripts through a bounded worker pool.
+
+    Starts at most ``MAX_HTTP_DISPATCH_THREADS`` worker threads that drain
+    a shared queue, so an event with hundreds of http entries can never
+    spawn hundreds of simultaneous threads/sockets. Returns the started
+    worker threads so callers can join them. Per-entry SSRF/HTTPS gating
+    is applied inside each worker via :func:`_prepare_http`.
+    """
+    import queue
+
+    if not scripts:
+        return []
+
+    work: queue.Queue[ScriptEntry] = queue.Queue()
+    for script in scripts:
+        work.put(script)
+
+    def _worker() -> None:
+        while True:
+            try:
+                script = work.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                prepared = _prepare_http(script, event, logger=logger, verbose=verbose)
+                if prepared is not None:
+                    url, payload, headers, timeout, event_name, safe_url, _host = prepared
+                    _dispatch_http_request(url, payload, headers, timeout, event_name, safe_url)
+            except Exception:
+                _logger.debug("HTTP dispatch worker failed", exc_info=True)
+            finally:
+                work.task_done()
+
+    pool_size = min(len(scripts), MAX_HTTP_DISPATCH_THREADS)
+    workers = [threading.Thread(target=_worker, daemon=True) for _ in range(pool_size)]
+    for worker in workers:
+        worker.start()
+    return workers
 
 
 # -- Command executor ------------------------------------------------------
