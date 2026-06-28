@@ -10,6 +10,9 @@ import mermaid from 'astro-mermaid';
 export default defineConfig({
 	site: 'https://microsoft.github.io',
 	base: '/apm/',
+	markdown: {
+		gfm: true,
+	},
 	trailingSlash: 'always',
 	prefetch: {
 		prefetchAll: true,
