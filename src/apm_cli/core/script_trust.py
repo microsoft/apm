@@ -254,20 +254,33 @@ def _trust_store_lock():
     clobber each other's entries on a stale snapshot (lost update).
     """
     store = _trust_store_path()
-    store.parent.mkdir(parents=True, exist_ok=True)
+    store.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     lock_path = store.with_name(store.name + ".lock")
     with _TRUST_STORE_THREAD_LOCK:
-        lock_handle = None
+        lock_fd = None
         try:
             if fcntl is not None:
-                lock_handle = open(lock_path, "w", encoding="utf-8")  # noqa: SIM115
-                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+                # Open the lock with O_NOFOLLOW and WITHOUT O_TRUNC: a plain
+                # open(lock_path, "w") follows a pre-planted symlink at the
+                # predictable lock path and truncates whatever it targets
+                # (an attacker can point it at the trust store itself, or any
+                # user-writable file, and wipe it). The dedicated lock fd is
+                # never written -- it exists only to carry the advisory flock.
+                # If the path is a symlink (O_NOFOLLOW -> ELOOP) or otherwise
+                # unopenable, degrade to the in-process thread lock alone
+                # rather than crash the trust write: the cross-process file
+                # lock is best-effort, and a hostile symlink at the lock path
+                # is an attack, not a genuine concurrent writer.
+                lock_flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+                with contextlib.suppress(OSError):
+                    lock_fd = os.open(lock_path, lock_flags, 0o600)
+                    fcntl.flock(lock_fd, fcntl.LOCK_EX)
             yield
         finally:
-            if lock_handle is not None:
+            if lock_fd is not None:
                 with contextlib.suppress(OSError):
-                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
-                lock_handle.close()
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                os.close(lock_fd)
 
 
 def is_project_scripts_trusted(script_file: Path) -> bool:

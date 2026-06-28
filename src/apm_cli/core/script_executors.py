@@ -450,6 +450,34 @@ def _redact_jwt_values(text: str) -> str:
     return _JWT_VALUE_PATTERN.sub("[REDACTED]", text)
 
 
+# Provider-credential VALUE shapes that carry no backing credential-named env
+# var (so the os.environ value-redactor never sees them) and no structural
+# delimiter (no ``@``-host, no ``password=``, no ``eyJ.eyJ``) -- a script that
+# prints ``gh auth token`` / ``vault kv get`` / ``cat .slack-token`` echoes the
+# raw secret to scripts.log otherwise. Each alternative is anchored on a
+# fixed provider prefix plus a long fixed-shape body so benign words that merely
+# start with the same letters (``ghpost-...``, ``AIzapod``) are not redacted.
+_PROVIDER_TOKEN_PATTERN = re.compile(
+    r"gh[posur]_[A-Za-z0-9]{36,}"  # GitHub PAT / OAuth / server / user / refresh
+    r"|github_pat_[A-Za-z0-9_]{40,}"  # GitHub fine-grained PAT
+    r"|xox[baprs]-[A-Za-z0-9-]{10,}"  # Slack bot/user/app/refresh token
+    r"|[sr]k_live_[A-Za-z0-9]{16,}"  # Stripe live secret / restricted key
+    r"|AIza[A-Za-z0-9_-]{35}"  # Google API key
+)
+
+
+def _redact_provider_tokens(text: str) -> str:
+    """Mask fixed-prefix provider credential *values* (PAT, Slack, Stripe, GCP).
+
+    Name-independent structural masker in the same class as
+    :func:`_redact_jwt_values`: it catches a raw provider secret printed to
+    stdout/stderr with no backing env var and no surrounding delimiter.
+    """
+    if not text:
+        return text
+    return _PROVIDER_TOKEN_PATTERN.sub("[REDACTED]", text)
+
+
 def _redact_secrets(text: str) -> str:
     """Mask any denylisted env-var *values* appearing in script output.
 
@@ -491,10 +519,12 @@ def _redact_secrets(text: str) -> str:
     for value in sorted(set(secrets), key=len, reverse=True):
         redacted = redacted.replace(value, "[REDACTED]")
     return _redact_jwt_values(
-        _redact_pem_private_keys(
-            _redact_bundler_source_credentials(
-                _redact_sas_signatures(
-                    _redact_webhook_urls(_redact_connection_string_password(redacted))
+        _redact_provider_tokens(
+            _redact_pem_private_keys(
+                _redact_bundler_source_credentials(
+                    _redact_sas_signatures(
+                        _redact_webhook_urls(_redact_connection_string_password(redacted))
+                    )
                 )
             )
         )
@@ -676,7 +706,16 @@ def _rotate_log_if_large(log_path: Path) -> None:
     except OSError:
         return
     try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        # Non-blocking: rotation is best-effort and runs synchronously on the
+        # install firing path, so it must NEVER block. A foreign holder of the
+        # predictable lock path (or a genuine concurrent rotator) means another
+        # process is already rotating -- skip this pass. The double-checked
+        # re-stat below makes skipping safe: a later appender re-stats and
+        # rotates if the log is still oversized.
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return
         with contextlib.suppress(OSError):
             if log_path.stat().st_size >= _MAX_LOG_BYTES:
                 os.replace(log_path, rotated)
