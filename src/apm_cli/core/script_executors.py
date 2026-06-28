@@ -475,6 +475,10 @@ _PROVIDER_TOKEN_PATTERN = re.compile(
     r"|hf_[A-Za-z0-9]{30,}"  # Hugging Face access token
     r"|dop_v1_[A-Za-z0-9]{40,}"  # DigitalOcean personal access token
     r"|tskey-[A-Za-z0-9-]{10,}"  # Tailscale auth/api key
+    r"|hv[sbr]\.[A-Za-z0-9]{24,}"  # HashiCorp Vault service/batch/recovery token
+    r"|npm_[A-Za-z0-9]{36}"  # npm automation/access token
+    r"|pypi-[A-Za-z0-9_-]{32,}"  # PyPI API token
+    r"|sk-ant-[A-Za-z0-9-]{20,}"  # Anthropic API key
 )
 
 

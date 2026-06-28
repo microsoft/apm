@@ -1258,7 +1258,7 @@ class DownloadDelegate:
             return body
         try:
             payload = json.loads(body.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError, AttributeError):
+        except (ValueError, UnicodeDecodeError, AttributeError, RecursionError):
             return body
         if not isinstance(payload, dict) or "content" not in payload:
             return body
