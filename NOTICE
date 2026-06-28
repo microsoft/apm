@@ -372,7 +372,7 @@ THE SOFTWARE.
 
 ## Component. llm
 
-- Version requirement: `>=0.17.0`
+- Version requirement: `>=0.28`
 - Upstream: https://github.com/simonw/llm
 - SPDX: `Apache-2.0`
 - Notes: No NOTICE or AUTHORS file present upstream; nothing additional to forward.
@@ -589,7 +589,7 @@ _Copyright Simon Willison (per PyPI author metadata; LICENSE file is the unmodif
 
 ## Component. llm-github-models
 
-- Version requirement: `>=0.1.0`
+- Version requirement: `>=0.18.0`
 - Upstream: https://github.com/tonybaloney/llm-github-models
 - SPDX: `Apache-2.0`
 - Notes: Upstream LICENSE file declares MIT license text but PyPI metadata + classifiers say Apache-2.0. See Open Issues.
