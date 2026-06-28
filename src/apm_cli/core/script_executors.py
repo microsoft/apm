@@ -84,10 +84,21 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za
 # The looser tokens (KEY, PAT, ...) keep their suffix-match behaviour as a
 # deliberate fail-safe: over-redacting a non-secret env var is harmless,
 # under-redacting a secret is not.
+# The trailing ENCODING tail ``(?:_?(?:BASE64|B64|HEX|PEM|DER|ASC))?`` closes a
+# real, widely-deployed CI convention: a whole secret (a GCP service-account
+# JSON, a TLS private key, a JWT signing secret) is base64/hex-encoded into ONE
+# single-line env var named ``<x>_BASE64`` / ``<x>_B64`` so it survives a flat
+# secret store -- e.g. ``GCP_SA_KEY_BASE64``, ``TLS_PRIVATE_KEY_BASE64``,
+# ``JWT_SECRET_B64``, ``API_TOKEN_BASE64``. The credential token (KEY/TOKEN/
+# SECRET/CREDENTIAL) is now an INFIX and the name ENDS in the benign encoding
+# tail, which the bare suffix anchor could not express. The tail only ever
+# applies AFTER a credential token, so a TOKEN-LESS encoded asset (IMAGE_BASE64,
+# LOGO_B64, FONT_BASE64, COLOR_HEX) never matches and still reaches the child env.
 _CREDENTIAL_DENYLIST = re.compile(
     r"(?:(?:^|_)PASS|TOKEN|SECRET|PAT|KEY|PASSWORD|PASSWD|PASSPHRASE|PWD"
     r"|CREDENTIAL|AUTHTOKEN|MNEMONIC|SEED_PHRASE|RECOVERY_PHRASE|BACKUP_PHRASE)"
-    r"S?(?:_IDS?)?(?:_?(?:OLD|NEW|PREV|CURRENT))?(?:_?V[0-9]+)?[_0-9]*$",
+    r"S?(?:_IDS?)?(?:_?(?:OLD|NEW|PREV|CURRENT))?(?:_?V[0-9]+)?"
+    r"(?:_?(?:BASE64|B64|HEX|PEM|DER|ASC))?[_0-9]*$",
     re.IGNORECASE,
 )
 
@@ -128,8 +139,19 @@ _CREDENTIAL_BLOB_NAMES: frozenset[str] = frozenset(
         "DERIVATION_SEED",
     }
 )
+# A base64/hex-encoded CONFIG blob keyed by the bare ``KUBE_CONFIG`` /
+# ``KUBECONFIG`` stem (no credential token, so the denylist cannot see it) is
+# the kubeconfig content secret -- it embeds a client cert / bearer token. The
+# encoding tail is REQUIRED here so the bare ``KUBECONFIG`` *path* var (which
+# merely names a file, like PWD) is NOT stripped from the child env and break
+# ``kubectl``. The existing blob suffixes also accept an optional encoding tail
+# so ``DOCKER_AUTH_CONFIG_BASE64`` / ``*_DSN_B64`` are caught the same way.
 _CREDENTIAL_BLOB_SUFFIX = re.compile(
-    r"(?:_AUTH|_AUTH_CONFIG|_CONNECTION_STRING|CONNECTIONSTRING|_DSN|_CONN_STR)$",
+    r"(?:"
+    r"(?:_AUTH|_AUTH_CONFIG|_CONNECTION_STRING|CONNECTIONSTRING|_DSN|_CONN_STR)"
+    r"(?:_?(?:BASE64|B64|HEX|PEM|DER|ASC))?"
+    r"|KUBE_?CONFIG_?(?:BASE64|B64|HEX)"
+    r")$",
     re.IGNORECASE,
 )
 
