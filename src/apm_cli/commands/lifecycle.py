@@ -434,6 +434,8 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
                 url = entry.get("url")
                 if not url:
                     errors.append(f"{prefix}: http script needs 'url' field")
+                elif not isinstance(url, str):
+                    errors.append(f"{prefix}: 'url' must be a string, got {type(url).__name__}")
                 else:
                     parsed = urlparse(url)
                     if parsed.scheme.lower() != "https":
