@@ -955,6 +955,11 @@ class _FakeResponse:
         self.headers: dict = {}
         self.content = json.dumps(payload).encode()
 
+    def iter_content(self, chunk_size=None):
+        # Registry/marketplace clients stream the body under a byte ceiling;
+        # yield the full payload as a single chunk.
+        yield self.content
+
     def json(self):
         return self._payload
 
