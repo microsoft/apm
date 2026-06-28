@@ -194,18 +194,43 @@ def _get_scripts_log_path() -> Path:
     return base / "logs" / "scripts.log"
 
 
+_LINE_BREAK_ESCAPES = {
+    "\r": "\\r",
+    "\n": "\\n",
+}
+# Every code point str.splitlines() treats as a line boundary. Escaping only
+# CR/LF is insufficient: a splitlines()-based log consumer (a very common
+# Python idiom) also splits on VT, FF, the FS/GS/RS information separators,
+# NEL, LS, and PS -- so an attacker field carrying any of these would still
+# forge a column-0 audit record for such a parser. We neutralize the full set
+# in one choke point so stdout/stderr (via _truncate_log_field) and target
+# (via safe_target) are all covered.
+_LINE_BREAK_PATTERN = re.compile("[\r\n\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
+
+
 def _neutralize_newlines(text: str) -> str:
-    """Escape CR/LF so a log field cannot forge a new log line.
+    """Escape every line-boundary code point so a log field cannot forge a line.
 
     The scripts.log audit trail exists to catch malicious scripts, so a field
     derived from attacker-controlled stdout/stderr (or a multi-line command)
-    must never contain a raw newline -- otherwise a script could emit output
+    must never contain a raw line break -- otherwise a script could emit output
     that, at column 0, is byte-indistinguishable from a genuine
     ``[ts] event=... status=ok`` entry and forge or bury audit records. The
-    header path already strips CR/LF from expanded values; this closes the
-    same gap for the output fields.
+    header path already strips CR/LF from expanded values; this closes the same
+    gap for the output fields, covering the complete ``str.splitlines()``
+    boundary set (not just CR/LF) so splitlines-based consumers cannot be
+    fooled either.
     """
-    return text.replace("\r", "\\r").replace("\n", "\\n")
+
+    def _escape(match: re.Match[str]) -> str:
+        char = match.group()
+        readable = _LINE_BREAK_ESCAPES.get(char)
+        if readable is not None:
+            return readable
+        code = ord(char)
+        return f"\\x{code:02x}" if code <= 0xFF else f"\\u{code:04x}"
+
+    return _LINE_BREAK_PATTERN.sub(_escape, text)
 
 
 def _truncate_log_field(text: str) -> str:

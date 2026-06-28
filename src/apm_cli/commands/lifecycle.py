@@ -372,7 +372,10 @@ def _validate_script_file(path: Path, source: str) -> list[str]:
     else:
         try:
             data = _json.loads(raw_text)
-        except (_json.JSONDecodeError, RecursionError) as e:
+        except (ValueError, RecursionError) as e:
+            # ValueError subsumes JSONDecodeError and the CPython int-string
+            # conversion limit (a bare ValueError on >4300-digit integers) so a
+            # hostile policy JSON drop-in is reported, never crashing validate.
             return [f"Invalid JSON: {e}"]
 
     if not isinstance(data, dict):

@@ -23,6 +23,8 @@ from __future__ import annotations
 import os
 import stat
 
+import pytest
+
 from apm_cli.core import script_executors
 from apm_cli.core.script_executors import (
     _append_to_script_log,
@@ -32,6 +34,10 @@ from apm_cli.core.script_executors import (
 )
 
 _NONE: frozenset[str] = frozenset()
+
+# Every code point str.splitlines() treats as a line boundary beyond CR/LF:
+# VT, FF, FS, GS, RS, NEL, LS, PS. Used by the round-5 r5-env-1 traps.
+_SPLITLINES_BOUNDARIES = ["\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"]
 
 
 # -- e-1: PWD / PASSWD denylist gap ---------------------------------------
@@ -218,3 +224,40 @@ class TestLogLineInjection:
         _append_to_script_log("post-install", "command", evil_cmd, status="ok")
         contents = log_path.read_text()
         assert [ln for ln in contents.splitlines() if ln.startswith("[2030-01-01")] == []
+
+    # round-5 (r5-env-1): str.splitlines() honors more boundaries than CR/LF.
+    # VT, FF, FS/GS/RS, NEL, LS, PS each forge a column-0 entry for a
+    # splitlines-based parser; _neutralize_newlines must escape the full set.
+    @pytest.mark.parametrize("boundary", _SPLITLINES_BOUNDARIES)
+    def test_unicode_line_boundary_cannot_forge_entry(
+        self, tmp_path, monkeypatch, boundary
+    ) -> None:
+        log_path = self._log_path(tmp_path, monkeypatch)
+        forged = (
+            "step done"
+            + boundary
+            + "[2031-09-09T00:00:00Z] event=preinstall type=command "
+            + "target=clean status=ok exit_code=0"
+        )
+        _append_to_script_log(
+            "preinstall", "command", "attacker.sh", stdout=forged, status="error", exit_code=1
+        )
+        contents = log_path.read_text()
+        # The raw boundary must not survive verbatim into the audit trail.
+        assert boundary not in contents
+        # A splitlines()-based consumer must see exactly one bracketed header.
+        headers = [ln for ln in contents.splitlines() if ln.startswith("[") and "event=" in ln]
+        assert len(headers) == 1, f"boundary {boundary!r} forged a splitlines column-0 entry"
+        assert "status=error" in headers[0]
+        # No line begins with the forged timestamp at column 0.
+        assert [ln for ln in contents.splitlines() if ln.startswith("[2031-09-09")] == []
+
+    def test_unicode_line_boundary_in_target_cannot_forge_entry(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        log_path = self._log_path(tmp_path, monkeypatch)
+        evil_cmd = "echo hi\u2028[2031-01-01T00:00:00Z] event=postinstall type=command status=ok"
+        _append_to_script_log("post-install", "command", evil_cmd, status="ok")
+        contents = log_path.read_text()
+        assert "\u2028" not in contents
+        assert [ln for ln in contents.splitlines() if ln.startswith("[2031-01-01")] == []

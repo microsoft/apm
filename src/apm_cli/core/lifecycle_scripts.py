@@ -321,7 +321,11 @@ def parse_script_file(path: Path, source: str = "project") -> list[ScriptEntry]:
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as e:
+    except (OSError, ValueError, RecursionError) as e:
+        # ValueError subsumes JSONDecodeError and UnicodeDecodeError, plus the
+        # CPython int-string conversion limit (a bare ValueError raised on a
+        # >4300-digit integer literal) so a malformed policy drop-in fails
+        # closed to [] instead of crashing discovery and the install fire path.
         _logger.debug("Failed to load script file %s: %s", path, e)
         return []
 
