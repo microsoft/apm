@@ -28,14 +28,115 @@ _DUMP_DEFAULTS: dict[str, Any] = dict(
 )
 
 
+class _BoundedSafeLoader(yaml.SafeLoader):
+    """SafeLoader that bounds YAML merge-key (``<<``) expansion.
+
+    PyYAML resolves merge keys EAGERLY in ``flatten_mapping``. A linear-size
+    document that chains aliased merges (``<<: [*a, *a]`` once per level)
+    doubles the merged value-list at each level, driving that resolution to
+    O(2^N) work, so a sub-kilobyte ``apm.yml`` can hang the parser for minutes
+    -- a CPU DoS reachable at PARSE time, before any post-parse structural
+    guard (``_is_fingerprint_safe``) can run, and before the trust gate, so an
+    untrusted clone could wedge ``apm install``.
+
+    The stock ``flatten_mapping`` calls itself only O(N) times (it mutates
+    each node in place, so a re-referenced alias is cheap on the second
+    visit); the cost lives in the ``merge.extend`` copies whose CUMULATIVE
+    volume grows like 2^N. So we reimplement ``flatten_mapping`` -- mirroring
+    PyYAML 6.x exactly -- and bound (a) the cumulative count of merged entries
+    and (b) the merge-recursion depth. A hostile manifest then raises a
+    ``yaml.YAMLError`` (which every ``load_yaml`` caller already treats as
+    fail-closed) within a small fixed budget instead of hanging. Both budgets
+    are orders of magnitude above any legitimate hand-written config, so real
+    ``<<`` merges still resolve correctly.
+    """
+
+    _MAX_MERGE_ENTRIES = 100_000
+    _MAX_FLATTEN_DEPTH = 200
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._merge_entries = 0
+        self._flatten_depth = 0
+
+    def _merge_budget_guard(self, node: Any) -> None:
+        if (
+            self._merge_entries > self._MAX_MERGE_ENTRIES
+            or self._flatten_depth > self._MAX_FLATTEN_DEPTH
+        ):
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                getattr(node, "start_mark", None),
+                "YAML merge-key expansion exceeded the safe budget "
+                "(possible merge-key expansion bomb)",
+                getattr(node, "start_mark", None),
+            )
+
+    def flatten_mapping(self, node: Any) -> Any:
+        # Faithful reimplementation of PyYAML 6.x
+        # ``SafeConstructor.flatten_mapping`` with a cumulative merged-entry
+        # budget + depth guard woven into the recursion. Keep the control flow
+        # identical to upstream so legitimate merges resolve identically.
+        self._flatten_depth += 1
+        try:
+            self._merge_budget_guard(node)
+            merge = []
+            index = 0
+            while index < len(node.value):
+                key_node, value_node = node.value[index]
+                if key_node.tag == "tag:yaml.org,2002:merge":
+                    del node.value[index]
+                    if isinstance(value_node, yaml.nodes.MappingNode):
+                        self.flatten_mapping(value_node)
+                        merge.extend(value_node.value)
+                    elif isinstance(value_node, yaml.nodes.SequenceNode):
+                        submerge = []
+                        for subnode in value_node.value:
+                            if not isinstance(subnode, yaml.nodes.MappingNode):
+                                raise yaml.constructor.ConstructorError(
+                                    "while constructing a mapping",
+                                    node.start_mark,
+                                    f"expected a mapping for merging, but found {subnode.id}",
+                                    subnode.start_mark,
+                                )
+                            self.flatten_mapping(subnode)
+                            submerge.append(subnode.value)
+                        submerge.reverse()
+                        for value in submerge:
+                            merge.extend(value)
+                    else:
+                        raise yaml.constructor.ConstructorError(
+                            "while constructing a mapping",
+                            node.start_mark,
+                            "expected a mapping or list of mappings for "
+                            f"merging, but found {value_node.id}",
+                            value_node.start_mark,
+                        )
+                    self._merge_entries += len(merge)
+                    self._merge_budget_guard(node)
+                elif key_node.tag == "tag:yaml.org,2002:value":
+                    key_node.tag = "tag:yaml.org,2002:str"
+                    index += 1
+                else:
+                    index += 1
+            if merge:
+                node.value = merge + node.value
+        finally:
+            self._flatten_depth -= 1
+
+
 def load_yaml(path: str | Path) -> dict[str, Any] | None:
     """Load a YAML file with explicit UTF-8 encoding.
 
     Returns parsed data or ``None`` for empty files.
     Raises ``FileNotFoundError`` or ``yaml.YAMLError`` on failure.
+
+    Uses a merge-bounded SafeLoader so a hostile manifest cannot wedge the
+    parser via an eager ``<<`` merge-key expansion (see ``_BoundedSafeLoader``);
+    the bomb fails closed as a ``yaml.YAMLError`` instead of hanging.
     """
     with open(path, encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        return yaml.load(fh, Loader=_BoundedSafeLoader)  # noqa: S506 - SafeLoader subclass
 
 
 def dump_yaml(

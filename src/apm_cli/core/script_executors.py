@@ -159,11 +159,22 @@ def _redact_secrets(text: str) -> str:
     """
     if not text:
         return text
-    secrets = [
-        value
-        for name, value in os.environ.items()
-        if value and len(value) >= _MIN_REDACT_LEN and _matches_credential(name)
-    ]
+    secrets: list[str] = []
+    for name, value in os.environ.items():
+        if not value or len(value) < _MIN_REDACT_LEN or not _matches_credential(name):
+            continue
+        secrets.append(value)
+        # subprocess text=True runs in universal-newline mode, which rewrites
+        # CRLF and lone CR to LF in captured stdout/stderr. A credential whose
+        # value carries a carriage return (a CRLF-sourced .env var, a Windows
+        # PEM/base64 blob) therefore diverges from this raw os.environ needle,
+        # so the exact str.replace below would miss and leak the cleartext to
+        # scripts.log. Mask the newline-normalized form too (same transform the
+        # subprocess applies); keep the raw form so the command/target string,
+        # which is never newline-translated, still matches.
+        normalized = value.replace("\r\n", "\n").replace("\r", "\n")
+        if normalized != value and len(normalized) >= _MIN_REDACT_LEN:
+            secrets.append(normalized)
     redacted = text
     for value in sorted(set(secrets), key=len, reverse=True):
         redacted = redacted.replace(value, "[REDACTED]")
