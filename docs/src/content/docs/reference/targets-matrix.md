@@ -35,7 +35,7 @@ Gemini, Antigravity, Codex, and Windsurf by default (see [Skills convergence](#s
 below). Claude and Kiro keep target-native skill directories.
 
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
-Copilot desktop App), and `openclaw` (OpenClaw agent runtime) are
+Copilot desktop App), `openclaw` (OpenClaw agent runtime), and `hermes` are
 gated behind experimental flags and not listed above. See
 [Experimental](./experimental/).
 
@@ -65,12 +65,12 @@ list before `compile` or `install`.
 | windsurf | `.windsurf/` directory                        |
 | kiro     | `.kiro/` directory                            |
 
-`agent-skills` and `antigravity` are never auto-detected but are canonical
-targets: select them with `--target` or list them in a project's `apm.yml`
-`targets:` field so contributors running plain `apm install` pick them up
-automatically.
+`agent-skills` is a canonical target key; `antigravity` is explicit-only.
+Both are available with `--target`, but only `agent-skills` can be listed in a
+project's `apm.yml` `targets:` field so contributors running plain `apm
+install` pick it up automatically.
 
-`copilot-cowork`, `copilot-app`, and `openclaw` are experimental targets
+`copilot-cowork`, `copilot-app`, `openclaw`, and `hermes` are experimental targets
 that require `apm experimental enable <name>` before use. They are selected
 with `--target` only and cannot be listed in `apm.yml` (the canonical
 targets validator will reject them).
@@ -157,7 +157,7 @@ Gemini CLI.
 
 Google Antigravity CLI (`agy`), successor to Gemini CLI.
 
-- **Detection.** None -- explicit-only. Antigravity shares the cross-tool `.agents/` root, so there is no unique auto-detect signal. Select it with `--target antigravity` or list it in `apm.yml` `targets:`. It is not part of `--target all`. Project-scope MCP writes are opt-in: `.agents/` must already exist (APM does not create it automatically for MCP).
+- **Detection.** None -- explicit-only. Antigravity shares the cross-tool `.agents/` root, so there is no unique auto-detect signal. Select it with `--target antigravity`; it is not part of `--target all` and is not accepted in `apm.yml` `targets:`. Project-scope MCP writes are opt-in: `.agents/` must already exist (APM does not create it automatically for MCP).
 - **Deploy directory.** `.agents/` (project scope); `~/.gemini/` (user scope).
 - **Supported primitives.** instructions, skills, hooks, mcp.
 - **File conventions.**

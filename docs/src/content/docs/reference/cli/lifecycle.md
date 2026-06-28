@@ -32,7 +32,7 @@ apm lifecycle untrust
 ### `apm lifecycle` (list)
 
 List all lifecycle scripts discovered from policy, user, and project sources.
-Equivalent to `apm lifecycle list`.
+There is no separate `list` subcommand; the group command lists by default.
 
 ```bash
 apm lifecycle

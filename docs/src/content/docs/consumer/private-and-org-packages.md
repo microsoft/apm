@@ -143,8 +143,9 @@ dependencies:
       ref: v1.2.0
 ```
 
-APM falls back across protocols on the same port: `ssh://host:7999`
-will retry as `https://host:7999/...` if SSH is unreachable.
+APM does not fall back across protocols by default. If you need the
+legacy same-port fallback, pass `--allow-protocol-fallback` or set
+`APM_ALLOW_PROTOCOL_FALLBACK=1`.
 
 ## Bitbucket Data Center personal repos
 

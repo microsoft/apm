@@ -72,7 +72,10 @@ Reset one flag (when `NAME` is given) or all flags (when omitted) to registry de
 | `copilot-app` | Deploys prompts as workflows into the GitHub Copilot desktop App. Workflows arrive disabled; enable them from the Copilot app's Workflows tab. | `apm install --target copilot-app` |
 | `marketplace-authoring` | Enables marketplace authoring commands (`init`, `build`, `publish`). | `apm marketplace --help` |
 | `registries` | Enables REST-based APM package registries in `apm.yml` and `~/.apm/config.json`. | `apm install` (with `registries:` configured) |
+| `canvas` | Ships Copilot CLI canvas extensions from `.apm/extensions/` bundles. | `apm install` |
 | `external-scanners` | Enables third-party SARIF scanner ingestion in `apm audit` (`--external`, `--external-llm`, `--external-args`), the `external.<name>.{llm,args}` config keys, and `security.audit.scanners` policy governance. | `apm audit --external skillspector` |
+| `openclaw` | Deploys skills to OpenClaw runtime directories. | `apm install --target openclaw` |
+| `hermes` | Deploys skills, `AGENTS.md`, and MCP servers to Hermes. | `apm install --target hermes` |
 
 Run `apm experimental list` to see the live registry; new flags ship in minor releases.
 

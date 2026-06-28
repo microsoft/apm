@@ -101,7 +101,7 @@ apm policy explain PACKAGE
 The effective decision follows the deny-wins precedence: an organization
 `executables.deny` / `deny_all` is the ceiling no project or user grant can
 widen. See [Executable approval](../approve/) for the trust model and
-[apm-policy.yml schema](../policy-schema/#executables) for the
+[apm-policy.yml schema](../../policy-schema/#executables) for the
 `executables` ceiling.
 
 ## Examples

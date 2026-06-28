@@ -110,6 +110,7 @@ for the full required-vs-optional runtime config rule.
 | OpenCode | `opencode.json` | project (only if `.opencode/` exists) | JSON `mcp` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
 | Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
+| JetBrains Copilot | OS-specific `mcp.json` under the GitHub Copilot user config directory | global | JSON `servers` |
 
 ## How `targets:` gates which configs get written
 

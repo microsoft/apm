@@ -118,9 +118,9 @@ Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm ini
 | **Description** | SPDX license expression (e.g. `MIT`, `Apache-2.0`, `(MIT OR Apache-2.0)`) declaring the package license. |
 
 The value is recorded verbatim into a consumer's lockfile as
-[`declared_license`](../lockfile-spec/) at resolve time, syntax-validated
+[`declared_license`](./lockfile-spec/) at resolve time, syntax-validated
 offline against the bundled SPDX id set, and surfaced by
-[`apm lock export`](../cli/lock/#export-sbom-inventory). Special tokens
+[`apm lock export`](./cli/lock/#export-sbom-inventory). Special tokens
 (`UNLICENSED`, `SEE LICENSE IN <file>`) and unrecognized strings are accepted
 and recorded as a named license -- a declaration is never rejected and never
 blocks packing or publishing. APM records what the manifest *declares*; it
@@ -136,11 +136,11 @@ actionable nudge (the authoring path only).
 | **Type** | `string` or `list<string>` |
 | **Required** | OPTIONAL |
 | **Default** | Auto-detect from folder presence (see below). |
-| **Allowed values** | `vscode`, `agents`, `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `all` |
+| **Allowed values** | `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `agent-skills` |
 
 Controls which output targets are generated during compilation, installation, and packing. Accepts a single string or a YAML list. Unknown values MUST raise a parse error at load time, naming the offending token.
 
-When `target:` is omitted, a conforming resolver SHOULD auto-detect: `vscode` if `.github/` exists, `claude` if `.claude/` exists, `codex` if `.codex/` exists, `windsurf` if `.windsurf/` exists, `kiro` if `.kiro/` exists, `all` if multiple are present, `minimal` if none. Auto-detection applies only when `target:` is unset; once set, the field is authoritative.
+When `target:` is omitted, APM auto-detects targets from folder presence (`.github/`, `.claude/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `.kiro/`). Auto-detection applies only when `target:` is unset; once set, the field is authoritative.
 
 ```yaml
 # Single target
@@ -155,25 +155,21 @@ target:
   - copilot
 ```
 
-When a list is specified, only those targets are compiled, installed, and packed; no output is generated for unlisted targets. `all` cannot be combined with other values.
+When a list is specified, only those targets are compiled, installed, and packed; no output is generated for unlisted targets.
 
 A plural alias `targets:` (YAML list only) is also accepted and takes precedence over the legacy CSV form when both are declared. Prefer `targets:` in new manifests; `target:` remains supported for backward compatibility.
 
 | Value | Effect |
 |---|---|
-| `vscode` | Emits `AGENTS.md` at the project root (and per-directory files in distributed mode). |
-| `agents` | Alias for `vscode`. |
-| `copilot` | Alias for `vscode`. |
+| `copilot` | Emits `AGENTS.md` at the project root (and per-directory files in distributed mode). |
 | `claude` | Emits `CLAUDE.md` at the project root. |
 | `cursor` | Emits to `.cursor/rules/`, `.cursor/agents/`, `.cursor/skills/`. |
 | `opencode` | Emits to `.opencode/agents/`, `.opencode/commands/`, `.opencode/skills/`. |
 | `codex` | Emits `AGENTS.md` and deploys skills to `.agents/skills/`, agents to `.codex/agents/`. |
 | `gemini` | Emits `GEMINI.md` and deploys to `.gemini/commands/`, `.gemini/skills/`, `.gemini/settings.json`. |
-| `antigravity` | Emits `AGENTS.md` and deploys rules to `.agents/rules/`, skills to `.agents/skills/`, hooks to `.agents/hooks.json`, MCP to `.agents/mcp_config.json`. Explicit-only (not auto-detected; not part of `--target all`). |
 | `windsurf` | Emits `AGENTS.md` and deploys to `.windsurf/rules/`, `.agents/skills/`, `.windsurf/workflows/`, `.windsurf/hooks.json`. |
 | `kiro` | Emits `AGENTS.md` and deploys to `.kiro/steering/`, `.kiro/skills/`, `.kiro/hooks/`, `.kiro/settings/mcp.json`. |
-| `all` | All targets. Cannot be combined with other values in a list. |
-| `minimal` | `AGENTS.md` only at project root. **Auto-detected only**: this value MUST NOT be set explicitly in manifests; it is an internal fallback when no target folder is detected. |
+| `agent-skills` | Deploys Agent Skills under `.agents/skills/`. |
 
 :::tip[Deterministic committed output]
 Teams that commit the files `apm compile` generates face a consistency problem:
@@ -690,7 +686,7 @@ dependencies:
 
 #### 4.3.4. What Gets Written
 
-`apm install` writes LSP server configs to detected runtime targets. Claude Code uses `.lsp.json` at project scope or `~/.claude.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at project scope or `~/.copilot/lsp-config.json` at user scope. See [Install LSP servers](../../consumer/install-lsp-servers/) for output formats and lifecycle details.
+`apm install` writes LSP server configs to detected runtime targets. Claude Code uses `.lsp.json` at project scope or `~/.claude.json` at user scope. GitHub Copilot CLI uses `.github/lsp.json` at project scope or `~/.copilot/lsp-config.json` at user scope. See [Install LSP servers](../consumer/install-lsp-servers/) for output formats and lifecycle details.
 
 ---
 
