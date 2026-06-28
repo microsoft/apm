@@ -94,7 +94,12 @@ def read_bundle_plugin_json(bundle_dir: Path) -> dict[str, Any]:
         return {}
     try:
         data = json.loads(pj_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (OSError, ValueError, RecursionError):
+        # json.JSONDecodeError is a ValueError subclass; the wider set also
+        # fails closed on a deeply-nested JSON (RecursionError) or an
+        # oversized-integer literal (bare ValueError from int_max_str_digits)
+        # in an untrusted bundle's plugin.json -- the same fail-closed posture
+        # parse_script_file / _load_trust_store take.
         return {}
     return data if isinstance(data, dict) else {}
 

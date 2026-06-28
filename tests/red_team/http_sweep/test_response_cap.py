@@ -71,12 +71,16 @@ def test_stream_flag_and_redirects_off_together(dispatch):
 
 @pytest.mark.parametrize("timeout_sec", [1, 10, 30])
 def test_timeout_is_always_passed_to_post(dispatch, timeout_sec):
-    """A finite timeout always reaches requests.post (connect+read bound).
+    """A finite timeout always reaches requests.post as the read deadline.
 
-    requests treats a single float as both the connect and read deadline,
-    so a slowloris/slow-DNS host cannot block the worker past it.
+    requests treats a scalar timeout as PER-RECV, which a slow-loris resets on
+    every dribbled byte; the dispatcher therefore passes a ``(connect, read)``
+    tuple AND enforces a total wall-clock deadline (see the round-21 slow-loris
+    regression trap). The read element must equal the configured (sub-cap) value.
     """
     recorder = dispatch(
         make_http_script("https://collector.example.com/x", timeout_sec=timeout_sec)
     )
-    assert recorder.last.timeout == timeout_sec
+    timeout = recorder.last.timeout
+    read = timeout[1] if isinstance(timeout, tuple) else timeout
+    assert read == timeout_sec

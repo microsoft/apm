@@ -85,21 +85,23 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za
 # The looser tokens (KEY, PAT, ...) keep their suffix-match behaviour as a
 # deliberate fail-safe: over-redacting a non-secret env var is harmless,
 # under-redacting a secret is not.
-# The trailing ENCODING tail ``(?:_?(?:BASE64|B64|HEX|PEM|DER|ASC))?`` closes a
-# real, widely-deployed CI convention: a whole secret (a GCP service-account
-# JSON, a TLS private key, a JWT signing secret) is base64/hex-encoded into ONE
-# single-line env var named ``<x>_BASE64`` / ``<x>_B64`` so it survives a flat
+# The trailing ENCODING tail ``(?:_?(?:BASE64|BASE32|B64|B32|HEX|PEM|DER|ASC))?``
+# closes a real, widely-deployed CI convention: a whole secret (a GCP service-
+# account JSON, a TLS private key, a JWT signing secret, an RFC-6238 TOTP/MFA
+# base32 seed) is base64/base32/hex-encoded into ONE single-line env var named
+# ``<x>_BASE64`` / ``<x>_B64`` / ``<x>_BASE32`` / ``<x>_B32`` so it survives a flat
 # secret store -- e.g. ``GCP_SA_KEY_BASE64``, ``TLS_PRIVATE_KEY_BASE64``,
-# ``JWT_SECRET_B64``, ``API_TOKEN_BASE64``. The credential token (KEY/TOKEN/
-# SECRET/CREDENTIAL) is now an INFIX and the name ENDS in the benign encoding
-# tail, which the bare suffix anchor could not express. The tail only ever
-# applies AFTER a credential token, so a TOKEN-LESS encoded asset (IMAGE_BASE64,
-# LOGO_B64, FONT_BASE64, COLOR_HEX) never matches and still reaches the child env.
+# ``JWT_SECRET_B64``, ``API_TOKEN_BASE64``, ``TOTP_SECRET_BASE32``. The credential
+# token (KEY/TOKEN/SECRET/CREDENTIAL/AUTHORIZATION) is now an INFIX and the name
+# ENDS in the benign encoding tail, which the bare suffix anchor could not
+# express. The tail only ever applies AFTER a credential token, so a TOKEN-LESS
+# encoded asset (IMAGE_BASE64, LOGO_B64, FONT_BASE32, COLOR_HEX) never matches and
+# still reaches the child env.
 _CREDENTIAL_DENYLIST = re.compile(
     r"(?:(?:^|_)PASS|TOKEN|SECRET|PAT|KEY|PASSWORD|PASSWD|PASSPHRASE|PWD"
-    r"|CREDENTIAL|AUTHTOKEN|MNEMONIC|SEED_PHRASE|RECOVERY_PHRASE|BACKUP_PHRASE)"
+    r"|CREDENTIAL|AUTHTOKEN|AUTHORIZATION|MNEMONIC|SEED_PHRASE|RECOVERY_PHRASE|BACKUP_PHRASE)"
     r"S?(?:_IDS?)?(?:_?(?:OLD|NEW|PREV|CURRENT))?(?:_?V[0-9]+)?"
-    r"(?:_?(?:BASE64|B64|HEX|PEM|DER|ASC))?[_0-9]*$",
+    r"(?:_?(?:BASE64|BASE32|B64|B32|HEX|PEM|DER|ASC))?[_0-9]*$",
     re.IGNORECASE,
 )
 
@@ -150,8 +152,8 @@ _CREDENTIAL_BLOB_NAMES: frozenset[str] = frozenset(
 _CREDENTIAL_BLOB_SUFFIX = re.compile(
     r"(?:"
     r"(?:_AUTH|_AUTH_CONFIG|_CONNECTION_STRING|CONNECTIONSTRING|_DSN|_CONN_STR)"
-    r"(?:_?(?:BASE64|B64|HEX|PEM|DER|ASC))?"
-    r"|KUBE_?CONFIG_?(?:BASE64|B64|HEX)"
+    r"(?:_?(?:BASE64|BASE32|B64|B32|HEX|PEM|DER|ASC))?"
+    r"|KUBE_?CONFIG_?(?:BASE64|BASE32|B64|B32|HEX)"
     # Binary private-key CONTAINER names (Android app-signing + JVM/Windows
     # code-signing): the signing key lives inside a keystore/PKCS#12 blob that
     # CI base64-encodes into one var (ANDROID_KEYSTORE_BASE64, SIGNING_KEYSTORE,
@@ -165,7 +167,7 @@ _CREDENTIAL_BLOB_SUFFIX = re.compile(
     # blob is caught while the benign PATH/FILE/ALIAS file vars (no encoding
     # tail) and TRUSTSTORE_* (public certs, no KEY) keep their suffixes and stay
     # in the child env.
-    r"|(?:_PFX|_P12|_PKCS12|_JKS|KEY_?STORE)(?:[A-Z0-9_]*?(?:BASE64|B64|HEX|DER))?"
+    r"|(?:_PFX|_P12|_PKCS12|_JKS|KEY_?STORE)(?:[A-Z0-9_]*?(?:BASE64|BASE32|B64|B32|HEX|DER))?"
     r")$",
     re.IGNORECASE,
 )
@@ -941,14 +943,32 @@ def _build_guarded_session():
             )
 
     session = requests.Session()
-    # trust_env=False so env HTTP(S)_PROXY/NO_PROXY cannot tunnel an https
-    # lifecycle dispatch through an unvetted proxy: a configured proxy uses
-    # urllib3's ProxyManager, which is NOT the resolve-and-pin pool above, so
-    # the SSRF guard + DNS pin would be silently nullified (the up-front
-    # _ssrf_block_reason only vets the TARGET host, never the proxy host).
+    # trust_env=False is correct for THIS (direct-egress) session only: a
+    # configured proxy uses urllib3's ProxyManager, NOT the resolve-and-pin
+    # pool above, so honoring a proxy here would silently nullify the DNS pin.
+    # Corporate-proxy egress is handled on a SEPARATE path in
+    # _dispatch_http_request (which honors the operator's env proxy explicitly);
+    # this session is used only when no env proxy applies to the destination.
     session.trust_env = False
     session.mount("https://", _SSRFGuardAdapter())
     return session
+
+
+def _environ_proxies_for(url: str) -> dict:
+    """Return the operator's env-configured proxies for *url*, or ``{}``.
+
+    A non-empty result is the corporate-egress case: the environment mandates
+    an outbound proxy for this destination (honoring ``NO_PROXY``), exactly as
+    curl / pip / npm / git resolve proxies. Returns ``{}`` (direct egress) when
+    no proxy applies or on any resolution error -- fail-closed to the DNS-pinned
+    direct path rather than guessing a proxy.
+    """
+    try:
+        import requests
+
+        return requests.utils.get_environ_proxies(url, no_proxy=None) or {}
+    except Exception:
+        return {}
 
 
 def _get_guarded_session():
@@ -972,6 +992,30 @@ def _get_guarded_session():
 # single lifecycle event. Without a cap, an event file with N http entries
 # spawns N threads + sockets at once (resource exhaustion).
 MAX_HTTP_DISPATCH_THREADS = 32
+
+# Hard ceiling on the (attacker-influenced) per-event HTTP timeout. ``timeoutSec``
+# in a project apm.yml is otherwise uncapped, so a malicious manifest could set it
+# to days; a lifecycle http event is fire-and-forget telemetry, so a small finite
+# ceiling is safe and bounds the worst-case hold on the dispatch worker.
+_MAX_HTTP_TIMEOUT = 30.0
+# Connect-phase timeout, bounded separately from the per-recv read timeout.
+_HTTP_CONNECT_TIMEOUT = 10.0
+
+
+def _coerce_http_deadline(timeout: float) -> float:
+    """Clamp the per-event HTTP timeout to a finite, positive ceiling.
+
+    ``ScriptEntry.effective_timeout`` is attacker-influenced (project apm.yml
+    ``timeoutSec``) and uncapped; a non-finite or huge value would let a
+    misbehaving endpoint hold a dispatch thread effectively forever.
+    """
+    try:
+        value = float(timeout)
+    except (TypeError, ValueError):
+        return _MAX_HTTP_TIMEOUT
+    if not math.isfinite(value) or value <= 0:
+        return _MAX_HTTP_TIMEOUT
+    return min(value, _MAX_HTTP_TIMEOUT)
 
 
 def _connect_layer_host(url: str) -> str | None:
@@ -1112,35 +1156,97 @@ def _dispatch_http_request(
 
     ``stream=True`` keeps a malicious endpoint from forcing the whole
     response body into memory: only the status line is consumed.
-    """
-    try:
-        import requests
 
-        session = _get_guarded_session()
-        post = session.post if session is not None else requests.post
-        resp = post(
-            url,
-            data=payload,
-            headers=request_headers,
-            timeout=timeout,
-            allow_redirects=False,
-            stream=True,
-            # Defeat env-proxy tunneling on BOTH the guarded session and the
-            # bare requests.post fallback (the fallback session has the
-            # library default trust_env=True): never route a lifecycle http
-            # action through an HTTP(S)_PROXY the SSRF guard never vetted.
-            proxies={"http": None, "https": None},
-        )
+    requests/urllib3 treat a scalar ``timeout`` as a PER-RECV socket timeout,
+    which a slow-loris endpoint resets on every dribbled byte -- so the read of
+    the response status/headers could otherwise hang far past the configured
+    timeout. We therefore run the request on an inner daemon worker and enforce
+    a TOTAL wall-clock deadline: past it, the worker is abandoned (a daemon never
+    blocks process exit) and a timeout is logged, so a dribble can never hold the
+    dispatch/batch worker -- or the ``apm lifecycle`` join that waits on it.
+    """
+    total_deadline = _coerce_http_deadline(timeout)
+    connect_timeout = min(total_deadline, _HTTP_CONNECT_TIMEOUT)
+    holder: dict[str, object] = {}
+
+    def _run() -> None:
+        try:
+            import requests
+
+            # The DESTINATION host was already vetted by _ssrf_block_reason in
+            # _prepare_http (internal / metadata / loopback targets are refused
+            # before dispatch), and that gate is proxy-agnostic -- it runs whether
+            # or not a proxy is configured. Egress ROUTING is a separate, operator-
+            # owned concern handled here:
+            env_proxies = _environ_proxies_for(url)
+            if env_proxies:
+                # Corporate-egress case: the operator's environment mandates an
+                # outbound proxy for this destination (honoring NO_PROXY), exactly
+                # as curl / pip / npm / git do -- in many corporate networks the
+                # proxy is the ONLY outbound path. The resolve-and-pin adapter
+                # cannot apply through a proxy (urllib3 uses a ProxyManager), so
+                # rebind-TOCTOU defense for this hop is delegated to the corporate
+                # proxy's own egress ACLs; the up-front destination gate still
+                # bounds WHERE the request may be sent. Influencing the process
+                # environment is RCE-equivalent here anyway (command-type lifecycle
+                # scripts run in this same env), so env integrity is a precondition,
+                # not a boundary we can meaningfully defend on this path.
+                post = requests.post
+                proxies = env_proxies
+            else:
+                # Direct-egress case: no env proxy applies. Use the resolve-and-pin
+                # guarded session and explicitly refuse any proxy so a stray env var
+                # cannot silently nullify the DNS pin.
+                session = _get_guarded_session()
+                post = session.post if session is not None else requests.post
+                proxies = {"http": None, "https": None}
+
+            holder["resp"] = post(
+                url,
+                data=payload,
+                headers=request_headers,
+                timeout=(connect_timeout, total_deadline),
+                allow_redirects=False,
+                stream=True,
+                proxies=proxies,
+            )
+        except BaseException as exc:
+            holder["exc"] = exc
+
+    worker = threading.Thread(target=_run, name="apm-http-post", daemon=True)
+    worker.start()
+    worker.join(total_deadline)
+
+    if worker.is_alive():
+        # A dribbling endpoint is still feeding bytes under the per-recv read
+        # timeout past the total deadline. Abandon the daemon worker rather than
+        # hang the dispatch; record a timeout. The leaked socket/fd is released
+        # when the (short-lived) install process exits.
         _append_to_script_log(
             event_name,
             "http",
             safe_url,
-            stdout=f"HTTP {resp.status_code}",
-            status="ok" if resp.ok else "error",
+            stderr=f"request exceeded total deadline {total_deadline:g}s",
+            status="error",
         )
-    except Exception as exc:
+        return
+
+    exc = holder.get("exc")
+    if exc is not None:
         _logger.debug("HTTP POST failed for %s", safe_url, exc_info=True)
         _append_to_script_log(event_name, "http", safe_url, stderr=str(exc), status="error")
+        return
+
+    resp = holder.get("resp")
+    _append_to_script_log(
+        event_name,
+        "http",
+        safe_url,
+        stdout=f"HTTP {resp.status_code}",
+        status="ok" if resp.ok else "error",
+    )
+    with contextlib.suppress(Exception):
+        resp.close()
 
 
 def _execute_http(

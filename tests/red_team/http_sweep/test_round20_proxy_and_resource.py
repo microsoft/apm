@@ -87,23 +87,21 @@ def _reset_cached_session():
 
 
 # --------------------------------------------------------------------------
-# PROXY: does the guarded session honor env proxies, tunneling an https
-# request for a PUBLIC host THROUGH a loopback/internal proxy?
+# PROXY (corporate-egress contract): the operator's env-configured proxy
+# MUST be honored for an already-vetted PUBLIC destination -- in many
+# corporate networks the proxy is the only outbound path. The destination
+# SSRF gate is proxy-AGNOSTIC and runs before dispatch, so the proxy only
+# ever carries requests to destinations the gate already approved.
 # --------------------------------------------------------------------------
-def test_https_proxy_env_tunnels_to_loopback(monkeypatch):
-    """HIGH-VALUE: prove a real connection to a loopback proxy.
+def test_https_proxy_env_is_honored_for_vetted_public_target(monkeypatch):
+    """Prove the operator's HTTPS_PROXY IS used for a vetted public host.
 
-    The SSRF guard vets the TARGET host (example.com -> public). The
-    DNS-pinned adapter only pins DIRECT https connections; a configured
-    proxy uses urllib3's ProxyManager, which is NOT the pinned pool. So
-    if ``trust_env`` honors HTTPS_PROXY, the dispatch dials the proxy IP
-    (here 127.0.0.1, an internal address) unvetted.
+    Regression guard for the corporate-proxy tunnel: APM must route a
+    lifecycle http action through the env-configured proxy exactly as
+    curl / pip / npm / git do. The destination (example.com -> public) was
+    already vetted by the up-front gate; the proxy host is loopback here
+    only so a hermetic local listener can PROVE the connection is dialed.
     """
-    # Override conftest's autouse fixture that neutralizes the guarded
-    # session: we want the REAL DNS-pinned production session here so the
-    # proof exercises the actual adapter/pool the shipped code uses.
-    real_session = se._build_guarded_session()
-    monkeypatch.setattr(se, "_get_guarded_session", lambda: real_session)
     # Restore the genuine resolver (the http_sweep conftest stubs
     # getaddrinfo to a fake public IP, which would otherwise redirect the
     # proxy connection away from our loopback listener). The proxy host is
@@ -116,9 +114,11 @@ def test_https_proxy_env_tunnels_to_loopback(monkeypatch):
         monkeypatch.setenv("https_proxy", proxy_url)
         monkeypatch.delenv("NO_PROXY", raising=False)
         monkeypatch.delenv("no_proxy", raising=False)
-        # target host is unambiguously PUBLIC; guard would allow it.
+        # target host is unambiguously PUBLIC; the gate allows it.
         target = "https://example.com/ingest"
         assert se._ssrf_block_reason(urlparse(target).hostname) is None
+        # the operator's environment mandates a proxy for this destination.
+        assert se._environ_proxies_for(target), "env proxy should be resolved"
 
         se._dispatch_http_request(
             url=target,
@@ -137,16 +137,69 @@ def test_https_proxy_env_tunnels_to_loopback(monkeypatch):
         peer = listener.peer
         verb = listener.first_line.split(b" ", 1)[0] if listener.first_line else b""
 
-    # SECURE CONTRACT: a lifecycle http action must never tunnel to an
-    # internal address via a proxy. A loopback hit here means the SSRF
-    # guard + DNS pin were entirely bypassed by trust_env honoring the
-    # HTTPS_PROXY env var. This assertion FAILS today -> the r20 break.
+    # SECURE-AND-FUNCTIONAL CONTRACT: the corporate proxy IS dialed (egress
+    # works), and because the target is https the proxy receives a CONNECT
+    # tunnel request -- proving APM honored the operator's mandated egress
+    # path rather than silently dropping all proxy support.
+    assert listener.hits >= 1, (
+        "corporate-egress regression: the env-configured HTTPS_PROXY was NOT "
+        f"honored for the vetted public host {urlparse(target).hostname!r} "
+        f"(proxy 127.0.0.1:{listener.port} never dialed). APM must tunnel "
+        "through the operator's proxy like curl/pip/npm/git."
+    )
+    assert verb == b"CONNECT", (
+        f"expected an HTTPS CONNECT tunnel through the proxy, got verb={verb!r} peer={peer}"
+    )
+
+
+def test_destination_gate_blocks_internal_target_even_with_proxy(monkeypatch):
+    """The destination SSRF gate is proxy-AGNOSTIC: an internal target is
+
+    refused before dispatch whether or not a proxy is configured. Honoring
+    the operator's proxy must NOT become an SSRF bypass -- the proxy only
+    ever carries gate-approved destinations.
+    """
+    from apm_cli.core.lifecycle_scripts import LifecycleEvent, PackageInfo, ScriptEntry
+
+    monkeypatch.setattr(socket, "getaddrinfo", _REAL_GETADDRINFO)
+
+    with _RecordingListener() as listener:
+        proxy_url = f"http://127.0.0.1:{listener.port}"
+        monkeypatch.setenv("HTTPS_PROXY", proxy_url)
+        monkeypatch.setenv("https_proxy", proxy_url)
+        monkeypatch.delenv("NO_PROXY", raising=False)
+        monkeypatch.delenv("no_proxy", raising=False)
+
+        # Internal literals: cloud-metadata + RFC1918 host. The gate refuses
+        # both regardless of the configured proxy.
+        for internal in ("https://169.254.169.254/latest/meta-data/", "https://10.0.0.5/x"):
+            host = urlparse(internal).hostname
+            assert se._ssrf_block_reason(host) is not None, (
+                f"gate must block internal host {host!r} even with a proxy set"
+            )
+            script = ScriptEntry(script_type="http", event="post-install", url=internal)
+            event = LifecycleEvent(
+                event="post-install",
+                packages=[PackageInfo(name="org/repo", reference="v1")],
+                scope="project",
+                timestamp="2026-01-01T00:00:00Z",
+                cli_version="0.0.0",
+                working_directory="/tmp/p",
+            )
+            # _prepare_http enforces the gate BEFORE any dispatch; an internal
+            # destination yields None -> the proxy is never contacted.
+            assert se._prepare_http(script, event) is None, (
+                f"internal destination {internal!r} must be refused up-front "
+                "even when an env proxy is configured"
+            )
+        time.sleep(0.2)
+
+    # The proxy was never dialed for an internal destination: the gate ran
+    # first and refused the request, so no CONNECT ever reached the proxy.
     assert listener.hits == 0, (
-        "SSRF-via-proxy: guarded dispatch tunneled an https request for the "
-        f"PUBLIC host {urlparse(target).hostname!r} through loopback proxy "
-        f"127.0.0.1:{listener.port} (verb={verb!r}, peer={peer}). "
-        "trust_env=True on the guarded session honors HTTPS_PROXY, and the "
-        "DNS-pinned adapter never vets the proxy connection."
+        "SSRF-via-proxy bypass: an internal destination reached the proxy "
+        f"(127.0.0.1:{listener.port}) despite the up-front gate. The gate must "
+        "refuse internal targets BEFORE proxy routing."
     )
 
 
