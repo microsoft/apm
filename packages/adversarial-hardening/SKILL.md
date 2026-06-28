@@ -129,12 +129,15 @@ escalation to the operator (never a silent stop).
 ### 2. Fan-out the adversarial panel (A1 / B1)
 
 Load `references/lens-catalogue.md`. Spawn ONE read-only child thread
-per chosen lens on the current head, each seeded with the lens
-charter, the target, and the current fingerprint set (so it skips
-known classes -- B13 cost discipline). Pick only the lenses whose
-vector-family is plausible; do NOT fan out all nine on a one-flag
-surface (A12 gradient). Each lens returns structured JSON findings and
-writes nothing.
+per chosen lens on the current head -- on Copilot via the task tool to
+a NAMED lens custom agent, the same fan-out apm-review-panel uses for
+its specialists. Seed each with the lens charter, the target, and the
+current fingerprint set so it skips already-found classes. Pick only
+the lenses whose vector-family is plausible; do NOT fan out all nine on
+a one-flag surface (A12 gradient). If you route a per-lens MODEL (B12),
+it binds on that lens agent's `.agent.md` `model:` field -- never in
+this SKILL.md, which cannot carry `model:`. Each lens returns
+structured JSON findings and writes nothing.
 
 ### 3. Charter-gated arbiter (B9 goal steward)
 

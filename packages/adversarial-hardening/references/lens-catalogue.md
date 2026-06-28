@@ -41,14 +41,16 @@ actual probe. This is a SEQUENCING discipline, not a model switch -- it
 holds on whatever model the harness gives the child thread, because the
 saving comes from not authoring probes against already-cleared surface.
 
-[i] OPTIONAL (per-harness only): where the harness exposes per-subagent
-model selection, the recon front MAY additionally run on a cheaper
-model and probe-authoring on a stronger one (genesis B12 MODEL ROUTER).
-This is an enhancement, NOT a requirement. The common child-thread
-spawn affordance does not guarantee model selection, so a harness
-without it runs the whole lens on its default model and still gets the
-sequencing benefit above. Never make a finding's correctness depend on
-the model swap, and never name a model class the runtime cannot bind.
+[i] PER-LENS MODEL ROUTING (B12): cross-lens routing -- e.g. a
+stronger model for security red-team lenses than for a chaos smoke
+pass -- binds on each lens's CUSTOM-AGENT profile, never in this
+catalogue and never in SKILL.md. On Copilot (the target harness) the
+binding site is the `.agent.md` `model:` field, mirroring how the
+repo's `../../agents/*.agent.md` specialists set `model:`; skill
+frontmatter cannot carry `model:`. A lens spawned WITHOUT a dedicated
+agent profile runs at the session default model -- still correct, just
+unrouted. Never make a finding's correctness depend on which model ran
+the lens, and never name a role class the runtime cannot bind.
 
 ---
 
