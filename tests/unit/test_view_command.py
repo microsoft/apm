@@ -298,6 +298,50 @@ class TestViewCommand(_InfoCmdBase):
         assert mock_reg.call_args.kwargs.get("registry_name") == "myreg"
         mock_gh.return_value.list_remote_refs.assert_not_called()
 
+    def test_view_versions_bare_registry_flag_forces_registry(self):
+        """Bare --registry (no NAME) parses as an empty value and forces the registry.
+
+        Guards against Click option drift (e.g. --registry accidentally becoming
+        value-required). registry_name is passed as None so the lockfile/default
+        registry is used.
+        """
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                result = self.runner.invoke(cli, ["view", "myorg/myrepo", "versions", "--registry"])
+        assert result.exit_code == 0
+        mock_reg.assert_called_once()
+        # "" (bare flag) is normalized to None -> use lockfile/default registry.
+        assert mock_reg.call_args.kwargs.get("registry_name") is None
+        mock_gh.return_value.list_remote_refs.assert_not_called()
+
+    def test_view_versions_scp_git_ref_forces_git_even_with_default_registry(self):
+        """An SCP-style git ref (arbitrary user) routes to git, not the registry."""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch(
+                    "apm_cli.commands.view._lookup_lockfile_ref",
+                    return_value=("", "", ""),
+                ),
+                patch(
+                    "apm_cli.commands.view._effective_default_registry",
+                    return_value="jfrog-demo",
+                ),
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                mock_gh.return_value.list_remote_refs.return_value = []
+                result = self.runner.invoke(
+                    cli, ["view", "alice@github.com:myorg/myrepo", "versions"]
+                )
+        assert result.exit_code == 0
+        mock_reg.assert_not_called()
+        mock_gh.return_value.list_remote_refs.assert_called_once()
+
     def test_view_versions_explicit_git_url_forces_git_even_with_default_registry(self):
         """A full git URL routes to git even when a default registry is configured."""
         with self._chdir_tmp() as tmp:
@@ -795,3 +839,48 @@ class TestViewMarketplaceNoField(_InfoCmdBase):
 
         assert result.exit_code == 0
         assert "1.0.0" in result.output
+
+
+class TestEffectiveDefaultRegistry:
+    """_effective_default_registry honors the registries feature gate."""
+
+    def test_returns_none_when_registry_feature_disabled(self, tmp_path) -> None:
+        """A config.json default must not route view->registry when registries are off.
+
+        Mirrors install/registry_wiring.get_effective_default_registry, which
+        short-circuits to None when is_package_registry_enabled() is False.
+        """
+        from apm_cli.commands.view import _effective_default_registry
+
+        with (
+            patch(
+                "apm_cli.deps.registry.feature_gate.is_package_registry_enabled",
+                return_value=False,
+            ),
+            patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=({"jfrog-demo": "https://example/r"}, "jfrog-demo"),
+            ) as mock_resolve,
+        ):
+            result = _effective_default_registry(tmp_path)
+
+        assert result is None
+        # Gate short-circuits before any registry resolution happens.
+        mock_resolve.assert_not_called()
+
+    def test_returns_default_when_enabled(self, tmp_path) -> None:
+        from apm_cli.commands.view import _effective_default_registry
+
+        with (
+            patch(
+                "apm_cli.deps.registry.feature_gate.is_package_registry_enabled",
+                return_value=True,
+            ),
+            patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=({"jfrog-demo": "https://example/r"}, "jfrog-demo"),
+            ),
+        ):
+            result = _effective_default_registry(tmp_path)
+
+        assert result == "jfrog-demo"

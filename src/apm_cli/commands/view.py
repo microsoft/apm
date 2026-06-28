@@ -462,14 +462,24 @@ def _display_registry_versions(
 
 
 def _is_explicit_git_form(package: str) -> bool:
-    """True when *package* is an explicit git reference (URL or SCP form).
+    """True when *package* is an explicit git reference (URL, SCP, or .git).
 
     Such references always route to the git path even when a default registry
     is configured -- they are the escape hatch for viewing git versions,
     mirroring the ``- git:`` manifest form.
+
+    Covers transport-scheme URLs (``https://``, ``ssh://``, ``git://``),
+    ``.git`` suffixes, and SCP-style ``user@host:path`` refs for ANY user
+    (not just ``git@``) -- ``DependencyReference.parse`` accepts arbitrary SSH
+    usernames, so the SCP check looks for ``@`` and ``:`` in the segment before
+    the first ``/`` rather than a literal ``git@`` prefix. A bare shorthand
+    (``owner/repo`` with an optional ``#ref``) has neither in that segment.
     """
-    p = package.strip().lower()
-    return "://" in p or p.startswith("git@")
+    p = package.strip()
+    if "://" in p or p.lower().endswith(".git"):
+        return True
+    head = p.split("/", 1)[0]
+    return "@" in head and ":" in head
 
 
 def _effective_default_registry(project_root: Path) -> str | None:
@@ -478,8 +488,19 @@ def _effective_default_registry(project_root: Path) -> str | None:
     Returns ``None`` when no default registry is configured or the registry
     feature is unavailable. Best-effort: any parsing/gate error is treated as
     "no default" so version lookups fall back to git.
+
+    Honors the registries experimental feature gate, mirroring
+    ``install/registry_wiring.get_effective_default_registry`` -- when registries
+    are disabled, shorthand routing must not silently use a config.json default.
     """
     from ..deps.registry.config_loader import resolve_effective_registries
+    from ..deps.registry.feature_gate import is_package_registry_enabled
+
+    try:
+        if not is_package_registry_enabled():
+            return None
+    except Exception:
+        return None
 
     project_registries = None
     project_default = None
