@@ -17,10 +17,12 @@ produce without enabling verbose CLI output.
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import logging
 import os
 import re
+import signal
 import socket
 import subprocess
 import threading
@@ -553,25 +555,33 @@ def _execute_command(
     cwd = _resolve_cwd(script, project_root)
 
     start = time.monotonic()
+    proc: subprocess.Popen[str] | None = None
     try:
-        result = subprocess.run(
+        # start_new_session puts the shell (and every grandchild it
+        # spawns) in its OWN process group, so a timeout can reap the
+        # whole tree via killpg instead of orphaning backgrounded
+        # grandchildren (subprocess.run's timeout kills only the shell).
+        proc = subprocess.Popen(
             cmd,
             shell=True,
             env=env,
-            input=event.to_json(),
-            timeout=timeout,
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             cwd=cwd,
+            start_new_session=True,
         )
+        stdout, stderr = proc.communicate(input=event.to_json(), timeout=timeout)
+        returncode = proc.returncode
         _append_to_script_log(
             event.event,
             "command",
             cmd,
-            stdout=result.stdout,
-            stderr=result.stderr,
-            exit_code=result.returncode,
-            status="ok" if result.returncode == 0 else "error",
+            stdout=stdout,
+            stderr=stderr,
+            exit_code=returncode,
+            status="ok" if returncode == 0 else "error",
         )
         elapsed = time.monotonic() - start
         if elapsed > _SLOW_SCRIPT_THRESHOLD_SEC and logger is not None:
@@ -583,6 +593,7 @@ def _execute_command(
                 )
     except subprocess.TimeoutExpired:
         _logger.debug("Command script timed out: %s", cmd)
+        _kill_process_group(proc)
         _append_to_script_log(event.event, "command", cmd, status="timeout")
         if logger:
             warn = getattr(logger, "warning", None) or getattr(logger, "verbose_detail", None)
@@ -592,9 +603,33 @@ def _execute_command(
                 )
     except Exception as exc:
         _logger.debug("Command script failed: %s", cmd, exc_info=True)
+        _kill_process_group(proc)
         _append_to_script_log(event.event, "command", cmd, stderr=str(exc), status="error")
         if verbose and logger:
             logger.verbose_detail(f"[i] Lifecycle command script failed: {cmd}")
+
+
+def _kill_process_group(proc: subprocess.Popen | None) -> None:
+    """Kill the script's whole process group, then reap it.
+
+    Required after a timeout: shell=True + start_new_session means the
+    shell leads its own process group, so a single SIGKILL to the group
+    also reaps backgrounded grandchildren that would otherwise orphan
+    (the shell may have already exited while a grandchild lives on).
+    Best-effort -- never raises into the install flow.
+    """
+    if proc is None:
+        return
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        else:
+            proc.kill()
+    except (ProcessLookupError, PermissionError, OSError):
+        with contextlib.suppress(OSError):
+            proc.kill()
+    with contextlib.suppress(subprocess.TimeoutExpired, ValueError, OSError):
+        proc.communicate(timeout=5)
 
 
 # -- Helpers ---------------------------------------------------------------

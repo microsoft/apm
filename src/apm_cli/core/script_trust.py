@@ -22,15 +22,27 @@ Trust records live in $APM_HOME/scripts-trust.json (default
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
 import os
+import tempfile
+import threading
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX
+    fcntl = None  # type: ignore[assignment]
 
 _logger = logging.getLogger(__name__)
 
 TRUST_FILE_VERSION = 1
+
+# Serialises the load -> modify -> write window of the trust store for
+# threads in this process; the file lock below covers other processes.
+_TRUST_STORE_THREAD_LOCK = threading.Lock()
 
 
 def _trust_store_path() -> Path:
@@ -88,12 +100,52 @@ def _load_trust_store() -> dict[str, str]:
 
 
 def _write_trust_store(projects: dict[str, str]) -> None:
-    """Persist the trusted-projects map, creating parent dirs as needed."""
+    """Atomically persist the trusted-projects map.
+
+    Writes to a temp file in the same directory then os.replace()s it
+    over the target, so a concurrent reader never observes a half-written
+    file (replace is atomic on POSIX and Windows). Callers that mutate
+    the store must hold _trust_store_lock() to avoid lost updates.
+    """
     store = _trust_store_path()
     store.parent.mkdir(parents=True, exist_ok=True)
     payload = {"version": TRUST_FILE_VERSION, "projects": projects}
-    store.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    store.chmod(0o600)
+    text = json.dumps(payload, indent=2) + "\n"
+    fd, tmp = tempfile.mkstemp(dir=str(store.parent), prefix=".scripts-trust.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, store)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+@contextlib.contextmanager
+def _trust_store_lock():
+    """Serialise a trust-store read-modify-write across threads and processes.
+
+    Holds an in-process thread lock plus, where available, an exclusive
+    advisory file lock so two concurrent trust()/untrust() calls cannot
+    clobber each other's entries on a stale snapshot (lost update).
+    """
+    store = _trust_store_path()
+    store.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = store.with_name(store.name + ".lock")
+    with _TRUST_STORE_THREAD_LOCK:
+        lock_handle = None
+        try:
+            if fcntl is not None:
+                lock_handle = open(lock_path, "w", encoding="utf-8")  # noqa: SIM115
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            yield
+        finally:
+            if lock_handle is not None:
+                with contextlib.suppress(OSError):
+                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+                lock_handle.close()
 
 
 def is_project_scripts_trusted(script_file: Path) -> bool:
@@ -128,18 +180,20 @@ def trust_project_scripts(script_file: Path) -> str | None:
     fingerprint = script_file_fingerprint(script_file)
     if fingerprint is None:
         return None
-    projects = _load_trust_store()
-    projects[str(script_file.resolve())] = fingerprint
-    _write_trust_store(projects)
+    with _trust_store_lock():
+        projects = _load_trust_store()
+        projects[str(script_file.resolve())] = fingerprint
+        _write_trust_store(projects)
     return fingerprint
 
 
 def untrust_project_scripts(script_file: Path) -> bool:
     """Revoke trust for script_file. Returns True if a record was removed."""
     key = str(script_file.resolve())
-    projects = _load_trust_store()
-    if key not in projects:
-        return False
-    del projects[key]
-    _write_trust_store(projects)
+    with _trust_store_lock():
+        projects = _load_trust_store()
+        if key not in projects:
+            return False
+        del projects[key]
+        _write_trust_store(projects)
     return True

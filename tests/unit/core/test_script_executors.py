@@ -35,6 +35,64 @@ def _make_event(event_name: str = "post-install") -> LifecycleEvent:
     )
 
 
+class _FakePopen:
+    """Minimal subprocess.Popen stand-in for command-executor tests.
+
+    Command scripts run via Popen + communicate (with start_new_session
+    so a timeout can killpg the whole group). This records the Popen
+    kwargs and the communicate(input=, timeout=) call for assertions.
+    """
+
+    def __init__(
+        self,
+        *args,
+        stdout: str = "",
+        stderr: str = "",
+        returncode: int = 0,
+        communicate_exc: BaseException | None = None,
+        **kwargs,
+    ) -> None:
+        self.init_args = args
+        self.init_kwargs = kwargs
+        self._stdout = stdout
+        self._stderr = stderr
+        self.returncode = returncode
+        self._exc = communicate_exc
+        self.communicate_calls: list[dict] = []
+        # A stale-but-plausible pid: _kill_process_group's killpg raises
+        # ProcessLookupError (caught), so no real process is signalled.
+        self.pid = 2_147_483_640
+
+    def communicate(self, input=None, timeout=None):
+        self.communicate_calls.append({"input": input, "timeout": timeout})
+        if self._exc is not None and len(self.communicate_calls) == 1:
+            raise self._exc
+        return (self._stdout, self._stderr)
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self) -> None:
+        pass
+
+
+def _patch_popen(**fake_kwargs):
+    """Patch subprocess.Popen to return a single _FakePopen instance.
+
+    Uses a side_effect factory so the fake records the ACTUAL runtime
+    Popen kwargs (shell, env, cwd, start_new_session) for assertions.
+    """
+    fake = _FakePopen(**fake_kwargs)
+
+    def _factory(*args, **kwargs):
+        fake.init_args = args
+        fake.init_kwargs = kwargs
+        return fake
+
+    patcher = patch("apm_cli.core.script_executors.subprocess.Popen", side_effect=_factory)
+    return patcher, fake
+
+
 # -- execute_script dispatcher ---------------------------------------------
 
 
@@ -109,67 +167,70 @@ class TestCommandExecutor:
     def test_runs_command_with_stdin_payload(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install", bash="echo done")
         event = _make_event()
-        with patch("apm_cli.core.script_executors.subprocess.run") as mock_run:
+        patcher, fake = _patch_popen()
+        with patcher:
             _execute_command(script, event)
-            mock_run.assert_called_once()
-            call_kwargs = mock_run.call_args
-            input_data = call_kwargs.kwargs.get("input")
-            assert input_data is not None
-            payload = json.loads(input_data)
-            assert payload["event"] == "post-install"
+        assert len(fake.communicate_calls) == 1
+        input_data = fake.communicate_calls[0]["input"]
+        assert input_data is not None
+        payload = json.loads(input_data)
+        assert payload["event"] == "post-install"
 
     def test_uses_shell_true(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install", bash="echo")
-        with patch("apm_cli.core.script_executors.subprocess.run") as mock_run:
+        patcher, fake = _patch_popen()
+        with patcher:
             _execute_command(script, _make_event())
-            call_kwargs = mock_run.call_args
-            assert call_kwargs.kwargs.get("shell") is True
+        assert fake.init_kwargs.get("shell") is True
+
+    def test_uses_start_new_session(self) -> None:
+        script = ScriptEntry(script_type="command", event="post-install", bash="echo")
+        patcher, fake = _patch_popen()
+        with patcher:
+            _execute_command(script, _make_event())
+        assert fake.init_kwargs.get("start_new_session") is True
 
     def test_timeout_from_script(self) -> None:
         script = ScriptEntry(
             script_type="command", event="post-install", bash="sleep", timeout_sec=5
         )
-        with patch("apm_cli.core.script_executors.subprocess.run") as mock_run:
+        patcher, fake = _patch_popen()
+        with patcher:
             _execute_command(script, _make_event())
-            call_kwargs = mock_run.call_args
-            assert call_kwargs.kwargs.get("timeout") == 5
+        assert fake.communicate_calls[0]["timeout"] == 5
 
     def test_default_timeout(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install", bash="echo")
-        with patch("apm_cli.core.script_executors.subprocess.run") as mock_run:
+        patcher, fake = _patch_popen()
+        with patcher:
             _execute_command(script, _make_event())
-            call_kwargs = mock_run.call_args
-            assert call_kwargs.kwargs.get("timeout") == 30
+        assert fake.communicate_calls[0]["timeout"] == 30
 
     def test_swallows_timeout_error(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install", bash="sleep")
-        with patch(
-            "apm_cli.core.script_executors.subprocess.run",
-            side_effect=subprocess.TimeoutExpired("sleep", 30),
-        ):
+        patcher, _ = _patch_popen(communicate_exc=subprocess.TimeoutExpired("sleep", 30))
+        with patcher:
             _execute_command(script, _make_event())
 
     def test_swallows_generic_error(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install", bash="bad")
         with patch(
-            "apm_cli.core.script_executors.subprocess.run",
+            "apm_cli.core.script_executors.subprocess.Popen",
             side_effect=OSError("not found"),
         ):
             _execute_command(script, _make_event())
 
     def test_skips_when_no_command(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install")
-        with patch("apm_cli.core.script_executors.subprocess.run") as mock_run:
+        with patch("apm_cli.core.script_executors.subprocess.Popen") as mock_popen:
             _execute_command(script, _make_event())
-            mock_run.assert_not_called()
+            mock_popen.assert_not_called()
 
     def test_verbose_logs_on_timeout(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install", bash="slow")
         logger = MagicMock()
-        with patch(
-            "apm_cli.core.script_executors.subprocess.run",
-            side_effect=subprocess.TimeoutExpired("slow", 30),
-        ):
+        patcher, _ = _patch_popen(communicate_exc=subprocess.TimeoutExpired("slow", 30))
+        with patcher:
             _execute_command(script, _make_event(), logger=logger, verbose=True)
         # Timeout warning always emits (not verbose-gated); uses logger.warning.
         logger.warning.assert_called_once()
@@ -183,17 +244,19 @@ class TestCommandExecutor:
             bash="echo",
             env={"EXTRA": "added"},
         )
-        with patch("apm_cli.core.script_executors.subprocess.run") as mock_run:
+        patcher, fake = _patch_popen()
+        with patcher:
             _execute_command(script, _make_event())
-            env = mock_run.call_args.kwargs.get("env", {})
-            assert env.get("EXISTING_VAR") == "original"
-            assert env.get("EXTRA") == "added"
+        env = fake.init_kwargs.get("env", {})
+        assert env.get("EXISTING_VAR") == "original"
+        assert env.get("EXTRA") == "added"
 
     def test_uses_project_root_as_cwd(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install", bash="echo")
-        with patch("apm_cli.core.script_executors.subprocess.run") as mock_run:
+        patcher, fake = _patch_popen()
+        with patcher:
             _execute_command(script, _make_event(), project_root="/my/project")
-            assert mock_run.call_args.kwargs.get("cwd") == "/my/project"
+        assert fake.init_kwargs.get("cwd") == "/my/project"
 
 
 # -- _expand_env_vars ------------------------------------------------------
@@ -381,11 +444,8 @@ class TestCommandExecutorLogging:
     ) -> None:
         monkeypatch.setenv("APM_HOME", str(tmp_path))
         script = ScriptEntry(script_type="command", event="post-install", bash="echo done")
-        mock_result = MagicMock()
-        mock_result.stdout = "script output line"
-        mock_result.stderr = ""
-        mock_result.returncode = 0
-        with patch("apm_cli.core.script_executors.subprocess.run", return_value=mock_result):
+        patcher, _ = _patch_popen(stdout="script output line", stderr="", returncode=0)
+        with patcher:
             _execute_command(script, _make_event())
         content = (tmp_path / "logs" / "scripts.log").read_text()
         assert "script output line" in content
@@ -395,11 +455,8 @@ class TestCommandExecutorLogging:
     def test_logs_failed_command(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("APM_HOME", str(tmp_path))
         script = ScriptEntry(script_type="command", event="post-install", bash="false")
-        mock_result = MagicMock()
-        mock_result.stdout = ""
-        mock_result.stderr = "something broke"
-        mock_result.returncode = 1
-        with patch("apm_cli.core.script_executors.subprocess.run", return_value=mock_result):
+        patcher, _ = _patch_popen(stdout="", stderr="something broke", returncode=1)
+        with patcher:
             _execute_command(script, _make_event())
         content = (tmp_path / "logs" / "scripts.log").read_text()
         assert "something broke" in content
@@ -409,10 +466,8 @@ class TestCommandExecutorLogging:
     def test_logs_timeout(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("APM_HOME", str(tmp_path))
         script = ScriptEntry(script_type="command", event="post-install", bash="sleep 999")
-        with patch(
-            "apm_cli.core.script_executors.subprocess.run",
-            side_effect=subprocess.TimeoutExpired("sleep", 30),
-        ):
+        patcher, _ = _patch_popen(communicate_exc=subprocess.TimeoutExpired("sleep", 30))
+        with patcher:
             _execute_command(script, _make_event())
         content = (tmp_path / "logs" / "scripts.log").read_text()
         assert "status=timeout" in content
