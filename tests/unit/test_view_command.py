@@ -342,6 +342,21 @@ class TestViewCommand(_InfoCmdBase):
         mock_reg.assert_not_called()
         mock_gh.return_value.list_remote_refs.assert_called_once()
 
+    def test_view_versions_unknown_registry_name_exits_with_error(self):
+        """--registry UNKNOWN exits 1 and names the missing registry in the error message."""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=({"known-registry": "https://example.com/r"}, "known-registry"),
+            ):
+                result = self.runner.invoke(
+                    cli, ["view", "myorg/myrepo", "versions", "--registry", "nonexistent"]
+                )
+        assert result.exit_code == 1
+        assert "nonexistent" in result.output
+        assert "not configured" in result.output
+
     def test_view_versions_explicit_git_url_forces_git_even_with_default_registry(self):
         """A full git URL routes to git even when a default registry is configured."""
         with self._chdir_tmp() as tmp:
