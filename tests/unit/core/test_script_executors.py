@@ -301,6 +301,22 @@ class TestResolveCwd:
         result = _resolve_cwd(script, "/my/project")
         assert result == "/my/project/scripts"
 
+    def test_traversal_outside_project_root_uses_project_root(self, tmp_path: Path) -> None:
+        """cwd values that escape project_root via .. are clamped to project_root.
+
+        This prevents a lifecycle entry like 'cwd: ../../.ssh' from redirecting
+        command execution outside the project directory.
+        """
+        project = tmp_path / "project"
+        project.mkdir()
+        script = ScriptEntry(script_type="command", event="post-install", cwd="../../etc")
+        result = _resolve_cwd(script, str(project))
+        # The raw traversal would resolve to tmp_path.parent / "etc", which is
+        # outside the project.  Containment must clamp it to the project root.
+        would_escape = str((project / "../../etc").resolve())
+        assert result != would_escape
+        assert result == str(project.resolve())
+
 
 # -- Script output log -----------------------------------------------------
 

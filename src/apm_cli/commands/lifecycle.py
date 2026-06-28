@@ -118,8 +118,10 @@ def lifecycle_test(event: str, verbose: bool, execute: bool) -> None:
         LifecycleEvent,
         LifecycleScriptRunner,
         PackageInfo,
+        _get_project_apm_yml,
         discover_scripts,
     )
+    from apm_cli.core.script_trust import is_project_scripts_trusted
 
     project_root = str(Path.cwd())
     all_scripts = discover_scripts(project_root=project_root)
@@ -134,11 +136,15 @@ def lifecycle_test(event: str, verbose: bool, execute: bool) -> None:
         return
 
     if not execute:
+        project_file = _get_project_apm_yml(project_root)
+        trusted = is_project_scripts_trusted(project_file)
+        trust_label = "[trusted]" if trusted else "[untrusted -- run: apm lifecycle trust]"
         _rich_info(
             f"Dry-run: '{event}' would fire {len(matching)} script(s) "
             "(no commands or requests are run).",
             symbol="gear",
         )
+        _rich_echo(f"  Trust status: {trust_label}", style="dim")
         for entry in matching:
             target = entry.url or entry.effective_command or "(none)"
             _rich_echo(f"  - {entry.script_type:8s} {target} ({entry.source})", style="dim")

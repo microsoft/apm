@@ -182,3 +182,66 @@ class TestLifecycleTrustUntrust:
         result = cli_runner.invoke(lifecycle, ["untrust"])
         assert result.exit_code == 0
         assert "nothing to revoke" in result.output.lower()
+
+
+class TestLifecycleTestTrustDisplay:
+    """Regression tests for trust-status display in 'apm lifecycle test' dry-run."""
+
+    def test_dry_run_shows_trust_status_untrusted(self, cli_runner, tmp_path, monkeypatch):
+        """Dry-run output must show [untrusted] when project lifecycle is not trusted.
+
+        This guards the invariant that users can see whether --execute would
+        actually fire scripts without first running 'apm lifecycle trust'.
+        """
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+        _write_yaml(
+            tmp_path / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "run": "echo ok"}]}},
+        )
+        result = cli_runner.invoke(lifecycle, ["test", "post-install"])
+        assert result.exit_code == 0
+        assert "Dry-run" in result.output
+        assert "untrusted" in result.output.lower()
+
+    def test_dry_run_shows_trust_status_trusted(self, cli_runner, tmp_path, monkeypatch):
+        """Dry-run output must show [trusted] after 'apm lifecycle trust' has been run."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+        _write_yaml(
+            tmp_path / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "run": "echo ok"}]}},
+        )
+        # Trust the lifecycle block first.
+        trust_result = cli_runner.invoke(lifecycle, ["trust"])
+        assert trust_result.exit_code == 0
+
+        result = cli_runner.invoke(lifecycle, ["test", "post-install"])
+        assert result.exit_code == 0
+        assert "Dry-run" in result.output
+        assert "trusted" in result.output.lower()
+
+    def test_execute_flag_runs_scripts_regardless_of_trust(self, cli_runner, tmp_path, monkeypatch):
+        """Document intentional design: --execute fires scripts even when untrusted.
+
+        'apm lifecycle test --execute' is an explicit developer action (scaffold +
+        verify wiring before first trust). It bypasses the trust gate by design so
+        authors can iterate without cycling trust on every script edit. This is
+        distinct from 'apm install' which ALWAYS requires trust.
+
+        This test is a regression trap: if the behavior changes (either to enforce
+        trust or to change the bypass semantics), this test must be updated with a
+        comment explaining the new design rationale.
+        """
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("APM_HOME", str(tmp_path / "home"))
+        _write_yaml(
+            tmp_path / "apm.yml",
+            {"lifecycle": {"post-install": [{"type": "command", "run": "echo ok"}]}},
+        )
+        # Deliberately do NOT run 'apm lifecycle trust' before --execute.
+        with patch("apm_cli.core.script_executors.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="ok", stderr="", returncode=0)
+            result = cli_runner.invoke(lifecycle, ["test", "post-install", "--execute"])
+        assert result.exit_code == 0
+        assert "fired" in result.output.lower()

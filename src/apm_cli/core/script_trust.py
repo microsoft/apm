@@ -83,6 +83,7 @@ def _write_trust_store(projects: dict[str, str]) -> None:
     store.parent.mkdir(parents=True, exist_ok=True)
     payload = {"version": TRUST_FILE_VERSION, "projects": projects}
     store.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    store.chmod(0o600)
 
 
 def is_project_scripts_trusted(script_file: Path) -> bool:

@@ -46,17 +46,34 @@ _SLOW_SCRIPT_THRESHOLD_SEC = 5.0
 _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
 
 # Credential variable denylist -- these must never be expanded into HTTP
-# headers or leaked to script subprocesses. Matches names that END with
-# these suffixes (e.g. GITHUB_APM_PAT, API_KEY) but not unrelated names
-# like PATH.
+# headers or leaked to script subprocesses. Suffix-anchored so compound
+# names without underscore separators (e.g. APIKEY, MYTOKEN, SSHKEY)
+# are caught alongside the common _SEP forms (GITHUB_TOKEN, API_KEY).
 _CREDENTIAL_DENYLIST = re.compile(
-    r"(?:_|^)(?:TOKEN|SECRET|PAT|KEY|PASSWORD|CREDENTIAL|AUTHTOKEN)(?:_|$)",
+    r"(?:TOKEN|SECRET|PAT|KEY|PASSWORD|CREDENTIAL|AUTHTOKEN)$",
     re.IGNORECASE,
+)
+
+# Known APM auth variables that must NEVER be expanded even when listed in
+# allowedEnvVars -- these are the credentials APM itself uses and must not
+# leak to HTTP endpoints or subprocess stdin regardless of opt-in.
+_NEVER_EXPAND: frozenset[str] = frozenset(
+    {
+        "GITHUB_APM_PAT",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "ADO_APM_PAT",
+    }
 )
 
 
 def _is_denylisted(name: str, allowed: frozenset[str]) -> bool:
-    """True if *name* is a credential var NOT explicitly allowlisted."""
+    """True if *name* is a credential var NOT explicitly allowlisted.
+
+    _NEVER_EXPAND vars are always blocked regardless of allowedEnvVars.
+    """
+    if name in _NEVER_EXPAND:
+        return True
     if name in allowed:
         return False
     return bool(_CREDENTIAL_DENYLIST.search(name))
@@ -183,8 +200,9 @@ def _expand_env_vars(
         var_name = match.group(1) or match.group(2)
         if _is_denylisted(var_name, allowed):
             warning = (
-                f"[!] Script: refusing to expand credential variable "
-                f"'{var_name}'. Add it to the script's 'allowedEnvVars' to opt in."
+                f"[!] Script: credential variable '{var_name}' will NOT be expanded. "
+                f"If you must pass it, add it to the script's 'allowedEnvVars' -- "
+                f"note this sends its value to the configured endpoint or subprocess."
             )
             if logger is not None:
                 warn_fn = getattr(logger, "warning", None) or getattr(
@@ -394,7 +412,12 @@ def _build_script_env(script: ScriptEntry) -> dict[str, str]:
 
 
 def _resolve_cwd(script: ScriptEntry, project_root: str | None) -> str | None:
-    """Resolve the working directory for a command script."""
+    """Resolve the working directory for a command script.
+
+    Rejects relative paths that escape project_root to prevent lateral
+    movement (e.g. 'cwd: ../../.ssh').  Absolute cwd values are passed
+    through unchanged because they are explicit and visible in apm.yml.
+    """
     if not script.cwd:
         return project_root
     from pathlib import Path
@@ -402,4 +425,11 @@ def _resolve_cwd(script: ScriptEntry, project_root: str | None) -> str | None:
     if Path(script.cwd).is_absolute():
         return script.cwd
     root = Path(project_root) if project_root else Path.cwd()
-    return str(root / script.cwd)
+    resolved = (root / script.cwd).resolve()
+    root_resolved = root.resolve()
+    if not str(resolved).startswith(str(root_resolved) + "/") and resolved != root_resolved:
+        _logger.warning(
+            "Script cwd '%s' escapes project root -- using project root instead", script.cwd
+        )
+        return str(root_resolved)
+    return str(resolved)

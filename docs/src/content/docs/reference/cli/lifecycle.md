@@ -49,7 +49,7 @@ Scaffold a starter `lifecycle:` block into the existing `apm.yml` manifest.
 
 ```bash
 apm lifecycle init            # injects lifecycle: into apm.yml
-apm lifecycle init --force    # overwrite an existing file
+apm lifecycle init --force    # overwrite an existing lifecycle: block
 ```
 
 | Flag | Description |

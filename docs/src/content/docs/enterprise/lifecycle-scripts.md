@@ -6,10 +6,26 @@ sidebar:
 ---
 
 APM supports **lifecycle scripts** -- custom actions that fire automatically
-at key moments during install, update, and uninstall operations. A failing
-script never aborts the CLI operation. HTTP scripts dispatch in a background
-thread (fire-and-forget), while command scripts run synchronously and can
-delay the operation until they finish or their timeout elapses.
+at key moments during install, update, and uninstall operations. Scripts live
+inside `apm.yml` under a `lifecycle:` key -- no separate config files to manage.
+
+```yaml
+# apm.yml
+lifecycle:
+  post-install:
+    - type: command
+      run: echo "Install complete"
+    - type: http
+      url: https://analytics.corp.net/events
+```
+
+Run `apm lifecycle init` to scaffold this block in the current project.
+Project scripts require explicit trust before they run: `apm lifecycle trust`.
+See the [CLI reference](../../../reference/cli/lifecycle/) for all subcommands.
+
+A failing script never aborts the CLI operation. HTTP scripts dispatch in a
+background thread (fire-and-forget), while command scripts run synchronously
+and can delay the operation until they finish or their timeout elapses.
 
 Scripts are defined in three tiers. The **project tier** uses the repository `apm.yml`
 manifest under a top-level `lifecycle:` key. The **user tier** uses
@@ -283,58 +299,19 @@ The log file is created automatically on first script execution.
 
 ## CLI commands
 
-APM provides commands to work with lifecycle scripts:
+For the full command reference, see [apm lifecycle](../../../reference/cli/lifecycle/).
 
-### `apm lifecycle` -- list discovered scripts
-
-Run without a sub-command to see all scripts discovered from policy, user,
-and project directories:
+Key workflows:
 
 ```bash
-apm lifecycle
+apm lifecycle init              # scaffold lifecycle: block in apm.yml
+apm lifecycle trust             # trust current lifecycle: subtree
+apm lifecycle validate          # check all scripts for schema/config errors
+apm lifecycle test post-install # dry-run: preview what would fire (no execution)
+apm lifecycle test post-install --execute  # fire the event for real
+apm lifecycle untrust           # revoke trust; scripts stop running
 ```
 
-### `apm lifecycle init` -- scaffold a starter lifecycle block
-
-Inject a starter `lifecycle:` block into `apm.yml`:
-
-```bash
-apm lifecycle init            # inject lifecycle: into apm.yml
-apm lifecycle init --force    # overwrite existing lifecycle: block
-```
-
-### `apm lifecycle validate` -- check script files for errors
-
-Validate all discovered script files across policy, user, and project
-directories. Reports schema errors, unknown events, missing fields, and
-non-HTTPS URLs:
-
-```bash
-apm lifecycle validate
-```
-
-Exits with a non-zero code if any errors are found.
-
-### `apm lifecycle test` -- dry-run a synthetic event
-
-Fire a synthetic event through all discovered scripts to verify wiring
-without performing a real install/update/uninstall:
-
-```bash
-apm lifecycle test                    # fires post-install (default)
-apm lifecycle test pre-uninstall      # fires a specific event
-```
-
-Script output is written to `~/.apm/logs/scripts.log` as usual.
-
-### `apm lifecycle trust` -- trust the project lifecycle block
-
-```bash
-apm lifecycle trust    # trusts apm.yml lifecycle: at its current contents
-```
-
-### `apm lifecycle untrust` -- revoke trust for the project lifecycle block
-
-```bash
-apm lifecycle untrust  # revokes trust; project scripts will no longer run
-```
+The `test` command defaults to a **dry-run** (no commands or HTTP requests run)
+and shows the trust status of the project lifecycle block. Add `--execute` to
+actually fire the event -- useful for verifying wiring before the first real install.
