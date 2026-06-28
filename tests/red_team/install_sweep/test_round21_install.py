@@ -228,16 +228,19 @@ def test_execute_command_flood_path(apm_home: Path) -> None:
 _BGHOLD = str(_W / "rt21_bg_holds_pipe.py")
 
 
-def test_success_path_grandchild_holds_stdout_join_delay() -> None:
-    """Parent exits 0 instantly but a backgrounded grandchild keeps the
-    stdout write-end open (no EOF). Characterise: does capture return
-    bounded, what is the latency, and does the grandchild survive?
+def test_success_path_grandchild_reaped_to_release_install() -> None:
+    """A backgrounded grandchild that INHERITS (does not redirect) stdout keeps
+    the capture pipe open after the shell leader exits 0. The round-22 contract
+    reaps that pipe-holding group member promptly so the install is released:
+    capture returns in a fraction of a second (NOT the old ~10s drain-join bound,
+    and crucially NOT the 30s orphan lifetime), the grandchild is killed, and
+    there is no deadlock.
 
-    This is the SUCCESS path (returncode 0) -- `_kill_process_group` is
-    NOT called by the caller, so any orphan here is by-design fire-and-
-    forget. We only assert NO deadlock + bounded latency.
+    A daemon that correctly REDIRECTS its stdio away from our pipes is NOT
+    affected -- its drains hit EOF within the grace and it survives. See
+    test_process_group_kill.py::test_backgrounded_grandchild_survives_normal_completion.
     """
-    holder = 30.0  # >> the 2x join(5) bound: proves we don't wait the orphan
+    holder = 30.0  # grandchild would live 30s; the reap must not wait for it
     proc = _popen(f"{PYEXE} {_BGHOLD} {holder}")
     start = time.monotonic()
     done, _result, exc = _run_bounded(lambda: _capture_bounded(proc, "{}", 25.0), watchdog=40.0)
@@ -246,12 +249,13 @@ def test_success_path_grandchild_holds_stdout_join_delay() -> None:
         assert done, "DEADLOCK: grandchild-holds-stdout wedged capture"
         assert exc is None, f"raised: {exc!r}"
         assert proc.returncode == 0
-        # Bounded by join(timeout=5) on the two still-blocked drain threads
-        # (stdout + stderr) => ~10s, and crucially INDEPENDENT of the 30s
-        # orphan lifetime. The secure contract is "bounded, not waiting the
-        # backgrounded child"; communicate() would have blocked the full 30s
-        # (or hit the 25s timeout). Floor 5s confirms a real join occurred.
-        assert 5.0 <= elapsed < 15.0, f"latency not the join bound: {elapsed:.1f}s"
+        # Prompt return: the short drain grace plus a group reap, far below the
+        # old ~10s drain-join bound and the 30s orphan lifetime. Proves we reap
+        # the pipe-holder rather than block waiting for it (or for the join).
+        assert elapsed < 5.0, f"pipe-holder not promptly reaped: {elapsed:.1f}s"
+        # The pipe-holding grandchild was reaped: the process group is now empty.
+        with pytest.raises(ProcessLookupError):
+            os.killpg(proc.pid, 0)
     finally:
         with __import__("contextlib").suppress(Exception):
             os.killpg(proc.pid, signal.SIGKILL)

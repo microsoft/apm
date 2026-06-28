@@ -85,23 +85,27 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za
 # The looser tokens (KEY, PAT, ...) keep their suffix-match behaviour as a
 # deliberate fail-safe: over-redacting a non-secret env var is harmless,
 # under-redacting a secret is not.
-# The trailing ENCODING tail ``(?:_?(?:BASE64|BASE32|B64|B32|HEX|PEM|DER|ASC))?``
-# closes a real, widely-deployed CI convention: a whole secret (a GCP service-
-# account JSON, a TLS private key, a JWT signing secret, an RFC-6238 TOTP/MFA
-# base32 seed) is base64/base32/hex-encoded into ONE single-line env var named
-# ``<x>_BASE64`` / ``<x>_B64`` / ``<x>_BASE32`` / ``<x>_B32`` so it survives a flat
-# secret store -- e.g. ``GCP_SA_KEY_BASE64``, ``TLS_PRIVATE_KEY_BASE64``,
-# ``JWT_SECRET_B64``, ``API_TOKEN_BASE64``, ``TOTP_SECRET_BASE32``. The credential
-# token (KEY/TOKEN/SECRET/CREDENTIAL/AUTHORIZATION) is now an INFIX and the name
-# ENDS in the benign encoding tail, which the bare suffix anchor could not
-# express. The tail only ever applies AFTER a credential token, so a TOKEN-LESS
-# encoded asset (IMAGE_BASE64, LOGO_B64, FONT_BASE32, COLOR_HEX) never matches and
-# still reaches the child env.
+# The trailing ENCODING tail closes a real, widely-deployed CI convention: a
+# whole secret (a GCP service-account JSON, a TLS private key, a JWT signing
+# secret, an RFC-6238 TOTP/MFA base32 seed, a Solana/web3 base58 key) is
+# serialized or base-encoded into ONE single-line env var named ``<x>_BASE64`` /
+# ``<x>_B64`` / ``<x>_BASE32`` / ``<x>_JSON`` / ``<x>_BASE58`` so it survives a
+# flat secret store -- e.g. ``GCP_SA_KEY_BASE64``, ``TLS_PRIVATE_KEY_BASE64``,
+# ``JWT_SECRET_B64``, ``GOOGLE_CREDENTIALS_JSON``, ``GCP_CREDENTIALS_YAML``,
+# ``SOLANA_PRIVATE_KEY_BASE58``, ``TOTP_SECRET_BASE32``. The tail therefore spans
+# three families: binary base encodings (BASE64/BASE32/BASE58/BASE62/B64/B32/HEX/
+# ASCII85/A85/Z85/URLSAFE), key armor (PEM/DER/ASC), and raw structured-text
+# serialization (JSON/YAML/YML/TOML -- how GCP/terraform inline a credentials
+# blob). The credential token (KEY/TOKEN/SECRET/CREDENTIAL/AUTHORIZATION) is an
+# INFIX and the name ENDS in the benign tail, which the bare suffix anchor could
+# not express. The tail only ever applies AFTER a credential token, so a
+# TOKEN-LESS asset (IMAGE_BASE64, LOGO_B64, CONFIG_JSON, PACKAGE_JSON, COLOR_HEX)
+# never matches and still reaches the child env.
 _CREDENTIAL_DENYLIST = re.compile(
     r"(?:(?:^|_)PASS|TOKEN|SECRET|PAT|KEY|PASSWORD|PASSWD|PASSPHRASE|PWD"
     r"|CREDENTIAL|AUTHTOKEN|AUTHORIZATION|MNEMONIC|SEED_PHRASE|RECOVERY_PHRASE|BACKUP_PHRASE)"
     r"S?(?:_IDS?)?(?:_?(?:OLD|NEW|PREV|CURRENT))?(?:_?V[0-9]+)?"
-    r"(?:_?(?:BASE64|BASE32|B64|B32|HEX|PEM|DER|ASC))?[_0-9]*$",
+    r"(?:_?(?:BASE64|BASE32|BASE58|BASE62|B64|B32|HEX|PEM|DER|ASCII85|A85|Z85|URL_?SAFE|JSON|YAML|YML|TOML|ASC))?[_0-9]*$",
     re.IGNORECASE,
 )
 
@@ -499,6 +503,15 @@ _MAX_LOG_BYTES = 5 * 1024 * 1024
 # prints. Comfortably above ``_MAX_LOG_FIELD_CHARS`` so the audit log is never
 # starved of legitimate output.
 _MAX_CAPTURE_CHARS = 1024 * 1024
+
+# Grace period (seconds) after a clean shell exit for the stdout/stderr drain
+# threads to hit EOF on their own. A well-behaved script -- or one that
+# backgrounds a daemon with redirected stdio -- closes the capture pipes well
+# within this window, so we never reap it. Only a backgrounded GROUP MEMBER
+# still holding the original capture pipes keeps a drain alive past the grace;
+# that is the wedge we reap. Kept short so a real wedge costs a fraction of a
+# second instead of the full 5s join budget.
+_CAPTURE_DRAIN_GRACE = 0.5
 
 
 def _get_scripts_log_path() -> Path:
@@ -993,6 +1006,23 @@ def _get_guarded_session():
 # spawns N threads + sockets at once (resource exhaustion).
 MAX_HTTP_DISPATCH_THREADS = 32
 
+# Hard cap on the number of http dispatches that may be IN FLIGHT at once,
+# counting BOTH live workers and abandoned-but-still-alive ones. The dispatch
+# pool above bounds how many workers START concurrently, but a slow-loris
+# endpoint makes ``_dispatch_http_request`` ABANDON its inner daemon worker on
+# total-deadline expiry (the daemon keeps dribbling, holding one socket/fd). A
+# malicious event file with thousands of http entries pointed at such an endpoint
+# would otherwise leak O(N) abandoned daemons + fds and exhaust the process fd
+# table within a single ``apm install``. This BoundedSemaphore is acquired
+# NON-BLOCKING before each worker starts and released only when the worker TRULY
+# finishes (its ``finally``), so an abandoned worker keeps holding its permit for
+# its real lifetime -- capping live+abandoned http daemons to a constant
+# regardless of attacker-chosen N. A dispatch that cannot claim a permit is
+# dropped with a logged error (zero added stall); a legitimate install with
+# <= MAX_HTTP_DISPATCH_THREADS fast http entries never hits the cap because each
+# fast worker releases its permit before the next entry needs it.
+_HTTP_INFLIGHT = threading.BoundedSemaphore(MAX_HTTP_DISPATCH_THREADS)
+
 # Hard ceiling on the (attacker-influenced) per-event HTTP timeout. ``timeoutSec``
 # in a project apm.yml is otherwise uncapped, so a malicious manifest could set it
 # to days; a lifecycle http event is fire-and-forget telemetry, so a small finite
@@ -1169,6 +1199,22 @@ def _dispatch_http_request(
     connect_timeout = min(total_deadline, _HTTP_CONNECT_TIMEOUT)
     holder: dict[str, object] = {}
 
+    # Bound live+abandoned http daemons to MAX_HTTP_DISPATCH_THREADS. A
+    # non-blocking acquire means a fast endpoint (permit released in _run's
+    # finally before the next entry needs it) never false-drops, while a flood
+    # of slow-loris entries that abandon their workers cannot leak more than the
+    # cap -- the (cap+1)th simply drops, converting unbounded fd-exhaustion into
+    # the already-accepted <= cap residual, with zero added stall.
+    if not _HTTP_INFLIGHT.acquire(blocking=False):
+        _append_to_script_log(
+            event_name,
+            "http",
+            safe_url,
+            stderr="too many in-flight http dispatches; entry dropped",
+            status="error",
+        )
+        return
+
     def _run() -> None:
         try:
             import requests
@@ -1212,16 +1258,29 @@ def _dispatch_http_request(
             )
         except BaseException as exc:
             holder["exc"] = exc
+        finally:
+            # Release ONLY when the worker truly finishes -- an abandoned
+            # (timed-out) worker holds its permit until its own dribble loop
+            # eventually exits, which is exactly the leak bound we want.
+            _HTTP_INFLIGHT.release()
 
     worker = threading.Thread(target=_run, name="apm-http-post", daemon=True)
-    worker.start()
+    try:
+        worker.start()
+    except BaseException:
+        # The thread never began, so _run's finally will not run; release the
+        # permit here to avoid leaking it (e.g. "can't start new thread").
+        _HTTP_INFLIGHT.release()
+        raise
     worker.join(total_deadline)
 
     if worker.is_alive():
         # A dribbling endpoint is still feeding bytes under the per-recv read
         # timeout past the total deadline. Abandon the daemon worker rather than
         # hang the dispatch; record a timeout. The leaked socket/fd is released
-        # when the (short-lived) install process exits.
+        # when the worker's own dribble loop finally exits (it then releases its
+        # _HTTP_INFLIGHT permit), and the in-flight cap bounds how many such
+        # abandoned workers can accumulate across a flood of http entries.
         _append_to_script_log(
             event_name,
             "http",
@@ -1549,8 +1608,25 @@ def _capture_bounded(
         except subprocess.TimeoutExpired:
             continue
 
+    # Clean shell exit reaped the LEADER. If NOTHING else holds the capture
+    # pipes, the drains hit EOF and finish within a short grace -- this is the
+    # well-behaved case AND the legitimately-detached-daemon case (a lifecycle
+    # script may background a service whose stdio is redirected away from our
+    # pipes, e.g. ``nohup svc >svc.log 2>&1 &``: its drains EOF immediately, so
+    # we never reap it -- mirroring npm/yarn, which let a redirected daemon
+    # survive). Only if a backgrounded GROUP MEMBER still holds the capture
+    # pipes open after the grace are the drains wedged on read() (leaking the
+    # grandchild + its fds + the two drain daemons); reap the whole group so the
+    # pipes hit EOF and the drains finish. This bounds the wedge to the grace
+    # instead of the full 5s join budget, and -- unlike an unconditional reap --
+    # does NOT kill a daemon that correctly redirected its stdio.
+    grace_deadline = time.monotonic() + _CAPTURE_DRAIN_GRACE
     for w in workers:
-        w.join(timeout=5)
+        w.join(timeout=max(0.0, grace_deadline - time.monotonic()))
+    if any(w.is_alive() for w in workers):
+        _signal_kill_group(proc)
+        for w in workers:
+            w.join(timeout=5)
     return "".join(out), "".join(err), bool(out_state["over"] or err_state["over"])
 
 

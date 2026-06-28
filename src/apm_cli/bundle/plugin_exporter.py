@@ -246,7 +246,9 @@ def _collect_hooks_from_apm(apm_dir: Path) -> dict:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
                     _deep_merge(hooks, data, overwrite=False)
-            except (json.JSONDecodeError, OSError):
+            except (OSError, ValueError, RecursionError):
+                # Untrusted .apm/hooks/*.json: oversized-int -> bare ValueError,
+                # deep nest -> RecursionError. Fail closed (skip this file).
                 pass
     return hooks
 
@@ -261,7 +263,9 @@ def _collect_hooks_from_root(package_root: Path) -> dict:
             data = json.loads(hooks_file.read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 _deep_merge(hooks, data, overwrite=False)
-        except (json.JSONDecodeError, OSError):
+        except (OSError, ValueError, RecursionError):
+            # Untrusted root hooks.json: fail closed (oversized-int ValueError /
+            # deep-nest RecursionError are not JSONDecodeError).
             pass
     # Directory
     hooks_dir = package_root / "hooks"
@@ -272,7 +276,8 @@ def _collect_hooks_from_root(package_root: Path) -> dict:
                     data = json.loads(f.read_text(encoding="utf-8"))
                     if isinstance(data, dict):
                         _deep_merge(hooks, data, overwrite=False)
-                except (json.JSONDecodeError, OSError):
+                except (OSError, ValueError, RecursionError):
+                    # Untrusted .../hooks/*.json: fail closed (skip this file).
                     pass
     return hooks
 

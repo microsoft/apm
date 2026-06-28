@@ -33,7 +33,7 @@ from apm_cli.utils.yaml_io import load_yaml
 
 @pytest.fixture
 def tmp_apm_home(monkeypatch):
-    home = tempfile.mkdtemp(dir="/tmp/rt21-trust")
+    home = tempfile.mkdtemp()
     monkeypatch.setenv("APM_HOME", home)
     yield Path(home)
 
@@ -54,7 +54,7 @@ def test_anchor_outside_subtree_is_baked_into_fingerprint(tmp_apm_home):
     load_yaml()['lifecycle'] is POST-resolution: the anchor value is baked
     in. If extraction were pre-resolution the anchor would be a hole.
     """
-    d = Path(tempfile.mkdtemp(dir="/tmp/rt21-trust"))
+    d = Path(tempfile.mkdtemp())
     benign = _write(
         d / "benign" / "apm.yml",
         'top: &cmd "echo TRUSTED"\nlifecycle:\n  pre-install:\n    - run: *cmd\n',
@@ -93,7 +93,7 @@ def test_case_variant_path_does_not_over_trust(tmp_apm_home):
     way a case-variant could be 'trusted' is if it is the SAME file with the
     SAME fingerprint, which is not a bypass. Assert fail-closed direction.
     """
-    d = Path(tempfile.mkdtemp(dir="/tmp/rt21-trust"))
+    d = Path(tempfile.mkdtemp())
     real = _write(d / "RepoCase" / "apm.yml", "lifecycle:\n  pre-install:\n    - run: echo hi\n")
 
     _, fp = parse_apm_yml_lifecycle_with_fingerprint(real, "project")
@@ -127,7 +127,7 @@ def test_executed_object_is_hashed_object_single_parse(tmp_apm_home, monkeypatch
     very object the entries were built from.
     """
     apm = _write(
-        Path(tempfile.mkdtemp(dir="/tmp/rt21-trust")) / "apm.yml",
+        Path(tempfile.mkdtemp()) / "apm.yml",
         "lifecycle:\n  pre-install:\n    - run: echo same-object\n",
     )
 
@@ -158,7 +158,7 @@ def test_executed_object_is_hashed_object_single_parse(tmp_apm_home, monkeypatch
 # --------------------------------------------------------------------------
 def test_same_path_different_content_re_gates(tmp_apm_home):
     """Clone A trusted; clone B with different lifecycle at same path re-gates."""
-    d = Path(tempfile.mkdtemp(dir="/tmp/rt21-trust"))
+    d = Path(tempfile.mkdtemp())
     apm = _write(d / "apm.yml", "lifecycle:\n  pre-install:\n    - run: echo A\n")
     _, fp_a = parse_apm_yml_lifecycle_with_fingerprint(apm, "project")
     trust_project_scripts(apm)
@@ -177,7 +177,7 @@ def test_same_path_different_content_re_gates(tmp_apm_home):
 # --------------------------------------------------------------------------
 def test_unfingerprintable_subtree_fails_closed(tmp_apm_home):
     """A subtree whose fp is None must never be considered trusted."""
-    apm = _write(Path(tempfile.mkdtemp(dir="/tmp/rt21-trust")) / "apm.yml", "lifecycle: {}\n")
+    apm = _write(Path(tempfile.mkdtemp()) / "apm.yml", "lifecycle: {}\n")
     # fingerprint None (empty/unsafe) -> is_fingerprint_trusted returns False
     assert is_fingerprint_trusted(apm, None) is False
     # Even after trusting, a None fp at fire time fails closed.
@@ -196,7 +196,7 @@ def test_merge_key_outside_value_is_baked_into_fingerprint(tmp_apm_home):
     subtree object that is both hashed and executed. Mutating the outside
     mapping must change the fingerprint (re-gate), not silently swap exec.
     """
-    d = Path(tempfile.mkdtemp(dir="/tmp/rt21-trust"))
+    d = Path(tempfile.mkdtemp())
     benign = _write(
         d / "b" / "apm.yml",
         "defs: &d {run: echo TRUSTED}\nlifecycle:\n  pre-install:\n    - <<: *d\n",
