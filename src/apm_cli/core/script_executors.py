@@ -46,11 +46,17 @@ _SLOW_SCRIPT_THRESHOLD_SEC = 5.0
 _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
 
 # Credential variable denylist -- these must never be expanded into HTTP
-# headers or leaked to script subprocesses. Suffix-anchored so compound
-# names without underscore separators (e.g. APIKEY, MYTOKEN, SSHKEY)
-# are caught alongside the common _SEP forms (GITHUB_TOKEN, API_KEY).
+# headers or leaked to script subprocesses. The credential token must end
+# the name, but we also accept a trailing plural ``S`` and an optional
+# ``_ID``/``_IDS`` qualifier so real-world families are caught:
+#   - plurals: ...TOKENS, ...KEYS, ...SECRETS, ...CREDENTIALS, ...PATS
+#   - qualified: AWS_ACCESS_KEY_ID, ..._KEY_IDS
+#   - canonical: GOOGLE_APPLICATION_CREDENTIALS (CREDENTIAL + plural S)
+# The trailing ``S?`` does not over-match unrelated names (e.g. PATH keeps
+# a stray ``H`` after PAT and so never matches; TRACE_ID has no credential
+# token before ``_ID`` and is left alone).
 _CREDENTIAL_DENYLIST = re.compile(
-    r"(?:TOKEN|SECRET|PAT|KEY|PASSWORD|CREDENTIAL|AUTHTOKEN)$",
+    r"(?:TOKEN|SECRET|PAT|KEY|PASSWORD|CREDENTIAL|AUTHTOKEN)S?(?:_IDS?)?$",
     re.IGNORECASE,
 )
 
@@ -86,6 +92,11 @@ def _redact_secrets(text: str) -> str:
     that prints ``$ANALYTICS_TOKEN`` would persist the cleartext secret
     into ``~/.apm/logs/scripts.log``. We replace occurrences of every
     denylisted variable's value (length >= 4) with ``[REDACTED]``.
+
+    Replacement is boundary-aware: the value is only masked when it is not
+    flanked by additional word characters, so a short secret value (e.g.
+    ``test``) that happens to be a substring of an ordinary word (``tests``,
+    ``latest``) does not corrupt unrelated log text.
     """
     if not text:
         return text
@@ -94,7 +105,8 @@ def _redact_secrets(text: str) -> str:
         if not value or len(value) < 4:
             continue
         if _CREDENTIAL_DENYLIST.search(name):
-            redacted = redacted.replace(value, "[REDACTED]")
+            pattern = re.compile(rf"(?<!\w){re.escape(value)}(?!\w)")
+            redacted = pattern.sub("[REDACTED]", redacted)
     return redacted
 
 
@@ -142,7 +154,10 @@ def _append_to_script_log(
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        lines = [f"[{ts}] event={event_name} type={script_type} target={target} status={status}"]
+        safe_target = _redact_secrets(target)
+        lines = [
+            f"[{ts}] event={event_name} type={script_type} target={safe_target} status={status}"
+        ]
         if exit_code is not None:
             lines[0] += f" exit_code={exit_code}"
         if stdout and stdout.strip():
@@ -212,7 +227,9 @@ def _expand_env_vars(
                     warn_fn(warning)
             _logger.debug("Blocked credential variable expansion: %s", var_name)
             return ""
-        return os.environ.get(var_name, "")
+        # Strip CR/LF so a value carrying a smuggled "\r\nX-Evil: ..." cannot
+        # inject extra HTTP headers when expanded into a header value.
+        return os.environ.get(var_name, "").replace("\r", "").replace("\n", "")
 
     return _ENV_VAR_PATTERN.sub(_replace, value)
 
