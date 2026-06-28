@@ -74,7 +74,9 @@ _DENYLIST_EXEMPT: frozenset[str] = frozenset({"PWD", "OLDPWD"})
 # STRING) that the suffix-token regex cannot express, yet whose VALUE is a
 # secret: base64 registry auth (DOCKER_AUTH_CONFIG), a basic-auth header
 # (BASIC_AUTH), or a DSN with an embedded password (*_CONNECTION_STRING).
-_CREDENTIAL_BLOB_NAMES: frozenset[str] = frozenset({"DOCKER_AUTH_CONFIG", "BASIC_AUTH"})
+_CREDENTIAL_BLOB_NAMES: frozenset[str] = frozenset(
+    {"DOCKER_AUTH_CONFIG", "BASIC_AUTH", "NPM_AUTH", "REGISTRY_AUTH"}
+)
 _CREDENTIAL_BLOB_SUFFIX = re.compile(
     r"(?:_AUTH_CONFIG|_CONNECTION_STRING|CONNECTIONSTRING)$",
     re.IGNORECASE,
@@ -181,7 +183,11 @@ def _redact_url_credentials(url: str) -> str:
 # to scripts.log in cleartext. The scheme prefix is required so a bare
 # ``user@host`` (e.g. an email address) is never over-redacted, and the
 # userinfo run stops at the first ``/`` so a ``?next=a@b`` query is ignored.
-_EMBEDDED_URL_CRED_PATTERN = re.compile(r"([a-zA-Z][a-zA-Z0-9+.\-]*://)[^/\s@]+@")
+# The userinfo class is ``[^/\s]+`` (NOT ``[^/\s@]+``): a password may itself
+# contain a literal ``@`` (e.g. ``svc:p@ssw0rd@host``), and git/curl treat the
+# LAST ``@`` before the path as the separator, so the greedy class must anchor
+# there too -- otherwise the secret tail after the first ``@`` would leak.
+_EMBEDDED_URL_CRED_PATTERN = re.compile(r"([a-zA-Z][a-zA-Z0-9+.\-]*://)[^/\s]+@")
 
 
 def _redact_embedded_url_credentials(text: str) -> str:

@@ -76,13 +76,13 @@ def lifecycle(ctx: click.Context) -> None:
         table.add_column("Source", style="dim")
 
         for entry in entries:
-            target = entry.url or entry.effective_command or "(none)"
+            target = _safe_token(entry.url or entry.effective_command or "(none)")
             table.add_row(entry.event, entry.script_type, target, entry.source)
 
         console.print(table)
     except (ImportError, NameError):
         for entry in entries:
-            target = entry.url or entry.effective_command or "(none)"
+            target = _safe_token(entry.url or entry.effective_command or "(none)")
             click.echo(f"  {entry.event:20s} {entry.script_type:10s} {target} ({entry.source})")
 
 
@@ -146,7 +146,7 @@ def lifecycle_test(event: str, verbose: bool, execute: bool) -> None:
         )
         _rich_echo(f"  Trust status: {trust_label}", style="dim")
         for entry in matching:
-            target = entry.url or entry.effective_command or "(none)"
+            target = _safe_token(entry.url or entry.effective_command or "(none)")
             _rich_echo(f"  - {entry.script_type:8s} {target} ({entry.source})", style="dim")
         _rich_echo("")
         _rich_info("Re-run with --execute to actually run these scripts.", symbol="info")

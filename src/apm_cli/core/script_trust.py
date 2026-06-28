@@ -283,7 +283,17 @@ def is_fingerprint_trusted(script_file: Path, fingerprint: str | None) -> bool:
     """
     if fingerprint is None:
         return False
-    trusted = _load_trust_store().get(str(script_file.resolve()))
+    try:
+        key = str(script_file.resolve())
+    except OSError:
+        # A concurrent symlink swap (or any FS resolution error) on the
+        # project apm.yml must fail CLOSED: treat the tier as untrusted and
+        # let install/update/uninstall proceed. is_fingerprint_trusted sits
+        # on the firing boundary (install/service.py is not wrapped like the
+        # update/uninstall callers), so a propagated OSError would abort the
+        # primary install path -- a fail-not-closed DoS, not a trust bypass.
+        return False
+    trusted = _load_trust_store().get(key)
     return trusted == fingerprint
 
 
