@@ -1094,7 +1094,7 @@ class MCPIntegrator:
             if dropped:
                 active_csv = ", ".join(sorted(active)) or "<none>"
                 _rich_info(
-                    f"Skipped MCP config for {', '.join(dropped)}  (active targets: {active_csv})",
+                    f"Skipped MCP config for {', '.join(dropped)} (active targets: {active_csv}, scope: global)",
                     symbol="info",
                 )
                 _log.debug(

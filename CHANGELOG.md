@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependencies are not reported as updated. (by @nadav-y) (#1927)
 - Fixed spurious version-range diffs for cached transitive registry
   dependencies during `apm update`. (by @nadav-y) (#1921)
+- Fixed `apm install -g --mcp NAME` ignoring the package `targets:` field and
+  `--target` flag at user scope; previously user-scope MCP install wrote to all
+  detected runtimes unconditionally, creating unintended folders (e.g. `~/.kiro/`)
+  when a package targets only a subset. (by @sergio-sisternes-epam) (#1941)
 
 ### Security
 
