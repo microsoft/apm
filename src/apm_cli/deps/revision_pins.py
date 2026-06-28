@@ -61,7 +61,7 @@ def abbreviate_sha(sha: str | None) -> str:
     return (sha or "")[:_SHA_DISPLAY_LEN]
 
 
-def _package_name(dep_ref: DependencyReference) -> str:
+def package_name(dep_ref: DependencyReference) -> str:
     """Return the tag-pattern package name for *dep_ref*."""
     if dep_ref.is_virtual_subdirectory() and dep_ref.virtual_path:
         return dep_ref.virtual_path.rstrip("/").rsplit("/", 1)[-1]
@@ -141,7 +141,7 @@ def resolve_revision_pin_updates(
         dep_key = dep_ref.get_unique_key()
         old_sha = (dep_ref.reference or "").strip().lower()
         remote_refs = downloader.list_remote_tag_refs(dep_ref)
-        latest = find_latest_annotated_tag(remote_refs, package_name=_package_name(dep_ref))
+        latest = find_latest_annotated_tag(remote_refs, package_name=package_name(dep_ref))
         latest_sha = latest.commit_sha.strip().lower()
         if not is_full_revision_pin(latest_sha):
             raise RevisionPinResolutionError(
