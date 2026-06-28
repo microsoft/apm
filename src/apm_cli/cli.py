@@ -143,8 +143,12 @@ def cli(ctx, verbose: bool) -> None:
 
     warnings.filterwarnings("ignore", category=AgentsTargetDeprecationWarning)
 
-    # Check for updates non-blockingly (only if not already showing version)
-    if not ctx.resilient_parsing:
+    # Check for updates only for known commands; skip on invalid input to fail fast.
+    if (
+        not ctx.resilient_parsing
+        and ctx.invoked_subcommand is not None
+        and ctx.command.get_command(ctx, ctx.invoked_subcommand) is not None
+    ):
         _check_and_notify_updates()
 
 

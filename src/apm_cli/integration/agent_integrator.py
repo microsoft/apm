@@ -28,6 +28,9 @@ if TYPE_CHECKING:
 class AgentIntegrator(BaseIntegrator):
     """Handles integration of APM package agents into .github/agents/, .claude/agents/, and .cursor/agents/."""
 
+    # Deploys via write_text_lf -> compare adopt candidates in LF mode.
+    _LF_NORMALIZED_DEPLOY = True
+
     def find_agent_files(self, package_path: Path) -> list[Path]:
         """Find all .agent.md and .chatmode.md files in a package.
 
@@ -400,7 +403,9 @@ class AgentIntegrator(BaseIntegrator):
                 continue
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.try_adopt_identical(target_path, source_file, target_paths):
+            if self.try_adopt_identical(
+                target_path, source_file, target_paths, lf_normalized_deploy=True
+            ):
                 files_adopted += 1
             else:
                 if self.check_collision(
@@ -431,7 +436,9 @@ class AgentIntegrator(BaseIntegrator):
                         )
                     continue
                 claude_rel = portable_relpath(claude_path, project_root)
-                if self.try_adopt_identical(claude_path, source_file, target_paths):
+                if self.try_adopt_identical(
+                    claude_path, source_file, target_paths, lf_normalized_deploy=True
+                ):
                     files_adopted += 1
                 elif not self.check_collision(
                     claude_path, claude_rel, managed_files, force, diagnostics=diagnostics
@@ -457,7 +464,9 @@ class AgentIntegrator(BaseIntegrator):
                         )
                     continue
                 cursor_rel = portable_relpath(cursor_path, project_root)
-                if self.try_adopt_identical(cursor_path, source_file, target_paths):
+                if self.try_adopt_identical(
+                    cursor_path, source_file, target_paths, lf_normalized_deploy=True
+                ):
                     files_adopted += 1
                 elif not self.check_collision(
                     cursor_path, cursor_rel, managed_files, force, diagnostics=diagnostics

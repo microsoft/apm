@@ -36,6 +36,9 @@ class InstructionIntegrator(BaseIntegrator):
     * Gemini CLI: compile-only (GEMINI.md) -- no per-file rule deployment
     """
 
+    # Deploys via write_text_lf -> compare adopt candidates in LF mode.
+    _LF_NORMALIZED_DEPLOY = True
+
     # Map format_id -> converter method.  Built once at class load time;
     # avoids rebuilding the dict on every ``_render_instruction`` call.
     _FORMAT_CONVERTERS: ClassVar[dict[str, str]] = {
