@@ -398,12 +398,17 @@ class TestInstallGitLabMarketplaceFullPipelineFromHttp:
 
         captured_urls = []
 
-        def fake_get(url, headers=None, timeout=None):
+        def fake_get(url, headers=None, timeout=None, **kwargs):
             captured_urls.append(url)
             m = MagicMock()
             m.status_code = 200
             m.text = json.dumps(marketplace_json)
             m.json.return_value = marketplace_json
+            m.headers = {}
+            m.iter_content.side_effect = lambda chunk_size=65536: iter(
+                [json.dumps(marketplace_json).encode("utf-8")]
+            )
+            m.close.side_effect = lambda: None
             return m
 
         mock_http_get.side_effect = fake_get

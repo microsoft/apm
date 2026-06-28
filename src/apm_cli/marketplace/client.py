@@ -251,6 +251,38 @@ def _read_bounded_response_bytes(resp, url: str, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
+def _read_capped_json(resp, label: str) -> dict:
+    """Read and parse a streamed JSON API response under the byte ceiling.
+
+    The GitHub Contents / GitLab raw / ADO REST responses are
+    attacker-influenceable (a compromised or MITM'd marketplace repo). The
+    direct ``url`` path streams them through :func:`_read_bounded_response_bytes`;
+    mirror that ``_MAX_MARKETPLACE_JSON_BYTES`` ceiling here so an oversized body
+    cannot be buffered whole and OOM the installer. The caller MUST issue the
+    request with ``stream=True`` so ``iter_content`` enforces the cap
+    incrementally instead of ``requests`` pre-buffering the entire body before
+    we ever see it. The response is closed when the read finishes.
+    """
+    try:
+        content_length = resp.headers.get("Content-Length", "")
+        if content_length:
+            with contextlib.suppress(ValueError):
+                if int(content_length) > _MAX_MARKETPLACE_JSON_BYTES:
+                    raise MarketplaceFetchError(
+                        label,
+                        f"marketplace.json exceeds {_MAX_MARKETPLACE_JSON_BYTES} bytes",
+                    )
+        raw = _read_bounded_response_bytes(resp, label, _MAX_MARKETPLACE_JSON_BYTES)
+    finally:
+        close = getattr(resp, "close", None)
+        if callable(close):
+            close()
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as exc:
+        raise ValueError(f"Invalid JSON in marketplace file: {exc}") from exc
+
+
 def _fetch_url_direct(
     url: str,
     *,
@@ -375,6 +407,16 @@ def _try_proxy_fetch(
     if content is None:
         return None
 
+    if len(content) > _MAX_MARKETPLACE_JSON_BYTES:
+        logger.debug(
+            "Proxy returned oversized marketplace.json for %s/%s %s (%d bytes)",
+            source.owner,
+            source.repo,
+            file_path,
+            len(content),
+        )
+        return None
+
     try:
         return json.loads(content)
     except (json.JSONDecodeError, ValueError):
@@ -428,7 +470,6 @@ def _fetch_via_api(
     *,
     url_builder: Callable,
     header_builder: Callable[[str | None], dict[str, str]],
-    parse_response: Callable,
     host_info,
     auth_resolver,
 ) -> dict | None:
@@ -437,16 +478,23 @@ def _fetch_via_api(
     Owns the common boilerplate: build URL, build headers, run
     ``try_with_fallback``, map 404 -> None, raise ``MarketplaceFetchError``
     on unexpected errors. Specialised callers pass kind-specific URL and
-    header builders.
+    header builders. The request is streamed and the body read through
+    :func:`_read_capped_json` so an oversized marketplace.json cannot OOM the
+    installer (the direct ``url`` path enforces the same ceiling).
     """
     url = url_builder(source, file_path, host_info)
 
     def _do_fetch(token, _git_env):
-        resp = _http_get(url, headers=header_builder(token), timeout=30)
-        if resp.status_code == 404:
-            return None
-        resp.raise_for_status()
-        return parse_response(resp)
+        resp = _http_get(url, headers=header_builder(token), timeout=30, stream=True)
+        try:
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return _read_capped_json(resp, source.name)
+        finally:
+            close = getattr(resp, "close", None)
+            if callable(close):
+                close()
 
     try:
         return auth_resolver.try_with_fallback(
@@ -459,13 +507,6 @@ def _fetch_via_api(
     except Exception as exc:
         logger.debug("API fetch failed for '%s'", source.name, exc_info=True)
         raise MarketplaceFetchError(source.name, str(exc)) from exc
-
-
-def _parse_json_text(resp) -> dict:
-    try:
-        return json.loads(resp.text)
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise ValueError(f"Invalid JSON in marketplace file: {exc}") from exc
 
 
 def _fetch_github(
@@ -481,7 +522,6 @@ def _fetch_github(
         file_path,
         url_builder=_github_contents_url,
         header_builder=_github_headers,
-        parse_response=lambda r: r.json(),
         host_info=host_info,
         auth_resolver=auth_resolver,
     )
@@ -506,7 +546,6 @@ def _fetch_gitlab(
         file_path,
         url_builder=_gitlab_file_raw_url,
         header_builder=_gitlab_headers,
-        parse_response=_parse_json_text,
         host_info=host_info,
         auth_resolver=auth_resolver,
     )
@@ -635,28 +674,33 @@ def _fetch_ado_rest(
     def _do_fetch(token, git_env):
         headers = {"User-Agent": "apm-cli"}
         headers.update(_ado_auth_header(token, git_env))
-        resp = _http_get(url, headers=headers, timeout=30)
-        if resp.status_code == 404:
-            # No message: this sentinel flows through ``try_with_fallback`` ->
-            # ``is_ado_auth_failure_signal(str(exc))``; an empty string never
-            # trips an auth-failure keyword, so a 404 never wastes a bearer
-            # retry.
-            raise _AdoItemNotFound
-        # ADO answers an unauthenticated/under-scoped request with HTTP 200 +
-        # an HTML sign-in page rather than a 401 (#1671). Treat that as an auth
-        # failure so try_with_fallback can attempt the AAD bearer before we
-        # give up and clone. The word "unauthorized" is load-bearing: it makes
-        # ``is_ado_auth_failure_signal(str(exc))`` match, which is the gate the
-        # PAT->bearer fallback checks (see AuthResolver._try_ado_bearer_fallback).
-        if resp.status_code == 200:
-            content_type = resp.headers.get("Content-Type", "").lower()
-            if "text/html" in content_type:
-                raise MarketplaceFetchError(
-                    source.name,
-                    "Azure DevOps returned a sign-in page (unauthorized: authentication required)",
-                )
-        resp.raise_for_status()
-        return _parse_json_text(resp)
+        resp = _http_get(url, headers=headers, timeout=30, stream=True)
+        try:
+            if resp.status_code == 404:
+                # No message: this sentinel flows through ``try_with_fallback`` ->
+                # ``is_ado_auth_failure_signal(str(exc))``; an empty string never
+                # trips an auth-failure keyword, so a 404 never wastes a bearer
+                # retry.
+                raise _AdoItemNotFound
+            # ADO answers an unauthenticated/under-scoped request with HTTP 200 +
+            # an HTML sign-in page rather than a 401 (#1671). Treat that as an auth
+            # failure so try_with_fallback can attempt the AAD bearer before we
+            # give up and clone. The word "unauthorized" is load-bearing: it makes
+            # ``is_ado_auth_failure_signal(str(exc))`` match, which is the gate the
+            # PAT->bearer fallback checks (see AuthResolver._try_ado_bearer_fallback).
+            if resp.status_code == 200:
+                content_type = resp.headers.get("Content-Type", "").lower()
+                if "text/html" in content_type:
+                    raise MarketplaceFetchError(
+                        source.name,
+                        "Azure DevOps returned a sign-in page (unauthorized: authentication required)",
+                    )
+            resp.raise_for_status()
+            return _read_capped_json(resp, source.name)
+        finally:
+            close = getattr(resp, "close", None)
+            if callable(close):
+                close()
 
     return auth_resolver.try_with_fallback(
         host,

@@ -33,6 +33,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX
+    fcntl = None  # type: ignore[assignment]
+
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import CommandLogger
     from apm_cli.core.lifecycle_scripts import LifecycleEvent, ScriptEntry
@@ -424,6 +429,27 @@ def _redact_pem_private_keys(text: str) -> str:
     return _PEM_PRIVATE_KEY_PATTERN.sub(lambda m: m.group(1) + "[REDACTED]" + m.group(3), text)
 
 
+# A JWT/bearer token is ``base64url(header).base64url(payload).base64url(sig)``;
+# both the header and payload JSON begin with ``{"`` so BOTH leading segments
+# base64url-encode to a ``eyJ`` prefix. That DOUBLE ``eyJ`` anchor is what makes
+# this structural masker unambiguous -- a benign dotted value (a version string,
+# a file path, ``a.b.c``, a single-segment ``eyJ...`` blob) lacks the second
+# ``eyJ`` and never matches, while a genuine three-segment JWT always does.
+# Round-24 added the JWT NAME tokens to the denylist, but a JWT printed to
+# stdout with NO backing env var (``gcloud auth print-identity-token``,
+# ``kubectl create token``) or carried by a benign-named var (``AUTH_HEADER``)
+# is matched by no NAME and no other structural masker, so it would persist in
+# cleartext in scripts.log. Mask the VALUE shape directly, independent of name.
+_JWT_VALUE_PATTERN = re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}")
+
+
+def _redact_jwt_values(text: str) -> str:
+    """Mask any JWT/bearer token *value* (``eyJ...eyJ...``) in *text*."""
+    if not text or "eyJ" not in text:
+        return text
+    return _JWT_VALUE_PATTERN.sub("[REDACTED]", text)
+
+
 def _redact_secrets(text: str) -> str:
     """Mask any denylisted env-var *values* appearing in script output.
 
@@ -464,10 +490,12 @@ def _redact_secrets(text: str) -> str:
     redacted = text
     for value in sorted(set(secrets), key=len, reverse=True):
         redacted = redacted.replace(value, "[REDACTED]")
-    return _redact_pem_private_keys(
-        _redact_bundler_source_credentials(
-            _redact_sas_signatures(
-                _redact_webhook_urls(_redact_connection_string_password(redacted))
+    return _redact_jwt_values(
+        _redact_pem_private_keys(
+            _redact_bundler_source_credentials(
+                _redact_sas_signatures(
+                    _redact_webhook_urls(_redact_connection_string_password(redacted))
+                )
             )
         )
     )
@@ -617,11 +645,47 @@ def _truncate_log_field(text: str) -> str:
 
 
 def _rotate_log_if_large(log_path: Path) -> None:
-    """Rotate the log to ``.1`` once it exceeds the size cap."""
+    """Rotate the log to ``.1`` once it exceeds the size cap.
+
+    Serialized across processes via an exclusive ``fcntl`` lock on a dedicated
+    lock file, with a DOUBLE-CHECKED size test INSIDE the critical section.
+    Without the lock two concurrent installers can both observe ``size >= cap``
+    and both ``os.replace`` -- the second rename clobbers the freshly-rotated
+    ``scripts.log.1`` and destroys ~5 MiB of audit trail (a hostile package can
+    flood the log to force the crossing and race the rename to bury its own
+    record). The re-stat under the lock makes the racing writer see the now-
+    small log and skip the rename, so no record is lost below the two-file
+    retention capacity. The unlocked pre-check keeps the common (under-cap)
+    append path lock-free; only a genuine crossing pays for the lock.
+    """
     with contextlib.suppress(OSError):
-        if log_path.stat().st_size >= _MAX_LOG_BYTES:
-            rotated = log_path.with_name(log_path.name + ".1")
-            os.replace(log_path, rotated)
+        if log_path.stat().st_size < _MAX_LOG_BYTES:
+            return
+
+    rotated = log_path.with_name(log_path.name + ".1")
+    if fcntl is None:  # pragma: no cover - non-POSIX best-effort
+        with contextlib.suppress(OSError):
+            if log_path.stat().st_size >= _MAX_LOG_BYTES:
+                os.replace(log_path, rotated)
+        return
+
+    lock_path = log_path.with_name(log_path.name + ".lock")
+    lock_flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        lock_fd = os.open(lock_path, lock_flags, 0o600)
+    except OSError:
+        return
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        with contextlib.suppress(OSError):
+            if log_path.stat().st_size >= _MAX_LOG_BYTES:
+                os.replace(log_path, rotated)
+    except OSError:
+        pass
+    finally:
+        with contextlib.suppress(OSError):
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
 
 
 def _append_to_script_log(
