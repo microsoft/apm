@@ -279,7 +279,7 @@ def _read_capped_json(resp, label: str) -> dict:
             close()
     try:
         return json.loads(raw.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError, RecursionError) as exc:
         raise ValueError(f"Invalid JSON in marketplace file: {exc}") from exc
 
 
@@ -349,7 +349,7 @@ def _fetch_url_direct(
 
     try:
         data = json.loads(raw.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
         raise MarketplaceFetchError(url, f"invalid JSON response: {exc}") from exc
     if not isinstance(data, dict):
         raise MarketplaceFetchError(url, "marketplace.json root must be an object")

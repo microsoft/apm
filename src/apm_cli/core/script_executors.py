@@ -116,9 +116,15 @@ _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za
 # not express. The tail only ever applies AFTER a credential token, so a
 # TOKEN-LESS asset (IMAGE_BASE64, LOGO_B64, CONFIG_JSON, PACKAGE_JSON, COLOR_HEX)
 # never matches and still reaches the child env.
+# ``(?:^|_)COOKIE`` is start-anchored like ``PASS``: a session/auth COOKIE is a
+# bearer credential (SESSION_COOKIE / AUTH_COOKIE / COOKIE / COOKIES) but the
+# benign cookie *config* a script reads (COOKIE_DOMAIN / COOKIE_NAME /
+# COOKIE_PATH / COOKIE_SECURE -- COOKIE is a PREFIX there) must survive, so the
+# token only matches when COOKIE is the trailing segment.
 _CREDENTIAL_DENYLIST = re.compile(
     r"(?:(?:^|_)PASS|PASSCODE|TOKEN|SECRET|PAT|KEY|PASSWORD|PASSWD|PASSPHRASE|PWD"
-    r"|CREDENTIAL|AUTHTOKEN|AUTHORIZATION|JWT|MNEMONIC|SEED_PHRASE|RECOVERY_PHRASE|BACKUP_PHRASE)"
+    r"|CREDENTIAL|AUTHTOKEN|AUTHORIZATION|JWT|MNEMONIC|SEED_PHRASE|RECOVERY_PHRASE|BACKUP_PHRASE"
+    r"|(?:^|_)COOKIE)"
     r"S?(?:_IDS?)?(?:_?(?:OLD|NEW|PREV|CURRENT))?(?:_?V[0-9]+)?"
     r"(?:_?(?:BASE64|BASE32|BASE58|BASE62|B64|B32|HEX|PEM|DER|ASCII85|A85|Z85|URL_?SAFE|JSON|YAML|YML|TOML|ASC))?[_0-9]*$",
     re.IGNORECASE,
@@ -463,6 +469,12 @@ _PROVIDER_TOKEN_PATTERN = re.compile(
     r"|xox[baprs]-[A-Za-z0-9-]{10,}"  # Slack bot/user/app/refresh token
     r"|[sr]k_live_[A-Za-z0-9]{16,}"  # Stripe live secret / restricted key
     r"|AIza[A-Za-z0-9_-]{35}"  # Google API key
+    r"|glpat-[A-Za-z0-9_-]{20,}"  # GitLab personal access token
+    r"|xapp-[A-Za-z0-9-]{10,}"  # Slack app-level token
+    r"|ya29\.[A-Za-z0-9_-]{20,}"  # Google OAuth2 access token
+    r"|hf_[A-Za-z0-9]{30,}"  # Hugging Face access token
+    r"|dop_v1_[A-Za-z0-9]{40,}"  # DigitalOcean personal access token
+    r"|tskey-[A-Za-z0-9-]{10,}"  # Tailscale auth/api key
 )
 
 
