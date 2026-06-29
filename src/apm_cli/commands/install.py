@@ -1051,7 +1051,7 @@ def _handle_mcp_install(
     "skill_names",
     multiple=True,
     metavar="NAME",
-    help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Persisted in apm.yml and apm.lock so bare 'apm install' is deterministic. Additive across installs: a later --skill X adds X to the existing pin (union) rather than replacing it. Use --skill '*' to reset to all skills; to drop a single skill, edit the skills: list in apm.yml then re-run apm install.",
+    help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Persisted in apm.yml and apm.lock so bare 'apm install' is deterministic. Additive across installs: a later --skill X adds X to the existing pin (union) rather than replacing it. Use --skill '*' (quote the asterisk in your shell) to reset to all skills; to drop a single skill, edit the skills: list in apm.yml then re-run apm install.",
 )
 @click.option(
     "--no-policy",

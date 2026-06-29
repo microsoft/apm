@@ -250,7 +250,10 @@ class LockfileBuilder:
                     cli_subset=self.ctx.skill_subset,
                     persisted_subset=locked_dep.skill_subset,
                 )
-                locked_dep.skill_subset = list(merged or [])
+                # merged is never None here: the guard above returns for
+                # --skill '*' (empty ctx.skill_subset), so a real named
+                # subset always survives the union.
+                locked_dep.skill_subset = list(merged) if merged else []
 
     def _attach_content_hashes(self, lockfile: LockFile) -> None:
         for dep_key, locked_dep in lockfile.dependencies.items():

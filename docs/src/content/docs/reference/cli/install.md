@@ -186,8 +186,9 @@ apm install ./my-bundle --target opencode
 ### Install only a subset of skills from a bundle
 
 ```bash
-apm install owner/skill-bundle --skill review --skill refactor
-apm install owner/skill-bundle --skill '*'   # reset to all skills
+apm install owner/skill-bundle --skill review
+apm install owner/skill-bundle --skill refactor   # adds refactor; review is kept (union)
+apm install owner/skill-bundle --skill '*'         # reset to all skills
 ```
 
 ## Exit codes

@@ -20,7 +20,11 @@ from pathlib import Path
 import yaml
 from click.testing import CliRunner
 
-from apm_cli.install.package_resolution import effective_deploy_skill_subset
+from apm_cli.install.package_resolution import (
+    apply_cli_skill_pin,
+    cli_skill_subset,
+    effective_deploy_skill_subset,
+)
 
 # ---------------------------------------------------------------------------
 # Unit: the additive-union helper
@@ -81,6 +85,78 @@ class TestEffectiveDeploySkillSubset:
             persisted_subset=["alpha", "beta"],
         )
         assert result == ("alpha", "beta")
+
+
+# ---------------------------------------------------------------------------
+# Unit: the CLI-subset normalizer + skill-pin applier
+# ---------------------------------------------------------------------------
+
+
+class TestCliSkillSubset:
+    def test_absent_returns_none(self):
+        assert cli_skill_subset(()) is None
+
+    def test_star_returns_none(self):
+        # `--skill '*'` collapses to None (all skills); origin tracked separately.
+        assert cli_skill_subset(("*",)) is None
+
+    def test_named_returns_tuple(self):
+        assert cli_skill_subset(("beta",)) == ("beta",)
+
+    def test_star_mixed_with_names_still_resets(self):
+        # Any '*' present means "all skills", even alongside named skills.
+        assert cli_skill_subset(("alpha", "*")) is None
+
+
+class _FakeDepRef:
+    """Minimal stand-in exercising apply_cli_skill_pin's reset/no-op branches."""
+
+    def __init__(self, identity, canonical, yml_entry):
+        self._identity = identity
+        self._canonical = canonical
+        self._yml_entry = yml_entry
+        self.skill_subset = ["stale"]
+
+    def get_identity(self):
+        return self._identity
+
+    def to_canonical(self):
+        return self._canonical
+
+    def to_apm_yml_entry(self):
+        return self._yml_entry
+
+
+class TestApplyCliSkillPin:
+    def test_star_reset_clears_pin_and_records_full_entry(self):
+        # `--skill '*'`: clear the pin and write the refreshed full-bundle entry.
+        dep_ref = _FakeDepRef("owner/bundle", "owner/bundle@main", "owner/bundle")
+        entries: dict = {}
+        apply_cli_skill_pin(
+            dep_ref,
+            None,
+            True,
+            [],
+            entries,
+            dependency_reference_cls=object,
+        )
+        assert dep_ref.skill_subset is None
+        assert entries == {"owner/bundle@main": "owner/bundle"}
+
+    def test_no_cli_flag_is_noop(self):
+        # Bare install (flag absent): leave the pin and apm.yml entries untouched.
+        dep_ref = _FakeDepRef("owner/bundle", "owner/bundle@main", "owner/bundle")
+        entries: dict = {}
+        apply_cli_skill_pin(
+            dep_ref,
+            None,
+            False,
+            [],
+            entries,
+            dependency_reference_cls=object,
+        )
+        assert dep_ref.skill_subset == ["stale"]
+        assert entries == {}
 
 
 # ---------------------------------------------------------------------------
