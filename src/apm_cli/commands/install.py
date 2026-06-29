@@ -47,8 +47,9 @@ from apm_cli.install.mcp.entry import _build_mcp_entry  # noqa: F401
 from apm_cli.install.mcp.writer import _add_mcp_to_apm_yml  # noqa: F401
 from apm_cli.install.package_resolution import (
     GIT_PARENT_USER_SCOPE_ERROR,
+    apply_cli_skill_pin,
+    cli_skill_subset,
     dependency_reference_to_yaml_entry,
-    normalize_and_merge_skill_subset,
     persist_dependency_list_if_changed,
     resolve_parsed_dependency_reference,
     update_existing_dependency_entry_if_needed,
@@ -454,29 +455,15 @@ def _resolve_package_references(
             )
             canonical = dep_ref.to_canonical()
             identity = dep_ref.get_identity()
-            # Attach --skill filter so to_apm_yml_entry() emits the dict form.
-            # Merges with existing skills: list so repeated --skill
-            # invocations are additive (issue #1771).
-            if skill_subset:
-                dep_ref.skill_subset = normalize_and_merge_skill_subset(
-                    skill_subset,
-                    current_deps,
-                    identity,
-                    dependency_reference_cls=DependencyReference,
-                )
-            elif skill_subset_from_cli:
-                # ``--skill '*'`` (explicit CLI, empty subset): reset the pin
-                # back to the full bundle. Drop any persisted ``skills:`` so the
-                # entry reverts to the plain string form and manifest/on-disk
-                # state agree on the whole bundle (documented contract:
-                # "Use --skill '*' to reset to all skills").
-                dep_ref.skill_subset = None
-                _apm_yml_entries[canonical] = dep_ref.to_apm_yml_entry()
-                if logger:
-                    logger.verbose_detail(
-                        f"    [i] {identity}: skill pin reset to full bundle "
-                        "(--skill '*'); a later bare 'apm install' deploys all skills"
-                    )
+            apply_cli_skill_pin(
+                dep_ref,
+                skill_subset,
+                skill_subset_from_cli,
+                current_deps,
+                _apm_yml_entries,
+                dependency_reference_cls=DependencyReference,
+                logger=logger,
+            )
             if marketplace_dep_ref is not None or direct_virtual_resolved:
                 _apm_yml_entries[canonical] = dependency_reference_to_yaml_entry(dep_ref)
         except ValueError as e:
@@ -1400,12 +1387,9 @@ def install(  # noqa: PLR0913
         )
 
         # Normalize --skill: '*' means all (same as absent). Reject with --mcp.
-        _skill_subset = None
-        if skill_names:
-            if mcp_name is not None:
-                raise click.UsageError("--skill cannot be combined with --mcp.")
-            if not any(s == "*" for s in skill_names):
-                _skill_subset = builtins.tuple(skill_names)
+        if skill_names and mcp_name is not None:
+            raise click.UsageError("--skill cannot be combined with --mcp.")
+        _skill_subset = cli_skill_subset(skill_names)
 
         if mcp_name is not None:
             _handle_mcp_install(
