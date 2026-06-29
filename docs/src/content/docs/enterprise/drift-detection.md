@@ -123,8 +123,10 @@ so it only provides the CLI without running `apm install`, then audit with
 `--no-drift` skips the install-replay (which requires a warm cache that
 `setup-only` does not populate). The `content-integrity` check verifies
 SHA-256 hashes of every deployed file against `deployed_file_hashes` in
-`apm.lock.yaml` without needing to replay the install. Any byte-level
-change to a deployed file since the last install is caught by this check.
+`apm.lock.yaml` without needing to replay the install. Any content
+change to a deployed file since the last install is caught by this check
+(line-ending-only differences are normalized away per req-lk-012, so a
+CRLF/LF flip alone is not flagged).
 
 See [Enforce in CI](./enforce-in-ci/#audit-only-ci-pattern) for the full
 recipe and a comparison table of the two patterns.

@@ -113,7 +113,8 @@ jobs:
 `--no-drift` skips the install-replay check because no warm cache exists;
 the `content-integrity` check still verifies that every deployed file's
 SHA-256 hash matches the `deployed_file_hashes` recorded in `apm.lock.yaml`.
-Any file whose bytes were changed after the last install fails this check.
+Any file whose content was changed after the last install fails this check
+(line-ending-only differences are normalized away per req-lk-012).
 
 The two patterns serve different goals:
 

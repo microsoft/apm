@@ -29,6 +29,14 @@ def compute_package_hash(package_path: Path) -> str:
     making it independent of filesystem ordering and metadata (timestamps,
     permissions).
 
+    Note: this whole-tree hash intentionally hashes raw file bytes, unlike
+    the per-file :func:`compute_file_hash` which normalizes CRLF->LF for
+    text (apm#1952). The package tree is hashed at the git-checkout
+    boundary where content is already platform-canonical, and the path is
+    bound into the digest, so cross-platform line-ending identity is
+    unnecessary here. Do not unify the two without re-checking that
+    invariant.
+
     Args:
         package_path: Root directory of the installed package.
 
