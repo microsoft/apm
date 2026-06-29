@@ -19,6 +19,7 @@ import copy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.install.package_resolution import effective_deploy_skill_subset
 from apm_cli.utils.content_hash import compute_file_hash
 
 if TYPE_CHECKING:
@@ -228,18 +229,28 @@ class LockfileBuilder:
                 lockfile.dependencies[dep_key].exec_status = status
 
     def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
-        """Apply CLI --skill override to lockfile skill_bundle entries.
+        """Union the CLI ``--skill`` values into lockfile skill_bundle entries.
 
-        When the user runs `apm install bundle --skill foo`, the CLI
-        skill_subset takes precedence over the per-entry skill_subset
-        from the manifest for this invocation's lockfile.
+        ``--skill`` is additive (issue #1786): a targeted ``apm install bundle
+        --skill foo`` must record the UNION of the previously pinned skills and
+        ``foo`` -- not replace the persisted subset with the raw CLI value. The
+        per-entry manifest subset already flows into ``locked_dep.skill_subset``;
+        here we fold in the current CLI values so the lockfile matches what was
+        deployed.
+
+        ``--skill '*'`` (empty ``ctx.skill_subset``) is a no-op here -- the
+        manifest reset already flowed the full-bundle (empty) subset through.
         """
         if not self.ctx.skill_subset:
-            return  # No CLI override; dep_ref.skill_subset already flows through
-        effective = sorted(set(self.ctx.skill_subset))
+            return  # bare install or --skill '*'; manifest value already flows through
         for dep_key, locked_dep in lockfile.dependencies.items():  # noqa: B007
             if locked_dep.package_type == "skill_bundle":
-                locked_dep.skill_subset = effective
+                merged = effective_deploy_skill_subset(
+                    skill_subset_from_cli=True,
+                    cli_subset=self.ctx.skill_subset,
+                    persisted_subset=locked_dep.skill_subset,
+                )
+                locked_dep.skill_subset = list(merged or [])
 
     def _attach_content_hashes(self, lockfile: LockFile) -> None:
         for dep_key, locked_dep in lockfile.dependencies.items():

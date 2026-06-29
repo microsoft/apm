@@ -14,6 +14,7 @@ This is the Template Method companion to the Strategy pattern in
 from __future__ import annotations
 
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
+from apm_cli.install.package_resolution import effective_deploy_skill_subset
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.install.sources import DependencySource, Materialization
 
@@ -147,15 +148,15 @@ def _integrate_materialization(
             package_name=dep_key,
             logger=logger,
             scope=ctx.scope,
-            # Per-package effective subset: CLI --skill overrides per-entry
-            # apm.yml skills:. When CLI is absent (bare reinstall), fall back
-            # to the dep_ref's persisted skill_subset.
-            # When CLI explicitly provided (even --skill '*'), use ctx value
-            # (which is None for '*' = install all).
-            skill_subset=(
-                ctx.skill_subset
-                if ctx.skill_subset_from_cli
-                else (tuple(dep_ref.skill_subset) if dep_ref.skill_subset else None)
+            # Per-package effective subset: ``--skill`` is additive (issue
+            # #1786), so deploy the UNION of the persisted apm.yml ``skills:``
+            # and the current CLI ``--skill`` values -- a targeted ``--skill``
+            # install lands on top of previously pinned skills instead of
+            # erasing them. ``--skill '*'`` resets to the full bundle (None).
+            skill_subset=effective_deploy_skill_subset(
+                skill_subset_from_cli=ctx.skill_subset_from_cli,
+                cli_subset=ctx.skill_subset,
+                persisted_subset=dep_ref.skill_subset,
             ),
             dep_target_subset=dep_ref.target_subset,
             ctx=ctx,

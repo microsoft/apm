@@ -329,6 +329,7 @@ def _resolve_package_references(
     scope=None,
     allow_insecure=False,
     skill_subset=None,
+    skill_subset_from_cli=False,
     default_registry=None,
 ):
     """Validate, canonicalize, and resolve package references.
@@ -463,6 +464,14 @@ def _resolve_package_references(
                     identity,
                     dependency_reference_cls=DependencyReference,
                 )
+            elif skill_subset_from_cli:
+                # ``--skill '*'`` (explicit CLI, empty subset): reset the pin
+                # back to the full bundle. Drop any persisted ``skills:`` so the
+                # entry reverts to the plain string form and manifest/on-disk
+                # state agree on the whole bundle (documented contract:
+                # "Use --skill '*' to reset to all skills").
+                dep_ref.skill_subset = None
+                _apm_yml_entries[canonical] = dep_ref.to_apm_yml_entry()
             if marketplace_dep_ref is not None or direct_virtual_resolved:
                 _apm_yml_entries[canonical] = dependency_reference_to_yaml_entry(dep_ref)
         except ValueError as e:
@@ -633,6 +642,7 @@ def _validate_and_add_packages_to_apm_yml(
     scope=None,
     allow_insecure=False,
     skill_subset=None,
+    skill_subset_from_cli=False,
 ):
     """Validate packages exist and can be accessed, then add to apm.yml dependencies section.
 
@@ -701,6 +711,7 @@ def _validate_and_add_packages_to_apm_yml(
         scope=scope,
         allow_insecure=allow_insecure,
         skill_subset=skill_subset,
+        skill_subset_from_cli=skill_subset_from_cli,
         default_registry=_default_registry_for_cli,
     )
 
@@ -1517,6 +1528,7 @@ def install(  # noqa: PLR0913
                 scope=scope,
                 allow_insecure=allow_insecure,
                 skill_subset=_skill_subset,
+                skill_subset_from_cli=bool(skill_names),
             )
             # Short-circuit: all packages failed validation -- nothing to install
             if outcome.all_failed:

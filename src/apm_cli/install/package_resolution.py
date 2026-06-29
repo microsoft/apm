@@ -180,6 +180,35 @@ def normalize_and_merge_skill_subset(
     return sorted(seen)
 
 
+def effective_deploy_skill_subset(
+    *,
+    skill_subset_from_cli: bool,
+    cli_subset: builtins.tuple[str, ...] | builtins.list[str] | None,
+    persisted_subset: builtins.tuple[str, ...] | builtins.list[str] | None,
+) -> builtins.tuple[str, ...] | None:
+    """Resolve the skill subset to *deploy* for a SKILL_BUNDLE.
+
+    ``--skill`` is additive (issue #1786): a targeted ``--skill B`` install must
+    land on top of skills already pinned for the bundle instead of erasing them.
+    The deployment therefore uses the union of the persisted manifest subset and
+    the current CLI ``--skill`` values -- not the raw CLI subset alone.
+
+    ``--skill '*'`` (signalled by ``skill_subset_from_cli`` True with an empty
+    ``cli_subset``) resets the bundle to its full set, so this returns ``None``
+    meaning "deploy all skills".
+
+    Returns a sorted, deduplicated tuple, or ``None`` for "deploy all".
+    """
+    if skill_subset_from_cli and not cli_subset:
+        return None  # --skill '*' -> full bundle
+    merged: builtins.set[str] = builtins.set()
+    if persisted_subset:
+        merged.update(persisted_subset)
+    if cli_subset:
+        merged.update(cli_subset)
+    return builtins.tuple(sorted(merged)) or None
+
+
 def manifest_has_different_entry_for_identity(
     current_deps: builtins.list,
     identity: str,
