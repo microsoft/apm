@@ -6,11 +6,11 @@ product's own :func:`apm_cli.utils.content_hash.compute_file_hash` -- the
 single function both the record side (``apm install``) and the verify side
 (``apm audit``) call -- and prints the resulting envelope.
 
-When run on a Windows runner with ``core.autocrlf=true``, git re-materializes
-the committed sample with ``\\r\\n``; on POSIX it stays ``\\n``. After the fix
-the computed hash MUST be identical on every platform. The companion workflow
-(.github/workflows/crlf-invariance.yml) runs this on ubuntu/windows/macos and
-asserts all three emitted hashes match byte-for-byte.
+When run on a Windows runner (``core.autocrlf=true``) git re-materializes the
+committed sample with ``\\r\\n``; on POSIX (``core.autocrlf=input``) it stays
+``\\n``. After the fix the computed hash MUST be identical on every platform.
+The companion workflow (.github/workflows/crlf-invariance.yml) runs this on
+ubuntu/windows/macos and asserts all three emitted hashes match byte-for-byte.
 
 Also asserts in-process invariants as a local defense:
   * CRLF text and LF text hash equal
@@ -49,10 +49,15 @@ def _git(args: list[str], cwd: Path) -> None:
 
 
 def _autocrlf_roundtrip_hash(work: Path) -> tuple[str, bytes]:
-    """Commit a LF sample, force autocrlf, re-check it out, hash on-disk bytes.
+    """Commit a LF sample, apply the platform's real autocrlf, hash on-disk bytes.
 
-    Returns (envelope, on_disk_bytes). On a Windows runner the on-disk bytes
-    come back CRLF; on POSIX they stay LF. The envelope must be identical.
+    Returns (envelope, on_disk_bytes). To faithfully reproduce the apm#1952
+    split we use the setting each platform actually ships with: ``true`` on
+    Windows (git materializes the working tree with ``\\r\\n``) and ``input``
+    on POSIX (no checkout translation, so the committed ``\\n`` stays ``\\n``).
+    The on-disk bytes therefore come back CRLF on Windows and LF on POSIX --
+    exactly the Windows-vs-POSIX divergence that produced the false drift --
+    and the canonical envelope MUST be identical across all of them.
     """
     _git(["init", "-q"], work)
     _git(["config", "user.email", "probe@example.com"], work)
@@ -63,8 +68,11 @@ def _autocrlf_roundtrip_hash(work: Path) -> tuple[str, bytes]:
     sample.write_bytes(SAMPLE_TEXT)
     _git(["add", "sample.md"], work)
     _git(["commit", "-q", "-m", "sample"], work)
-    # Turn on the exact setting that triggers apm#1952, then re-materialize.
-    _git(["config", "core.autocrlf", "true"], work)
+    # Windows devs run autocrlf=true (CRLF working tree); POSIX devs and CI run
+    # autocrlf=input (LF working tree). Picking per-OS reproduces the genuine
+    # cross-platform on-disk split rather than forcing CRLF everywhere.
+    autocrlf = "true" if platform.system() == "Windows" else "input"
+    _git(["config", "core.autocrlf", autocrlf], work)
     sample.unlink()
     _git(["checkout", "--", "sample.md"], work)
     on_disk = sample.read_bytes()
