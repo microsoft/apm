@@ -7,21 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-06-28
+
 ### Added
 
-- `apm view <package> versions` now routes to the configured default registry for
-  plain shorthands (e.g., `acme/web-skills`) when a default registry is configured,
-  matching `apm install` routing behavior. Added `--registry [NAME]` for explicit
-  registry control: bare `--registry` uses the lockfile entry or configured default;
-  `--registry NAME` forces a named registry. Use a full git URL to force the git path
-  when a default registry is configured. (by @nadav-y) (#1938)
+- Added a general-purpose lifecycle hooks framework: embed shell-command or
+  HTTPS-webhook scripts in `apm.yml` under a `lifecycle:` key that fire at
+  `pre`/`post` install/update/uninstall events, gated behind `apm lifecycle trust`
+  so nothing runs without explicit consent. The new `apm lifecycle` command
+  (`init`/`validate`/`test`/`trust`/`untrust`) manages and dry-runs them, with
+  cross-platform Windows support. (by @sergio-sisternes-epam) (#1798, #1947)
+- `apm view <package> versions` now routes plain shorthands (e.g.
+  `acme/web-skills`) to the configured default registry, matching `apm install`
+  routing. Added `--registry [NAME]` for explicit control: bare `--registry` uses
+  the lockfile entry or configured default, `--registry NAME` forces a named
+  registry, and a full git URL forces the git path. (by @nadav-y) (#1938)
 
 ### Removed
 
-- Removed legacy `.chatmode.md` primitive format and `chatmodes/` subdirectory
-  support. Use `.agent.md` files in `.apm/agents/` instead. All discovery
-  patterns, integrator file-scan paths, watcher watch-paths, and extension maps
-  have been updated to the `agents/` + `.agent.md` convention. (#840)
+- **BREAKING:** Removed the legacy `.chatmode.md` primitive format and
+  `chatmodes/` directory support across discovery, integration, the watcher, and
+  extension maps. Use `.agent.md` files in `.apm/agents/` instead. (closes #840)
+  (#1931)
 
 ### Fixed
 
@@ -48,6 +55,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--target` flag at user scope; previously user-scope MCP install wrote to all
   detected runtimes unconditionally, creating unintended folders (e.g. `~/.kiro/`)
   when a package targets only a subset. (by @sergio-sisternes-epam) (#1941)
+- Applied six `--help` and flag-naming consistency fixes from the CLI Consistency
+  Report: surfaced the `apm deps update` deprecation and `apm install --runtime`
+  legacy-alias status in help text, dropped the misleading `vscode` runtime value,
+  and promoted `apm compile --force-instructions` as the primary flag (`--no-dedup`
+  kept as a hidden alias). (by @sergio-sisternes-epam; closes #1928) (#1929)
+- Fixed `apm preview <script>` crashing with `ValueError: too many values to
+  unpack` by unpacking all three values returned by the auto-compile step. (by
+  @fmferrari) (#1721)
+- Fixed two false-positive `unintegrated` drift reports in `apm audit --ci` by
+  honoring per-dependency `targets:` and the plural `targets:` key during drift
+  replay. (by @sergio-sisternes-epam) (#1930)
 
 ### Security
 
@@ -61,15 +79,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.22.0] - 2026-06-26
 
 ### Added
-
-- Lifecycle scripts (`apm lifecycle`): run validated shell commands or HTTPS webhooks
-  at `pre/post-install/update/uninstall` events with zero config files beyond
-  `apm.yml`. Project and user lifecycle config lives inside `apm.yml` under
-  `lifecycle:` (no separate files to lose across environments). Project scripts are
-  gated behind `apm lifecycle trust`, which hashes only the canonical `lifecycle:`
-  subtree so editing unrelated `apm.yml` keys never revokes trust. `APM_NO_SCRIPTS=1`
-  kills all scripts for one run; org `executables.deny_all` suppresses scripts as a
-  one-directional safety ceiling. (#1798, #1919)
 
 - Per-dependency `targets:` scopes a dependency's target-specific primitives
   to selected harnesses (for example `targets: [copilot, claude]`), preventing
