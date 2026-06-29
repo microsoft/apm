@@ -80,7 +80,7 @@ Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initi
 
 | Flag | Default | Description |
 |---|---|---|
-| `--skill NAME` | all | Install only named skill(s) from a skill collection (`SKILL_BUNDLE` or plugin manifest). Repeatable. For plugin manifests, `NAME` may be the skill name or manifest path, such as `skills/productivity/grill-me`. The selection is persisted to `apm.yml` and `apm.lock.yaml`. Use `--skill '*'` to reset and install all. |
+| `--skill NAME` | all | Install only named skill(s) from a skill collection (`SKILL_BUNDLE` or plugin manifest). Repeatable. For plugin manifests, `NAME` may be the skill name or manifest path, such as `skills/productivity/grill-me`. The selection is persisted to `apm.yml` and `apm.lock.yaml`. `--skill` is additive across separate installs: a later `apm install <bundle> --skill X` adds `X` to the existing pin (union) rather than replacing it -- previously deployed skills are never silently removed. Use `--skill '*'` to reset to the full bundle; to drop a single skill, edit the `skills:` list in `apm.yml` and re-run `apm install`. |
 | `--as ALIAS` | bundle id | Override the log/display label for a local-bundle install. Only valid with a single local-bundle `PACKAGE_REF`. |
 
 ### MCP server entry (use only with `--mcp`)
@@ -186,8 +186,9 @@ apm install ./my-bundle --target opencode
 ### Install only a subset of skills from a bundle
 
 ```bash
-apm install owner/skill-bundle --skill review --skill refactor
-apm install owner/skill-bundle --skill '*'   # reset to all skills
+apm install owner/skill-bundle --skill review
+apm install owner/skill-bundle --skill refactor   # adds refactor; review is kept (union)
+apm install owner/skill-bundle --skill '*'         # reset to all skills
 ```
 
 ## Exit codes

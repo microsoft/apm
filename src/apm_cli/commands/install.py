@@ -47,8 +47,9 @@ from apm_cli.install.mcp.entry import _build_mcp_entry  # noqa: F401
 from apm_cli.install.mcp.writer import _add_mcp_to_apm_yml  # noqa: F401
 from apm_cli.install.package_resolution import (
     GIT_PARENT_USER_SCOPE_ERROR,
+    apply_cli_skill_pin,
+    cli_skill_subset,
     dependency_reference_to_yaml_entry,
-    normalize_and_merge_skill_subset,
     persist_dependency_list_if_changed,
     resolve_parsed_dependency_reference,
     update_existing_dependency_entry_if_needed,
@@ -329,6 +330,7 @@ def _resolve_package_references(
     scope=None,
     allow_insecure=False,
     skill_subset=None,
+    skill_subset_from_cli=False,
     default_registry=None,
 ):
     """Validate, canonicalize, and resolve package references.
@@ -453,16 +455,15 @@ def _resolve_package_references(
             )
             canonical = dep_ref.to_canonical()
             identity = dep_ref.get_identity()
-            # Attach --skill filter so to_apm_yml_entry() emits the dict form.
-            # Merges with existing skills: list so repeated --skill
-            # invocations are additive (issue #1771).
-            if skill_subset:
-                dep_ref.skill_subset = normalize_and_merge_skill_subset(
-                    skill_subset,
-                    current_deps,
-                    identity,
-                    dependency_reference_cls=DependencyReference,
-                )
+            apply_cli_skill_pin(
+                dep_ref,
+                skill_subset,
+                skill_subset_from_cli,
+                current_deps,
+                _apm_yml_entries,
+                dependency_reference_cls=DependencyReference,
+                logger=logger,
+            )
             if marketplace_dep_ref is not None or direct_virtual_resolved:
                 _apm_yml_entries[canonical] = dependency_reference_to_yaml_entry(dep_ref)
         except ValueError as e:
@@ -633,6 +634,7 @@ def _validate_and_add_packages_to_apm_yml(
     scope=None,
     allow_insecure=False,
     skill_subset=None,
+    skill_subset_from_cli=False,
 ):
     """Validate packages exist and can be accessed, then add to apm.yml dependencies section.
 
@@ -701,6 +703,7 @@ def _validate_and_add_packages_to_apm_yml(
         scope=scope,
         allow_insecure=allow_insecure,
         skill_subset=skill_subset,
+        skill_subset_from_cli=skill_subset_from_cli,
         default_registry=_default_registry_for_cli,
     )
 
@@ -1048,7 +1051,7 @@ def _handle_mcp_install(
     "skill_names",
     multiple=True,
     metavar="NAME",
-    help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Persisted in apm.yml and apm.lock so bare 'apm install' is deterministic. Use --skill '*' to reset to all skills.",
+    help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Persisted in apm.yml and apm.lock so bare 'apm install' is deterministic. Additive across installs: a later --skill X adds X to the existing pin (union) rather than replacing it. Use --skill '*' (quote the asterisk in your shell) to reset to all skills; to drop a single skill, edit the skills: list in apm.yml then re-run apm install.",
 )
 @click.option(
     "--no-policy",
@@ -1384,12 +1387,9 @@ def install(  # noqa: PLR0913
         )
 
         # Normalize --skill: '*' means all (same as absent). Reject with --mcp.
-        _skill_subset = None
-        if skill_names:
-            if mcp_name is not None:
-                raise click.UsageError("--skill cannot be combined with --mcp.")
-            if not any(s == "*" for s in skill_names):
-                _skill_subset = builtins.tuple(skill_names)
+        if skill_names and mcp_name is not None:
+            raise click.UsageError("--skill cannot be combined with --mcp.")
+        _skill_subset = cli_skill_subset(skill_names)
 
         if mcp_name is not None:
             _handle_mcp_install(
@@ -1517,6 +1517,7 @@ def install(  # noqa: PLR0913
                 scope=scope,
                 allow_insecure=allow_insecure,
                 skill_subset=_skill_subset,
+                skill_subset_from_cli=bool(skill_names),
             )
             # Short-circuit: all packages failed validation -- nothing to install
             if outcome.all_failed:
