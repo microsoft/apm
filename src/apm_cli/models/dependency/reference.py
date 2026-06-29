@@ -112,7 +112,23 @@ class DependencyReference:
     marketplace_plugin_name: str | None = None
     marketplace_version_spec: str | None = None
 
+    def __post_init__(self) -> None:
+        import os
+        import re
+
+        if self.repo_url:
+            # Extract repository name (last part of repo_url path)
+            repo_name = self.repo_url.split("/")[-1]
+            # Replace non-alphanumeric characters with underscore and uppercase
+            safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", repo_name).upper()
+            override_env = f"APM_{safe_name}"
+            if override_env in os.environ:
+                val = os.environ[override_env]
+                if val:
+                    self.reference = val
+
     @property
+
     def ref_kind(self) -> str | None:
         """Classify ``reference`` for routing purposes.
 

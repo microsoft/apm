@@ -329,8 +329,31 @@ def _configure_encoding() -> None:
             _warn_encoding_issue(current_cp)
 
 
+def _load_version_env() -> None:
+    """Load config overrides from version.env if it exists in current directory."""
+    import os
+
+    env_file = "version.env"
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" in line:
+                        key, val = line.split("=", 1)
+                        key = key.strip()
+                        val = val.strip().strip('"').strip("'")
+                        if key:
+                            os.environ[key] = val
+        except Exception:
+            pass
+
+
 def main():
     """Main entry point for the CLI."""
+    _load_version_env()
     _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
     try:

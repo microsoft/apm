@@ -27,6 +27,48 @@ from src.apm_cli.models.apm_package import (
 class TestDependencyReference:
     """Test DependencyReference parsing and functionality."""
 
+    def test_override_version_via_environment_variable(self, monkeypatch):
+        """Test that environment variables override dependency references dynamically."""
+        monkeypatch.setenv("APM_OH_MY_OPENAGENT", "v2.0.0")
+        dep = DependencyReference.parse("owner/oh-my-openagent#v1.0.0")
+        assert dep.reference == "v2.0.0"
+
+        # Also test that it works even if no reference was originally specified
+        dep2 = DependencyReference.parse("owner/oh-my-openagent")
+        assert dep2.reference == "v2.0.0"
+
+        # Also test with hyphens and non-alphanumeric characters
+        monkeypatch.setenv("APM_MY_DASHED_REPO", "v3.0.0")
+        dep3 = DependencyReference.parse("owner/my-dashed-repo")
+        assert dep3.reference == "v3.0.0"
+
+    def test_load_version_env_file(self, tmp_path, monkeypatch):
+        """Test that _load_version_env reads version.env and sets environment variables."""
+        from apm_cli.cli import _load_version_env
+
+        # Change current working directory to temp path
+        monkeypatch.chdir(tmp_path)
+
+        env_content = (
+            "# This is a comment\n"
+            "APM_OH_MY_OPENAGENT=v4.0.0\n"
+            "APM_NEXUS = v2.5.0\n"
+        )
+
+        env_file = tmp_path / "version.env"
+        env_file.write_text(env_content, encoding="utf-8")
+
+        # Run loading function
+        _load_version_env()
+
+        import os
+        assert os.environ.get("APM_OH_MY_OPENAGENT") == "v4.0.0"
+        assert os.environ.get("APM_NEXUS") == "v2.5.0"
+
+        # Clean up environment variables
+        monkeypatch.delenv("APM_OH_MY_OPENAGENT", raising=False)
+        monkeypatch.delenv("APM_NEXUS", raising=False)
+
     def test_parse_simple_repo(self):
         """Test parsing simple user/repo format."""
         dep = DependencyReference.parse("user/repo")
