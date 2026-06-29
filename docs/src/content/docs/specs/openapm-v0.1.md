@@ -830,10 +830,27 @@ This includes vendor-extension keys per [req-ext-001](#req-ext-001).
 <a id="req-lk-012"></a>
 **[req-lk-012]** A conforming **consumer** implementation MUST
 compute `deployed_file_hashes` and `local_deployed_file_hashes` as
-SHA-256 hash envelopes (`sha256:<hex-lowercase>`) of the deployed
-file bytes as written to disk. Directory entries (paths ending in
-`/`) MUST NOT have a hash entry. The hash envelope `<algo>:<hex>`
-form defined by [req-lk-016](#req-lk-016) applies uniformly.
+SHA-256 hash envelopes (`sha256:<hex-lowercase>`) over the *canonical
+content* of each deployed file. The canonical content is defined as
+follows: if the file's bytes decode as UTF-8 and contain no NUL
+(`0x00`) byte (a *text* file), the canonical content is those bytes
+with every `\r\n` sequence replaced by `\n` (a lone `\r` is left
+unchanged); otherwise (a *binary* file) the canonical content is the
+raw bytes as written to disk. Directory entries (paths ending in `/`)
+MUST NOT have a hash entry. The hash envelope `<algo>:<hex>` form
+defined by [req-lk-016](#req-lk-016) applies uniformly.
+
+The text-file line-ending normalization makes the recorded hash
+*platform-invariant*: a file that git materializes with `\r\n` on a
+`core.autocrlf=true` checkout and with `\n` on a POSIX checkout yields
+one identical hash, so the record side (install) and the verify side
+([req-lk-017](#req-lk-017), `apm audit`) agree across operating
+systems (apm#1952). Preserving a lone `\r` is deliberate: only the
+benign `\r\n` -> `\n` platform difference is made hash-invisible,
+while a bare carriage return -- which a terminal or parser may treat
+as an overwrite -- still changes the hash. This domain matches the
+drift-replay normalizer, so the two integrity surfaces agree on what
+constitutes a content change.
 
 <a id="req-lk-013"></a>
 **[req-lk-013]** A conforming **consumer** implementation MUST verify
@@ -891,7 +908,8 @@ that left the bare-hex form open-ended).
 executing a frozen install (see
 [req-lk-006](#req-lk-006)) MUST re-verify every entry in
 `deployed_file_hashes` and `local_deployed_file_hashes` against the
-bytes written to disk and MUST fail closed on mismatch. The
+on-disk content, hashed over the canonical domain defined by
+[req-lk-012](#req-lk-012), and MUST fail closed on mismatch. The
 diagnostic MUST name the offending path, the expected envelope, and
 the observed envelope. The same re-verification MUST run on `apm
 audit`.
@@ -2906,6 +2924,7 @@ renumbering of conformance classes.
 | 0.1.5   | 2026-06-20 | Spec-citation fold for the executable primitive approval gate. Added new Section 10.13 "Executable primitive approval gate" with two consumer MUSTs: [req-sc-009] (deny deployment of any hook, bin, MCP server, or canvas extension from a dependency not listed in the effective `allowExecutables` approval set when the block is present -- fail closed) and [req-sc-010] (persist interactive approval decisions user-locally, not in the project `apm.yml`, so one developer's approval cannot propagate via VCS to teammates). Added rows 11 and 12 to the Section 10.11 summary table. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 90 -> 92 (87 MUST, 5 SHOULD). |
 | 0.1.6   | 2026-06-25 | Spec-citation fold for executable trust precedence and audit fidelity. Added Section 10.14 with two consumer MUSTs: [req-sc-011] (executable trust resolves through one deny-wins precedence; an org executables.deny/deny_all overrides any project or user grant; the install gate and the audit MUST reach the identical outcome via the shared resolver) and [req-sc-012] (a required package's audit asserts lockfile presence, not executable deployment; a present-but-withheld required package satisfies the presence requirement and surfaces a distinct withheld-executable signal). Added rows 13 and 14 to the Section 10.11 summary table. Section 11.3.2 and Appendix C updated. Statement count 92 -> 94 (89 MUST, 5 SHOULD). |
 | 0.1.7   | 2026-06-27 | Spec-citation fold for lockfile inventory metadata (closes the #1888 Mode-B silent-extension gate). Added [req-lk-019] (Section 5.2, consumer MUST): the optional per-entry `name` and `version` fields are self-asserted inventory metadata only -- preserved on round-trip per [req-lk-011], never a trust anchor, and never an identity, deduplication, or frozen-replay key (identity/replay derive solely from `repo_url`, `resolved_commit`, `resolved_tag`/`constraint`, and the recorded hash envelopes); their presence is additive and MUST NOT change `lockfile_version`. Added the `name` row to the Section 5.2 per-entry field table and broadened the `version` row note to non-semver sources; added `name` to the `entry` `$defs` in `lockfile-v0.1.schema.json` (sibling of `declared_license`). Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 94 -> 95 (90 MUST, 5 SHOULD). |
+| 0.1.8   | 2026-06-29 | Normative amendment (semver-zero `0.x` minor) to [req-lk-012]: redefined the `deployed_file_hashes` / `local_deployed_file_hashes` domain from "bytes as written to disk" to the *canonical content* -- UTF-8 text (decodable, no NUL byte) is hashed over its `\r\n` -> `\n` normalized form (a lone `\r` is preserved); binary is hashed raw. This makes the per-deployed-file hash platform-invariant so `apm audit --ci` no longer reports a false `content-integrity` drift when a file is checked out with `\r\n` on Windows (`core.autocrlf=true`) and `\n` on POSIX (apm#1952); it harmonizes `content-integrity` with the drift-replay normalizer. Preserving a bare `\r` keeps the carriage-return smuggling vector hash-visible. [req-lk-017] reworded to re-verify against the [req-lk-012] canonical domain rather than raw on-disk bytes (consistency, not a new obligation). Migration: lockfiles whose hashes were recorded on Windows before this amendment carry `\r\n`-domain hashes; one `apm install` re-records them in the canonical domain. No statement-count change (existing MUST modified, none added); 95 (90 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel + comment window. |
 
 Errata (none at publication).
 
