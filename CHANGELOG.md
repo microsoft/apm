@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install <bundle> --skill X` is now properly additive: a later
+  `apm install <bundle> --skill Y` adds `Y` on top of the existing pin instead
+  of silently removing the previously deployed `X` from disk. Deployment now
+  unions the persisted `apm.yml` `skills:` pin with the current `--skill`
+  values (matching the persistence behavior shipped in #1786), the lockfile
+  records the same union, and `--skill '*'` resets the pin back to the full
+  bundle. Drop a single skill by editing the `skills:` list in `apm.yml` and
+  re-running `apm install`. (#1955)
+
 ## [0.23.0] - 2026-06-28
 
 ### Added

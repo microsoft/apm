@@ -472,6 +472,11 @@ def _resolve_package_references(
                 # "Use --skill '*' to reset to all skills").
                 dep_ref.skill_subset = None
                 _apm_yml_entries[canonical] = dep_ref.to_apm_yml_entry()
+                if logger:
+                    logger.verbose_detail(
+                        f"    [i] {identity}: skill pin reset to full bundle "
+                        "(--skill '*'); a later bare 'apm install' deploys all skills"
+                    )
             if marketplace_dep_ref is not None or direct_virtual_resolved:
                 _apm_yml_entries[canonical] = dependency_reference_to_yaml_entry(dep_ref)
         except ValueError as e:
@@ -1059,7 +1064,7 @@ def _handle_mcp_install(
     "skill_names",
     multiple=True,
     metavar="NAME",
-    help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Persisted in apm.yml and apm.lock so bare 'apm install' is deterministic. Use --skill '*' to reset to all skills.",
+    help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Persisted in apm.yml and apm.lock so bare 'apm install' is deterministic. Additive across installs: a later --skill X adds X to the existing pin (union) rather than replacing it. Use --skill '*' to reset to all skills; to drop a single skill, edit the skills: list in apm.yml then re-run apm install.",
 )
 @click.option(
     "--no-policy",

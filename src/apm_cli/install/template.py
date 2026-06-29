@@ -129,6 +129,26 @@ def _integrate_materialization(
             ctx.package_deployed_files[dep_key] = []
             return deltas
 
+        # Per-package effective subset: ``--skill`` is additive (issue
+        # #1786), so deploy the UNION of the persisted apm.yml ``skills:``
+        # and the current CLI ``--skill`` values -- a targeted ``--skill``
+        # install lands on top of previously pinned skills instead of
+        # erasing them. ``--skill '*'`` resets to the full bundle (None).
+        effective_skill_subset = effective_deploy_skill_subset(
+            skill_subset_from_cli=ctx.skill_subset_from_cli,
+            cli_subset=ctx.skill_subset,
+            persisted_subset=dep_ref.skill_subset,
+        )
+        # When the additive union deploys more skills than the user named on
+        # this invocation, name the retained pins so the deployed set is not
+        # a silent surprise (verbose only -- the count already renders).
+        if logger and ctx.skill_subset and effective_skill_subset:
+            retained = sorted(set(effective_skill_subset) - set(ctx.skill_subset))
+            if retained:
+                logger.verbose_detail(
+                    f"    [i] {dep_key}: retaining previously pinned "
+                    f"skill(s): {', '.join(retained)}"
+                )
         int_result = integrate_package_primitives(
             m.package_info,
             ctx.project_root,
@@ -148,16 +168,7 @@ def _integrate_materialization(
             package_name=dep_key,
             logger=logger,
             scope=ctx.scope,
-            # Per-package effective subset: ``--skill`` is additive (issue
-            # #1786), so deploy the UNION of the persisted apm.yml ``skills:``
-            # and the current CLI ``--skill`` values -- a targeted ``--skill``
-            # install lands on top of previously pinned skills instead of
-            # erasing them. ``--skill '*'`` resets to the full bundle (None).
-            skill_subset=effective_deploy_skill_subset(
-                skill_subset_from_cli=ctx.skill_subset_from_cli,
-                cli_subset=ctx.skill_subset,
-                persisted_subset=dep_ref.skill_subset,
-            ),
+            skill_subset=effective_skill_subset,
             dep_target_subset=dep_ref.target_subset,
             ctx=ctx,
             allow_executables=_effective_allow(ctx),

@@ -246,7 +246,7 @@ class LockfileBuilder:
         for dep_key, locked_dep in lockfile.dependencies.items():  # noqa: B007
             if locked_dep.package_type == "skill_bundle":
                 merged = effective_deploy_skill_subset(
-                    skill_subset_from_cli=True,
+                    skill_subset_from_cli=self.ctx.skill_subset_from_cli,
                     cli_subset=self.ctx.skill_subset,
                     persisted_subset=locked_dep.skill_subset,
                 )
