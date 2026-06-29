@@ -20,6 +20,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PYTHON_VERSION: '3.12'
+
 jobs:
   probe:
     name: Probe (${{ matrix.os }})
@@ -30,10 +33,13 @@ jobs:
         os: [ ubuntu-latest, windows-latest, macos-latest ]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
       - uses: astral-sh/setup-uv@v6
 
       - name: Run cross-platform content-hash probe
-        run: uv run python scripts/crlf_invariance_probe.py --out hash.txt
+        run: uv run --python ${{ env.PYTHON_VERSION }} python scripts/crlf_invariance_probe.py --out hash.txt
 
       - name: Upload hash artifact
         uses: actions/upload-artifact@v4
