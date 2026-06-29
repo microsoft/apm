@@ -7,11 +7,11 @@ sidebar:
 
 Single source of truth for documented public and operator-facing environment variables APM reads. Variables are grouped by purpose. Unless noted, scope is **process** (the running `apm` invocation and any child processes it spawns); a small number toggle behaviour for the entire shell **session**.
 
-For CLI flags that pair with these variables, see the [reference index](./). For token policy and supply-chain guidance, see [Security and supply chain](../enterprise/security-and-supply-chain/).
+For CLI flags that pair with these variables, see the [reference index](./). For token policy and supply-chain guidance, see [Security model](../enterprise/security/).
 
 ## Authentication
 
-PAT / bearer credentials APM reads when cloning packages, calling host APIs, or wiring secrets into agent runtimes. Treat every value here as a secret: never commit, never log, never echo. See [Authentication](../consumer/authentication/) for the resolution chain and [Security and supply chain](../enterprise/security-and-supply-chain/) for token scoping.
+PAT / bearer credentials APM reads when cloning packages, calling host APIs, or wiring secrets into agent runtimes. Treat every value here as a secret: never commit, never log, never echo. See [Authentication](../consumer/authentication/) for the resolution chain and [Security model](../enterprise/security/) for token scoping.
 
 | Variable | Purpose | Default | Notes |
 |---|---|---|---|

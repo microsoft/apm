@@ -151,4 +151,4 @@ apm lifecycle untrust
   blocked from HTTP header expansion unless listed in `allowedEnvVars`.
 
 See [Lifecycle Scripts - Security](../../../enterprise/lifecycle-scripts/#security-considerations)
-and [Security and supply chain](../../../enterprise/security/) for the full security model.
+and [Security model](../../../enterprise/security/) for the full security model.

@@ -294,4 +294,4 @@ connected host with `apm pack` and restore offline. See
 - [Authentication](../consumer/authentication/) -- token resolution order
 - [Private and org packages](../consumer/private-and-org-packages/) -- per-host PAT scoping
 - [Pack and distribute](../producer/pack-a-bundle/) -- air-gapped bundle delivery
-- [Governance overview](./governance-overview/) -- policy-cache offline story
+- [Governance deep-dive](./governance-guide/) -- policy-cache offline story

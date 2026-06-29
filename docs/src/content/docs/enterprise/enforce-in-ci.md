@@ -11,8 +11,8 @@ pull request itself. That is defence in depth: a developer can pass
 `--no-policy`, `--force`, or `APM_POLICY_DISABLE=1` locally; CI cannot.
 
 This page is the recipe set. For the full schema and the rollout
-playbook, see [Governance overview](./governance-overview/) and
-[apm-policy getting started](./apm-policy-getting-started/).
+playbook, see [Governance deep-dive](./governance-guide/) and
+[apm-policy getting started](./apm-policy/).
 
 ## The gate
 
@@ -217,7 +217,7 @@ must be visible in the policy file's history.
 
 - [drift detection](./drift-detection/) -- what the replay actually
   catches and how to read its output.
-- [security and supply chain](./security-and-supply-chain/) -- the
+- [security model](./security/) -- the
   built-in install-time scan that complements the CI gate.
 - [github rulesets](./github-rulesets/) -- make the audit job a
   required status check across an org.

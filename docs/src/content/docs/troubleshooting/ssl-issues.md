@@ -7,7 +7,7 @@ sidebar:
 
 `apm install` and `apm audit` reach out to GitHub, GHES, GitLab, Azure DevOps, and package archives over HTTPS. When the system can't verify the server certificate, the operation fails. This page maps the failure modes to fixes.
 
-Related: [environment variables](../reference/environment-variables/), [install failures](./install-failures/), [security and supply chain](../enterprise/security-and-supply-chain/), [authentication](../getting-started/authentication/).
+Related: [environment variables](../reference/environment-variables/), [install failures](./install-failures/), [security model](../enterprise/security/), [authentication](../getting-started/authentication/).
 
 ## Symptoms
 
@@ -158,7 +158,7 @@ export GIT_SSL_NO_VERIFY=true       # git only
 export PYTHONHTTPSVERIFY=0          # Python stdlib only; requests ignores this
 ```
 
-What you lose: any guarantee that the host you reached is the host you intended to reach. Tokens you send may be captured. Packages you download may be tampered with - APM's [built-in security scanning](../enterprise/security-and-supply-chain/) still runs on the bytes received, but it cannot detect substitution upstream of itself.
+What you lose: any guarantee that the host you reached is the host you intended to reach. Tokens you send may be captured. Packages you download may be tampered with - APM's [built-in security scanning](../enterprise/security/) still runs on the bytes received, but it cannot detect substitution upstream of itself.
 
 Unset both as soon as you are done:
 

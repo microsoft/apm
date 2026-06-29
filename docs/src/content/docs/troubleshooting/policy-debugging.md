@@ -200,8 +200,8 @@ When you open the PR against the org policy repo:
    to hunt for it.
 
 For org-side context (who owns the policy, how rollouts work),
-see [Governance overview](../enterprise/governance-overview/) and
-[APM policy: getting started](../enterprise/apm-policy-getting-started/).
+see [Governance deep-dive](../enterprise/governance-guide/) and
+[APM policy: getting started](../enterprise/apm-policy/).
 
 ## See also
 

@@ -1,8 +1,6 @@
 ---
-title: Governance
+title: Governance deep-dive
 description: How APM controls, governs, and enforces agent configuration -- with explicit guarantees, bypass surfaces, and known limitations.
-sidebar:
-  order: 5
 ---
 
 :::note[Policy Engine Maturity]

@@ -36,7 +36,7 @@ For deeper definitions, see [Primitives and targets](/apm/concepts/primitives-an
 
 ## What APM is not
 
-- **Not a runtime.** APM governs the install and integrity plane -- what reaches disk and whether it conforms to policy. It does not govern the runtime plane -- what a running agent may do, which permissions it holds, or how it is sandboxed. That responsibility belongs to your agent harness. The two planes do not overlap. For how policy coexists with harness-managed configuration, see [Governance overview](/apm/enterprise/governance-overview/#boundary-statement).
+- **Not a runtime.** APM governs the install and integrity plane -- what reaches disk and whether it conforms to policy. It does not govern the runtime plane -- what a running agent may do, which permissions it holds, or how it is sandboxed. That responsibility belongs to your agent harness. The two planes do not overlap. For how policy coexists with harness-managed configuration, see [Governance deep-dive](/apm/enterprise/governance-guide/).
 - **Not an LLM gateway.** APM does not route, proxy, or meter model calls. It does not see your prompts at inference time.
 - **Not a fine-tuning tool.** APM versions context, not weights.
 - **Not a marketplace.** Any git repository is a valid APM package. Marketplaces are an optional discovery surface, not a requirement.
@@ -70,6 +70,6 @@ Org policy enforced at install time, before MCP touches disk. `apm-policy.yml` l
   </Card>
   <Card title="Enterprise" icon="approve-check">
     Gate org installs on policy and audit in CI.
-    [Governance overview](/apm/enterprise/governance-overview/)
+    [Governance deep-dive](/apm/enterprise/governance-guide/)
   </Card>
 </CardGrid>

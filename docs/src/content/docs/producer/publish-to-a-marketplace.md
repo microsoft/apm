@@ -275,7 +275,7 @@ range exits non-zero before you push the release commit.
 Org policy can restrict which marketplaces a consumer is allowed to
 register and which packages it can install from them. That gate runs
 on the consumer side at install time. See
-[Governance overview](../enterprise/governance-overview/) for the
+[Governance deep-dive](../enterprise/governance-guide/) for the
 producer-side implications (signing, allow-listed sources).
 
 ## Where next

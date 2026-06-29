@@ -23,7 +23,7 @@ Four concrete categories. Each has a different signal and a different fix.
 
 Marketplace-shadow drift -- the same plugin name appearing under more than
 one registered marketplace -- is reported inline by `apm install` when it
-happens; see [security and supply chain](./security-and-supply-chain/).
+happens; see [security model](./security/).
 
 ## The local commands
 
@@ -194,7 +194,7 @@ Once drift is detected, remediation routes back to two pages:
 - [Enforce in CI](./enforce-in-ci/) -- wire `apm audit --ci` into branch
   protection so future drift cannot land. The same command that detects
   drift here is the one that gates merges.
-- [Security and supply chain](./security-and-supply-chain/) -- scope
+- [Security model](./security/) -- scope
   tokens, lock the registry proxy, and tighten `apm-policy.yml` so the
   drift you cleaned up cannot reappear from a new source.
 

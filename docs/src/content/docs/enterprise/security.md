@@ -7,6 +7,10 @@ sidebar:
 
 This page documents APM's security posture for enterprise security reviews, compliance audits, and supply chain assessments.
 
+## Threat model
+
+APM defends the build-time supply chain for AI agent context: prompts, instructions, skills, hooks, and MCP server declarations flowing from a git source through `apm install` into your project tree and on into supported harnesses. The defended properties are reproducibility (same install everywhere), integrity (downloaded content matches the lockfile), provenance (every dep traces to a pinned commit at a named host), and pre-deploy content safety (no hidden Unicode reaches the agent). APM does NOT sandbox MCP servers at runtime, does not do malware analysis on dependency code, does not sign packages, and does not inspect what an agent does once it has read your context.
+
 ## The prompt supply chain is different
 
 Traditional package managers install code that sits inert until a developer or CI pipeline explicitly executes it. Between `npm install` and `npm start`, there is a gap — time for `npm audit`, code review, and policy checks.
@@ -187,6 +191,19 @@ Content scanning detects hidden Unicode characters. It does not detect:
 
 - **Hook transparency** — display hook script contents during install so developers can review what will execute.
 
+### External scanner hardening
+
+The experimental `external-scanners` feature can invoke a third-party SARIF scanner and optionally run its LLM-powered analysis -- a subprocess plus network-egress surface, hardened as follows:
+
+- **Allowlisted args only.** `--external-args` tokens are validated against a per-adapter allowlist. Non-allowlisted flags, secret-looking flags (`--token`, `--api-key`), or paths outside the working directory are rejected fail-closed; argv is always a list (no `shell=True`).
+- **Restrict-only policy.** A project `apm-policy.yml` can `allow_args: false` to strip args but can never add argv tokens nor force LLM mode on. Only the local user opts into LLM egress.
+- **Credential hygiene.** LLM API keys are forwarded only when LLM mode is active for that run and stripped otherwise; scanner stderr is secret-redacted before surfacing.
+- **Project-vs-org trust boundary.** LLM mode sends content to a third-party API, so it requires explicit user consent and is never triggered by an untrusted project-local policy file.
+
+## Policy gates that block install
+
+`apm-policy.yml` is evaluated before any download or write. The install preflight walks the resolved dependency graph -- including transitive MCP servers -- and fails the install if a dep is not in the allow list, falls under a deny rule, uses a forbidden source/scope, or violates a configured trust rule. In CI, `apm audit --ci` runs the same baseline plus policy checks (allow/deny lists, target restrictions, MCP transport restrictions). Tighten-only inheritance (enterprise -> org -> repo) is enforced so a downstream layer can never loosen an upstream rule. See [Get started with apm-policy.yml](./apm-policy/) and [Policy Reference](./policy-reference/).
+
 ## Content integrity hashing
 
 APM computes a SHA-256 hash of each downloaded package's file tree and stores it in `apm.lock.yaml` as `content_hash`. On subsequent installs, cached packages under `apm_modules/` are verified against the lockfile hash. When the on-disk tree no longer matches, APM logs a warning and re-downloads. If freshly downloaded content still does not match the lockfile record, the install **aborts** (possible supply-chain tampering). Use `apm install --update` to accept new upstream content and refresh the lockfile.
@@ -203,7 +220,17 @@ The hash is deterministic — computed over sorted file paths and contents, inde
 
 Lock files generated before this feature omit `content_hash`. APM handles this gracefully — verification is skipped and the hash is populated on the next install.
 
+On every cache hit, APM reads the cached checkout's `.git/HEAD` directly (not via `git rev-parse`, so a poisoned `.git/config` cannot subvert the check) and compares it to the lockfile's `resolved_commit`; on mismatch the cache entry is evicted and a fresh fetch runs. Local bundles get a fourth check: every file listed in `pack.bundle_files` is SHA-256 verified, symlinks under the bundle root are rejected, and unlisted files are flagged as a tampering signal.
+
 See the [Lock File Specification](../reference/lockfile-spec/#44-content-integrity) for field details.
+
+## Inventory export (SBOM)
+
+`apm lock export --format cyclonedx|spdx` serializes the lockfile into a CycloneDX 1.5 or SPDX 2.3 document. This is an inventory export, not a security attestation: it reflects exactly what `apm.lock.yaml` already recorded -- component identity (purl), recorded hashes, and the declared license -- and never re-resolves, re-hashes, or touches the network or filesystem.
+
+Component identity is a Package URL: `pkg:github/<owner>/<repo>@<commit>` for git deps, `pkg:oci/<name>@<digest>` for registry deps, and `pkg:generic/<name>@<content_hash>` for local primitives. Output is deterministic (components sorted by purl, pinned timestamp, stable key order), so two runs are byte-identical. Credentials embedded in a recorded URL (userinfo or query-string tokens) are scrubbed before they reach the document.
+
+APM records the license the package manifest *declares* (`license:` in `apm.yml`), validates it offline against the bundled SPDX id set, and passes it through. APM never reads or interprets `LICENSE` file text -- declared is not concluded. A not-declared license stays unknown (`NOASSERTION`), never silently upgraded. See [`apm lock export`](../reference/cli/lock/#export-sbom-inventory) and the [`license` manifest field](../reference/manifest-schema/#35-license) for reference.
 
 ## Path security
 
@@ -412,6 +439,18 @@ See [Azure DevOps AAD bearer tokens](#azure-devops-aad-bearer-tokens) above for 
 | Build-time injection | Malicious build steps execute | No build step — files are copied |
 | Hidden content injection | Not applicable (binary packages) | Pre-deploy scan blocks critical hidden Unicode; `apm audit` for on-demand checks |
 | Compromised policy intermediary | Not applicable (no policy layer) | A malicious mirror or MITM returns valid YAML with relaxed rules. Mitigated by [`policy.hash` consumer-side pin](./policy-reference/#96-hash-pin-policyhash-consumer-side-verification) which verifies raw bytes against a project-pinned digest. |
+
+## Recommended hardening
+
+For an org standardizing on APM:
+
+- Require `GITHUB_APM_PAT` / `ADO_APM_PAT` from a secret store, never developer dotfiles; scope tokens read-only on source repos.
+- Wire `apm audit --ci -f sarif -o audit.sarif` into branch protection and upload SARIF to GitHub code scanning.
+- Publish an `apm-policy.yml` from your `<org>/.github` repo with an allow list and an MCP transport restriction. See [Governance Guide](./governance-guide/).
+- Require signed commits on the source repos APM pulls from -- this is where the trust chain bottoms out.
+- Route dep traffic through an enterprise proxy with audit logging. See [Registry Proxy & Air-gapped](./registry-proxy/).
+- Forbid `allow_insecure: true` via the policy allow list, except where an air-gapped mirror demands it.
+- Scan committed `apm.yml` for literal secrets in `mcp.env` values -- APM assumes env-var indirection (`GITHUB_TOKEN: ${GITHUB_TOKEN}`) but does not enforce it. `apm install` auto-adds `apm_modules/` to `.gitignore`, keeping cached source trees out of commits.
 
 ## Frequently asked questions
 

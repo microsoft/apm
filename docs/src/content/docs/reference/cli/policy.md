@@ -150,9 +150,9 @@ APM Policy Status
   complements `apm policy status --check`.
 - [Policy reference](../../../enterprise/policy-reference/) -- canonical
   `apm-policy.yml` schema and enforcement semantics.
-- [Governance overview](../../../enterprise/governance-overview/) --
+- [Governance deep-dive](../../../enterprise/governance-guide/) --
   how policy fits the broader enterprise governance model.
-- [APM policy: getting started](../../../enterprise/apm-policy-getting-started/)
+- [APM policy: getting started](../../../enterprise/apm-policy/)
   -- author and publish your first `apm-policy.yml`.
 - [Enforce in CI](../../../enterprise/enforce-in-ci/) -- wire `audit`
   and `policy status` into pipelines.

@@ -147,6 +147,6 @@ Two escape hatches exist:
 Neither hides anything from `apm audit --ci` running in CI. They only
 relax local enforcement.
 
-If you are the one writing the policy, see [Governance overview](../enterprise/governance-overview/)
+If you are the one writing the policy, see [Governance deep-dive](../enterprise/governance-guide/)
 for the platform-team view -- this page is the consumer's view of a policy
 that is already in place.

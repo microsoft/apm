@@ -103,7 +103,7 @@ What these checks do **not** cover, by design:
   described below.
 - Org policy (allow-listed sources, forbidden primitives, scope
   restrictions). Policy enforcement is an enterprise concern; see
-  [Security and supply chain](../enterprise/security-and-supply-chain/)
+  [Security model](../enterprise/security/)
   and [Drift detection](../enterprise/drift-detection/).
 
 ## On-demand: `apm audit`
