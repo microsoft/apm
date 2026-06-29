@@ -214,6 +214,7 @@ export default defineConfig({
 						{ label: 'Enforce in CI', slug: 'enterprise/enforce-in-ci' },
 						{ label: 'Security model', slug: 'enterprise/security' },
 						{ label: 'Security and supply chain', slug: 'enterprise/security-and-supply-chain' },
+						{ label: 'Lifecycle scripts', slug: 'enterprise/lifecycle-scripts' },
 						{ label: 'Drift detection', slug: 'enterprise/drift-detection' },
 						{ label: 'Registry proxy and air-gapped', slug: 'enterprise/registry-proxy' },
 						{ label: 'Registries', slug: 'guides/registries' },
