@@ -4169,6 +4169,11 @@ class TestPluginBinDeploy:
         bin_dir = pkg_dir / "bin"
         bin_dir.mkdir()
         (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+        import os
+        import stat as _stat
+
+        if os.name == "posix":
+            (bin_dir / "myplugin").chmod(0o777)
         plugin_manifest_dir = pkg_dir / ".claude-plugin"
         plugin_manifest_dir.mkdir()
         (plugin_manifest_dir / "plugin.json").write_text('{"name": "myplugin"}')
@@ -4202,15 +4207,9 @@ class TestPluginBinDeploy:
 
         # Verify full user-only (0o700-style) permissions: owner rwx, and no
         # group/other read/write/execute bits at all.
-        import os
-        import stat as _stat
-
         if os.name == "posix":
             mode = deployed_bin.stat().st_mode
-            assert mode & _stat.S_IXUSR, "owner execute bit must be set"
-            assert (mode & 0o077) == 0, "no group/other permission bits may be set"
-            assert (mode & 0o7000) == 0, "special permission bits must be cleared"
-            assert (mode & 0o777) == 0o700, "deployed executable must be 0o700"
+            assert _stat.S_IMODE(mode) == 0o700, "deployed bin permissions must be 0o700"
 
     @pytest.mark.parametrize("previous_mode", [0o644, 0o755, 0o777, 0o4755])
     def test_bin_deploy_hardens_permissions_on_idempotent_reinstall(
@@ -4256,7 +4255,7 @@ class TestPluginBinDeploy:
         # for one case, a special bit preserved from the shipped package.
         deployed_bin.chmod(previous_mode)
         mode_before = deployed_bin.stat().st_mode
-        assert (mode_before & 0o7777) == previous_mode, "pre-condition: loose mode set"
+        assert _stat.S_IMODE(mode_before) == previous_mode, "pre-condition: loose mode set"
         assert mode_before & (0o077 | _stat.S_ISUID), "pre-condition: loose bits set"
 
         # Second install with identical content -- must harden permissions.
@@ -4267,10 +4266,7 @@ class TestPluginBinDeploy:
         )
 
         mode_after = deployed_bin.stat().st_mode
-        assert mode_after & _stat.S_IXUSR, "owner execute bit must be set"
-        assert (mode_after & 0o077) == 0, "all group/other bits must be cleared on re-install"
-        assert (mode_after & 0o7000) == 0, "all special bits must be cleared on re-install"
-        assert (mode_after & 0o777) == 0o700, "re-install must harden to 0o700"
+        assert _stat.S_IMODE(mode_after) == 0o700, "re-install must harden permissions to 0o700"
 
     def test_bin_deploy_suppressed_by_policy_deny(self, tmp_path: Path) -> None:
         """bin_deploy.deny list suppresses deployment for the matching package."""
@@ -4301,6 +4297,38 @@ class TestPluginBinDeploy:
 
         deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
         assert not deployed_bin.exists(), "bin/myplugin should NOT be deployed when in deny list"
+        assert result.skill_created is False
+
+    def test_bin_deploy_deny_normalizes_case_and_github_prefix(self, tmp_path: Path) -> None:
+        """bin_deploy.deny accepts common GitHub URL/prefix forms."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.policy.schema import ApmPolicy, BinDeployPolicy
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir, pkg_name="MyOwner/MyPlugin")
+        policy = ApmPolicy(
+            bin_deploy=BinDeployPolicy(deny=("https://github.com/myowner/myplugin.git",))
+        )
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+            policy=policy,
+        )
+
+        deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
+        assert not deployed_bin.exists(), "normalized bin_deploy.deny should suppress deployment"
         assert result.skill_created is False
 
     def test_bin_deploy_suppressed_by_deny_all(self, tmp_path: Path) -> None:
