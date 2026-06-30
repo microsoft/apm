@@ -25,11 +25,25 @@ from apm_cli.models.apm_package import (
     GitReferenceType,
     ResolvedReference,
 )
+from apm_cli.utils.archive import safe_extract_zip
 from apm_cli.utils.github_host import (
     build_artifactory_archive_url,
     is_artifactory_path,
     parse_artifactory_path,
 )
+
+
+def _mock_stream_response(
+    status_code: int = 200,
+    content: bytes = b"",
+    headers: dict[str, str] | None = None,
+) -> Mock:
+    resp = Mock()
+    resp.status_code = status_code
+    resp.content = content
+    resp.headers = headers or {}
+    resp.iter_content.return_value = iter([content] if content else [])
+    return resp
 
 # ── github_host.py: Artifactory path helpers ──
 
@@ -970,12 +984,10 @@ class TestArtifactoryArchiveDownload:
     def test_successful_extraction(self):
         """Archive is downloaded and extracted with root prefix stripped."""
         zip_bytes = self._make_zip_bytes()
-        mock_resp = Mock()
-        mock_resp.status_code = 200
-        mock_resp.content = zip_bytes
+        mock_resp = _mock_stream_response(200, zip_bytes)
 
         target = self.temp_dir / "pkg"
-        with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
+        with patch.object(self.downloader, "_resilient_get", return_value=mock_resp) as mock_get:
             self.downloader._download_artifactory_archive(
                 "art.example.com",
                 "artifactory/github",
@@ -989,15 +1001,13 @@ class TestArtifactoryArchiveDownload:
         assert (target / "README.md").exists()
         # Root prefix directory should NOT appear as a nested folder
         assert not (target / "repo-main").exists()
+        assert mock_get.call_args.kwargs["stream"] is True
 
     def test_falls_back_to_tags_url(self):
         """When heads URL returns 404, falls back to tags URL."""
         zip_bytes = self._make_zip_bytes()
-        mock_resp_404 = Mock()
-        mock_resp_404.status_code = 404
-        mock_resp_200 = Mock()
-        mock_resp_200.status_code = 200
-        mock_resp_200.content = zip_bytes
+        mock_resp_404 = _mock_stream_response(404)
+        mock_resp_200 = _mock_stream_response(200, zip_bytes)
 
         target = self.temp_dir / "pkg"
         with patch.object(
@@ -1018,8 +1028,7 @@ class TestArtifactoryArchiveDownload:
 
     def test_raises_on_all_failures(self):
         """Raises RuntimeError when both URLs fail."""
-        mock_resp = Mock()
-        mock_resp.status_code = 404
+        mock_resp = _mock_stream_response(404)
 
         target = self.temp_dir / "pkg"
         with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
@@ -1038,9 +1047,7 @@ class TestArtifactoryArchiveDownload:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w"):
             pass  # empty zip
-        mock_resp = Mock()
-        mock_resp.status_code = 200
-        mock_resp.content = buf.getvalue()
+        mock_resp = _mock_stream_response(200, buf.getvalue())
 
         target = self.temp_dir / "pkg"
         with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
@@ -1062,9 +1069,7 @@ class TestArtifactoryArchiveDownload:
             "skills/debug.prompt.md": b"# Debug\n",
         }
         zip_bytes = self._make_zip_bytes(files=files)
-        mock_resp = Mock()
-        mock_resp.status_code = 200
-        mock_resp.content = zip_bytes
+        mock_resp = _mock_stream_response(200, zip_bytes)
 
         target = self.temp_dir / "pkg"
         with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
@@ -1100,9 +1105,7 @@ class TestArtifactoryFileDownload:
     def test_extract_single_file(self):
         """Extract a specific file from the archive (full-archive fallback)."""
         zip_bytes = self._make_zip_bytes()
-        mock_resp = Mock()
-        mock_resp.status_code = 200
-        mock_resp.content = zip_bytes
+        mock_resp = _mock_stream_response(200, zip_bytes)
 
         with patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None):
             with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
@@ -1120,9 +1123,7 @@ class TestArtifactoryFileDownload:
     def test_file_not_found(self):
         """Raises RuntimeError when file is not in the archive."""
         zip_bytes = self._make_zip_bytes()
-        mock_resp = Mock()
-        mock_resp.status_code = 200
-        mock_resp.content = zip_bytes
+        mock_resp = _mock_stream_response(200, zip_bytes)
 
         with patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None):
             with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
@@ -1158,9 +1159,7 @@ class TestArtifactoryFileDownload:
     def test_entry_download_failure_falls_back_to_full_archive(self):
         """When entry download returns None, full archive is used."""
         zip_bytes = self._make_zip_bytes(files={"prompts/deploy.prompt.md": b"# Prompt content"})
-        mock_resp = Mock()
-        mock_resp.status_code = 200
-        mock_resp.content = zip_bytes
+        mock_resp = _mock_stream_response(200, zip_bytes)
 
         with patch("apm_cli.deps.artifactory_entry.fetch_entry_from_archive", return_value=None):
             with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
@@ -1224,33 +1223,54 @@ class TestArtifactoryEdgeCases:
                 zf.writestr(f"{root_prefix}{name}", content)
         return buf.getvalue()
 
-    def test_zip_path_traversal_blocked(self):
-        """Zip entries with ../ path traversal are silently skipped (CWE-22)."""
+    def test_zip_path_traversal_rejected(self):
+        """Zip entries with ../ path traversal are rejected (CWE-22)."""
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("repo-main/", "")
             zf.writestr("repo-main/apm.yml", b"name: test\nversion: 1.0.0\n")
             zf.writestr("repo-main/../../../etc/passwd", b"root:x:0:0")
-        mock_resp = Mock()
-        mock_resp.status_code = 200
-        mock_resp.content = buf.getvalue()
+        mock_resp = _mock_stream_response(200, buf.getvalue())
 
         target = self.temp_dir / "pkg"
         with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
-            self.downloader._download_artifactory_archive(
-                "art.example.com", "artifactory/github", "owner", "repo", "main", target
-            )
-        # Legitimate file extracted
-        assert (target / "apm.yml").exists()
-        # Traversal file must NOT exist anywhere outside target
+            with pytest.raises(RuntimeError, match="Failed to download"):
+                self.downloader._download_artifactory_archive(
+                    "art.example.com", "artifactory/github", "owner", "repo", "main", target
+                )
         assert not (self.temp_dir / "etc").exists()
+
+    def test_single_file_zip_path_traversal_rejected(self):
+        """Single-file archives also reject traversal instead of using extractall()."""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("../escape.txt", b"nope")
+        mock_resp = _mock_stream_response(200, buf.getvalue())
+
+        target = self.temp_dir / "pkg"
+        with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
+            with pytest.raises(RuntimeError, match="Failed to download"):
+                self.downloader._download_artifactory_archive(
+                    "art.example.com", "artifactory/github", "owner", "repo", "main", target
+                )
+        assert not (self.temp_dir / "escape.txt").exists()
+
+    def test_uncompressed_archive_limit_enforced(self, monkeypatch: pytest.MonkeyPatch):
+        """The shared safe zip limits apply to Artifactory archive extraction."""
+        zip_bytes = self._make_zip_bytes(files={"big.bin": b"x" * 2048})
+        mock_resp = _mock_stream_response(200, zip_bytes)
+
+        target = self.temp_dir / "pkg"
+        monkeypatch.setitem(safe_extract_zip.__kwdefaults__, "max_uncompressed", 1024)
+        with patch.object(self.downloader, "_resilient_get", return_value=mock_resp):
+            with pytest.raises(RuntimeError, match="Failed to download"):
+                self.downloader._download_artifactory_archive(
+                    "art.example.com", "artifactory/github", "owner", "repo", "main", target
+                )
 
     def test_oversized_archive_rejected(self):
         """Archives exceeding ARTIFACTORY_MAX_ARCHIVE_MB are rejected."""
-        zip_bytes = self._make_zip_bytes()
-        mock_resp = Mock()
-        mock_resp.status_code = 200
-        mock_resp.content = zip_bytes
+        mock_resp = _mock_stream_response(200, b"x")
 
         target = self.temp_dir / "pkg"
         # Set limit to 0 MB so any archive is too large
