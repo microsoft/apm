@@ -155,13 +155,11 @@ def render_unknown_target_error(
     runtime_command = ""
     if runtime_target:
         runtime_hint = (
-            f"\n'{display_value}' is a runtime alias, not an install target.\n"
+            f"'{display_value}' is a runtime alias, not an install target.\n"
             f"Use '--runtime {display_value}' for that runtime; it maps to target "
             f"'{runtime_target}'.\n"
         )
-        runtime_command = (
-            f"  apm install <pkg> --target {runtime_target} --runtime {display_value}\n"
-        )
+        runtime_command = f"  apm install <pkg> --runtime {display_value}\n"
 
     return (
         f"[x] Unknown target '{display_value}'\n"
