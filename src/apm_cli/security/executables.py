@@ -225,6 +225,20 @@ def _strip_version(package_key: str) -> str:
     return package_key.split("#", 1)[0]
 
 
+def normalize_bin_deploy_deny_key(value: object) -> str:
+    """Normalize package identity for legacy ``bin_deploy.deny`` matching."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        from apm_cli.models.apm_package import DependencyReference
+
+        raw = DependencyReference.parse(raw).get_canonical_dependency_string()
+    except ValueError:
+        raw = raw.removesuffix(".git")
+    return raw.rstrip("/").lower()
+
+
 def _map_grants(
     grant_map: dict[str, dict[str, bool]] | None,
     package_key: str,
@@ -271,8 +285,13 @@ def _org_denies(ctx: ExecTrustContext, name: str, exec_type: str) -> tuple[bool,
         return True, LAYER_ORG_DENY_ALL
     if _deny_glob_match(name, ctx.org_deny):
         return True, LAYER_ORG_DENY
-    if exec_type == EXEC_TYPE_BIN and _deny_glob_match(name, ctx.org_bin_deny):
-        return True, LAYER_ORG_DENY
+    if exec_type == EXEC_TYPE_BIN:
+        normalized_name = normalize_bin_deploy_deny_key(name)
+        normalized_bin_deny = frozenset(
+            normalize_bin_deploy_deny_key(pattern) for pattern in ctx.org_bin_deny
+        )
+        if _deny_glob_match(normalized_name, normalized_bin_deny):
+            return True, LAYER_ORG_DENY
     return False, None
 
 
@@ -1092,7 +1111,10 @@ def build_exec_trust_context(
         bin_deploy = getattr(policy, "bin_deploy", None)
         if bin_deploy is not None:
             org_bin_deny_all = bool(getattr(bin_deploy, "deny_all", False))
-            org_bin_deny = frozenset(getattr(bin_deploy, "deny", ()) or ())
+            org_bin_deny = frozenset(
+                normalize_bin_deploy_deny_key(entry)
+                for entry in (getattr(bin_deploy, "deny", ()) or ())
+            )
             org_signal = org_signal or org_bin_deny_all or bool(org_bin_deny)
 
     gate_enabled = project_executables_gate_enabled(data) or org_signal

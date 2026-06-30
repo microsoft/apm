@@ -4169,6 +4169,11 @@ class TestPluginBinDeploy:
         bin_dir = pkg_dir / "bin"
         bin_dir.mkdir()
         (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+        import os
+        import stat as _stat
+
+        if os.name == "posix":
+            (bin_dir / "myplugin").chmod(0o777)
         plugin_manifest_dir = pkg_dir / ".claude-plugin"
         plugin_manifest_dir.mkdir()
         (plugin_manifest_dir / "plugin.json").write_text('{"name": "myplugin"}')
@@ -4201,14 +4206,9 @@ class TestPluginBinDeploy:
         assert deployed_manifest in tp_files, "plugin.json not in target_paths"
 
         # Verify user-only execute: S_IXUSR set, S_IXGRP and S_IXOTH cleared.
-        import os
-        import stat as _stat
-
         if os.name == "posix":
             mode = deployed_bin.stat().st_mode
-            assert mode & _stat.S_IXUSR, "owner execute bit must be set"
-            assert not (mode & _stat.S_IXGRP), "group execute bit must NOT be set"
-            assert not (mode & _stat.S_IXOTH), "other execute bit must NOT be set"
+            assert _stat.S_IMODE(mode) == 0o700, "deployed bin permissions must be 0o700"
 
     def test_bin_deploy_hardens_permissions_on_idempotent_reinstall(self, tmp_path: Path) -> None:
         """Re-install of content-identical bin/ file still applies user-only execute.
@@ -4247,10 +4247,11 @@ class TestPluginBinDeploy:
         deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
         assert deployed_bin.is_file()
 
-        # Simulate a file previously deployed with loose permissions (0o755).
-        deployed_bin.chmod(0o755)
+        # Simulate a file previously deployed with loose permissions (0o777).
+        deployed_bin.chmod(0o777)
         mode_before = deployed_bin.stat().st_mode
         assert mode_before & _stat.S_IXGRP, "pre-condition: group-execute set"
+        assert mode_before & _stat.S_IWOTH, "pre-condition: other-write set"
 
         # Second install with identical content -- must harden permissions.
         integrator.integrate_package_skill(
@@ -4260,9 +4261,7 @@ class TestPluginBinDeploy:
         )
 
         mode_after = deployed_bin.stat().st_mode
-        assert mode_after & _stat.S_IXUSR, "owner execute bit must be set"
-        assert not (mode_after & _stat.S_IXGRP), "group execute bit must be cleared on re-install"
-        assert not (mode_after & _stat.S_IXOTH), "other execute bit must be cleared on re-install"
+        assert _stat.S_IMODE(mode_after) == 0o700, "re-install must harden permissions to 0o700"
 
     def test_bin_deploy_suppressed_by_policy_deny(self, tmp_path: Path) -> None:
         """bin_deploy.deny list suppresses deployment for the matching package."""
@@ -4293,6 +4292,38 @@ class TestPluginBinDeploy:
 
         deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
         assert not deployed_bin.exists(), "bin/myplugin should NOT be deployed when in deny list"
+        assert result.skill_created is False
+
+    def test_bin_deploy_deny_normalizes_case_and_github_prefix(self, tmp_path: Path) -> None:
+        """bin_deploy.deny accepts common GitHub URL/prefix forms."""
+        from apm_cli.core.scope import InstallScope
+        from apm_cli.policy.schema import ApmPolicy, BinDeployPolicy
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        (project_root / ".claude").mkdir()
+
+        pkg_dir = tmp_path / "apm_modules" / "myplugin"
+        pkg_dir.mkdir(parents=True)
+        bin_dir = pkg_dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "myplugin").write_text("#!/bin/sh\necho hello\n")
+
+        pkg_info = self._make_plugin_package(pkg_dir, pkg_name="MyOwner/MyPlugin")
+        policy = ApmPolicy(
+            bin_deploy=BinDeployPolicy(deny=("https://github.com/myowner/myplugin.git",))
+        )
+
+        integrator = SkillIntegrator()
+        result = integrator.integrate_package_skill(
+            pkg_info,
+            project_root,
+            scope=InstallScope.USER,
+            policy=policy,
+        )
+
+        deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
+        assert not deployed_bin.exists(), "normalized bin_deploy.deny should suppress deployment"
         assert result.skill_created is False
 
     def test_bin_deploy_suppressed_by_deny_all(self, tmp_path: Path) -> None:

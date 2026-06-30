@@ -89,6 +89,12 @@ class TestRow1OrgDeny:
         d_hooks = resolve_exec_decision(ctx, PKG, EXEC_TYPE_HOOKS)
         assert d_hooks.deciding_layer != LAYER_ORG_DENY_ALL
 
+    def test_legacy_bin_deploy_denies_normalized_github_url(self):
+        ctx = _ctx(org_bin_deny=frozenset({"https://github.com/OWNER/REPO.git"}))
+        d = resolve_exec_decision(ctx, PKG, EXEC_TYPE_BIN)
+        assert d.allowed is False
+        assert d.deciding_layer == LAYER_ORG_DENY
+
 
 class TestRow2UserDeny:
     def test_user_deny_denies(self):
