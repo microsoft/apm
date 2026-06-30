@@ -67,8 +67,7 @@ def _write_release_metadata(
                 "name": asset_name,
                 "digest": f"sha256:{digest}",
                 "browser_download_url": (
-                    "https://github.com/openai/codex/releases/download/"
-                    f"{version}/{asset_name}"
+                    f"https://github.com/openai/codex/releases/download/{version}/{asset_name}"
                 ),
             }
         ],
@@ -81,6 +80,7 @@ def _write_fake_curl(script_path: Path) -> None:
         """#!/bin/sh
 set -eu
 
+auth="no"
 output=""
 url=""
 
@@ -91,6 +91,11 @@ while [ "$#" -gt 0 ]; do
             shift 2
             ;;
         -H|--header)
+            case "$2" in
+                Authorization:*)
+                    auth="yes"
+                    ;;
+            esac
             shift 2
             ;;
         *)
@@ -109,9 +114,11 @@ done
 
 case "$url" in
     https://api.github.com/repos/*/releases/*)
+        printf 'api auth=%s url=%s\\n' "$auth" "$url" >> "$FAKE_CURL_LOG"
         cat "$FAKE_RELEASE_JSON"
         ;;
     https://github.com/*/releases/download/*)
+        printf 'download auth=%s url=%s\\n' "$auth" "$url" >> "$FAKE_CURL_LOG"
         if [ -z "$output" ]; then
             echo "missing output path" >&2
             exit 1
@@ -129,7 +136,13 @@ esac
     script_path.chmod(0o755)
 
 
-def _run_setup(tmp_path: Path, *, release_json: Path, tarball: Path) -> subprocess.CompletedProcess[str]:
+def _run_setup(
+    tmp_path: Path,
+    *,
+    release_json: Path,
+    tarball: Path,
+    env_updates: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     home_dir = tmp_path / "home"
     bin_dir = tmp_path / "bin"
     home_dir.mkdir()
@@ -138,13 +151,16 @@ def _run_setup(tmp_path: Path, *, release_json: Path, tarball: Path) -> subproce
 
     env = os.environ.copy()
     env["HOME"] = str(home_dir)
-    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', os.defpath)}"
     env["SHELL"] = "/bin/bash"
     env["TMPDIR"] = str(tmp_path)
+    env["FAKE_CURL_LOG"] = str(tmp_path / "curl.log")
     env["FAKE_RELEASE_JSON"] = str(release_json)
     env["FAKE_TARBALL"] = str(tarball)
     env.pop("GITHUB_TOKEN", None)
     env.pop("GITHUB_APM_PAT", None)
+    if env_updates is not None:
+        env.update(env_updates)
 
     return subprocess.run(
         ["bash", str(SETUP_SCRIPT), "--vanilla", TEST_VERSION],
@@ -164,7 +180,9 @@ def codex_platform() -> str:
     return platform_name
 
 
-def test_setup_codex_verifies_checksum_before_extracting(tmp_path: Path, codex_platform: str) -> None:
+def test_setup_codex_verifies_checksum_before_extracting(
+    tmp_path: Path, codex_platform: str
+) -> None:
     asset_name = f"codex-{codex_platform}.tar.gz"
     tarball = tmp_path / asset_name
     metadata = tmp_path / "release.json"
@@ -196,4 +214,79 @@ def test_setup_codex_rejects_mismatched_checksum(tmp_path: Path, codex_platform:
 
     assert result.returncode != 0
     assert "Checksum verification failed" in output
+    assert not (tmp_path / "home" / ".apm" / "runtimes" / "codex").exists()
+
+
+def test_setup_codex_runs_when_path_is_unset(
+    tmp_path: Path, codex_platform: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asset_name = f"codex-{codex_platform}.tar.gz"
+    tarball = tmp_path / asset_name
+    metadata = tmp_path / "release.json"
+
+    _write_fake_archive(tarball)
+    _write_release_metadata(metadata, asset_name=asset_name, digest=_sha256(tarball))
+    monkeypatch.delenv("PATH", raising=False)
+
+    result = _run_setup(tmp_path, release_json=metadata, tarball=tarball)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Verified Codex archive checksum" in result.stdout
+
+
+def test_setup_codex_uses_token_for_metadata_fetch(tmp_path: Path, codex_platform: str) -> None:
+    asset_name = f"codex-{codex_platform}.tar.gz"
+    tarball = tmp_path / asset_name
+    metadata = tmp_path / "release.json"
+
+    _write_fake_archive(tarball)
+    _write_release_metadata(metadata, asset_name=asset_name, digest=_sha256(tarball))
+
+    result = _run_setup(
+        tmp_path,
+        release_json=metadata,
+        tarball=tarball,
+        env_updates={"GITHUB_TOKEN": "ghp_test_token"},
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "api auth=yes" in (tmp_path / "curl.log").read_text(encoding="utf-8")
+
+
+def test_setup_codex_aborts_when_digest_absent_from_metadata(
+    tmp_path: Path, codex_platform: str
+) -> None:
+    asset_name = f"codex-{codex_platform}.tar.gz"
+    tarball = tmp_path / asset_name
+    metadata = tmp_path / "release.json"
+
+    _write_fake_archive(tarball)
+    _write_release_metadata(
+        metadata,
+        asset_name="codex-unrelated-platform.tar.gz",
+        digest=_sha256(tarball),
+    )
+
+    result = _run_setup(tmp_path, release_json=metadata, tarball=tarball)
+    output = result.stdout + result.stderr
+
+    assert result.returncode != 0
+    assert f"Failed to find checksum metadata for {asset_name}." in output
+    assert "download auth=" not in (tmp_path / "curl.log").read_text(encoding="utf-8")
+    assert not (tmp_path / "home" / ".apm" / "runtimes" / "codex").exists()
+
+
+def test_setup_codex_rejects_malformed_digest_format(tmp_path: Path, codex_platform: str) -> None:
+    asset_name = f"codex-{codex_platform}.tar.gz"
+    tarball = tmp_path / asset_name
+    metadata = tmp_path / "release.json"
+
+    _write_fake_archive(tarball)
+    _write_release_metadata(metadata, asset_name=asset_name, digest="notahex_short")
+
+    result = _run_setup(tmp_path, release_json=metadata, tarball=tarball)
+    output = result.stdout + result.stderr
+
+    assert result.returncode != 0
+    assert "did not include a valid SHA-256 digest" in output
     assert not (tmp_path / "home" / ".apm" / "runtimes" / "codex").exists()
