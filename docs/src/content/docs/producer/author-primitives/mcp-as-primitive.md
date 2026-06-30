@@ -114,12 +114,13 @@ shipped. Do not embed tokens. Two patterns work:
 ```
 
 Headers and env values are never shell-expanded by APM. For harnesses
-that support runtime env placeholders, APM preserves the placeholder so
-the harness resolves it when the server starts or the request is made.
-For harnesses that require literal values, APM resolves `${VAR}` from
-the install process environment and leaves unresolved placeholders
-unchanged. Keep the real secret in the consumer's environment (or their
-secret manager).
+that support runtime env placeholders (for example VS Code and Kiro),
+APM preserves the placeholder so the harness resolves it when the
+server starts or the request is made. For harnesses that require
+literal values (for example Claude Code and Codex self-defined stdio
+env), APM resolves `${VAR}` from the install process environment and
+leaves unresolved placeholders unchanged. Keep the real secret in the
+consumer's environment (or their secret manager).
 
 The `github-mcp-server` is a special case: APM injects an
 `Authorization: Bearer <token>` header automatically when it writes

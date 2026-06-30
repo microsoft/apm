@@ -544,8 +544,8 @@ def _install_self_defined_deps(
         synthetic_info = MCPIntegrator._build_self_defined_info(dep)
         self_defined_cache = {dep.name: synthetic_info}
         transport_label = dep.transport or "stdio"
-        # Stdio env values live in _raw_stdio and must be resolved by the
-        # adapter pipeline, not reused as env_overrides that shadow os.environ.
+        # Stdio env values live in _raw_stdio from _build_self_defined_info
+        # and resolve in the adapter pipeline, not via env_overrides.
         self_defined_env = {} if transport_label == "stdio" else dep.env or {}
         action_text = "Updating" if is_update else "Configuring"
         if console:

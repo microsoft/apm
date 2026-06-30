@@ -362,6 +362,38 @@ class TestRunMcpInstallSelfDefined:
         assert env_block["MY_TOKEN"] == "repro-secret-not-a-real-token"
         assert env_block["LITERAL_VALUE"] == "literal-value"
 
+    def test_self_defined_non_stdio_env_remains_env_overrides(self) -> None:
+        from apm_cli.integration.mcp_integrator import MCPIntegrator
+        from apm_cli.integration.mcp_integrator_install import run_mcp_install
+        from apm_cli.models.dependency.mcp import MCPDependency
+
+        dep = MCPDependency(
+            name="http-demo",
+            registry=False,
+            transport="http",
+            url="https://example.test/mcp",
+            env={"HTTP_TOKEN": "${HTTP_TOKEN}"},
+        )
+
+        with (
+            patch(
+                "apm_cli.integration.mcp_integrator_install._resolve_target_runtimes",
+                return_value=["claude"],
+            ),
+            patch("apm_cli.integration.mcp_integrator._get_console", return_value=None),
+            patch.object(
+                MCPIntegrator,
+                "_check_self_defined_servers_needing_installation",
+                return_value={"http-demo"},
+            ),
+            patch.object(MCPIntegrator, "_install_for_runtime", return_value=True) as install_mock,
+        ):
+            result = run_mcp_install([dep], runtime="claude", logger=MagicMock())
+
+        assert result == 1
+        install_mock.assert_called_once()
+        assert install_mock.call_args.args[2] == {"HTTP_TOKEN": "${HTTP_TOKEN}"}
+
 
 # ---------------------------------------------------------------------------
 # plain strings treated as registry deps
