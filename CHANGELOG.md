@@ -7,27 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-06-29
+
 ### Fixed
 
 - `apm audit --ci` no longer reports a false `content-integrity` hash-drift
-  failure when a deployed text file is checked out with Windows line endings
-  (`\r\n`) on one platform and POSIX line endings (`\n`) on another (e.g.
-  recorded on a Windows `core.autocrlf=true` checkout, audited in Linux CI).
-  Per-deployed-file hashes are now computed over canonical content -- UTF-8
-  text is normalized `\r\n` -> `\n` (a lone `\r` is preserved, so the
-  carriage-return smuggling vector is still caught) and binary is hashed raw
-  -- making the hash identical across platforms. Lockfiles whose hashes were
-  recorded on Windows before this fix re-record once on the next `apm install`.
-  Amends spec req-lk-012 (revision 0.1.8). (#1952)
+  failure when a deployed text file is checked out with Windows (`\r\n`) line
+  endings on one platform and POSIX (`\n`) line endings on another. Per-
+  deployed-file hashes are now computed over canonical content (UTF-8 text
+  normalized `\r\n` -> `\n` with a lone `\r` preserved so the carriage-return
+  smuggling vector is still caught, binary hashed raw), so they match across
+  platforms; lockfiles recorded on Windows before this fix re-record once on
+  the next `apm install`. (#1952, #1959)
 
 - `apm install <bundle> --skill X` is now properly additive: a later
   `apm install <bundle> --skill Y` adds `Y` on top of the existing pin instead
-  of silently removing the previously deployed `X` from disk. Deployment now
-  unions the persisted `apm.yml` `skills:` pin with the current `--skill`
-  values (matching the persistence behavior shipped in #1786), the lockfile
-  records the same union, and `--skill '*'` resets the pin back to the full
-  bundle. Drop a single skill by editing the `skills:` list in `apm.yml` and
-  re-running `apm install`. (#1955)
+  of silently removing the previously deployed `X` from disk. Reset the pin to
+  the full bundle with `--skill '*'`, or drop a single skill by editing the
+  `skills:` list in `apm.yml` and re-running `apm install`. (#1955)
 
 ## [0.23.0] - 2026-06-28
 
