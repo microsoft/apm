@@ -482,7 +482,9 @@ def set(key, value):  # noqa: F811
         )
 
 
-@config.command(help="Get a configuration value")
+@config.command(
+    help="Get a configuration value (omit KEY to list all settable keys with effective values)"
+)
 @click.argument("key", required=False)
 def get(key):
     """Get a configuration value or show all configuration.

@@ -728,6 +728,7 @@ def _render_marketplace_catalog(logger, written: list[tuple[str | None, Path]]) 
         "[Deprecated] Extract an APM bundle into the current project. "
         "Use 'apm install <bundle-path>' instead -- this command will be removed in a future release."
     ),
+    short_help="[Deprecated] Use 'apm install <bundle-path>' instead.",
 )
 @click.argument("bundle_path", type=click.Path(exists=True))
 @click.option(

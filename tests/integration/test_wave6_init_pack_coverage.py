@@ -412,6 +412,13 @@ class TestInitPluginNameValidation:
 class TestPackBasic:
     """Basic pack invocations with a skill project."""
 
+    def test_top_level_help_names_unpack_replacement(self, runner):
+        """Top-level command list names the replacement for deprecated unpack."""
+        result = runner.invoke(cli, ["--help"])
+        assert result.exit_code == 0, result.output
+        assert "unpack" in result.output
+        assert "apm install <bundle-path>" in result.output
+
     def test_pack_skill_project(self, runner, tmp_path, monkeypatch):
         """apm pack in a skill project produces output files."""
         monkeypatch.chdir(tmp_path)
