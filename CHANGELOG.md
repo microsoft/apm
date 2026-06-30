@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `apm audit --ci` no longer reports phantom drift for root-local hook files
   when audit replay writes into a scratch project root. (#1980)
+- Self-defined stdio MCP env placeholders now resolve from the install process
+  environment for Claude Code and Codex. (#1966)
 
 ## [0.23.1] - 2026-06-29
 

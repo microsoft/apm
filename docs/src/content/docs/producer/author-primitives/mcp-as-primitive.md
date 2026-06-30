@@ -104,7 +104,7 @@ shipped. Do not embed tokens. Two patterns work:
   headers:
     Authorization: "Bearer ${LINEAR_TOKEN}"
 
-# Stdio env -- value passed verbatim; use ${VAR} for indirection
+# Stdio env -- use ${VAR} for indirection from the installer environment
 - name: my-internal
   registry: false
   transport: stdio
@@ -113,9 +113,13 @@ shipped. Do not embed tokens. Two patterns work:
     API_TOKEN: "${MY_API_TOKEN}"
 ```
 
-Headers and env values are not shell-expanded by APM -- the harness
-does that when it spawns the server or makes the request. Keep the
-real secret in the consumer's environment (or their secret manager).
+Headers and env values are never shell-expanded by APM. For harnesses
+that support runtime env placeholders, APM preserves the placeholder so
+the harness resolves it when the server starts or the request is made.
+For harnesses that require literal values, APM resolves `${VAR}` from
+the install process environment and leaves unresolved placeholders
+unchanged. Keep the real secret in the consumer's environment (or their
+secret manager).
 
 The `github-mcp-server` is a special case: APM injects an
 `Authorization: Bearer <token>` header automatically when it writes

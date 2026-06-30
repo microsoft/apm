@@ -21,9 +21,12 @@ Covers branches not hit by existing MCP tests:
 from __future__ import annotations
 
 import contextlib
+import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import toml
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -308,6 +311,56 @@ class TestRunMcpInstallSelfDefined:
             run_mcp_install([sd_dep], runtime="copilot", logger=logger)
 
         # Function reached without crash is the assertion
+
+    @pytest.mark.parametrize(
+        ("runtime", "signal_dir", "config_relpath"),
+        [
+            ("claude", ".claude", ".mcp.json"),
+            ("codex", ".codex", ".codex/config.toml"),
+        ],
+    )
+    def test_self_defined_stdio_env_placeholders_resolve_from_process_env(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        runtime: str,
+        signal_dir: str,
+        config_relpath: str,
+    ) -> None:
+        from apm_cli.integration.mcp_integrator_install import run_mcp_install
+        from apm_cli.models.dependency.mcp import MCPDependency
+
+        (tmp_path / signal_dir).mkdir()
+        monkeypatch.setenv("MY_TOKEN", "repro-secret-not-a-real-token")
+        dep = MCPDependency(
+            name="env-demo",
+            registry=False,
+            transport="stdio",
+            command="npx",
+            args=["-y", "example-mcp"],
+            env={
+                "MY_TOKEN": "${MY_TOKEN}",
+                "LITERAL_VALUE": "literal-value",
+            },
+        )
+
+        result = run_mcp_install(
+            [dep],
+            runtime=runtime,
+            project_root=tmp_path,
+            logger=MagicMock(),
+        )
+
+        assert result == 1
+        config_path = tmp_path / config_relpath
+        if runtime == "claude":
+            env_block = json.loads(config_path.read_text(encoding="utf-8"))["mcpServers"][
+                "env-demo"
+            ]["env"]
+        else:
+            env_block = toml.load(config_path)["mcp_servers"]["env-demo"]["env"]
+        assert env_block["MY_TOKEN"] == "repro-secret-not-a-real-token"
+        assert env_block["LITERAL_VALUE"] == "literal-value"
 
 
 # ---------------------------------------------------------------------------

@@ -543,9 +543,10 @@ def _install_self_defined_deps(
         is_update = dep.name in servers_to_update
         synthetic_info = MCPIntegrator._build_self_defined_info(dep)
         self_defined_cache = {dep.name: synthetic_info}
-        self_defined_env = dep.env or {}
-
         transport_label = dep.transport or "stdio"
+        # Stdio env values live in _raw_stdio and must be resolved by the
+        # adapter pipeline, not reused as env_overrides that shadow os.environ.
+        self_defined_env = {} if transport_label == "stdio" else dep.env or {}
         action_text = "Updating" if is_update else "Configuring"
         if console:
             console.print(

@@ -369,7 +369,8 @@ dependencies:
         #                            and resolved at runtime.
         #                            Kiro: preserved as ${VAR} and resolved at runtime.
         #                            Cursor/Windsurf/OpenCode/Claude/Gemini: resolved at install time.
-        #                            Codex: passed through unchanged.
+        #                            Codex remote headers: passed through unchanged.
+        #                            Codex self-defined stdio env: resolved at install time.
         #   ${input:<id>}         -> VS Code prompts user at runtime
         #   <VAR>                 -> deprecated; auto-translated, emits a warning
         # Registry-declared optional env/input fields are omitted when unset;
