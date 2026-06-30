@@ -1531,7 +1531,10 @@ class SkillIntegrator(BaseIntegrator):
         bd_policy = policy.bin_deploy
         if bd_policy is None:
             return False
+        from apm_cli.security.executables import normalize_bin_deploy_deny_key
+
         canonical = package_info.get_canonical_dependency_string()
+        normalized_canonical = normalize_bin_deploy_deny_key(canonical)
         if bd_policy.deny_all:
             if logger:
                 logger.progress(
@@ -1539,7 +1542,8 @@ class SkillIntegrator(BaseIntegrator):
                     symbol="info",
                 )
             return True
-        if canonical in bd_policy.deny:
+        deny_entries = {normalize_bin_deploy_deny_key(entry) for entry in bd_policy.deny}
+        if normalized_canonical in deny_entries:
             if logger:
                 logger.progress(
                     f"bin_deploy.deny: skipping bin deploy for {canonical}",
@@ -1619,11 +1623,9 @@ class SkillIntegrator(BaseIntegrator):
         Skips the copy when an identical file already exists (unless *force*),
         keeping repeated installs quiet and idempotent.
 
-        When *make_executable* is True, only the owner (user) execute bit is
-        set; group and other execute bits are explicitly cleared.  Deployed
-        files live under ~/.claude/skills/ which is user-scoped, so there is
-        no reason to grant group/other execute access regardless of what the
-        source package shipped.
+        When *make_executable* is True, permissions are tightened to ``0o700``.
+        Deployed files live under ~/.claude/skills/ which is user-scoped, so
+        there is no reason to retain group/other access from the source package.
         """
         import os
         import stat
@@ -1638,11 +1640,9 @@ class SkillIntegrator(BaseIntegrator):
             shutil.copy2(src_file, dest_file)
 
         if make_executable and os.name == "posix":
-            current = dest_file.stat().st_mode
-            # User-only execute: set S_IXUSR, clear group and other execute bits.
             # Runs for both fresh copies and idempotent re-installs so that files
             # previously deployed by older APM versions are hardened in-place.
-            dest_file.chmod((current & ~(stat.S_IXGRP | stat.S_IXOTH)) | stat.S_IXUSR)
+            dest_file.chmod(stat.S_IRWXU)
 
         if not skip_copy and logger:
             logger.progress(f"deployed {src_file.name} -> {rel_label}", symbol="check")
