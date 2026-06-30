@@ -226,7 +226,7 @@ def _strip_version(package_key: str) -> str:
 
 
 def normalize_bin_deploy_deny_key(value: object) -> str:
-    """Normalize package identity for legacy ``bin_deploy.deny`` matching."""
+    """Normalize package identity for ``bin_deploy.deny`` storage and lookup."""
     raw = str(value or "").strip()
     if not raw:
         return ""
@@ -287,10 +287,7 @@ def _org_denies(ctx: ExecTrustContext, name: str, exec_type: str) -> tuple[bool,
         return True, LAYER_ORG_DENY
     if exec_type == EXEC_TYPE_BIN:
         normalized_name = normalize_bin_deploy_deny_key(name)
-        normalized_bin_deny = frozenset(
-            normalize_bin_deploy_deny_key(pattern) for pattern in ctx.org_bin_deny
-        )
-        if _deny_glob_match(normalized_name, normalized_bin_deny):
+        if _deny_glob_match(normalized_name, ctx.org_bin_deny):
             return True, LAYER_ORG_DENY
     return False, None
 
