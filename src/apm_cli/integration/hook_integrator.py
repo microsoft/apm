@@ -886,12 +886,18 @@ class HookIntegrator(BaseIntegrator):
         return rewritten, unique_scripts
 
     @staticmethod
+    def _root_local_identity_root(package_info, project_root: Path | None) -> Path | None:
+        """Return the project root used to identify root-local packages."""
+        return getattr(package_info, "root_local_project_root", None) or project_root
+
+    @staticmethod
     def _is_root_local_package(package_info, project_root: Path | None) -> bool:
         """Return True when *package_info* represents the project's own .apm content."""
-        if project_root is None:
+        identity_root = HookIntegrator._root_local_identity_root(package_info, project_root)
+        if identity_root is None:
             return False
         try:
-            return Path(package_info.install_path).resolve() == Path(project_root).resolve()
+            return Path(package_info.install_path).resolve() == Path(identity_root).resolve()
         except (OSError, RuntimeError):
             return False
 
@@ -951,7 +957,8 @@ class HookIntegrator(BaseIntegrator):
             str: Package name used as hook source marker and script namespace
         """
         if self._is_root_local_package(package_info, project_root):
-            return HookIntegrator._get_root_local_package_name(package_info, Path(project_root))
+            identity_root = HookIntegrator._root_local_identity_root(package_info, project_root)
+            return HookIntegrator._get_root_local_package_name(package_info, Path(identity_root))
         return package_info.install_path.name
 
     @staticmethod
