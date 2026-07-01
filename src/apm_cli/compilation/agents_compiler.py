@@ -500,10 +500,7 @@ class AgentsCompiler:
         elif not can_dedup_agents_md_instructions(config.target):
             skip_instructions = False
         else:
-            is_antigravity = (
-                config.target == "antigravity"
-                or (isinstance(config.target, frozenset) and "antigravity" in config.target)
-            )
+            is_antigravity = config.target == "antigravity"
             if is_antigravity:
                 dep_dir = self.base_dir / ".agents" / "rules"
                 log_dep_dir = ".agents/rules/"
