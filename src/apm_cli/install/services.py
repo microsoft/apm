@@ -186,7 +186,7 @@ def _log_canvas_skip(package_name: str, package_info: Any, logger: InstallLogger
         )
 
 
-def integrate_package_primitives(  # noqa: PLR0913
+def integrate_package_primitives(  # noqa: PLR0913, C901
     package_info: Any,
     project_root: Path,
     *,
@@ -205,6 +205,7 @@ def integrate_package_primitives(  # noqa: PLR0913
     is_first_party: bool = False,
     allow_executables: builtins.dict[str, builtins.dict[str, bool]] | None = None,
     dep_target_subset: list[str] | None = None,
+    real_project_root: Path | None = None,
 ) -> dict:
     """Run the full integration pipeline for a single package.
 
@@ -421,6 +422,11 @@ def integrate_package_primitives(  # noqa: PLR0913
                 _call_kwargs["user_scope"] = scope is InstallScope.USER
                 _call_kwargs["dep_targets_active"] = dep_targets_active
                 _call_kwargs["allowed_targets"] = allowed_dep_targets
+                # During drift replay, project_root points at the scratch tmpdir
+                # while the real project lives elsewhere.  Thread the real root so
+                # _is_root_local_package evaluates correctly (#1978).
+                if real_project_root is not None:
+                    _call_kwargs["real_project_root"] = real_project_root
             # Canvas integration: always pass is_first_party.  Approval
             # is enforced by the gate above (canvas already skipped if
             # not approved and not is_first_party), so here we always

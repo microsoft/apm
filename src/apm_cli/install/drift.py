@@ -518,6 +518,10 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     # Honor per-dependency 'targets:' narrowing from apm.yml so the
                     # replay does not write to targets excluded by the consumer (#1923).
                     dep_target_subset=lock_dep.target_subset or None,
+                    # Pass the real project root so hook-integrator ownership checks
+                    # (_is_root_local_package) evaluate against the actual project
+                    # directory, not the scratch tmpdir (#1978).
+                    real_project_root=project_root,
                 )
                 replayed_count += 1
     finally:
