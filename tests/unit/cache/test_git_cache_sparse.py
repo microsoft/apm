@@ -230,11 +230,14 @@ class TestPartialBareFlavor:
         config_cmds: list[list[str]] = []
 
         def _spy(cmd, *args, **kwargs):
-            cmd_list = list(cmd) if isinstance(cmd, (list, tuple)) else None
-            if cmd_list is not None and "clone" in cmd_list:
-                clone_cmds.append(cmd_list)
-            if cmd_list is not None and "config" in cmd_list:
-                config_cmds.append(cmd_list)
+            # Normalize any argv sequence (list/tuple) to a copied list so a
+            # call site that passes a tuple can't slip past this spawn guard.
+            # A bare str command (shell=True) is wrapped so ``in`` still works.
+            argv = [cmd] if isinstance(cmd, (str, bytes)) else list(cmd)
+            if "clone" in argv:
+                clone_cmds.append(argv)
+            if "config" in argv:
+                config_cmds.append(argv)
             return real_run(cmd, *args, **kwargs)
 
         monkeypatch.setattr(subprocess, "run", _spy)
