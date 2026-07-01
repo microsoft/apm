@@ -338,6 +338,28 @@ class TieredRefResolver:
         # Diagnostics: counts per tier across the run. Read by tests.
         self.stats: dict[str, int] = {tier.name: 0 for tier in tiers}
         self.stats["coalesced"] = 0
+        # Zero-I/O resolves of an already-concrete SHA. Tracked separately
+        # so verbose tier stats do not inflate the commits-API count.
+        self.stats["sha_passthrough"] = 0
+
+    def seed(self, repo_url: str, ref: str, sha: str) -> bool:
+        """Pre-populate the L0 per-run cache with a known ``ref -> sha``.
+
+        Used by the resolve phase to inject lockfile-verified commits
+        (``resolved_commit`` for the exact ``resolved_tag``) BEFORE any
+        download runs, so the subsequent ``resolve()`` for that ref gets an
+        L0 hit and the commits-API tier (L1) never fires. Idempotent; a
+        no-op unless ``sha`` is a full 40-char hex commit and ``ref`` is
+        non-empty. Returns ``True`` when a value was stored.
+
+        Safe because the seeded SHA is the lockfile's own trust anchor --
+        the same value ``resolve()`` would otherwise fetch from the network
+        and cache. No behavior change beyond eliminating the round-trip.
+        """
+        if not ref or not sha or not _SHA_RE.match(sha):
+            return False
+        self._cache.put(repo_url, ref, sha.lower())
+        return True
 
     def resolve(self, repo_ref: str | DependencyReference) -> ResolvedReference:
         """Resolve a git reference, dispatching through the tier waterfall.
@@ -353,6 +375,15 @@ class TieredRefResolver:
         # without re-implementing them per-tier.
         if not ref or dep_ref.is_artifactory():
             return self._legacy.resolve_full(dep_ref)
+
+        # Ref is already a concrete commit SHA (e.g. the download ref was
+        # rewritten from the lockfile): resolution is a no-op with zero I/O.
+        # Count it distinctly so verbose tier stats reflect *real* network
+        # round-trips -- previously this fell into the commits-API tier and
+        # inflated ``commits_api`` even though no HTTP call was made.
+        if _SHA_RE.match(ref):
+            self.stats["sha_passthrough"] = self.stats.get("sha_passthrough", 0) + 1
+            return self._build_result(dep_ref, ref, ref.lower(), tier_name="sha_passthrough")
 
         key = (dep_ref.repo_url, ref)
 

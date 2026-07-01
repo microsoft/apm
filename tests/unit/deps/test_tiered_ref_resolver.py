@@ -255,6 +255,82 @@ def test_orchestrator_caches_after_first_resolve():
     assert resolver.stats["per_run_cache"] == 2
 
 
+def test_seed_populates_l0_and_avoids_network_tier():
+    """A seeded ref resolves via L0 without touching the network tier."""
+    cache = PerRunRefCache()
+    network_tier = MagicMock()
+    network_tier.name = "commits_api"
+    network_tier.try_resolve.return_value = SHA_B  # would win if reached
+    legacy = _make_legacy_with(SHA_B)
+    resolver = TieredRefResolver(
+        tiers=[L0PerRunCache(cache=cache), network_tier, legacy],
+        cache=cache,
+        legacy=legacy,
+    )
+
+    assert resolver.seed("owner/repo", "main", SHA_A) is True
+
+    result = resolver.resolve(_dep(ref="main"))
+
+    assert result.resolved_commit == SHA_A  # seeded value, not the tier's
+    network_tier.try_resolve.assert_not_called()
+    assert resolver.stats["per_run_cache"] == 1
+    assert resolver.stats["commits_api"] == 0
+
+
+def test_sha_ref_counts_as_passthrough_not_commits_api():
+    """An already-concrete SHA ref resolves with zero I/O and does NOT
+    increment the commits-API tier counter."""
+    cache = PerRunRefCache()
+    network_tier = MagicMock()
+    network_tier.name = "commits_api"
+    network_tier.try_resolve.return_value = SHA_B
+    legacy = _make_legacy_with(SHA_B)
+    resolver = TieredRefResolver(
+        tiers=[L0PerRunCache(cache=cache), network_tier, legacy],
+        cache=cache,
+        legacy=legacy,
+    )
+
+    result = resolver.resolve(_dep(ref=SHA_A))
+
+    assert result.resolved_commit == SHA_A
+    network_tier.try_resolve.assert_not_called()
+    assert resolver.stats["commits_api"] == 0
+    assert resolver.stats["sha_passthrough"] == 1
+
+
+def test_seed_rejects_non_sha_and_empty_ref():
+    """seed() is a no-op for non-commit SHAs or empty refs."""
+    cache = PerRunRefCache()
+    legacy = _make_legacy_with(SHA_A)
+    resolver = TieredRefResolver(
+        tiers=[L0PerRunCache(cache=cache), legacy],
+        cache=cache,
+        legacy=legacy,
+    )
+
+    assert resolver.seed("owner/repo", "main", "not-a-sha") is False
+    assert resolver.seed("owner/repo", "", SHA_A) is False
+    assert resolver.seed("owner/repo", "v1.0.0", "") is False
+    assert cache.size() == 0
+
+
+def test_seed_normalizes_sha_case():
+    """A seeded upper-case SHA is stored and returned lower-cased."""
+    cache = PerRunRefCache()
+    legacy = _make_legacy_with(SHA_A)
+    resolver = TieredRefResolver(
+        tiers=[L0PerRunCache(cache=cache), legacy],
+        cache=cache,
+        legacy=legacy,
+    )
+
+    assert resolver.seed("owner/repo", "release", ("A" * 40)) is True
+    result = resolver.resolve(_dep(ref="release"))
+    assert result.resolved_commit == "a" * 40
+
+
 def test_orchestrator_collapses_concurrent_resolves():
     cache = PerRunRefCache()
     legacy = _make_legacy_with(SHA_A)
