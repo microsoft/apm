@@ -535,6 +535,32 @@ class GitCache:
             subprocess_env = env if env is not None else git_subprocess_env()
 
             try:
+                # Configure the consumer as a promisor pointing at the
+                # real upstream URL so missing blobs (the partial bare only
+                # carries trees) are lazy-fetched during checkout. Without
+                # this, ``git checkout`` would fail with "fatal: unable to
+                # read tree/blob" for any object missing from the local
+                # alternates. The fetch goes to ``promisor_url`` directly;
+                # auth comes from the inherited subprocess_env.
+                #
+                # ``promisor`` and ``partialclonefilter`` are set via
+                # ``-c key=val`` on the clone itself so they land in one git
+                # invocation. ``remote.origin.url`` cannot ride along -- git
+                # clone always writes it to the clone SOURCE (the local
+                # bare) after applying ``-c``, clobbering any override -- so
+                # it needs one post-clone ``git config``. Net: the promisor
+                # setup drops from three ``git config`` subprocesses to one.
+                # Fewer process spawns matters on hosts where each ``git``
+                # exec carries fixed overhead (e.g. on-access security
+                # scanning); behaviour is identical.
+                promisor_clone_args: list[str] = []
+                if promisor_url:
+                    promisor_clone_args = [
+                        "-c",
+                        "remote.origin.promisor=true",
+                        "-c",
+                        "remote.origin.partialclonefilter=blob:none",
+                    ]
                 # Clone from local bare repo (fast, no network)
                 subprocess.run(
                     [
@@ -545,6 +571,7 @@ class GitCache:
                         "--shared",
                         "--no-checkout",
                         "--no-recurse-submodules",
+                        *promisor_clone_args,
                         str(bare_dir),
                         str(staged),
                     ],
@@ -555,34 +582,25 @@ class GitCache:
                     check=True,
                 )
                 if promisor_url:
-                    # Configure consumer as a promisor pointing at the
-                    # real upstream URL so missing blobs (the partial
-                    # bare only carries trees) are lazy-fetched during
-                    # checkout. Without this, ``git checkout`` would
-                    # fail with "fatal: unable to read tree/blob" for
-                    # any object missing from the local alternates.
-                    # The fetch goes to ``promisor_url`` directly; auth
-                    # comes from the inherited subprocess_env.
-                    for cfg_args in (
-                        ["remote.origin.url", promisor_url],
-                        ["remote.origin.promisor", "true"],
-                        ["remote.origin.partialclonefilter", "blob:none"],
-                    ):
-                        subprocess.run(
-                            [
-                                git_exe,
-                                *_safe_git_args(),
-                                "-C",
-                                str(staged),
-                                "config",
-                                *cfg_args,
-                            ],
-                            capture_output=True,
-                            text=True,
-                            timeout=10,
-                            env=subprocess_env,
-                            check=True,
-                        )
+                    # Point origin at the real upstream (clone set it to the
+                    # local bare). Single config call; the other two promisor
+                    # keys were already applied via ``-c`` above.
+                    subprocess.run(
+                        [
+                            git_exe,
+                            *_safe_git_args(),
+                            "-C",
+                            str(staged),
+                            "config",
+                            "remote.origin.url",
+                            promisor_url,
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        env=subprocess_env,
+                        check=True,
+                    )
                 if sparse_paths:
                     # Sparse-cone setup BEFORE checkout. Failures raise
                     # (not silently fallen back to full checkout) because
