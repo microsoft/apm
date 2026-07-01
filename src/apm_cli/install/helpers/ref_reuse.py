@@ -11,7 +11,21 @@ once per repo instead of once per dep.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
+
+
+def _token_fingerprint(token: str | None) -> str | None:
+    """Return a non-reversible fingerprint of ``token`` for use as a cache key.
+
+    The cache lives on ``InstallContext``; keying by the raw PAT would leak
+    the credential into any ``repr(ctx)`` / debug dump / dict-key trace. A
+    truncated SHA-256 keeps distinct tokens in distinct buckets without
+    storing the secret. ``None`` (unauthenticated) maps to ``None``.
+    """
+    if token is None:
+        return None
+    return "sha256:" + hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
 
 
 def resolve_dep_token(dep_ref: Any, auth_resolver: Any) -> str | None:
@@ -40,23 +54,23 @@ def get_shared_ref_resolver(
 ) -> Any:
     """Return a ``RefResolver`` for ``(host, token)``, reused across a run.
 
-    When ``cache`` is provided, resolvers are memoized by ``(host, token)``
-    so the second and later deps from a repo reuse the instance (and its
-    ref cache). When ``lock`` is also provided, the get-or-create runs under
-    it -- required because the BFS download callback runs on a worker pool,
-    where unguarded concurrent first-touches would each build a resolver and
-    defeat the dedup. ``cache=None`` (the default caller behavior) builds a
-    fresh resolver per call, preserving the legacy one-per-dep path.
+    When ``cache`` is provided, resolvers are memoized so the second and
+    later deps from a repo reuse the instance (and its ref cache). The cache
+    key is ``(host, fingerprint(token))`` -- a non-reversible token
+    fingerprint, never the raw PAT, so the credential is not exposed via the
+    context object this cache lives on. When ``lock`` is also provided, the
+    get-or-create runs under it -- required because the BFS download callback
+    runs on a worker pool, where unguarded concurrent first-touches would
+    each build a resolver and defeat the dedup. ``cache=None`` (the default
+    caller behavior) builds a fresh resolver per call, preserving the legacy
+    one-per-dep path.
     """
     from apm_cli.marketplace.ref_resolver import RefResolver
 
     if cache is None:
         return RefResolver(host=host, token=token)
 
-    import hashlib
-
-    token_key = None if token is None else hashlib.sha256(token.encode("utf-8")).digest()
-    key = (host, token_key)
+    key = (host, _token_fingerprint(token))
     if lock is not None:
         with lock:
             resolver = cache.get(key)
