@@ -121,6 +121,11 @@ class InstallContext:
     # consumed by install/sources.py to plumb the resolution into the
     # lockfile via InstalledPackage.git_semver_resolution.
     git_semver_resolutions: dict[str, Any] = field(default_factory=dict)
+    # Run-scoped cache of RefResolver instances keyed by (host, token) so
+    # semver deps sharing an upstream repo reuse one ``git ls-remote`` tag
+    # listing (RefResolver memoizes per instance) instead of one per dep.
+    # Populated lazily in _maybe_resolve_git_semver during the resolve phase.
+    ref_resolver_cache: dict[Any, Any] = field(default_factory=dict)
     managed_files: set[str] = field(default_factory=set)
 
     # ------------------------------------------------------------------
