@@ -325,6 +325,7 @@ dependency's target-scoped primitives. They compose via intersection. See
   A non-empty list narrows reach; it never widens beyond what the install
   resolved. An empty list is a parse error; remove the field to mean
   "all".
+- Supported on: both `git:` and `path:` dependency forms.
 
 ```yaml
 dependencies:
@@ -334,6 +335,9 @@ dependencies:
 
     - git: owner/universal-hooks
       # no targets: all active install targets
+
+    - path: ./skills/my-local-skill
+      targets: [claude]         # local deps support targets: too
 ```
 
 The lockfile records `target_subset` for audit/display only. Install

@@ -815,7 +815,25 @@ class DependencyReference:
                     "or 'path' must be a local filesystem path "
                     "(starting with './', '../', '/', or '~')"
                 )
-            return cls.parse(local)
+            dep = cls.parse(local)
+            alias_override = entry.get("alias")
+            if alias_override is not None:
+                if not isinstance(alias_override, str) or not alias_override.strip():
+                    raise ValueError("'alias' field must be a non-empty string")
+                alias_override = alias_override.strip()
+                if not re.match(r"^[a-zA-Z0-9._-]+$", alias_override):
+                    raise ValueError(
+                        f"Invalid alias: {alias_override}. Aliases can only contain "
+                        "letters, numbers, dots, underscores, and hyphens"
+                    )
+                dep.alias = alias_override
+            skills_raw = entry.get("skills")
+            if skills_raw is not None:
+                dep.skill_subset = parse_skill_subset(skills_raw)
+            targets_raw = entry.get("targets")
+            if targets_raw is not None:
+                dep.target_subset = parse_target_subset(targets_raw)
+            return dep
 
         if "git" not in entry:
             raise ValueError(
@@ -2003,6 +2021,17 @@ class DependencyReference:
                 f"Cannot serialize unresolved marketplace dependency "
                 f"'{self.marketplace_plugin_name}@{self.marketplace_name}'"
             )
+        if self.is_local and self.local_path:
+            if self.skill_subset or self.target_subset or self.alias:
+                entry: dict = {"path": self.local_path}
+                if self.alias:
+                    entry["alias"] = self.alias
+                if self.skill_subset:
+                    entry["skills"] = sorted(self.skill_subset)
+                if self.target_subset:
+                    entry["targets"] = sorted(self.target_subset)
+                return entry
+            return self.to_canonical()
         if self.is_insecure:
             host = self.host or default_host()
             entry = {"git": f"http://{host}/{self.repo_url}"}
