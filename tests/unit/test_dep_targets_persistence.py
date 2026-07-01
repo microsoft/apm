@@ -46,6 +46,23 @@ class TestLocalPathDepTargets:
         with pytest.raises(ValueError, match="Unknown target"):
             DependencyReference.parse_from_dict({"path": "./local", "targets": ["notarealthing"]})
 
+    def test_local_path_parse_alias(self) -> None:
+        dep = DependencyReference.parse_from_dict({"path": "./local", "alias": "my-skills"})
+
+        assert dep.alias == "my-skills"
+        assert dep.is_local
+
+    def test_local_path_alias_round_trip(self) -> None:
+        entry = {"path": "./local", "alias": "my-skills"}
+
+        emitted = DependencyReference.parse_from_dict(entry).to_apm_yml_entry()
+
+        assert emitted == {"path": "./local", "alias": "my-skills"}
+
+    def test_local_path_alias_invalid_chars_raises(self) -> None:
+        with pytest.raises(ValueError, match="Invalid alias"):
+            DependencyReference.parse_from_dict({"path": "./local", "alias": "bad alias!"})
+
 
 def test_parse_targets_field() -> None:
     dep = DependencyReference.parse_from_dict({"git": "owner/repo", "targets": ["codex"]})

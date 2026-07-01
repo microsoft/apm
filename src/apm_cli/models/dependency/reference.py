@@ -2006,12 +2006,16 @@ class DependencyReference:
     def to_apm_yml_entry(self):
         """Return the entry to store in apm.yml.
 
-        For HTTP (insecure) deps, returns a dict with 'git' and 'allow_insecure' keys.
-        For deps with skill_subset, returns a dict with 'git' and 'skills' keys.
-        For all other deps, returns the canonical string (same as to_canonical()).
+        - Local path deps with alias, skill_subset, or target_subset: returns a dict
+          with a 'path' key plus the applicable optional keys.
+        - HTTP (insecure) git deps: returns a dict with 'git' and 'allow_insecure' keys.
+        - Git deps with skill_subset or target_subset: returns a dict with 'git' plus
+          the applicable optional keys.
+        - All other deps: returns the canonical string (same as to_canonical()).
 
         Returns:
-            str or dict: String for simple deps; dict for HTTP or skill-subset deps.
+            str or dict: String for simple deps; dict for local-with-subsets, HTTP, or
+            skill/target-subset deps.
 
         Raises:
             ValueError: If this is an unresolved marketplace dependency.
