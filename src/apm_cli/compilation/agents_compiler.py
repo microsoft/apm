@@ -500,15 +500,26 @@ class AgentsCompiler:
         elif not can_dedup_agents_md_instructions(config.target):
             skip_instructions = False
         else:
+            is_antigravity = (
+                config.target == "antigravity"
+                or (isinstance(config.target, frozenset) and "antigravity" in config.target)
+            )
+            if is_antigravity:
+                dep_dir = self.base_dir / ".agents" / "rules"
+                log_dep_dir = ".agents/rules/"
+            else:
+                dep_dir = self.base_dir / ".github" / "instructions"
+                log_dep_dir = ".github/instructions/"
+
             skip_instructions = _detect_deployed_instructions(
-                self.base_dir / ".github" / "instructions",
+                dep_dir,
                 self.base_dir,
                 lambda msg: self._log("warning", msg),
             )
             if skip_instructions:
                 self._log(
                     "progress",
-                    "Instructions already in .github/instructions/ -- omitting from"
+                    f"Instructions already in {log_dep_dir} -- omitting from"
                     " AGENTS.md to avoid duplicate context",
                     symbol="info",
                 )

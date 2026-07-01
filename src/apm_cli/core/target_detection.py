@@ -331,8 +331,8 @@ def can_dedup_agents_md_instructions(target: CompileTargetType) -> bool:
         # .github/instructions/ may be present, so we keep instructions
         # in AGENTS.md to be safe.
         return target == frozenset({"vscode"})
-    # Single-string targets: only "vscode" reads .github/instructions/.
-    return target == "vscode"
+    # Single-string targets: "vscode" and "antigravity" support deduplication.
+    return target in ("vscode", "antigravity")
 
 
 def get_target_description(target: UserTargetType) -> str:

@@ -717,13 +717,40 @@ class InstructionIntegrator(BaseIntegrator):
     def _convert_to_antigravity_rules(content: str) -> str:
         """Convert APM instruction content to Antigravity CLI rules format.
 
-        Strips YAML frontmatter (Antigravity rules are plain markdown with
-        no frontmatter) and returns the body as-is.
+        Parses existing YAML frontmatter, maps ``applyTo`` to Antigravity's
+        ``trigger: glob`` + ``globs`` frontmatter.
         """
+        from ..utils.yaml_io import load_yaml_str
+
+        body = content
+        apply_to = ""
+
+        # Parse existing frontmatter
         fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
         if fm_match:
-            return fm_match.string[fm_match.end() :].lstrip("\n")
-        return content
+            body = content[fm_match.end() :]
+            try:
+                fm = load_yaml_str(fm_match.group(1)) or {}
+            except Exception:
+                fm = {}
+            apply_to = str(fm.get("applyTo", "")).strip()
+
+        # Build Antigravity rules frontmatter
+        parts = ["---"]
+        safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
+        globs = parse_apply_to(safe_apply_to)
+        if globs:
+            parts.append("trigger: glob")
+            if len(globs) == 1:
+                parts.append(f"globs: {yaml_double_quote(globs[0])}")
+            else:
+                parts.append("globs:")
+                parts.extend(f"  - {yaml_double_quote(g)}" for g in globs)
+            parts.append("---")
+            return "\n".join(parts) + "\n\n" + body.lstrip("\n")
+
+        # No applyTo -> unconditional rule, return body without frontmatter
+        return body.lstrip("\n")
 
     def copy_instruction_claude(self, source: Path, target: Path) -> int:
         """Copy instruction file converted to Claude Code rules format.
