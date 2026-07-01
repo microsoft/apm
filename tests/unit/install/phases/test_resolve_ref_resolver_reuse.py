@@ -95,8 +95,11 @@ def test_concurrent_same_repo_deps_share_one_resolver_under_lock():
     import threading
     import time
 
+    n_threads = 8
     made = []
-    all_started = threading.Barrier(8)
+    all_started = threading.Barrier(n_threads)
+    errors: list[BaseException] = []
+    errors_lock = threading.Lock()
 
     class _SlowFakeRefResolver:
         def __init__(self, *, host=None, token=None):
@@ -113,26 +116,36 @@ def test_concurrent_same_repo_deps_share_one_resolver_under_lock():
 
     def worker(i):
         # Release all threads at once so they contend on the cache together.
-        all_started.wait(timeout=5)
-        _maybe_resolve_git_semver(
-            dep_ref=_semver_dep("owner/repo", f"packages/p{i}"),
-            existing_lockfile=None,
-            update_refs=False,
-            ref_resolver_cache=cache,
-            ref_resolver_cache_lock=lock,
-        )
+        # Capture any exception so a failure inside a worker thread surfaces
+        # as a test failure instead of a lost/warning-only thread error.
+        try:
+            all_started.wait(timeout=5)
+            _maybe_resolve_git_semver(
+                dep_ref=_semver_dep("owner/repo", f"packages/p{i}"),
+                existing_lockfile=None,
+                update_refs=False,
+                ref_resolver_cache=cache,
+                ref_resolver_cache_lock=lock,
+            )
+        except BaseException as exc:  # re-raised on the main thread
+            with errors_lock:
+                errors.append(exc)
 
     with (
         patch("apm_cli.marketplace.ref_resolver.RefResolver", _SlowFakeRefResolver),
         patch("apm_cli.deps.git_semver_resolver.GitSemverResolver", fake_semver),
     ):
-        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(n_threads)]
         for t in threads:
             t.start()
         for t in threads:
             t.join(timeout=10)
 
-    # Exactly one resolver despite 8 concurrent first-touches.
+    # Every worker must have terminated (no hang / deadlock).
+    assert not any(t.is_alive() for t in threads), "worker thread(s) did not terminate"
+    # Any exception raised inside a worker must fail the test, not be swallowed.
+    assert not errors, f"worker thread(s) raised: {errors!r}"
+    # Exactly one resolver despite n concurrent first-touches.
     assert len(made) == 1
     assert len(cache) == 1
 
@@ -163,4 +176,29 @@ def test_distinct_hosts_get_distinct_resolvers():
             )
     # Different host -> different cache key -> two resolvers.
     assert len(made) == 2
+    assert len(cache) == 2
+
+
+def test_cache_key_does_not_contain_raw_token():
+    """The raw PAT must never appear in a cache key (leak prevention)."""
+    from apm_cli.install.helpers.ref_reuse import get_shared_ref_resolver
+
+    secret = "ghp_SUPERSECRETTOKENVALUE1234567890"
+    cache: dict = {}
+
+    class _FakeRefResolver:
+        def __init__(self, *, host=None, token=None):
+            self.token = token
+
+    with patch("apm_cli.marketplace.ref_resolver.RefResolver", _FakeRefResolver):
+        resolver = get_shared_ref_resolver("github.com", secret, cache)
+
+    # The resolver still receives the real token (auth works)...
+    assert resolver.token == secret
+    # ...but no cache key exposes it.
+    for key in cache:
+        assert secret not in repr(key)
+    # Distinct tokens still map to distinct buckets.
+    with patch("apm_cli.marketplace.ref_resolver.RefResolver", _FakeRefResolver):
+        get_shared_ref_resolver("github.com", "ghp_a_different_token_000000", cache)
     assert len(cache) == 2
