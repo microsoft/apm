@@ -345,11 +345,13 @@ class TieredRefResolver:
     def seed(self, repo_url: str, ref: str, sha: str) -> bool:
         """Pre-populate the L0 per-run cache with a known ``ref -> sha``.
 
-        Used by the resolve phase to inject lockfile-verified commits
-        (``resolved_commit`` for the exact ``resolved_ref``) BEFORE any
-        download runs, so the subsequent ``resolve()`` for that ref gets an
-        L0 hit and the commits-API tier (L1) never fires. Idempotent; a
-        no-op unless ``sha`` is a full 40-char hex commit and ``ref`` is
+        Used by the resolve phase to inject a lockfile-verified commit
+        (``resolved_commit``) for a named ``resolved_ref`` -- a branch OR a
+        tag name, whichever the lockfile recorded -- BEFORE any download
+        runs, so the subsequent ``resolve()`` for that same ref gets an L0
+        hit and the commits-API tier (L1) never fires. ``ref`` must be the
+        exact ref string ``resolve()`` will look up. Idempotent; a no-op
+        unless ``sha`` is a full 40-char hex commit and ``ref`` is
         non-empty. Returns ``True`` when a value was stored.
 
         Safe because the seeded SHA is the lockfile's own trust anchor --

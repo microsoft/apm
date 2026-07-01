@@ -9,12 +9,15 @@ with zero network round-trips. Companion to the resolver-level tests in
 from __future__ import annotations
 
 import os
+import re
 import sys
 import types
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
 
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
+
+_FAKE_SHA_RE = re.compile(r"^[a-f0-9]{40}$", re.IGNORECASE)
 
 
 class _FakeResolver:
@@ -24,8 +27,8 @@ class _FakeResolver:
         self.seeded: list[tuple[str, str, str]] = []
 
     def seed(self, repo_url, ref, sha):
-        # Mirror the real guard: only 40-char hex + non-empty ref count.
-        if not ref or not sha or len(sha) != 40:
+        # Mirror the real guard: full 40-char hex SHA + non-empty ref.
+        if not ref or not sha or not _FAKE_SHA_RE.match(sha):
             return False
         self.seeded.append((repo_url, ref, sha))
         return True
@@ -107,3 +110,17 @@ def test_skips_entries_missing_ref_or_commit():
     )
     seed_ref_resolver_from_lockfile(_ctx(resolver=resolver, lockfile=lockfile))
     assert resolver.seeded == [("owner/repo", "main", SHA)]
+
+
+def test_skips_non_hex_commit_of_correct_length():
+    """A 40-char but non-hex resolved_commit is rejected by the guard."""
+    resolver = _FakeResolver()
+    not_hex = "z" * 40  # correct length, not a hex SHA
+    lockfile = _FakeLockfile(
+        [
+            _locked("owner/repo", "main", not_hex),
+            _locked("owner/repo", "release", SHA),  # valid
+        ]
+    )
+    seed_ref_resolver_from_lockfile(_ctx(resolver=resolver, lockfile=lockfile))
+    assert resolver.seeded == [("owner/repo", "release", SHA)]
