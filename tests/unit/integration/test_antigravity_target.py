@@ -175,7 +175,41 @@ def test_antigravity_instructions_deploy_to_agents_rules(tmp_path: Path) -> None
     )
 
 
-# ---------------------------------------------------------------------------
+def test_antigravity_instructions_deploy_multi_glob_to_agents_rules(tmp_path: Path) -> None:
+    (tmp_path / ".agents").mkdir()
+    package_dir = tmp_path / "pkg"
+    instructions_dir = package_dir / ".apm" / "instructions"
+    instructions_dir.mkdir(parents=True)
+    (instructions_dir / "style.instructions.md").write_text(
+        "---\n"
+        "description: Style rules\n"
+        'applyTo: "src/**/*.py, tests/**/*.py"\n'
+        "---\n\n"
+        "# Style\n\nUse type hints.\n",
+        encoding="utf-8",
+    )
+
+    result = InstructionIntegrator().integrate_instructions_for_target(
+        KNOWN_TARGETS["antigravity"],
+        _make_package_info(package_dir),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 1
+    target = tmp_path / ".agents" / "rules" / "style.md"
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == (
+        "---\n"
+        "trigger: glob\n"
+        "globs:\n"
+        '  - "src/**/*.py"\n'
+        '  - "tests/**/*.py"\n'
+        "---\n\n"
+        "# Style\n\nUse type hints.\n"
+    )
+
+
+# -----------------------------------------------------------------------------------------------------------
 # Skills -> .agents/skills/<pkg>/SKILL.md
 # ---------------------------------------------------------------------------
 

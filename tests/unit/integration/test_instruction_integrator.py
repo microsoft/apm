@@ -1435,6 +1435,40 @@ class TestApplyToCommaSplitting:
             assert "applyTo: '**/src/**,**/api/**,**/services/**'" in written
             assert "paths:" not in written
 
+    # ---- Antigravity ----
+
+    def test_antigravity_comma_list_emits_yaml_list(self):
+        content = "---\napplyTo: '**/src/**,**/api/**,**/services/**'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger: glob" in result
+        assert "globs:" in result
+        assert '  - "**/src/**"' in result
+        assert '  - "**/api/**"' in result
+        assert '  - "**/services/**"' in result
+        assert 'globs: "**/src/**,' not in result
+
+    def test_antigravity_single_glob_stays_scalar(self):
+        content = "---\napplyTo: '**/*.py'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger: glob" in result
+        assert 'globs: "**/*.py"' in result
+        assert '  - "**/*.py"' not in result
+
+    def test_antigravity_comma_whitespace_trimmed(self):
+        content = '---\napplyTo: "a, b , c"\n---\n\n# R'
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger: glob" in result
+        assert '  - "a"' in result
+        assert '  - "b"' in result
+        assert '  - "c"' in result
+
+    def test_antigravity_single_comma_falls_back_to_no_frontmatter(self):
+        content = '---\napplyTo: ","\n---\n\n# R'
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger: glob" not in result
+        assert "globs" not in result
+        assert "# R" in result
+
 
 class TestWindsurfRulesIntegration:
     """Test end-to-end Windsurf rules deployment."""
