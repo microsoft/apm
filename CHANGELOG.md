@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Hook events with PascalCase names (`PreToolUse`, `PostToolUse`) are now
+  silently renamed to camelCase when deploying to the `copilot` target.
+  Previously, `_HOOK_EVENT_MAP` had no `copilot` entry and the copilot deploy
+  path passed a hard-coded empty map, so packages authored in Claude style were
+  written verbatim and never recognised by Copilot. (#1977)
+
 ## [0.23.1] - 2026-06-29
 
 ### Fixed

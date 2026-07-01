@@ -117,6 +117,11 @@ class _MergeHookConfig:
 # Copilot (camelCase) or Claude (PascalCase) names; targets that use
 # different conventions get their events renamed during merge.
 _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
+    "copilot": {
+        # Claude PascalCase -> Copilot camelCase
+        "PreToolUse": "preToolUse",
+        "PostToolUse": "postToolUse",
+    },
     "claude": {
         # Copilot camelCase -> Claude PascalCase
         "preToolUse": "PreToolUse",
@@ -1234,6 +1239,18 @@ class HookIntegrator(BaseIntegrator):
                 root_dir=root_dir,
             )
 
+            # Rename hook event keys to the copilot camelCase convention.
+            # Packages are often authored with PascalCase (Claude-style) event
+            # names; the copilot entry in _HOOK_EVENT_MAP covers the canonical
+            # aliases so the deployed JSON is always valid for this target.
+            copilot_event_map = _HOOK_EVENT_MAP.get("copilot", {})
+            if copilot_event_map:
+                raw_hooks = rewritten.get("hooks", {})
+                rewritten = {
+                    **rewritten,
+                    "hooks": {copilot_event_map.get(k, k): v for k, v in raw_hooks.items()},
+                }
+
             # Generate target filename (clean, no -apm suffix)
             stem = hook_file.stem
             target_filename = f"{package_name}-{stem}.json"
@@ -1245,7 +1262,11 @@ class HookIntegrator(BaseIntegrator):
             ):
                 continue
 
-            _emit_hook_event_diagnostics(list(rewritten.get("hooks", {}).keys()), "copilot", {})
+            _emit_hook_event_diagnostics(
+                list(rewritten.get("hooks", {}).keys()),
+                "copilot",
+                _HOOK_EVENT_MAP.get("copilot", {}),
+            )
 
             # Write rewritten JSON
             with open(target_path, "w", encoding="utf-8") as f:
