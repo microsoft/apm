@@ -726,14 +726,18 @@ class InstructionIntegrator(BaseIntegrator):
         apply_to = ""
 
         # Parse existing frontmatter
-        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
+        fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
         if fm_match:
             body = content[fm_match.end() :]
             try:
                 fm = load_yaml_str(fm_match.group(1)) or {}
             except Exception:
                 fm = {}
-            apply_to = str(fm.get("applyTo", "")).strip()
+            raw_apply_to = fm.get("applyTo", "")
+            if isinstance(raw_apply_to, list):
+                apply_to = ",".join(str(item) for item in raw_apply_to)
+            else:
+                apply_to = str(raw_apply_to).strip()
 
         # Build Antigravity rules frontmatter
         parts = ["---"]

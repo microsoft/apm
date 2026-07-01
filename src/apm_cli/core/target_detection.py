@@ -309,13 +309,14 @@ def should_compile_copilot_instructions_md(target: CompileTargetType) -> bool:
 def can_dedup_agents_md_instructions(target: CompileTargetType) -> bool:
     """Check if instruction dedup is safe for AGENTS.md.
 
-    Returns True only when every target that reads AGENTS.md also reads
-    ``.github/instructions/`` -- meaning instructions can safely be omitted
-    from AGENTS.md without losing context for any consumer.
+    Returns True only when the target that reads AGENTS.md also reads its
+    respective deployed rules directory (``.github/instructions/`` for Copilot
+    or ``.agents/rules/`` for Antigravity) -- meaning instructions can safely
+    be omitted from AGENTS.md without losing context for any consumer.
 
-    Today only Copilot (vscode) reads both locations.  Codex, OpenCode,
-    Windsurf, and Gemini rely on AGENTS.md as their sole instruction source
-    and must always receive instruction content (issue #1678).
+    Today Copilot (vscode) and Antigravity support this native rules reading.
+    Codex, OpenCode, Windsurf, and Gemini rely on AGENTS.md as their sole
+    instruction source and must always receive instruction content (issue #1678).
 
     Args:
         target: The detected or configured target.  May be a string or a

@@ -1469,6 +1469,21 @@ class TestApplyToCommaSplitting:
         assert "globs" not in result
         assert "# R" in result
 
+    def test_antigravity_crlf_newlines_supported(self):
+        content = "---\r\napplyTo: 'src/**/*.py'\r\n---\r\n\r\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger: glob" in result
+        assert 'globs: "src/**/*.py"' in result
+
+    def test_antigravity_list_valued_apply_to(self):
+        content = "---\napplyTo:\n  - 'src/**/*.py'\n  - 'tests/**/*.py'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger: glob" in result
+        assert "globs:" in result
+        assert '  - "src/**/*.py"' in result
+        assert '  - "tests/**/*.py"' in result
+        assert 'globs: "[' not in result
+
 
 class TestWindsurfRulesIntegration:
     """Test end-to-end Windsurf rules deployment."""
