@@ -53,7 +53,10 @@ def get_shared_ref_resolver(
     if cache is None:
         return RefResolver(host=host, token=token)
 
-    key = (host, token)
+    import hashlib
+
+    token_key = None if token is None else hashlib.sha256(token.encode("utf-8")).digest()
+    key = (host, token_key)
     if lock is not None:
         with lock:
             resolver = cache.get(key)
