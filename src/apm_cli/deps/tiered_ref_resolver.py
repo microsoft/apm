@@ -346,7 +346,7 @@ class TieredRefResolver:
         """Pre-populate the L0 per-run cache with a known ``ref -> sha``.
 
         Used by the resolve phase to inject lockfile-verified commits
-        (``resolved_commit`` for the exact ``resolved_tag``) BEFORE any
+        (``resolved_commit`` for the exact ``resolved_ref``) BEFORE any
         download runs, so the subsequent ``resolve()`` for that ref gets an
         L0 hit and the commits-API tier (L1) never fires. Idempotent; a
         no-op unless ``sha`` is a full 40-char hex commit and ``ref`` is
