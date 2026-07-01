@@ -230,10 +230,11 @@ class TestPartialBareFlavor:
         config_cmds: list[list[str]] = []
 
         def _spy(cmd, *args, **kwargs):
-            if isinstance(cmd, list) and "clone" in cmd:
-                clone_cmds.append(cmd)
-            if isinstance(cmd, list) and "config" in cmd:
-                config_cmds.append(cmd)
+            cmd_list = list(cmd) if isinstance(cmd, (list, tuple)) else None
+            if cmd_list is not None and "clone" in cmd_list:
+                clone_cmds.append(cmd_list)
+            if cmd_list is not None and "config" in cmd_list:
+                config_cmds.append(cmd_list)
             return real_run(cmd, *args, **kwargs)
 
         monkeypatch.setattr(subprocess, "run", _spy)
