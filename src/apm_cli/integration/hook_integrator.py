@@ -117,6 +117,23 @@ class _MergeHookConfig:
 # Copilot (camelCase) or Claude (PascalCase) names; targets that use
 # different conventions get their events renamed during merge.
 _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
+    "copilot": {
+        # Claude PascalCase -> Copilot camelCase
+        "PreToolUse": "preToolUse",
+        "preToolUse": "preToolUse",
+        "PostToolUse": "postToolUse",
+        "postToolUse": "postToolUse",
+        "UserPromptSubmit": "userPromptSubmit",
+        "userPromptSubmit": "userPromptSubmit",
+        "Stop": "stop",
+        "stop": "stop",
+        "AgentStop": "agentStop",
+        "agentStop": "agentStop",
+        "PreTaskExecution": "preTaskExecution",
+        "preTaskExecution": "preTaskExecution",
+        "PostTaskExecution": "postTaskExecution",
+        "postTaskExecution": "postTaskExecution",
+    },
     "claude": {
         # Copilot camelCase -> Claude PascalCase
         "preToolUse": "PreToolUse",
@@ -1245,7 +1262,19 @@ class HookIntegrator(BaseIntegrator):
             ):
                 continue
 
-            _emit_hook_event_diagnostics(list(rewritten.get("hooks", {}).keys()), "copilot", {})
+            hooks = rewritten.get("hooks", {})
+            event_map = _HOOK_EVENT_MAP.get("copilot", {})
+            _emit_hook_event_diagnostics(list(hooks.keys()), "copilot", event_map)
+            if isinstance(hooks, dict):
+                renamed_hooks = {}
+                for raw_event_name, entries in hooks.items():
+                    event_name = event_map.get(raw_event_name, raw_event_name)
+                    if event_name in renamed_hooks and isinstance(renamed_hooks[event_name], list):
+                        if isinstance(entries, list):
+                            renamed_hooks[event_name].extend(entries)
+                            continue
+                    renamed_hooks[event_name] = entries
+                rewritten["hooks"] = renamed_hooks
 
             # Write rewritten JSON
             with open(target_path, "w", encoding="utf-8") as f:
