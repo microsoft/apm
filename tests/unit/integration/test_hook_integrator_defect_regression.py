@@ -199,3 +199,46 @@ def test_copilot_camel_events_pass_through_unchanged(tmp_path: Path) -> None:
     hook_keys = set(data.get("hooks", {}).keys())
 
     assert hook_keys == {"preToolUse", "postToolUse"}
+
+
+def test_copilot_duplicate_aliases_merged_not_dropped(tmp_path: Path) -> None:
+    """When both PascalCase and camelCase aliases appear for the same event,
+    their entry lists are merged -- no entries are silently dropped.
+
+    Regression for review feedback on #1985: the original dict comprehension
+    would silently overwrite the first alias's entries with the second's.
+    """
+    project = tmp_path / "project"
+    package_path = tmp_path / "pkg-dup"
+    (project / ".github").mkdir(parents=True)
+    hooks_dir = package_path / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [{"type": "command", "bash": "echo pascal"}],
+                    "preToolUse": [{"type": "command", "bash": "echo camel"}],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    HookIntegrator().integrate_package_hooks(
+        _package_info(package_path, name="pkg-dup"),
+        project,
+    )
+
+    output_file = project / ".github" / "hooks" / "pkg-dup-hooks.json"
+    assert output_file.exists()
+    data = json.loads(output_file.read_text(encoding="utf-8"))
+    hook_keys = set(data.get("hooks", {}).keys())
+
+    # Both aliases must collapse to a single camelCase key
+    assert "preToolUse" in hook_keys
+    assert "PreToolUse" not in hook_keys
+    # Both entry commands must survive in the merged list
+    commands = [e.get("bash") for e in data["hooks"]["preToolUse"]]
+    assert "echo pascal" in commands, "PascalCase alias entries must not be dropped"
+    assert "echo camel" in commands, "camelCase alias entries must not be dropped"

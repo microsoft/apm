@@ -1243,13 +1243,20 @@ class HookIntegrator(BaseIntegrator):
             # Packages are often authored with PascalCase (Claude-style) event
             # names; the copilot entry in _HOOK_EVENT_MAP covers the canonical
             # aliases so the deployed JSON is always valid for this target.
+            # When two source aliases map to the same camelCase key (e.g. both
+            # "PreToolUse" and "preToolUse" are present), their entry lists are
+            # merged so no entries are silently dropped.
             copilot_event_map = _HOOK_EVENT_MAP.get("copilot", {})
             if copilot_event_map:
                 raw_hooks = rewritten.get("hooks", {})
-                rewritten = {
-                    **rewritten,
-                    "hooks": {copilot_event_map.get(k, k): v for k, v in raw_hooks.items()},
-                }
+                merged_hooks: dict[str, list] = {}
+                for raw_key, entries in raw_hooks.items():
+                    target_key = copilot_event_map.get(raw_key, raw_key)
+                    if target_key not in merged_hooks:
+                        merged_hooks[target_key] = []
+                    if isinstance(entries, list):
+                        merged_hooks[target_key].extend(entries)
+                rewritten = {**rewritten, "hooks": merged_hooks}
 
             # Generate target filename (clean, no -apm suffix)
             stem = hook_file.stem
