@@ -200,10 +200,8 @@ def test_real_project_root_fixes_source_marker_for_merge_targets(
     assert pkg_name_real == "myapp"
 
     pkg_name_scratch = integrator._get_package_name(pkg_info, scratch)
-    assert pkg_name_scratch != "myapp" or pkg_name_scratch == real_project.name, (
-        "When project_root is scratch, package name must not match the real root name "
-        "via _is_root_local_package (it may equal real_project.name as a fallback)"
-    )
+    # Falls back to install_path.name when project_root != install_path.
+    assert pkg_name_scratch == pkg_info.install_path.name
 
 
 def test_get_hook_source_marker_uses_real_project_root_not_scratch(

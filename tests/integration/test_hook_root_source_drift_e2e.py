@@ -217,7 +217,7 @@ def test_audit_no_drift_after_clean_install(
     sidecar_rel: str | None,
     event_key: str,
 ) -> None:
-    """apm audit --check drift must exit 0 immediately after apm install (#1978).
+    """apm audit --ci must exit 0 immediately after apm install (#1978).
 
     Phantom drift was caused by the replay engine passing the scratch tmpdir
     as project_root to the hook integrator, making _is_root_local_package
