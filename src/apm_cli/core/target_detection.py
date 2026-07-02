@@ -326,6 +326,8 @@ def get_dedup_rules_dir(target: CompileTargetType) -> str | None:
         if target == frozenset({"vscode"}):
             return ".github/instructions"
         return None
+    if isinstance(target, str):
+        target = TARGET_ALIASES.get(target, target)
     if target == "vscode":
         return ".github/instructions"
     if target == "antigravity":

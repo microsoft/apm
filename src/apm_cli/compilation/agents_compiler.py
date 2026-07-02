@@ -80,7 +80,7 @@ def _detect_deployed_instructions(
         warn_fn(f"{rules_dir} is a symlink outside the project root -- ignoring")
         return False
 
-    if expected_filenames:
+    if expected_filenames is not None:
         return any((rules_dir / name).is_file() for name in expected_filenames)
     return any(rules_dir.glob("*.md"))
 
@@ -516,7 +516,7 @@ class AgentsCompiler:
                 expected_filenames = set()
                 from ..integration.targets import KNOWN_TARGETS
 
-                target_key = "vscode"
+                target_key = "copilot"
                 if "agents/rules" in str(rules_dir_rel):
                     target_key = "antigravity"
                 elif "claude/rules" in str(rules_dir_rel):

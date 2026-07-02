@@ -653,7 +653,8 @@ class InstructionIntegrator(BaseIntegrator):
             raw_apply_to = fm.get("applyTo", "")
             if isinstance(raw_apply_to, list):
                 globs = [
-                    s for item in raw_apply_to
+                    s
+                    for item in raw_apply_to
                     if (s := str(item).replace("\n", " ").replace("\r", " ").strip())
                 ]
             else:
@@ -742,7 +743,8 @@ class InstructionIntegrator(BaseIntegrator):
             raw_apply_to = fm.get("applyTo", "")
             if isinstance(raw_apply_to, list):
                 globs = [
-                    s for item in raw_apply_to
+                    s
+                    for item in raw_apply_to
                     if (s := str(item).replace("\n", " ").replace("\r", " ").strip())
                 ]
             else:

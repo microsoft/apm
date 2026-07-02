@@ -165,7 +165,7 @@ Google Antigravity CLI (`agy`), successor to Gemini CLI.
   - skills: `.agents/skills/<name>/SKILL.md`
   - hooks: `.agents/hooks.json` (Antigravity's native schema: `PreToolUse`/`PostToolUse`/`PreInvocation`/`PostInvocation`/`Stop`)
   - mcp: `.agents/mcp_config.json` (project; `mcpServers` key) or `~/.gemini/config/mcp_config.json` (user)
-- **Compile output.** `AGENTS.md`. Supports compilation deduplication: if `.agents/rules/` exists and contains at least one `.md` file, instructions are omitted from `AGENTS.md` to avoid duplicate context.
+- **Compile output.** `AGENTS.md`. Supports compilation deduplication: if `.agents/rules/` exists and contains at least one deployed instruction rule file (for the discovered `.apm/instructions/*.instructions.md` set), those instructions are omitted from `AGENTS.md` to avoid duplicate context.
 
 ## opencode
 
