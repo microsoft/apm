@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `apm install` now formats and emits Antigravity-native `trigger: glob` and `globs` frontmatter in `.agents/rules/*.md` files instead of stripping frontmatter entirely. (by @okamiconcept) (#1984)
+- `apm compile` now supports compilation deduplication for the `antigravity` target, omitting instructions from `AGENTS.md` when they are already present in `.agents/rules/`. (by @okamiconcept) (#1984)
+
 ### Security
 
 - `apm runtime setup codex` now verifies GitHub Releases SHA-256 asset

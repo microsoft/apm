@@ -167,11 +167,7 @@ def test_antigravity_instructions_deploy_to_agents_rules(tmp_path: Path) -> None
     assert target.exists()
     # Antigravity rules now carry trigger: glob frontmatter.
     assert target.read_text(encoding="utf-8") == (
-        "---\n"
-        "trigger: glob\n"
-        'globs: "src/**/*.py"\n'
-        "---\n\n"
-        "# Style\n\nUse type hints.\n"
+        '---\ntrigger: glob\nglobs: "src/**/*.py"\n---\n\n# Style\n\nUse type hints.\n'
     )
 
 
@@ -395,6 +391,7 @@ def test_antigravity_hooks_skip_when_agents_dir_absent(tmp_path: Path) -> None:
 def test_antigravity_instructions_included_without_rules_dir(tmp_path: Path) -> None:
     """Without .agents/rules/, instructions appear in AGENTS.md."""
     import yaml
+
     # Minimal apm.yml so discovery works
     with open(tmp_path / "apm.yml", "w") as f:
         yaml.dump({"name": "test-project", "version": "1.0.0"}, f)
@@ -407,6 +404,7 @@ def test_antigravity_instructions_included_without_rules_dir(tmp_path: Path) -> 
     )
 
     from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
     compiler = AgentsCompiler(str(tmp_path))
     config = CompilationConfig(target="antigravity", dry_run=False)
     result = compiler.compile(config)
@@ -419,6 +417,7 @@ def test_antigravity_instructions_included_without_rules_dir(tmp_path: Path) -> 
 def test_antigravity_instructions_skipped_with_populated_rules_dir(tmp_path: Path) -> None:
     """With .agents/rules/ containing .md files, instructions are skipped from AGENTS.md."""
     import yaml
+
     # Minimal apm.yml so discovery works
     with open(tmp_path / "apm.yml", "w") as f:
         yaml.dump({"name": "test-project", "version": "1.0.0"}, f)
@@ -432,9 +431,13 @@ def test_antigravity_instructions_skipped_with_populated_rules_dir(tmp_path: Pat
 
     rules_dir = tmp_path / ".agents" / "rules"
     rules_dir.mkdir(parents=True)
-    (rules_dir / "style.md").write_text("---\ntrigger: glob\nglobs: '**/*.py'\n---\nUse type hints.\n", encoding="utf-8")
+    (rules_dir / "style.md").write_text(
+        "---\ntrigger: glob\nglobs: '**/*.py'\n---\nUse type hints.\n",
+        encoding="utf-8",
+    )
 
     from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
     compiler = AgentsCompiler(str(tmp_path))
     config = CompilationConfig(target="antigravity", dry_run=False)
     result = compiler.compile(config)

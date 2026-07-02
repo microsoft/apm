@@ -980,14 +980,16 @@ class TestCoworkParserLayer:
 
 
 class TestCanDedupAgentsMdInstructions:
-    """Only vscode-only targets allow instruction dedup from AGENTS.md."""
+    """Only targets with dedicated local rules directories (vscode, antigravity) allow instruction dedup from AGENTS.md."""
 
     @pytest.mark.parametrize(
         ("target", "expected"),
         [
             # Copilot reads both AGENTS.md and .github/instructions/ -- safe to dedup.
             ("vscode", True),
-            # Non-Copilot targets only read AGENTS.md -- must NOT dedup.
+            # Antigravity reads both AGENTS.md and .agents/rules/ -- safe to dedup.
+            ("antigravity", True),
+            # Non-Copilot/Antigravity targets only read AGENTS.md -- must NOT dedup.
             ("codex", False),
             ("opencode", False),
             ("windsurf", False),
@@ -1005,6 +1007,7 @@ class TestCanDedupAgentsMdInstructions:
         ],
         ids=[
             "vscode-str",
+            "antigravity-str",
             "codex-str",
             "opencode-str",
             "windsurf-str",
