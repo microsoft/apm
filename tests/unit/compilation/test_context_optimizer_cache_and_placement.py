@@ -93,11 +93,12 @@ class TestUniversalApplyToFastPath:
         (tmp_path / "empty").mkdir()
 
         optimizer = ContextOptimizer(base_dir=str(tmp_path))
+        expected_directories = {tmp_path / f"pkg{i}" for i in range(30)}
         instruction = Instruction(
             name="global-standards",
             file_path=Path("global.instructions.md"),
             description="Global coding standards",
-            apply_to="**",
+            apply_to=" ** ",
             content="Global standards",
         )
 
@@ -115,10 +116,12 @@ class TestUniversalApplyToFastPath:
         assert optimizer._optimization_decisions[0].matching_directories == 30
         assert file_match_spy.call_count == 0
         assert glob_spy.call_count == 0
-        assert "**" in optimizer._pattern_cache
+        assert optimizer._pattern_cache["**"] == expected_directories
+        assert " ** " not in optimizer._pattern_cache
         for directory, analysis in optimizer._directory_cache.items():
             assert directory in optimizer._pattern_cache["**"]
             assert analysis.pattern_matches["**"] == analysis.total_files
+            assert " ** " not in analysis.pattern_matches
 
 
 class TestSelectivePlacementNonRootLCA:
