@@ -665,11 +665,16 @@ class TargetParamType(click.ParamType):
             # error format (#1154).
             from apm_cli.core.apm_yml import CANONICAL_TARGETS
             from apm_cli.core.errors import UnknownTargetError, render_unknown_target_error
+            from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
 
             err_msg = str(e)
             if "is not a valid target" in err_msg:
                 target_name = value if isinstance(value, str) else ",".join(value or [])
-                rendered = render_unknown_target_error(target_name, sorted(CANONICAL_TARGETS))
+                rendered = render_unknown_target_error(
+                    target_name,
+                    sorted(CANONICAL_TARGETS),
+                    RUNTIME_TO_CANONICAL_TARGET,
+                )
                 raise UnknownTargetError(rendered) from None
             # Click idiom: route validation errors through self.fail so the
             # user sees a clean "Invalid value for '--target': ..." message

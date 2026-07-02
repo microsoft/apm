@@ -13,7 +13,7 @@ This page is a hub. It tells you which tools are supported, how detection works,
 
 The full slot-by-slot capability table lives in [Targets matrix](../reference/targets-matrix/). At a glance, APM currently writes for:
 
-| Target               | Marker / signal                     | Notes                                  |
+| Tool / runtime       | Marker / signal                     | Notes                                  |
 |----------------------|--------------------------------------|----------------------------------------|
 | VS Code + Copilot    | `.github/copilot-instructions.md`    | Native instructions, prompts, agents   |
 | Claude Code          | `.claude/`                           | Skills, agents, commands, MCP          |
@@ -24,7 +24,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../reference/ta
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
 | Kiro                 | `.kiro/`                             | Steering + Skills + Hooks + MCP        |
-| JetBrains Copilot    | user-scope config dir (global)       | MCP only (user-scope path, `${env:VAR}` env substitution) |
+| JetBrains (`--runtime intellij`) | user-scope config dir (global)       | MCP only via the `copilot` target (user-scope path, `${env:VAR}` env substitution) |
 | Agent-Skills (cross) | `.agents/skills/`                    | Vendor-neutral skill sharing           |
 
 For exact per-target capabilities (which primitives are supported, transformer used, file layout), see [Targets matrix](../reference/targets-matrix/).
@@ -141,7 +141,7 @@ that directory is the auto-detect signal.
 
 ```bash
 # Install an MCP server into the JetBrains user-scope config
-apm install --mcp --runtime intellij <package>
+apm install --mcp <package> --runtime intellij
 ```
 
 Notes and limits:
@@ -150,7 +150,8 @@ Notes and limits:
   or `.windsurf/`, JetBrains is detected from the global config directory, not a
   file in your repo. It is therefore detected for every project on the machine
   once the plugin directory exists. Use `--runtime intellij` to target it
-  explicitly regardless of auto-detect.
+  explicitly regardless of auto-detect. `intellij` is a runtime alias that maps
+  to the `copilot` deployment target; do not pass it as `--target intellij`.
 - **Runtime env substitution.** JetBrains Copilot resolves `${env:VAR}` in
   `mcp.json` at server start. APM preserves env-var placeholders as
   `${env:VAR}` instead of writing matching host secrets into the config.

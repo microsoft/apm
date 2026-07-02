@@ -71,6 +71,18 @@ def test_unknown_target_error_lists_valid():
     assert "claude" in text
 
 
+def test_unknown_target_error_suggests_runtime_alias_flag():
+    text = render_unknown_target_error(
+        "intellij",
+        ["claude", "copilot", "cursor"],
+        {"intellij": "copilot"},
+    )
+    _assert_three_sections(text, ["unknown target", "invalid target"])
+    assert "--runtime intellij" in text
+    assert "--target copilot" in text
+    assert "maps to target 'copilot'" in text
+
+
 def test_unknown_target_error_suggests_copilot_not_first_alphabetical():
     """Suggestion must be a sensible default (#1188), not sorted-first."""
     valid = ["agent-skills", "claude", "copilot", "cursor"]

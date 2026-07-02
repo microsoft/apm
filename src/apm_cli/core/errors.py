@@ -10,7 +10,9 @@ a three-section structure:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 
 import click
 
@@ -66,6 +68,7 @@ _SIGNAL_LIST = (
     ".codex/, .gemini/, GEMINI.md, "
     ".opencode/, .windsurf/, .kiro/"
 )
+_EMPTY_RUNTIME_ALIAS_TARGETS: Mapping[str, str] = MappingProxyType({})
 
 
 def render_no_harness_error(project_root: Path | None = None) -> str:
@@ -116,7 +119,11 @@ def render_ambiguous_error(project_root: Path | None, detected: list[str]) -> st
     )
 
 
-def render_unknown_target_error(value: str, valid: list[str]) -> str:
+def render_unknown_target_error(
+    value: str,
+    valid: list[str],
+    runtime_alias_targets: Mapping[str, str] | None = None,
+) -> str:
     """Render the 3-section error for unknown target token."""
     # Hide ``agent-skills`` from the user-facing suggestion surface (#1208).
     # ``agent-skills`` is a meta-target (multi-harness fan-out to
@@ -145,14 +152,29 @@ def render_unknown_target_error(value: str, valid: list[str]) -> str:
     # back to the raw value (or "<empty>") if stripping consumes
     # everything, so the headline remains actionable.
     display_value = value.strip("[]'\" ") or value or "<empty>"
+    runtime_alias_targets = runtime_alias_targets or _EMPTY_RUNTIME_ALIAS_TARGETS
+    runtime_target = runtime_alias_targets.get(display_value)
+    runtime_hint = ""
+    runtime_command = ""
+    if runtime_target:
+        runtime_hint = (
+            "\n"
+            f"Use '--runtime {display_value}' for that runtime; it maps to target "
+            f"'{runtime_target}'.\n"
+            f"'{display_value}' is a runtime alias, not an install target.\n"
+        )
+        runtime_command = f"  apm install <pkg> --runtime {display_value}\n"
+
     return (
         f"[x] Unknown target '{display_value}'\n"
         "\n"
         f"Valid targets: {valid_csv}\n"
+        f"{runtime_hint}"
         "\n"
         "Fix with one of:\n"
         "\n"
         "  apm targets                            # see all supported harnesses\n"
+        f"{runtime_command}"
         f"  apm install <pkg> --target {suggestion}\n"
         "  apm install <pkg> --dry-run\n"
         "\n"

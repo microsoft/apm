@@ -695,6 +695,16 @@ class TestTargetParamType:
         with pytest.raises(click.UsageError, match="Unknown target"):
             self.tp.convert("invalid", None, None)
 
+    def test_runtime_alias_target_error_suggests_runtime_flag(self):
+        """Runtime aliases rejected as targets suggest the runtime flag."""
+        with pytest.raises(click.UsageError, match="Unknown target") as exc_info:
+            self.tp.convert("intellij", None, None)
+
+        message = str(exc_info.value)
+        assert "--runtime intellij" in message
+        assert "--target copilot" in message
+        assert "maps to target 'copilot'" in message
+
     def test_invalid_in_multi(self):
         """Invalid target in comma list produces clean error."""
         with pytest.raises(click.UsageError, match="Unknown target"):
