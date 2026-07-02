@@ -207,3 +207,53 @@ def test_root_hook_source_drift_heals_on_reinstall(
     assert len(user_owned) == 1, (
         f"User-owned hook entry must survive healing for {target}; entries={entries}"
     )
+
+
+@pytest.mark.parametrize("target, settings_rel, sidecar_rel, event_key", _HARNESS_CASES)
+def test_audit_no_drift_after_clean_install(
+    tmp_path: Path,
+    target: str,
+    settings_rel: str,
+    sidecar_rel: str | None,
+    event_key: str,
+) -> None:
+    """apm audit --ci must exit 0 immediately after apm install (#1978).
+
+    Phantom drift was caused by the replay engine passing the scratch tmpdir
+    as project_root to the hook integrator, making _is_root_local_package
+    return False and writing a bare source marker instead of _local/<name>.
+    This test locks in the fix: install then audit without any modifications
+    must report no drift.
+    """
+    project = tmp_path / "myapp"
+    project.mkdir()
+    (project / "apm.yml").write_text(
+        f"name: myapp\nversion: 0.0.0\ntargets:\n  - {target}\n",
+        encoding="utf-8",
+    )
+    hooks_dir = project / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "pre.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "command", "command": "echo apm-managed"}],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    install = _run(project, "install")
+    assert install.returncode == 0, install.stderr or install.stdout
+
+    audit = _run(project, "audit", "--ci")
+    assert audit.returncode == 0, (
+        f"apm audit reported drift immediately after a clean install for target={target}.\n"
+        f"stdout: {audit.stdout}\nstderr: {audit.stderr}"
+    )

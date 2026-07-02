@@ -1198,6 +1198,7 @@ class HookIntegrator(BaseIntegrator):
         diagnostics=None,
         target=None,
         dep_targets_active: bool = False,
+        real_project_root: Path | None = None,
     ) -> HookIntegrationResult:
         """Integrate hooks from a package into hooks dir (Copilot target).
 
@@ -1206,16 +1207,20 @@ class HookIntegrator(BaseIntegrator):
 
         Args:
             package_info: PackageInfo with package metadata and install path
-            project_root: Root directory of the project
+            project_root: Root directory of the project (scratch dir during replay)
             force: If True, overwrite user-authored files on collision
             managed_files: Set of relative paths known to be APM-managed
             target: Optional TargetProfile for scope-resolved root_dir
+            real_project_root: Actual project root for ownership checks during
+                drift replay, where project_root points at the scratch tmpdir.
 
         Returns:
             HookIntegrationResult: Results of the integration operation
         """
+        # Use real_project_root for ownership identity; project_root for file I/O.
+        _eff_root = real_project_root or project_root
         hook_files = self.find_hook_files(package_info.install_path)
-        package_name = self._get_package_name(package_info, project_root)
+        package_name = self._get_package_name(package_info, _eff_root)
         if not dep_targets_active:
             hook_files = _filter_hook_files_for_target(
                 hook_files,
@@ -1341,6 +1346,7 @@ class HookIntegrator(BaseIntegrator):
         target=None,
         user_scope: bool = False,
         dep_targets_active: bool = False,
+        real_project_root: Path | None = None,
     ) -> HookIntegrationResult:
         """Integrate hooks by merging into a target-specific JSON config.
 
@@ -1375,8 +1381,12 @@ class HookIntegrator(BaseIntegrator):
         # the gate is explicit rather than inferred from deploy-root shape.
         _deploy_root_for_rewrite = project_root if user_scope else None
 
+        # Use real_project_root for ownership identity; project_root for file I/O.
+        # During drift replay project_root is the scratch tmpdir (#1978).
+        _eff_root = real_project_root or project_root
+
         hook_files = self.find_hook_files(package_info.install_path)
-        package_name = self._get_package_name(package_info, project_root)
+        package_name = self._get_package_name(package_info, _eff_root)
         if not dep_targets_active:
             hook_files = _filter_hook_files_for_target(
                 hook_files,
@@ -1388,10 +1398,10 @@ class HookIntegrator(BaseIntegrator):
         if not hook_files:
             return _empty
 
-        source_marker = self._get_hook_source_marker(package_info, project_root, package_name)
-        heal_stale_root_source = self._is_root_local_package(package_info, project_root)
+        source_marker = self._get_hook_source_marker(package_info, _eff_root, package_name)
+        heal_stale_root_source = self._is_root_local_package(package_info, _eff_root)
         dependency_sources = (
-            self._dependency_hook_sources(project_root) if heal_stale_root_source else set()
+            self._dependency_hook_sources(_eff_root) if heal_stale_root_source else set()
         )
         hooks_integrated = 0
         scripts_copied = 0
@@ -1820,6 +1830,7 @@ class HookIntegrator(BaseIntegrator):
         user_scope: bool = False,
         dep_targets_active: bool = False,
         allowed_targets: set[str] | None = None,
+        real_project_root: Path | None = None,
     ) -> "HookIntegrationResult":
         """Integrate hooks for a single *target*.
 
@@ -1832,6 +1843,9 @@ class HookIntegrator(BaseIntegrator):
         ``~/.claude/settings.json`` -- see #1310 / #1354) or left
         repo-relative so checked-in project-scope configs stay portable
         across clones, contributors, and CI runners (#1394).
+
+        ``real_project_root`` overrides ownership identity checks during
+        drift replay, where ``project_root`` is the scratch tmpdir (#1978).
         """
         if dep_targets_active and (not allowed_targets or target.name not in allowed_targets):
             raise AssertionError(f"BUG: target {target.name} bypassed chokepoint filter")
@@ -1845,6 +1859,7 @@ class HookIntegrator(BaseIntegrator):
                 diagnostics=diagnostics,
                 target=target,
                 dep_targets_active=dep_targets_active,
+                real_project_root=real_project_root,
             )
 
         if target.name == "kiro":
@@ -1860,6 +1875,7 @@ class HookIntegrator(BaseIntegrator):
                 target=target,
                 user_scope=user_scope,
                 dep_targets_active=dep_targets_active,
+                real_project_root=real_project_root,
             )
 
         config = _MERGE_HOOK_TARGETS.get(target.name)
@@ -1874,6 +1890,7 @@ class HookIntegrator(BaseIntegrator):
                 target=target,
                 user_scope=user_scope,
                 dep_targets_active=dep_targets_active,
+                real_project_root=real_project_root,
             )
 
         return HookIntegrationResult(

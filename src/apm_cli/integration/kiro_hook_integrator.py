@@ -251,6 +251,7 @@ def integrate_kiro_hooks(
     target=None,
     user_scope: bool = False,
     dep_targets_active: bool = False,
+    real_project_root: Path | None = None,
 ) -> HookIntegrationResult:
     """Integrate hooks as one Kiro JSON file per hook action."""
     root_dir = target.root_dir if target else ".kiro"
@@ -258,8 +259,10 @@ def integrate_kiro_hooks(
     if not target_dir.exists():
         return HookIntegrationResult(0, 0, 0, [])
 
+    # Use real_project_root for ownership identity during drift replay (#1978).
+    _eff_root = real_project_root or project_root
     hook_files = integrator.find_hook_files(package_info.install_path)
-    package_name = integrator._get_package_name(package_info, project_root)
+    package_name = integrator._get_package_name(package_info, _eff_root)
     if not dep_targets_active:
         hook_files = _filter_hook_files_for_target(
             hook_files,
