@@ -66,9 +66,9 @@ def _detect_deployed_instructions(
 ) -> bool:
     """Return True when rules_dir contains at least one rule file safely inside base_dir.
 
-    Shared by the Claude and Copilot compile paths: each passes its own
-    target-specific rules directory (.claude/rules/ or .github/instructions/)
-    so the detection logic stays in one place (R0801 guard).
+    Shared by the Claude, Copilot, and Antigravity compile paths: each passes
+    its own target-specific rules directory (.claude/rules/, .github/instructions/,
+    or .agents/rules/) so the detection logic stays in one place (R0801 guard).
     """
     if not rules_dir.is_dir():
         return False
@@ -83,6 +83,42 @@ def _detect_deployed_instructions(
     if expected_filenames is not None:
         return any((rules_dir / name).is_file() for name in expected_filenames)
     return any(rules_dir.glob("*.md"))
+
+
+def _build_expected_rule_filenames(
+    target_key: str,
+    primitives: "AgentPrimitives",
+) -> set[str]:
+    """Return the set of expected rule filenames for *target_key* given *primitives*.
+
+    Shared by the Antigravity/Copilot (_compile_distributed) and Claude
+    (_compile_claude_md) dedup paths so the filename-building policy stays in
+    one place (R0801 guard).
+
+    Args:
+        target_key: Canonical KNOWN_TARGETS key (e.g. "claude", "copilot",
+            "antigravity").
+        primitives: Compiled agent primitives whose instructions drive the
+            expected filenames.
+
+    Returns:
+        A set of expected rule filenames (stem + target extension), or an empty
+        set if the target profile is unknown or lacks an ``instructions``
+        primitive mapping.
+    """
+    from ..integration.targets import KNOWN_TARGETS
+
+    expected: set[str] = set()
+    target_profile = KNOWN_TARGETS.get(target_key)
+    if target_profile and "instructions" in target_profile.primitives:
+        mapping = target_profile.primitives["instructions"]
+        extension = mapping.extension
+        for instr in primitives.instructions:
+            stem = instr.file_path.name
+            if stem.endswith(".instructions.md"):
+                stem = stem[: -len(".instructions.md")]
+            expected.add(f"{stem}{extension}")
+    return expected
 
 
 # Compiler families allowed inside a multi-target frozenset (built by
@@ -512,25 +548,16 @@ class AgentsCompiler:
                 dep_dir = self.base_dir / rules_dir_rel
                 log_dep_dir = f"{rules_dir_rel}/"
 
-                # Build expected filenames
-                expected_filenames = set()
-                from ..integration.targets import KNOWN_TARGETS
-
+                # Determine the target key using exact equality against the
+                # canonical paths returned by get_dedup_rules_dir() to avoid
+                # accidental substring matches if paths ever change.
                 target_key = "copilot"
-                if "agents/rules" in str(rules_dir_rel):
+                if rules_dir_rel == ".agents/rules":
                     target_key = "antigravity"
-                elif "claude/rules" in str(rules_dir_rel):
-                    target_key = "claude"
 
-                target_profile = KNOWN_TARGETS.get(target_key)
-                if target_profile and "instructions" in target_profile.primitives:
-                    mapping = target_profile.primitives["instructions"]
-                    extension = mapping.extension
-                    for instr in primitives.instructions:
-                        stem = instr.file_path.name
-                        if stem.endswith(".instructions.md"):
-                            stem = stem[: -len(".instructions.md")]
-                        expected_filenames.add(f"{stem}{extension}")
+                expected_filenames = _build_expected_rule_filenames(
+                    target_key, primitives
+                )
 
                 skip_instructions = _detect_deployed_instructions(
                     dep_dir,
@@ -818,19 +845,7 @@ class AgentsCompiler:
                 symbol="info",
             )
         else:
-            # Build expected filenames
-            expected_filenames = set()
-            from ..integration.targets import KNOWN_TARGETS
-
-            target_profile = KNOWN_TARGETS.get("claude")
-            if target_profile and "instructions" in target_profile.primitives:
-                mapping = target_profile.primitives["instructions"]
-                extension = mapping.extension
-                for instr in primitives.instructions:
-                    stem = instr.file_path.name
-                    if stem.endswith(".instructions.md"):
-                        stem = stem[: -len(".instructions.md")]
-                    expected_filenames.add(f"{stem}{extension}")
+            expected_filenames = _build_expected_rule_filenames("claude", primitives)
 
             skip_instructions = _detect_deployed_instructions(
                 self.base_dir / ".claude" / "rules",
