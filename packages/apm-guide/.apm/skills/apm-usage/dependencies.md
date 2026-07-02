@@ -167,12 +167,20 @@ instead so `@` remains reserved for git usernames and version syntax.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `path` | REQUIRED | Filesystem path (must start with `./`, `../`, `/`, or `~/`). |
+| `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
+| `skills` | OPTIONAL | Consumer-side skill subset for that dependency. Non-empty list of skill names. |
+| `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
 
 Local-path deps inside another local package resolve relative to that
 package's directory, not the project root.
 
 ```yaml
 - path: ./packages/my-skills
+
+- path: ./packages/local-review-kit
+  alias: local-review-kit
+  skills: [reviewer]
+  targets: [claude]
 ```
 
 ### Marketplace (`name` + `marketplace`)

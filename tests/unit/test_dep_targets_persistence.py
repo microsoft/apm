@@ -23,7 +23,7 @@ class TestLocalPathDepTargets:
         assert dep.target_subset is None
 
     def test_local_path_targets_round_trip(self) -> None:
-        entry = {"path": "./local", "targets": ["claude", "codex"]}
+        entry = {"path": "./local", "targets": ["codex", "claude"]}
 
         emitted = DependencyReference.parse_from_dict(entry).to_apm_yml_entry()
 
@@ -62,6 +62,10 @@ class TestLocalPathDepTargets:
     def test_local_path_alias_invalid_chars_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid alias"):
             DependencyReference.parse_from_dict({"path": "./local", "alias": "bad alias!"})
+
+    def test_local_path_unknown_field_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unsupported field"):
+            DependencyReference.parse_from_dict({"path": "./local", "target": ["claude"]})
 
 
 def test_parse_targets_field() -> None:

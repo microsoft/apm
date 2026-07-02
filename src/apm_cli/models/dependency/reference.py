@@ -34,7 +34,12 @@ from .identity import (
     build_canonical_dependency_string,
     build_dependency_unique_key,
 )
-from .subsets import parse_skill_subset, parse_target_subset
+from .object_fields import (
+    apply_optional_dependency_fields,
+    local_path_apm_yml_entry,
+    parse_alias_override,
+    reject_unknown_fields,
+)
 from .types import VirtualPackageType
 
 # Identity/semver helpers re-exported from .identity for back-compat imports.
@@ -805,6 +810,7 @@ class DependencyReference:
 
         # Support dict-form local path: { path: ./local/dir }
         if "path" in entry and "git" not in entry:
+            reject_unknown_fields(entry, {"path", "alias", "skills", "targets"}, "path")
             local = entry["path"]
             if not isinstance(local, str) or not local.strip():
                 raise ValueError("'path' field must be a non-empty string")
@@ -816,23 +822,7 @@ class DependencyReference:
                     "(starting with './', '../', '/', or '~')"
                 )
             dep = cls.parse(local)
-            alias_override = entry.get("alias")
-            if alias_override is not None:
-                if not isinstance(alias_override, str) or not alias_override.strip():
-                    raise ValueError("'alias' field must be a non-empty string")
-                alias_override = alias_override.strip()
-                if not re.match(r"^[a-zA-Z0-9._-]+$", alias_override):
-                    raise ValueError(
-                        f"Invalid alias: {alias_override}. Aliases can only contain "
-                        "letters, numbers, dots, underscores, and hyphens"
-                    )
-                dep.alias = alias_override
-            skills_raw = entry.get("skills")
-            if skills_raw is not None:
-                dep.skill_subset = parse_skill_subset(skills_raw)
-            targets_raw = entry.get("targets")
-            if targets_raw is not None:
-                dep.target_subset = parse_target_subset(targets_raw)
+            apply_optional_dependency_fields(dep, entry)
             return dep
 
         if "git" not in entry:
@@ -859,29 +849,17 @@ class DependencyReference:
             normalized_path = cls._normalize_parent_repo_decl_path(path_raw)
 
             ref_override = entry.get("ref")
-            alias_override = entry.get("alias")
             reference: str | None = None
             if ref_override is not None:
                 if not isinstance(ref_override, str) or not ref_override.strip():
                     raise ValueError("'ref' field must be a non-empty string")
                 reference = ref_override.strip()
 
-            alias_val: str | None = None
-            if alias_override is not None:
-                if not isinstance(alias_override, str) or not alias_override.strip():
-                    raise ValueError("'alias' field must be a non-empty string")
-                alias_override = alias_override.strip()
-                if not re.match(r"^[a-zA-Z0-9._-]+$", alias_override):
-                    raise ValueError(
-                        f"Invalid alias: {alias_override}. Aliases can only contain letters, numbers, dots, underscores, and hyphens"
-                    )
-                alias_val = alias_override
-
             return cls(
                 repo_url="_parent",
                 host=None,
                 reference=reference,
-                alias=alias_val,
+                alias=parse_alias_override(entry.get("alias")),
                 virtual_path=normalized_path,
                 is_virtual=True,
                 is_parent_repo_inheritance=True,
@@ -889,7 +867,6 @@ class DependencyReference:
 
         sub_path = entry.get("path")
         ref_override = entry.get("ref")
-        alias_override = entry.get("alias")
         allow_insecure = entry.get("allow_insecure", False)
         if not isinstance(allow_insecure, bool):
             raise ValueError("'allow_insecure' field must be a boolean")
@@ -919,30 +896,12 @@ class DependencyReference:
                 raise ValueError("'ref' field must be a non-empty string")
             dep.reference = ref_override.strip()
 
-        if alias_override is not None:
-            if not isinstance(alias_override, str) or not alias_override.strip():
-                raise ValueError("'alias' field must be a non-empty string")
-            alias_override = alias_override.strip()
-            if not re.match(r"^[a-zA-Z0-9._-]+$", alias_override):
-                raise ValueError(
-                    f"Invalid alias: {alias_override}. Aliases can only contain letters, numbers, dots, underscores, and hyphens"
-                )
-            dep.alias = alias_override
-
         # Apply sub-path as virtual package
         if sub_path:
             dep.virtual_path = sub_path
             dep.is_virtual = True
 
-        # Parse skills: field (SKILL_BUNDLE subset selection)
-        skills_raw = entry.get("skills")
-        if skills_raw is not None:
-            dep.skill_subset = parse_skill_subset(skills_raw)
-
-        targets_raw = entry.get("targets")
-        if targets_raw is not None:
-            dep.target_subset = parse_target_subset(targets_raw)
-
+        apply_optional_dependency_fields(dep, entry)
         return dep
 
     @staticmethod
@@ -2006,8 +1965,7 @@ class DependencyReference:
     def to_apm_yml_entry(self):
         """Return the entry to store in apm.yml.
 
-        - Local path deps with alias, skill_subset, or target_subset: returns a dict
-          with a 'path' key plus the applicable optional keys.
+        - Local path deps with optional fields: returns a dict with 'path'.
         - HTTP (insecure) git deps: returns a dict with 'git' and 'allow_insecure' keys.
         - Git deps with skill_subset or target_subset: returns a dict with 'git' plus
           the applicable optional keys.
@@ -2027,14 +1985,12 @@ class DependencyReference:
             )
         if self.is_local and self.local_path:
             if self.skill_subset or self.target_subset or self.alias:
-                entry: dict = {"path": self.local_path}
-                if self.alias:
-                    entry["alias"] = self.alias
-                if self.skill_subset:
-                    entry["skills"] = sorted(self.skill_subset)
-                if self.target_subset:
-                    entry["targets"] = sorted(self.target_subset)
-                return entry
+                return local_path_apm_yml_entry(
+                    self.local_path,
+                    self.alias,
+                    self.skill_subset,
+                    self.target_subset,
+                )
             return self.to_canonical()
         if self.is_insecure:
             host = self.host or default_host()
