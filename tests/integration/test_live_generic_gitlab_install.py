@@ -75,8 +75,7 @@ def _configured_package() -> DependencyReference:
     raw = os.environ.get(_LIVE_PACKAGE_ENV, "").strip()
     if not raw:
         pytest.fail(
-            f"{_LIVE_PACKAGE_ENV} is not set; "
-            f"set {_LIVE_PACKAGE_ENV}=gitlab.com/<group>/<repo>"
+            f"{_LIVE_PACKAGE_ENV} is not set; set {_LIVE_PACKAGE_ENV}=gitlab.com/<group>/<repo>"
         )
 
     dep = DependencyReference.parse(raw)
@@ -95,8 +94,7 @@ def _expected_sha() -> str:
     raw = os.environ.get(_LIVE_EXPECTED_SHA_ENV, "").strip().lower()
     if not raw:
         pytest.fail(
-            f"{_LIVE_EXPECTED_SHA_ENV} must be set to the fixture's pinned "
-            "40-character commit SHA"
+            f"{_LIVE_EXPECTED_SHA_ENV} must be set to the fixture's pinned 40-character commit SHA"
         )
     if not _FULL_SHA_RE.fullmatch(raw):
         pytest.fail(f"{_LIVE_EXPECTED_SHA_ENV} must be a full commit SHA, got {raw!r}")
@@ -165,7 +163,9 @@ def _locked_dep(lockfile: dict[str, object], expected: DependencyReference) -> d
     return None
 
 
-def _run_install(apm_binary_path: Path, project: Path, fake_home: Path) -> subprocess.CompletedProcess:
+def _run_install(
+    apm_binary_path: Path, project: Path, fake_home: Path
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         [str(apm_binary_path), "install"],
         cwd=project,
