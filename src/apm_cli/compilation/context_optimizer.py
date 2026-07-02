@@ -1293,7 +1293,9 @@ class ContextOptimizer:
         if not instruction.apply_to:
             return True  # Global instructions are always relevant
 
-        pattern = instruction.apply_to
+        pattern = instruction.apply_to.strip()
+        if not pattern:
+            return True
 
         # Resolve working directory to handle path inconsistencies
         try:
