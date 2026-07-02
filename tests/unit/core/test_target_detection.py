@@ -12,6 +12,7 @@ from apm_cli.core.target_detection import (
     TargetParamType,
     can_dedup_agents_md_instructions,
     detect_target,
+    get_dedup_rules_dir,
     get_target_description,
     normalize_target_list,
     should_compile_agents_md,
@@ -980,14 +981,16 @@ class TestCoworkParserLayer:
 
 
 class TestCanDedupAgentsMdInstructions:
-    """Only vscode-only targets allow instruction dedup from AGENTS.md."""
+    """Only targets with dedicated local rules directories (vscode, antigravity) allow instruction dedup from AGENTS.md."""
 
     @pytest.mark.parametrize(
         ("target", "expected"),
         [
             # Copilot reads both AGENTS.md and .github/instructions/ -- safe to dedup.
             ("vscode", True),
-            # Non-Copilot targets only read AGENTS.md -- must NOT dedup.
+            # Antigravity reads both AGENTS.md and .agents/rules/ -- safe to dedup.
+            ("antigravity", True),
+            # Non-Copilot/Antigravity targets only read AGENTS.md -- must NOT dedup.
             ("codex", False),
             ("opencode", False),
             ("windsurf", False),
@@ -1005,6 +1008,7 @@ class TestCanDedupAgentsMdInstructions:
         ],
         ids=[
             "vscode-str",
+            "antigravity-str",
             "codex-str",
             "opencode-str",
             "windsurf-str",
@@ -1070,3 +1074,23 @@ class TestResolveCompileTargetMixedTargets:
         assert isinstance(result, frozenset)
         assert "vscode" in result
         assert "claude" in result
+
+
+class TestGetDedupRulesDir:
+    """Tests for get_dedup_rules_dir resolving canonical targets and aliases."""
+
+    @pytest.mark.parametrize(
+        ("target", "expected"),
+        [
+            ("vscode", ".github/instructions"),
+            ("copilot", ".github/instructions"),
+            ("agents", ".github/instructions"),
+            ("antigravity", ".agents/rules"),
+            ("agy", ".agents/rules"),
+            ("claude", None),
+            (frozenset({"vscode"}), ".github/instructions"),
+            (frozenset({"vscode", "agents"}), None),
+        ],
+    )
+    def test_get_dedup_rules_dir(self, target, expected):
+        assert get_dedup_rules_dir(target) == expected

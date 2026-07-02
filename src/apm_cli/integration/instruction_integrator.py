@@ -641,7 +641,7 @@ class InstructionIntegrator(BaseIntegrator):
         from ..utils.yaml_io import load_yaml_str
 
         body = content
-        apply_to = ""
+        globs = []
 
         fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
         if fm_match:
@@ -652,12 +652,14 @@ class InstructionIntegrator(BaseIntegrator):
                 fm = {}
             raw_apply_to = fm.get("applyTo", "")
             if isinstance(raw_apply_to, list):
-                apply_to = ",".join(str(item) for item in raw_apply_to)
+                globs = [
+                    s
+                    for item in raw_apply_to
+                    if (s := str(item).replace("\n", " ").replace("\r", " ").strip())
+                ]
             else:
-                apply_to = str(raw_apply_to).strip()
-
-        safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
-        globs = parse_apply_to(safe_apply_to)
+                safe_apply_to = str(raw_apply_to).replace("\n", " ").replace("\r", " ").strip()
+                globs = parse_apply_to(safe_apply_to)
 
         parts = ["---"]
         if globs:
@@ -717,13 +719,52 @@ class InstructionIntegrator(BaseIntegrator):
     def _convert_to_antigravity_rules(content: str) -> str:
         """Convert APM instruction content to Antigravity CLI rules format.
 
-        Strips YAML frontmatter (Antigravity rules are plain markdown with
-        no frontmatter) and returns the body as-is.
+        Parses existing YAML frontmatter, maps ``applyTo`` to Antigravity's
+        ``trigger: glob`` + ``globs`` frontmatter.
         """
-        fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", content, re.DOTALL)
+        from ..utils.yaml_io import load_yaml_str
+
+        body = content
+        globs = []
+
+        # Parse existing frontmatter
+        fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
         if fm_match:
-            return fm_match.string[fm_match.end() :].lstrip("\n")
-        return content
+            body = content[fm_match.end() :]
+            try:
+                fm = load_yaml_str(fm_match.group(1)) or {}
+            except Exception as e:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Failed to parse instruction frontmatter YAML: %s", e
+                )
+                fm = {}
+            raw_apply_to = fm.get("applyTo", "")
+            if isinstance(raw_apply_to, list):
+                globs = [
+                    s
+                    for item in raw_apply_to
+                    if (s := str(item).replace("\n", " ").replace("\r", " ").strip())
+                ]
+            else:
+                safe_apply_to = str(raw_apply_to).replace("\n", " ").replace("\r", " ").strip()
+                globs = parse_apply_to(safe_apply_to)
+
+        # Build Antigravity rules frontmatter
+        parts = ["---"]
+        if globs:
+            parts.append("trigger: glob")
+            if len(globs) == 1:
+                parts.append(f"globs: {yaml_double_quote(globs[0])}")
+            else:
+                parts.append("globs:")
+                parts.extend(f"  - {yaml_double_quote(g)}" for g in globs)
+            parts.append("---")
+            return "\n".join(parts) + "\n\n" + body.lstrip("\r\n")
+
+        # No applyTo -> unconditional rule, return body without frontmatter
+        return body.lstrip("\r\n")
 
     def copy_instruction_claude(self, source: Path, target: Path) -> int:
         """Copy instruction file converted to Claude Code rules format.
