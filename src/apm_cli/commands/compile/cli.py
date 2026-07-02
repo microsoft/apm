@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
-from ...core.target_detection import TargetParamType
+from ...core.target_detection import TARGET_HELP_DETAILS, TargetParamType
 from ...primitives.discovery import clear_discovery_cache, discover_primitives
 from ...utils import perf_stats
 from ...utils.console import (
@@ -890,7 +890,10 @@ def _run_compilation(
     "-t",
     type=TargetParamType(),
     default=None,
-    help="Target platform (comma-separated). Values: copilot, claude, cursor, opencode, codex, gemini, antigravity, windsurf, kiro, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'antigravity' (alias 'agy') deploys to .agents/ and is explicit-only -- not part of 'all'. 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro (excludes agent-skills and antigravity); combine with 'agent-skills' or 'antigravity' to add them.",
+    help=(
+        f"Target platform (comma-separated). {TARGET_HELP_DETAILS} "
+        "For compile, '--target all' is deprecated; use '--all' instead."
+    ),
 )
 @click.option(
     "--dry-run",

@@ -60,7 +60,7 @@ from git.exc import GitCommandError
 
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger
-from ..core.target_detection import TargetParamType
+from ..core.target_detection import TARGET_HELP_EXAMPLE_CSV, TargetParamType
 from ..deps.github_downloader import GitHubPackageDownloader
 from ..deps.revision_pins import (
     RemoteRefDownloader,
@@ -252,7 +252,7 @@ def _annotate_lockfile_revision_tags(project_root: Path, updates: list[RevisionP
     default=None,
     help=(
         "Agent target(s) to update for "
-        "(e.g. claude, copilot, cursor, windsurf, kiro, codex, opencode, gemini). "
+        f"(e.g. {TARGET_HELP_EXAMPLE_CSV}). "
         "Comma-separated for multiple: --target claude,cursor. "
         "Highest-priority entry in the resolution chain "
         "(--target > apm.yml targets: > auto-detect)."
