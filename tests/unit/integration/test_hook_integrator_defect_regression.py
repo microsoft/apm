@@ -98,6 +98,61 @@ def test_copilot_hook_path_no_doubling(tmp_path: Path) -> None:
     ).exists()
 
 
+def test_copilot_renames_claude_tool_events_to_camel_case(tmp_path: Path, caplog, capsys) -> None:
+    project = tmp_path / "project"
+    package_path = tmp_path / "superpowers"
+    hooks_dir = package_path / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [{"hooks": [{"type": "command", "command": "echo pre"}]}],
+                    "PostToolUse": [{"hooks": [{"type": "command", "command": "echo post"}]}],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    HookIntegrator().integrate_package_hooks(_package_info(package_path), project)
+
+    output = json.loads(
+        (project / ".github" / "hooks" / "superpowers-hooks.json").read_text(encoding="utf-8")
+    )
+    assert set(output["hooks"]) == {"preToolUse", "postToolUse"}
+    captured = capsys.readouterr()
+    assert "may not be recognized" not in captured.out
+    assert "hook event casing mismatch" not in caplog.text
+
+
+def test_copilot_merges_duplicate_event_aliases_to_camel_case(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    package_path = tmp_path / "superpowers"
+    hooks_dir = package_path / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [{"hooks": [{"type": "command", "command": "echo pascal"}]}],
+                    "preToolUse": [{"hooks": [{"type": "command", "command": "echo camel"}]}],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    HookIntegrator().integrate_package_hooks(_package_info(package_path), project)
+
+    output = json.loads(
+        (project / ".github" / "hooks" / "superpowers-hooks.json").read_text(encoding="utf-8")
+    )
+    assert set(output["hooks"]) == {"preToolUse"}
+    commands = [entry["hooks"][0]["command"] for entry in output["hooks"]["preToolUse"]]
+    assert commands == ["echo pascal", "echo camel"]
+
+
 def test_claude_hook_script_path_no_doubling(tmp_path: Path) -> None:
     project = tmp_path / "project"
     package_path = tmp_path / "superpowers"

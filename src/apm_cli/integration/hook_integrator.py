@@ -120,7 +120,19 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
     "copilot": {
         # Claude PascalCase -> Copilot camelCase
         "PreToolUse": "preToolUse",
+        "preToolUse": "preToolUse",
         "PostToolUse": "postToolUse",
+        "postToolUse": "postToolUse",
+        "UserPromptSubmit": "userPromptSubmit",
+        "userPromptSubmit": "userPromptSubmit",
+        "Stop": "stop",
+        "stop": "stop",
+        "AgentStop": "agentStop",
+        "agentStop": "agentStop",
+        "PreTaskExecution": "preTaskExecution",
+        "preTaskExecution": "preTaskExecution",
+        "PostTaskExecution": "postTaskExecution",
+        "postTaskExecution": "postTaskExecution",
     },
     "claude": {
         # Copilot camelCase -> Claude PascalCase
@@ -891,12 +903,18 @@ class HookIntegrator(BaseIntegrator):
         return rewritten, unique_scripts
 
     @staticmethod
+    def _root_local_identity_root(package_info, project_root: Path | None) -> Path | None:
+        """Return the project root used to identify root-local packages."""
+        return getattr(package_info, "root_local_project_root", None) or project_root
+
+    @staticmethod
     def _is_root_local_package(package_info, project_root: Path | None) -> bool:
         """Return True when *package_info* represents the project's own .apm content."""
-        if project_root is None:
+        identity_root = HookIntegrator._root_local_identity_root(package_info, project_root)
+        if identity_root is None:
             return False
         try:
-            return Path(package_info.install_path).resolve() == Path(project_root).resolve()
+            return Path(package_info.install_path).resolve() == Path(identity_root).resolve()
         except (OSError, RuntimeError):
             return False
 
@@ -956,7 +974,8 @@ class HookIntegrator(BaseIntegrator):
             str: Package name used as hook source marker and script namespace
         """
         if self._is_root_local_package(package_info, project_root):
-            return HookIntegrator._get_root_local_package_name(package_info, Path(project_root))
+            identity_root = HookIntegrator._root_local_identity_root(package_info, project_root)
+            return HookIntegrator._get_root_local_package_name(package_info, Path(identity_root))
         return package_info.install_path.name
 
     @staticmethod
@@ -1269,11 +1288,19 @@ class HookIntegrator(BaseIntegrator):
             ):
                 continue
 
-            _emit_hook_event_diagnostics(
-                list(rewritten.get("hooks", {}).keys()),
-                "copilot",
-                _HOOK_EVENT_MAP.get("copilot", {}),
-            )
+            hooks = rewritten.get("hooks", {})
+            event_map = _HOOK_EVENT_MAP.get("copilot", {})
+            _emit_hook_event_diagnostics(list(hooks.keys()), "copilot", event_map)
+            if isinstance(hooks, dict):
+                renamed_hooks = {}
+                for raw_event_name, entries in hooks.items():
+                    event_name = event_map.get(raw_event_name, raw_event_name)
+                    if event_name in renamed_hooks and isinstance(renamed_hooks[event_name], list):
+                        if isinstance(entries, list):
+                            renamed_hooks[event_name].extend(entries)
+                            continue
+                    renamed_hooks[event_name] = entries
+                rewritten["hooks"] = renamed_hooks
 
             # Write rewritten JSON
             with open(target_path, "w", encoding="utf-8") as f:

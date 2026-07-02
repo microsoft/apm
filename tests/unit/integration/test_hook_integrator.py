@@ -338,7 +338,7 @@ class TestVSCodeIntegration:
 
         target_json = temp_project / ".github" / "hooks" / "ralph-loop-hooks.json"
         data = json.loads(target_json.read_text())
-        cmd = data["hooks"]["Stop"][0]["hooks"][0]["command"]
+        cmd = data["hooks"]["stop"][0]["hooks"][0]["command"]
         assert "ralph-loop" in cmd
         assert "stop-hook.sh" in cmd
 
