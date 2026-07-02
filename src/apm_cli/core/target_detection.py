@@ -306,6 +306,33 @@ def should_compile_copilot_instructions_md(target: CompileTargetType) -> bool:
     return target in ("vscode", "all")
 
 
+def get_dedup_rules_dir(target: CompileTargetType) -> str | None:
+    """Get the relative directory path where deployed instructions reside for a target.
+
+    Args:
+        target: The detected or configured target. May be a string or a
+            frozenset of compiler families for multi-target lists.
+
+    Returns:
+        str | None: Relative path (e.g., '.agents/rules' or '.github/instructions')
+        or None if the target does not support instruction deduplication.
+    """
+    if isinstance(target, frozenset):
+        # Conservative policy: only dedup when the target set is exactly
+        # {"vscode"} (Copilot alone). Any additional family -- including
+        # "agents" -- means at least one consumer that does not read
+        # .github/instructions/ may be present, so we keep instructions
+        # in AGENTS.md to be safe.
+        if target == frozenset({"vscode"}):
+            return ".github/instructions"
+        return None
+    if target == "vscode":
+        return ".github/instructions"
+    if target == "antigravity":
+        return ".agents/rules"
+    return None
+
+
 def can_dedup_agents_md_instructions(target: CompileTargetType) -> bool:
     """Check if instruction dedup is safe for AGENTS.md.
 
@@ -325,15 +352,7 @@ def can_dedup_agents_md_instructions(target: CompileTargetType) -> bool:
     Returns:
         bool: True if instructions can be omitted from AGENTS.md.
     """
-    if isinstance(target, frozenset):
-        # Conservative policy: only dedup when the target set is exactly
-        # {"vscode"} (Copilot alone).  Any additional family -- including
-        # "agents" -- means at least one consumer that does not read
-        # .github/instructions/ may be present, so we keep instructions
-        # in AGENTS.md to be safe.
-        return target == frozenset({"vscode"})
-    # Single-string targets: "vscode" and "antigravity" support deduplication.
-    return target in ("vscode", "antigravity")
+    return get_dedup_rules_dir(target) is not None
 
 
 def get_target_description(target: UserTargetType) -> str:

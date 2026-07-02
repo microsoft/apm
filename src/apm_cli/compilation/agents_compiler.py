@@ -13,7 +13,7 @@ from typing import Any, Callable, NamedTuple  # noqa: UP035
 
 from ..core.target_detection import (
     CompileTargetType,
-    can_dedup_agents_md_instructions,
+    get_dedup_rules_dir,
     should_compile_agents_md,
     should_compile_claude_md,
     should_compile_copilot_instructions_md,
@@ -497,22 +497,19 @@ class AgentsCompiler:
                 "Including instructions in AGENTS.md (--force-instructions overrides deduplication)",
                 symbol="info",
             )
-        elif not can_dedup_agents_md_instructions(config.target):
-            skip_instructions = False
         else:
-            is_antigravity = config.target == "antigravity"
-            if is_antigravity:
-                dep_dir = self.base_dir / ".agents" / "rules"
-                log_dep_dir = ".agents/rules/"
+            rules_dir_rel = get_dedup_rules_dir(config.target)
+            if rules_dir_rel is None:
+                skip_instructions = False
             else:
-                dep_dir = self.base_dir / ".github" / "instructions"
-                log_dep_dir = ".github/instructions/"
+                dep_dir = self.base_dir / rules_dir_rel
+                log_dep_dir = f"{rules_dir_rel}/"
 
-            skip_instructions = _detect_deployed_instructions(
-                dep_dir,
-                self.base_dir,
-                lambda msg: self._log("warning", msg),
-            )
+                skip_instructions = _detect_deployed_instructions(
+                    dep_dir,
+                    self.base_dir,
+                    lambda msg: self._log("warning", msg),
+                )
             if skip_instructions:
                 self._log(
                     "progress",

@@ -731,7 +731,12 @@ class InstructionIntegrator(BaseIntegrator):
             body = content[fm_match.end() :]
             try:
                 fm = load_yaml_str(fm_match.group(1)) or {}
-            except Exception:
+            except Exception as e:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Failed to parse instruction frontmatter YAML: %s", e
+                )
                 fm = {}
             raw_apply_to = fm.get("applyTo", "")
             if isinstance(raw_apply_to, list):

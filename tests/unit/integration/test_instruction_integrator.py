@@ -1484,6 +1484,16 @@ class TestApplyToCommaSplitting:
         assert '  - "tests/**/*.py"' in result
         assert 'globs: "[' not in result
 
+    def test_antigravity_malformed_yaml_fallback(self, caplog):
+        import logging
+
+        content = "---\napplyTo: [\n---\n\n# Body"
+        with caplog.at_level(logging.WARNING):
+            result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "Failed to parse instruction frontmatter YAML" in caplog.text
+        assert "trigger: glob" not in result
+        assert "# Body" in result
+
 
 class TestWindsurfRulesIntegration:
     """Test end-to-end Windsurf rules deployment."""
