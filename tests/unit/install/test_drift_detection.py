@@ -46,7 +46,9 @@ from apm_cli.install.drift import (
     render_drift,
     render_drift_json,
     render_drift_text,
+    run_replay,
 )
+from apm_cli.integration.hook_integrator import HookIntegrator
 
 # ---------------------------------------------------------------------------
 # _assert_scratch_bound
@@ -123,6 +125,43 @@ class TestCheckLogger:
         logger.scratch_root(tmp_path)
         captured = capsys.readouterr()
         assert str(tmp_path) in captured.err
+
+
+def test_run_replay_preserves_root_local_hook_marker_identity(tmp_path: Path) -> None:
+    """Self package hook markers must stay stable when replay writes to scratch."""
+    project = tmp_path / "apm-bugs"
+    project.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    (project / "apm.yml").write_text("name: apm-bugs\nversion: 0.0.0\n", encoding="utf-8")
+    lockfile_path = project / "apm.lock.yaml"
+    LockFile(local_deployed_files=[".codex/hooks.json"]).write(lockfile_path)
+    captured: dict[str, object] = {}
+
+    def fake_integrate_package_primitives(package_info, replay_root, **_kwargs):
+        hook_integrator = HookIntegrator()
+        package_name = hook_integrator._get_package_name(package_info, replay_root)
+        captured["marker"] = hook_integrator._get_hook_source_marker(
+            package_info, replay_root, package_name
+        )
+        captured["replay_root"] = replay_root
+        return {"deployed_files": []}
+
+    with (
+        patch("apm_cli.install.drift._make_scratch_root", return_value=scratch),
+        patch(
+            "apm_cli.install.services.integrate_package_primitives",
+            side_effect=fake_integrate_package_primitives,
+        ),
+    ):
+        returned_scratch = run_replay(
+            ReplayConfig(project_root=project, lockfile_path=lockfile_path),
+            CheckLogger(verbose=False),
+        )
+
+    assert returned_scratch == scratch
+    assert captured["replay_root"] == scratch
+    assert captured["marker"] == "_local/apm-bugs"
 
 
 # ---------------------------------------------------------------------------
