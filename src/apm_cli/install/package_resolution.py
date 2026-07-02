@@ -9,10 +9,12 @@ tests that patch ``apm_cli.commands.install.DependencyReference`` and
 from __future__ import annotations
 
 import builtins
+import urllib.parse
 from collections.abc import Callable
 from typing import Any
 
 from apm_cli.install.gitlab_resolver import _GITLAB_DIRECT_SHORTHAND_UNRESOLVED
+from apm_cli.models.dependency.subsets import parse_skill_subset
 
 GIT_PARENT_USER_SCOPE_ERROR = (
     "git: parent dependencies are not supported at user scope. "
@@ -30,6 +32,120 @@ def dependency_reference_to_yaml_entry(dep_ref: Any) -> dict:
     if dep_ref.alias:
         entry["alias"] = dep_ref.alias
     return entry
+
+
+def normalize_github_skill_url_packages(
+    packages: Any,
+) -> tuple[tuple[str, ...], dict[str, tuple[str, ...]], list[tuple[str, str]]]:
+    """Normalize GitHub ``SKILL.md`` URLs into repo refs plus implicit skills.
+
+    A URL copied from GitHub's file view (or raw.githubusercontent.com) points at
+    a concrete file, but APM installs skill bundles as ``repo`` + ``skills:``.
+    Return the normalized package tuple, a per-package skill map, and validation
+    failures for GitHub skill URLs that are malformed.
+    """
+    normalized_packages: list[str] = []
+    package_skill_sets: dict[str, set[str]] = {}
+    invalid_outcomes: list[tuple[str, str]] = []
+
+    for package in packages:
+        if not isinstance(package, str):
+            normalized_packages.append(package)
+            continue
+        try:
+            normalized = normalize_github_skill_url_package(package)
+        except ValueError as exc:
+            invalid_outcomes.append((package, str(exc)))
+            continue
+        if normalized is None:
+            normalized_packages.append(package)
+            continue
+
+        package_ref, skill_subset = normalized
+        if package_ref not in normalized_packages:
+            normalized_packages.append(package_ref)
+        package_skill_sets.setdefault(package_ref, set()).update(skill_subset)
+
+    package_skill_subsets = {
+        package_ref: tuple(sorted(skills)) for package_ref, skills in package_skill_sets.items()
+    }
+    return tuple(normalized_packages), package_skill_subsets, invalid_outcomes
+
+
+def normalize_github_skill_url_package(package: str) -> tuple[str, tuple[str, ...]] | None:
+    """Return ``(repo_ref, skills)`` for GitHub ``skills/.../SKILL.md`` URLs."""
+    parsed = urllib.parse.urlparse(package.strip())
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    host = (parsed.hostname or "").lower()
+    path_parts = _url_path_parts(parsed.path)
+
+    if host == "github.com":
+        if len(path_parts) < 3 or path_parts[2] != "blob":
+            return None
+        owner, repo = path_parts[0], path_parts[1]
+        return _normalize_github_skill_url_parts(
+            parsed.scheme,
+            owner,
+            repo,
+            path_parts[3:],
+            raw=package,
+        )
+
+    if host == "raw.githubusercontent.com":
+        if len(path_parts) < 3:
+            return None
+        owner, repo = path_parts[0], path_parts[1]
+        return _normalize_github_skill_url_parts(
+            parsed.scheme,
+            owner,
+            repo,
+            path_parts[2:],
+            raw=package,
+        )
+
+    return None
+
+
+def _url_path_parts(path: str) -> list[str]:
+    return [urllib.parse.unquote(part) for part in path.split("/") if part]
+
+
+def _normalize_github_skill_url_parts(
+    scheme: str,
+    owner: str,
+    repo: str,
+    ref_and_path_parts: list[str],
+    *,
+    raw: str,
+) -> tuple[str, tuple[str, ...]]:
+    if not ref_and_path_parts or ref_and_path_parts[-1] != "SKILL.md":
+        raise ValueError(
+            "GitHub skill install URLs must point to a SKILL.md file under "
+            "`skills/<skill-name>/SKILL.md`."
+        )
+
+    try:
+        skills_index = ref_and_path_parts.index("skills")
+    except ValueError as exc:
+        raise ValueError(
+            f"GitHub SKILL.md install URLs must point inside a `skills/` directory. Got: `{raw}`."
+        ) from exc
+
+    ref_parts = ref_and_path_parts[:skills_index]
+    skill_parts = ref_and_path_parts[skills_index + 1 : -1]
+    if not ref_parts:
+        raise ValueError(
+            "GitHub skill install URLs must include a branch, tag, or commit before `skills/`."
+        )
+    if not skill_parts:
+        raise ValueError(
+            "GitHub skill install URLs must include a skill name between `skills/` and `SKILL.md`."
+        )
+
+    skill_subset = tuple(parse_skill_subset(["/".join(skill_parts)]))
+    repo_ref = f"{scheme}://github.com/{owner}/{repo}#{'/'.join(ref_parts)}"
+    return repo_ref, skill_subset
 
 
 def resolve_parsed_dependency_reference(

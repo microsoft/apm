@@ -17,7 +17,7 @@ apm install [PACKAGE_REF...] [OPTIONS]
 
 With no arguments it installs everything from `apm.yml`. With one or more `PACKAGE_REF` arguments it adds those packages to `apm.yml` (creating one if needed) and installs only what was added. `apm install --mcp NAME` is the dedicated path for adding an MCP server entry.
 
-`PACKAGE_REF` accepts: shorthand (`owner/repo`), HTTPS or SSH Git URLs, FQDN shorthand (`host/owner/repo`), local paths (`./path`, `/abs/path`, `~/path`), packed bundles (`./bundle.zip`, `./bundle.tar.gz`), and marketplace refs (`NAME@MARKETPLACE[#ref]`).
+`PACKAGE_REF` accepts: shorthand (`owner/repo`), HTTPS or SSH Git URLs, FQDN shorthand (`host/owner/repo`), GitHub `skills/<name>/SKILL.md` file URLs (`github.com/.../blob/...` or `raw.githubusercontent.com/...`), local paths (`./path`, `/abs/path`, `~/path`), packed bundles (`./bundle.zip`, `./bundle.tar.gz`), and marketplace refs (`NAME@MARKETPLACE[#ref]`).
 
 :::caution
 `http://` dependencies are refused unless you pass `--allow-insecure` (direct) or `--allow-insecure-host HOSTNAME` (transitive).
@@ -189,6 +189,9 @@ apm install ./my-bundle --target opencode
 apm install owner/skill-bundle --skill review
 apm install owner/skill-bundle --skill refactor   # adds refactor; review is kept (union)
 apm install owner/skill-bundle --skill '*'         # reset to all skills
+
+# Copy-paste a GitHub SKILL.md file URL; APM records the repo ref plus skills: pin.
+apm install https://github.com/owner/skill-bundle/blob/main/skills/review/SKILL.md
 ```
 
 ## Exit codes
