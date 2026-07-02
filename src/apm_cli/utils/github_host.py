@@ -379,7 +379,11 @@ def build_https_clone_url(
     if token:
         # Use x-access-token format which is compatible with GitHub Enterprise and GH Actions
         return f"https://x-access-token:{token}@{netloc}/{repo_ref}.git"
-    return f"https://{netloc}/{repo_ref}"
+    # Keep the .git suffix on the anonymous form too: hosts like GitBucket
+    # serve smart-HTTP only at the .git path (no redirect), while GitHub /
+    # GitLab / Bitbucket / Gitea accept both. This also keeps parity with
+    # the token, SSH, and plain-HTTP builders, which all emit .git.
+    return f"https://{netloc}/{repo_ref}.git"
 
 
 def build_gitlab_https_clone_url(
