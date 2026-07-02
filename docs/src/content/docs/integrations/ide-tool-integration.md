@@ -13,7 +13,7 @@ This page is a hub. It tells you which tools are supported, how detection works,
 
 The full slot-by-slot capability table lives in [Targets matrix](../reference/targets-matrix/). At a glance, APM currently writes for:
 
-| Target               | Marker / signal                     | Notes                                  |
+| Tool / runtime       | Marker / signal                     | Notes                                  |
 |----------------------|--------------------------------------|----------------------------------------|
 | VS Code + Copilot    | `.github/copilot-instructions.md`    | Native instructions, prompts, agents   |
 | Claude Code          | `.claude/`                           | Skills, agents, commands, MCP          |
@@ -24,7 +24,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../reference/ta
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
 | Kiro                 | `.kiro/`                             | Steering + Skills + Hooks + MCP        |
-| JetBrains Copilot    | user-scope config dir (global)       | MCP only (user-scope path, `${env:VAR}` env substitution) |
+| JetBrains Copilot (`--runtime intellij`) | user-scope config dir (global)       | MCP only via the `copilot` target (user-scope path, `${env:VAR}` env substitution) |
 | Agent-Skills (cross) | `.agents/skills/`                    | Vendor-neutral skill sharing           |
 
 For exact per-target capabilities (which primitives are supported, transformer used, file layout), see [Targets matrix](../reference/targets-matrix/).
