@@ -756,10 +756,10 @@ class InstructionIntegrator(BaseIntegrator):
                 parts.append("globs:")
                 parts.extend(f"  - {yaml_double_quote(g)}" for g in globs)
             parts.append("---")
-            return "\n".join(parts) + "\n\n" + body.lstrip("\n")
+            return "\n".join(parts) + "\n\n" + body.lstrip("\r\n")
 
         # No applyTo -> unconditional rule, return body without frontmatter
-        return body.lstrip("\n")
+        return body.lstrip("\r\n")
 
     def copy_instruction_claude(self, source: Path, target: Path) -> int:
         """Copy instruction file converted to Claude Code rules format.
