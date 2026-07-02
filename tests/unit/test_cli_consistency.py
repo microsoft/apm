@@ -70,6 +70,21 @@ def test_experimental_subcommand_help_is_specific():
     assert "-y, --yes" in reset_result.output
 
 
+def test_config_help_mentions_no_subcommand_and_list_alias():
+    runner = CliRunner()
+
+    group_result = runner.invoke(cli, ["config", "--help"])
+    assert group_result.exit_code == 0
+    assert "Run with no subcommand to show the merged project" in group_result.output
+    assert "list" in group_result.output
+    assert "List all configuration values" in group_result.output
+
+    list_result = runner.invoke(cli, ["config", "list", "--help"])
+    assert list_result.exit_code == 0
+    assert "Usage: cli config list [OPTIONS]" in list_result.output
+    assert "List all configuration values" in list_result.output
+
+
 def test_runtime_remove_help_includes_short_yes_alias():
     result = CliRunner().invoke(cli, ["runtime", "remove", "--help"])
 
