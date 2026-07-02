@@ -24,7 +24,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../reference/ta
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
 | Kiro                 | `.kiro/`                             | Steering + Skills + Hooks + MCP        |
-| JetBrains Copilot (`--runtime intellij`) | user-scope config dir (global)       | MCP only via the `copilot` target (user-scope path, `${env:VAR}` env substitution) |
+| JetBrains (`--runtime intellij`) | user-scope config dir (global)       | MCP only via the `copilot` target (user-scope path, `${env:VAR}` env substitution) |
 | Agent-Skills (cross) | `.agents/skills/`                    | Vendor-neutral skill sharing           |
 
 For exact per-target capabilities (which primitives are supported, transformer used, file layout), see [Targets matrix](../reference/targets-matrix/).
