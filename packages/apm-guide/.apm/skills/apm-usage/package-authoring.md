@@ -222,13 +222,19 @@ tags: [security, validation]
 ```
 
 `applyTo` accepts a single glob (`"**/*.py"`) or a comma-separated list
-(`"**/src/**,**/api/**"`). A YAML sequence (`applyTo: ['**/*.py', '**/tests/**/*.py']`)
-is also supported; multiple sequence elements are fully expanded for targets like Antigravity,
-Windsurf, Kiro, and Copilot (legacy line-scanners may only parse the first element).
+(`"**/src/**,**/api/**"`). The comma-separated string form is the recommended
+way to specify multiple patterns, as it is portably expanded into target-specific
+yaml arrays/lists (under `paths:` / `globs:` / `fileMatchPattern:`) across
+Claude, Cursor, Windsurf, Kiro, and Antigravity.
+
+A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) is accepted
+but is non-portable: some converters (like Claude) only parse the first element,
+while others (like Antigravity and Windsurf) fully parse and expand them. For maximum
+portability, use a comma-separated string for multiple globs.
+
 Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
 and are NOT separators -- only top-level commas split the list. On Copilot
-the value is preserved verbatim; on Claude/Cursor/Windsurf/Kiro/Antigravity comma-lists/sequences are
-expanded to a YAML array/list under `paths:` / `globs:` / `fileMatchPattern:`.
+the value is preserved verbatim.
 
 ### 2. Agent (`*.agent.md`)
 
