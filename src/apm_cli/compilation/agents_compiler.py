@@ -479,14 +479,15 @@ class AgentsCompiler:
             source_dir=str(self.source_dir),
         )
 
-        # Skip instructions in AGENTS.md when they are already deployed to
-        # .github/instructions/ by `apm install` (avoids duplicate context for
-        # Copilot, which reads both locations). Mirrors the .claude/rules/ check
+        # Skip instructions in AGENTS.md when they are already deployed to the
+        # target's dedicated rules directory (e.g., .github/instructions/ for Copilot
+        # or .agents/rules/ for Antigravity) by `apm install` (avoids duplicate context
+        # for agents that read both locations). Mirrors the .claude/rules/ check
         # on the Claude path (issue #1445); shared helper keeps the detection
         # logic in one place (R0801 guard).
         #
-        # Target-aware: only dedup when EVERY AGENTS.md consumer also reads
-        # .github/instructions/. Codex, OpenCode, Windsurf rely solely on
+        # Target-aware: only dedup when EVERY AGENTS.md consumer also reads the
+        # target-specific rules directory. Codex, OpenCode, Windsurf rely solely on
         # AGENTS.md for instructions, so dedup must not fire for those
         # targets (issue #1678).
         # --force-instructions / --no-dedup lets users opt out entirely.
