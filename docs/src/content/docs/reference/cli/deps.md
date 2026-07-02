@@ -125,7 +125,7 @@ apm deps clean [OPTIONS]
 | Option | Description |
 |---|---|
 | `--dry-run` | Show what would be removed without removing. |
-| `-y, --yes` | Skip the confirmation prompt (for CI and scripts). |
+| `-y, --yes` | Skip the confirmation prompt. |
 
 ## Examples
 

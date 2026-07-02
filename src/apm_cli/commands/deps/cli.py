@@ -669,7 +669,7 @@ def tree(global_):
 @click.option(
     "--dry-run", is_flag=True, default=False, help="Show what would be removed without removing"
 )
-@click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt")
+@click.option("--yes", "-y", is_flag=True, default=False, help="Skip the confirmation prompt")
 def clean(dry_run: bool, yes: bool):
     """Remove entire apm_modules/ directory."""
     logger = CommandLogger("deps-clean")

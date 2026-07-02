@@ -64,7 +64,7 @@ _PROMPT_TARGETS_ORDERED: list[str] = [
 @click.command(help="Initialize a new APM project")
 @click.argument("project_name", required=False)
 @click.option(
-    "--yes", "-y", is_flag=True, help="Skip interactive prompts and use auto-detected defaults"
+    "--yes", "-y", is_flag=True, help="Skip interactive prompts (use auto-detected defaults)"
 )
 @click.option(
     "--plugin",

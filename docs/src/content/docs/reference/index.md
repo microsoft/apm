@@ -13,13 +13,14 @@ Per-command pages live under [`reference/cli/`](./cli/install/). Grouped by life
 
 | Phase                  | Commands                                                                         |
 |------------------------|----------------------------------------------------------------------------------|
-| Project setup          | [`init`](./cli/init/), [`install`](./cli/install/), [`update`](./cli/update/), [`uninstall`](./cli/uninstall/) |
-| Inspect and audit      | [`view`](./cli/view/), [`deps`](./cli/deps/), [`outdated`](./cli/outdated/), [`list`](./cli/list/), [`audit`](./cli/audit/) |
+| Project setup          | [`init`](./cli/init/), [`install`](./cli/install/), [`lock`](./cli/lock/), [`update`](./cli/update/), [`uninstall`](./cli/uninstall/) |
+| Inspect and audit      | [`view`](./cli/view/), [`find`](./cli/find/), [`deps`](./cli/deps/), [`outdated`](./cli/outdated/), [`list`](./cli/list/), [`audit`](./cli/audit/) |
 | Compile and integrate  | [`compile`](./cli/compile/), [`prune`](./cli/prune/), [`targets`](./cli/targets/), [`runtime`](./cli/runtime/) |
 | Cache and config       | [`cache`](./cli/cache/), [`config`](./cli/config/)                               |
 | Run scripts            | [`run`](./cli/run/)                                                              |
-| Author and distribute  | [`pack`](./cli/pack/), [`unpack`](./cli/unpack/), [`preview`](./cli/preview/), [`marketplace`](./cli/marketplace/), [`search`](./cli/search/) |
-| Governance             | [`policy`](./cli/policy/), [`mcp`](./cli/mcp/)                                   |
+| Author and distribute  | [`pack`](./cli/pack/), [`unpack`](./cli/unpack/), [`plugin`](./cli/plugin/), [`publish`](./cli/publish/), [`preview`](./cli/preview/), [`marketplace`](./cli/marketplace/), [`search`](./cli/search/) |
+| Governance             | [`approve`](./cli/approve/) / [`deny`](./cli/approve/), [`lifecycle`](./cli/lifecycle/), [`policy`](./cli/policy/), [`mcp`](./cli/mcp/) |
+| Diagnostics and utility | [`doctor`](./cli/doctor/), [`self-update`](./cli/self-update/)                   |
 | Experimental           | [`experimental`](./cli/experimental/)                                            |
 
 ## Schemas and specifications

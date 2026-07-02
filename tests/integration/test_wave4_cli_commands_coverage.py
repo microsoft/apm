@@ -267,6 +267,13 @@ class TestConfigCommand:
         result = self.runner.invoke(cli, ["config", "get", "auto-integrate"])
         assert result.exit_code == 0
 
+    def test_config_get_help_describes_no_argument_listing(self, tmp_path: Path) -> None:
+        """``config get --help`` documents the no-argument list-all behavior."""
+        os.chdir(tmp_path)
+        result = self.runner.invoke(cli, ["config", "get", "--help"])
+        assert result.exit_code == 0
+        assert "omit KEY to list all settable keys" in result.output
+
 
 # ====== Experimental Command Tests ======
 
