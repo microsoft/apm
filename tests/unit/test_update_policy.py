@@ -156,10 +156,10 @@ class TestGetSelfUpdateDisabledMessage:
 class TestGetUpdateHintMessage:
     """Tests for get_update_hint_message()."""
 
-    def test_returns_run_apm_update_when_enabled(self) -> None:
+    def test_returns_run_apm_self_update_when_enabled(self) -> None:
         with patch.object(policy_mod, "SELF_UPDATE_ENABLED", True):
             result = get_update_hint_message()
-        assert result == "Run apm update to upgrade"
+        assert result == "Run apm self-update to upgrade"
 
     def test_returns_disabled_message_when_disabled(self) -> None:
         custom = "Use your package manager to update."

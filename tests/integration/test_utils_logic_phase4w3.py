@@ -286,7 +286,7 @@ class TestUpdatePolicy:
 
         with patch.object(policy, "SELF_UPDATE_ENABLED", True):
             hint = policy.get_update_hint_message()
-        assert "apm update" in hint
+        assert "apm self-update" in hint
 
     def test_get_update_hint_disabled(self) -> None:
         import apm_cli.update_policy as policy

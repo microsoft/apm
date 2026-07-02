@@ -13,6 +13,7 @@ from collections.abc import Iterable
 
 import click
 
+from ..deps.lockfile import LockedDependency
 from ..deps.outdated_row import OutdatedRow
 from ..deps.revision_pins import (
     RevisionPinResolutionError,
@@ -21,6 +22,10 @@ from ..deps.revision_pins import (
     find_latest_annotated_tag,
     is_full_revision_pin,
 )
+from ..deps.revision_pins import (
+    package_name as revision_pin_package_name,
+)
+from ..models.dependency.reference import DependencyReference
 from ..models.dependency.types import RemoteRef
 
 logger = logging.getLogger(__name__)
@@ -50,10 +55,17 @@ def _strip_v(ref: str) -> str:
     return ref[1:] if ref and ref.startswith("v") else (ref or "")
 
 
-def _package_basename(dep) -> str:
+def _package_basename(dep: LockedDependency, dep_ref: DependencyReference | None = None) -> str:
     """Return the display name used in ``{name}`` tag patterns."""
     if dep.marketplace_plugin_name:
         return dep.marketplace_plugin_name
+    # For virtual subdirectory packages, derive the name from the virtual path
+    # (e.g. "packages/agent-dev-workflow" -> "agent-dev-workflow").
+    if dep.is_virtual and dep.virtual_path:
+        if dep_ref is None:
+            dep_ref = dep.to_dependency_ref()
+        if dep_ref.is_virtual_subdirectory():
+            return revision_pin_package_name(dep_ref)
     repo = dep.repo_url or ""
     if not repo:
         return ""
@@ -294,7 +306,7 @@ def _check_one_dep(dep, downloader, verbose, registry_ctx=None):
             package=package_name, current=current_ref or "(none)", latest="-", status="unknown"
         )
 
-    package_basename = _package_basename(dep)
+    package_basename = _package_basename(dep, dep_ref=dep_ref)
     revision_pin_row = _check_revision_pin_ref(
         current_ref=current_ref,
         package_name=package_name,

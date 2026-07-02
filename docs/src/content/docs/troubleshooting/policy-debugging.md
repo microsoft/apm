@@ -17,7 +17,7 @@ This page walks the diagnosis end to end.
 A policy block looks roughly like this:
 
 ```text
-[x] policy: dependency.allow
+[x] policy: dependency-allowlist
     severity: error
     message:  Dependency 'acme-corp/internal-skills' is not on the
               org allowlist.
@@ -27,7 +27,7 @@ A policy block looks roughly like this:
 
 Three things to extract before doing anything else:
 
-- **Rule id** (`dependency.allow`) -- pin it; you will reuse it in the
+- **Rule id** (`dependency-allowlist`) -- pin it; you will reuse it in the
   next steps.
 - **Severity** (`error` blocks; `warning` does not).
 - **Source** -- the org policy file that owns the rule. If you do not
@@ -138,14 +138,14 @@ Both flags are documented in
 These cover most real-world failures. Each lists the symptom and the
 shortest path to green.
 
-### `dependency.allow` / `dependency.deny`
+### `dependency-allowlist` / `dependency-denylist`
 
 - **Symptom:** `Dependency '<owner>/<repo>' is not on the org
   allowlist` (or `is on the org denylist`).
 - **Fix:** Replace the dep with an allowed equivalent, or open a PR
   against the org policy file to add it (see step 6).
 
-### `mcp.transport.allow` excluding `stdio`
+### `mcp-transport` excluding `stdio`
 
 - **Symptom:** `MCP server '<name>' uses transport 'stdio' which is
   not on the allowed transport list`.
@@ -154,7 +154,7 @@ shortest path to green.
 - **Fix:** Re-install the server from the registry with `--url` (HTTP
   endpoint). If no remote endpoint exists, escalate to the org admin.
 
-### `mcp.self_defined: deny`
+### `mcp-self-defined`
 
 - **Symptom:** `Self-defined MCP server '<name>' is not allowed; only
   registry-resolved servers are permitted`.
@@ -163,7 +163,7 @@ shortest path to green.
 - **Fix:** Find the server in the registry and `apm install
   mcp:<name>`. Remove the hand-rolled entry.
 
-### `manifest.required_fields` missing
+### `required-manifest-fields`
 
 - **Symptom:** `Required manifest field 'description' is missing from
   apm.yml`.
@@ -171,7 +171,7 @@ shortest path to green.
   defines the required set; check
   [Policy schema](../reference/policy-schema/).
 
-### `unmanaged_files.action: deny`
+### `unmanaged-files`
 
 - **Symptom:** `Unmanaged file detected in target directory:
   .github/instructions/extra.md`.
@@ -200,8 +200,8 @@ When you open the PR against the org policy repo:
    to hunt for it.
 
 For org-side context (who owns the policy, how rollouts work),
-see [Governance overview](../enterprise/governance-overview/) and
-[APM policy: getting started](../enterprise/apm-policy-getting-started/).
+see [Governance deep-dive](../enterprise/governance-guide/) and
+[APM policy: getting started](../enterprise/apm-policy/).
 
 ## See also
 

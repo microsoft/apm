@@ -637,7 +637,13 @@ class LockFile:
     @classmethod
     def from_yaml(cls, yaml_str: str) -> LockFile:
         """Deserialize from YAML string."""
-        data = yaml.safe_load(yaml_str)
+        from ..utils.yaml_io import load_yaml_str
+
+        # Bounded loader: an untrusted bundle apm.lock.yaml cannot wedge the
+        # parser with a merge-key bomb (the surrounding LockFile.read guard
+        # cannot catch a non-terminating safe_load loop -- it can catch the
+        # YAMLError this raises instead).
+        data = load_yaml_str(yaml_str)
         if not data:
             return cls()
         if not isinstance(data, dict):

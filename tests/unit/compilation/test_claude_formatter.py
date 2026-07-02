@@ -316,7 +316,7 @@ class TestAgentsExcludedFromClaudeMd:
 
         chatmode = Chatmode(
             name="code-reviewer",
-            file_path=temp_project / ".github/chatmodes/code-reviewer.chatmode.md",
+            file_path=temp_project / ".github/agents/code-reviewer.agent.md",
             description="Expert code reviewer",
             apply_to=None,
             content="You are an expert code reviewer. Focus on security and performance.",
@@ -353,7 +353,7 @@ class TestAgentsExcludedFromClaudeMd:
 
         chatmode = Chatmode(
             name="reviewer",
-            file_path=temp_project / "reviewer.chatmode.md",
+            file_path=temp_project / "reviewer.agent.md",
             description="Reviewer",
             apply_to=None,
             content="You are a reviewer.",
@@ -391,7 +391,7 @@ class TestAgentsExcludedFromClaudeMd:
 
         chatmode1 = Chatmode(
             name="reviewer",
-            file_path=temp_project / "reviewer.chatmode.md",
+            file_path=temp_project / "reviewer.agent.md",
             description="Code reviewer",
             apply_to=None,
             content="Review code.",
@@ -399,7 +399,7 @@ class TestAgentsExcludedFromClaudeMd:
         )
         chatmode2 = Chatmode(
             name="architect",
-            file_path=temp_project / "architect.chatmode.md",
+            file_path=temp_project / "architect.agent.md",
             description="System architect",
             apply_to=None,
             content="Design systems.",

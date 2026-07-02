@@ -1,5 +1,6 @@
 """Unit tests for the MCP registry client."""
 
+import json
 import os
 import unittest
 import warnings
@@ -12,25 +13,45 @@ from apm_cli.registry.client import SimpleRegistryClient
 from apm_cli.utils import github_host
 
 
+def _streamed_response(payload, status=200):
+    """Build a mock response honoring the round-27 capped-stream read contract
+    (#1798): a real headers dict + iter_content replay, not buffered .json()."""
+    body = json.dumps(payload).encode("utf-8")
+    resp = mock.Mock()
+    resp.status_code = status
+    resp.headers = {"Content-Type": "application/json", "Content-Length": str(len(body))}
+    resp.iter_content = lambda chunk_size=None: iter([body])
+    resp.close = lambda: None
+    resp.raise_for_status.return_value = None
+    resp.url = "https://registry.example/v0.1/servers"
+    return resp
+
+
 class TestSimpleRegistryClient(unittest.TestCase):
     """Test cases for the MCP registry client."""
 
     def setUp(self):
         """Set up test fixtures."""
         self.client = SimpleRegistryClient()
+        # These tests assert the network-call contract (URL/params/kwargs and
+        # call counts), not the HTTP cache (covered with isolation in
+        # test_registry_client_http_cache.py). Disable the on-disk cache so a
+        # same-URL second call is never silently cache-served and so bodies
+        # from one test cannot contaminate another via the shared user cache.
+        self.client._http_cache = None
 
     @mock.patch("requests.Session.get")
     def test_list_servers(self, mock_get):
         """Test listing servers from the registry under the v0.1 spec."""
-        mock_response = mock.Mock()
-        mock_response.json.return_value = {
-            "servers": [
-                {"server": {"name": "io.github.foo/server1", "description": "Description 1"}},
-                {"server": {"name": "io.github.foo/server2", "description": "Description 2"}},
-            ],
-            "metadata": {"nextCursor": "next-page-token", "count": 2},
-        }
-        mock_response.raise_for_status.return_value = None
+        mock_response = _streamed_response(
+            {
+                "servers": [
+                    {"server": {"name": "io.github.foo/server1", "description": "Description 1"}},
+                    {"server": {"name": "io.github.foo/server2", "description": "Description 2"}},
+                ],
+                "metadata": {"nextCursor": "next-page-token", "count": 2},
+            }
+        )
         mock_get.return_value = mock_response
 
         servers, next_cursor = self.client.list_servers()
@@ -43,14 +64,13 @@ class TestSimpleRegistryClient(unittest.TestCase):
             f"{self.client.registry_url}/v0.1/servers",
             params={"limit": 100},
             timeout=self.client._timeout,
+            stream=True,
         )
 
     @mock.patch("requests.Session.get")
     def test_list_servers_with_pagination(self, mock_get):
         """Test listing servers with pagination parameters under the v0.1 spec."""
-        mock_response = mock.Mock()
-        mock_response.json.return_value = {"servers": [], "metadata": {}}
-        mock_response.raise_for_status.return_value = None
+        mock_response = _streamed_response({"servers": [], "metadata": {}})
         mock_get.return_value = mock_response
 
         self.client.list_servers(limit=10, cursor="page-token")
@@ -59,17 +79,18 @@ class TestSimpleRegistryClient(unittest.TestCase):
             f"{self.client.registry_url}/v0.1/servers",
             params={"limit": 10, "cursor": "page-token"},
             timeout=self.client._timeout,
+            stream=True,
         )
 
     @mock.patch("requests.Session.get")
     def test_list_servers_reads_nextCursor_camelCase(self, mock_get):
         """Regression trap (#1210): metadata.nextCursor is the spec key."""
-        mock_response = mock.Mock()
-        mock_response.json.return_value = {
-            "servers": [],
-            "metadata": {"nextCursor": "spec-cursor"},
-        }
-        mock_response.raise_for_status.return_value = None
+        mock_response = _streamed_response(
+            {
+                "servers": [],
+                "metadata": {"nextCursor": "spec-cursor"},
+            }
+        )
         mock_get.return_value = mock_response
 
         _, next_cursor = self.client.list_servers()
@@ -78,9 +99,7 @@ class TestSimpleRegistryClient(unittest.TestCase):
     @mock.patch("requests.Session.get")
     def test_list_servers_uses_v0_1_endpoint(self, mock_get):
         """Regression trap (#1210): URL must be /v0.1/, never /v0/."""
-        mock_response = mock.Mock()
-        mock_response.json.return_value = {"servers": [], "metadata": {}}
-        mock_response.raise_for_status.return_value = None
+        mock_response = _streamed_response({"servers": [], "metadata": {}})
         mock_get.return_value = mock_response
 
         self.client.list_servers()
@@ -92,19 +111,19 @@ class TestSimpleRegistryClient(unittest.TestCase):
     @mock.patch("requests.Session.get")
     def test_search_servers(self, mock_get):
         """Test searching for servers under the v0.1 spec (?search= on /v0.1/servers)."""
-        mock_response = mock.Mock()
-        mock_response.json.return_value = {
-            "servers": [
-                {
-                    "server": {
-                        "name": "io.github.foo/test-server",
-                        "description": "Test description",
-                    }
-                },
-                {"server": {"name": "io.github.foo/server2", "description": "Another test"}},
-            ]
-        }
-        mock_response.raise_for_status.return_value = None
+        mock_response = _streamed_response(
+            {
+                "servers": [
+                    {
+                        "server": {
+                            "name": "io.github.foo/test-server",
+                            "description": "Test description",
+                        }
+                    },
+                    {"server": {"name": "io.github.foo/server2", "description": "Another test"}},
+                ]
+            }
+        )
         mock_get.return_value = mock_response
 
         results = self.client.search_servers("test")
@@ -113,6 +132,7 @@ class TestSimpleRegistryClient(unittest.TestCase):
             f"{self.client.registry_url}/v0.1/servers",
             params={"search": "test"},
             timeout=self.client._timeout,
+            stream=True,
         )
         self.assertEqual(len(results), 2)
         self.assertEqual(results[0]["name"], "io.github.foo/test-server")
@@ -121,9 +141,7 @@ class TestSimpleRegistryClient(unittest.TestCase):
     @mock.patch("requests.Session.get")
     def test_search_servers_passes_full_reference(self, mock_get):
         """search_servers passes the full reference (no slug pre-trim) to the spec ?search="""
-        mock_response = mock.Mock()
-        mock_response.json.return_value = {"servers": []}
-        mock_response.raise_for_status.return_value = None
+        mock_response = _streamed_response({"servers": []})
         mock_get.return_value = mock_response
 
         self.client.search_servers("io.github.foo/bar")
@@ -132,12 +150,12 @@ class TestSimpleRegistryClient(unittest.TestCase):
             f"{self.client.registry_url}/v0.1/servers",
             params={"search": "io.github.foo/bar"},
             timeout=self.client._timeout,
+            stream=True,
         )
 
     @mock.patch("requests.Session.get")
     def test_get_server(self, mock_get):
         """Test getting server info under the v0.1 spec."""
-        mock_response = mock.Mock()
         server_data = {
             "server": {
                 "name": "io.github.foo/test-server",
@@ -158,8 +176,7 @@ class TestSimpleRegistryClient(unittest.TestCase):
                 ],
             }
         }
-        mock_response.json.return_value = server_data
-        mock_response.raise_for_status.return_value = None
+        mock_response = _streamed_response(server_data)
         mock_get.return_value = mock_response
 
         server_info = self.client.get_server("io.github.foo/test-server")
@@ -170,14 +187,15 @@ class TestSimpleRegistryClient(unittest.TestCase):
         mock_get.assert_called_once_with(
             f"{self.client.registry_url}/v0.1/servers/io.github.foo%2Ftest-server/versions/latest",
             timeout=self.client._timeout,
+            stream=True,
         )
 
     @mock.patch("requests.Session.get")
     def test_get_server_url_encodes_slash_in_name(self, mock_get):
         """Regression trap (#1210): slash in serverName must be URL-encoded as %2F."""
-        mock_response = mock.Mock()
-        mock_response.json.return_value = {"server": {"name": "io.github.github/github-mcp-server"}}
-        mock_response.raise_for_status.return_value = None
+        mock_response = _streamed_response(
+            {"server": {"name": "io.github.github/github-mcp-server"}}
+        )
         mock_get.return_value = mock_response
 
         self.client.get_server("io.github.github/github-mcp-server")

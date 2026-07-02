@@ -21,7 +21,7 @@ APM uses a tiered approach to integration testing:
 - **Duration**: ~2-3 minutes per platform
 - **Trigger**: merge queue integration workflow, runtime-code pushes, scheduled/manual runs, and release validation
 
-### 2. **End-to-End Golden Scenario Tests** (Releases only)
+### 2. **End-to-End Golden Scenario Tests** (merge queue and promotion runs)
 - **Location**: `tests/integration/test_golden_scenario_e2e.py`
 - **Purpose**: Complete verification of the README golden scenario
 - **Scope**:
@@ -29,9 +29,9 @@ APM uses a tiered approach to integration testing:
   - Project initialization (`apm init`)
   - Dependency installation (`apm install`)
   - Real API calls to GitHub Models
-  - Both Codex and LLM runtime execution
+  - Copilot, Codex, LLM, and Gemini runtime execution
 - **Duration**: ~10-15 minutes per platform (with 20-minute timeout)  
-- **Trigger**: Only on version tags (releases)
+- **Trigger**: merge queue integration workflow, plus tag, schedule, and manual promotion runs
 
 ## Running Tests Locally
 
@@ -134,8 +134,8 @@ environment end-to-end; for local iteration prefer the direct
 
 ### GitHub Actions Workflow
 
-**On every push/PR:**
-1. Unit tests + **Smoke tests** (runtime installation verification)
+**On PR and merge queue:**
+1. PR-time unit checks run first; merge queue adds Linux smoke, integration, and release-validation gates.
 
 **On version tag releases:**
 1. Unit tests + Smoke tests
@@ -159,28 +159,29 @@ E2E tests require proper GitHub Models API access:
 - `models: read` - **Required for GitHub Models API access**
 
 **Environment Variables:**
-- `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` - for Codex runtime
-- `GITHUB_MODELS_KEY: ${{ secrets.GITHUB_TOKEN }}` - for LLM runtime (expects different env var name)
+- `GITHUB_TOKEN` - user-scoped token for GitHub Models runtime calls
+- `GITHUB_APM_PAT` - package access token; used as fallback by runtime setup
 
-Both runtimes authenticate against GitHub Models but expect different environment variable names.
+Runtime setup prefers `GITHUB_TOKEN` for GitHub Models and falls back to `GITHUB_APM_PAT` when no user-scoped token is present.
 
 ### Release Pipeline Sequencing
 
 The workflow ensures quality gates at each step:
 
-1. **test** job - Unit tests + smoke tests (all platforms)
-2. **build** job - Binary compilation (depends on test success)
-3. **integration-tests** job - Comprehensive runtime scenarios (depends on build success)
-4. **create-release** job - GitHub release creation (depends on integration-tests success)
-5. **publish-pypi** job - PyPI package publication (depends on release creation)
-6. **update-homebrew** job - Homebrew formula update (depends on PyPI publication)
+1. **build-and-test** jobs - Unit tests plus binary builds
+2. **integration-tests** job - Comprehensive runtime scenarios
+3. **release-validation** job - Final shipped-binary validation
+4. **create-release** job - GitHub release creation
+5. **publish-pypi** job - PyPI package publication
+6. **update-homebrew** job - Homebrew formula update
 
 Each stage must succeed before proceeding to the next, ensuring only fully validated releases reach users.
 
 ### Test Matrix
 
-All integration tests run on:
-- **Linux**: ubuntu-24.04 (x86_64)
+Promotion integration tests run on:
+- **Linux**: ubuntu-24.04 (x86_64), ubuntu-24.04-arm (arm64)
+- **Windows**: windows-latest (x86_64)
 - **macOS Intel**: macos-15-intel (x86_64)
 - **macOS Apple Silicon**: macos-latest (arm64)
 

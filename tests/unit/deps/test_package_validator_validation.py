@@ -211,7 +211,7 @@ class TestValidatePackageStructurePrimitives:
 
     def test_valid_with_chatmode_primitive(self, tmp_path: Path) -> None:
         apm_dir = self._setup_apm_package(tmp_path)
-        _make_primitive(apm_dir, "chatmodes", "my.chatmode.md")
+        _make_primitive(apm_dir, "agents", "my.agent.md")
         with patch("apm_cli.models.validation.detect_package_type") as mock_detect:
             mock_detect.return_value = (PackageType.APM_PACKAGE, None)
             with patch("apm_cli.deps.package_validator.APMPackage.from_apm_yml") as mock_parse:
@@ -323,7 +323,7 @@ class TestValidatePrimitiveStructure:
 
     def test_wrong_suffix_flagged(self, tmp_path: Path) -> None:
         apm_dir = tmp_path / ".apm"
-        _make_primitive(apm_dir, "chatmodes", "tool.instructions.md")  # wrong suffix for chatmode
+        _make_primitive(apm_dir, "agents", "tool.instructions.md")  # wrong suffix for chatmode
         issues = PackageValidator().validate_primitive_structure(apm_dir)
         assert any("Invalid primitive" in i for i in issues)
 
@@ -360,12 +360,12 @@ class TestIsValidPrimitiveName:
         "filename,ptype,expected",
         [
             ("tool.instructions.md", "instructions", True),
-            ("my-tool.chatmode.md", "chatmodes", True),
+            ("my-tool.agent.md", "agents", True),
             ("config.context.md", "contexts", True),
             ("gen.prompt.md", "prompts", True),
             # Wrong suffixes
-            ("tool.chatmode.md", "instructions", False),
-            ("tool.instructions.md", "chatmodes", False),
+            ("tool.agent.md", "instructions", False),
+            ("tool.instructions.md", "agents", False),
             # Space in name
             ("my tool.instructions.md", "instructions", False),
             # Doesn't end with .md

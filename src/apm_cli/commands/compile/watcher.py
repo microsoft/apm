@@ -234,10 +234,6 @@ def _watch_mode(
             observer.schedule(event_handler, ".github/agents", recursive=True)
             watch_paths.append(".github/agents/")
 
-        if Path(".github/chatmodes").exists():
-            observer.schedule(event_handler, ".github/chatmodes", recursive=True)
-            watch_paths.append(".github/chatmodes/")
-
         if Path(APM_YML_FILENAME).exists():
             observer.schedule(event_handler, ".", recursive=False)
             watch_paths.append(APM_YML_FILENAME)

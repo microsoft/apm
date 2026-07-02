@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from apm_cli.install.request import InstallRequest
 
 if TYPE_CHECKING:
+    from apm_cli.core.lifecycle_scripts import LifecycleEvent, LifecycleScriptRunner
     from apm_cli.models.results import InstallResult
 
 
@@ -45,6 +46,9 @@ class InstallService:
 
     def run(self, request: InstallRequest) -> InstallResult:
         """Execute the install pipeline and return the structured result.
+
+        Fires ``pre-install`` / ``post-install`` lifecycle scripts around
+        the pipeline when scripts are configured.
 
         Raises:
             InstallNotAvailableError: if the dependency subsystem failed
@@ -69,7 +73,11 @@ class InstallService:
         except ImportError as e:  # pragma: no cover -- defensive
             raise InstallNotAvailableError(f"APM dependency system not available: {e}") from e
 
-        return run_install_pipeline(
+        runner = self._build_script_runner(request)
+        event = self._build_event("pre-install", request)
+        runner.fire("pre-install", event)
+
+        result = run_install_pipeline(
             request.apm_package,
             update_refs=request.update_refs,
             verbose=request.verbose,
@@ -93,6 +101,61 @@ class InstallService:
             plan_callback=request.plan_callback,
             refresh=request.refresh,
             lockfile_only=request.lockfile_only,
+        )
+
+        post_event = self._build_event("post-install", request)
+        runner.fire("post-install", post_event)
+
+        return result
+
+    # -- Lifecycle script helpers ------------------------------------------
+
+    @staticmethod
+    def _build_script_runner(request: InstallRequest) -> LifecycleScriptRunner:
+        """Build a :class:`LifecycleScriptRunner` from the request context."""
+        from apm_cli.core.lifecycle_scripts import build_runner_from_context
+
+        project_root = None
+        pkg_path = getattr(request.apm_package, "package_path", None)
+        if pkg_path is not None:
+            project_root = str(pkg_path)
+
+        return build_runner_from_context(
+            logger=request.logger,
+            verbose=request.verbose,
+            project_root=project_root,
+        )
+
+    @staticmethod
+    def _build_event(event_name: str, request: InstallRequest) -> LifecycleEvent:
+        """Build a :class:`LifecycleEvent` from the request."""
+        from apm_cli.core.lifecycle_scripts import LifecycleEvent, PackageInfo
+
+        packages = []
+        for dep in request.apm_package.get_apm_dependencies():
+            packages.append(
+                PackageInfo(
+                    name=dep.repo_url or str(dep),
+                    reference=dep.reference,
+                )
+            )
+
+        scope_name = "project"
+        if request.scope is not None:
+            scope_name = (
+                request.scope.value if hasattr(request.scope, "value") else str(request.scope)
+            )
+
+        project_root = None
+        pkg_path = getattr(request.apm_package, "package_path", None)
+        if pkg_path is not None:
+            project_root = str(pkg_path)
+
+        return LifecycleEvent.create(
+            event=event_name,
+            packages=packages,
+            scope=scope_name,
+            working_directory=project_root,
         )
 
     @staticmethod

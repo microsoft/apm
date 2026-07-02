@@ -451,14 +451,14 @@ def _validate_claude_skill(
     Returns:
         ValidationResult: Updated validation result
     """
-    import frontmatter
+    from apm_cli.utils.yaml_io import load_frontmatter
 
     from .apm_package import APMPackage
 
     try:
         # Parse SKILL.md to extract metadata
         with open(skill_md_path, encoding="utf-8") as f:
-            post = frontmatter.load(f)
+            post = load_frontmatter(f)
 
         skill_name = post.metadata.get("name", package_path.name)
         skill_description = post.metadata.get("description", f"Claude Skill: {skill_name}")
@@ -502,9 +502,8 @@ def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> Vali
     Returns:
         ValidationResult: Updated validation result
     """
-    import frontmatter as _frontmatter
-
     from ..utils.path_security import ensure_path_within, validate_path_segments
+    from ..utils.yaml_io import load_frontmatter
     from .apm_package import APMPackage
 
     skills_dir = package_path / "skills"
@@ -544,7 +543,7 @@ def _validate_skill_bundle(package_path: Path, result: ValidationResult) -> Vali
         # Validate frontmatter
         try:
             with open(skill_md_path, encoding="utf-8") as f:
-                post = _frontmatter.load(f)
+                post = load_frontmatter(f)
         except Exception as e:
             result.add_error(f"skills/{name}/SKILL.md: failed to parse frontmatter: {e}")
             continue
@@ -645,10 +644,10 @@ def _validate_hybrid_package(
         return result
 
     try:
-        import frontmatter
+        from apm_cli.utils.yaml_io import load_frontmatter
 
         with open(skill_md_path, encoding="utf-8") as f:
-            frontmatter.load(f)  # Parse only to surface malformed frontmatter.
+            load_frontmatter(f)  # Parse only to surface malformed frontmatter.
 
         # Metadata model for HYBRID packages: apm.yml.description and
         # SKILL.md frontmatter description are INDEPENDENT fields with

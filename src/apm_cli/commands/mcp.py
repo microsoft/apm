@@ -92,13 +92,14 @@ def mcp():
         "  apm mcp install api --transport http --url https://example.com/mcp"
     ),
     epilog=(
-        "Common options (see `apm install --help` for full list):\n"
+        "\b\n"
+        "Common options (see 'apm install --help' for full list):\n"
         "  --transport [stdio|http|sse|streamable-http]\n"
         "  --url URL           Server URL for remote transports\n"
         "  --env KEY=VALUE     Environment variable (repeatable)\n"
         "  --header KEY=VALUE  HTTP header (repeatable)\n"
         "  --registry URL      Custom registry URL\n"
-        "  --mcp-version VER    Pin registry entry to a specific version\n"
+        "  --mcp-version VER   Pin registry entry to a specific version\n"
         "  --dev / --dry-run / --force / --verbose / --no-policy\n"
     ),
 )

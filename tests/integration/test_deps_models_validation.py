@@ -217,9 +217,9 @@ class TestParseVirtualPackages:
         assert ref.is_virtual_file() is True
 
     def test_virtual_file_chatmode(self) -> None:
-        ref = _DR().parse("owner/repo/chatmodes/review.chatmode.md")
+        ref = _DR().parse("owner/repo/agents/review.agent.md")
         assert ref.is_virtual is True
-        assert ref.virtual_path == "chatmodes/review.chatmode.md"
+        assert ref.virtual_path == "agents/review.agent.md"
 
     def test_virtual_file_agent(self) -> None:
         ref = _DR().parse("owner/repo/agents/my-agent.agent.md")
@@ -811,19 +811,19 @@ class TestDownloadVirtualFilePackage:
             with pytest.raises(RuntimeError, match="Failed to download virtual package"):
                 dl.download_virtual_file_package(dep, tmp_path / "out")
 
-    def test_chatmode_extension_placed_in_chatmodes_dir(self, tmp_path: Path) -> None:
+    def test_chatmode_extension_placed_in_agents_dir(self, tmp_path: Path) -> None:
         dl = _make_downloader()
         dep = _make_dep_ref(
             repo_url="owner/repo",
             is_virtual=True,
-            virtual_path="chatmodes/review.chatmode.md",
+            virtual_path="agents/review.agent.md",
         )
         with (
             patch.object(dl, "_resolve_commit_sha_for_ref", return_value=None),
             patch.object(dl, "download_raw_file", return_value=b"# Chatmode"),
         ):
             dl.download_virtual_file_package(dep, tmp_path / "out")
-        assert (tmp_path / "out" / ".apm" / "chatmodes" / "review.chatmode.md").exists()
+        assert (tmp_path / "out" / ".apm" / "agents" / "review.agent.md").exists()
 
 
 # ============================================================================

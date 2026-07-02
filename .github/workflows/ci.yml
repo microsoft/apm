@@ -143,7 +143,7 @@ jobs:
     # gate is preserved on the path that actually merges to main.
     - name: Run tests with coverage
       run: |
-        uv run pytest tests/unit tests/test_console.py \
+        uv run pytest tests/unit tests/test_console.py tests/red_team \
           --splits 2 --group ${{ matrix.shard }} \
           -n 2 --dist worksteal \
           --cov --cov-report= --cov-fail-under=60

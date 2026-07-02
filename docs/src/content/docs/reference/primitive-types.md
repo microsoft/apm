@@ -27,7 +27,7 @@ from apm_cli.primitives import Chatmode
 # Local primitive
 chatmode = Chatmode(
     name="assistant", 
-    file_path=Path("local.chatmode.md"),
+    file_path=Path("local.agent.md"),
     description="Local assistant",
     content="...",
     source="local"  # New field
@@ -36,7 +36,7 @@ chatmode = Chatmode(
 # Dependency primitive  
 dep_chatmode = Chatmode(
     name="reviewer",
-    file_path=Path("dep.chatmode.md"), 
+    file_path=Path("dep.agent.md"), 
     description="Dependency assistant",
     content="...",
     source="dependency:company-standards"  # New field
@@ -143,13 +143,13 @@ The enhanced discovery system expects this structure:
 project/
 ├── apm.yml                           # Dependency declarations
 ├── .apm/                             # Local primitives (highest priority)
-│   ├── chatmodes/
+│   ├── agents/
 │   ├── instructions/
 │   └── contexts/
 └── apm_modules/                      # Dependency primitives
     ├── standards/                    # From company/standards
     │   └── .apm/
-    │       ├── chatmodes/
+    │       ├── agents/
     │       └── instructions/
     ├── team/
     │   └── workflows/                # From team/workflows

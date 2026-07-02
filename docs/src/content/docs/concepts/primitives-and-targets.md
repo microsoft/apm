@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-A **primitive** is a unit of agent context APM can manage: instructions, prompts, agents, skills, hooks, commands, plugins, and MCP servers. A **target** is a harness APM compiles primitives for: Copilot, Claude, Cursor, Codex, Gemini, Antigravity, OpenCode, and Windsurf. The matrix below is the full reach map. For any primitive X and harness Y, it tells you whether Y receives X natively, receives it after APM transforms it, or does not receive it at all.
+A **primitive** is a unit of agent context APM can manage: instructions, prompts, agents, skills, hooks, commands, plugins, and MCP servers. A **target** is a harness APM compiles primitives for: Copilot, Claude, Cursor, Codex, Gemini, OpenCode, Windsurf, and Kiro, with Antigravity available as an explicit CLI-only target. The matrix below is the full reach map. For any primitive X and harness Y, it tells you whether Y receives X natively, receives it after APM transforms it, or does not receive it at all.
 
 This page is the canonical reference. Tutorials and how-tos link here; do not duplicate.
 
@@ -33,7 +33,7 @@ Executable, parameterized AI workflows. Equivalent to a callable program for an 
 
 Specialized AI personalities with tool boundaries and expertise scope.
 
-- Source: `.apm/agents/*.agent.md` (legacy: `.chatmode.md`)
+- Source: `.apm/agents/*.agent.md`
 - Deep dive: [Agent workflows](/apm/producer/author-primitives/instructions-and-agents/)
 
 ### Skills
@@ -78,7 +78,7 @@ GitHub Copilot CLI canvas extensions: a directory bundle whose entry file is `ex
 
 ## Target catalogue
 
-Each target is identified by a slug used in `apm.yml`'s `targets:` field and on the `--target` flag. The output directory is where APM writes deployed primitives. The "agent-skills" and "copilot-cowork" targets exist in the registry but are not end-user runtimes; they are covered separately in the experimental reference.
+Each target is identified by a slug used in `apm.yml`'s `targets:` field or on the `--target` flag. `apm.yml` accepts the canonical targets (`claude`, `copilot`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `agent-skills`); `antigravity` is `--target`-only and explicit-only. The output directory is where APM writes deployed primitives.
 
 | Slug | Output directory | Compile family |
 |---|---|---|
@@ -175,8 +175,7 @@ Full pattern, the three pack-time gotchas, and verification steps: [Dev-only pri
 1. Explicit `--target <slug>` flag, when passed.
 2. The `targets:` field in `apm.yml`, when present.
 3. Auto-detection: any harness whose root directory (`.github/`, `.claude/`, `.cursor/`, `.codex/`, `.gemini/`, `.opencode/`, `.windsurf/`, `.kiro/`) already exists in the workspace is selected.
-4. Fallback: `minimal` -- APM writes `AGENTS.md` only and skips folder
-   integration. Create one of the harness folders above (or set
+4. Fallback: `copilot` -- greenfield projects get the default Copilot skills root. Create one of the harness folders above (or set
    `targets:` explicitly) for full integration.
 
 Unknown target slugs are rejected upstream by the manifest parser; they never silently fall through to the default.

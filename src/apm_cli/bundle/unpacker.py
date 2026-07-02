@@ -130,9 +130,12 @@ def unpack_bundle(
         # Extract pack: metadata (written by apm pack) before structured parse
         pack_meta: dict = {}
         try:
-            import yaml
+            from ..utils.yaml_io import load_yaml
 
-            raw = yaml.safe_load(lockfile_path.read_text(encoding="utf-8"))
+            # Bounded loader: an untrusted bundle lockfile cannot hang the
+            # unpacker with a merge-key bomb (the except below cannot catch a
+            # non-terminating safe_load loop).
+            raw = load_yaml(lockfile_path)
             if isinstance(raw, dict):
                 val = raw.get("pack", {})
                 pack_meta = val if isinstance(val, dict) else {}

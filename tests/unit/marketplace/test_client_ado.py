@@ -70,6 +70,12 @@ def _fake_response(status_code: int, *, text: str = "", content_type: str = "app
             raise client_mod.requests.exceptions.HTTPError(f"HTTP {status_code}")
 
     resp.raise_for_status.side_effect = _raise_for_status
+    # The capped API reader streams the body via ``iter_content`` (stream=True);
+    # yield the encoded text so the fake matches the real streamed contract.
+    resp.iter_content.side_effect = lambda chunk_size=65536: iter(
+        [text.encode("utf-8")] if text else []
+    )
+    resp.close.side_effect = lambda: None
     return resp
 
 
@@ -119,7 +125,7 @@ def test_ado_auth_header_bearer_detected_from_git_env() -> None:
 def test_fetch_ado_uses_rest_items_api_not_clone() -> None:
     captured: list[tuple[str, dict]] = []
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_get(url, headers=None, timeout=None, **kwargs):
         captured.append((url, dict(headers or {})))
         return _fake_response(200, text=json.dumps(_MANIFEST))
 
@@ -153,7 +159,7 @@ def test_fetch_ado_uses_rest_items_api_not_clone() -> None:
 def test_fetch_ado_bearer_context_sends_bearer_header() -> None:
     captured_headers: list[dict] = []
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_get(url, headers=None, timeout=None, **kwargs):
         captured_headers.append(dict(headers or {}))
         return _fake_response(200, text=json.dumps(_MANIFEST))
 
@@ -174,7 +180,7 @@ def test_fetch_ado_bearer_context_sends_bearer_header() -> None:
 
 
 def test_fetch_ado_404_returns_none_without_clone() -> None:
-    def fake_get(url, headers=None, timeout=None):
+    def fake_get(url, headers=None, timeout=None, **kwargs):
         return _fake_response(404)
 
     resolver = _FakeResolver(token="pat-abc")
@@ -196,7 +202,7 @@ def test_fetch_ado_404_returns_none_without_clone() -> None:
 def test_fetch_ado_legacy_visualstudio_host() -> None:
     captured: list[str] = []
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_get(url, headers=None, timeout=None, **kwargs):
         captured.append(url)
         return _fake_response(200, text=json.dumps(_MANIFEST))
 
@@ -227,7 +233,7 @@ def test_fetch_ado_legacy_visualstudio_host() -> None:
 def test_fetch_ado_signin_html_falls_back_to_git() -> None:
     """ADO 200 + text/html sign-in page (#1671) -> generic-git clone."""
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_get(url, headers=None, timeout=None, **kwargs):
         return _fake_response(200, text="<html>sign in</html>", content_type="text/html")
 
     resolver = _FakeResolver(token=None)  # anonymous -> no bearer fallback
@@ -247,7 +253,7 @@ def test_fetch_ado_signin_html_falls_back_to_git() -> None:
 
 
 def test_fetch_ado_network_error_falls_back_to_git() -> None:
-    def fake_get(url, headers=None, timeout=None):
+    def fake_get(url, headers=None, timeout=None, **kwargs):
         raise client_mod.requests.exceptions.ConnectionError("offline")
 
     resolver = _FakeResolver(token="pat-abc")
@@ -287,7 +293,7 @@ def test_fetch_ado_non_decomposable_url_uses_git_directly() -> None:
 
 
 def test_fetch_ado_invalid_json_falls_back_to_git() -> None:
-    def fake_get(url, headers=None, timeout=None):
+    def fake_get(url, headers=None, timeout=None, **kwargs):
         return _fake_response(200, text="not json{{")
 
     resolver = _FakeResolver(token="pat-abc")
@@ -322,7 +328,7 @@ def test_fetch_file_dispatches_ado_kind_through_rest() -> None:
     """End-to-end: ``_fetch_file`` routes an ADO source to the REST items API."""
     captured: list[tuple[str, dict]] = []
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_get(url, headers=None, timeout=None, **kwargs):
         captured.append((url, dict(headers or {})))
         return _fake_response(200, text=json.dumps(_MANIFEST))
 
@@ -348,7 +354,7 @@ def test_fetch_file_dispatches_ado_kind_through_rest() -> None:
 def test_fetch_ado_rest_auth_failure_then_git_fallback_via_resolver() -> None:
     """A non-404 HTTP error bubbles out of try_with_fallback -> git fallback."""
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_get(url, headers=None, timeout=None, **kwargs):
         return _fake_response(403, text="forbidden")
 
     # Pin the AAD bearer provider to "unavailable" so the PAT 403 propagates
@@ -387,7 +393,7 @@ def test_fetch_ado_signin_page_triggers_bearer_fallback_before_clone() -> None:
     bearer_provider.is_available.return_value = True
     bearer_provider.get_bearer_token.return_value = "jwt-fallback"
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_get(url, headers=None, timeout=None, **kwargs):
         auth = (headers or {}).get("Authorization", "")
         if auth.startswith("Bearer "):
             # Bearer retry succeeds with the real manifest.
@@ -419,7 +425,7 @@ def test_fetch_ado_rest_raises_is_swallowed_into_fallback() -> None:
     """A MarketplaceFetchError raised inside the operation triggers fallback."""
     sentinel = MarketplaceFetchError("acme", "boom")
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_get(url, headers=None, timeout=None, **kwargs):
         raise sentinel
 
     resolver = _FakeResolver(token="pat-abc")

@@ -46,11 +46,11 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 
 | Flag | Default | Description |
 |---|---|---|
-| `--target`, `-t VALUE` | auto-detect | Force deployment targets. Comma-separated for multiple (`-t claude,cursor`). Values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `intellij`, `agent-skills`, `all`; experimental `copilot-cowork` and `copilot-app` are also accepted when enabled. `all` expands to every harness above except `agent-skills`; combine `all,agent-skills` for both. Highest precedence in the chain `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. With nothing to detect, install exits `2` with a teaching message. |
+| `--target`, `-t VALUE` | auto-detect | Force deployment targets. Comma-separated for multiple (`-t claude,cursor`). Values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `intellij`, `vscode`, `agent-skills`, `all`; experimental `copilot-cowork` and `copilot-app` are also accepted when enabled. `all` expands to every harness above except `agent-skills` and `antigravity`; combine `all,agent-skills` or `all,antigravity` to add them. Highest precedence in the chain `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. With nothing to detect, install exits `2` with a teaching message. |
 | `--runtime VALUE` | unset | Legacy alias for `--target` (single value only). Still accepted; prefer `--target`. |
 | `--exclude VALUE` | unset | Skip a single runtime that auto-detect or `targets:` would otherwise enable. |
 | `--only apm\|mcp` | both | Install only APM packages or only MCP servers. |
-| `-g`, `--global` | off | Install to user scope (`~/.apm/`) instead of the current project. MCP servers deploy only to global-capable runtimes, such as Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Kiro, Windsurf, and JetBrains Copilot. |
+| `-g`, `--global` | off | Install to user scope (`~/.apm/`) instead of the current project. MCP servers deploy only to global-capable runtimes, such as Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Kiro, Windsurf, and JetBrains Copilot. |
 | `--legacy-skill-paths` | off | Deploy skills to per-client paths (`.cursor/skills/`, `.github/skills/`, ...) instead of the converged `.agents/skills/`. Env: `APM_LEGACY_SKILL_PATHS=1`. |
 
 ### Policy and trust
@@ -80,7 +80,7 @@ Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initi
 
 | Flag | Default | Description |
 |---|---|---|
-| `--skill NAME` | all | Install only named skill(s) from a skill collection (`SKILL_BUNDLE` or plugin manifest). Repeatable. For plugin manifests, `NAME` may be the skill name or manifest path, such as `skills/productivity/grill-me`. The selection is persisted to `apm.yml` and `apm.lock.yaml`. Use `--skill '*'` to reset and install all. |
+| `--skill NAME` | all | Install only named skill(s) from a skill collection (`SKILL_BUNDLE` or plugin manifest). Repeatable. For plugin manifests, `NAME` may be the skill name or manifest path, such as `skills/productivity/grill-me`. The selection is persisted to `apm.yml` and `apm.lock.yaml`. `--skill` is additive across separate installs: a later `apm install <bundle> --skill X` adds `X` to the existing pin (union) rather than replacing it -- previously deployed skills are never silently removed. Use `--skill '*'` to reset to the full bundle; to drop a single skill, edit the `skills:` list in `apm.yml` and re-run `apm install`. |
 | `--as ALIAS` | bundle id | Override the log/display label for a local-bundle install. Only valid with a single local-bundle `PACKAGE_REF`. |
 
 ### MCP server entry (use only with `--mcp`)
@@ -186,8 +186,9 @@ apm install ./my-bundle --target opencode
 ### Install only a subset of skills from a bundle
 
 ```bash
-apm install owner/skill-bundle --skill review --skill refactor
-apm install owner/skill-bundle --skill '*'   # reset to all skills
+apm install owner/skill-bundle --skill review
+apm install owner/skill-bundle --skill refactor   # adds refactor; review is kept (union)
+apm install owner/skill-bundle --skill '*'         # reset to all skills
 ```
 
 ## Exit codes

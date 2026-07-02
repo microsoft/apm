@@ -233,18 +233,41 @@ class TestComputeFileHash:
         assert result.startswith("sha256:")
         assert len(result) == len("sha256:") + 64
 
-    def test_hashes_raw_bytes_as_written(self, tmp_path):
-        """Hash is over the exact on-disk bytes (req-lk-012), no normalization.
+    def test_text_crlf_and_lf_hash_equal(self, tmp_path):
+        """CRLF and LF variants of the same TEXT hash identically (apm#1952).
 
-        CRLF and LF variants of the same text are distinct on disk, so they
-        MUST hash differently -- the provenance hash binds the bytes as
-        written, which is what ``apm audit`` re-verifies.
+        The per-deployed-file hash is computed over the CRLF -> LF
+        normalized content so a file git materializes as ``\\r\\n`` on
+        Windows and ``\\n`` on POSIX produces one platform-invariant
+        hash. This is what makes ``apm install`` (record) and
+        ``apm audit`` (verify) symmetric across operating systems.
         """
         lf = tmp_path / "lf.md"
         lf.write_bytes(b"# H\n\ntext\n")
         crlf = tmp_path / "crlf.md"
         crlf.write_bytes(b"# H\r\n\r\ntext\r\n")
-        assert compute_file_hash(lf) != compute_file_hash(crlf)
+        assert compute_file_hash(lf) == compute_file_hash(crlf)
+
+    def test_bare_cr_still_distinct_from_lf(self, tmp_path):
+        """A lone CR is NOT normalized -- the smuggling vector stays caught.
+
+        Only ``\\r\\n`` collapses to ``\\n``; a bare ``\\r`` (which a
+        terminal or parser may treat as a carriage-return overwrite) is
+        preserved, so it still changes the hash.
+        """
+        lf = tmp_path / "lf.md"
+        lf.write_bytes(b"safe\ntext\n")
+        bare_cr = tmp_path / "cr.md"
+        bare_cr.write_bytes(b"safe\rtext\n")
+        assert compute_file_hash(bare_cr) != compute_file_hash(lf)
+
+    def test_binary_hashed_raw(self, tmp_path):
+        """Binary content (NUL byte / non-UTF-8) is hashed raw, not normalized."""
+        a = tmp_path / "a.bin"
+        a.write_bytes(b"\x00\r\n\xff\xfe")
+        h1 = compute_file_hash(a)
+        a.write_bytes(b"\x00\n\xff\xfe")
+        assert compute_file_hash(a) != h1
 
     def test_real_content_change_differs(self, tmp_path):
         """A genuine content edit changes the hash."""

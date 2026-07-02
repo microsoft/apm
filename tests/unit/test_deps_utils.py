@@ -222,10 +222,10 @@ class TestCountPackageFiles:
         assert wf == 0
 
     def test_chatmodes_counted_as_context(self, tmp_path):
-        """Files in .apm/chatmodes/ are counted as context."""
+        """Files in .apm/agents/ are counted as context."""
         apm = _make_apm_dir(tmp_path)
-        (apm / "chatmodes").mkdir()
-        (apm / "chatmodes" / "mode.md").write_text("# m")
+        (apm / "agents").mkdir()
+        (apm / "agents" / "mode.md").write_text("# m")
         ctx, _ = _count_package_files(tmp_path)
         assert ctx == 1
 
@@ -286,7 +286,7 @@ class TestGetDetailedContextCounts:
     def test_no_apm_dir(self, tmp_path):
         """Returns zeros when .apm/ does not exist."""
         result = _get_detailed_context_counts(tmp_path)
-        assert result == {"instructions": 0, "chatmodes": 0, "contexts": 0}
+        assert result == {"instructions": 0, "agents": 0, "contexts": 0}
 
     def test_instructions_counted(self, tmp_path):
         """Counts files in .apm/instructions/."""
@@ -297,13 +297,13 @@ class TestGetDetailedContextCounts:
         assert result["instructions"] == 1
 
     def test_chatmodes_counted(self, tmp_path):
-        """Counts files in .apm/chatmodes/."""
+        """Counts files in .apm/agents/."""
         apm = _make_apm_dir(tmp_path)
-        (apm / "chatmodes").mkdir()
-        (apm / "chatmodes" / "debug.md").write_text("# debug")
-        (apm / "chatmodes" / "review.md").write_text("# review")
+        (apm / "agents").mkdir()
+        (apm / "agents" / "debug.md").write_text("# debug")
+        (apm / "agents" / "review.md").write_text("# review")
         result = _get_detailed_context_counts(tmp_path)
-        assert result["chatmodes"] == 2
+        assert result["agents"] == 2
 
     def test_contexts_uses_context_dir(self, tmp_path):
         """'contexts' key maps to .apm/context/ directory (singular name)."""
@@ -318,14 +318,14 @@ class TestGetDetailedContextCounts:
         apm = _make_apm_dir(tmp_path)
         for d, files in [
             ("instructions", ["i.md"]),
-            ("chatmodes", ["m1.md", "m2.md"]),
+            ("agents", ["m1.md", "m2.md"]),
             ("context", ["c.md"]),
         ]:
             (apm / d).mkdir()
             for f in files:
                 (apm / d / f).write_text(f"# {f}")
         result = _get_detailed_context_counts(tmp_path)
-        assert result == {"instructions": 1, "chatmodes": 2, "contexts": 1}
+        assert result == {"instructions": 1, "agents": 2, "contexts": 1}
 
 
 # ==================================================================

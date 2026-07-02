@@ -9,6 +9,7 @@ from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResul
 from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
+from apm_cli.utils.yaml_io import load_frontmatter
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
@@ -267,8 +268,6 @@ class PromptIntegrator(BaseIntegrator):
         target_paths = []
         total_links_resolved = 0
 
-        import frontmatter as _fm
-
         for source_file in prompt_files:
             # Skip workflow-shape prompts at file-based targets: an
             # author who added execution metadata (interval, mode, ...)
@@ -277,7 +276,7 @@ class PromptIntegrator(BaseIntegrator):
             # file ships to both surfaces and the App-only metadata
             # leaks into a slash-command users would not expect.
             try:
-                _meta = _fm.load(str(source_file)).metadata
+                _meta = load_frontmatter(str(source_file)).metadata
             except Exception:
                 _meta = {}
             if _is_workflow_shape(_meta):

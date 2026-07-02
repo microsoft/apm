@@ -145,7 +145,7 @@ primitive type:
 | instruction | `.apm/instructions/*.instructions.md` | No |
 | command (prompt) | `.apm/prompts/*.prompt.md` | No |
 | hook | `.apm/hooks/*.json` | Yes: `hooks/*.json` |
-| agent | `.apm/agents/**/*.agent.md`, `.apm/chatmodes/*.chatmode.md` | Yes: `*.agent.md` and `*.chatmode.md` at package root |
+| agent | `.apm/agents/**/*.agent.md` | Yes: `*.agent.md` at package root |
 | skill | `.apm/skills/<name>/SKILL.md` | Yes: `skills/<name>/SKILL.md` (SKILL_BUNDLE or MARKETPLACE_PLUGIN) |
 
 Source: `src/apm_cli/integration/instruction_integrator.py`,

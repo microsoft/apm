@@ -150,7 +150,7 @@ See the [CI/CD Integration guide](../ci-cd/) and [Pack and distribute](../../pro
 
 APM automatically scans dependencies for hidden Unicode characters during installation. Critical findings block deployment. This applies to both direct `apm install` and when gh-aw resolves packages via `shared/apm.md`.
 
-For CI visibility into scan results (SARIF reports, step summaries), see the [CI/CD Integration guide](../../integrations/ci-cd/#content-scanning-in-ci).
+For CI visibility into scan results (SARIF reports, step summaries), see the [CI/CD Integration guide](../ci-cd/#governance-with-apm-audit).
 
 For details on what APM detects, see [Content scanning](../../enterprise/security/#content-scanning).
 

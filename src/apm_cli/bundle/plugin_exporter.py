@@ -246,7 +246,9 @@ def _collect_hooks_from_apm(apm_dir: Path) -> dict:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
                     _deep_merge(hooks, data, overwrite=False)
-            except (json.JSONDecodeError, OSError):
+            except (OSError, ValueError, RecursionError):
+                # Untrusted .apm/hooks/*.json: oversized-int -> bare ValueError,
+                # deep nest -> RecursionError. Fail closed (skip this file).
                 pass
     return hooks
 
@@ -261,7 +263,9 @@ def _collect_hooks_from_root(package_root: Path) -> dict:
             data = json.loads(hooks_file.read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 _deep_merge(hooks, data, overwrite=False)
-        except (json.JSONDecodeError, OSError):
+        except (OSError, ValueError, RecursionError):
+            # Untrusted root hooks.json: fail closed (oversized-int ValueError /
+            # deep-nest RecursionError are not JSONDecodeError).
             pass
     # Directory
     hooks_dir = package_root / "hooks"
@@ -272,7 +276,8 @@ def _collect_hooks_from_root(package_root: Path) -> dict:
                     data = json.loads(f.read_text(encoding="utf-8"))
                     if isinstance(data, dict):
                         _deep_merge(hooks, data, overwrite=False)
-                except (json.JSONDecodeError, OSError):
+                except (OSError, ValueError, RecursionError):
+                    # Untrusted .../hooks/*.json: fail closed (skip this file).
                     pass
     return hooks
 
@@ -356,7 +361,11 @@ def _has_marketplace_block(apm_yml_path: Path) -> bool:
     try:
         import yaml
 
-        data = yaml.safe_load(apm_yml_path.read_text(encoding="utf-8")) or {}
+        # Bounded loader so a hostile apm.yml cannot wedge the export with a
+        # merge/alias expansion bomb (fails closed as yaml.YAMLError).
+        from apm_cli.utils.yaml_io import load_yaml
+
+        data = load_yaml(apm_yml_path) or {}
     except (OSError, yaml.YAMLError):
         return False
     return bool(data.get("marketplace"))

@@ -293,7 +293,7 @@ class TestAgentsCompiler(unittest.TestCase):
 
         chatmode = Chatmode(
             name="test-chatmode",
-            file_path=Path("test.chatmode.md"),
+            file_path=Path("test.agent.md"),
             description="Test chatmode",
             apply_to=None,
             content="You are a test assistant.",

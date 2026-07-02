@@ -25,6 +25,35 @@ from ..utils.path_security import PathTraversalError, ensure_path_within
 
 _logger = logging.getLogger(__name__)
 
+# Untrusted plugin-package JSON files (.mcp.json / .lsp.json / plugin.json) are
+# read straight off attacker-controlled package content during ``apm install``.
+# Stock ``json.load`` has two failure classes that escape a narrow
+# ``except json.JSONDecodeError``: a deeply nested document raises
+# ``RecursionError`` and a >4300-digit integer literal raises ``ValueError``
+# (the stdlib int-string conversion limit) -- either crashes a default command.
+# Cap the file size first, then funnel every parse failure into a single
+# ``ValueError`` so callers fail closed with one except type.
+_MAX_PLUGIN_JSON_BYTES = 5 * 1024 * 1024
+
+
+def _bounded_read_json(path: Path) -> Any:
+    """Read and JSON-parse a plugin-package file fail-closed under a size cap.
+
+    Raises ``ValueError`` on any parse failure (oversize, malformed, deep-nest
+    ``RecursionError``, huge-int / ``MemoryError``). ``OSError`` (missing or
+    unreadable file) propagates unchanged so callers can distinguish it.
+    """
+    size = path.stat().st_size
+    if size > _MAX_PLUGIN_JSON_BYTES:
+        raise ValueError(
+            f"JSON file {path} exceeds {_MAX_PLUGIN_JSON_BYTES}-byte cap ({size} bytes)"
+        )
+    text = path.read_text(encoding="utf-8")
+    try:
+        return json.loads(text)
+    except (ValueError, RecursionError, MemoryError) as exc:
+        raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
+
 
 class PluginIntegrityError(RuntimeError):
     """Raised when a plugin destination tree contains a pre-existing symlink.
@@ -118,9 +147,8 @@ def parse_plugin_manifest(plugin_json_path: Path) -> dict[str, Any]:
         raise FileNotFoundError(f"plugin.json not found: {plugin_json_path}")
 
     try:
-        with open(plugin_json_path, encoding="utf-8") as f:
-            manifest = json.load(f)
-    except json.JSONDecodeError as e:
+        manifest = _bounded_read_json(plugin_json_path)
+    except ValueError as e:
         raise ValueError(f"Invalid JSON in plugin.json: {e}")  # noqa: B904
 
     if not manifest.get("name"):
@@ -155,7 +183,7 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
     if plugin_json_path is not None and plugin_json_path.exists():
         try:  # noqa: SIM105
             manifest = parse_plugin_manifest(plugin_json_path)
-        except (ValueError, FileNotFoundError):
+        except (ValueError, FileNotFoundError, RecursionError, MemoryError):
             pass  # Treat as empty manifest; fall back to dir-name defaults
 
     # Derive name from directory if not in manifest
@@ -324,8 +352,8 @@ def _read_mcp_file(plugin_path: Path, rel_path: str, logger: logging.Logger) -> 
 def _read_mcp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
     """Parse a JSON file and return the ``mcpServers`` mapping."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+        data = _bounded_read_json(path)
+    except (ValueError, OSError) as exc:
         logger.warning("Failed to read MCP config %s: %s", path, exc)
         return {}
     if not isinstance(data, dict):
@@ -517,8 +545,8 @@ def _read_lsp_json(path: Path, logger: logging.Logger) -> dict[str, Any]:
     Claude ``~/.claude.json``.  Plugins may ship either variant.
     """
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+        data = _bounded_read_json(path)
+    except (ValueError, OSError) as exc:
         logger.warning("Failed to read LSP config %s: %s", path, exc)
         return {}
     if not isinstance(data, dict):
@@ -1010,11 +1038,12 @@ def validate_plugin_package(plugin_path: Path) -> bool:
     plugin_json = find_plugin_json(plugin_path)
     if plugin_json is not None:
         try:
-            with open(plugin_json, encoding="utf-8") as f:
-                manifest = json.load(f)
-            return bool(manifest.get("name"))
-        except (OSError, json.JSONDecodeError):
+            manifest = _bounded_read_json(plugin_json)
+        except (ValueError, OSError):
             pass
+        else:
+            if isinstance(manifest, dict) and manifest.get("name"):
+                return True
 
     # Fallback: presence of any standard component directory
     for component_dir in ("agents", "commands", "skills", "hooks"):

@@ -53,7 +53,7 @@ import copy
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 from git.exc import GitCommandError
@@ -81,6 +81,7 @@ from ..utils.console import _rich_echo, _rich_error, _rich_info, _rich_success, 
 from ._helpers import UnknownPackageError, _find_apm_yml, resolve_requested_packages
 
 if TYPE_CHECKING:
+    from ..core.command_logger import CommandLogger
     from ..models.dependency.reference import DependencyReference
 
 
@@ -527,6 +528,15 @@ def _run_dep_update(
         return _confirm_plan_application()
 
     try:
+        # Fire pre-update lifecycle scripts
+        _fire_update_scripts(
+            "pre-update",
+            apm_package=staged_apm_package,
+            scope=scope,
+            logger=logger,
+            verbose=verbose,
+        )
+
         result = _install_apm_dependencies(
             staged_apm_package,
             update_refs=True,
@@ -601,6 +611,63 @@ def _run_dep_update(
             _rich_success(f"Updated {count} revision {noun} in apm.yml.")
         else:
             _rich_success("No dependency changes were applied.")
+
+        # Fire post-update lifecycle scripts
+        _fire_update_scripts(
+            "post-update",
+            apm_package=staged_apm_package,
+            scope=scope,
+            logger=logger,
+            verbose=verbose,
+        )
+
+
+def _fire_update_scripts(
+    event_name: str,
+    *,
+    apm_package: Any,
+    scope: Any,
+    logger: CommandLogger | None,
+    verbose: bool,
+) -> None:
+    """Build a script runner and fire an update lifecycle event.
+
+    Best-effort: all exceptions are swallowed so scripts never block
+    the update flow.
+    """
+    import contextlib
+
+    with contextlib.suppress(Exception):
+        from apm_cli.core.lifecycle_scripts import (
+            LifecycleEvent,
+            PackageInfo,
+            build_runner_from_context,
+        )
+
+        project_root = None
+        pkg_path = getattr(apm_package, "package_path", None)
+        if pkg_path is not None:
+            project_root = str(pkg_path)
+
+        runner = build_runner_from_context(
+            logger=logger,
+            verbose=verbose,
+            project_root=project_root,
+        )
+
+        pkg_infos = []
+        for dep in apm_package.get_apm_dependencies():
+            pkg_infos.append(PackageInfo(name=dep.repo_url or str(dep), reference=dep.reference))
+
+        scope_name = scope.value if hasattr(scope, "value") else str(scope)
+        event = LifecycleEvent.create(
+            event=event_name,
+            packages=pkg_infos,
+            scope=scope_name,
+            working_directory=project_root,
+        )
+
+        runner.fire(event_name, event)
 
 
 __all__ = ["update"]

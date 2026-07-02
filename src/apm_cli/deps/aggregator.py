@@ -2,7 +2,7 @@
 
 import glob
 
-import frontmatter
+from apm_cli.utils.yaml_io import load_frontmatter
 
 
 def scan_workflows_for_dependencies():
@@ -29,7 +29,7 @@ def scan_workflows_for_dependencies():
     for workflow_file in workflows:
         try:
             with open(workflow_file, encoding="utf-8") as f:
-                content = frontmatter.load(f)
+                content = load_frontmatter(f)
                 if "mcp" in content.metadata and isinstance(content.metadata["mcp"], list):
                     all_servers.update(content.metadata["mcp"])
         except Exception as e:

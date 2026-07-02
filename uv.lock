@@ -201,7 +201,7 @@ wheels = [
 
 [[package]]
 name = "apm-cli"
-version = "0.22.0"
+version = "0.23.1"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -244,8 +244,8 @@ requires-dist = [
     { name = "filelock", specifier = ">=3.12" },
     { name = "gitpython", specifier = ">=3.1.0" },
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.0.0" },
-    { name = "llm", specifier = ">=0.17.0" },
-    { name = "llm-github-models", specifier = ">=0.1.0" },
+    { name = "llm", specifier = ">=0.28" },
+    { name = "llm-github-models", specifier = ">=0.18.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "pyinstaller", marker = "extra == 'build'", specifier = ">=6.0.0" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.0.0" },
@@ -870,7 +870,7 @@ wheels = [
 
 [[package]]
 name = "llm"
-version = "0.27.1"
+version = "0.31"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -888,9 +888,9 @@ dependencies = [
     { name = "sqlite-migrate" },
     { name = "sqlite-utils" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/05/7f/f2fe103b8fa6c5a96ba117fef46af15c766d4c28640893c2c7feb79c0df3/llm-0.27.1.tar.gz", hash = "sha256:02b0b393e31cf0e0ee1f2a6006c451c74ec18c7ec3973218de56e76fd72baa80", size = 85109, upload-time = "2025-08-12T05:17:46.797Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7d/f2/3a81744fdaf3a92fe9020dc298dd2e4c144e2e7fcab863e1a132ea537cab/llm-0.31.tar.gz", hash = "sha256:c7701408fdc53cbdf1db6a43f35c7dd410c291dda36cc38a14db4b482b274fa4", size = 86505, upload-time = "2026-04-24T23:37:24.579Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6c/67/47585c961ff2299749e519891681025c2685b75801e3f784ee232853c5b0/llm-0.27.1-py3-none-any.whl", hash = "sha256:a884a575062fbea8c2b129708a80e146fa9682bd1c444d8d7b028196107de727", size = 82500, upload-time = "2025-08-12T05:17:45.104Z" },
+    { url = "https://files.pythonhosted.org/packages/41/5d/033f0a2ba2fd952323d9b6434f653755ac1ce2e42f23c43579d47b008660/llm-0.31-py3-none-any.whl", hash = "sha256:10fabf61f60869a3ff90383f020ad8c787503c53f706eef4477a262d856c18ff", size = 83919, upload-time = "2026-04-24T23:37:23.294Z" },
 ]
 
 [[package]]
@@ -1107,7 +1107,7 @@ wheels = [
 
 [[package]]
 name = "openai"
-version = "1.107.2"
+version = "2.44.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1119,9 +1119,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a0/66/61b0c63b68df8a22f8763d7d632ea7255edb4021dca1859f4359a5659b85/openai-1.107.2.tar.gz", hash = "sha256:a11fe8d4318e98e94309308dd3a25108dec4dfc1b606f9b1c5706e8d88bdd3cb", size = 564155, upload-time = "2025-09-12T19:52:21.159Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/f5/7c7cb955305cb41f7f3c5fd7e0e38bf6bbf2658468863d4b7b868a5cb8df/openai-2.44.0.tar.gz", hash = "sha256:68a5a5ffad82b8ff7d451c437529fb64f7c3b8123aaf0c021966a882d9e3947d", size = 988753, upload-time = "2026-06-24T20:56:02.293Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d3/65/e51a77a368eed7b9cc22ce394087ab43f13fa2884724729b716adf2da389/openai-1.107.2-py3-none-any.whl", hash = "sha256:d159d4f3ee3d9c717b248c5d69fe93d7773a80563c8b1ca8e9cad789d3cf0260", size = 946937, upload-time = "2025-09-12T19:52:19.355Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/f4/561ed79fd94876160018a5e75254cfcb9b0e62d4dded9dcb20072e86d623/openai-2.44.0-py3-none-any.whl", hash = "sha256:0a2a3ab2e29aeda368700f662ff9ba0f9df17ba4c54577a64e08b8115a3cc0ad", size = 1366216, upload-time = "2026-06-24T20:55:58.882Z" },
 ]
 
 [[package]]

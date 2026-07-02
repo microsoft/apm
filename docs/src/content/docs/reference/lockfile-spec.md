@@ -14,10 +14,11 @@ reproducible installs and for drift detection. Commit it.
 ## Purpose
 
 This is a **Working Draft**. The lock file format has two versions in use:
-`"1"` (Git-only projects) and `"2"` (projects with at least one registry-sourced
-dependency). The bump is opportunistic; see [Version bumping](#version-bumping).
-Registry-sourced dependencies require the experimental registries feature
-(`apm experimental enable registries`) before install or replay.
+`"1"` (plain Git projects) and `"2"` (projects with at least one registry-sourced
+dependency or Git semver-resolved dependency). The bump is opportunistic; see
+[Version bumping](#version-bumping). Registry-sourced dependencies require the
+experimental registries feature (`apm experimental enable registries`) before
+install or replay.
 
 The lockfile gives APM four things:
 
@@ -101,7 +102,7 @@ local_deployed_file_hashes:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `lockfile_version` | string | yes | Schema version. `"1"` for Git-only projects; `"2"` when any dependency has `source: "registry"`. |
+| `lockfile_version` | string | yes | Schema version. `"1"` for plain Git projects; `"2"` when any dependency has `source: "registry"` or Git semver resolution fields (`constraint`, `resolved_tag`, `resolved_at`). |
 | `generated_at` | ISO 8601 string | yes | UTC timestamp of the last write. Ignored by equivalence checks. |
 | `apm_version` | string | no | APM CLI version that wrote the file. Diagnostic only. |
 | `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
@@ -133,9 +134,10 @@ Each item in `dependencies` describes one resolved package.
 | `resolved_by` | string | no | `repo_url` of the parent that pulled this transitive dep. Absent for direct deps. |
 | `package_type` | string | no | Kind of package: `apm_package`, `skill_bundle`, `claude_skill`, `hook_package`, `hybrid`, `marketplace_plugin`. Drives target placement. |
 | `skill_subset` | list of strings | no | For `skill_bundle` packages: the sorted subset of skill names the manifest selected. Empty means "all". |
+| `target_subset` | list of strings | no | Sorted target names selected by a dependency's `targets:` subset. Empty means "all active install targets". |
 | `deployed_files` | list of strings | no | Project-relative paths APM wrote for this dep. Sorted. Powers `prune` and `audit`'s file-presence check. |
-| `deployed_file_hashes` | map | no | `path -> sha256` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Directory entries (trailing `/`) have no hash. |
-| `exec_status` | string | no | Executable-trust state of this dep's executable primitives, set by the install-time gate via the shared deny-wins resolver. One of `deployed` (trusted and materialized), `gated_pending_approval` (present but parked until approved), `denied` (blocked by an org/user deny), or `absent` (declares no executables). Consumed by `audit`'s `required-executable-untrusted` signal; see [Executable approval](../cli/approve/). |
+| `deployed_file_hashes` | map | no | `path -> sha256` for the files in `deployed_files`. Powers `audit`'s content-integrity check. Hashed over canonical content -- UTF-8 text is normalized CRLF -> LF (bare CR preserved) so the hash is the same whether git checks the file out with Windows or POSIX line endings; binary is hashed raw. Directory entries (trailing `/`) have no hash. |
+| `exec_status` | string | no | Executable-trust state of this dep's executable primitives, set by the install-time gate via the shared deny-wins resolver. One of `deployed` (trusted and materialized), `gated_pending_approval` (present but parked until approved), `denied` (blocked by an org/user deny), or `absent` (declares no executables). Consumed by `audit`'s `required-executable-untrusted` signal; see [Executable approval](./cli/approve/). |
 | `source` | string | no | `"local"` for path dependencies, `"registry"` for dedicated-registry resolutions. Absent for Git deps. |
 | `resolved_url` | string | registry only | Fully-qualified download URL used to re-fetch registry archives. |
 | `resolved_hash` | string | registry only | SHA-256 digest of the registry archive bytes, verified on every install. |
@@ -197,7 +199,7 @@ The lock file uses two schema versions:
 | Version | Triggered by | Adds |
 |---|---|---|
 | `"1"` | Default for Git-only projects. | Baseline schema. |
-| `"2"` | Any dependency with `source: "registry"`. | `resolved_url`, `resolved_hash`, and the `version` field on registry entries. |
+| `"2"` | Any dependency with `source: "registry"` or Git semver resolution fields. | `resolved_url`, `resolved_hash`, and registry `version`; `constraint`, `resolved_tag`, and `resolved_at` for Git semver pins. |
 
 The bump is **opportunistic**: a project that never opts into a registry keeps
 `lockfile_version: "1"` forever, even on a newer client. The first registry

@@ -254,7 +254,7 @@ class TestVirtualPackages:
 
     def test_virtual_file_chatmode_md(self) -> None:
         DR = _dep_ref()
-        ref = DR.parse("owner/repo/modes/debug.chatmode.md")
+        ref = DR.parse("owner/repo/modes/debug.agent.md")
         assert ref.is_virtual is True
         assert ref.is_virtual_file() is True
 

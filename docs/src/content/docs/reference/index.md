@@ -42,5 +42,5 @@ Per-command pages live under [`reference/cli/`](./cli/install/). Grouped by life
 
 - `<placeholder>` -- you must substitute a real value.
 - `[optional]` -- argument or flag is optional.
-- All commands assume `apm` is on `PATH`; install instructions are in the [Quickstart](../quickstart/).
+- All commands assume `apm` is on `PATH`; install instructions are in the [Quickstart](../quickstart).
 - Status symbols in CLI output: `[+]` success, `[!]` warning, `[x]` error, `[i]` info, `[*]` action, `[>]` running.

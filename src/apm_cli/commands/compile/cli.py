@@ -69,8 +69,8 @@ def _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run):
             "[+] All validated",
         )
         table.add_row(
-            "Chatmodes",
-            str(stats.get("chatmodes", 0)),
+            "Agents",
+            str(stats.get("agents", 0)),
             "[+] All validated",
         )
 
@@ -448,7 +448,7 @@ def _validate_project(logger: CommandLogger, dry_run: bool, source_root: Path) -
     # Check if .apm directory has actual content
     apm_dir = source_root / APM_DIR
     local_apm_has_content = apm_dir.exists() and (
-        any(apm_dir.rglob("*.instructions.md")) or any(apm_dir.rglob("*.chatmode.md"))
+        any(apm_dir.rglob("*.instructions.md")) or any(apm_dir.rglob("*.agent.md"))
     )
 
     # If no primitive sources exist, check deeper to provide better feedback
@@ -457,20 +457,20 @@ def _validate_project(logger: CommandLogger, dry_run: bool, source_root: Path) -
         has_empty_apm = (
             apm_dir.exists()
             and not any(apm_dir.rglob("*.instructions.md"))
-            and not any(apm_dir.rglob("*.chatmode.md"))
+            and not any(apm_dir.rglob("*.agent.md"))
         )
 
         if has_empty_apm:
             logger.error("No instruction files found in .apm/ directory")
             logger.progress(" To add instructions, create files like:")
             logger.progress("   .apm/instructions/coding-standards.instructions.md")
-            logger.progress("   .apm/chatmodes/backend-engineer.chatmode.md")
+            logger.progress("   .apm/agents/backend-engineer.agent.md")
         else:
             logger.error("No APM content found to compile")
             logger.progress(" To get started:")
             logger.progress("   1. Install APM dependencies: apm install <owner>/<repo>")
             logger.progress("   2. Or create local instructions: mkdir -p .apm/instructions")
-            logger.progress("   3. Then create .instructions.md or .chatmode.md files")
+            logger.progress("   3. Then create .instructions.md or .agent.md files")
 
         if not dry_run:  # Don't exit on dry-run to allow testing
             sys.exit(1)
@@ -951,23 +951,23 @@ def _run_compilation(
     help="Compile for all canonical targets. Equivalent to --target all.",
 )
 @click.option(
-    "--no-dedup/--no-force-instructions",
+    "--force-instructions/--no-force-instructions",
     "no_dedup",
-    is_flag=True,
     default=False,
     help=(
         "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
+        "already populated, and in AGENTS.md even when .github/instructions/ is "
         "already populated. Overrides the default deduplication that normally omits "
-        "the section to avoid duplicate context in Claude Code. Affects the Claude "
-        "target only. Alias: --force-instructions."
+        "these sections to avoid duplicate context. Affects both the Claude and "
+        "Copilot (AGENTS.md) deduplication paths. Alias: --no-dedup."
     ),
 )
 @click.option(
-    "--force-instructions",
+    "--no-dedup",
     "no_dedup",
     is_flag=True,
     default=False,
-    help="Alias for --no-dedup.",
+    help="Alias for --force-instructions.",
     hidden=True,
 )
 @click.option(
@@ -1073,7 +1073,7 @@ def compile(  # noqa: PLR0913 -- Click handler
             "compile_all": "--all",
             "legacy_skill_paths": "--legacy-skill-paths",
             "local_only": "--local-only",
-            "no_dedup": "--no-dedup/--force-instructions",
+            "no_dedup": "--force-instructions/--no-force-instructions",
             "no_links": "--no-links",
             "output": "--output",
             "root": "--root",

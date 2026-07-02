@@ -11,8 +11,8 @@ pull request itself. That is defence in depth: a developer can pass
 `--no-policy`, `--force`, or `APM_POLICY_DISABLE=1` locally; CI cannot.
 
 This page is the recipe set. For the full schema and the rollout
-playbook, see [Governance overview](./governance-overview/) and
-[apm-policy getting started](./apm-policy-getting-started/).
+playbook, see [Governance deep-dive](./governance-guide/) and
+[apm-policy getting started](./apm-policy/).
 
 ## The gate
 
@@ -113,7 +113,8 @@ jobs:
 `--no-drift` skips the install-replay check because no warm cache exists;
 the `content-integrity` check still verifies that every deployed file's
 SHA-256 hash matches the `deployed_file_hashes` recorded in `apm.lock.yaml`.
-Any file whose bytes were changed after the last install fails this check.
+Any file whose content was changed after the last install fails this check
+(line-ending-only differences are normalized away per req-lk-012).
 
 The two patterns serve different goals:
 
@@ -217,7 +218,7 @@ must be visible in the policy file's history.
 
 - [drift detection](./drift-detection/) -- what the replay actually
   catches and how to read its output.
-- [security and supply chain](./security-and-supply-chain/) -- the
+- [security model](./security/) -- the
   built-in install-time scan that complements the CI gate.
 - [github rulesets](./github-rulesets/) -- make the audit job a
   required status check across an org.

@@ -57,6 +57,9 @@ def _fake_response(status_code: int, *, text: str = "", content_type: str = "app
     resp.status_code = status_code
     resp.text = text
     resp.headers = {"Content-Type": content_type}
+    # Marketplace fetches stream the body via resp.iter_content under a byte
+    # ceiling, so the double must yield the payload bytes in chunks.
+    resp.iter_content = lambda chunk_size=None: iter([text.encode("utf-8")])
 
     def _raise_for_status():
         if status_code >= 400:
@@ -73,7 +76,7 @@ def test_fetch_marketplace_ado_uses_rest_and_then_sidecar_cache(monkeypatch) -> 
 
     calls: list[tuple[str, dict]] = []
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_get(url, headers=None, timeout=None, **kwargs):
         calls.append((url, dict(headers or {})))
         return _fake_response(200, text=json.dumps(_MANIFEST))
 
@@ -101,7 +104,7 @@ def test_fetch_marketplace_ado_rest_failure_falls_back_to_git(monkeypatch) -> No
     no_bearer = MagicMock()
     no_bearer.is_available.return_value = False
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_get(url, headers=None, timeout=None, **kwargs):
         # Simulate ADO returning a sign-in page (auth insufficient).
         return _fake_response(200, text="<html>sign in</html>", content_type="text/html")
 

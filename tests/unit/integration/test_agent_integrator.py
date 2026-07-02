@@ -49,17 +49,17 @@ class TestAgentIntegrator:
         assert all(p.name.endswith(".agent.md") for p in agents)
 
     def test_find_agent_files_in_root_legacy_format(self):
-        """Test finding .chatmode.md files in package root (legacy)."""
+        """Test finding .agent.md files in package root."""
         package_dir = self.project_root / "package"
         package_dir.mkdir()
 
-        # Create legacy chatmode files
-        (package_dir / "default.chatmode.md").write_text("# Default Chatmode")
-        (package_dir / "backend.chatmode.md").write_text("# Backend Chatmode")
+        # Create agent files in the package root
+        (package_dir / "default.agent.md").write_text("# Default Chatmode")
+        (package_dir / "backend.agent.md").write_text("# Backend Chatmode")
 
         agents = self.integrator.find_agent_files(package_dir)
         assert len(agents) == 2
-        assert all(p.name.endswith(".chatmode.md") for p in agents)
+        assert all(p.name.endswith(".agent.md") for p in agents)
 
     def test_find_agent_files_in_apm_agents(self):
         """Test finding .agent.md files in .apm/agents/ (new standard)."""
@@ -74,29 +74,29 @@ class TestAgentIntegrator:
         assert agents[0].name == "security.agent.md"
 
     def test_find_agent_files_in_apm_chatmodes(self):
-        """Test finding .chatmode.md files in .apm/chatmodes/ (legacy)."""
+        """Test finding .agent.md files in .apm/agents/."""
         package_dir = self.project_root / "package"
-        apm_chatmodes = package_dir / ".apm" / "chatmodes"
+        apm_chatmodes = package_dir / ".apm" / "agents"
         apm_chatmodes.mkdir(parents=True)
 
-        (apm_chatmodes / "default.chatmode.md").write_text("# Default Chatmode")
+        (apm_chatmodes / "default.agent.md").write_text("# Default Chatmode")
 
         agents = self.integrator.find_agent_files(package_dir)
         assert len(agents) == 1
-        assert agents[0].name == "default.chatmode.md"
+        assert agents[0].name == "default.agent.md"
 
     def test_find_agent_files_mixed_formats(self):
-        """Test finding both .agent.md and .chatmode.md files."""
+        """Test finding multiple .agent.md files."""
         package_dir = self.project_root / "package"
         package_dir.mkdir()
 
         (package_dir / "new.agent.md").write_text("# New Agent")
-        (package_dir / "old.chatmode.md").write_text("# Old Chatmode")
+        (package_dir / "old.agent.md").write_text("# Old Chatmode")
 
         agents = self.integrator.find_agent_files(package_dir)
         assert len(agents) == 2
         extensions = {tuple(p.name.split(".")[-2:]) for p in agents}
-        assert extensions == {("agent", "md"), ("chatmode", "md")}
+        assert extensions == {("agent", "md")}
 
     def test_copy_agent_verbatim(self):
         """Test copying agent file verbatim (no metadata injection)."""
@@ -121,8 +121,8 @@ class TestAgentIntegrator:
         assert target == "security.agent.md"
 
     def test_get_target_filename_chatmode_format(self):
-        """Test target filename generation renames .chatmode.md to .agent.md."""
-        source = Path("/package/default.chatmode.md")
+        """Test target filename generation renames .agent.md to .agent.md."""
+        source = Path("/package/default.agent.md")
         package_name = "microsoft/apm-sample-package"
 
         target = self.integrator.get_target_filename(source, package_name)
@@ -569,7 +569,7 @@ class TestAgentSuffixPattern:
 
     def test_clean_naming_chatmode_to_agent(self):
         """Test clean naming renames chatmode to agent format."""
-        source = Path("default.chatmode.md")
+        source = Path("default.agent.md")
         result = self.integrator.get_target_filename(source, "pkg")
         assert result == "default.agent.md"
 
@@ -630,8 +630,8 @@ class TestClaudeAgentIntegration:
         assert result == "security.md"
 
     def test_get_target_filename_claude_from_chatmode_md(self):
-        """Test Claude filename from .chatmode.md uses .md extension."""
-        source = Path("default.chatmode.md")
+        """Test Claude filename from .agent.md uses .md extension."""
+        source = Path("default.agent.md")
         result = self.integrator.get_target_filename_claude(source, "pkg")
         assert result == "default.md"
 
@@ -672,10 +672,10 @@ class TestClaudeAgentIntegration:
         assert "Review code for vulnerabilities" in content
 
     def test_integrate_handles_chatmode_files(self):
-        """Test .chatmode.md files are integrated to .claude/agents/."""
+        """Test .agent.md files are integrated to .claude/agents/."""
         package_dir = self.project_root / "package"
         package_dir.mkdir()
-        (package_dir / "backend.chatmode.md").write_text("# Backend Mode")
+        (package_dir / "backend.agent.md").write_text("# Backend Mode")
 
         package_info = self._create_package_info(package_dir)
         result = self.integrator.integrate_package_agents_claude(package_info, self.project_root)
@@ -690,7 +690,7 @@ class TestClaudeAgentIntegration:
         package_dir.mkdir()
         (package_dir / "security.agent.md").write_text("# Security")
         (package_dir / "planner.agent.md").write_text("# Planner")
-        (package_dir / "default.chatmode.md").write_text("# Default")
+        (package_dir / "default.agent.md").write_text("# Default")
 
         package_info = self._create_package_info(package_dir)
         result = self.integrator.integrate_package_agents_claude(package_info, self.project_root)
@@ -828,8 +828,8 @@ class TestCursorAgentIntegration:
         assert result == "security.md"
 
     def test_get_target_filename_cursor_from_chatmode_md(self):
-        """Test Cursor filename from .chatmode.md uses .md extension."""
-        source = Path("default.chatmode.md")
+        """Test Cursor filename from .agent.md uses .md extension."""
+        source = Path("default.agent.md")
         result = self.integrator.get_target_filename_cursor(source, "pkg")
         assert result == "default.md"
 
@@ -894,7 +894,7 @@ class TestCursorAgentIntegration:
         package_dir.mkdir()
         (package_dir / "security.agent.md").write_text("# Security")
         (package_dir / "planner.agent.md").write_text("# Planner")
-        (package_dir / "default.chatmode.md").write_text("# Default")
+        (package_dir / "default.agent.md").write_text("# Default")
 
         package_info = self._create_package_info(package_dir)
         result = self.integrator.integrate_package_agents_cursor(package_info, self.project_root)

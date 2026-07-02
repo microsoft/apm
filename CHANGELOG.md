@@ -16,6 +16,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm audit --ci` no longer reports phantom drift for root-local hook files
+  when audit replay writes into a scratch project root. (#1980)
+
+## [0.23.1] - 2026-06-29
+
+### Fixed
+
+- `apm audit --ci` no longer reports a false `content-integrity` hash-drift
+  failure when a deployed text file is checked out with Windows (`\r\n`) line
+  endings on one platform and POSIX (`\n`) line endings on another. Per-
+  deployed-file hashes are now computed over canonical content (UTF-8 text
+  normalized `\r\n` -> `\n` with a lone `\r` preserved so the carriage-return
+  smuggling vector is still caught, binary hashed raw), so they match across
+  platforms; lockfiles recorded on Windows before this fix re-record once on
+  the next `apm install`. (#1952, #1959)
+
+- `apm install <bundle> --skill X` is now properly additive: a later
+  `apm install <bundle> --skill Y` adds `Y` on top of the existing pin instead
+  of silently removing the previously deployed `X` from disk. Reset the pin to
+  the full bundle with `--skill '*'`, or drop a single skill by editing the
+  `skills:` list in `apm.yml` and re-running `apm install`. (#1955)
+
+## [0.23.0] - 2026-06-28
+
+### Added
+
+- Added a general-purpose lifecycle hooks framework: embed shell-command or
+  HTTPS-webhook scripts in `apm.yml` under a `lifecycle:` key that fire at
+  `pre`/`post` install/update/uninstall events, gated behind `apm lifecycle trust`
+  so nothing runs without explicit consent. The new `apm lifecycle` command
+  (`init`/`validate`/`test`/`trust`/`untrust`) manages and dry-runs them, with
+  cross-platform Windows support. (by @sergio-sisternes-epam) (#1798, #1947)
+- `apm view <package> versions` now routes plain shorthands (e.g.
+  `acme/web-skills`) to the configured default registry, matching `apm install`
+  routing. Added `--registry [NAME]` for explicit control: bare `--registry` uses
+  the lockfile entry or configured default, `--registry NAME` forces a named
+  registry, and a full git URL forces the git path. (by @nadav-y) (#1938)
+
+### Removed
+
+- **BREAKING:** Removed the legacy `.chatmode.md` primitive format and
+  `chatmodes/` directory support across discovery, integration, the watcher, and
+  extension maps. Use `.agent.md` files in `.apm/agents/` instead. (closes #840)
+  (#1931)
+
+### Fixed
+
+- Fixed startup version-check hint to reference `apm self-update` instead
+  of the deprecated `apm update` command. (by @syf2211; closes #1939) (#1943)
+- Fixed GFM table rendering in the documentation site by enabling `markdown.gfm` in the Astro
+  config, restoring pipe tables, strikethrough, and task-list support for all `.mdx` content.
+  (by @syf2211; closes #1940) (#1944)
+- `apm outdated` tag-pattern matching for monorepo virtual subdirectory
+  dependencies now derives the `{name}` segment from the `virtual_path`
+  basename (e.g., `packages/my-pkg` -> `my-pkg`), aligning with `apm update`
+  behavior. (by @kevinbeier-enbw; closes #1893) (#1893)
+- Skipped startup update checks for unknown `apm` commands and bare help
+  invocations so invalid CLI input fails without update-check latency. (by
+  @maro114510) (#1541)
 - Fixed `apm install` lockfile pruning when all `apm.yml` dependencies are
   removed, so stale `apm.lock.yaml` entries no longer survive. (by @nadav-y)
   (#1926)
@@ -23,6 +82,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependencies are not reported as updated. (by @nadav-y) (#1927)
 - Fixed spurious version-range diffs for cached transitive registry
   dependencies during `apm update`. (by @nadav-y) (#1921)
+- Fixed `apm install -g --mcp NAME` ignoring the package `targets:` field and
+  `--target` flag at user scope; previously user-scope MCP install wrote to all
+  detected runtimes unconditionally, creating unintended folders (e.g. `~/.kiro/`)
+  when a package targets only a subset. (by @sergio-sisternes-epam) (#1941)
+- Applied six `--help` and flag-naming consistency fixes from the CLI Consistency
+  Report: surfaced the `apm deps update` deprecation and `apm install --runtime`
+  legacy-alias status in help text, dropped the misleading `vscode` runtime value,
+  and promoted `apm compile --force-instructions` as the primary flag (`--no-dedup`
+  kept as a hidden alias). (by @sergio-sisternes-epam; closes #1928) (#1929)
+- Fixed `apm preview <script>` crashing with `ValueError: too many values to
+  unpack` by unpacking all three values returned by the auto-compile step. (by
+  @fmferrari) (#1721)
+- Fixed two false-positive `unintegrated` drift reports in `apm audit --ci` by
+  honoring per-dependency `targets:` and the plural `targets:` key during drift
+  replay. (by @sergio-sisternes-epam) (#1930)
+
+### Security
+
+- Bumped `llm` to `>=0.28` (resolved to 0.31) to clear the Critical code-injection
+  advisory GHSA-g76p-4vg5-f4qh (Dependabot #62) affecting `llm <= 0.27.1`, and
+  raised the `llm-github-models` floor to `>=0.18.0`. Forced patched transitive
+  `vite` (`>=7.3.5`) and `esbuild` (`>=0.28.1`) in the `docs/` site via
+  `package.json` overrides to clear GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3,
+  and GHSA-g7r4-m6w7-qqqr (Dependabot #68, #69, #65). (#1936)
 
 ## [0.22.0] - 2026-06-26
 

@@ -22,6 +22,8 @@ from typing import Any, Protocol
 
 import yaml
 
+from ..utils.yaml_io import load_yaml
+
 
 class OutputKind(enum.Enum):
     """Kinds of artifacts that ``apm pack`` can produce."""
@@ -268,8 +270,7 @@ class PluginManifestProducer:
         data: dict = {}
         if options.apm_yml_path.is_file():
             try:
-                with open(options.apm_yml_path, encoding="utf-8") as handle:
-                    loaded = yaml.safe_load(handle)
+                loaded = load_yaml(options.apm_yml_path)
                 if isinstance(loaded, dict):
                     data = loaded
             except yaml.YAMLError:
@@ -352,8 +353,7 @@ def detect_outputs(apm_yml_path: Path) -> set[OutputKind]:
     data: dict | None = None
     if apm_yml_path.is_file():
         try:
-            with open(apm_yml_path, encoding="utf-8") as handle:
-                loaded = yaml.safe_load(handle)
+            loaded = load_yaml(apm_yml_path)
         except yaml.YAMLError as exc:
             raise BuildError(f"Failed to parse {apm_yml_path}: {exc}") from exc
         if loaded is not None and not isinstance(loaded, dict):

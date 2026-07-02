@@ -7,7 +7,7 @@ sidebar:
 
 This is the order to roll APM out. Five phases, each with a single owner,
 a deliverable, and a gate to clear before moving on. Read the
-[Governance overview](./governance-overview/) page first if you have not -- it is the
+[Governance deep-dive](./governance-guide/) page first if you have not -- it is the
 contract this playbook operationalizes.
 
 | Phase | Duration | Owner | Gate to advance |
@@ -73,7 +73,7 @@ and policy in `warn` mode. The platform team rides along.
 
 - `apm.yml` and `apm.lock.yaml` committed in the pilot repo.
 - An org policy file at `<org>/.github/apm-policy.yml` with
-  `enforcement: warn`. See [Get started with apm-policy.yml](./apm-policy-getting-started/) for the mental
+  `enforcement: warn`. See [Get started with apm-policy.yml](./apm-policy/) for the mental
   model and [Policy Reference](./policy-reference/) for fields.
 - `apm audit --ci` wired into the pilot repo's required checks. See the
   [CI Policy Enforcement](./enforce-in-ci/) guide.
@@ -81,7 +81,7 @@ and policy in `warn` mode. The platform team rides along.
 
 **Why `warn` first:** it lets you tune the allow-lists against real
 traffic without ever red-marking a PR. The
-[Governance overview](./governance-overview/) page documents the bypass surface so
+[Governance deep-dive](./governance-guide/) page documents the bypass surface so
 you know exactly what `warn` mode does and does not promise.
 
 **Gate to advance:** two consecutive weeks where every pilot PR passes
@@ -180,7 +180,7 @@ Steady-state operations.
   one cycle.
 - **Quarterly:** marketplace refresh. Retire unused packages. Promote
   internal tools that have proven themselves into the org marketplace.
-  Re-read the [Governance overview](./governance-overview/) known-gaps section
+  Re-read the [Governance deep-dive](./governance-guide/) known-gaps section
   against the current APM version.
 
 **Health signals to watch:**
@@ -202,11 +202,11 @@ threat model and the agent ecosystem move; the policy must too).
 
 - [Making the Case](./making-the-case/) -- the pitch deck inputs for
   Phase 1 stakeholder buy-in.
-- [Governance overview](./governance-overview/) -- the trust contract this playbook
+- [Governance deep-dive](./governance-guide/) -- the trust contract this playbook
   operationalizes.
-- [Security and supply chain](./security-and-supply-chain/) -- the procurement-grade answer for
+- [Security model](./security/) -- the procurement-grade answer for
   Phase 1 review.
-- [Get started with apm-policy.yml](./apm-policy-getting-started/) and [Policy Reference](./policy-reference/)
+- [Get started with apm-policy.yml](./apm-policy/) and [Policy Reference](./policy-reference/)
   -- what to put in `apm-policy.yml` for Phase 2 and Phase 3.
 - [Registry Proxy & Air-gapped](./registry-proxy/) -- Phase 3 proxy
   rollout.
