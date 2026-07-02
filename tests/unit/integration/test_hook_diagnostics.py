@@ -18,6 +18,7 @@ import pytest
 
 from apm_cli.integration.hook_integrator import (
     _HOOK_EVENT_EXPECTED_CASING,
+    _HOOK_EVENT_MAP,
     HookIntegrator,
     _detect_event_casing,
     _emit_hook_event_diagnostics,
@@ -73,6 +74,26 @@ class TestHookEventExpectedCasing:
 
     def test_vscode_expects_pascal(self):
         assert _HOOK_EVENT_EXPECTED_CASING["vscode"] == "PascalCase"
+
+
+# ---------------------------------------------------------------------------
+# _HOOK_EVENT_MAP coverage -- issue #1977
+# ---------------------------------------------------------------------------
+
+
+class TestHookEventMap:
+    """Verify that per-target event maps contain the expected canonical entries."""
+
+    def test_copilot_map_exists(self):
+        # Issue #1977: copilot entry was missing, causing PascalCase events to
+        # be written verbatim and never recognised by Copilot.
+        assert "copilot" in _HOOK_EVENT_MAP
+
+    def test_copilot_pretooluse_renamed_to_camel(self):
+        assert _HOOK_EVENT_MAP["copilot"]["PreToolUse"] == "preToolUse"
+
+    def test_copilot_posttooluse_renamed_to_camel(self):
+        assert _HOOK_EVENT_MAP["copilot"]["PostToolUse"] == "postToolUse"
 
 
 # ---------------------------------------------------------------------------
@@ -139,10 +160,17 @@ class TestEmitHookEventDiagnosticsMismatch:
 
     def test_warns_pascal_event_on_camel_target(self, capsys):
         # "PreToolUse" is PascalCase but copilot expects camelCase;
-        # no mapping exists so it may not be recognized.
+        # passing an empty map means no mapping covers it, so a warning fires.
         _emit_hook_event_diagnostics(["PreToolUse"], "copilot", {})
         captured = capsys.readouterr()
         assert "PreToolUse" in captured.out
+
+    def test_no_warn_for_copilot_mapped_pascal_event(self, capsys):
+        # "PreToolUse" IS covered by the real copilot event map, so no warning.
+        # Regression for issue #1977: the deploy path now passes the real map.
+        _emit_hook_event_diagnostics(["PreToolUse"], "copilot", _HOOK_EVENT_MAP.get("copilot", {}))
+        captured = capsys.readouterr()
+        assert "may not be recognized" not in captured.out
 
     def test_no_warn_when_event_is_mapped(self, capsys):
         # "preToolUse" is remapped to "PreToolUse" for claude, so no warning.
