@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Live GitLab install smoke-test infrastructure for `apm install
+  gitlab.com/<group>/<repo>`, gated by `APM_LIVE_GENERIC_PACKAGE` and pinned by
+  `APM_LIVE_GENERIC_EXPECTED_SHA` for scheduled/manual CI activation. (#1663,
+  tracks #1229)
+
 ### Fixed
 
 - `apm audit --ci` no longer reports phantom drift for root-local hook files
