@@ -140,7 +140,7 @@ Configure marketplace artifact paths in `apm.yml` with the `marketplace.outputs`
 
 ### Plugin manifests
 
-Ship one APM package; consumers get a native plugin for their tool of choice. When `apm.yml` declares a [`target:`](../manifest-schema/#36-target) (or `targets:`) field containing `claude` or `copilot`, `apm pack` generates an ecosystem-specific `plugin.json` so the same source tree drops into a Claude Code plugin directory or a Copilot plugin path with no hand-editing.
+Ship one APM package; consumers get a native plugin for their tool of choice. When `apm.yml` declares a [`target:`](../../manifest-schema/#36-target) (or `targets:`) field containing `claude` or `copilot`, `apm pack` generates an ecosystem-specific `plugin.json` so the same source tree drops into a Claude Code plugin directory or a Copilot plugin path with no hand-editing.
 
 | Ecosystem | Output path |
 |---|---|

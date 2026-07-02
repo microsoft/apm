@@ -311,6 +311,73 @@ class TestApmYmlWriter:
         entry = data["dependencies"]["apm"][0]
         assert entry["skills"] == ["alpha", "gamma"]
 
+    def test_set_target_subset_promotes_string_entry(self, tmp_path):
+        """Target writer promotes string entries and persists sorted targets."""
+        from apm_cli.commands._apm_yml_writer import set_target_subset_for_entry
+        from apm_cli.utils.yaml_io import load_yaml
+
+        manifest = self._write_manifest(
+            tmp_path,
+            """\
+            dependencies:
+              apm:
+                - owner/repo#main
+            """,
+        )
+
+        assert set_target_subset_for_entry(manifest, "owner/repo", ["codex", "claude"]) is True
+        data = load_yaml(manifest)
+        entry = data["dependencies"]["apm"][0]
+        assert entry["git"] == "owner/repo"
+        assert entry["ref"] == "main"
+        assert entry["targets"] == ["claude", "codex"]
+
+    def test_set_target_subset_clears_field_and_preserves_skills(self, tmp_path):
+        """Clearing targets leaves existing skills untouched."""
+        from apm_cli.commands._apm_yml_writer import set_target_subset_for_entry
+        from apm_cli.utils.yaml_io import load_yaml
+
+        manifest = self._write_manifest(
+            tmp_path,
+            """\
+            dependencies:
+              apm:
+                - git: owner/repo
+                  skills:
+                    - reviewer
+                  targets:
+                    - codex
+            """,
+        )
+
+        assert set_target_subset_for_entry(manifest, "owner/repo", None) is True
+        data = load_yaml(manifest)
+        entry = data["dependencies"]["apm"][0]
+        assert entry["skills"] == ["reviewer"]
+        assert "targets" not in entry
+
+    def test_set_target_subset_preserves_existing_skills(self, tmp_path):
+        """Setting targets does not remove the existing skills field."""
+        from apm_cli.commands._apm_yml_writer import set_target_subset_for_entry
+        from apm_cli.utils.yaml_io import load_yaml
+
+        manifest = self._write_manifest(
+            tmp_path,
+            """\
+            dependencies:
+              apm:
+                - git: owner/repo
+                  skills:
+                    - reviewer
+            """,
+        )
+
+        assert set_target_subset_for_entry(manifest, "owner/repo", ["codex"]) is True
+        data = load_yaml(manifest)
+        entry = data["dependencies"]["apm"][0]
+        assert entry["skills"] == ["reviewer"]
+        assert entry["targets"] == ["codex"]
+
     def test_no_dependencies_key_returns_false(self, tmp_path):
         """Manifest with no 'dependencies' key at all returns False (line 30: deps_section={})."""
         from apm_cli.commands._apm_yml_writer import set_skill_subset_for_entry

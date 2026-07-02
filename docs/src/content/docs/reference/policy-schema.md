@@ -9,7 +9,7 @@ sidebar:
 
 The `apm-policy.yml` schema. One file per org or repo. Loaded by `apm install`, `apm audit --ci`, `apm policy status`, and the install preflight before any package is written to disk.
 
-For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../enterprise/apm-policy-getting-started/). For CLI usage of `apm policy status`, see [apm policy](./cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance overview](../enterprise/governance-overview/).
+For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../enterprise/apm-policy/). For CLI usage of `apm policy status`, see [apm policy](./cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance deep-dive](../enterprise/governance-guide/).
 
 ## What apm-policy.yml governs
 
@@ -64,7 +64,8 @@ The `<ref>` accepts:
 | `unmanaged_files`  | object              | see section      | no       | Rules over files in target directories not tracked by the lockfile.               |
 | `security`         | object              | see section      | no       | Rules over APM's security checks (install-time content audit + external scanners; requires `external-scanners` flag). |
 | `registry_source`  | object              | see section      | no       | Mandate registry usage and block non-registry sources (requires `registries` flag). |
-| `bin_deploy`       | object              | see section      | no       | Control whether `marketplace_plugin` bin/ executables are deployed to `~/.claude/skills/<name>/bin/`. |
+| `executables`      | object              | see section      | no       | Org ceiling for executable-primitive trust (hooks, bin, self-defined MCP, canvas). See [executables](#executables). |
+| `bin_deploy`       | object              | see section      | no       | DEPRECATED alias folded into `executables.deny` (bin-scoped). See [bin_deploy](#bin_deploy). |
 
 Unknown top-level keys produce a warning, never an error -- so newer policy files load on older clients.
 
@@ -291,6 +292,8 @@ inherited list (see the tri-state table below).
 | `security.audit.scanners`   | Union of scanner names; per scanner `allow_args` is AND-merged (any ancestor `false` wins -- tightening). `null` is transparent.                  |
 | `security.audit.fail_on_drift` | Logical OR -- once a parent enables it, a child cannot relax.                  |
 | `security.integrity.require_hashes` | Logical OR -- once a parent enables it, a child cannot relax.             |
+| `executables.deny_all`      | Logical OR -- any ancestor kill-switch (`true`) sticks.                           |
+| `executables.deny` / `require` / `recommend` / `enforce` | Union, deduplicated. A child adds packages but never drops a parent's. |
 | `compilation.*.enforce`     | First non-null wins (parent precedence).                                         |
 | `compilation.source_attribution` | Logical OR.                                                                 |
 
@@ -400,9 +403,54 @@ registry_source:
   allow_non_registry: false
 ```
 
+## executables
+
+The org ceiling for executable-primitive trust. Unifies the executable-trust
+vocabulary onto one noun, `executables`, governing all four gated types: hooks,
+`bin/` executables, self-defined MCP servers (`registry: false`), and canvas
+extensions. The org layer is the ceiling on **deny** -- it can deny and require
+fleet-wide, and recommend a vetted set, but personal or project consent can
+never widen past an org deny.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `deny_all` | `bool` | `false` | When `true`, blocks every executable type for every package org-wide. |
+| `deny` | `list<string>` | `[]` | Canonical package strings whose executables must not deploy. **Deny is the ceiling and always wins**, and is the only side that supports `fnmatch` globs in v1, e.g. `evil/*` blocks every package under `evil/`. |
+| `require` | `list<string>` | `[]` | Packages whose executables MUST be present and trusted (exact-match only in v1). A required package whose executables are untrusted hard-fails the `required-executable-untrusted` audit check in CI. `require` mandates presence + trust but does **not** grant execution -- it stays a developer-consent decision. To mandate AND auto-deploy fleet-wide, list the package in BOTH `require` and `recommend`. |
+| `recommend` | `list<string>` | `[]` | Org-vetted set (exact-match only in v1): default-allowed unless locally denied. Bulk-accepted with `apm approve --recommended`. |
+| `enforce` | `list<string>` | `[]` | v2 mandate tier; **accepted but INERT in v1** -- it degrades to `recommend` (no force-execute; a user deny still overrides). Writing it emits a deprecation-style warning. |
+
+> **Glob scope (v1):** only `deny` supports glob patterns (it is the safety ceiling -- broad denial is safety-positive). `allow`, `recommend`, and `require` are exact-match only; widening the GRANT side with a wildcard has a larger blast radius and is deferred.
+
+```yaml
+# apm-policy.yml
+executables:
+  deny_all: false
+  deny: ["evil/*"]
+  require: ["acme/ci"]
+  recommend: ["acme/fmt"]
+```
+
+The install gate and `apm audit` resolve trust through one shared deny-wins,
+first-match-wins ladder (org deny > user deny > project deny > project allow >
+user allow > org recommend > default-deny). Each locked dependency records the
+resolved state in the `exec_status` field of `apm.lock.yaml` (one of
+`deployed`, `gated_pending_approval`, `denied`, `absent`). For the consumer-side
+commands that write project and personal trust, see [apm approve / apm
+deny](./cli/approve/).
+
+There is no `enforce` mandate runtime, no cryptographic signing, and no
+content-hash binding in this release: an `executables.enforce` rung is accepted
+in policy but fail-safe degrades to `recommend` (allowed, still overridable by a
+deny).
+
 ## bin_deploy
 
-Controls whether `apm install -g` deploys `bin/` executables from `marketplace_plugin` packages into `~/.claude/skills/<name>/bin/`, alongside the package's `.claude-plugin/plugin.json`. Here `<name>` is the package's install directory name (typically the repository name).
+> **Deprecated:** `bin_deploy` is the bin-scoped predecessor of `executables`.
+> It is folded into `executables.deny` (bin type only) and honored as an alias
+> for one minor cycle. Prefer `executables.deny` for new policies.
+
+
 
 This realizes Claude Code's "skills-directory plugin" contract: a folder under a skills directory that contains `.claude-plugin/plugin.json` loads as `<name>@skills-dir`, and its root `bin/` is added to the Bash tool's `PATH`. The package's `.claude-plugin/plugin.json` is required for Claude to load the folder as a plugin; APM copies it alongside `bin/` when the package ships one. The contract is Claude-specific, so deployment only targets Claude. Restart Claude Code (or run `/reload-plugins`) after install for new executables to be picked up.
 
@@ -439,6 +487,6 @@ No. apm-policy.yml controls what gets installed; your harness controls what runs
 ## See also
 
 - [apm policy](./cli/policy/) -- the `apm policy status` command.
-- [Govern with apm-policy.yml](../enterprise/apm-policy-getting-started/) -- end-to-end rollout guide.
+- [Govern with apm-policy.yml](../enterprise/apm-policy/) -- end-to-end rollout guide.
 - [Enforce in CI](../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.
-- [Governance overview](../enterprise/governance-overview/) -- the full enterprise control surface.
+- [Governance deep-dive](../enterprise/governance-guide/) -- the full enterprise control surface.

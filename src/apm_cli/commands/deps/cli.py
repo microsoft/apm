@@ -49,6 +49,8 @@ def _deps_list_source_label(
 
     if is_local or lockfile_source == "local":
         return "local"
+    if lockfile_source == "registry":
+        return "registry"
     if host and is_azure_devops_hostname(host):
         return "azure-devops"
     if host and is_gitlab_hostname(host):
@@ -111,7 +113,9 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
             for dep in project_package.get_apm_dependencies():
                 # Build the expected installed package name
                 repo_parts = dep.repo_url.split("/")
-                source = _deps_list_source_label(dep.host, is_local=dep.is_local)
+                source = _deps_list_source_label(
+                    dep.host, is_local=dep.is_local, lockfile_source=dep.source
+                )
                 is_ado = dep.is_azure_devops() and len(repo_parts) >= 3
                 is_gh = len(repo_parts) >= 2
 
@@ -714,7 +718,9 @@ def clean(dry_run: bool, yes: bool):
         sys.exit(1)
 
 
-@deps.command(help="Update APM dependencies to latest refs")
+@deps.command(
+    help="DEPRECATED: use 'apm update' instead (strict superset). Update APM dependencies to latest refs"
+)
 @click.argument("packages", nargs=-1)
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed update information")
 @click.option(
@@ -910,7 +916,9 @@ def update(packages, verbose, force, target, parallel_downloads, global_, legacy
         logger.success("All packages already at latest refs.")
 
 
-@deps.command(help="Show detailed package information")
+@deps.command(
+    help="Show detailed package information (alias for 'apm view PACKAGE' for installed packages; prefer 'apm view' in new scripts)"
+)
 @click.argument("package", required=True)
 def info(package: str):
     """Show detailed information about a specific package including context files and workflows."""
@@ -927,4 +935,4 @@ def info(package: str):
         sys.exit(1)
 
     package_path = resolve_package_path(package, apm_modules_path, logger)
-    display_package_info(package, package_path, logger)
+    display_package_info(package, package_path, logger, project_root=project_root)

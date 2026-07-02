@@ -105,7 +105,7 @@ def _count_package_files(package_path: Path) -> tuple[int, int]:
         return 0, workflow_count
 
     context_count = 0
-    context_dirs = ["instructions", "chatmodes", "context"]
+    context_dirs = ["instructions", "agents", "context"]
 
     for context_dir in context_dirs:
         context_path = apm_dir / context_dir
@@ -134,12 +134,12 @@ def _get_detailed_context_counts(package_path: Path) -> dict[str, int]:
     """Get detailed context file counts by type."""
     apm_dir = package_path / APM_DIR
     if not apm_dir.exists():
-        return {"instructions": 0, "chatmodes": 0, "contexts": 0}
+        return {"instructions": 0, "agents": 0, "contexts": 0}
 
     counts = {}
     context_directories = {
         "instructions": "instructions",
-        "chatmodes": "chatmodes",
+        "agents": "agents",
         "contexts": "context",  # Note: directory is 'context', not 'contexts'
     }
 
@@ -235,7 +235,7 @@ def _get_detailed_package_info(package_path: Path) -> dict[str, Any]:
             "author": "Unknown",
             "source": "unknown",
             "install_path": str(package_path.resolve()),
-            "context_files": {"instructions": 0, "chatmodes": 0, "contexts": 0},
+            "context_files": {"instructions": 0, "agents": 0, "contexts": 0},
             "workflows": 0,
             "hooks": 0,
         }

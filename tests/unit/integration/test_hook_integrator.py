@@ -269,7 +269,7 @@ class TestVSCodeIntegration:
 
         # Verify rewritten paths
         data = json.loads(target_json.read_text())
-        cmd = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        cmd = data["hooks"]["preToolUse"][0]["hooks"][0]["command"]
         assert "${CLAUDE_PLUGIN_ROOT}" not in cmd
         assert ".github/hooks/scripts/hookify/hooks/pretooluse.py" in cmd
         assert cmd.startswith("python3 ")
@@ -338,7 +338,7 @@ class TestVSCodeIntegration:
 
         target_json = temp_project / ".github" / "hooks" / "ralph-loop-hooks.json"
         data = json.loads(target_json.read_text())
-        cmd = data["hooks"]["Stop"][0]["hooks"][0]["command"]
+        cmd = data["hooks"]["stop"][0]["hooks"][0]["command"]
         assert "ralph-loop" in cmd
         assert "stop-hook.sh" in cmd
 
@@ -404,7 +404,7 @@ class TestVSCodeIntegration:
 
         target_json = temp_project / ".github" / "hooks" / "format-pkg-format.json"
         data = json.loads(target_json.read_text())
-        cmd = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        cmd = data["hooks"]["preToolUse"][0]["hooks"][0]["command"]
         assert cmd == "npx prettier --check ."
 
     def test_invalid_json_skipped(self, temp_project):
@@ -2341,7 +2341,7 @@ class TestScriptPathRewriting:
         # Verify the rewritten command points to the bundled script
         target_json = temp_project / ".github" / "hooks" / "lint-hooks-hooks.json"
         data = json.loads(target_json.read_text())
-        cmd = data["hooks"]["PostToolUse"][0]["hooks"][0]["command"]
+        cmd = data["hooks"]["postToolUse"][0]["hooks"][0]["command"]
         assert ".github/hooks/scripts/lint-hooks/scripts/lint.sh" in cmd
         assert "./" not in cmd
 
@@ -3343,10 +3343,10 @@ class TestIssue1007Fixes:
         names = {f.name for f in result}
         assert "cursor-hooks.json" not in names, "cursor-hooks.json must not reach copilot"
         assert "copilot-hooks.json" in names, "copilot-hooks.json must reach copilot"
-        assert "hooks.json" in names, "Generic hooks.json must reach copilot"
+        assert "hooks.json" not in names, "hooks.json must not reach copilot when specific exists"
 
     def test_filter_generic_hooks_universal(self, tmp_path: Path) -> None:
-        """Generic stems (no *-<agent>-hooks suffix) pass through for ALL targets."""
+        """Generic stems pass through for all targets when no target-specific file exists."""
         generic_files = [
             tmp_path / "hooks.json",
             tmp_path / "telemetry-hooks.json",

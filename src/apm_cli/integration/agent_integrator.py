@@ -15,8 +15,10 @@ import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.opencode_frontmatter import validate_opencode_frontmatter
+from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
+from apm_cli.utils.yaml_io import load_yaml_str
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
@@ -26,13 +28,15 @@ if TYPE_CHECKING:
 class AgentIntegrator(BaseIntegrator):
     """Handles integration of APM package agents into .github/agents/, .claude/agents/, and .cursor/agents/."""
 
+    # Deploys via write_text_lf -> compare adopt candidates in LF mode.
+    _LF_NORMALIZED_DEPLOY = True
+
     def find_agent_files(self, package_path: Path) -> list[Path]:
-        """Find all .agent.md and .chatmode.md files in a package.
+        """Find all agent files in a package.
 
         Searches in:
-        - Package root directory (.agent.md and .chatmode.md)
-        - .apm/agents/ subdirectory (new standard, recursive)
-        - .apm/chatmodes/ subdirectory (legacy)
+        - Package root directory (*.agent.md files)
+        - .apm/agents/ subdirectory (recursive): *.agent.md and plain *.md files
 
         Args:
             package_path: Path to the package directory
@@ -43,7 +47,6 @@ class AgentIntegrator(BaseIntegrator):
         files: list[Path] = []
         # Flat search in package root
         files += self.find_files_by_glob(package_path, "*.agent.md")
-        files += self.find_files_by_glob(package_path, "*.chatmode.md")
         # Recursive search in .apm/agents/ (use ** glob for subdirectories)
         apm_agents = package_path / ".apm" / "agents"
         if apm_agents.exists():
@@ -52,10 +55,6 @@ class AgentIntegrator(BaseIntegrator):
             for f in self.find_files_by_glob(apm_agents, "**/*.md"):
                 if not f.name.endswith(".agent.md") and f not in files:
                     files.append(f)
-        # Flat search in .apm/chatmodes/ (legacy)
-        apm_chatmodes = package_path / ".apm" / "chatmodes"
-        if apm_chatmodes.exists():
-            files += self.find_files_by_glob(apm_chatmodes, "*.chatmode.md")
         return files
 
     # NOTE: find_skill_file(), integrate_skill(), and _generate_skill_agent_content()
@@ -79,12 +78,7 @@ class AgentIntegrator(BaseIntegrator):
         """Generate target filename using the extension from *target*'s agents mapping."""
         mapping = target.primitives.get("agents")
         ext = mapping.extension if mapping else ".agent.md"
-        if source_file.name.endswith(".agent.md"):
-            stem = source_file.name[:-9]
-        elif source_file.name.endswith(".chatmode.md"):
-            stem = source_file.name[:-12]
-        else:
-            stem = source_file.stem
+        stem = source_file.name[:-9] if source_file.name.endswith(".agent.md") else source_file.stem
         return f"{stem}{ext}"
 
     def integrate_agents_for_target(
@@ -248,7 +242,7 @@ class AgentIntegrator(BaseIntegrator):
             raise ValueError(f"Refusing to read symlink source: {source}")
         content = source.read_text(encoding="utf-8")
         content, links_resolved = self.resolve_links(content, source, target)
-        target.write_text(content, encoding="utf-8")
+        write_text_lf(target, content)
         return links_resolved
 
     # ------------------------------------------------------------------
@@ -281,7 +275,7 @@ class AgentIntegrator(BaseIntegrator):
         if not fm_match:
             return
         try:
-            fm = yaml.safe_load(fm_match.group(1)) or {}
+            fm = load_yaml_str(fm_match.group(1)) or {}
         except yaml.YAMLError:
             return
         if not isinstance(fm, dict):
@@ -321,7 +315,7 @@ class AgentIntegrator(BaseIntegrator):
         if fm_match:
             body = content[fm_match.end() :]
             try:
-                fm = yaml.safe_load(fm_match.group(1)) or {}
+                fm = load_yaml_str(fm_match.group(1)) or {}
                 name = fm.get("name", name)
                 description = fm.get("description", description)
             except Exception:
@@ -332,7 +326,7 @@ class AgentIntegrator(BaseIntegrator):
             "description": description,
             "developer_instructions": body.strip(),
         }
-        target.write_text(_toml.dumps(doc), encoding="utf-8")
+        write_text_lf(target, _toml.dumps(doc))
 
     # DEPRECATED: use integrate_agents_for_target(KNOWN_TARGETS["copilot"], ...) instead.
     def integrate_package_agents(
@@ -398,7 +392,9 @@ class AgentIntegrator(BaseIntegrator):
                 continue
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.try_adopt_identical(target_path, source_file, target_paths):
+            if self.try_adopt_identical(
+                target_path, source_file, target_paths, lf_normalized_deploy=True
+            ):
                 files_adopted += 1
             else:
                 if self.check_collision(
@@ -429,7 +425,9 @@ class AgentIntegrator(BaseIntegrator):
                         )
                     continue
                 claude_rel = portable_relpath(claude_path, project_root)
-                if self.try_adopt_identical(claude_path, source_file, target_paths):
+                if self.try_adopt_identical(
+                    claude_path, source_file, target_paths, lf_normalized_deploy=True
+                ):
                     files_adopted += 1
                 elif not self.check_collision(
                     claude_path, claude_rel, managed_files, force, diagnostics=diagnostics
@@ -455,7 +453,9 @@ class AgentIntegrator(BaseIntegrator):
                         )
                     continue
                 cursor_rel = portable_relpath(cursor_path, project_root)
-                if self.try_adopt_identical(cursor_path, source_file, target_paths):
+                if self.try_adopt_identical(
+                    cursor_path, source_file, target_paths, lf_normalized_deploy=True
+                ):
                     files_adopted += 1
                 elif not self.check_collision(
                     cursor_path, cursor_rel, managed_files, force, diagnostics=diagnostics

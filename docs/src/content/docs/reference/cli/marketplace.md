@@ -1,6 +1,6 @@
 ---
 title: apm marketplace
-description: Register marketplaces, author manifests, and publish updates to consumer repositories.
+description: Register marketplaces, author manifests, and validate updates for consumer repositories.
 sidebar:
   order: 20
 ---
@@ -8,7 +8,7 @@ sidebar:
 Manage marketplaces -- both **consuming** them (registering a remote
 marketplace so packages resolve by `package@marketplace` shorthand)
 and **authoring** one (editing `apm.yml`'s `marketplace:` block,
-validating it, and publishing updates to consumer repositories).
+validating it, and preparing artifacts for consumer repositories).
 
 ## Synopsis
 
@@ -26,9 +26,7 @@ apm marketplace init [--force] [--name N] [--owner O]
 apm marketplace migrate [--force | --dry-run]
 apm marketplace check [--offline]
 apm marketplace audit NAME [--strict] [-v]
-apm marketplace doctor
 apm marketplace outdated [--offline] [--include-prerelease]
-apm marketplace publish [--targets FILE] [--dry-run] [--no-pr] [...]
 
 # Edit packages in the authoring config
 apm marketplace package add SOURCE [...]
@@ -45,8 +43,7 @@ interact with this command:
   can resolve by short name (`my-pkg@my-marketplace`) instead of a
   full git URL. See [`apm install`](../install/).
 - **Authors** maintain a marketplace's `apm.yml` (`marketplace:`
-  block) and ship updates to consumer repositories via
-  `apm marketplace publish`.
+  block) and build marketplace artifacts with [`apm pack`](../pack/).
 
 The authoring config is the `marketplace:` block of `apm.yml` in the
 current working directory. Legacy `marketplace.yml` files are still
@@ -110,22 +107,23 @@ apm marketplace add file:///srv/marketplaces/agent-forge.git --name agent-forge
 | `--verbose`, `-v` | Show detailed output. |
 
 **Trust boundary.** APM forwards its authentication tokens
-(`GITHUB_APM_PAT`, `GITLAB_APM_PAT`) only when the marketplace
-host is classified as GitHub or GitLab family. For any other git
-host -- generic HTTPS, SSH, Azure DevOps, self-hosted -- the
-marketplace is fetched via subprocess `git` through `GitCache`,
-and authentication falls through to the host's local git credential
-helper and matching `*_APM_PAT` variables such as `ADO_APM_PAT`.
-Hosted `marketplace.json` URLs are public HTTPS only: APM sends no auth
-headers. Use a git-backed marketplace for private catalogs. When packages
-are installed from a hosted JSON URL, the lockfile records the source URL and
-fetched content digest. See
+(`GITHUB_APM_PAT`, `GITLAB_APM_PAT`, `ADO_APM_PAT`) only when the
+marketplace host is classified as GitHub, GitLab, or Azure DevOps.
+Other git hosts -- generic HTTPS, SSH, self-hosted -- are fetched via
+subprocess `git` through `GitCache`, and authentication falls through
+to the host's local git credential helper. Hosted `marketplace.json`
+URLs are public HTTPS only: APM sends no auth headers. Use a
+git-backed marketplace for private catalogs. When packages are
+installed from a hosted JSON URL, the lockfile records the source URL
+and fetched content digest. See
 [`getting-started/authentication`](../../../getting-started/authentication/).
 
 **Azure DevOps.** ADO-hosted marketplaces fetch `marketplace.json`
-via a sparse-cone git clone (not the ADO REST API), so authentication
-uses `ADO_APM_PAT` -- identical to how `apm install` handles
-ADO-hosted package dependencies. See
+through the Azure DevOps Items API first. Authentication uses
+`ADO_APM_PAT`, with the same `az` bearer fallback as ADO package
+dependencies. If the REST request is unavailable, forbidden, or cannot
+read the repo shape, APM transparently falls back to the existing
+subprocess git path. See
 [`consumer/private-and-org-packages`](../../../consumer/private-and-org-packages/).
 
 ### `apm marketplace list`
@@ -301,11 +299,11 @@ apm marketplace package add my-org/code-reviewer --version '>=1.0.0'
 apm marketplace check
 ```
 
-Preview a publish, then ship it as drafts:
+Check marketplace metadata before packaging:
 
 ```bash
-apm marketplace publish --dry-run
-apm marketplace publish --draft
+apm marketplace check
+apm marketplace check --offline
 ```
 
 ## Related

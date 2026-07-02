@@ -69,8 +69,8 @@ def _display_single_file_summary(stats, c_status, c_hash, output_path, dry_run):
             "[+] All validated",
         )
         table.add_row(
-            "Chatmodes",
-            str(stats.get("chatmodes", 0)),
+            "Agents",
+            str(stats.get("agents", 0)),
             "[+] All validated",
         )
 
@@ -335,6 +335,97 @@ def _resolve_effective_target(
     return detected_target, detection_reason, config_target
 
 
+def _handle_global_flag(dry_run: bool, logger: CommandLogger) -> int:
+    """Handle --global compilation of user-scope root context files.
+
+    Returns 0 on success, 1 on error (for sys.exit).
+    """
+
+    from ...compilation import compile_user_root_contexts
+    from ...core.scope import InstallScope, get_apm_dir
+    from ...integration.targets import KNOWN_TARGETS
+
+    source_root = get_apm_dir(InstallScope.USER)
+    apm_modules = source_root / "apm_modules"
+    if not apm_modules.is_dir():
+        display_path = _display_user_path(apm_modules)
+        logger.error(
+            f"User-scope apm_modules not found: {display_path}. "
+            "Run 'apm install -g <package>' to install packages globally.",
+            symbol="error",
+        )
+        return 1
+
+    results = compile_user_root_contexts(
+        list(KNOWN_TARGETS.values()),
+        source_root,
+        dry_run=dry_run,
+        logger=None,
+    )
+
+    if not results:
+        logger.info(
+            "No user-scope targets produced output -- run 'apm install -g <package>' "
+            "to add global instructions.",
+            symbol="info",
+        )
+        return 0
+
+    has_error = False
+    written_count = 0
+    would_write_count = 0
+    unchanged_count = 0
+    for entry in results:
+        status = entry.status
+        tname = entry.target
+        path = entry.path
+        display_path = _display_user_path(path) if path is not None else None
+        if status == "written":
+            logger.success(f"{tname}: wrote {display_path}", symbol="check")
+            written_count += 1
+        elif status == "would-write":
+            logger.info(f"{tname}: would write {display_path} (dry-run)", symbol="preview")
+            would_write_count += 1
+        elif status == "unchanged":
+            logger.verbose_detail(f"{tname}: unchanged {display_path}")
+            unchanged_count += 1
+        elif status == "skipped-hand-authored":
+            logger.info(f"{tname}: skipped (hand-authored) {display_path}", symbol="info")
+        elif status == "skipped-no-instructions":
+            logger.verbose_detail(f"{tname}: skipped (no global instructions)")
+        elif status.startswith("error:"):
+            logger.error(f"{tname}: {status[6:]}", symbol="error")
+            has_error = True
+        if entry.has_critical_security:
+            has_error = True
+
+    if not has_error:
+        changed_count = written_count + would_write_count
+        if changed_count:
+            verb = "Would compile" if dry_run else "Compiled"
+            message = f"{verb} {changed_count} user-scope root context file(s)"
+            if unchanged_count:
+                message += f"; {unchanged_count} unchanged"
+            message += "."
+            if dry_run:
+                logger.info(message, symbol="preview")
+            else:
+                logger.success(message, symbol="check")
+        else:
+            logger.info("No user-scope root context files changed.", symbol="info")
+
+    return 1 if has_error else 0
+
+
+def _display_user_path(path: Path) -> str:
+    """Render paths under HOME with a stable tilde prefix for CLI output."""
+    try:
+        rel = path.resolve().relative_to(Path.home().resolve())
+    except ValueError:
+        return str(path)
+    return f"~/{rel.as_posix()}"
+
+
 def _validate_project(logger: CommandLogger, dry_run: bool, source_root: Path) -> None:
     """Check APM project exists and has content.
 
@@ -357,7 +448,7 @@ def _validate_project(logger: CommandLogger, dry_run: bool, source_root: Path) -
     # Check if .apm directory has actual content
     apm_dir = source_root / APM_DIR
     local_apm_has_content = apm_dir.exists() and (
-        any(apm_dir.rglob("*.instructions.md")) or any(apm_dir.rglob("*.chatmode.md"))
+        any(apm_dir.rglob("*.instructions.md")) or any(apm_dir.rglob("*.agent.md"))
     )
 
     # If no primitive sources exist, check deeper to provide better feedback
@@ -366,20 +457,20 @@ def _validate_project(logger: CommandLogger, dry_run: bool, source_root: Path) -
         has_empty_apm = (
             apm_dir.exists()
             and not any(apm_dir.rglob("*.instructions.md"))
-            and not any(apm_dir.rglob("*.chatmode.md"))
+            and not any(apm_dir.rglob("*.agent.md"))
         )
 
         if has_empty_apm:
             logger.error("No instruction files found in .apm/ directory")
             logger.progress(" To add instructions, create files like:")
             logger.progress("   .apm/instructions/coding-standards.instructions.md")
-            logger.progress("   .apm/chatmodes/backend-engineer.chatmode.md")
+            logger.progress("   .apm/agents/backend-engineer.agent.md")
         else:
             logger.error("No APM content found to compile")
             logger.progress(" To get started:")
             logger.progress("   1. Install APM dependencies: apm install <owner>/<repo>")
             logger.progress("   2. Or create local instructions: mkdir -p .apm/instructions")
-            logger.progress("   3. Then create .instructions.md or .chatmode.md files")
+            logger.progress("   3. Then create .instructions.md or .agent.md files")
 
         if not dry_run:  # Don't exit on dry-run to allow testing
             sys.exit(1)
@@ -860,23 +951,23 @@ def _run_compilation(
     help="Compile for all canonical targets. Equivalent to --target all.",
 )
 @click.option(
-    "--no-dedup/--no-force-instructions",
+    "--force-instructions/--no-force-instructions",
     "no_dedup",
-    is_flag=True,
     default=False,
     help=(
         "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
+        "already populated, and in AGENTS.md even when .github/instructions/ is "
         "already populated. Overrides the default deduplication that normally omits "
-        "the section to avoid duplicate context in Claude Code. Affects the Claude "
-        "target only. Alias: --force-instructions."
+        "these sections to avoid duplicate context. Affects both the Claude and "
+        "Copilot (AGENTS.md) deduplication paths. Alias: --no-dedup."
     ),
 )
 @click.option(
-    "--force-instructions",
+    "--no-dedup",
     "no_dedup",
     is_flag=True,
     default=False,
-    help="Alias for --no-dedup.",
+    help="Alias for --force-instructions.",
     hidden=True,
 )
 @click.option(
@@ -890,6 +981,19 @@ def _run_compilation(
         "sources (apm.yml, .apm/, project tree for placement scoring) "
         "continue resolving from $PWD. Pairs with 'apm install --root' "
         "for scratch-dir verification. Cannot be combined with --watch."
+    ),
+)
+@click.option(
+    "--global",
+    "-g",
+    "global_",
+    is_flag=True,
+    default=False,
+    help=(
+        "Compile user-scope root context files (~/.claude/CLAUDE.md, etc.) "
+        "from ~/.apm/apm_modules. Cannot be combined with project-scoped output "
+        "flags such as --target, --all, --watch, --root, or --output; use with "
+        "--dry-run to preview changes."
     ),
 )
 @click.pass_context
@@ -911,11 +1015,15 @@ def compile(  # noqa: PLR0913 -- Click handler
     compile_all,
     no_dedup,
     root,
+    global_,
 ):
     """Compile APM context into distributed AGENTS.md files.
 
     By default, uses distributed compilation to generate multiple focused AGENTS.md
     files across your directory structure following the Minimal Context Principle.
+
+    Use --global / -g to compile user-scope root context files from globally
+    installed packages.
 
     Use --single-agents for traditional single-file compilation when needed.
 
@@ -952,6 +1060,39 @@ def compile(  # noqa: PLR0913 -- Click handler
         # CLI output and would only ever fire for downstream library
         # consumers running with -W default, which we have none of.
         logger.warning("'--target all' is deprecated; use '--all' instead.")
+
+    # --global: compile user-scope root context files from ~/.apm/apm_modules.
+    # Must be checked before --watch / --root guards so we return early.
+    if global_:
+        from click.core import ParameterSource
+
+        allowed_with_global = {"global_", "dry_run", "verbose"}
+        flag_names = {
+            "chatmode": "--chatmode",
+            "clean": "--clean",
+            "compile_all": "--all",
+            "legacy_skill_paths": "--legacy-skill-paths",
+            "local_only": "--local-only",
+            "no_dedup": "--force-instructions/--no-force-instructions",
+            "no_links": "--no-links",
+            "output": "--output",
+            "root": "--root",
+            "single_agents": "--single-agents",
+            "target": "--target",
+            "validate": "--validate",
+            "verbose": "--verbose",
+            "watch": "--watch",
+            "with_constitution": "--with-constitution/--no-constitution",
+        }
+        for name in sorted(set(ctx.params) - allowed_with_global):
+            if ctx.get_parameter_source(name) is ParameterSource.DEFAULT:
+                continue
+            flag = flag_names.get(name, f"--{name.replace('_', '-')}")
+            raise click.UsageError(f"--global is not valid with {flag}")
+        rc = _handle_global_flag(dry_run=dry_run, logger=logger)
+        if rc != 0:
+            ctx.exit(rc)
+        return
 
     # --root + --watch is rejected: ``_watch_mode`` uses bare-relative
     # paths (``Path(APM_DIR)``, ``AgentsCompiler(".")``) and the watch

@@ -247,15 +247,19 @@ def _materialize_install_path(
     # unverifiable -- there is no marker we can write at install time and
     # no commit we can compare at audit time. Refuse to replay it rather
     # than silently trust whatever happens to live in the cache.
-    if getattr(lock_dep, "source", None) != "local" and not lock_dep.resolved_commit:
+    if (
+        getattr(lock_dep, "source", None) not in {"local", "registry"}
+        and not lock_dep.resolved_commit
+    ):
         raise CacheMissError(
             f"cannot replay {lock_dep.repo_url}: lockfile entry has no resolved_commit "
             "(cache freshness unverifiable). Re-run 'apm install' with a pinned ref "
             "(commit, tag, or specific branch HEAD) before audit."
         )
     if not candidate.exists():
+        _ref_label = lock_dep.resolved_commit or lock_dep.version or "unknown"
         raise CacheMissError(
-            f"cache miss for {lock_dep.repo_url}@{lock_dep.resolved_commit}: "
+            f"cache miss for {lock_dep.repo_url}@{_ref_label}: "
             f"expected {candidate}; run 'apm install' to populate the cache"
         )
     # Stale-cache detection: verify the cache pin marker matches the
@@ -367,31 +371,37 @@ def _filter_targets(all_targets, names: frozenset[str] | None):
 
 
 def _read_apm_yml_target(project_root: Path):
-    """Return the ``target:`` field from ``apm.yml`` if present, else ``None``.
+    """Return the explicit target list from ``apm.yml`` if declared, else ``None``.
 
-    This lets ``run_replay`` reproduce the SAME target set the install
-    pipeline used, instead of falling back to directory auto-detection
-    that misses targets whose deployment directories are still empty.
+    Handles both the singular ``target:`` and plural ``targets:`` forms so
+    that the replay uses the same target set the install pipeline used.
+    Without this, a project with ``targets: [claude, codex]`` (no copilot)
+    that also has a ``.github/`` directory for unrelated CI workflows would
+    have copilot auto-detected during replay, producing false
+    ``unintegrated`` findings for ``.github/instructions/`` (#1924).
     """
     apm_yml = project_root / "apm.yml"
     if not apm_yml.exists():
         return None
     try:
-        import yaml as _yaml  # local import: drift module avoids top-level yaml dep
+        # Route through the merge/alias-bounded loader (not stock yaml.safe_load)
+        # so a hostile apm.yml shipped in a cloned repo cannot wedge the default-on
+        # ``apm audit`` drift replay with a billion-laughs merge/alias bomb.
+        from apm_cli.utils.yaml_io import load_yaml
 
-        data = _yaml.safe_load(apm_yml.read_text(encoding="utf-8")) or {}
+        data = load_yaml(apm_yml) or {}
     except Exception:
         # Manifest unreadable / corrupt: fall back to auto-detect rather
         # than crashing the replay; the caller still surfaces a useful
         # error elsewhere if the project is truly broken.
         return None
-    raw = data.get("target")
-    if raw is None:
-        return None
+    # parse_targets_field handles both 'target:' (singular) and 'targets:'
+    # (plural list) and validates the tokens against the canonical set.
     try:
-        from apm_cli.core.target_detection import parse_target_field
+        from apm_cli.core.apm_yml import parse_targets_field
 
-        return parse_target_field(raw, source_path=apm_yml)
+        tokens = parse_targets_field(data)
+        return tokens if tokens else None
     except Exception:
         return None
 
@@ -482,6 +492,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     )
 
                 package_info = _build_package_info(lock_dep, install_path)
+                if lock_dep.local_path == _SELF_KEY:
+                    package_info.root_local_project_root = project_root
                 dep_key = lock_dep.get_unique_key()
 
                 integrate_package_primitives(
@@ -505,6 +517,9 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     skill_subset=None,
                     ctx=None,
                     scratch_root=scratch_root,
+                    # Honor per-dependency 'targets:' narrowing from apm.yml so the
+                    # replay does not write to targets excluded by the consumer (#1923).
+                    dep_target_subset=lock_dep.target_subset or None,
                 )
                 replayed_count += 1
     finally:

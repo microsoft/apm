@@ -32,22 +32,22 @@ These are the primitive types you can declare in `apm.yml` or ship in a package.
 | Plugins | Bundles of the primitives above, packaged for one-shot install. |
 | MCP servers | External tools the agent connects to via Model Context Protocol. |
 
-For deeper definitions, see [Primitives and targets](../primitives-and-targets/). For the on-disk layout of a package, see [Package anatomy](../package-anatomy/).
+For deeper definitions, see [Primitives and targets](/apm/concepts/primitives-and-targets/). For the on-disk layout of a package, see [Package anatomy](/apm/concepts/package-anatomy/).
 
 ## What APM is not
 
-- **Not a runtime.** APM governs the install and integrity plane -- what reaches disk and whether it conforms to policy. It does not govern the runtime plane -- what a running agent may do, which permissions it holds, or how it is sandboxed. That responsibility belongs to your agent harness. The two planes do not overlap. For how policy coexists with harness-managed configuration, see [Governance overview](/apm/enterprise/governance-overview/#boundary-statement).
+- **Not a runtime.** APM governs the install and integrity plane -- what reaches disk and whether it conforms to policy. It does not govern the runtime plane -- what a running agent may do, which permissions it holds, or how it is sandboxed. That responsibility belongs to your agent harness. The two planes do not overlap. For how policy coexists with harness-managed configuration, see [Governance deep-dive](/apm/enterprise/governance-guide/).
 - **Not an LLM gateway.** APM does not route, proxy, or meter model calls. It does not see your prompts at inference time.
 - **Not a fine-tuning tool.** APM versions context, not weights.
 - **Not a marketplace.** Any git repository is a valid APM package. Marketplaces are an optional discovery surface, not a requirement.
 
 ## The three promises
 
-APM commits to three things. Each gets a one-paragraph summary here; the deep dive lives in [The three promises](../the-three-promises/).
+APM commits to three things. Each gets a one-paragraph summary here; the deep dive lives in [The three promises](/apm/concepts/the-three-promises/).
 
 ### Portable by manifest
 
-One `apm.yml`. Eight harnesses. Reproducible AI agent setup. Every developer who clones the repo runs `apm install` and gets the same skills, prompts, instructions, hooks, and MCP servers wired into Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Antigravity, and Windsurf. The lockfile pins exact versions and content hashes.
+One `apm.yml`. Eight default harnesses. Reproducible AI agent setup. Every developer who clones the repo runs `apm install` and gets the same skills, prompts, instructions, hooks, and MCP servers wired into Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Windsurf, and Kiro. Antigravity is available as an explicit CLI target. The lockfile pins exact versions and content hashes.
 
 ### Secure by default
 
@@ -66,10 +66,10 @@ Org policy enforced at install time, before MCP touches disk. `apm-policy.yml` l
   </Card>
   <Card title="Producer" icon="puzzle">
     Author and publish primitives others can install.
-    [Primitives and targets](../primitives-and-targets/)
+    [Primitives and targets](/apm/concepts/primitives-and-targets/)
   </Card>
   <Card title="Enterprise" icon="approve-check">
     Gate org installs on policy and audit in CI.
-    [Governance overview](/apm/enterprise/governance-overview/)
+    [Governance deep-dive](/apm/enterprise/governance-guide/)
   </Card>
 </CardGrid>

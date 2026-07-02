@@ -471,3 +471,81 @@ def test_run_replay_wraps_loop_with_readonly_guard(monkeypatch, tmp_path):
         run_replay(config, logger)
 
     assert "leaked.md" in str(exc_info.value) or "created:" in str(exc_info.value)
+
+
+def test_run_replay_threads_dep_target_subset(monkeypatch, tmp_path):
+    """run_replay must pass dep_target_subset from the lockfile to integrate_package_primitives.
+
+    A dependency narrowed to ``targets: [claude]`` in apm.yml stores
+    ``target_subset: [claude]`` in the lockfile.  The replay must forward
+    this list so the per-dependency target filter applies -- otherwise
+    copilot-governed paths (e.g. ``.agents/skills/``) are written to
+    scratch even though the dep was never installed there, producing
+    false ``unintegrated`` drift (#1923).
+    """
+    from apm_cli.deps.lockfile import LockedDependency, LockFile
+    from apm_cli.install.drift import CheckLogger, ReplayConfig, run_replay
+
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    # Explicit apm.yml with targets: [claude, copilot] makes target resolution
+    # deterministic (not directory-based) and matches the real bug scenario where
+    # a copilot target is active but the dep is narrowed to claude only.
+    (project_root / "apm.yml").write_text(
+        "name: test-project\ntargets:\n  - claude\n  - copilot\n", encoding="utf-8"
+    )
+
+    # Use a local dep whose path resolves under project_root so
+    # _materialize_install_path does not need network or apm_modules cache.
+    lock = LockFile()
+    dep = LockedDependency(
+        repo_url="./my-skill",
+        source="local",
+        local_path="./my-skill",
+        resolved_commit=None,
+        target_subset=["claude"],
+    )
+    lock.add_dependency(dep)
+    # Create the local package dir so path resolution succeeds.
+    (project_root / "my-skill").mkdir()
+    lockfile_path = project_root / "apm.lock.yaml"
+    lock.write(lockfile_path)
+
+    captured: list = []
+
+    def _spy_integrate(*args, **kwargs):
+        # Capture both the resolved targets list and dep_target_subset so the
+        # test confirms (a) the full target set includes copilot (subset is
+        # meaningful) and (b) dep_target_subset is passed through correctly.
+        captured.append(
+            {
+                "target_names": sorted(t.name for t in kwargs.get("targets", [])),
+                "dep_target_subset": kwargs.get("dep_target_subset"),
+            }
+        )
+        return {"deployed_files": []}
+
+    monkeypatch.setattr(
+        "apm_cli.install.services.integrate_package_primitives",
+        _spy_integrate,
+    )
+
+    config = ReplayConfig(
+        project_root=project_root,
+        lockfile_path=lockfile_path,
+        targets=None,
+        cache_only=True,
+    )
+    logger = CheckLogger(verbose=False)
+    run_replay(config, logger)
+
+    assert len(captured) >= 1, "integrate_package_primitives was not called"
+    call = captured[0]
+    # The resolved target set must include both claude and copilot so the
+    # dep_target_subset=['claude'] actually narrows integration.
+    assert "copilot" in call["target_names"], (
+        f"expected copilot in resolved targets, got {call['target_names']}"
+    )
+    assert call["dep_target_subset"] == ["claude"], (
+        f"dep_target_subset should be ['claude'], got {call['dep_target_subset']}"
+    )

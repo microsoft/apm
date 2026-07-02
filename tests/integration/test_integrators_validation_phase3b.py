@@ -439,10 +439,10 @@ class TestAgentIntegratorFindFiles:
         assert "planner.agent.md" in names
 
     def test_finds_chatmode_md_in_root(self, tmp_path: Path) -> None:
-        (tmp_path / "default.chatmode.md").write_text("# Default")
+        (tmp_path / "default.agent.md").write_text("# Default")
         integrator = AgentIntegrator()
         files = integrator.find_agent_files(tmp_path)
-        assert any(f.name == "default.chatmode.md" for f in files)
+        assert any(f.name == "default.agent.md" for f in files)
 
     def test_finds_agent_md_in_apm_agents_subdir(self, tmp_path: Path) -> None:
         apm_agents = tmp_path / ".apm" / "agents"
@@ -462,12 +462,12 @@ class TestAgentIntegratorFindFiles:
         assert any(f.name == "helper.md" for f in files)
 
     def test_finds_chatmode_in_apm_chatmodes_subdir(self, tmp_path: Path) -> None:
-        apm_chatmodes = tmp_path / ".apm" / "chatmodes"
+        apm_chatmodes = tmp_path / ".apm" / "agents"
         apm_chatmodes.mkdir(parents=True)
-        (apm_chatmodes / "review.chatmode.md").write_text("# Review")
+        (apm_chatmodes / "review.agent.md").write_text("# Review")
         integrator = AgentIntegrator()
         files = integrator.find_agent_files(tmp_path)
-        assert any(f.name == "review.chatmode.md" for f in files)
+        assert any(f.name == "review.agent.md" for f in files)
 
     def test_non_agent_md_not_found(self, tmp_path: Path) -> None:
         """Plain README.md should NOT be discovered."""
@@ -519,7 +519,7 @@ class TestAgentIntegratorTargetFilenames:
         from apm_cli.integration.targets import KNOWN_TARGETS
 
         integrator = AgentIntegrator()
-        source = Path("backend.chatmode.md")
+        source = Path("backend.agent.md")
         filename = integrator.get_target_filename_for_target(
             source, "pkg", KNOWN_TARGETS["copilot"]
         )

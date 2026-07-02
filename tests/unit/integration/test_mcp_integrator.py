@@ -816,9 +816,9 @@ class TestGateProjectScopedRuntimes:
 
     _gate = staticmethod(MCPIntegrator._gate_project_scoped_runtimes)
 
-    # -- user_scope bypass --------------------------------------------------
+    # -- user_scope: declared targets are respected -------------------------
 
-    def test_user_scope_bypasses_all_gating(self, tmp_path):
+    def test_user_scope_filters_by_declared_targets(self, tmp_path):
         result = self._gate(
             ["claude", "copilot", "vscode", "codex"],
             user_scope=True,
@@ -826,7 +826,77 @@ class TestGateProjectScopedRuntimes:
             apm_config={"targets": ["claude"]},
             explicit_target=None,
         )
+        assert result == ["claude"]
+
+    def test_user_scope_no_targets_passes_all_runtimes(self, tmp_path):
+        result = self._gate(
+            ["claude", "copilot", "vscode", "codex"],
+            user_scope=True,
+            project_root=tmp_path,
+            apm_config={},
+            explicit_target=None,
+        )
         assert result == ["claude", "copilot", "vscode", "codex"]
+
+    def test_user_scope_explicit_target_filters(self, tmp_path):
+        result = self._gate(
+            ["claude", "copilot", "vscode", "codex"],
+            user_scope=True,
+            project_root=tmp_path,
+            apm_config={},
+            explicit_target="copilot",
+        )
+        assert result == ["copilot", "vscode"]
+
+    def test_user_scope_explicit_target_overrides_config(self, tmp_path):
+        result = self._gate(
+            ["claude", "copilot", "vscode", "codex"],
+            user_scope=True,
+            project_root=tmp_path,
+            apm_config={"targets": ["claude"]},
+            explicit_target="copilot",
+        )
+        assert result == ["copilot", "vscode"]
+
+    def test_user_scope_apm_config_none_passes_all_runtimes(self, tmp_path):
+        result = self._gate(
+            ["claude", "copilot", "vscode", "codex"],
+            user_scope=True,
+            project_root=tmp_path,
+            apm_config=None,
+            explicit_target=None,
+        )
+        assert result == ["claude", "copilot", "vscode", "codex"]
+
+    def test_user_scope_malformed_targets_fails_closed(self, tmp_path):
+        result = self._gate(
+            ["claude", "copilot"],
+            user_scope=True,
+            project_root=tmp_path,
+            apm_config={"target": "claude", "targets": ["copilot"]},
+            explicit_target=None,
+        )
+        assert result == []
+
+    def test_user_scope_explicit_target_all_passes_all_runtimes(self, tmp_path):
+        result = self._gate(
+            ["claude", "copilot", "vscode", "codex"],
+            user_scope=True,
+            project_root=tmp_path,
+            apm_config={"targets": ["claude"]},
+            explicit_target="all",
+        )
+        assert result == ["claude", "copilot", "vscode", "codex"]
+
+    def test_user_scope_explicit_target_all_in_list_passes_all_runtimes(self, tmp_path):
+        result = self._gate(
+            ["claude", "copilot", "vscode"],
+            user_scope=True,
+            project_root=tmp_path,
+            apm_config={},
+            explicit_target=["all"],
+        )
+        assert result == ["claude", "copilot", "vscode"]
 
     # -- explicit targets: (plural) gates all runtimes ---------------------
 

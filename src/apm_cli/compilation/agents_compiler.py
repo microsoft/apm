@@ -21,6 +21,7 @@ from ..core.target_detection import (
 )
 from ..primitives.discovery import discover_primitives
 from ..primitives.models import PrimitiveCollection
+from ..utils.atomic_io import write_text_lf
 from ..utils.path_security import PathTraversalError, ensure_path_within
 from ..utils.paths import portable_relpath
 from ..version import get_version
@@ -118,7 +119,7 @@ class CompilationConfig:
 
     # Deduplication opt-out (issue #1463): when True, instructions are always
     # included in CLAUDE.md regardless of .claude/rules/ contents.
-    # Mirrors --no-dedup / --force-instructions CLI flag.
+    # Mirrors --force-instructions / --no-dedup CLI flag.
     no_dedup: bool = False
 
     # Managed-section mode (issue #1540): update only the APM-owned block
@@ -488,12 +489,12 @@ class AgentsCompiler:
         # .github/instructions/. Codex, OpenCode, Windsurf rely solely on
         # AGENTS.md for instructions, so dedup must not fire for those
         # targets (issue #1678).
-        # --no-dedup / --force-instructions lets users opt out entirely.
+        # --force-instructions / --no-dedup lets users opt out entirely.
         if config.no_dedup:
             skip_instructions = False
             self._log(
                 "progress",
-                "Including instructions in AGENTS.md (--no-dedup overrides deduplication)",
+                "Including instructions in AGENTS.md (--force-instructions overrides deduplication)",
                 symbol="info",
             )
         elif not can_dedup_agents_md_instructions(config.target):
@@ -582,7 +583,7 @@ class AgentsCompiler:
                     "progress",
                     f"Skipped {suppressed_count} empty AGENTS.md {noun} -- "
                     ".github/instructions/ already covers Copilot; "
-                    "pass --no-dedup to write all AGENTS.md files",
+                    "pass --force-instructions to write all AGENTS.md files",
                     symbol="info",
                 )
             else:
@@ -591,7 +592,7 @@ class AgentsCompiler:
                     "progress",
                     f"AGENTS.md not generated ({suppressed_count} {noun}) -- "
                     ".github/instructions/ already covers Copilot; "
-                    "pass --no-dedup to write AGENTS.md",
+                    "pass --force-instructions to write AGENTS.md",
                     symbol="info",
                 )
 
@@ -775,12 +776,12 @@ class AgentsCompiler:
 
         # Skip instructions in CLAUDE.md when they are already deployed to
         # .claude/rules/ by `apm install` (avoids duplicate context in Claude Code).
-        # --no-dedup / --force-instructions lets users opt out of this behaviour.
+        # --force-instructions / --no-dedup lets users opt out of this behaviour.
         if config.no_dedup:
             skip_instructions = False
             self._log(
                 "progress",
-                "Including instructions in CLAUDE.md (--no-dedup overrides deduplication)",
+                "Including instructions in CLAUDE.md (--force-instructions overrides deduplication)",
                 symbol="info",
             )
         else:
@@ -1353,7 +1354,7 @@ class AgentsCompiler:
 
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(content, encoding="utf-8")
+            write_text_lf(output_path, content)
             result.stats["copilot_root_instructions_written"] = 1
             result.stats["copilot_root_instructions_unchanged"] = 0
             return result

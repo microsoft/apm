@@ -944,7 +944,6 @@ class GitHubPackageDownloader:
         subdirs = {
             ".prompt.md": "prompts",
             ".instructions.md": "instructions",
-            ".chatmode.md": "chatmodes",
             ".agent.md": "agents",
         }
 

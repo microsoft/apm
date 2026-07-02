@@ -184,8 +184,9 @@ Output:
 Note the split: **agents** are runtime-specific and land under
 `.github/agents/` (Copilot's directory). **Skills** land under
 `.agents/skills/` -- the cross-client universal location that
-Copilot, Cursor, OpenCode, Codex, and Gemini all read. Claude Code
-is the exception: it reads `.claude/skills/`.
+Copilot, Cursor, OpenCode, Codex, Gemini, and Windsurf all read.
+Claude Code and Kiro are the exceptions: they read `.claude/skills/`
+and `.kiro/skills/`, respectively.
 
 Your tree now has source on the left and runtime-ready output on the right:
 
@@ -225,6 +226,9 @@ in the current directory. To target explicitly, see the
 > plain `agents`-protocol hosts). Gemini also receives commands, skills,
 > hooks, and MCP via `apm install`. Copilot, Claude Code, and Cursor read
 > the per-skill directories directly -- no compile step needed.
+> If your project commits those generated files, set `targets:` in `apm.yml`
+> to keep the committed set consistent across machines. See
+> [Pin committed output with targets:](/apm/reference/cli/compile/#pin-committed-output-with-targets).
 
 Now open Copilot or Claude in this project. Ask "draft a PR description for
 my last commit". The `pr-description` skill activates on its own. To get the

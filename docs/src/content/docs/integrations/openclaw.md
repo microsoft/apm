@@ -54,7 +54,7 @@ apm install --target openclaw,claude
 ## Supported primitives
 
 - **Skills** deploy as `SKILL.md` content, unchanged from the agentskills.io format APM already produces.
-- Agents, instructions, prompts, hooks, commands, chatmodes, and MCP servers are not part of the OpenClaw surface and are skipped for this target.
+- Agents, instructions, prompts, hooks, commands, and MCP servers are not part of the OpenClaw surface and are skipped for this target.
 
 ## Troubleshooting
 

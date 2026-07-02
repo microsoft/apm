@@ -221,6 +221,40 @@ class TestLocalContentAudit:
             f"path of modified file not surfaced: {haystack!r}"
         )
 
+    def test_audit_passes_when_deployed_file_has_crlf(self, tmp_path, apm_command):
+        """Test F (issue #1952): a deployed file whose only post-install
+        change is LF -> CRLF must NOT be flagged as content drift.
+
+        Reproduces the cross-platform false positive end-to-end at the
+        ``apm audit`` command layer: install records the canonical
+        LF-content hash, then a consumer's git autocrlf (simulated here by
+        an explicit byte rewrite) re-materializes the working-tree copy
+        with CRLF. The content-integrity check must treat the two as
+        identical content and pass.
+        """
+        project = _make_project(tmp_path)
+        _install(apm_command, project)
+
+        deployed_instr = project / ".github" / "instructions" / "bar.instructions.md"
+        assert deployed_instr.exists(), f"target file missing post-install: {deployed_instr}"
+
+        # Rewrite the deployed copy with CRLF line endings, same logical text.
+        original = deployed_instr.read_bytes()
+        assert b"\r\n" not in original, "fixture precondition: deployed file should be LF on disk"
+        crlf = original.replace(b"\n", b"\r\n")
+        assert crlf != original, "rewrite did not change any line endings"
+        deployed_instr.write_bytes(crlf)
+
+        exit_code, payload, result = _audit_json(apm_command, project)
+        assert exit_code == 0, (
+            f"audit --ci should pass on a CRLF-only difference but failed: {payload}\n"
+            f"STDERR: {result.stderr}"
+        )
+        ci = _check(payload, "content-integrity")
+        assert ci["passed"] is True, (
+            f"content-integrity false-flagged a CRLF-only change (issue #1952): {ci}"
+        )
+
     def test_audit_passes_with_explicit_includes(self, tmp_path, apm_command):
         """Test D: declaring ``includes:`` removes the consent advisory."""
         # Use 'auto' first.

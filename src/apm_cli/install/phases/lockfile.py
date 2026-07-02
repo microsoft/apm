@@ -19,6 +19,7 @@ import copy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.install.package_resolution import effective_deploy_skill_subset
 from apm_cli.utils.content_hash import compute_file_hash
 
 if TYPE_CHECKING:
@@ -67,7 +68,22 @@ class LockfileBuilder:
 
     def build_and_save(self) -> None:
         """Assemble lockfile from ctx state and write it (no-op when nothing was installed)."""
-        if not self.ctx.installed_packages and not self.ctx.lockfile_only:
+        # Self-heal cache pin markers for remote deps recorded in the
+        # PRE-EXISTING on-disk lockfile whose cached payload survives on
+        # disk. This runs FIRST, before orphan-pruning (#1926) may rewrite
+        # the lockfile to drop deps no longer in the manifest: those deps'
+        # cached directories remain under apm_modules/, and the supply-chain
+        # contract (PR #1137) requires every cached remote dep to carry a
+        # ``.apm-pin`` marker so a later ``apm audit`` drift replay can
+        # fail-closed on a stale cache. Idempotent + best-effort; warnings
+        # for unpinned deps are surfaced by the primary post-build sync, so
+        # this secondary pass stays silent.
+        self._sync_cache_pin_markers_from_existing()
+        if (
+            not self.ctx.installed_packages
+            and not self.ctx.lockfile_only
+            and not self._has_orphan_lockfile_entries()
+        ):
             # Even with nothing newly installed, a pre-existing
             # lockfile may need its cache pin markers refreshed --
             # e.g. user upgraded APM and their cache pre-dates the
@@ -79,6 +95,12 @@ class LockfileBuilder:
             # promise is to always materialise an ``apm.lock.yaml`` (an
             # empty one for a depless project), mirroring
             # ``cargo generate-lockfile``.
+            #
+            # We also fall through when the existing lockfile records deps
+            # that the manifest no longer declares (orphans): removing every
+            # dependency leaves installed_packages empty, but the lockfile
+            # must still be pruned to match apm.yml (see
+            # ``_has_orphan_lockfile_entries``).
             self._sync_cache_pin_markers_from_disk()
             return
         try:
@@ -91,6 +113,8 @@ class LockfileBuilder:
             # Attach deployed_files and package_type to each LockedDependency
             self._attach_deployed_files(lockfile)
             self._attach_package_types(lockfile)
+            # Attach #1873 executable trust state captured at the gate.
+            self._attach_exec_status(lockfile)
             # Apply CLI --skill override to lockfile entries (skill_bundle only)
             self._attach_skill_subset_override(lockfile)
             # Attach content hashes captured at download/verify time
@@ -135,6 +159,24 @@ class LockfileBuilder:
 
     # -- private helpers (verbatim from original inline block) ----------
 
+    def _has_orphan_lockfile_entries(self) -> bool:
+        """True when the existing lockfile records apm deps no longer intended.
+
+        Guards the "nothing installed" early-return: when every apm dependency
+        is removed from the manifest, ``installed_packages`` is empty, yet the
+        lockfile still lists the dropped deps. Falling through lets the normal
+        prune path (``_merge_existing``) rebuild a lockfile that matches the
+        manifest. Skipped for partial (``only_packages``) installs, which
+        intentionally preserve unlisted entries.
+        """
+        existing = self.ctx.existing_lockfile
+        if existing is None or self.ctx.only_packages:
+            return False
+        from apm_cli.deps.lockfile import _SELF_KEY
+
+        intended = self.ctx.intended_dep_keys or set()
+        return any(key != _SELF_KEY and key not in intended for key in existing.dependencies)
+
     def _attach_deployed_files(self, lockfile: LockFile) -> None:
         """Attach per-dependency deployed-file manifests, unioning targets.
 
@@ -170,19 +212,48 @@ class LockfileBuilder:
             if dep_key in lockfile.dependencies:
                 lockfile.dependencies[dep_key].package_type = pkg_type
 
-    def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
-        """Apply CLI --skill override to lockfile skill_bundle entries.
+    def _attach_exec_status(self, lockfile: LockFile) -> None:
+        """Attach the #1873 ``exec_status`` trust state computed at the gate.
 
-        When the user runs `apm install bundle --skill foo`, the CLI
-        skill_subset takes precedence over the per-entry skill_subset
-        from the manifest for this invocation's lockfile.
+        ``ctx.package_exec_status`` is keyed by dep_key and holds the worst-case
+        trust state (``deployed`` / ``gated_pending_approval`` / ``denied``) for
+        each dependency that declared executables. Packages with no executables
+        are absent from the map and keep ``exec_status=None`` (the audit treats
+        them as trusted).
+        """
+        statuses = getattr(self.ctx, "package_exec_status", None)
+        if not statuses:
+            return
+        for dep_key, status in statuses.items():
+            if dep_key in lockfile.dependencies and status:
+                lockfile.dependencies[dep_key].exec_status = status
+
+    def _attach_skill_subset_override(self, lockfile: LockFile) -> None:
+        """Union the CLI ``--skill`` values into lockfile skill_bundle entries.
+
+        ``--skill`` is additive (issue #1786): a targeted ``apm install bundle
+        --skill foo`` must record the UNION of the previously pinned skills and
+        ``foo`` -- not replace the persisted subset with the raw CLI value. The
+        per-entry manifest subset already flows into ``locked_dep.skill_subset``;
+        here we fold in the current CLI values so the lockfile matches what was
+        deployed.
+
+        ``--skill '*'`` (empty ``ctx.skill_subset``) is a no-op here -- the
+        manifest reset already flowed the full-bundle (empty) subset through.
         """
         if not self.ctx.skill_subset:
-            return  # No CLI override; dep_ref.skill_subset already flows through
-        effective = sorted(set(self.ctx.skill_subset))
+            return  # bare install or --skill '*'; manifest value already flows through
         for dep_key, locked_dep in lockfile.dependencies.items():  # noqa: B007
             if locked_dep.package_type == "skill_bundle":
-                locked_dep.skill_subset = effective
+                merged = effective_deploy_skill_subset(
+                    skill_subset_from_cli=self.ctx.skill_subset_from_cli,
+                    cli_subset=self.ctx.skill_subset,
+                    persisted_subset=locked_dep.skill_subset,
+                )
+                # merged is never None here: the guard above returns for
+                # --skill '*' (empty ctx.skill_subset), so a real named
+                # subset always survives the union.
+                locked_dep.skill_subset = list(merged) if merged else []
 
     def _attach_content_hashes(self, lockfile: LockFile) -> None:
         for dep_key, locked_dep in lockfile.dependencies.items():
@@ -326,6 +397,44 @@ class LockfileBuilder:
         except Exception as exc:
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail(f"Cache pin marker sync skipped: {exc}")
+
+    def _sync_cache_pin_markers_from_existing(self) -> None:
+        """Self-heal markers from the pre-existing in-memory lockfile.
+
+        Runs at the very start of ``build_and_save`` so that remote deps
+        recorded in the on-disk lockfile get their ``.apm-pin`` markers
+        even when the imminent build prunes them (orphan removal, #1926):
+        the pruned dep's cache remains under ``apm_modules/`` and the
+        supply-chain contract (#1137) requires every cached remote dep to
+        be marked. Warnings are suppressed here -- the primary post-build
+        sync over the freshly-built lockfile surfaces unpinned deps, so a
+        second warning pass would be noise. Best-effort: a marker write
+        failure must never abort the install.
+        """
+        existing = self.ctx.existing_lockfile
+        if existing is None:
+            return
+        try:
+            from apm_cli.install.cache_pin import sync_markers_for_lockfile
+
+            apm_modules_dir = self.ctx.apm_modules_dir
+            if apm_modules_dir is None:
+                return
+            written = sync_markers_for_lockfile(
+                existing,
+                self.ctx.project_root,
+                apm_modules_dir,
+                warn_unpinned=False,
+            )
+            if self.ctx.logger and written:
+                self.ctx.logger.verbose_detail(
+                    f"Self-healed {written} cache pin marker(s) from existing lockfile"
+                )
+        except Exception as exc:
+            if self.ctx.logger:
+                self.ctx.logger.verbose_detail(
+                    f"Cache pin marker self-heal (existing) skipped: {exc}"
+                )
 
     def _sync_cache_pin_markers_from_disk(self) -> None:
         """Self-heal markers from the on-disk lockfile when no install ran.

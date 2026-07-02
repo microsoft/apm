@@ -164,7 +164,7 @@ class TestValidatePrimitive(unittest.TestCase):
 
         cm = Chatmode(
             name="test",
-            file_path=Path("test.chatmode.md"),
+            file_path=Path("test.agent.md"),
             description="desc",
             apply_to=None,
             content="# body",
@@ -176,7 +176,7 @@ class TestValidatePrimitive(unittest.TestCase):
 
         cm = Chatmode(
             name="test",
-            file_path=Path("test.chatmode.md"),
+            file_path=Path("test.agent.md"),
             description="",
             apply_to=None,
             content="",
@@ -1038,15 +1038,15 @@ class TestFindPrimitiveFilesEdgeCases(unittest.TestCase):
     """Tests for find_primitive_files edge cases."""
 
     def test_nonexistent_directory_returns_empty(self):
-        result = find_primitive_files("/nonexistent/path", ["**/*.chatmode.md"])
+        result = find_primitive_files("/nonexistent/path", ["**/*.agent.md"])
         self.assertEqual(result, [])
 
     def test_deduplicates_matched_files(self):
         """Multiple patterns matching same file should yield one result."""
         with tempfile.TemporaryDirectory() as tmp:
-            _write(Path(tmp) / "test.chatmode.md", CHATMODE_CONTENT)
+            _write(Path(tmp) / "test.agent.md", CHATMODE_CONTENT)
             # Both patterns should match the same file
-            result = find_primitive_files(tmp, ["**/*.chatmode.md", "*.chatmode.md"])
+            result = find_primitive_files(tmp, ["**/*.agent.md", "*.agent.md"])
             self.assertEqual(len(result), 1)
 
 

@@ -155,6 +155,8 @@ def sync_markers_for_lockfile(
     lockfile: LockFile,
     project_root: Path,
     apm_modules_dir: Path,
+    *,
+    warn_unpinned: bool = True,
 ) -> int:
     """Write a marker for every remote dep in ``lockfile`` that has a cached install.
 
@@ -167,20 +169,25 @@ def sync_markers_for_lockfile(
     a single stderr warning (one per dep). These deps cannot participate
     in stale-cache verification, which is a supply-chain weakness worth
     surfacing -- silent no-op would let unpinned refs sneak past audit.
+    Pass ``warn_unpinned=False`` to suppress these warnings when this is a
+    secondary self-heal pass over the pre-existing lockfile (the primary
+    pass over the freshly-built lockfile already surfaces them, so warning
+    twice would be noise).
 
     Returns the count of markers written (useful for verbose logging
     and for tests).
     """
-    unpinned = find_unpinned_remote_deps(lockfile)
-    if unpinned:
-        from apm_cli.utils.console import _rich_warning
+    if warn_unpinned:
+        unpinned = find_unpinned_remote_deps(lockfile)
+        if unpinned:
+            from apm_cli.utils.console import _rich_warning
 
-        for repo in unpinned:
-            _rich_warning(
-                f"cache-pin: remote dep {repo!r} has no resolved_commit; "
-                "drift cannot verify its cache freshness. Re-run 'apm install' "
-                "with a pinned ref (commit, tag, or specific branch HEAD)."
-            )
+            for repo in unpinned:
+                _rich_warning(
+                    f"cache-pin: remote dep {repo!r} has no resolved_commit; "
+                    "drift cannot verify its cache freshness. Re-run 'apm install' "
+                    "with a pinned ref (commit, tag, or specific branch HEAD)."
+                )
 
     written = 0
     for dep_key, dep in lockfile.dependencies.items():  # noqa: B007

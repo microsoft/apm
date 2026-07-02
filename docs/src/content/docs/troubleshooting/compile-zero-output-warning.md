@@ -42,7 +42,7 @@ To check the local tree directly:
 
 ```bash
 find .apm -name '*.instructions.md' -o -name '*.prompt.md' -o \
-         -name '*.agent.md' -o -name '*.chatmode.md' -o -name 'SKILL.md'
+         -name '*.agent.md' -o -name 'SKILL.md'
 ```
 
 ### 3. Confirm the includes filter is not excluding everything

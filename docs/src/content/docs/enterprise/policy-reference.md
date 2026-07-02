@@ -40,7 +40,7 @@ mcp:
 
 compilation:
   target:
-    allow: []                   # copilot | claude | cursor | opencode | codex | gemini | vscode | windsurf | kiro | agent-skills | all
+    allow: []                   # claude | copilot | cursor | opencode | codex | gemini | windsurf | kiro | agent-skills
     enforce: null               # Enforce specific target (must be present in list)
   strategy:
     enforce: null               # distributed | single-file
@@ -49,16 +49,29 @@ compilation:
 manifest:
   required_fields: []           # Required apm.yml fields
   scripts: allow                # allow | deny
+  require_explicit_includes: false  # Require includes: to be explicit
   content_types:
     allow: []                   # instructions | skill | hybrid | prompts
 
 unmanaged_files:
   action: ignore                # ignore | warn | deny
   directories: []               # Directories to monitor
+  exclude: []                   # Workspace path globs to suppress
 
 registry_source:
   require: []                   # Registry names required for dependencies
   allow_non_registry: true      # false = block git/local sources
+
+security:
+  audit: {on_install: null, fail_on_drift: false}
+  integrity: {require_hashes: false}
+
+executables:
+  deny_all: false
+  deny: []
+  require: []
+  recommend: []
+  enforce: []                   # accepted but inert in v1
 ```
 
 ## Top-level fields
@@ -235,14 +248,14 @@ Whether to trust MCP servers declared by transitive dependencies. Default: `fals
 
 Control which compilation targets are permitted. With multi-target support, these policies apply to every item in the target list:
 
-- **`enforce`**: The enforced target must be present in the target list. Fails if missing (e.g., `enforce: vscode` requires `vscode` to appear in `target: [claude, vscode]`).
+- **`enforce`**: The enforced target must be present in the target list. Fails if missing (e.g., `enforce: copilot` requires `copilot` to appear in `target: [claude, copilot]`).
 - **`allow`**: Every target in the list must be in the allowed set. Rejects any target not listed.
 
 ```yaml
 compilation:
   target:
-    allow: [vscode, claude]  # Only these targets allowed
-    enforce: vscode           # Must be present in the target list
+    allow: [copilot, claude]  # Only these targets allowed
+    enforce: copilot          # Must be present in the target list
 ```
 
 `enforce` takes precedence over `allow`. Use one or the other.
@@ -402,7 +415,7 @@ Deny patterns are evaluated first. If a reference matches any deny pattern, it f
 
 ### Policy checks (run with `--ci --policy`)
 
-There are 19 policy checks in APM 0.16.0.
+There are 20 policy checks in APM 0.22.0.
 
 **Dependencies:**
 
@@ -412,6 +425,7 @@ There are 19 policy checks in APM 0.16.0.
 | `dependency-denylist` | No dependency matches the deny list |
 | `required-packages` | Every required package is in the manifest |
 | `required-packages-deployed` | Required packages appear in lockfile with deployed files |
+| `required-executable-untrusted` | Required executable packages are present and trusted |
 | `required-package-version` | Required packages with version pins match per `require_resolution` |
 | `transitive-depth` | No dependency exceeds `max_depth` |
 | `dependency-pinned-constraint` | Every dep uses a bounded constraint (semver range, literal tag, or SHA) when `require_pinned_constraint: true` |

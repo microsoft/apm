@@ -18,7 +18,7 @@ apm self-update [--check]
 `apm self-update` upgrades the **APM CLI itself** to the latest version published on GitHub releases. It downloads the official platform installer (`install.sh` on macOS/Linux, `install.ps1` on Windows) and runs it in place.
 
 :::caution[Looking for dependency updates?]
-This command does **not** update the packages declared in your `apm.yml`. To re-resolve your dependencies against the latest matching Git refs, run:
+This command does **not** update the packages declared in your `apm.yml`. To re-resolve your dependencies against the latest matching versions or Git refs, run:
 
 ```bash
 apm update
@@ -28,6 +28,15 @@ See [`apm update`](../update/) for the dependency refresh workflow, or [`apm ins
 :::
 
 The command compares the installed version against the latest GitHub release and exits early if you are already current. With `--check`, it reports availability without installing.
+
+Self-update can read two non-secret installer preferences from `apm config`:
+
+- `self-update.channel`: `stable` (default) or `prerelease`. `prerelease` selects the newest non-draft prerelease and pins that version for the installer run.
+- `self-update.install-dir`: default target directory passed to the installer as `APM_INSTALL_DIR`.
+
+Environment variables win over config: `VERSION` pins an exact release, `APM_SELF_UPDATE_CHANNEL` overrides the channel, and `APM_INSTALL_DIR` overrides the install directory.
+
+Credentials, registry tokens, mirror URLs, commands, and installer arguments are **not** persisted in self-update config. Tokens still resolve through the existing auth path; enterprise mirror URLs remain environment variables.
 
 :::note
 Some package-manager distributions (for example, Homebrew) disable self-update at build time. In those builds, `apm self-update` prints a distributor-defined message (such as `brew upgrade apm`) and exits without running the installer. The startup update notification is also suppressed in those builds.
@@ -44,6 +53,8 @@ Some package-manager distributions (for example, Homebrew) disable self-update a
 | `APM_RELEASE_BASE_URL` | _(unset)_ | Base URL containing release assets at `{base}/{tag}/{asset}`. Used when self-update runs the installer to fetch binary archives. |
 | `APM_PYPI_INDEX_URL` | _(unset)_ | PyPI-compatible index used by installer pip fallback. |
 | `APM_NO_DIRECT_FALLBACK` | _(unset)_ | Set to `1` to fail closed instead of using public GitHub, `aka.ms`, or PyPI fallback. |
+| `APM_SELF_UPDATE_CHANNEL` | `stable` | Invocation-scoped channel override: `stable` or `prerelease`. Overrides `apm config set self-update.channel ...`. |
+| `APM_INSTALL_DIR` | installer default | Invocation-scoped install target directory. Overrides `apm config set self-update.install-dir ...`. |
 | `GITHUB_URL` | `https://github.com` | Legacy GitHub/GHES base URL. Still supported when mirror env vars are not set. |
 | `APM_REPO` | `microsoft/apm` | Repository in `owner/repo` form for GitHub/GHES paths. |
 | `VERSION` | _(unset)_ | Pin a release tag and skip release metadata lookup. |
@@ -81,6 +92,16 @@ Install the latest release:
 
 ```bash
 apm self-update
+```
+
+Persist non-secret self-update defaults:
+
+```bash
+apm config set self-update.channel prerelease
+apm config set self-update.install-dir ~/.local/bin
+apm self-update
+apm config unset self-update.channel
+apm config unset self-update.install-dir
 ```
 
 ## Behavior
@@ -128,6 +149,6 @@ The check is cached and non-blocking. It is suppressed in distributions that dis
 
 ## Related
 
-- [`apm update`](../update/) -- refresh dependencies declared in `apm.yml` against the latest matching refs.
+- [`apm update`](../update/) -- refresh dependencies declared in `apm.yml` against the latest matching versions or refs.
 - [`apm install`](../install/) -- install dependencies; use `--frozen` for read-only, lockfile-pinned installs.
 - [Quickstart](../../../quickstart/) -- first-time install.

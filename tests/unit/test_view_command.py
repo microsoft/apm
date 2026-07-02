@@ -218,6 +218,169 @@ class TestViewCommand(_InfoCmdBase):
         assert result.exit_code == 0
         assert "main" in result.output
 
+    def test_view_versions_routes_registry_dep_to_registry_api(self):
+        """display_versions delegates to the registry API for a lockfile-confirmed registry dep."""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch(
+                    "apm_cli.commands.view._lookup_lockfile_ref",
+                    return_value=("^1.0.0", "", "registry"),
+                ),
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                result = self.runner.invoke(cli, ["view", "myorg/myrepo", "versions"])
+        assert result.exit_code == 0
+        mock_reg.assert_called_once()
+        mock_gh.return_value.list_remote_refs.assert_not_called()
+
+    def test_view_versions_routes_unlocked_shorthand_to_default_registry(self):
+        """No lockfile signal, but a default registry is configured -> registry API.
+
+        Mirrors how ``apm install`` routes an unscoped shorthand to the default
+        registry. Without this the unlocked shorthand fell through to git.
+        """
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch(
+                    "apm_cli.commands.view._lookup_lockfile_ref",
+                    return_value=("", "", ""),  # not in lockfile
+                ),
+                patch(
+                    "apm_cli.commands.view._effective_default_registry",
+                    return_value="jfrog-demo",
+                ),
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                result = self.runner.invoke(cli, ["view", "myorg/myrepo", "versions"])
+        assert result.exit_code == 0
+        mock_reg.assert_called_once()
+        mock_gh.return_value.list_remote_refs.assert_not_called()
+
+    def test_view_versions_unlocked_shorthand_no_default_uses_git(self):
+        """No lockfile signal and no default registry -> git path (keeps git working)."""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch(
+                    "apm_cli.commands.view._lookup_lockfile_ref",
+                    return_value=("", "", ""),
+                ),
+                patch(
+                    "apm_cli.commands.view._effective_default_registry",
+                    return_value=None,
+                ),
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                mock_gh.return_value.list_remote_refs.return_value = []
+                result = self.runner.invoke(cli, ["view", "myorg/myrepo", "versions"])
+        assert result.exit_code == 0
+        mock_reg.assert_not_called()
+        mock_gh.return_value.list_remote_refs.assert_called_once()
+
+    def test_view_versions_explicit_registry_flag_forces_registry(self):
+        """--registry NAME forces the registry path and passes the name through."""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                result = self.runner.invoke(
+                    cli, ["view", "myorg/myrepo", "versions", "--registry", "myreg"]
+                )
+        assert result.exit_code == 0
+        mock_reg.assert_called_once()
+        assert mock_reg.call_args.kwargs.get("registry_name") == "myreg"
+        mock_gh.return_value.list_remote_refs.assert_not_called()
+
+    def test_view_versions_bare_registry_flag_forces_registry(self):
+        """Bare --registry (no NAME) parses as an empty value and forces the registry.
+
+        Guards against Click option drift (e.g. --registry accidentally becoming
+        value-required). registry_name is passed as None so the lockfile/default
+        registry is used.
+        """
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                result = self.runner.invoke(cli, ["view", "myorg/myrepo", "versions", "--registry"])
+        assert result.exit_code == 0
+        mock_reg.assert_called_once()
+        # "" (bare flag) is normalized to None -> use lockfile/default registry.
+        assert mock_reg.call_args.kwargs.get("registry_name") is None
+        mock_gh.return_value.list_remote_refs.assert_not_called()
+
+    def test_view_versions_scp_git_ref_forces_git_even_with_default_registry(self):
+        """An SCP-style git ref (arbitrary user) routes to git, not the registry."""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch(
+                    "apm_cli.commands.view._lookup_lockfile_ref",
+                    return_value=("", "", ""),
+                ),
+                patch(
+                    "apm_cli.commands.view._effective_default_registry",
+                    return_value="jfrog-demo",
+                ),
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                mock_gh.return_value.list_remote_refs.return_value = []
+                result = self.runner.invoke(
+                    cli, ["view", "alice@github.com:myorg/myrepo", "versions"]
+                )
+        assert result.exit_code == 0
+        mock_reg.assert_not_called()
+        mock_gh.return_value.list_remote_refs.assert_called_once()
+
+    def test_view_versions_unknown_registry_name_exits_with_error(self):
+        """--registry UNKNOWN exits 1 and names the missing registry in the error message."""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=({"known-registry": "https://example.com/r"}, "known-registry"),
+            ):
+                result = self.runner.invoke(
+                    cli, ["view", "myorg/myrepo", "versions", "--registry", "nonexistent"]
+                )
+        assert result.exit_code == 1
+        assert "nonexistent" in result.output
+        assert "not configured" in result.output
+
+    def test_view_versions_explicit_git_url_forces_git_even_with_default_registry(self):
+        """A full git URL routes to git even when a default registry is configured."""
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: testproject\nversion: 1.0.0\n")
+            with (
+                patch(
+                    "apm_cli.commands.view._lookup_lockfile_ref",
+                    return_value=("", "", ""),
+                ),
+                patch(
+                    "apm_cli.commands.view._effective_default_registry",
+                    return_value="jfrog-demo",
+                ),
+                patch("apm_cli.commands.view._display_registry_versions") as mock_reg,
+                patch("apm_cli.commands.view.GitHubPackageDownloader") as mock_gh,
+            ):
+                mock_gh.return_value.list_remote_refs.return_value = []
+                result = self.runner.invoke(
+                    cli, ["view", "https://github.com/myorg/myrepo", "versions"]
+                )
+        assert result.exit_code == 0
+        mock_reg.assert_not_called()
+        mock_gh.return_value.list_remote_refs.assert_called_once()
+
     # -- invalid field ----------------------------------------------------
 
     def test_view_invalid_field(self):
@@ -411,7 +574,7 @@ class TestViewCommand(_InfoCmdBase):
             with (
                 patch(
                     "apm_cli.commands.view._lookup_lockfile_ref",
-                    return_value=("v2.0.0", "abcdef1234567890deadbeef"),
+                    return_value=("v2.0.0", "abcdef1234567890deadbeef", ""),
                 ),
                 _force_rich_fallback(),
             ):
@@ -434,9 +597,10 @@ class TestLookupLockfileRef(_InfoCmdBase):
         from apm_cli.commands.view import _lookup_lockfile_ref
 
         with self._chdir_tmp() as tmp:
-            ref, commit = _lookup_lockfile_ref("org/repo", tmp)
+            ref, commit, _source = _lookup_lockfile_ref("org/repo", tmp)
         assert ref == ""
         assert commit == ""
+        assert _source == ""
 
     def test_exact_match(self):
         """Returns ref/commit for exact lockfile key match."""
@@ -454,7 +618,7 @@ class TestLookupLockfileRef(_InfoCmdBase):
             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
         ):  # patched to prevent real I/O
             mock_lf.read.return_value = mock_lockfile
-            ref, commit = _lookup_lockfile_ref("org/repo", Path("/fake"))
+            ref, commit, _source = _lookup_lockfile_ref("org/repo", Path("/fake"))
         assert ref == "v1.0.0"
         assert commit == "abc123"
 
@@ -477,7 +641,7 @@ class TestLookupLockfileRef(_InfoCmdBase):
             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
         ):  # patched to prevent real I/O
             mock_lf.read.return_value = mock_lockfile
-            ref, commit = _lookup_lockfile_ref("org/repo", Path("/fake"))
+            ref, commit, _source = _lookup_lockfile_ref("org/repo", Path("/fake"))
         assert ref == "main"
         assert commit == "deadbeef"
 
@@ -494,7 +658,7 @@ class TestLookupLockfileRef(_InfoCmdBase):
             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
         ):  # patched to prevent real I/O
             mock_lf.read.return_value = mock_lockfile
-            ref, commit = _lookup_lockfile_ref("nomatch", Path("/fake"))
+            ref, commit, _source = _lookup_lockfile_ref("nomatch", Path("/fake"))
         assert ref == ""
         assert commit == ""
 
@@ -506,7 +670,7 @@ class TestLookupLockfileRef(_InfoCmdBase):
             "apm_cli.deps.lockfile.migrate_lockfile_if_needed",
             side_effect=RuntimeError("boom"),
         ):
-            ref, commit = _lookup_lockfile_ref("x", Path("/fake"))
+            ref, commit, _source = _lookup_lockfile_ref("x", Path("/fake"))
         assert ref == ""
         assert commit == ""
 
@@ -520,7 +684,7 @@ class TestLookupLockfileRef(_InfoCmdBase):
             patch("apm_cli.deps.lockfile.migrate_lockfile_if_needed"),
         ):  # patched to prevent real I/O
             mock_lf.read.return_value = None
-            ref, commit = _lookup_lockfile_ref("org/repo", Path("/fake"))
+            ref, commit, _source = _lookup_lockfile_ref("org/repo", Path("/fake"))
         assert ref == ""
         assert commit == ""
 
@@ -690,3 +854,156 @@ class TestViewMarketplaceNoField(_InfoCmdBase):
 
         assert result.exit_code == 0
         assert "1.0.0" in result.output
+
+
+class TestEffectiveDefaultRegistry:
+    """_effective_default_registry honors the registries feature gate."""
+
+    def test_returns_none_when_registry_feature_disabled(self, tmp_path) -> None:
+        """A config.json default must not route view->registry when registries are off.
+
+        Mirrors install/registry_wiring.get_effective_default_registry, which
+        short-circuits to None when is_package_registry_enabled() is False.
+        """
+        from apm_cli.commands.view import _effective_default_registry
+
+        with (
+            patch(
+                "apm_cli.deps.registry.feature_gate.is_package_registry_enabled",
+                return_value=False,
+            ),
+            patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=({"jfrog-demo": "https://example/r"}, "jfrog-demo"),
+            ) as mock_resolve,
+        ):
+            result = _effective_default_registry(tmp_path)
+
+        assert result is None
+        # Gate short-circuits before any registry resolution happens.
+        mock_resolve.assert_not_called()
+
+    def test_returns_default_when_enabled(self, tmp_path) -> None:
+        from apm_cli.commands.view import _effective_default_registry
+
+        with (
+            patch(
+                "apm_cli.deps.registry.feature_gate.is_package_registry_enabled",
+                return_value=True,
+            ),
+            patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=({"jfrog-demo": "https://example/r"}, "jfrog-demo"),
+            ),
+        ):
+            result = _effective_default_registry(tmp_path)
+
+        assert result == "jfrog-demo"
+
+
+class TestDisplayRegistryVersions:
+    """Direct tests for _display_registry_versions error and output paths."""
+
+    runner = CliRunner()
+
+    def test_unknown_registry_name_exits_with_error(self, tmp_path) -> None:
+        """An explicit --registry NAME that does not exist in config exits 1."""
+        from apm_cli.commands.view import _display_registry_versions
+        from apm_cli.core.command_logger import CommandLogger
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep_ref = DependencyReference.parse("acme/web-skills")
+        logger = CommandLogger("test")
+
+        with (
+            patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=({"known-reg": "https://known.example"}, "known-reg"),
+            ),
+            pytest.raises(SystemExit, match=r"1"),
+        ):
+            _display_registry_versions(
+                dep_ref.repo_url, dep_ref, logger, registry_name="no-such-reg"
+            )
+
+    def test_no_registry_configured_exits_with_error(self, tmp_path) -> None:
+        """When no registry is configured at all, _display_registry_versions exits 1."""
+        from apm_cli.commands.view import _display_registry_versions
+        from apm_cli.core.command_logger import CommandLogger
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep_ref = DependencyReference.parse("acme/web-skills")
+        logger = CommandLogger("test")
+
+        with (
+            patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=(None, None),
+            ),
+            patch(
+                "apm_cli.deps.lockfile.LockFile.read",
+                return_value=None,
+            ),
+            pytest.raises(SystemExit, match=r"1"),
+        ):
+            _display_registry_versions("acme/web-skills", dep_ref, logger, registry_name=None)
+
+    def test_registry_client_error_exits_with_error(self) -> None:
+        """RegistryError from the client is caught and exits 1."""
+        from apm_cli.commands.view import _display_registry_versions
+        from apm_cli.core.command_logger import CommandLogger
+        from apm_cli.deps.registry.client import RegistryError
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep_ref = DependencyReference.parse("acme/web-skills")
+        logger = CommandLogger("test")
+
+        with (
+            patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=({"my-reg": "https://reg.example"}, "my-reg"),
+            ),
+            patch(
+                "apm_cli.deps.registry.auth.resolve_for_url",
+                return_value=None,
+            ),
+            patch(
+                "apm_cli.deps.registry.client.RegistryClient.list_versions",
+                side_effect=RegistryError("connection refused"),
+            ),
+            pytest.raises(SystemExit, match=r"1"),
+        ):
+            _display_registry_versions("acme/web-skills", dep_ref, logger, registry_name=None)
+
+    def test_happy_path_returns_versions(self) -> None:
+        """Happy path: RegistryClient returns versions and the function returns normally."""
+        from apm_cli.commands.view import _display_registry_versions
+        from apm_cli.core.command_logger import CommandLogger
+        from apm_cli.models.dependency.reference import DependencyReference
+
+        dep_ref = DependencyReference.parse("acme/web-skills")
+        logger = CommandLogger("test")
+
+        version_entry = MagicMock()
+        version_entry.version = "1.2.3"
+        version_entry.published_at = "2025-01-01T00:00:00Z"
+
+        with (
+            patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=({"my-reg": "https://reg.example"}, "my-reg"),
+            ),
+            patch(
+                "apm_cli.deps.registry.auth.resolve_for_url",
+                return_value=None,
+            ),
+            patch(
+                "apm_cli.deps.registry.client.RegistryClient.list_versions",
+                return_value=[version_entry],
+            ),
+            patch("rich.console.Console") as mock_console_cls,
+        ):
+            mock_console = MagicMock()
+            mock_console_cls.return_value = mock_console
+            # Should not raise or exit
+            _display_registry_versions("acme/web-skills", dep_ref, logger, registry_name=None)

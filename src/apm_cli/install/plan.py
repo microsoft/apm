@@ -196,6 +196,18 @@ def build_update_plan(
         seen_keys.add(key)
         old = old_entries.get(key)
         new_ref, new_commit = _extract_new_ref_and_commit(dep)
+        # Unannotated registry dep (cached, not re-downloaded): no concrete
+        # version was resolved this run, so treat the locked value as current.
+        # Require the locked entry to also be registry-sourced -- otherwise a
+        # dep that transitions sources (e.g. git -> registry) while keeping the
+        # same key would be masked as unchanged.
+        if (
+            new_ref is None
+            and old is not None
+            and getattr(dep, "source", None) == "registry"
+            and old.source == "registry"
+        ):
+            new_ref = old.resolved_ref
 
         if old is None:
             plan_entries.append(
@@ -280,6 +292,11 @@ def _extract_new_ref_and_commit(dep: DependencyReference) -> tuple[str | None, s
     """
     resolved = getattr(dep, "resolved_reference", None)
     if resolved is None:
+        # Registry deps identify by resolved version, not the manifest range.
+        # Return None so the caller can fall back to the locked concrete version
+        # rather than treating the range as a ref change.
+        if getattr(dep, "source", None) == "registry":
+            return (None, None)
         return (getattr(dep, "reference", None), None)
     new_ref = (
         getattr(resolved, "ref_name", None)
@@ -309,7 +326,11 @@ def _format_ref_change(entry: PlanEntry) -> str:
     old_ref = entry.old_resolved_ref or "-"
     new_ref = entry.new_resolved_ref or old_ref
     ref_part = old_ref if old_ref == new_ref else f"{old_ref} -> {new_ref}"
-    return f"{ref_part} ({entry.short_old_commit} -> {entry.short_new_commit})"
+    old_c = entry.short_old_commit
+    new_c = entry.short_new_commit
+    if old_c == "-" and new_c == "-":
+        return ref_part
+    return f"{ref_part} ({old_c} -> {new_c})"
 
 
 def render_plan_text(plan: UpdatePlan, *, verbose: bool = False) -> str:

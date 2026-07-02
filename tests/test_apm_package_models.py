@@ -365,7 +365,7 @@ class TestDependencyReference:
 
     def test_parse_virtual_file_all_extensions(self):
         """Test parsing virtual files with all supported extensions."""
-        extensions = [".prompt.md", ".instructions.md", ".chatmode.md", ".agent.md"]
+        extensions = [".prompt.md", ".instructions.md", ".agent.md"]
 
         for ext in extensions:
             dep = DependencyReference.parse(f"user/repo/path/to/file{ext}")
@@ -893,9 +893,9 @@ class TestPackageValidation:
             instructions_dir.mkdir()
             (instructions_dir / "test.instructions.md").write_text("# Test instruction")
 
-            chatmodes_dir = apm_dir / "chatmodes"
+            chatmodes_dir = apm_dir / "agents"
             chatmodes_dir.mkdir()
-            (chatmodes_dir / "test.chatmode.md").write_text("# Test chatmode")
+            (chatmodes_dir / "test.agent.md").write_text("# Test chatmode")
 
             result = validate_apm_package(Path(tmpdir))
             assert result.is_valid

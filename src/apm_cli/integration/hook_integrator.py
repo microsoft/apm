@@ -40,7 +40,7 @@ Hook JSON format (Cursor  -- flat arrays with command key):
 Script path handling:
     - ${CLAUDE_PLUGIN_ROOT}/path, ${CURSOR_PLUGIN_ROOT}/path, ${PLUGIN_ROOT}/path
       -> resolved relative to package root, rewritten for target
-    - ./path -> relative path, resolved from hook file's parent directory, rewritten for target
+    - ./path -> relative path, resolved from the hook file context, rewritten for target
     - System commands (no path separators) -> passed through unchanged
 """
 
@@ -55,6 +55,7 @@ from typing import Any
 import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.integration.hook_file_routing import filter_hook_files_for_target
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -64,6 +65,10 @@ from apm_cli.utils.path_security import (
 from apm_cli.utils.paths import portable_relpath
 
 _log = logging.getLogger(__name__)
+
+# Testability seam: tests can patch deprecated filename routing without
+# replacing the imported helper for every call site.
+_filter_hook_files_for_target = filter_hook_files_for_target
 
 
 # DEPRECATED -- use IntegrationResult directly for new code.
@@ -112,6 +117,23 @@ class _MergeHookConfig:
 # Copilot (camelCase) or Claude (PascalCase) names; targets that use
 # different conventions get their events renamed during merge.
 _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
+    "copilot": {
+        # Claude PascalCase -> Copilot camelCase
+        "PreToolUse": "preToolUse",
+        "preToolUse": "preToolUse",
+        "PostToolUse": "postToolUse",
+        "postToolUse": "postToolUse",
+        "UserPromptSubmit": "userPromptSubmit",
+        "userPromptSubmit": "userPromptSubmit",
+        "Stop": "stop",
+        "stop": "stop",
+        "AgentStop": "agentStop",
+        "agentStop": "agentStop",
+        "PreTaskExecution": "preTaskExecution",
+        "preTaskExecution": "preTaskExecution",
+        "PostTaskExecution": "postTaskExecution",
+        "postTaskExecution": "postTaskExecution",
+    },
     "claude": {
         # Copilot camelCase -> Claude PascalCase
         "preToolUse": "PreToolUse",
@@ -414,54 +436,35 @@ def _reinject_apm_source_from_sidecar(hooks: dict, sidecar_data: dict) -> None:
                     del pool[disk_key]
 
 
-# Mapping from hook-file stem suffix to the set of target keys that
-# should receive the file.  Files whose stem does not match any
-# suffix are treated as universal and deployed to every target.
-_HOOK_FILE_TARGET_SUFFIXES: dict[str, set[str]] = {
-    "copilot-hooks": {"copilot", "vscode"},
-    "cursor-hooks": {"cursor"},
-    "claude-hooks": {"claude"},
-    "codex-hooks": {"codex"},
-    "gemini-hooks": {"gemini"},
-    "antigravity-hooks": {"antigravity"},
-    "windsurf-hooks": {"windsurf"},
-    "kiro-hooks": {"kiro"},
-}
-
-
-def _filter_hook_files_for_target(
-    hook_files: list[Path],
-    target_key: str,
+def _relative_hook_script_bases(
+    package_path: Path,
+    hook_file_dir: Path | None,
 ) -> list[Path]:
-    """Return only hook files intended for *target_key*.
+    """Return candidate bases for resolving a relative hook script path."""
+    bases: list[Path] = []
+    if hook_file_dir is not None:
+        bases.append(hook_file_dir)
+    if package_path not in bases:
+        bases.append(package_path)
+    return bases
 
-    Routing is based on the file stem (case-insensitive):
-      - Stems ending with a known ``-<target>-hooks`` suffix are
-        restricted to matching targets.
-      - All other stems (e.g. ``hooks``, ``my-custom-hooks``) are
-        universal and pass through for every target.
 
-    Args:
-        hook_files: All discovered hook JSON files.
-        target_key: Lowercase target name (e.g. ``"claude"``, ``"cursor"``).
-
-    Returns:
-        Filtered list preserving original order.
-    """
-    result: list[Path] = []
-    for hf in hook_files:
-        stem_lower = hf.stem.lower()
-        matched_suffix: str | None = None
-        for suffix, allowed_targets in _HOOK_FILE_TARGET_SUFFIXES.items():
-            if stem_lower == suffix or stem_lower.endswith(f"-{suffix}"):
-                matched_suffix = suffix
-                if target_key in allowed_targets:
-                    result.append(hf)
-                break
-        if matched_suffix is None:
-            # Universal file -- deploy to all targets
-            result.append(hf)
-    return result
+def _resolve_relative_hook_script(
+    package_path: Path,
+    hook_file_dir: Path | None,
+    rel_path: str,
+) -> Path | None:
+    """Resolve a relative hook script path without escaping the package."""
+    last_candidate: Path | None = None
+    for base in _relative_hook_script_bases(package_path, hook_file_dir):
+        try:
+            candidate = ensure_path_within(base / rel_path, package_path)
+        except PathTraversalError:
+            continue
+        last_candidate = candidate
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return last_candidate
 
 
 class HookIntegrator(BaseIntegrator):
@@ -497,6 +500,11 @@ class HookIntegrator(BaseIntegrator):
         "linux",
         "osx",
     )
+
+    def __init__(self) -> None:
+        """Initialize per-install hook integration state."""
+        super().__init__()
+        self._deprecated_hook_routing_warnings: set[str] = set()
 
     @staticmethod
     def _iter_hook_entries(payload: dict) -> list[tuple[str, dict]]:
@@ -592,8 +600,8 @@ class HookIntegrator(BaseIntegrator):
         Returns:
             List[Path]: List of absolute paths to hook JSON files
         """
-        hook_files = []
-        seen = set()
+        hook_files: list[Path] = []
+        seen_stems: set[str] = set()
 
         # Search in .apm/hooks/ (APM convention)
         apm_hooks = package_path / ".apm" / "hooks"
@@ -601,9 +609,9 @@ class HookIntegrator(BaseIntegrator):
             for f in sorted(apm_hooks.glob("*.json")):
                 if f.is_symlink():
                     continue
-                resolved = f.resolve()
-                if resolved not in seen:
-                    seen.add(resolved)
+                stem_key = f.stem.lower()
+                if stem_key not in seen_stems:
+                    seen_stems.add(stem_key)
                     hook_files.append(f)
 
         # Search in hooks/ (Claude-native convention)
@@ -612,9 +620,9 @@ class HookIntegrator(BaseIntegrator):
             for f in sorted(hooks_dir.glob("*.json")):
                 if f.is_symlink():
                     continue
-                resolved = f.resolve()
-                if resolved not in seen:
-                    seen.add(resolved)
+                stem_key = f.stem.lower()
+                if stem_key not in seen_stems:
+                    seen_stems.add(stem_key)
                     hook_files.append(f)
 
         return hook_files
@@ -765,17 +773,14 @@ class HookIntegrator(BaseIntegrator):
         # like ".github/..." not "./" or ".\")
         # Match both forward-slash and backslash separators (Windows hook JSON
         # may use backslashes: .\scripts\scan.ps1)
-        # Resolve from hook file's directory if available, else fall back to package root
-        resolve_base = hook_file_dir if hook_file_dir else package_path
         rel_pattern = r"(\.[\\/][^\s\"']+)"
         for match in re.finditer(rel_pattern, new_command):
             rel_ref = match.group(1)
             # Normalize to forward slashes for path resolution
             rel_path = rel_ref[2:].replace("\\", "/")
 
-            try:
-                source_file = ensure_path_within(resolve_base / rel_path, package_path)
-            except PathTraversalError:
+            source_file = _resolve_relative_hook_script(package_path, hook_file_dir, rel_path)
+            if source_file is None:
                 continue
             if source_file.exists() and source_file.is_file():
                 target_rel = f"{scripts_base}/{rel_path}"
@@ -898,12 +903,18 @@ class HookIntegrator(BaseIntegrator):
         return rewritten, unique_scripts
 
     @staticmethod
+    def _root_local_identity_root(package_info, project_root: Path | None) -> Path | None:
+        """Return the project root used to identify root-local packages."""
+        return getattr(package_info, "root_local_project_root", None) or project_root
+
+    @staticmethod
     def _is_root_local_package(package_info, project_root: Path | None) -> bool:
         """Return True when *package_info* represents the project's own .apm content."""
-        if project_root is None:
+        identity_root = HookIntegrator._root_local_identity_root(package_info, project_root)
+        if identity_root is None:
             return False
         try:
-            return Path(package_info.install_path).resolve() == Path(project_root).resolve()
+            return Path(package_info.install_path).resolve() == Path(identity_root).resolve()
         except (OSError, RuntimeError):
             return False
 
@@ -963,7 +974,8 @@ class HookIntegrator(BaseIntegrator):
             str: Package name used as hook source marker and script namespace
         """
         if self._is_root_local_package(package_info, project_root):
-            return HookIntegrator._get_root_local_package_name(package_info, Path(project_root))
+            identity_root = HookIntegrator._root_local_identity_root(package_info, project_root)
+            return HookIntegrator._get_root_local_package_name(package_info, Path(identity_root))
         return package_info.install_path.name
 
     @staticmethod
@@ -1185,6 +1197,7 @@ class HookIntegrator(BaseIntegrator):
         managed_files: set = None,  # noqa: RUF013
         diagnostics=None,
         target=None,
+        dep_targets_active: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks from a package into hooks dir (Copilot target).
 
@@ -1202,7 +1215,15 @@ class HookIntegrator(BaseIntegrator):
             HookIntegrationResult: Results of the integration operation
         """
         hook_files = self.find_hook_files(package_info.install_path)
-        hook_files = _filter_hook_files_for_target(hook_files, "copilot")
+        package_name = self._get_package_name(package_info, project_root)
+        if not dep_targets_active:
+            hook_files = _filter_hook_files_for_target(
+                hook_files,
+                "copilot",
+                package_name=package_name,
+                warned_packages=self._deprecated_hook_routing_warnings,
+                package_identity=package_info.get_canonical_dependency_string(),
+            )
 
         if not hook_files:
             return HookIntegrationResult(
@@ -1216,7 +1237,6 @@ class HookIntegrator(BaseIntegrator):
         hooks_dir = project_root / root_dir / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
 
-        package_name = self._get_package_name(package_info, project_root)
         hooks_integrated = 0
         scripts_copied = 0
         scripts_adopted = 0
@@ -1249,7 +1269,19 @@ class HookIntegrator(BaseIntegrator):
             ):
                 continue
 
-            _emit_hook_event_diagnostics(list(rewritten.get("hooks", {}).keys()), "copilot", {})
+            hooks = rewritten.get("hooks", {})
+            event_map = _HOOK_EVENT_MAP.get("copilot", {})
+            _emit_hook_event_diagnostics(list(hooks.keys()), "copilot", event_map)
+            if isinstance(hooks, dict):
+                renamed_hooks = {}
+                for raw_event_name, entries in hooks.items():
+                    event_name = event_map.get(raw_event_name, raw_event_name)
+                    if event_name in renamed_hooks and isinstance(renamed_hooks[event_name], list):
+                        if isinstance(entries, list):
+                            renamed_hooks[event_name].extend(entries)
+                            continue
+                    renamed_hooks[event_name] = entries
+                rewritten["hooks"] = renamed_hooks
 
             # Write rewritten JSON
             with open(target_path, "w", encoding="utf-8") as f:
@@ -1308,6 +1340,7 @@ class HookIntegrator(BaseIntegrator):
         diagnostics=None,
         target=None,
         user_scope: bool = False,
+        dep_targets_active: bool = False,
     ) -> HookIntegrationResult:
         """Integrate hooks by merging into a target-specific JSON config.
 
@@ -1343,11 +1376,18 @@ class HookIntegrator(BaseIntegrator):
         _deploy_root_for_rewrite = project_root if user_scope else None
 
         hook_files = self.find_hook_files(package_info.install_path)
-        hook_files = _filter_hook_files_for_target(hook_files, config.target_key)
+        package_name = self._get_package_name(package_info, project_root)
+        if not dep_targets_active:
+            hook_files = _filter_hook_files_for_target(
+                hook_files,
+                config.target_key,
+                package_name=package_name,
+                warned_packages=self._deprecated_hook_routing_warnings,
+                package_identity=package_info.get_canonical_dependency_string(),
+            )
         if not hook_files:
             return _empty
 
-        package_name = self._get_package_name(package_info, project_root)
         source_marker = self._get_hook_source_marker(package_info, project_root, package_name)
         heal_stale_root_source = self._is_root_local_package(package_info, project_root)
         dependency_sources = (
@@ -1778,6 +1818,8 @@ class HookIntegrator(BaseIntegrator):
         diagnostics=None,
         scope=None,
         user_scope: bool = False,
+        dep_targets_active: bool = False,
+        allowed_targets: set[str] | None = None,
     ) -> "HookIntegrationResult":
         """Integrate hooks for a single *target*.
 
@@ -1791,6 +1833,9 @@ class HookIntegrator(BaseIntegrator):
         repo-relative so checked-in project-scope configs stay portable
         across clones, contributors, and CI runners (#1394).
         """
+        if dep_targets_active and (not allowed_targets or target.name not in allowed_targets):
+            raise AssertionError(f"BUG: target {target.name} bypassed chokepoint filter")
+
         if target.name == "copilot":
             return self.integrate_package_hooks(
                 package_info,
@@ -1799,6 +1844,7 @@ class HookIntegrator(BaseIntegrator):
                 managed_files=managed_files,
                 diagnostics=diagnostics,
                 target=target,
+                dep_targets_active=dep_targets_active,
             )
 
         if target.name == "kiro":
@@ -1813,6 +1859,7 @@ class HookIntegrator(BaseIntegrator):
                 diagnostics=diagnostics,
                 target=target,
                 user_scope=user_scope,
+                dep_targets_active=dep_targets_active,
             )
 
         config = _MERGE_HOOK_TARGETS.get(target.name)
@@ -1826,6 +1873,7 @@ class HookIntegrator(BaseIntegrator):
                 diagnostics=diagnostics,
                 target=target,
                 user_scope=user_scope,
+                dep_targets_active=dep_targets_active,
             )
 
         return HookIntegrationResult(

@@ -89,8 +89,8 @@ def resolve_package_path(
     sys.exit(1)
 
 
-def _lookup_lockfile_ref(package: str, project_root: Path):
-    """Return (ref, commit) from the lockfile for *package*, or ("", "")."""
+def _lookup_lockfile_ref(package: str, project_root: Path) -> tuple[str, str, str]:
+    """Return (ref, commit, source) from the lockfile for *package*, or ("", "", "")."""
     try:
         from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
 
@@ -98,7 +98,7 @@ def _lookup_lockfile_ref(package: str, project_root: Path):
         lockfile_path = get_lockfile_path(project_root)
         lockfile = LockFile.read(lockfile_path)
         if lockfile is None:
-            return "", ""
+            return "", "", ""
 
         # Try exact key first, then substring match
         dep = lockfile.dependencies.get(package)
@@ -109,10 +109,10 @@ def _lookup_lockfile_ref(package: str, project_root: Path):
                     break
 
         if dep is not None:
-            return dep.resolved_ref or "", dep.resolved_commit or ""
+            return dep.resolved_ref or "", dep.resolved_commit or "", dep.source or ""
     except Exception:
         pass
-    return "", ""
+    return "", "", ""
 
 
 def display_package_info(
@@ -130,11 +130,12 @@ def display_package_info(
     try:
         package_info = _get_detailed_package_info(package_path)
 
-        # Look up lockfile entry for ref/commit info
+        # Look up lockfile entry for ref/commit/source info
         locked_ref = ""
         locked_commit = ""
+        locked_source = ""
         if project_root is not None:
-            locked_ref, locked_commit = _lookup_lockfile_ref(package, project_root)
+            locked_ref, locked_commit, locked_source = _lookup_lockfile_ref(package, project_root)
 
         try:
             from rich.console import Console
@@ -147,7 +148,7 @@ def display_package_info(
             content_lines.append(f"[bold]Version:[/bold] {package_info['version']}")
             content_lines.append(f"[bold]Description:[/bold] {package_info['description']}")
             content_lines.append(f"[bold]Author:[/bold] {package_info['author']}")
-            content_lines.append(f"[bold]Source:[/bold] {package_info['source']}")
+            content_lines.append(f"[bold]Source:[/bold] {locked_source or package_info['source']}")
             if locked_ref:
                 content_lines.append(f"[bold]Ref:[/bold] {locked_ref}")
             if locked_commit:
@@ -191,7 +192,7 @@ def display_package_info(
             click.echo(f"Version: {package_info['version']}")
             click.echo(f"Description: {package_info['description']}")
             click.echo(f"Author: {package_info['author']}")
-            click.echo(f"Source: {package_info['source']}")
+            click.echo(f"Source: {locked_source or package_info['source']}")
             if locked_ref:
                 click.echo(f"Ref: {locked_ref}")
             if locked_commit:
@@ -335,7 +336,196 @@ def _display_marketplace_plugin(
         click.echo(f"  Install: apm install {plugin.name}@{marketplace_name}")
 
 
-def display_versions(package: str, logger: CommandLogger) -> None:
+def _display_registry_versions(
+    package: str,
+    dep_ref: DependencyReference,
+    logger: CommandLogger,
+    registry_name: str | None = None,
+) -> None:
+    """List available versions from the configured registry for a registry dep.
+
+    *registry_name* forces a specific registry by name (from the merged
+    registries map), bypassing the lockfile/default resolution below. An empty
+    string or ``None`` falls back to the lockfile's recorded registry, then the
+    configured default.
+    """
+    from ..deps.registry.auth import resolve_for_url
+    from ..deps.registry.client import RegistryClient, RegistryError
+    from ..deps.registry.config_loader import resolve_effective_registries
+
+    repo_url = dep_ref.repo_url
+    parts = [p for p in repo_url.split("/") if p]
+    if len(parts) < 2:
+        logger.error(f"Cannot parse owner/repo from '{package}'")
+        sys.exit(1)
+    owner = "/".join(parts[:-1]) if len(parts) > 2 else parts[0]
+    repo = parts[-1]
+
+    # Build the merged registries map (config.json + ~/.apm/apm.yml + project).
+    project_registries = None
+    project_default = None
+    try:
+        from ..models.apm_package import APMPackage
+
+        apm_yml = Path(".") / "apm.yml"
+        if apm_yml.is_file():
+            pkg = APMPackage.from_apm_yml(apm_yml)
+            project_registries = pkg.registries
+            project_default = pkg.default_registry
+    except Exception:
+        pass
+
+    registries, default_registry = resolve_effective_registries(project_registries, project_default)
+    if registries is None:
+        registries = {}
+
+    # An explicit --registry NAME forces that registry, bypassing lockfile and
+    # default resolution.
+    explicit = registry_name or None
+    registry_url = None
+    if explicit:
+        registry_url = registries.get(explicit)
+        if not registry_url:
+            known = ", ".join(sorted(registries)) or "none configured"
+            logger.error(f"Registry '{explicit}' is not configured (known: {known})")
+            sys.exit(1)
+
+    # Prefer resolved_url from lockfile: it names the exact registry used for
+    # this dep and works for non-default registries without any extra lookup.
+    if registry_url is None:
+        try:
+            from ..deps.lockfile import LockFile, get_lockfile_path
+
+            lf_path = get_lockfile_path(Path("."))
+            lf = LockFile.read(lf_path)
+            if lf:
+                locked = lf.dependencies.get(package)
+                if locked is None:
+                    for key, d in lf.dependencies.items():
+                        if package in key or key.endswith(f"/{package}"):
+                            locked = d
+                            break
+                if locked and locked.resolved_url:
+                    sep = "/v1/packages/"
+                    idx = locked.resolved_url.find(sep)
+                    if idx != -1:
+                        registry_url = locked.resolved_url[:idx]
+        except Exception:
+            pass
+
+    if registry_url is None:
+        if not default_registry:
+            logger.error(f"No registry configured; cannot list versions for '{package}'")
+            sys.exit(1)
+        registry_url = registries.get(default_registry) if registries else None
+        if not registry_url:
+            logger.error(f"Registry '{default_registry}' has no URL configured")
+            sys.exit(1)
+
+    try:
+        auth = resolve_for_url(registry_url, registries or {})
+        client = RegistryClient(registry_url, auth)
+        versions = client.list_versions(owner, repo)
+    except RegistryError as exc:
+        logger.error(f"Failed to list versions for '{package}': {exc}")
+        sys.exit(1)
+
+    if not versions:
+        logger.warning(f"No versions found for '{package}'. Verify the package name and registry.")
+        return
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+
+        console = Console()
+        table = Table(
+            title=f"Available versions: {package}",
+            show_header=True,
+            header_style="bold cyan",
+        )
+        table.add_column("Version", style="bold white")
+        table.add_column("Published", style="dim white")
+
+        for entry in versions:
+            table.add_row(entry.version, entry.published_at)
+
+        console.print(table)
+
+    except ImportError:
+        click.echo(f"Available versions: {package}")
+        click.echo("-" * 50)
+        click.echo(f"{'Version':<20} {'Published':<30}")
+        click.echo("-" * 50)
+        for entry in versions:
+            click.echo(f"{entry.version:<20} {entry.published_at:<30}")
+
+
+def _is_explicit_git_form(package: str) -> bool:
+    """True when *package* is an explicit git reference (URL, SCP, or .git).
+
+    Such references always route to the git path even when a default registry
+    is configured -- they are the escape hatch for viewing git versions,
+    mirroring the ``- git:`` manifest form.
+
+    Covers transport-scheme URLs (``https://``, ``ssh://``, ``git://``),
+    ``.git`` suffixes, and SCP-style ``user@host:path`` refs for ANY user
+    (not just ``git@``) -- ``DependencyReference.parse`` accepts arbitrary SSH
+    usernames, so the SCP check looks for ``@`` and ``:`` in the segment before
+    the first ``/`` rather than a literal ``git@`` prefix. A bare shorthand
+    (``owner/repo`` with an optional ``#ref``) has neither in that segment.
+    """
+    p = package.strip()
+    if p.startswith("./") or p.startswith("../") or p.startswith("/"):
+        return True
+    if "://" in p or p.lower().endswith(".git"):
+        return True
+    head = p.split("/", 1)[0]
+    return "@" in head and ":" in head
+
+
+def _effective_default_registry(project_root: Path) -> str | None:
+    """Return the effective default registry name (config.json + project apm.yml).
+
+    Returns ``None`` when no default registry is configured or the registry
+    feature is unavailable. Best-effort: any parsing/gate error is treated as
+    "no default" so version lookups fall back to git.
+
+    Honors the registries experimental feature gate, mirroring
+    ``install/registry_wiring.get_effective_default_registry`` -- when registries
+    are disabled, shorthand routing must not silently use a config.json default.
+    """
+    from ..deps.registry.config_loader import resolve_effective_registries
+    from ..deps.registry.feature_gate import is_package_registry_enabled
+
+    try:
+        if not is_package_registry_enabled():
+            return None
+    except Exception:
+        return None
+
+    project_registries = None
+    project_default = None
+    try:
+        apm_yml = project_root / "apm.yml"
+        if apm_yml.is_file():
+            from ..models.apm_package import APMPackage
+
+            pkg = APMPackage.from_apm_yml(apm_yml)
+            project_registries = pkg.registries
+            project_default = pkg.default_registry
+        _, default_registry = resolve_effective_registries(project_registries, project_default)
+    except Exception:
+        return None
+    return default_registry
+
+
+def display_versions(
+    package: str,
+    logger: CommandLogger,
+    project_root: Path | None = None,
+    registry: str | None = None,
+) -> None:
     """Query and display available remote versions (tags/branches).
 
     This is a purely remote operation -- it does NOT require the package
@@ -347,6 +537,20 @@ def display_versions(package: str, logger: CommandLogger) -> None:
     When *package* matches the ``NAME@MARKETPLACE`` pattern, the
     marketplace manifest is fetched instead and the plugin's marketplace
     metadata is displayed.
+
+    Registry routing (highest precedence first):
+
+    1. ``registry`` is not ``None`` -- ``--registry`` was passed: force the
+       registry path. A non-empty value names the registry; ``""`` uses the
+       lockfile/default. An explicit git URL still overrides nothing here --
+       the flag wins.
+    2. The lockfile records the package as ``source: registry``.
+    3. A default registry is configured and *package* is a plain shorthand
+       (not an explicit git URL) -- mirrors how ``apm install`` routes
+       shorthand to the default registry.
+
+    Otherwise the git path is used. *project_root* scopes the lockfile and
+    apm.yml lookups; pass ``None`` (``--global``) to read from the cwd.
     """
     # -- Marketplace path: NAME@MARKETPLACE --
     from ..marketplace.resolver import parse_marketplace_ref
@@ -357,12 +561,41 @@ def display_versions(package: str, logger: CommandLogger) -> None:
         _display_marketplace_plugin(plugin_name, marketplace_name, logger)
         return
 
-    # -- Git-based path (unchanged) --
+    # -- Git-based path --
     try:
         dep_ref = DependencyReference.parse(package)
     except ValueError as exc:
         logger.error(f"Invalid package reference '{package}': {exc}")
         sys.exit(1)
+
+    # (1) Explicit --registry forces the registry path.
+    if registry is not None:
+        _display_registry_versions(package, dep_ref, logger, registry_name=registry or None)
+        return
+
+    # (2) Detect registry dep via lockfile and route to registry API.
+    # Only consult the lockfile when we have a project root with an apm.yml;
+    # this prevents mis-routing when the user is outside an APM project or
+    # running with --global (project_root=None).
+    _pr = project_root if project_root is not None else Path(".")
+    if (_pr / "apm.yml").is_file():
+        _, _, _locked_source = _lookup_lockfile_ref(package, _pr)
+        if _locked_source == "registry":
+            _display_registry_versions(package, dep_ref, logger)
+            return
+
+    # (3) No lockfile signal, but a default registry is configured and the
+    # reference is a plain shorthand -- consult the registry, mirroring how
+    # `apm install` routes unscoped shorthands to the default registry. An
+    # explicit git URL is the escape hatch to force the git path below.
+    if not _is_explicit_git_form(package):
+        _default_reg = _effective_default_registry(_pr)
+        if _default_reg:
+            logger.info(
+                f"Routing to registry '{_default_reg}' (use a git URL to force the git path)"
+            )
+            _display_registry_versions(package, dep_ref, logger, registry_name=_default_reg)
+            return
 
     try:
         downloader = GitHubPackageDownloader(auth_resolver=AuthResolver())
@@ -372,7 +605,7 @@ def display_versions(package: str, logger: CommandLogger) -> None:
         sys.exit(1)
 
     if not refs:
-        logger.progress(f"No versions found for '{package}'")
+        logger.warning(f"No versions found for '{package}'. Verify the package name and remote.")
         return
 
     # -- render with Rich table (fallback to plain text) ---------------
@@ -423,9 +656,12 @@ _VIEW_HELP = (
     "    versions    List available remote tags and branches\n\n"
     "\b\n"
     "Examples:\n"
-    "    apm view org/repo                # Local metadata\n"
-    "    apm view org/repo versions       # Remote tags/branches\n"
-    "    apm view org/repo -g             # From user scope"
+    "    apm view org/repo                       # Local metadata\n"
+    "    apm view org/repo versions              # Remote tags/branches (or registry)\n"
+    "    apm view org/repo versions --registry   # From the default registry\n"
+    "    apm view org/repo versions --registry myreg  # From a named registry\n"
+    "    apm view https://github.com/org/repo versions  # Force the git path\n"
+    "    apm view org/repo -g                    # From user scope"
 )
 
 
@@ -444,11 +680,25 @@ _VIEW_HELP = (
     default=False,
     help="Inspect package from user scope (~/.apm/)",
 )
-def view(package: str, field: str | None, global_: bool):
+@click.option(
+    "--registry",
+    "registry",
+    is_flag=False,
+    flag_value="",
+    default=None,
+    metavar="[NAME]",
+    help="List versions from a registry (bare to use the default, or name one). "
+    "Use a full git URL to force the git path instead.",
+)
+def view(package: str, field: str | None, global_: bool, registry: str | None):
     """View package metadata or list remote versions."""
     from ..core.scope import InstallScope, get_apm_dir
 
     logger = CommandLogger("view")
+
+    # Warn if --registry is supplied without the versions field (flag is ignored).
+    if registry is not None and field != "versions":
+        logger.warning("--registry is only valid with the versions field; flag ignored")
 
     # --- field validation (before any I/O) ---
     if field is not None:
@@ -458,7 +708,12 @@ def view(package: str, field: str | None, global_: bool):
             sys.exit(1)
 
         if field == "versions":
-            display_versions(package, logger)
+            display_versions(
+                package,
+                logger,
+                project_root=None if global_ else Path("."),
+                registry=registry,
+            )
             return
 
     # --- marketplace ref without explicit field -> show versions ---

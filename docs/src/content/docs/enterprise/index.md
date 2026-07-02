@@ -5,28 +5,43 @@ sidebar:
   order: 1
 ---
 
-APM for organizations rests on three pillars:
+You have seen how to consume and produce primitives. This section is for teams that need to control which primitives are allowed, how they are secured, and how compliance is maintained at scale. It delivers APM's third promise: **every AI package your developers install is governed by org policy before it touches disk.**
 
-- **[Portable by manifest](../getting-started/first-package/)** -- one `apm.yml` declares every dependency; `apm.lock.yaml` pins exact versions; every developer and every CI run gets the same agent setup.
-- **[Secure by default](./security/)** -- `apm install` scans every package for hidden Unicode and other tampering before agents read it. Attack surface, scanners, and the MCP trust boundary are documented for procurement review.
-- **[Governed by policy](./governance-guide/)** -- `apm-policy.yml` lets platform teams allow-list dependencies, restrict deploy targets, and enforce trust rules at install time across every repo, from a single source of truth.
+Read it as five phases. Most teams move through them in order; jump to the phase you are in.
 
-## Where to start
+## Decide
 
-| If you are... | Start here |
-|---|---|
-| A CISO or security reviewer | [Security Model](./security/) -> [Governance](./governance-guide/) -> [Registry Proxy & Air-gapped](./registry-proxy/) |
-| A VP of Engineering or Tech Lead evaluating APM | [Governance](./governance-guide/) -> [Adoption Playbook](./adoption-playbook/) |
-| A platform engineer rolling out APM org-wide | [Adoption Playbook](./adoption-playbook/) -> [Registry Proxy & Air-gapped](./registry-proxy/) |
-| A champion building an internal pitch | [Making the Case](./making-the-case/) -> [Adoption Playbook](./adoption-playbook/) |
-| An engineer authoring policy | [Policy Files](./apm-policy/) -> [Policy Reference](./policy-reference/) |
+Build the case and plan the rollout.
 
-## Section map
+- [Making the case](./making-the-case/) -- problem-at-scale narrative, talking points by audience, objection handling, sample RFC, ROI framework.
+- [Adoption playbook](./adoption-playbook/) -- phased rollout from pilot team to organization-wide, with milestones, success metrics, and rollback options.
 
-- [Making the Case](./making-the-case/) -- problem-at-scale narrative, talking points by audience, objection handling, sample RFC, ROI framework.
-- [Adoption Playbook](./adoption-playbook/) -- phased rollout from pilot team to organization-wide, with milestones, success metrics, and rollback options.
-- [Security Model](./security/) -- supply-chain posture: pre-deploy gate, content scanners, hidden-Unicode threat model, MCP trust boundary. Consumed verbatim by procurement and security reviewers.
-- [Governance](./governance-guide/) -- the flagship trust contract: bypass surfaces, install-gate guarantees, audit-log schema, rollout playbook, known gaps. Read this if you are deciding whether to make `apm audit --ci` a required check.
-- [Registry Proxy & Air-gapped](./registry-proxy/) -- route dependency and marketplace traffic through Artifactory or a compatible proxy; bypass-prevention contract; air-gapped CI playbook for both online-proxy and offline-bundle shapes.
-- [Policy Files](./apm-policy/) -- conceptual model of `apm-policy.yml`: what it is, what it declares, how to start one.
-- [Policy Reference](./policy-reference/) -- complete schema for every `apm-policy.yml` field.
+## Secure
+
+Understand the install-time security model and the execution-trust surfaces.
+
+- [Security model](./security/) -- pre-deploy gate, content scanners, hidden-Unicode threat model, integrity, provenance, and the MCP trust boundary. Read verbatim by procurement and security reviewers.
+- [Lifecycle scripts](./lifecycle-scripts/) -- custom actions at install/update/uninstall, and the trust model that decides what runs and who authorizes it.
+
+## Author policy
+
+Write `apm-policy.yml` and test it before it bites.
+
+- [Policy files](./apm-policy/) -- conceptual model of `apm-policy.yml` plus your first policy in 20 minutes.
+- [Policy pilot](./policy-pilot/) -- the warn-then-block rollout so a new rule does not break every repo on day one.
+- [Policy reference](./policy-reference/) -- complete schema for every field.
+
+## Enforce
+
+Make the policy authoritative on every pull request.
+
+- [Enforce in CI](./enforce-in-ci/) -- wire `apm audit --ci` as a required check.
+- [Drift detection](./drift-detection/) -- the eight non-bypassable lockfile baselines and what each catches.
+- [GitHub rulesets](./github-rulesets/) -- the GitHub-side config that makes the check unbypassable.
+
+## Operate
+
+Run governance at organization scale.
+
+- [Registry proxy](./registry-proxy/) -- route all dependency traffic through Artifactory or a compatible proxy; air-gapped CI playbook.
+- [Governance deep-dive](./governance-guide/) -- the full trust contract: bypass surfaces, install-gate guarantees, audit-log schema, known gaps. The due-diligence reference for a CISO deciding to make `apm audit --ci` a required check.

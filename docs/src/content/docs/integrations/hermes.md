@@ -47,13 +47,12 @@ Use `apm experimental list` to confirm whether `hermes` is enabled on the curren
 ```bash
 # Project scope: skills -> .agents/skills/, plus AGENTS.md on compile
 apm install --target hermes
-apm compile -t hermes
 
 # User scope: skills -> ~/.hermes/skills/, MCP servers -> ~/.hermes/config.yaml
 apm install --target hermes --global
 ```
 
-`apm compile -t hermes` emits `AGENTS.md` at the project root (the `hermes` target shares the `agents` compile family).
+Run your normal `apm compile` flow when you also need `AGENTS.md`; Hermes shares that standard context-file output.
 
 ## HERMES_HOME override
 
@@ -86,7 +85,7 @@ HTTP servers are written with `url` and optional `headers` instead of `command`/
 
 - Skills deploy as `SKILL.md` content, unchanged from the agentskills.io format APM already produces.
 - Instructions compile to `AGENTS.md`, which Hermes reads as a first-class context file.
-- Agents, prompts, hooks, commands, and chatmodes are not part of the Hermes surface and are skipped for this target.
+- Agents, prompts, hooks, and commands are not part of the Hermes surface and are skipped for this target.
 
 ## Troubleshooting
 

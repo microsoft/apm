@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.utils.atomic_io import write_text_lf
 from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 from apm_cli.utils.paths import portable_relpath
+from apm_cli.utils.yaml_io import load_frontmatter
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
@@ -45,7 +47,7 @@ class PromptIntegrator(BaseIntegrator):
             raise ValueError(f"Refusing to read symlink source: {source}")
         content = source.read_text(encoding="utf-8")
         content, links_resolved = self.resolve_links(content, source, target)
-        target.write_text(content, encoding="utf-8")
+        write_text_lf(target, content)
         return links_resolved
 
     def get_target_filename(self, source_file: Path, package_name: str) -> str:
@@ -266,8 +268,6 @@ class PromptIntegrator(BaseIntegrator):
         target_paths = []
         total_links_resolved = 0
 
-        import frontmatter as _fm
-
         for source_file in prompt_files:
             # Skip workflow-shape prompts at file-based targets: an
             # author who added execution metadata (interval, mode, ...)
@@ -276,7 +276,7 @@ class PromptIntegrator(BaseIntegrator):
             # file ships to both surfaces and the App-only metadata
             # leaks into a slash-command users would not expect.
             try:
-                _meta = _fm.load(str(source_file)).metadata
+                _meta = load_frontmatter(str(source_file)).metadata
             except Exception:
                 _meta = {}
             if _is_workflow_shape(_meta):
@@ -301,7 +301,9 @@ class PromptIntegrator(BaseIntegrator):
                 continue
             rel_path = portable_relpath(target_path, project_root)
 
-            if self.try_adopt_identical(target_path, source_file, target_paths):
+            if self.try_adopt_identical(
+                target_path, source_file, target_paths, lf_normalized_deploy=True
+            ):
                 files_adopted += 1
                 continue
 

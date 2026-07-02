@@ -21,6 +21,7 @@ from dataclasses import dataclass
 import yaml
 
 from ..utils.path_security import PathTraversalError, validate_path_segments
+from ..utils.yaml_io import load_yaml_str
 from .client import fetch_raw
 from .errors import MarketplaceError
 from .models import MarketplaceManifest, MarketplacePlugin, MarketplaceSource
@@ -252,7 +253,7 @@ def fetch_plugin_apm_yml(
         )
 
     try:
-        data = yaml.safe_load(raw.decode("utf-8", errors="replace"))
+        data = load_yaml_str(raw.decode("utf-8", errors="replace"))
     except yaml.YAMLError as exc:
         return FetchStatus.PARSE_ERROR, None, f"malformed YAML: {exc}"
 

@@ -70,28 +70,47 @@ is not picked up mid-session.
 
 ## Trust gate for dependency canvases
 
-A canvas shipped by a **dependency** is arbitrary executable Node.js code. APM
-blocks dependency-provided canvases by default. To deploy them, opt in
-explicitly:
+A canvas shipped by a **dependency** is arbitrary executable Node.js code. When
+the project opts in to the executable gate (by adding an `executables:` block to
+`apm.yml`), APM blocks dependency-provided canvases unless the package has been
+explicitly approved. To deploy them:
+
+```yaml
+# apm.yml  (committed -- opts the project in to the gate)
+executables: {}
+```
 
 ```bash
-apm install --target copilot --trust-canvas-extensions
+# apm approve writes committed project trust (shared with the team);
+# add --user to record a personal grant in ~/.apm/config.json instead.
+apm approve some-org/canvas-package
+apm install --target copilot
 ```
+
+By default `apm approve` writes the grant to the project `apm.yml`
+`executables.allow` block (committed), so the trust decision is shared with the
+team. `apm approve --user` records a personal grant in `~/.apm/config.json`
+instead -- a machine-local override that is never committed. Adding an empty
+`executables: {}` enables the gate but grants trust to nothing; approve each
+package you want to deploy.
+
+The legacy top-level `allowExecutables:` block is a deprecated alias for
+`executables.allow`, read for one minor cycle and migrated on the next
+`apm approve` / `apm deny` write.
 
 The trust gate is independent of the experimental flag:
 
 - The **experimental flag** decides whether the canvas primitive is processed at
   all. It is a feature-availability gate, not a security gate.
-- The **`--trust-canvas-extensions` flag** decides whether *dependency*
-  canvases may deploy. Your own first-party canvas (in the root package you are
-  installing from) deploys freely once the flag is on; only dependency-provided
-  canvases need the trust flag.
+- The **`executables` block** decides whether *dependency* canvases may
+  deploy. Your own first-party canvas (in the root package you are installing
+  from) deploys freely once the flag is on; only dependency-provided canvases
+  need approval.
 
-When a dependency canvas is blocked, APM prints a diagnostic naming the package,
-the canvas, the `extension.mjs` entry point, the deploy directory, and the
-opt-in flag. The same gate is enforced on offline bundle install
-(`apm install <bundle>`) and on `apm unpack`, so a vendored bundle cannot
-smuggle an executable canvas past trust.
+When a dependency canvas is blocked, APM prints a diagnostic naming the package
+and the canvas, and instructs you to run `apm approve <pkg>`. The same gate is
+enforced on offline bundle install (`apm install <bundle>`), so a vendored
+bundle cannot smuggle an executable canvas past trust.
 
 ## Install globally (user scope)
 
@@ -99,7 +118,8 @@ To make a canvas available in **every** Copilot session, install it globally so
 it lands in `~/.copilot/extensions/<name>/`:
 
 ```bash
-apm install <package> --global --trust-canvas-extensions
+apm approve <package>
+apm install <package> --global
 ```
 
 Global canvas install is intentionally limited in this experimental release:
@@ -109,8 +129,8 @@ Global canvas install is intentionally limited in this experimental release:
   globally, so APM records it in the user lockfile and `apm uninstall --global`
   can prune it. A first-party root `.apm/extensions/` canvas is **not** deployed
   at user scope -- package it and install it as a dependency instead.
-- **Trust is always required.** A global canvas has full-account blast radius,
-  so `--trust-canvas-extensions` is mandatory even though the project-scope
+- **Approval is always required.** A global canvas has full-account blast radius,
+  so executable-trust approval is mandatory even though the project-scope
   first-party path does not need it.
 - **Default `~/.copilot` only.** If `$COPILOT_HOME` is set to a non-default
   location, APM refuses the global canvas install rather than deploy to a path
@@ -132,13 +152,14 @@ experimental flag, so a previously-installed canvas can always be removed.
   (`--target claude`, `cursor`, etc.) never receive it.
 - **Global install is dependency-only.** User-scope (`--global`) deployment to
   `~/.copilot/extensions/` supports dependency-provided canvases (always
-  requiring `--trust-canvas-extensions`) and the default `~/.copilot` location
+  requiring executable-trust approval) and the default `~/.copilot` location
   only; first-party root canvases deploy at project scope only.
 - **No compile/list surfacing yet.** Canvases are not yet shown by
   `apm list`/`apm compile`; they are deployed at install only.
-- **No policy-file control yet.** Canvas trust is controlled only by the
-  `--trust-canvas-extensions` CLI flag; governing it via `apm-policy.yml` is
-  planned but not part of this experimental release.
+- **No canvas-specific org policy field yet.** The org `executables:` block in
+  `apm-policy.yml` governs canvas trust alongside the other executable types
+  (`deny_all`, `deny`, `require`, `recommend`); a canvas-only policy knob is not
+  planned for this experimental release.
 
 See the [primitives and targets](/apm/concepts/primitives-and-targets/) matrix
 for where the canvas primitive sits.

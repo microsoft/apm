@@ -46,7 +46,9 @@ from apm_cli.install.drift import (
     render_drift,
     render_drift_json,
     render_drift_text,
+    run_replay,
 )
+from apm_cli.integration.hook_integrator import HookIntegrator
 
 # ---------------------------------------------------------------------------
 # _assert_scratch_bound
@@ -125,6 +127,43 @@ class TestCheckLogger:
         assert str(tmp_path) in captured.err
 
 
+def test_run_replay_preserves_root_local_hook_marker_identity(tmp_path: Path) -> None:
+    """Self package hook markers must stay stable when replay writes to scratch."""
+    project = tmp_path / "apm-bugs"
+    project.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    (project / "apm.yml").write_text("name: apm-bugs\nversion: 0.0.0\n", encoding="utf-8")
+    lockfile_path = project / "apm.lock.yaml"
+    LockFile(local_deployed_files=[".codex/hooks.json"]).write(lockfile_path)
+    captured: dict[str, object] = {}
+
+    def fake_integrate_package_primitives(package_info, replay_root, **_kwargs):
+        hook_integrator = HookIntegrator()
+        package_name = hook_integrator._get_package_name(package_info, replay_root)
+        captured["marker"] = hook_integrator._get_hook_source_marker(
+            package_info, replay_root, package_name
+        )
+        captured["replay_root"] = replay_root
+        return {"deployed_files": []}
+
+    with (
+        patch("apm_cli.install.drift._make_scratch_root", return_value=scratch),
+        patch(
+            "apm_cli.install.services.integrate_package_primitives",
+            side_effect=fake_integrate_package_primitives,
+        ),
+    ):
+        returned_scratch = run_replay(
+            ReplayConfig(project_root=project, lockfile_path=lockfile_path),
+            CheckLogger(verbose=False),
+        )
+
+    assert returned_scratch == scratch
+    assert captured["replay_root"] == scratch
+    assert captured["marker"] == "_local/apm-bugs"
+
+
 # ---------------------------------------------------------------------------
 # _materialize_install_path
 # ---------------------------------------------------------------------------
@@ -169,6 +208,23 @@ class TestMaterializeInstallPath:
         dep = LockedDependency(repo_url="owner/repo", resolved_commit=None)
         with pytest.raises(CacheMissError, match="no resolved_commit"):
             _materialize_install_path(dep, tmp_path, tmp_path / "apm_modules", cache_only=True)
+
+    def test_registry_dep_no_commit_uses_existing_cache(self, tmp_path: Path) -> None:
+        from apm_cli.install.drift import _materialize_install_path
+
+        apm_modules = tmp_path / "apm_modules"
+        cached = apm_modules / "owner" / "repo"
+        cached.mkdir(parents=True)
+        dep = LockedDependency(
+            repo_url="owner/repo",
+            source="registry",
+            resolved_commit=None,
+            version="1.0.0",
+        )
+
+        result = _materialize_install_path(dep, tmp_path, apm_modules, cache_only=True)
+
+        assert result == cached
 
 
 # ---------------------------------------------------------------------------
@@ -277,16 +333,24 @@ class TestReadApmYmlTarget:
         result = _read_apm_yml_target(tmp_path)
         assert result is None
 
-    def test_apm_yml_with_target_returns_value(self, tmp_path: Path) -> None:
+    def test_apm_yml_with_singular_target_returns_list(self, tmp_path: Path) -> None:
+        # Singular 'target: copilot' form -- returns a one-element list.
         (tmp_path / "apm.yml").write_text("name: pkg\ntarget: copilot\n", encoding="utf-8")
-        with patch("apm_cli.core.target_detection.parse_target_field", return_value="copilot"):
-            result = _read_apm_yml_target(tmp_path)
-        assert result == "copilot"
+        result = _read_apm_yml_target(tmp_path)
+        assert result == ["copilot"]
 
-    def test_parse_target_field_exception_returns_none(self, tmp_path: Path) -> None:
-        (tmp_path / "apm.yml").write_text("name: pkg\ntarget: invalid\n", encoding="utf-8")
+    def test_apm_yml_with_targets_list_returns_list(self, tmp_path: Path) -> None:
+        # Plural 'targets: [claude, codex]' form -- both tokens returned (#1924).
+        (tmp_path / "apm.yml").write_text(
+            "name: pkg\ntargets:\n  - claude\n  - codex\n", encoding="utf-8"
+        )
+        result = _read_apm_yml_target(tmp_path)
+        assert result == ["claude", "codex"]
+
+    def test_parse_targets_field_exception_returns_none(self, tmp_path: Path) -> None:
+        (tmp_path / "apm.yml").write_text("name: pkg\ntarget: copilot\n", encoding="utf-8")
         with patch(
-            "apm_cli.core.target_detection.parse_target_field",
+            "apm_cli.core.apm_yml.parse_targets_field",
             side_effect=ValueError("bad"),
         ):
             result = _read_apm_yml_target(tmp_path)

@@ -144,6 +144,7 @@ instead so `@` remains reserved for git usernames and version syntax.
 | `ref` | OPTIONAL | Branch, tag, or commit SHA. |
 | `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
 | `type` | OPTIONAL | Set to `gitlab` for self-managed GitLab on a bespoke hostname. Generic hosts do not receive APM-managed PATs on HTTP file reads. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys) for keying rules. |
+| `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
 
 ```yaml
 - git: https://gitlab.com/acme/repo.git
@@ -278,7 +279,7 @@ Virtual packages reference a subset of a repository.
 
 | Type | Detection rule | Example |
 |------|---------------|---------|
-| File | Ends in `.prompt.md`, `.instructions.md`, `.agent.md`, `.chatmode.md` | `owner/repo/prompts/review.prompt.md` |
+| File | Ends in `.prompt.md`, `.instructions.md`, or `.agent.md` | `owner/repo/prompts/review.prompt.md` |
 | Subdirectory | Does not match a file extension above | `owner/repo/skills/security` |
 
 Classification is by extension only. A path like `owner/repo/collections/security` (no extension) is a Subdirectory; the actual shape -- APM package (incl. dep-only `apm.yml` with no `.apm/`), skill bundle, or plugin -- is resolved at fetch time by probing for `apm.yml`.
@@ -301,6 +302,45 @@ APM normalizes dependency strings when saving to apm.yml:
 | `./packages/my-skills` | `./packages/my-skills` |
 
 GitHub URLs are stripped to shorthand; non-GitHub hosts keep the FQDN.
+
+## Per-dependency target selection (`targets:`)
+
+`targets:` is an optional per-dependency list on the object form of a
+`dependencies.apm` entry. It restricts which active install targets
+receive that dependency's target-scoped primitives.
+
+Package-level `targets:` (top-level) selects the package's own
+compile/install runtimes; per-dependency `targets:` (inside a
+`dependencies.apm` entry) selects which active harnesses receive that
+dependency's target-scoped primitives. They compose via intersection. See
+`package-authoring.md` for author guidance.
+
+- Type: list of harness keys (`copilot`, `claude`, `cursor`, `codex`,
+  `gemini`, `antigravity`, `windsurf`, `kiro`, plus canonical targets
+  such as `opencode`, `agent-skills`, `openclaw`, `hermes`,
+  `copilot-cowork`, and `copilot-app`). Use `copilot`, not the runtime
+  alias `vscode`, for Copilot-family dependency routing.
+- Default: omitted means all active install targets.
+- Semantics: effective reach is `install_targets INTERSECT dep_targets`.
+  A non-empty list narrows reach; it never widens beyond what the install
+  resolved. An empty list is a parse error; remove the field to mean
+  "all".
+
+```yaml
+dependencies:
+  apm:
+    - git: owner/codex-hooks
+      targets: [codex]
+
+    - git: owner/universal-hooks
+      # no targets: all active install targets
+```
+
+The lockfile records `target_subset` for audit/display only. Install
+routing always recomputes from the live `apm.yml` entry, so editing the
+lockfile cannot widen a dependency's reach. The formal schema contract
+lives in `docs/src/content/docs/reference/manifest-schema.md` section
+4.1.2.
 
 ## MCP dependency formats
 
@@ -486,3 +526,13 @@ uses the locked SHA, ensuring reproducible installs across machines.
 Lockfile keys keep `github.com` implicit for migration stability while
 non-default hosts add the lowercased host segment. See the [lockfile spec](https://microsoft.github.io/apm/reference/lockfile-spec/#lockfile-identity-keys)
 for the full keying rules.
+
+Each dependency entry can also record the package-declared `name`. For
+git/local deps, `version` is read from the dependency's own `apm.yml` at
+resolution time. These package-declared values are **SELF-ASSERTED** author
+claims useful for inventory and audit -- they are NOT integrity-verified and
+MUST NOT be used for trust decisions. Always cross-reference `repo_url` +
+`resolved_commit` (or `resolved_hash`) for provenance. For registry deps,
+`version` is the locked registry selection used for reinstall, with
+`resolved_hash` as the integrity anchor; for git/local deps it is display
+metadata only.

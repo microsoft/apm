@@ -14,8 +14,66 @@ This is the Template Method companion to the Strategy pattern in
 from __future__ import annotations
 
 from apm_cli.install.helpers.security_scan import _pre_deploy_security_scan
+from apm_cli.install.package_resolution import effective_deploy_skill_subset
 from apm_cli.install.services import IntegratorBundle, integrate_package_primitives
 from apm_cli.install.sources import DependencySource, Materialization
+
+
+def _effective_allow(ctx) -> dict | None:
+    """Return the effective (deny-wins) allow-map for the install context.
+
+    Builds the #1873 trust context from three layers and materialises the
+    decision map via the shared resolver:
+
+    * org policy -- ``ctx.policy_fetch.policy`` (the deny ceiling, Gap A);
+    * project ``apm.yml`` -- the ``executables`` block (or legacy
+      ``allowExecutables`` alias) read from disk;
+    * user consent -- ``~/.apm/config.json`` (lowest authority).
+
+    Returns ``None`` when the gate is disabled (backward-compatible: every
+    executable deploys).
+    """
+    from apm_cli.security.executables import (
+        build_exec_trust_context,
+        materialize_exec_map,
+    )
+    from apm_cli.utils.yaml_io import load_yaml
+
+    if getattr(ctx, "exec_trust_ctx", None) is not None:
+        return getattr(ctx, "exec_allow_map", None)
+
+    project_data: dict | None = None
+    manifest = getattr(ctx, "project_root", None)
+    if manifest is not None:
+        manifest_path = manifest / "apm.yml"
+        if manifest_path.is_file():
+            data = load_yaml(manifest_path)
+            if isinstance(data, dict):
+                project_data = data
+                if data.get("allowExecutables") is not None:
+                    from apm_cli.security.executables import (
+                        warn_allow_executables_alias_once,
+                    )
+
+                    warn_allow_executables_alias_once(getattr(ctx, "logger", None))
+
+    # Fall back to the in-memory gate signal when apm.yml is unreadable so a
+    # project that opted in via allowExecutables still gates.
+    if project_data is None:
+        project_val = getattr(getattr(ctx, "apm_package", None), "allow_executables", None)
+        if isinstance(project_val, dict):
+            project_data = {"allowExecutables": project_val}
+
+    policy = getattr(getattr(ctx, "policy_fetch", None), "policy", None)
+    trust_ctx = build_exec_trust_context(policy=policy, project_data=project_data)
+    allow_map = materialize_exec_map(trust_ctx)
+    # Cache the resolved context and allow map once per install so each
+    # dependency uses the same precedence ladder without re-reading policy files.
+    if hasattr(ctx, "exec_trust_ctx"):
+        ctx.exec_trust_ctx = trust_ctx
+    if hasattr(ctx, "exec_allow_map"):
+        ctx.exec_allow_map = allow_map
+    return allow_map
 
 
 def run_integration_template(
@@ -71,6 +129,26 @@ def _integrate_materialization(
             ctx.package_deployed_files[dep_key] = []
             return deltas
 
+        # Per-package effective subset: ``--skill`` is additive (issue
+        # #1786), so deploy the UNION of the persisted apm.yml ``skills:``
+        # and the current CLI ``--skill`` values -- a targeted ``--skill``
+        # install lands on top of previously pinned skills instead of
+        # erasing them. ``--skill '*'`` resets to the full bundle (None).
+        effective_skill_subset = effective_deploy_skill_subset(
+            skill_subset_from_cli=ctx.skill_subset_from_cli,
+            cli_subset=ctx.skill_subset,
+            persisted_subset=dep_ref.skill_subset,
+        )
+        # When the additive union deploys more skills than the user named on
+        # this invocation, name the retained pins so the deployed set is not
+        # a silent surprise (verbose only -- the count already renders).
+        if logger and ctx.skill_subset and effective_skill_subset:
+            retained = sorted(set(effective_skill_subset) - set(ctx.skill_subset))
+            if retained:
+                logger.verbose_detail(
+                    f"    [i] {dep_key}: retaining previously pinned "
+                    f"skill(s): {', '.join(retained)}"
+                )
         int_result = integrate_package_primitives(
             m.package_info,
             ctx.project_root,
@@ -90,18 +168,10 @@ def _integrate_materialization(
             package_name=dep_key,
             logger=logger,
             scope=ctx.scope,
-            # Per-package effective subset: CLI --skill overrides per-entry
-            # apm.yml skills:. When CLI is absent (bare reinstall), fall back
-            # to the dep_ref's persisted skill_subset.
-            # When CLI explicitly provided (even --skill '*'), use ctx value
-            # (which is None for '*' = install all).
-            skill_subset=(
-                ctx.skill_subset
-                if ctx.skill_subset_from_cli
-                else (tuple(dep_ref.skill_subset) if dep_ref.skill_subset else None)
-            ),
+            skill_subset=effective_skill_subset,
+            dep_target_subset=dep_ref.target_subset,
             ctx=ctx,
-            allow_executables=getattr(getattr(ctx, "apm_package", None), "allow_executables", None),
+            allow_executables=_effective_allow(ctx),
         )
         mutation_keys = (
             "prompts",

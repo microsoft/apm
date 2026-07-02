@@ -4,7 +4,10 @@ Dispatches over a ``_FETCHERS`` table keyed by ``source.kind``:
 
 - ``github`` / ``gitlab`` -> host file API via ``_fetch_via_api`` (auth-routed
   through ``AuthResolver.try_with_fallback`` and the JSON sidecar cache).
-- ``git`` -> generic git URL (ADO, Gitea, self-hosted, etc.) via subprocess
+- ``ado`` -> Azure DevOps REST items API (``_fetch_ado``, auth-routed through
+  ``AuthResolver.try_with_fallback`` with the JSON sidecar cache), falling back
+  to the generic-git path on any REST/transport failure.
+- ``git`` -> generic git URL (Gitea, self-hosted, etc.) via subprocess
   through ``GitCache``; ``git ls-remote`` is the freshness check, no JSON
   sidecar cache.
 - ``local`` -> bare repo (``git --git-dir=... show <ref>:<file>``), working
@@ -17,6 +20,7 @@ Artifactory Archive Entry Download proxy first. Cache lives at
 ``~/.apm/cache/marketplace/`` with a 1-hour TTL.
 """
 
+import base64
 import contextlib
 import hashlib
 import json
@@ -119,10 +123,12 @@ def _cache_key(source: MarketplaceSource) -> str:
         return f"url__{hashlib.sha256(source.url.encode()).hexdigest()[:16]}"
     if kind == "local":
         return f"local__{_sanitize_cache_name(source.name)}"
-    if kind == "git":
-        # Generic git: include host so a.com/o/r vs b.com/o/r never collapse.
+    if kind in ("git", "ado"):
+        # Generic git / ADO: include host so a.com/o/r vs b.com/o/r never
+        # collapse, and prefix by kind so the same host on the two paths keeps
+        # distinct sidecar files.
         host = _host_from_url(source.url) or source.host or "unknown"
-        return f"git__{_sanitize_cache_name(host)}__{_sanitize_cache_name(source.name)}"
+        return f"{kind}__{_sanitize_cache_name(host)}__{_sanitize_cache_name(source.name)}"
     normalized_host = (source.host or "github.com").lower()
     if normalized_host == "github.com":
         return source.name
@@ -245,6 +251,38 @@ def _read_bounded_response_bytes(resp, url: str, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
+def _read_capped_json(resp, label: str) -> dict:
+    """Read and parse a streamed JSON API response under the byte ceiling.
+
+    The GitHub Contents / GitLab raw / ADO REST responses are
+    attacker-influenceable (a compromised or MITM'd marketplace repo). The
+    direct ``url`` path streams them through :func:`_read_bounded_response_bytes`;
+    mirror that ``_MAX_MARKETPLACE_JSON_BYTES`` ceiling here so an oversized body
+    cannot be buffered whole and OOM the installer. The caller MUST issue the
+    request with ``stream=True`` so ``iter_content`` enforces the cap
+    incrementally instead of ``requests`` pre-buffering the entire body before
+    we ever see it. The response is closed when the read finishes.
+    """
+    try:
+        content_length = resp.headers.get("Content-Length", "")
+        if content_length:
+            with contextlib.suppress(ValueError):
+                if int(content_length) > _MAX_MARKETPLACE_JSON_BYTES:
+                    raise MarketplaceFetchError(
+                        label,
+                        f"marketplace.json exceeds {_MAX_MARKETPLACE_JSON_BYTES} bytes",
+                    )
+        raw = _read_bounded_response_bytes(resp, label, _MAX_MARKETPLACE_JSON_BYTES)
+    finally:
+        close = getattr(resp, "close", None)
+        if callable(close):
+            close()
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError, RecursionError) as exc:
+        raise ValueError(f"Invalid JSON in marketplace file: {exc}") from exc
+
+
 def _fetch_url_direct(
     url: str,
     *,
@@ -311,7 +349,7 @@ def _fetch_url_direct(
 
     try:
         data = json.loads(raw.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise MarketplaceFetchError(url, f"invalid JSON response: {exc}") from exc
     if not isinstance(data, dict):
         raise MarketplaceFetchError(url, "marketplace.json root must be an object")
@@ -369,6 +407,16 @@ def _try_proxy_fetch(
     if content is None:
         return None
 
+    if len(content) > _MAX_MARKETPLACE_JSON_BYTES:
+        logger.debug(
+            "Proxy returned oversized marketplace.json for %s/%s %s (%d bytes)",
+            source.owner,
+            source.repo,
+            file_path,
+            len(content),
+        )
+        return None
+
     try:
         return json.loads(content)
     except (json.JSONDecodeError, ValueError):
@@ -422,7 +470,6 @@ def _fetch_via_api(
     *,
     url_builder: Callable,
     header_builder: Callable[[str | None], dict[str, str]],
-    parse_response: Callable,
     host_info,
     auth_resolver,
 ) -> dict | None:
@@ -431,16 +478,23 @@ def _fetch_via_api(
     Owns the common boilerplate: build URL, build headers, run
     ``try_with_fallback``, map 404 -> None, raise ``MarketplaceFetchError``
     on unexpected errors. Specialised callers pass kind-specific URL and
-    header builders.
+    header builders. The request is streamed and the body read through
+    :func:`_read_capped_json` so an oversized marketplace.json cannot OOM the
+    installer (the direct ``url`` path enforces the same ceiling).
     """
     url = url_builder(source, file_path, host_info)
 
     def _do_fetch(token, _git_env):
-        resp = _http_get(url, headers=header_builder(token), timeout=30)
-        if resp.status_code == 404:
-            return None
-        resp.raise_for_status()
-        return parse_response(resp)
+        resp = _http_get(url, headers=header_builder(token), timeout=30, stream=True)
+        try:
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            return _read_capped_json(resp, source.name)
+        finally:
+            close = getattr(resp, "close", None)
+            if callable(close):
+                close()
 
     try:
         return auth_resolver.try_with_fallback(
@@ -453,13 +507,6 @@ def _fetch_via_api(
     except Exception as exc:
         logger.debug("API fetch failed for '%s'", source.name, exc_info=True)
         raise MarketplaceFetchError(source.name, str(exc)) from exc
-
-
-def _parse_json_text(resp) -> dict:
-    try:
-        return json.loads(resp.text)
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise ValueError(f"Invalid JSON in marketplace file: {exc}") from exc
 
 
 def _fetch_github(
@@ -475,7 +522,6 @@ def _fetch_github(
         file_path,
         url_builder=_github_contents_url,
         header_builder=_github_headers,
-        parse_response=lambda r: r.json(),
         host_info=host_info,
         auth_resolver=auth_resolver,
     )
@@ -500,7 +546,6 @@ def _fetch_gitlab(
         file_path,
         url_builder=_gitlab_file_raw_url,
         header_builder=_gitlab_headers,
-        parse_response=_parse_json_text,
         host_info=host_info,
         auth_resolver=auth_resolver,
     )
@@ -563,8 +608,166 @@ def _fetch_git(
     try:
         with open(target, encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (OSError, ValueError, RecursionError, MemoryError) as exc:
         raise MarketplaceFetchError(source.name, f"failed to read {file_path}: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Network fetch -- Azure DevOps REST items API (fast path, git fallback)
+# ---------------------------------------------------------------------------
+
+
+class _AdoItemNotFound(Exception):
+    """Sentinel: the ADO items API returned a confirmed 404 for the path.
+
+    Distinguishes "the file is definitively absent at this ref" (map to
+    ``None`` so ``_auto_detect_path`` can probe the next candidate) from a
+    transport/auth failure (fall back to the generic-git clone path).
+    """
+
+
+def _ado_auth_header(token: str | None, git_env: dict | None) -> dict[str, str]:
+    """Build the Azure DevOps ``Authorization`` header for a resolved token.
+
+    ``AuthResolver.try_with_fallback`` hands the operation a ``(token, git_env)``
+    pair but not the auth scheme. Bearer contexts carry the full
+    ``Authorization: Bearer <jwt>`` header in ``GIT_CONFIG_VALUE_0`` (see
+    ``AuthResolver._build_git_env``); detect that and emit the Bearer scheme.
+    Otherwise treat the token as an ADO PAT and use HTTP Basic with
+    ``base64(":" + PAT)`` per ADO's convention (empty username, PAT as
+    password). Returns an empty dict for an anonymous request.
+
+    The returned dict carries the credential -- callers MUST NOT log it.
+    """
+    if not token:
+        return {}
+    extra_header = (git_env or {}).get("GIT_CONFIG_VALUE_0", "").strip()
+    if extra_header.lower().startswith("authorization: bearer "):
+        return {"Authorization": f"Bearer {token}"}
+    encoded = base64.b64encode(f":{token}".encode()).decode("ascii")
+    return {"Authorization": f"Basic {encoded}"}
+
+
+def _fetch_ado_rest(
+    source: MarketplaceSource,
+    file_path: str,
+    *,
+    org: str,
+    project: str,
+    repo: str,
+    host: str,
+    auth_resolver,
+) -> dict | None:
+    """Read a single metadata file from Azure DevOps via the REST items API.
+
+    Routes auth through ``AuthResolver.try_with_fallback`` for the ADO host so
+    a resolved PAT (``ADO_APM_PAT``) is tried first and an AAD bearer (``az``)
+    is the runtime fallback -- the same auth posture as the clone path. The
+    token is never logged. Raises on any failure (network, auth, non-JSON,
+    sign-in page) so the caller can fall back to the generic-git path; raises
+    ``_AdoItemNotFound`` for a confirmed 404.
+    """
+    from ..utils.github_host import build_ado_api_url
+
+    url = build_ado_api_url(org, project, repo, file_path, source.ref, host)
+
+    def _do_fetch(token, git_env):
+        headers = {"User-Agent": "apm-cli"}
+        headers.update(_ado_auth_header(token, git_env))
+        resp = _http_get(url, headers=headers, timeout=30, stream=True)
+        try:
+            if resp.status_code == 404:
+                # No message: this sentinel flows through ``try_with_fallback`` ->
+                # ``is_ado_auth_failure_signal(str(exc))``; an empty string never
+                # trips an auth-failure keyword, so a 404 never wastes a bearer
+                # retry.
+                raise _AdoItemNotFound
+            # ADO answers an unauthenticated/under-scoped request with HTTP 200 +
+            # an HTML sign-in page rather than a 401 (#1671). Treat that as an auth
+            # failure so try_with_fallback can attempt the AAD bearer before we
+            # give up and clone. The word "unauthorized" is load-bearing: it makes
+            # ``is_ado_auth_failure_signal(str(exc))`` match, which is the gate the
+            # PAT->bearer fallback checks (see AuthResolver._try_ado_bearer_fallback).
+            if resp.status_code == 200:
+                content_type = resp.headers.get("Content-Type", "").lower()
+                if "text/html" in content_type:
+                    raise MarketplaceFetchError(
+                        source.name,
+                        "Azure DevOps returned a sign-in page (unauthorized: authentication required)",
+                    )
+            resp.raise_for_status()
+            return _read_capped_json(resp, source.name)
+        finally:
+            close = getattr(resp, "close", None)
+            if callable(close):
+                close()
+
+    return auth_resolver.try_with_fallback(
+        host,
+        _do_fetch,
+        org=org,
+        path=f"{org}/{project}/{repo}",
+        unauth_first=False,
+    )
+
+
+def _fetch_ado(
+    source: MarketplaceSource,
+    file_path: str,
+    *,
+    host_info,
+    auth_resolver,
+) -> dict | None:
+    """Fetch marketplace.json from Azure DevOps, REST-first with git fallback.
+
+    Optional latency optimisation over the generic-git path: ADO single-file
+    metadata reads go through ``GET .../_apis/git/repositories/{repo}/items``
+    instead of a subprocess clone, matching the GitHub/GitLab fast path.
+
+    Falls back to ``_fetch_git`` (the subprocess clone) on any REST/transport
+    failure or offline condition so there is no regression vs. the prior
+    behaviour. A confirmed 404 returns ``None`` (the file is absent at this
+    path) so ``_auto_detect_path`` can probe the next candidate without paying
+    for a clone that would also miss.
+    """
+    from ..utils.github_host import parse_ado_repo_url
+
+    parsed = parse_ado_repo_url(source.url)
+    if parsed is None:
+        # URL does not decompose into org/project/repo (unusual ADO shape) --
+        # nothing to REST against, so use the generic-git path directly.
+        return _fetch_git(source, file_path, host_info=host_info, auth_resolver=auth_resolver)
+
+    org, project, repo = parsed
+    host = host_info.host if host_info is not None else "dev.azure.com"
+    try:
+        return _fetch_ado_rest(
+            source,
+            file_path,
+            org=org,
+            project=project,
+            repo=repo,
+            host=host,
+            auth_resolver=auth_resolver,
+        )
+    except _AdoItemNotFound:
+        return None
+    except Exception as exc:
+        # REST failed (network, auth exhausted, sign-in page, malformed JSON,
+        # 5xx, ...). Fall back to the clone path so offline/unusual repos keep
+        # working. Sanitize exception text because requests exceptions can
+        # include URLs with query parameters.
+        from ..cache.git_cache import _sanitize_url
+
+        logger.info(
+            "ADO REST metadata fetch unavailable for '%s'; falling back to git.", source.name
+        )
+        logger.debug(
+            "ADO REST metadata fetch failed for '%s'; falling back to generic-git: %s",
+            source.name,
+            _sanitize_url(str(exc)),
+        )
+        return _fetch_git(source, file_path, host_info=host_info, auth_resolver=auth_resolver)
 
 
 # ---------------------------------------------------------------------------
@@ -638,7 +841,7 @@ def _fetch_local_file(source: MarketplaceSource, manifest_file: Path) -> dict | 
     try:
         with open(safe_file, encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (OSError, ValueError, RecursionError, MemoryError) as exc:
         raise MarketplaceFetchError(source.name, f"failed to read {safe_file}: {exc}") from exc
 
 
@@ -681,7 +884,7 @@ def _fetch_local_via_git_show(
 
     try:
         return json.loads(result.stdout.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (OSError, ValueError, RecursionError, MemoryError) as exc:
         raise MarketplaceFetchError(source.name, f"invalid JSON in {file_path}: {exc}") from exc
 
 
@@ -708,7 +911,7 @@ def _fetch_local_direct_read(
     try:
         with open(candidate, encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (OSError, ValueError, RecursionError, MemoryError) as exc:
         raise MarketplaceFetchError(source.name, f"failed to read {file_path}: {exc}") from exc
 
 
@@ -720,6 +923,7 @@ def _fetch_local_direct_read(
 _FETCHERS: dict[str, Callable] = {
     "github": _fetch_github,
     "gitlab": _fetch_gitlab,
+    "ado": _fetch_ado,
     "git": _fetch_git,
     "local": _fetch_local,
 }
@@ -837,9 +1041,9 @@ def _fetch_file(
     host_info = None
     if kind in ("github", "gitlab"):
         host_info = AuthResolver.classify_host(source.host)
-    elif kind == "git":
-        # For generic git, classify the host extracted from the URL so ADO etc.
-        # get correctly-typed auth contexts.
+    elif kind in ("git", "ado"):
+        # For ADO and generic git, classify the host extracted from the URL so
+        # each gets a correctly-typed auth context (ADO PAT/bearer routing).
         host = _host_from_url(source.url)
         host_info = AuthResolver.classify_host(host) if host else None
 
@@ -891,8 +1095,8 @@ def fetch_marketplace(
 ) -> MarketplaceManifest:
     """Fetch and parse a marketplace manifest.
 
-    Uses the JSON sidecar cache for ``kind in ("github", "gitlab", "url")``.
-    Generic-git fetches rely on ``GitCache`` + ``git ls-remote`` for
+    Uses the JSON sidecar cache for ``kind in ("github", "gitlab", "ado",
+    "url")``. Generic-git fetches rely on ``GitCache`` + ``git ls-remote`` for
     freshness; local fetches read directly without caching.
 
     Args:
@@ -907,7 +1111,7 @@ def fetch_marketplace(
         MarketplaceFetchError: If fetch fails and no cache is available.
     """
     cache_name = _cache_key(source)
-    use_sidecar_cache = source.kind in ("github", "gitlab", "url")
+    use_sidecar_cache = source.kind in ("github", "gitlab", "ado", "url")
 
     # Try fresh cache first (API kinds only)
     if use_sidecar_cache and not force_refresh:

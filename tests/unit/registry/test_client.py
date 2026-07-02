@@ -9,6 +9,7 @@ Uses mocked ``requests.Session`` to avoid network access. Confirms:
 
 from __future__ import annotations
 
+import json as _json
 from unittest.mock import MagicMock
 
 import pytest
@@ -34,11 +35,14 @@ def _make_response(
     resp.status_code = status
     resp.url = "<test>"
     resp.headers = {"Content-Type": content_type}
-    if json_body is not None:
-        resp.json.return_value = json_body
-    else:
-        resp.json.side_effect = ValueError("no body")
-    resp.content = body
+    # The client reads bodies via a capped iter_content reader (stream-safe),
+    # not response.json(). Feed the effective body bytes through iter_content
+    # so the fake matches the real streamed contract; keep .content too for the
+    # binary download path. A fresh iterator per call (the error + success
+    # branches may each read once).
+    raw = _json.dumps(json_body).encode("utf-8") if json_body is not None else body
+    resp.content = raw
+    resp.iter_content = lambda chunk_size=None: iter([raw] if raw else [])
     return resp
 
 

@@ -40,8 +40,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import frontmatter
-
 from apm_cli.integration import copilot_app_db as _db_mod
 from apm_cli.integration import copilot_app_ws as _ws_mod
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
@@ -63,6 +61,7 @@ from apm_cli.integration.copilot_app_ws import (
     WsClient,
     WsError,
 )
+from apm_cli.utils.yaml_io import load_frontmatter
 
 if TYPE_CHECKING:
     from apm_cli.integration.targets import TargetProfile
@@ -342,7 +341,7 @@ class CopilotAppWorkflowIntegrator(BaseIntegrator):
                     )
                 files_skipped += 1
                 continue
-            post = frontmatter.load(str(source_file))
+            post = load_frontmatter(str(source_file))
             if not _is_workflow_shape(post.metadata):
                 if diagnostics is not None:
                     diagnostics.warn(

@@ -24,6 +24,11 @@ def _mock_response(*, body: bytes, headers: dict[str, str] | None = None, status
     resp.json.return_value = {"servers": [], "metadata": {}}
     resp.raise_for_status.return_value = None
     resp.headers = headers or {}
+    # Round-27 (#1798): the client now reads bodies via a capped iter_content
+    # stream, not buffered .json()/.content. Replay the body in one chunk.
+    resp.iter_content = lambda chunk_size=None: iter([body] if body else [])
+    resp.close = lambda: None
+    resp.url = "https://api.mcp.github.com/v0.1/servers"
     return resp
 
 

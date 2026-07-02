@@ -35,7 +35,7 @@ and [`apm marketplace init`](../marketplace/) instead.
 | `-y`, `--yes` | off | Skip interactive prompts; use auto-detected defaults. Overwrites an existing `apm.yml` without confirmation. |
 | `--plugin` | off | **Deprecated.** Use [`apm plugin init`](../plugin/) instead. Scaffold a plugin authoring project: also writes `plugin.json` and adds a `devDependencies` block to `apm.yml`. Plugin name must be kebab-case, max 64 chars. |
 | `--marketplace` | off | **Deprecated.** Use [`apm marketplace init`](../marketplace/) instead. Append a `marketplace:` authoring block to `apm.yml`. See [Publish to a marketplace](../../../producer/publish-to-a-marketplace/). |
-| `--target` | (prompt) | Comma-separated target list. Skips the interactive target prompt and writes targets directly. Valid values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`. |
+| `--target` | (prompt) | Comma-separated target list. Skips the interactive target prompt and writes targets directly. Valid values include `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, and `all`. |
 | `-v`, `--verbose` | off | Show detailed output. |
 
 Target precedence: `--target` flag > interactive prompt > auto-detect at

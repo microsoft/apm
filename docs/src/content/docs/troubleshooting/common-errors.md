@@ -147,7 +147,7 @@ See also: [./compile-zero-output-warning/](./compile-zero-output-warning/), [../
 [x] No harness detected
 ```
 
-Cause: the project has no harness markers (`.github/copilot/`, `.claude/`, `.cursor/`, ...) and no `targets:` block in `apm.yml`. APM no longer defaults to copilot.
+Cause: the project has no harness markers (`.github/copilot-instructions.md`, `.claude/`, `.cursor/`, ...) and no `targets:` block in `apm.yml`. APM no longer defaults to copilot.
 
 Fix: pass `--target <harness>` on the command, or declare `targets:` in `apm.yml`. Run `apm targets` to list supported harnesses.
 

@@ -58,7 +58,6 @@ class TestInstallContextFields:
         "protocol_pref",
         "allow_protocol_fallback",
         "trust_transitive_mcp",
-        "trust_canvas",
         "no_policy",
         "install_mode",
         "packages",
@@ -122,15 +121,12 @@ class TestInstallContextDefaults:
             protocol_pref=sentinel.PROTO,
             allow_protocol_fallback=False,
             trust_transitive_mcp=False,
-            trust_canvas=False,
             no_policy=False,
             install_mode=sentinel.MODE,
             packages=(),
         )
         defaults.update(overrides)
         return InstallContext(**defaults)
-
-    def test_only_packages_defaults_to_none(self):
         ctx = self._build_minimal()
         assert ctx.only_packages is None
 
@@ -169,7 +165,6 @@ class TestInstallContextRoundTrip:
             protocol_pref=sentinel.PROTO,
             allow_protocol_fallback=True,
             trust_transitive_mcp=True,
-            trust_canvas=True,
             no_policy=True,
             install_mode=sentinel.MODE,
             packages=("owner/repo",),
@@ -223,7 +218,6 @@ class TestInstallContextRoundTrip:
             protocol_pref=sentinel.PROTO,
             allow_protocol_fallback=False,
             trust_transitive_mcp=False,
-            trust_canvas=False,
             no_policy=False,
             install_mode=sentinel.MODE,
             packages=(),

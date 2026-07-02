@@ -9,6 +9,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from apm_cli.integration.base_integrator import BaseIntegrator
+from apm_cli.integration.targets import TargetProfile
+from apm_cli.utils.atomic_io import write_text_lf
 
 
 def _build_copy_ignore(
@@ -439,6 +441,20 @@ class SkillIntegrator(BaseIntegrator):
         # map so that same-manifest collisions are detected before the lockfile is written.
         self._native_skill_session_owners: dict[str, str] = {}
 
+    @staticmethod
+    def _target_skills_root(target: TargetProfile, project_root: Path) -> Path:
+        """Return the target skills root for static and dynamic-root targets."""
+        if target.resolved_deploy_root is not None:
+            return target.deploy_path(project_root)
+        skills_mapping = target.primitives["skills"]
+        effective_root = skills_mapping.deploy_root or target.root_dir
+        return project_root / effective_root / "skills"
+
+    @staticmethod
+    def _target_skill_dir(target: TargetProfile, project_root: Path, skill_name: str) -> Path:
+        """Return the concrete directory for a deployed skill."""
+        return SkillIntegrator._target_skills_root(target, project_root) / skill_name
+
     def find_instruction_files(self, package_path: Path) -> list[Path]:
         """Find all instruction files in a package.
 
@@ -576,7 +592,7 @@ class SkillIntegrator(BaseIntegrator):
                 preserved_source_root=source_root,
             )
             if count:
-                target_file.write_text(resolved, encoding="utf-8")
+                write_text_lf(target_file, resolved)
                 links_resolved += count
         return links_resolved
 
@@ -831,13 +847,7 @@ class SkillIntegrator(BaseIntegrator):
                 continue
 
             is_primary = idx == 0  # first active target owns diagnostics
-            skills_mapping = target.primitives["skills"]
-            # Dynamic-root targets (cowork): use resolved_deploy_root.
-            if target.resolved_deploy_root is not None:
-                target_skills_root = target.resolved_deploy_root
-            else:
-                effective_root = skills_mapping.deploy_root or target.root_dir
-                target_skills_root = project_root / effective_root / "skills"
+            target_skills_root = self._target_skills_root(target, project_root)
 
             # Dedup: skip if same resolved skills root already processed.
             resolved_root = target_skills_root.resolve()
@@ -973,12 +983,9 @@ class SkillIntegrator(BaseIntegrator):
 
             is_primary = idx == 0  # first active target owns diagnostics
             skills_mapping = target.primitives["skills"]
-            # Dynamic-root targets (cowork): use resolved_deploy_root.
-            if target.resolved_deploy_root is not None:
-                target_skill_dir = target.resolved_deploy_root / skill_name
-            else:
-                effective_root = skills_mapping.deploy_root or target.root_dir
-                target_skill_dir = project_root / effective_root / "skills" / skill_name
+            # Static targets still need the effective root for the containment guard below.
+            effective_root = skills_mapping.deploy_root or target.root_dir
+            target_skill_dir = self._target_skill_dir(target, project_root, skill_name)
 
             # Security: validate name + containment + symlink rejection.
             from apm_cli.utils.path_security import (
@@ -1071,11 +1078,8 @@ class SkillIntegrator(BaseIntegrator):
             if is_primary:
                 files_copied = sum(1 for _ in target_skill_dir.rglob("*") if _.is_file())
 
-            # Promote sub-skills for this target
-            if target.resolved_deploy_root is not None:
-                target_skills_root = target.resolved_deploy_root
-            else:
-                target_skills_root = project_root / effective_root / "skills"
+            # Promote sub-skills for this target.
+            target_skills_root = self._target_skills_root(target, project_root)
             _, sub_deployed = self._promote_sub_skills(
                 sub_skills_dir,
                 target_skills_root,

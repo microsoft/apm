@@ -718,13 +718,13 @@ class TestDownloadVirtualFilePackageErrors:
     def test_chatmode_subdir_mapping(
         self, downloader: GitHubPackageDownloader, tmp_path: Path
     ) -> None:
-        dep = _make_dep(is_virtual=True, virtual_path="chatmodes/mymode.chatmode.md")
+        dep = _make_dep(is_virtual=True, virtual_path="agents/mymode.agent.md")
         downloader._refs = MagicMock()
         downloader._refs.resolve_commit_sha_for_ref.return_value = None
         downloader._strategies.download_github_file = MagicMock(return_value=b"# Chat\n")
         with patch.object(downloader, "_parse_artifactory_base_url", return_value=None):
             downloader.download_virtual_file_package(dep, tmp_path / "out")
-        assert (tmp_path / "out" / ".apm" / "chatmodes" / "mymode.chatmode.md").exists()
+        assert (tmp_path / "out" / ".apm" / "agents" / "mymode.agent.md").exists()
 
     def test_agent_subdir_mapping(
         self, downloader: GitHubPackageDownloader, tmp_path: Path

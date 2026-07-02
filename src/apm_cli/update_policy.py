@@ -46,5 +46,5 @@ def get_self_update_disabled_message() -> str:
 def get_update_hint_message() -> str:
     """Return the update hint used in startup notifications."""
     if is_self_update_enabled():
-        return "Run apm update to upgrade"
+        return "Run apm self-update to upgrade"
     return get_self_update_disabled_message()

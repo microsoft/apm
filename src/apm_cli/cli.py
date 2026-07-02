@@ -29,6 +29,7 @@ from apm_cli.commands.experimental import experimental
 from apm_cli.commands.find import find as find_cmd
 from apm_cli.commands.init import init
 from apm_cli.commands.install import install
+from apm_cli.commands.lifecycle import lifecycle
 from apm_cli.commands.list_cmd import list as list_cmd
 from apm_cli.commands.lock import lock
 from apm_cli.commands.marketplace import marketplace
@@ -142,8 +143,12 @@ def cli(ctx, verbose: bool) -> None:
 
     warnings.filterwarnings("ignore", category=AgentsTargetDeprecationWarning)
 
-    # Check for updates non-blockingly (only if not already showing version)
-    if not ctx.resilient_parsing:
+    # Check for updates only for known commands; skip on invalid input to fail fast.
+    if (
+        not ctx.resilient_parsing
+        and ctx.invoked_subcommand is not None
+        and ctx.command.get_command(ctx, ctx.invoked_subcommand) is not None
+    ):
         _check_and_notify_updates()
 
 
@@ -187,6 +192,7 @@ cli.add_command(mcp)
 cli.add_command(policy)
 cli.add_command(outdated_cmd, name="outdated")
 cli.add_command(doctor)
+cli.add_command(lifecycle)
 cli.add_command(marketplace)
 cli.add_command(find_cmd)
 cli.add_command(marketplace_search, name="search")

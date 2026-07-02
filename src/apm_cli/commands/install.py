@@ -47,8 +47,9 @@ from apm_cli.install.mcp.entry import _build_mcp_entry  # noqa: F401
 from apm_cli.install.mcp.writer import _add_mcp_to_apm_yml  # noqa: F401
 from apm_cli.install.package_resolution import (
     GIT_PARENT_USER_SCOPE_ERROR,
+    apply_cli_skill_pin,
+    cli_skill_subset,
     dependency_reference_to_yaml_entry,
-    normalize_and_merge_skill_subset,
     persist_dependency_list_if_changed,
     resolve_parsed_dependency_reference,
     update_existing_dependency_entry_if_needed,
@@ -96,7 +97,7 @@ from ..constants import (
 )
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger, _ValidationOutcome
-from ..core.target_detection import TargetParamType
+from ..core.target_detection import TargetParamType, manifest_targets_from_target_option
 
 # MCP --mcp helpers (module-level re-exports for test patches); must stay at
 # import time per comments in the original mid-file block.
@@ -211,7 +212,6 @@ class InstallContext:
     protocol_pref: Any  # ProtocolPreference
     allow_protocol_fallback: bool
     trust_transitive_mcp: bool
-    trust_canvas: bool
     no_policy: bool
     install_mode: Any  # InstallMode
     packages: tuple  # Original Click packages
@@ -330,6 +330,7 @@ def _resolve_package_references(
     scope=None,
     allow_insecure=False,
     skill_subset=None,
+    skill_subset_from_cli=False,
     default_registry=None,
 ):
     """Validate, canonicalize, and resolve package references.
@@ -454,16 +455,15 @@ def _resolve_package_references(
             )
             canonical = dep_ref.to_canonical()
             identity = dep_ref.get_identity()
-            # Attach --skill filter so to_apm_yml_entry() emits the dict form.
-            # Merges with existing skills: list so repeated --skill
-            # invocations are additive (issue #1771).
-            if skill_subset:
-                dep_ref.skill_subset = normalize_and_merge_skill_subset(
-                    skill_subset,
-                    current_deps,
-                    identity,
-                    dependency_reference_cls=DependencyReference,
-                )
+            apply_cli_skill_pin(
+                dep_ref,
+                skill_subset,
+                skill_subset_from_cli,
+                current_deps,
+                _apm_yml_entries,
+                dependency_reference_cls=DependencyReference,
+                logger=logger,
+            )
             if marketplace_dep_ref is not None or direct_virtual_resolved:
                 _apm_yml_entries[canonical] = dependency_reference_to_yaml_entry(dep_ref)
         except ValueError as e:
@@ -634,6 +634,7 @@ def _validate_and_add_packages_to_apm_yml(
     scope=None,
     allow_insecure=False,
     skill_subset=None,
+    skill_subset_from_cli=False,
 ):
     """Validate packages exist and can be accessed, then add to apm.yml dependencies section.
 
@@ -702,6 +703,7 @@ def _validate_and_add_packages_to_apm_yml(
         scope=scope,
         allow_insecure=allow_insecure,
         skill_subset=skill_subset,
+        skill_subset_from_cli=skill_subset_from_cli,
         default_registry=_default_registry_for_cli,
     )
 
@@ -889,7 +891,8 @@ def _handle_mcp_install(
 @click.option(
     "--runtime",
     help=(
-        "Target specific runtime only (copilot, claude, codex, cursor, gemini, antigravity, intellij, kiro, opencode, vscode, windsurf)"
+        "Target specific runtime only (copilot, claude, codex, cursor, gemini, antigravity, intellij, kiro, opencode, windsurf) "
+        "(legacy alias for --target, single value only; prefer --target)"
     ),
 )
 @click.option("--exclude", help="Exclude specific runtime from installation")
@@ -921,11 +924,6 @@ def _handle_mcp_install(
     help="Trust self-defined MCP servers from transitive packages (skip re-declaration requirement)",
 )
 @click.option(
-    "--trust-canvas-extensions",
-    is_flag=True,
-    help="[experimental] Deploy canvas extensions provided by dependencies. Canvas extensions are executable Node code and are blocked by default; this flag opts in. With --global the canvas deploys to ~/.copilot/extensions and the flag is always required. Requires the 'canvas' experimental feature.",
-)
-@click.option(
     "--parallel-downloads",
     type=int,
     default=4,
@@ -944,7 +942,7 @@ def _handle_mcp_install(
     "target",
     type=TargetParamType(),
     default=None,
-    help="Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Repeating the flag (e.g. '-t a -t b') is NOT supported -- only the last value wins; use commas. Highest-priority entry in the resolution chain (--target > apm.yml targets: > auto-detect). Values: copilot, claude, cursor, opencode, codex, gemini, antigravity, windsurf, kiro, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'antigravity' (alias 'agy') deploys to .agents/ (AGENTS.md + rules + skills + hooks.json + mcp_config.json) and is explicit-only -- not part of 'all' or auto-detection. 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro (excludes agent-skills and antigravity); combine with 'agent-skills' or 'antigravity' to add them. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork'). 'copilot-app' is also accepted when the copilot-app experimental flag is enabled (run 'apm experimental enable copilot-app'). Note: '--target all' on 'apm compile' is deprecated; use 'apm compile --all' instead.",
+    help="Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Repeating the flag (e.g. '-t a -t b') is NOT supported -- only the last value wins; use commas. Highest-priority entry in the resolution chain (--target > apm.yml targets: > apm config target > auto-detect). Values: copilot, claude, cursor, opencode, codex, gemini, antigravity, windsurf, kiro, agent-skills, all. 'agent-skills' deploys to .agents/skills/ (cross-client). 'antigravity' (alias 'agy') deploys to .agents/ (AGENTS.md + rules + skills + hooks.json + mcp_config.json) and is explicit-only -- not part of 'all' or auto-detection. 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro (excludes agent-skills and antigravity); combine with 'agent-skills' or 'antigravity' to add them. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork'). 'copilot-app' is also accepted when the copilot-app experimental flag is enabled (run 'apm experimental enable copilot-app'). Note: '--target all' on 'apm compile' is deprecated; use 'apm compile --all' instead.",
 )
 @click.option(
     "--allow-insecure",
@@ -999,6 +997,7 @@ def _handle_mcp_install(
         "Add an MCP server entry to apm.yml. Use with --transport, --url, --env, "
         "--header, --mcp-version, or a stdio command after `--`. Resolves active "
         "targets the same way `apm install` does (--target > apm.yml targets: > "
+        "apm config target > "
         "auto-detect); writes only for active targets, skips others with [i]."
     ),
 )
@@ -1052,7 +1051,7 @@ def _handle_mcp_install(
     "skill_names",
     multiple=True,
     metavar="NAME",
-    help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Persisted in apm.yml and apm.lock so bare 'apm install' is deterministic. Use --skill '*' to reset to all skills.",
+    help="Install only named skill(s) from a SKILL_BUNDLE. Repeatable. Persisted in apm.yml and apm.lock so bare 'apm install' is deterministic. Additive across installs: a later --skill X adds X to the existing pin (union) rather than replacing it. Use --skill '*' (quote the asterisk in your shell) to reset to all skills; to drop a single skill, edit the skills: list in apm.yml then re-run apm install.",
 )
 @click.option(
     "--no-policy",
@@ -1134,7 +1133,6 @@ def install(  # noqa: PLR0913
     frozen,
     verbose,
     trust_transitive_mcp,
-    trust_canvas_extensions,
     parallel_downloads,
     dev,
     target,
@@ -1266,6 +1264,10 @@ def install(  # noqa: PLR0913
             except ValueError as exc:
                 raise click.UsageError(f"Bundle security check failed: {exc}") from exc
             if _bundle_info is not None:
+                # allowExecutables for bundle install gate.
+                from ..security.executables import read_bundle_allow_executables as _rbae
+
+                _allow_execs_for_bundle = _rbae(Path(root or ".") / "apm.yml", logger)
                 _install_lb(
                     bundle_info=_bundle_info,
                     bundle_arg=packages[0],
@@ -1277,7 +1279,7 @@ def install(  # noqa: PLR0913
                     alias=alias,
                     logger=logger,
                     legacy_skill_paths=legacy_skill_paths,
-                    trust_canvas=trust_canvas_extensions,
+                    allow_executables=_allow_execs_for_bundle,
                     # Rejected-flag context for consolidated UsageError:
                     rejected_flags={
                         "--update": update,
@@ -1385,12 +1387,9 @@ def install(  # noqa: PLR0913
         )
 
         # Normalize --skill: '*' means all (same as absent). Reject with --mcp.
-        _skill_subset = None
-        if skill_names:
-            if mcp_name is not None:
-                raise click.UsageError("--skill cannot be combined with --mcp.")
-            if not any(s == "*" for s in skill_names):
-                _skill_subset = builtins.tuple(skill_names)
+        if skill_names and mcp_name is not None:
+            raise click.UsageError("--skill cannot be combined with --mcp.")
+        _skill_subset = cli_skill_subset(skill_names)
 
         if mcp_name is not None:
             _handle_mcp_install(
@@ -1476,15 +1475,18 @@ def install(  # noqa: PLR0913
         # Check if apm.yml exists
         apm_yml_exists = manifest_path.exists()
 
-        # Auto-bootstrap: create minimal apm.yml when packages specified but no apm.yml
         if not apm_yml_exists and packages:
-            # Get current directory name as project name
             project_name = Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
             config = _get_default_config(project_name)
+            if manifest_targets := manifest_targets_from_target_option(target):
+                config["targets"] = manifest_targets
             _create_minimal_apm_yml(config, target_path=manifest_path)
             logger.success(f"Created {manifest_display}")
+            if manifest_targets:
+                logger.progress(
+                    f"Targets set: {', '.join(manifest_targets)} (persisted to {manifest_display})"
+                )
 
-        # Error when NO apm.yml AND NO packages
         if not apm_yml_exists and not packages:
             logger.error(f"No {manifest_display} found")
             if scope is InstallScope.USER:
@@ -1494,7 +1496,6 @@ def install(  # noqa: PLR0913
                 logger.progress("  apm install <org/repo> to auto-create + install")
             sys.exit(1)
 
-        # If packages are specified, validate and add them to apm.yml first
         outcome = None
         if packages:
             # -- W2-pkg-rollback (#827): snapshot raw bytes BEFORE mutation --
@@ -1516,6 +1517,7 @@ def install(  # noqa: PLR0913
                 scope=scope,
                 allow_insecure=allow_insecure,
                 skill_subset=_skill_subset,
+                skill_subset_from_cli=bool(skill_names),
             )
             # Short-circuit: all packages failed validation -- nothing to install
             if outcome.all_failed:
@@ -1546,7 +1548,6 @@ def install(  # noqa: PLR0913
             protocol_pref=protocol_pref,
             allow_protocol_fallback=allow_protocol_fallback,
             trust_transitive_mcp=trust_transitive_mcp,
-            trust_canvas=trust_canvas_extensions,
             no_policy=no_policy,
             audit_override=audit_override,
             install_mode=InstallMode(only) if only else InstallMode.ALL,
@@ -1798,7 +1799,6 @@ def _install_apm_packages(ctx, outcome):
                 skill_subset=ctx.skill_subset,
                 skill_subset_from_cli=ctx.skill_subset_from_cli,
                 refresh=ctx.refresh,
-                trust_canvas=ctx.trust_canvas,
             )
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics
@@ -1862,7 +1862,11 @@ def _install_apm_packages(ctx, outcome):
             logger.verbose_detail(f"Collected {len(transitive_mcp)} transitive MCP dependency(ies)")
             mcp_deps = MCPIntegrator.deduplicate(mcp_deps + transitive_mcp)
 
-    # -- S1/S2 fix (#827-C2/C3): enforce policy on ALL MCP deps ----
+    # allowExecutables MCP gate.
+    from ..security.executables import filter_mcp_by_allow_executables as _fmcp
+
+    mcp_deps = _fmcp(mcp_deps, getattr(apm_package, "allow_executables", None), logger)
+
     # The pipeline gate phase (policy_gate.py) checks direct APM deps
     # and direct MCP deps from apm.yml.  However, transitive MCP
     # servers (discovered via collect_transitive above) are only known
@@ -2052,7 +2056,6 @@ def _install_apm_dependencies(  # noqa: PLR0913
     plan_callback=None,
     refresh: bool = False,
     lockfile_only: bool = False,
-    trust_canvas: bool = False,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -2093,6 +2096,5 @@ def _install_apm_dependencies(  # noqa: PLR0913
         plan_callback=plan_callback,
         refresh=refresh,
         lockfile_only=lockfile_only,
-        trust_canvas=trust_canvas,
     )
     return InstallService().run(request)

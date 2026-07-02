@@ -585,6 +585,7 @@ class PackageInfo:
         None  # Original dependency reference for canonical string
     )
     package_type: PackageType | None = None  # APM_PACKAGE, CLAUDE_SKILL, or HYBRID
+    root_local_project_root: Path | None = None
 
     def get_canonical_dependency_string(self) -> str:
         """Get the canonical dependency string for this package.
@@ -612,7 +613,7 @@ class PackageInfo:
             # Check for any primitive files in .apm/ subdirectories
             for primitive_type in [
                 "instructions",
-                "chatmodes",
+                "agents",
                 "contexts",
                 "prompts",
                 "hooks",

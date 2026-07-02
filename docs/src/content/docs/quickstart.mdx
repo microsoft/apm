@@ -135,7 +135,7 @@ and pinned its content hash in `apm.lock.yaml`. If your org ships an
 APM's verbs match npm's semantics:
 
 - `apm install` -- install and deploy dependencies, like `npm install`.
-- `apm update` -- refresh dependencies to the latest matching refs,
+- `apm update` -- refresh dependencies to the latest matching versions or refs,
   with a consent prompt, like `npm update`.
 - `apm install --frozen` -- lockfile-only install for CI; fails on
   drift, like `npm ci`.
@@ -156,7 +156,7 @@ After `apm install` runs, three categories of files land in your project:
 |------|---------|-----|
 | `apm.yml` | Yes | Manifest -- declares dependencies, shared with the team |
 | `apm.lock.yaml` | Yes | Lockfile -- pins exact commits and content hashes for reproducible installs |
-| `.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, `.windsurf/`, `.kiro/` | Yes | Deployed agent context -- gives every contributor and cloud Copilot instant access on clone, before they run `apm install` |
+| `.github/`, `.claude/`, `.cursor/`, `.opencode/`, `.gemini/`, `.windsurf/`, `.kiro/`, `.agents/` | Yes | Deployed agent context -- gives every contributor and cloud Copilot instant access on clone, before they run `apm install` |
 | `apm_modules/` | No | Package cache -- rebuilt from the lockfile on `apm install`. Add to `.gitignore` (APM does this automatically) |
 
 :::tip[Keeping deployed files in sync]

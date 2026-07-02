@@ -143,7 +143,7 @@ dependencies:
     # virtual sub-path -- no marker-segment heuristic involved.
     - group/subgroup/project/skills/<name>
     # Files ending in ``.prompt.md`` / ``.instructions.md`` /
-    # ``.chatmode.md`` / ``.agent.md`` are structurally a virtual file
+    # ``.agent.md`` are structurally a virtual file
     # at parse time; the probe still confirms which directory the file
     # sits under is part of the repo path.
     - group/subgroup/project/<name>.prompt.md
@@ -294,4 +294,4 @@ connected host with `apm pack` and restore offline. See
 - [Authentication](../consumer/authentication/) -- token resolution order
 - [Private and org packages](../consumer/private-and-org-packages/) -- per-host PAT scoping
 - [Pack and distribute](../producer/pack-a-bundle/) -- air-gapped bundle delivery
-- [Governance overview](./governance-overview/) -- policy-cache offline story
+- [Governance deep-dive](./governance-guide/) -- policy-cache offline story

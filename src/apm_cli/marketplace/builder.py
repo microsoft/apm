@@ -28,13 +28,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import yaml
-
 if TYPE_CHECKING:
     from ..core.auth import HostInfo
 
 from ..utils.github_host import default_host
 from ..utils.path_security import ensure_path_within
+from ..utils.yaml_io import load_yaml_str
 from ._io import atomic_write
 from ._shared import iter_semver_tags
 from .auth_helpers import resolve_token_for_host
@@ -73,6 +72,21 @@ from .yml_schema import (
 logger = logging.getLogger(__name__)
 
 _LOCAL_METADATA_MAX_BYTES = 64 * 1024
+
+
+def _read_capped_text(resp: Any) -> str:
+    """Read a remote metadata body bounded to ``_LOCAL_METADATA_MAX_BYTES``.
+
+    Cosmetic metadata enrichment must never buffer an unbounded remote
+    ``apm.yml``; a body over the cap raises ``ValueError``, which the caller's
+    ``except Exception`` turns into a fail-closed ``None`` (no metadata) -- the
+    same byte ceiling the local on-disk reader applies.
+    """
+    raw = resp.read(_LOCAL_METADATA_MAX_BYTES + 1)
+    if len(raw) > _LOCAL_METADATA_MAX_BYTES:
+        raise ValueError("remote metadata exceeds byte cap")
+    return raw.decode("utf-8")
+
 
 __all__ = [
     "BuildDiagnostic",
@@ -864,7 +878,7 @@ class MarketplaceBuilder:
                     _LOCAL_METADATA_MAX_BYTES,
                 )
                 return None
-            data = yaml.safe_load(raw.decode("utf-8"))
+            data = load_yaml_str(raw.decode("utf-8"))
             if not isinstance(data, dict):
                 return None
             result: dict[str, str] = {}
@@ -959,7 +973,7 @@ class MarketplaceBuilder:
                     req.add_header("Authorization", f"token {token}")
                 try:
                     with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                        raw = resp.read().decode("utf-8")
+                        raw = _read_capped_text(resp)
                 except urllib.error.HTTPError as exc:
                     if exc.code != 404:
                         raise
@@ -974,7 +988,7 @@ class MarketplaceBuilder:
                     if token:
                         req.add_header("Authorization", f"token {token}")
                     with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                        raw = resp.read().decode("utf-8")
+                        raw = _read_capped_text(resp)
             else:
                 api_base = (
                     host_info.api_base if host_info else None
@@ -986,8 +1000,8 @@ class MarketplaceBuilder:
                     req.add_header("Authorization", f"token {token}")
 
                 with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-                    raw = resp.read().decode("utf-8")
-            data = yaml.safe_load(raw)
+                    raw = _read_capped_text(resp)
+            data = load_yaml_str(raw)
             if not isinstance(data, dict):
                 return None
             result: dict[str, str] = {}

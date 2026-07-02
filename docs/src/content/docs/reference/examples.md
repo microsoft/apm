@@ -218,7 +218,7 @@ apm run compliance-docs --param regulations="GDPR,CCPA"
 **Scenario**: Engineering team needs consistent code quality standards
 
 ```yaml
-# .apm/chatmodes/senior-reviewer.chatmode.md
+# .apm/agents/senior-reviewer.agent.md
 ---
 name: "Senior Code Reviewer"
 model: "gpt-4"

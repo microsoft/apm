@@ -104,10 +104,10 @@ def pack_bundle(
         # at pack time -- this is the publish gate for the AUTHOR.
         if is_hybrid_root and not package.description and logger:
             try:
-                import frontmatter as _frontmatter
+                from apm_cli.utils.yaml_io import load_frontmatter
 
                 with open(skill_md_path, encoding="utf-8") as _f:
-                    _skill_post = _frontmatter.load(_f)
+                    _skill_post = load_frontmatter(_f)
                 _skill_desc = _skill_post.metadata.get("description")
             except Exception:
                 _skill_desc = None

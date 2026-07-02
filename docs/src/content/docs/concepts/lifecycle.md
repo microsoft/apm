@@ -35,7 +35,7 @@ Targets are picked in priority order. An explicit `--target copilot,claude` flag
 **Common surprises**
 
 - Re-running `apm init` in a directory that already has `apm.yml` warns and exits unless you pass `-y` (which overwrites the manifest).
-- If you set `targets:` to an empty list in `apm.yml`, target detection runs again at compile time. To pin targets, list them explicitly.
+- `targets:` must contain at least one target. Omit the field (or leave legacy `target:` blank) when you want auto-detection at compile time.
 
 **Read more:** [`apm init` reference](/apm/reference/cli/init/), [package anatomy](/apm/concepts/package-anatomy/).
 

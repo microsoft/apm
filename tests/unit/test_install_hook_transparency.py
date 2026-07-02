@@ -116,7 +116,7 @@ def test_display_payloads_reflect_rewritten_paths_vscode(tmp_path):
     # Verify actions are present
     assert len(payload["actions"]) >= 1
     action = payload["actions"][0]
-    assert action["event"] == "PreToolUse"
+    assert action["event"] == "preToolUse"
     # Summary must reference the rewritten path, not the template variable
     assert "${CLAUDE_PLUGIN_ROOT}" not in action["summary"]
     assert ".github" in action["summary"]

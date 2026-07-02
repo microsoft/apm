@@ -44,7 +44,7 @@ def install_local_bundle(
     logger,
     legacy_skill_paths: bool = False,
     rejected_flags: dict[str, object],
-    trust_canvas: bool = False,
+    allow_executables: dict | None = None,
 ) -> None:
     """Deploy a local bundle into project / user scope.
 
@@ -138,7 +138,7 @@ def install_local_bundle(
             logger=logger,
             scope=scope,
             alias=alias,
-            trust_canvas=trust_canvas,
+            allow_executables=allow_executables,
         )
 
         deployed = result.get("deployed_files", [])
@@ -320,7 +320,10 @@ def _parse_bundle_mcp_servers(bundle_dir: Path) -> list[MCPDependency]:
 
     try:
         data = json.loads(mcp_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (OSError, ValueError, RecursionError):
+        # json.JSONDecodeError is a ValueError subclass; the wider set also
+        # fails closed on deeply-nested JSON (RecursionError) or an oversized-
+        # integer literal (bare ValueError) in an untrusted bundle's .mcp.json.
         return []
     if not isinstance(data, dict):
         return []

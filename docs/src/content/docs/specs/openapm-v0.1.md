@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **90 normative statements** indexed in
+- OpenAPM v0.1 carries **95 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -559,7 +559,7 @@ rather than the whole repository.
 **[req-mf-008]** A conforming **consumer** implementation MUST
 classify virtual packages by **file extension only** and MUST NOT
 infer kind from path segments. A `virtual_path` ending in
-`.prompt.md`, `.instructions.md`, `.agent.md`, or `.chatmode.md` is a
+`.prompt.md`, `.instructions.md`, or `.agent.md` is a
 file; any other path is a subdirectory. On-disk shape of a
 subdirectory virtual package is resolved by probing for `apm.yml`
 first.
@@ -792,7 +792,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `resolved_ref`            | User-supplied ref (branch, tag, SHA).                                           |
 | `resolved_commit`         | Exact 40-character lowercase hexadecimal commit SHA-1.                          |
 | `tree_sha256`             | Hash envelope (`sha256:<hex>`) over the canonicalised git tree. See [req-lk-015](#req-lk-015). |
-| `version`                 | Resolved version selector (semver string for semver-bearing sources).           |
+| `version`                 | Registry entries carry the registry-resolved selector for reinstall; git/local entries MAY carry a dependency-`apm.yml`-derived inventory value per [req-lk-019](#req-lk-019). |
 | `virtual_path`            | Subpath inside repo for virtual packages.                                       |
 | `is_virtual`              | Boolean.                                                                        |
 | `depth`                   | Tree depth (0 = self, 1 = direct, >1 = transitive).                             |
@@ -810,6 +810,7 @@ unknown fields on round-trip. Field availability is **monotonic** in
 | `constraint`              | git-semver: the original semver range from the manifest (verbatim).             |
 | `resolved_tag`            | git-semver: the literal tag the range resolved to.                              |
 | `resolved_at`             | git-semver: ISO 8601 UTC timestamp; advisory (see [Section 7.3](#73-git-semver-resolution)). |
+| `name`                    | Self-asserted display/inventory name; non-identity (see [req-lk-019](#req-lk-019)). |
 | `attestations`            | Reserved for v0.2 (publisher provenance).                                       |
 | `x-<name>`                | Vendor extension (per [req-ext-001](#req-ext-001)).                             |
 
@@ -829,10 +830,27 @@ This includes vendor-extension keys per [req-ext-001](#req-ext-001).
 <a id="req-lk-012"></a>
 **[req-lk-012]** A conforming **consumer** implementation MUST
 compute `deployed_file_hashes` and `local_deployed_file_hashes` as
-SHA-256 hash envelopes (`sha256:<hex-lowercase>`) of the deployed
-file bytes as written to disk. Directory entries (paths ending in
-`/`) MUST NOT have a hash entry. The hash envelope `<algo>:<hex>`
-form defined by [req-lk-016](#req-lk-016) applies uniformly.
+SHA-256 hash envelopes (`sha256:<hex-lowercase>`) over the *canonical
+content* of each deployed file. The canonical content is defined as
+follows: if the file's bytes decode as UTF-8 and contain no NUL
+(`0x00`) byte (a *text* file), the canonical content is those bytes
+with every `\r\n` sequence replaced by `\n` (a lone `\r` is left
+unchanged); otherwise (a *binary* file) the canonical content is the
+raw bytes as written to disk. Directory entries (paths ending in `/`)
+MUST NOT have a hash entry. The hash envelope `<algo>:<hex>` form
+defined by [req-lk-016](#req-lk-016) applies uniformly.
+
+The text-file line-ending normalization makes the recorded hash
+*platform-invariant*: a file that git materializes with `\r\n` on a
+`core.autocrlf=true` checkout and with `\n` on a POSIX checkout yields
+one identical hash, so the record side (install) and the verify side
+([req-lk-017](#req-lk-017), `apm audit`) agree across operating
+systems (apm#1952). Preserving a lone `\r` is deliberate: only the
+benign `\r\n` -> `\n` platform difference is made hash-invisible,
+while a bare carriage return -- which a terminal or parser may treat
+as an overwrite -- still changes the hash. This domain matches the
+drift-replay normalizer, so the two integrity surfaces agree on what
+constitutes a content change.
 
 <a id="req-lk-013"></a>
 **[req-lk-013]** A conforming **consumer** implementation MUST verify
@@ -847,6 +865,25 @@ or partially extract the archive.
 preserve vendor-extension keys (`x-[a-z][a-z0-9-]*`) at every
 mapping level of the lockfile -- top-level and per-entry -- on
 round-trip. See [req-ext-001](#req-ext-001).
+
+<a id="req-lk-019"></a>
+**[req-lk-019]** A conforming **consumer** implementation MUST treat
+the optional `name` field, and any dependency-`apm.yml`-derived
+`version` value, as **self-asserted inventory metadata** only --
+recorded to support human-readable listing and audit reporting,
+never as a trust anchor. A consumer MUST preserve both fields on
+round-trip per [req-lk-011](#req-lk-011), and MUST NOT derive any
+identity or deduplication decision from them. For git/local entries,
+a dependency-`apm.yml`-derived `version` MUST NOT drive frozen
+replay; replay derives from `resolved_ref`, `resolved_commit`,
+`resolved_tag`/`constraint`, and the recorded hash envelopes (see
+[req-lk-003](#req-lk-003), [req-lk-008](#req-lk-008)). For registry
+entries, the registry-resolved `version` MAY remain the exact
+registry selection used for reinstall, but the integrity anchor is
+the recorded `resolved_hash` required by [req-lk-013](#req-lk-013).
+The presence of `name` or dependency-`apm.yml`-derived `version` is
+additive and MUST NOT change `lockfile_version` (both are valid in
+`"1"` and `"2"`).
 
 <a id="req-lk-016"></a>
 **[req-lk-016]** A conforming **consumer** implementation MUST emit
@@ -871,7 +908,8 @@ that left the bare-hex form open-ended).
 executing a frozen install (see
 [req-lk-006](#req-lk-006)) MUST re-verify every entry in
 `deployed_file_hashes` and `local_deployed_file_hashes` against the
-bytes written to disk and MUST fail closed on mismatch. The
+on-disk content, hashed over the canonical domain defined by
+[req-lk-012](#req-lk-012), and MUST fail closed on mismatch. The
 diagnostic MUST name the offending path, the expected envelope, and
 the observed envelope. The same re-verification MUST run on `apm
 audit`.
@@ -2270,6 +2308,10 @@ every stored hash, foreclosing algorithm-ambiguity attacks.
 | 8 | Policy bypass via crafted manifest          | [req-pl-002](#req-pl-002), [req-pl-009](#req-pl-009), [req-pl-010](#req-pl-010) | Governance-only   |
 | 9 | Archive path-traversal                      | [req-sc-002](#req-sc-002), [req-sc-004](#req-sc-004)               | Consumer-default  |
 | 10| Hash-algorithm downgrade                    | [req-mf-018](#req-mf-018), [req-lk-016](#req-lk-016)               | Consumer-default  |
+| 11| Unauthorised executable primitive deployment | [req-sc-009](#req-sc-009)                                         | Consumer-default  |
+| 12| Approval grant propagation via VCS           | [req-sc-010](#req-sc-010)                                         | Consumer-default  |
+| 13| Org executable denial bypassed by project/user grant | [req-sc-011](#req-sc-011)                                 | Consumer-default  |
+| 14| Required-package audit false-positive on withheld executable | [req-sc-012](#req-sc-012)                         | Consumer-default  |
 
 ### 10.12 Publisher provenance and attestations (reserved for v0.2)
 
@@ -2284,6 +2326,78 @@ provenance binding format; sigstore verification semantics;
 Governance `policy.dependencies.require_attestation` enforcement
 modes; and the registry HTTP wire envelope (alongside
 [Appendix B](#appendix-b-registry-http-api-reserved-for-v02)).
+
+### 10.13 Executable primitive approval gate
+
+**Threat.** A dependency package deploys executable code --
+hooks, bin executables, MCP server configurations, or canvas
+extensions -- that runs on the developer's machine without
+explicit consent.
+
+**Mitigations.**
+
+<a id="req-sc-009"></a>
+**[req-sc-009]** A conforming **consumer** implementation MUST,
+when the consuming project's `apm.yml` contains an `allowExecutables`
+block, deny deployment of any executable primitive (hooks, bin
+executables, MCP server configurations, and canvas extensions)
+from a dependency package unless that package is explicitly listed
+in the effective approval set for the corresponding executable type.
+A consumer MUST fail closed when the `allowExecutables` block is
+present but the package is absent from the approval set: the
+primitive MUST NOT be deployed.
+
+<a id="req-sc-010"></a>
+**[req-sc-010]** A conforming **consumer** implementation that
+provides an interactive approval mechanism for executable primitives
+MUST persist per-user approval decisions in a location that is
+isolated from the project manifest (`apm.yml`) and is not tracked
+by version control alongside project files by default. The consumer
+MUST NOT write interactive approval decisions into the project
+`apm.yml`, so that one developer's approval cannot propagate
+implicitly to other developers who clone or share the project.
+
+### 10.14 Executable trust precedence and audit fidelity
+
+**Threat.** Two failure modes defeat centralized executable
+governance. First, a project-level or user-level approval re-enables
+an executable primitive that an organization policy has denied, or
+the install-time gate and the post-install audit reach different
+trust conclusions for the same primitive (a split-brain that lets a
+denied primitive read as trusted, or the reverse). Second, a
+governance requirement mandating that a package be present is
+reported as unmet merely because that package's executable primitives
+were withheld from deployment, making it impossible to both mandate a
+package and let a consumer withhold its executables.
+
+**Mitigations.**
+
+<a id="req-sc-011"></a>
+**[req-sc-011]** A conforming **consumer** implementation MUST resolve
+every executable-primitive trust decision through a single deny-wins
+precedence relation in which an organization policy denial (an
+`executables.deny` entry or `executables.deny_all` in an applicable
+`apm-policy.yml` per [Section 6](#6-policy-format-apm-policyyml))
+overrides any project-level or user-level grant for the same package
+and executable type. A consumer MUST reach the identical allow-or-deny
+outcome for identical inputs whether the decision gates deployment at
+install time or classifies an already-installed primitive at audit
+time. A consumer MUST NOT allow a project `apm.yml` grant or a
+user-local approval to re-enable an executable primitive that an
+applicable organization policy denies.
+
+<a id="req-sc-012"></a>
+**[req-sc-012]** A conforming **consumer** implementation that
+evaluates a governance requirement mandating the presence of a package
+(per [Section 6](#6-policy-format-apm-policyyml)) MUST determine
+satisfaction of that requirement from the presence of the package in
+the resolved lockfile, and MUST NOT condition it on whether that
+package's executable primitives were deployed. When a required package
+is present but one or more of its executable primitives are withheld
+from deployment by the trust resolution of
+[req-sc-011](#req-sc-011), a consumer MUST treat the presence
+requirement as satisfied and MUST surface each withheld executable as
+a diagnostic signal distinct from any missing-package violation.
 
 ---
 
@@ -2358,6 +2472,7 @@ conformance statement identifying:
 [req-lk-013](#req-lk-013), [req-lk-014](#req-lk-014),
 [req-lk-015](#req-lk-015), [req-lk-016](#req-lk-016),
 [req-lk-017](#req-lk-017), [req-lk-018](#req-lk-018) (SHOULD),
+[req-lk-019](#req-lk-019),
 [req-rs-001](#req-rs-001), [req-rs-002](#req-rs-002),
 [req-rs-003](#req-rs-003), [req-rs-004](#req-rs-004),
 [req-rs-005](#req-rs-005), [req-rs-006](#req-rs-006),
@@ -2372,7 +2487,9 @@ conformance statement identifying:
 [req-sc-002](#req-sc-002), [req-sc-003](#req-sc-003),
 [req-sc-004](#req-sc-004), [req-sc-005](#req-sc-005),
 [req-sc-006](#req-sc-006), [req-sc-007](#req-sc-007),
-[req-sc-008](#req-sc-008) (SHOULD), [req-cf-001](#req-cf-001),
+[req-sc-008](#req-sc-008) (SHOULD), [req-sc-009](#req-sc-009),
+[req-sc-010](#req-sc-010), [req-sc-011](#req-sc-011),
+[req-sc-012](#req-sc-012), [req-cf-001](#req-cf-001),
 [req-cf-002](#req-cf-002).
 
 #### 11.3.3 Registry
@@ -2735,6 +2852,7 @@ renumbering of conformance classes.
 | [req-lk-016](#req-lk-016)                | MUST    | 5.2     | consumer    |
 | [req-lk-017](#req-lk-017)                | MUST    | 5.2     | consumer    |
 | [req-lk-018](#req-lk-018)                | SHOULD  | 5.5     | consumer    |
+| [req-lk-019](#req-lk-019)                | MUST    | 5.2     | consumer    |
 | [req-pl-001](#req-pl-001)                | MUST    | 6.1     | governance  |
 | [req-pl-002](#req-pl-002)                | MUST    | 6.2     | governance  |
 | [req-pl-003](#req-pl-003)                | MUST    | 6.4     | governance  |
@@ -2781,11 +2899,15 @@ renumbering of conformance classes.
 | [req-sc-006](#req-sc-006)                | MUST    | 4.2.3   | consumer    |
 | [req-sc-007](#req-sc-007)                | MUST    | 10.3    | consumer    |
 | [req-sc-008](#req-sc-008)                | SHOULD  | 10.3    | consumer    |
+| [req-sc-009](#req-sc-009)                | MUST    | 10.13   | consumer    |
+| [req-sc-010](#req-sc-010)                | MUST    | 10.13   | consumer    |
+| [req-sc-011](#req-sc-011)                | MUST    | 10.14   | consumer    |
+| [req-sc-012](#req-sc-012)                | MUST    | 10.14   | consumer    |
 | [req-rg-001](#req-rg-001)                | MUST    | 11.3.3  | registry    |
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 90** (85 MUST, 5 SHOULD).
+**Total normative statements: 95** (90 MUST, 5 SHOULD).
 
 ---
 
@@ -2799,6 +2921,10 @@ renumbering of conformance classes.
 | 0.1.2   | 2026-05-28 | Round-3 spec-guardian editorial fold (no new normative statements; statement count remains 87). Section 11.3.2 Consumer enumeration appended `[req-rs-014]` and `[req-cf-002]` (closing drift vs Appendix C). req-lk-005 extended: writers MUST canonicalise the `dependencies` list in ascending lexicographic order of (`repo_url`, `virtual_path`) so frozen-install diffs are stable across implementations. req-sc-003 extended: consumers MUST drop the originating Authorization header before issuing a cross-host-class redirect (closes the mirror-redirect token-leak surface in Section 10.3). req-rg-001 extended with publish-side idempotency clause: a Registry MUST either reject a republish or accept ONLY if bytes are byte-identical to the previously-served bytes. Section 6.2 + Section 6.3.1 defaults pinned: `fetch_failure` defaults to `warn` and `dependencies.require_resolution` defaults to `project-wins` (mirrored as advisory `"default"` annotations in `policy-v0.1.schema.json`). Manifest schema `conflict_resolution` enum aligned to prose: renamed `intersect` -> `intersection-pick`, dropped `nest` from the v0.1 enum (`nest` remains reserved-for-v0.2 per req-rs-013, now noted via schema `$comment`). Mode B silent-extension detector landed in `.github/workflows/spec-conformance.yml` and `tests/spec_conformance/mode_b_detector.sh`; closes the named sole-implementer rot risk by gating PRs that add substantive code under critical paths (`primitives/`, `deps/`, `policy/`, `registry/`, `runtime/`, `install/`, `integration/`) without a spec citation, with auditable `apm-spec-waiver:` opt-out. |
 | 0.1.3   | 2026-06-16 | Spec-citation fold for the declarable integrity policy keys. Added two governance MUSTs under a new Section 6.8 "Integrity controls": [req-pl-013] (`security.integrity.require_hashes` -- fail-closed install when a resolved non-local dependency lacks a recorded hash in `apm.lock.yaml`, or the lockfile is absent/unreadable) and [req-pl-014] (`security.audit.fail_on_drift` -- audit exits non-zero on detected or indeterminate drift). Both keys are default-off and merge by logical OR (tighten-not-relax). Added the non-normative Section 6.3.6 `security` field reference and two merge-table rows; renumbered the governance conformance trailer 6.8 -> 6.9. Statement count: 87 -> 89 (84 MUST, 5 SHOULD). NOTE: a sibling spec-citation amendment also edits the shared count sites (Section 1.3, Appendix C trailer, this revision history); whichever lands second reconciles the cumulative total and takes the union of the added Appendix C rows. |
 | 0.1.4   | 2026-06-16 | Normative addition (semver-zero `0.x` minor): added `[req-pl-015]` (Section 6.3.5, governance MUST) codifying unmanaged-artifact surfacing completeness -- a governance implementation evaluating policy over a populated primitive target tree MUST surface every file under a managed primitive target directory that is neither recorded in `apm.lock.yaml` nor matched by a configured `unmanaged_files.exclude` glob, each with its unmanaged reason and a supplemental dependency/MCP deny-conflict note where applicable; the inferred primitive type is carried where determinable and omitted otherwise; an excluded path MUST NOT be surfaced even when it also matches a deny pattern. The requirement body is structured as sub-clauses (a)/(b)/(c) so each obligation is individually citable. Added the `unmanaged_files.exclude` row to the Section 6.4 merge table (additive union, deduplicated, parent order preserved). The requirement governs reporting COMPLETENESS only; enforcement stays governed by `unmanaged_files.action`. Reconciled with the sibling 0.1.3 amendment (req-pl-013/req-pl-014): cumulative statement count 89 -> 90 (85 MUST, 5 SHOULD); Appendix C carries the union of all three new governance rows. |
+| 0.1.5   | 2026-06-20 | Spec-citation fold for the executable primitive approval gate. Added new Section 10.13 "Executable primitive approval gate" with two consumer MUSTs: [req-sc-009] (deny deployment of any hook, bin, MCP server, or canvas extension from a dependency not listed in the effective `allowExecutables` approval set when the block is present -- fail closed) and [req-sc-010] (persist interactive approval decisions user-locally, not in the project `apm.yml`, so one developer's approval cannot propagate via VCS to teammates). Added rows 11 and 12 to the Section 10.11 summary table. Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 90 -> 92 (87 MUST, 5 SHOULD). |
+| 0.1.6   | 2026-06-25 | Spec-citation fold for executable trust precedence and audit fidelity. Added Section 10.14 with two consumer MUSTs: [req-sc-011] (executable trust resolves through one deny-wins precedence; an org executables.deny/deny_all overrides any project or user grant; the install gate and the audit MUST reach the identical outcome via the shared resolver) and [req-sc-012] (a required package's audit asserts lockfile presence, not executable deployment; a present-but-withheld required package satisfies the presence requirement and surfaces a distinct withheld-executable signal). Added rows 13 and 14 to the Section 10.11 summary table. Section 11.3.2 and Appendix C updated. Statement count 92 -> 94 (89 MUST, 5 SHOULD). |
+| 0.1.7   | 2026-06-27 | Spec-citation fold for lockfile inventory metadata (closes the #1888 Mode-B silent-extension gate). Added [req-lk-019] (Section 5.2, consumer MUST): the optional per-entry `name` and `version` fields are self-asserted inventory metadata only -- preserved on round-trip per [req-lk-011], never a trust anchor, and never an identity, deduplication, or frozen-replay key (identity/replay derive solely from `repo_url`, `resolved_commit`, `resolved_tag`/`constraint`, and the recorded hash envelopes); their presence is additive and MUST NOT change `lockfile_version`. Added the `name` row to the Section 5.2 per-entry field table and broadened the `version` row note to non-semver sources; added `name` to the `entry` `$defs` in `lockfile-v0.1.schema.json` (sibling of `declared_license`). Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 94 -> 95 (90 MUST, 5 SHOULD). |
+| 0.1.8   | 2026-06-29 | Normative amendment (semver-zero `0.x` minor) to [req-lk-012]: redefined the `deployed_file_hashes` / `local_deployed_file_hashes` domain from "bytes as written to disk" to the *canonical content* -- UTF-8 text (decodable, no NUL byte) is hashed over its `\r\n` -> `\n` normalized form (a lone `\r` is preserved); binary is hashed raw. This makes the per-deployed-file hash platform-invariant so `apm audit --ci` no longer reports a false `content-integrity` drift when a file is checked out with `\r\n` on Windows (`core.autocrlf=true`) and `\n` on POSIX (apm#1952); it harmonizes `content-integrity` with the drift-replay normalizer. Preserving a bare `\r` keeps the carriage-return smuggling vector hash-visible. [req-lk-017] reworded to re-verify against the [req-lk-012] canonical domain rather than raw on-disk bytes (consistency, not a new obligation). Migration: lockfiles whose hashes were recorded on Windows before this amendment carry `\r\n`-domain hashes; one `apm install` re-records them in the canonical domain. No statement-count change (existing MUST modified, none added); 95 (90 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel + comment window. |
 
 Errata (none at publication).
 
@@ -2836,4 +2962,3 @@ is excluded from canonical-emission stability checks per
 [Section 5.6](#56-git-semver-fields-constraint-resolved_tag-resolved_at). Round-
 trip conformance ([req-cf-001](#req-cf-001)) treats this field as
 permitted-to-vary.
-

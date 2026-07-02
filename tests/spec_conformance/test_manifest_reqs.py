@@ -1,6 +1,6 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
-Covers req-mf-001..021, req-ext-001..002, req-sc-001..008,
+Covers req-mf-001..021, req-ext-001..002, req-sc-001..010,
 req-tg-001..004, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
@@ -307,7 +307,42 @@ def test_consumer_should_refuse_credential_on_non_https_git_over_http():
     )
 
 
-# --- req-tg-001..004: targets -----------------------------------------
+@pytest.mark.req("req-sc-009")
+def test_consumer_must_deny_executable_primitive_without_allowexecutables_approval():
+    assert_spec_contains(
+        "deny deployment of any executable primitive",
+        "allowExecutables",
+        "fail closed",
+    )
+
+
+@pytest.mark.req("req-sc-010")
+def test_consumer_must_persist_approvals_user_locally_not_in_project_manifest():
+    assert_spec_contains(
+        "persist per-user approval decisions",
+        "isolated from the project manifest",
+        "MUST NOT write interactive approval decisions into the project",
+    )
+
+
+@pytest.mark.req("req-sc-011")
+def test_consumer_must_resolve_executable_trust_through_deny_wins_precedence():
+    # Verbatim single-line substrings of the Section 10.14 normative text
+    # (the authored sentences are line-wrapped; these needles fit one line each).
+    assert_spec_contains(
+        "through a single deny-wins",
+        "overrides any project-level or user-level grant for the same package",
+        "identical allow-or-deny",
+    )
+
+
+@pytest.mark.req("req-sc-012")
+def test_consumer_required_package_audit_asserts_presence_not_deployment():
+    assert_spec_contains(
+        "evaluates a governance requirement mandating the presence of a package",
+        "satisfaction of that requirement from the presence of the package in",
+        "distinct from any missing-package violation",
+    )
 
 
 @pytest.mark.req("req-tg-001")

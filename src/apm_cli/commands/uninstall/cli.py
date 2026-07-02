@@ -83,6 +83,17 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
 
         logger.start(f"Uninstalling {len(packages)} package(s)...")
 
+        # Fire pre-uninstall lifecycle scripts
+        _fire_uninstall_scripts(
+            "pre-uninstall",
+            packages=packages,
+            scope=scope,
+            manifest_path=manifest_path,
+            logger=logger,
+            verbose=verbose,
+            deploy_root=deploy_root,
+        )
+
         # Read current apm.yml
         from ...utils.yaml_io import dump_yaml, load_yaml
 
@@ -283,6 +294,59 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         if packages_not_found:
             logger.warning(f"Note: {len(packages_not_found)} package(s) were not found in apm.yml")
 
+        # Fire post-uninstall lifecycle scripts
+        _fire_uninstall_scripts(
+            "post-uninstall",
+            packages=packages_to_remove,
+            scope=scope,
+            manifest_path=manifest_path,
+            logger=logger,
+            verbose=verbose,
+            deploy_root=deploy_root,
+        )
+
     except Exception as e:
         logger.error(f"Error uninstalling packages: {e}")
         sys.exit(1)
+
+
+def _fire_uninstall_scripts(
+    event_name: str,
+    *,
+    packages,
+    scope,
+    manifest_path,
+    logger,
+    verbose: bool,
+    deploy_root,
+) -> None:
+    """Build a script runner and fire an uninstall lifecycle event.
+
+    Best-effort: all exceptions are swallowed so scripts never block
+    the uninstall flow.
+    """
+    import contextlib
+
+    with contextlib.suppress(Exception):
+        from apm_cli.core.lifecycle_scripts import (
+            LifecycleEvent,
+            PackageInfo,
+            build_runner_from_context,
+        )
+
+        runner = build_runner_from_context(
+            logger=logger,
+            verbose=verbose,
+            project_root=str(deploy_root),
+        )
+
+        pkg_infos = [PackageInfo(name=str(pkg)) for pkg in packages]
+        scope_name = scope.value if hasattr(scope, "value") else str(scope)
+        event = LifecycleEvent.create(
+            event=event_name,
+            packages=pkg_infos,
+            scope=scope_name,
+            working_directory=str(deploy_root),
+        )
+
+        runner.fire(event_name, event)
