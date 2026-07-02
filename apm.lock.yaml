@@ -1,7 +1,61 @@
 lockfile_version: '1'
-generated_at: '2026-06-25T18:39:34.738228+00:00'
-apm_version: 0.21.0
+generated_at: '2026-06-28T19:37:04.419680+00:00'
+apm_version: 0.22.0
 dependencies:
+- repo_url: _local/adversarial-hardening
+  name: adversarial-hardening
+  version: 0.1.0
+  package_type: hybrid
+  deployed_files:
+  - .agents/skills/adversarial-hardening
+  - .agents/skills/adversarial-hardening/SKILL.md
+  - .agents/skills/adversarial-hardening/apm.yml
+  - .agents/skills/adversarial-hardening/assets/scope-charter.template.md
+  - .agents/skills/adversarial-hardening/evals/.gitignore
+  - .agents/skills/adversarial-hardening/evals/README.md
+  - .agents/skills/adversarial-hardening/evals/content/out-of-scope-decline.json
+  - .agents/skills/adversarial-hardening/evals/content/pillar-a-grounded-findings.json
+  - .agents/skills/adversarial-hardening/evals/content/pillar-b-push-hygiene.json
+  - .agents/skills/adversarial-hardening/evals/evals.json
+  - .agents/skills/adversarial-hardening/evals/fixtures/out-of-scope-decline__with_skill.md
+  - .agents/skills/adversarial-hardening/evals/fixtures/out-of-scope-decline__without_skill.md
+  - .agents/skills/adversarial-hardening/evals/fixtures/pillar-a-grounded-findings__with_skill.md
+  - .agents/skills/adversarial-hardening/evals/fixtures/pillar-a-grounded-findings__without_skill.md
+  - .agents/skills/adversarial-hardening/evals/fixtures/pillar-b-push-hygiene__with_skill.md
+  - .agents/skills/adversarial-hardening/evals/fixtures/pillar-b-push-hygiene__without_skill.md
+  - .agents/skills/adversarial-hardening/evals/results/.gitkeep
+  - .agents/skills/adversarial-hardening/evals/triggers.json
+  - .agents/skills/adversarial-hardening/references/findings-ledger.md
+  - .agents/skills/adversarial-hardening/references/lens-catalogue.md
+  - .agents/skills/adversarial-hardening/scripts/check-push-hygiene.sh
+  - .agents/skills/adversarial-hardening/scripts/render-dossier.py
+  - .agents/skills/adversarial-hardening/scripts/run_evals.py
+  deployed_file_hashes:
+    .agents/skills/adversarial-hardening/SKILL.md: sha256:d5d72168d42a7fadf58d3c1359543e83c0feeabcfd989c47cf279c144405a014
+    .agents/skills/adversarial-hardening/apm.yml: sha256:2c661c9e3dd846fdba09884a6e4182dbefc651ac193c813e91fc1d27cf8626bd
+    .agents/skills/adversarial-hardening/assets/scope-charter.template.md: sha256:7d5872531601b05f66678521076b3ee7367e852f1a98577180df81e1776252b4
+    .agents/skills/adversarial-hardening/evals/.gitignore: sha256:dc810cf3561d22d2d47b89fd0697de46aff0068819b3514577842cb2a2a1c332
+    .agents/skills/adversarial-hardening/evals/README.md: sha256:8f71a5f64243f0d8a2c7e1168b308128fc494b5822c82ff2f50af87d5e50b38b
+    .agents/skills/adversarial-hardening/evals/content/out-of-scope-decline.json: sha256:f590174e82239658cf0be28557d7626da0dfe73d6bf021be8b8c67874ea6ddda
+    .agents/skills/adversarial-hardening/evals/content/pillar-a-grounded-findings.json: sha256:6cba4e9113be607b2bd05412a1ca573df63fbb8651d28eb7420c7c7494241d3d
+    .agents/skills/adversarial-hardening/evals/content/pillar-b-push-hygiene.json: sha256:87febf7ad752046ac984c16c0fd336b0185437048a30285a96726dd7ac0a83d9
+    .agents/skills/adversarial-hardening/evals/evals.json: sha256:b0fe6897c375c4ff96b25b0748ddb86d01397c1944b21d8ddb5e9cb7bac9cabb
+    .agents/skills/adversarial-hardening/evals/fixtures/out-of-scope-decline__with_skill.md: sha256:09be12d337989adf714fc7da462076d014d316a017330795674b36344f710222
+    .agents/skills/adversarial-hardening/evals/fixtures/out-of-scope-decline__without_skill.md: sha256:92de32ce2f2c4793add2cb5733918ab02111c30655c290a2d98153933cfb908f
+    .agents/skills/adversarial-hardening/evals/fixtures/pillar-a-grounded-findings__with_skill.md: sha256:f232b76dcc2a514b9d71c35619b34d75261859d7d3228ba14d1b4e6cd97efb9e
+    .agents/skills/adversarial-hardening/evals/fixtures/pillar-a-grounded-findings__without_skill.md: sha256:a51ea9f9f7dc451b2bd529063044c5fb85f0cae54208a1bffcff9668e3c16a3f
+    .agents/skills/adversarial-hardening/evals/fixtures/pillar-b-push-hygiene__with_skill.md: sha256:0a30dfc7400bdb1ffb8ee4d5d8ca67db43aa36f16c8e95f36e46a07212e0c66e
+    .agents/skills/adversarial-hardening/evals/fixtures/pillar-b-push-hygiene__without_skill.md: sha256:60a50d4a80edc24df201e5533f928e4a13df36b449aedfd49c744cab55ba4b2a
+    .agents/skills/adversarial-hardening/evals/results/.gitkeep: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    .agents/skills/adversarial-hardening/evals/triggers.json: sha256:125ab7a7cc8227378813afe6d10a667e9579101134da46749ac4038db5c79c2a
+    .agents/skills/adversarial-hardening/references/findings-ledger.md: sha256:14ba85f10c5b4a944f235c5872794547508c5e12d33a85432556239d712a12e9
+    .agents/skills/adversarial-hardening/references/lens-catalogue.md: sha256:6cc12a640d1f2a1ec9087762d0b9bf9a3cab7b9529e369158acca8dd938a58fc
+    .agents/skills/adversarial-hardening/scripts/check-push-hygiene.sh: sha256:0a47e5f200476b1aecb781e2159a855add3a1233ba5504e8b1409f04bf36fa58
+    .agents/skills/adversarial-hardening/scripts/render-dossier.py: sha256:0fb9fadd77a6fd649d3639c12dce92751f522da0ac700c94a85e21164edd777f
+    .agents/skills/adversarial-hardening/scripts/run_evals.py: sha256:5ebe9c880506d3eaac27f9658a338208a07eb5ee7f1aa1ebade456fca0bea0f7
+  source: local
+  local_path: ./packages/adversarial-hardening
+  declared_license: MIT
 - repo_url: _local/apm-issue-autopilot
   name: apm-issue-autopilot
   version: 0.1.0
@@ -122,6 +176,42 @@ dependencies:
   source: local
   local_path: ./packages/batch-bug-shepherd
   declared_license: MIT
+- repo_url: _local/apm-review-panel
+  name: apm-review-panel
+  version: 0.1.0
+  depth: 2
+  resolved_by: _local/adversarial-hardening
+  package_type: hybrid
+  deployed_files:
+  - .agents/skills/apm-review-panel
+  - .agents/skills/apm-review-panel/SKILL.md
+  - .agents/skills/apm-review-panel/apm.yml
+  - .agents/skills/apm-review-panel/assets/ceo-return-schema.json
+  - .agents/skills/apm-review-panel/assets/panelist-return-schema.json
+  - .agents/skills/apm-review-panel/assets/recommendation-template.md
+  - .agents/skills/apm-review-panel/evals/README.md
+  - .agents/skills/apm-review-panel/evals/fixtures/01-ship-now-pr1084-shape.json
+  - .agents/skills/apm-review-panel/evals/fixtures/01-ship-now-pr1084-shape.rendered.md
+  - .agents/skills/apm-review-panel/evals/fixtures/02-needs-rework-shape.json
+  - .agents/skills/apm-review-panel/evals/fixtures/02-needs-rework-shape.rendered.md
+  - .agents/skills/apm-review-panel/evals/render_eval.py
+  - .agents/skills/apm-review-panel/evals/trigger-evals.json
+  deployed_file_hashes:
+    .agents/skills/apm-review-panel/SKILL.md: sha256:fc63e25479c5c2066f317b5b0e430738bd8a67054a2ae6934fbe5b3d281fa10a
+    .agents/skills/apm-review-panel/apm.yml: sha256:80c403c4d3c59a91bb27b85650e21a466e9cd0cbc28e92bf0f3e53c6ea71cb2c
+    .agents/skills/apm-review-panel/assets/ceo-return-schema.json: sha256:d8707211968efb0471d083f880d5353d66a0eda84635e803a930f60c91837468
+    .agents/skills/apm-review-panel/assets/panelist-return-schema.json: sha256:e3cf2ae17e93dd934f2659ed77d2640ea9601fbe8698f63ba800edf046691f99
+    .agents/skills/apm-review-panel/assets/recommendation-template.md: sha256:ed973263897671ea04c980cb54c76b33aaa9bb7d1b5b24082df89b388d4329b8
+    .agents/skills/apm-review-panel/evals/README.md: sha256:40e7abb1fa15403a71505797e23dde8433f31ca70546657886c3f9760974bfb8
+    .agents/skills/apm-review-panel/evals/fixtures/01-ship-now-pr1084-shape.json: sha256:108fc261680f17bdade3e2bdf8e64fc908d16a37ec9c29c53169b394530bdd67
+    .agents/skills/apm-review-panel/evals/fixtures/01-ship-now-pr1084-shape.rendered.md: sha256:ca1fdd3cd24e0fd8ec15b37690c597921ebf1c872270166edb2727d54ee155d8
+    .agents/skills/apm-review-panel/evals/fixtures/02-needs-rework-shape.json: sha256:faa41c6c83c4a7955447bcb8fc0ad5a3b8afb4235db257462f649ba0a901913e
+    .agents/skills/apm-review-panel/evals/fixtures/02-needs-rework-shape.rendered.md: sha256:b69cd113a428b61d8bbb9381a85261b3ee3acd3f101c08d06419e26aab03bba8
+    .agents/skills/apm-review-panel/evals/render_eval.py: sha256:690baf6267775077ad011b98839eda1001e207bbae78a7a8454c4d39bb8a2864
+    .agents/skills/apm-review-panel/evals/trigger-evals.json: sha256:c715ba52cd2131f294c1cf685a10995a08e4ee6971f97cf5d36e09df28d3af91
+  source: local
+  local_path: ../apm-review-panel
+  declared_license: MIT
 - repo_url: _local/apm-triage-panel
   name: apm-triage-panel
   version: 0.1.0
@@ -225,42 +315,6 @@ dependencies:
     .agents/skills/shepherd-driver/references/mergeability-gate.md: sha256:90bf5cd838d1025dd0fa223a0843be926cd509c85c91ef683cc9bfc98b5e8785
   source: local
   local_path: ../shepherd-driver
-  declared_license: MIT
-- repo_url: _local/apm-review-panel
-  name: apm-review-panel
-  version: 0.1.0
-  depth: 3
-  resolved_by: _local/shepherd-driver
-  package_type: hybrid
-  deployed_files:
-  - .agents/skills/apm-review-panel
-  - .agents/skills/apm-review-panel/SKILL.md
-  - .agents/skills/apm-review-panel/apm.yml
-  - .agents/skills/apm-review-panel/assets/ceo-return-schema.json
-  - .agents/skills/apm-review-panel/assets/panelist-return-schema.json
-  - .agents/skills/apm-review-panel/assets/recommendation-template.md
-  - .agents/skills/apm-review-panel/evals/README.md
-  - .agents/skills/apm-review-panel/evals/fixtures/01-ship-now-pr1084-shape.json
-  - .agents/skills/apm-review-panel/evals/fixtures/01-ship-now-pr1084-shape.rendered.md
-  - .agents/skills/apm-review-panel/evals/fixtures/02-needs-rework-shape.json
-  - .agents/skills/apm-review-panel/evals/fixtures/02-needs-rework-shape.rendered.md
-  - .agents/skills/apm-review-panel/evals/render_eval.py
-  - .agents/skills/apm-review-panel/evals/trigger-evals.json
-  deployed_file_hashes:
-    .agents/skills/apm-review-panel/SKILL.md: sha256:fc63e25479c5c2066f317b5b0e430738bd8a67054a2ae6934fbe5b3d281fa10a
-    .agents/skills/apm-review-panel/apm.yml: sha256:80c403c4d3c59a91bb27b85650e21a466e9cd0cbc28e92bf0f3e53c6ea71cb2c
-    .agents/skills/apm-review-panel/assets/ceo-return-schema.json: sha256:d8707211968efb0471d083f880d5353d66a0eda84635e803a930f60c91837468
-    .agents/skills/apm-review-panel/assets/panelist-return-schema.json: sha256:e3cf2ae17e93dd934f2659ed77d2640ea9601fbe8698f63ba800edf046691f99
-    .agents/skills/apm-review-panel/assets/recommendation-template.md: sha256:ed973263897671ea04c980cb54c76b33aaa9bb7d1b5b24082df89b388d4329b8
-    .agents/skills/apm-review-panel/evals/README.md: sha256:40e7abb1fa15403a71505797e23dde8433f31ca70546657886c3f9760974bfb8
-    .agents/skills/apm-review-panel/evals/fixtures/01-ship-now-pr1084-shape.json: sha256:108fc261680f17bdade3e2bdf8e64fc908d16a37ec9c29c53169b394530bdd67
-    .agents/skills/apm-review-panel/evals/fixtures/01-ship-now-pr1084-shape.rendered.md: sha256:ca1fdd3cd24e0fd8ec15b37690c597921ebf1c872270166edb2727d54ee155d8
-    .agents/skills/apm-review-panel/evals/fixtures/02-needs-rework-shape.json: sha256:faa41c6c83c4a7955447bcb8fc0ad5a3b8afb4235db257462f649ba0a901913e
-    .agents/skills/apm-review-panel/evals/fixtures/02-needs-rework-shape.rendered.md: sha256:b69cd113a428b61d8bbb9381a85261b3ee3acd3f101c08d06419e26aab03bba8
-    .agents/skills/apm-review-panel/evals/render_eval.py: sha256:690baf6267775077ad011b98839eda1001e207bbae78a7a8454c4d39bb8a2864
-    .agents/skills/apm-review-panel/evals/trigger-evals.json: sha256:c715ba52cd2131f294c1cf685a10995a08e4ee6971f97cf5d36e09df28d3af91
-  source: local
-  local_path: ../apm-review-panel
   declared_license: MIT
 local_deployed_files:
 - .agents/skills/apm-spec-guardian

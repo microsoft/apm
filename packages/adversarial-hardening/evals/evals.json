@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "skill": "adversarial-hardening",
+  "skill_path": "../SKILL.md",
+  "triggers_manifest": "triggers.json",
+  "content_manifests": [
+    "content/out-of-scope-decline.json",
+    "content/pillar-a-grounded-findings.json",
+    "content/pillar-b-push-hygiene.json"
+  ],
+  "gates": {
+    "triggers": {
+      "split": "val",
+      "should_fire_rate_min": 0.5,
+      "should_not_fire_rate_max": 0.5
+    },
+    "content": {
+      "delta_min_anchors": 1,
+      "scope": "every_scenario"
+    }
+  },
+  "stop_list": [
+    "triage",
+    "issue backlog",
+    "secret scanner",
+    "malware scanner",
+    "license scanner",
+    "open prs",
+    "open pull",
+    "bug queue",
+    "sweep",
+    "shepherd",
+    "review this pr",
+    "scanner",
+    "scan ",
+    "audit the docs",
+    "merge"
+  ],
+  "trigger_keywords_primary": [
+    "red-team",
+    "red team",
+    "chaos-engineer",
+    "chaos engineer",
+    "battle-test",
+    "battle test",
+    "harden",
+    "fuzz",
+    "try to break",
+    "stress-test",
+    "stress test",
+    "adversarial"
+  ],
+  "trigger_keywords_secondary": [
+    "loop",
+    "until",
+    "no",
+    "new",
+    "exploit",
+    "vector",
+    "blast",
+    "radius",
+    "resilience",
+    "break",
+    "regression",
+    "fold",
+    "defects"
+  ],
+  "secondary_anchor_tokens": [
+    "exploit",
+    "break",
+    "blast",
+    "resilience",
+    "adversarial"
+  ]
+}

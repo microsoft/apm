@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "pillar-b-push-hygiene",
+  "summary": "Pillar B. A fold adds an uncollected test file (not in the merge-queue lane) and a stray fixture. With the skill, the push-hygiene gate REJECTS, loops back to shepherd-driver, and the final diff carries only collected unit + integration tests with no orphans. Without the skill, the unwired test and fixture ship (the 25k-line anti-pattern).",
+  "scenario": {
+    "target": "lifecycle-scripts runner",
+    "bad_fold": ["tests/red_team/test_uncollected.py (not collected)", "tests/orphan_fixture.bin (stray)"]
+  },
+  "rubric": [
+    {"id": "hygiene-reject", "pattern": "(?i)push-hygiene|hygiene gate|REJECT", "weight": 2, "description": "Hygiene gate engaged and rejected the bad fold"},
+    {"id": "collected-only", "pattern": "(?i)collect-only|merge-queue lane|CI-COLLECTED", "weight": 2, "description": "CI-collected check named"},
+    {"id": "no-orphans", "pattern": "(?i)no orphan|removed the stray fixture|diff-minimal", "weight": 1, "description": "Orphan fixture removed"},
+    {"id": "integration-test", "pattern": "(?i)integration test", "weight": 1, "description": "Right-altitude integration test added for cross-module fold"},
+    {"id": "shipped-unwired", "pattern": "(?i)uncollected test (ships|shipped)|stray fixture remains|25k|red_team/ tests added", "weight": -3, "description": "PENALTY: unwired test/fixture shipped"}
+  ],
+  "fixtures": {
+    "with_skill": "../fixtures/pillar-b-push-hygiene__with_skill.md",
+    "without_skill": "../fixtures/pillar-b-push-hygiene__without_skill.md"
+  }
+}
