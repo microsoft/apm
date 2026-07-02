@@ -119,9 +119,9 @@ APM preserves the placeholder so the harness resolves it when the
 server starts or the request is made. For harnesses that require
 literal values (for example Claude Code and Codex self-defined stdio
 env), APM resolves `${VAR}` from the install process environment,
-prompts during interactive installs when possible, and leaves unresolved
-placeholders unchanged in non-interactive installs. Keep the real secret
-in the consumer's environment (or their secret manager).
+prompts interactively when the terminal is attached, and leaves
+unresolved placeholders unchanged in non-interactive installs. Keep the
+real secret in the consumer's environment (or their secret manager).
 
 The `github-mcp-server` is a special case: APM injects an
 `Authorization: Bearer <token>` header automatically when it writes
