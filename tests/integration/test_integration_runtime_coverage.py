@@ -1830,12 +1830,25 @@ class TestInstructionConverters:
         assert "inclusion: always" in result
 
     def test_convert_to_kiro_steering_list_apply_to(self) -> None:
-        """applyTo as list is joined with commas."""
+        """applyTo as list produces fileMatchPattern list."""
         from apm_cli.integration.instruction_integrator import InstructionIntegrator
 
         content = "---\napplyTo:\n  - '**/*.py'\n  - '**/*.pyi'\n---\n# Python\n"
         result = InstructionIntegrator._convert_to_kiro_steering(content)
-        assert "fileMatch" in result
+        assert "inclusion: fileMatch" in result
+        assert 'fileMatchPattern:' in result
+        assert '  - "**/*.py"' in result
+        assert '  - "**/*.pyi"' in result
+
+    def test_convert_to_kiro_steering_list_apply_to_with_literal_commas(self) -> None:
+        """applyTo list with literal commas is not split."""
+        from apm_cli.integration.instruction_integrator import InstructionIntegrator
+
+        content = "---\napplyTo:\n  - 'src/foo,bar/*.py'\n  - '**/*.pyi'\n---\n# Python\n"
+        result = InstructionIntegrator._convert_to_kiro_steering(content)
+        assert "inclusion: fileMatch" in result
+        assert '  - "src/foo,bar/*.py"' in result
+        assert '  - "**/*.pyi"' in result
 
     def test_convert_to_cursor_rules_multiple_globs(self) -> None:
         """Multiple globs result in a YAML list in cursor rules."""
