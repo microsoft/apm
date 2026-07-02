@@ -312,6 +312,27 @@ class TestConfigGet:
         # Internal keys must not appear - users cannot set them via apm config set
         assert "default_client" not in result.output
 
+    def test_list_config_matches_get_without_key(self):
+        """`apm config list` is an alias for listing all effective config values."""
+        with (
+            patch("apm_cli.config.get_auto_integrate", return_value=True),
+            patch("apm_cli.config.get_temp_dir", return_value=None),
+            patch("apm_cli.config.get_install_target", return_value=None),
+            patch("apm_cli.config.get_self_update_channel", return_value="stable"),
+            patch("apm_cli.config.get_self_update_install_dir", return_value=None),
+            patch("apm_cli.config.get_allow_protocol_fallback", return_value=False),
+            patch("apm_cli.config.get_prefer_ssh", return_value=False),
+            patch("apm_cli.core.experimental.is_enabled", return_value=False),
+            patch("apm_cli.config.get_mcp_registry_url", return_value=None),
+        ):
+            get_result = self.runner.invoke(config, ["get"])
+            list_result = self.runner.invoke(config, ["list"])
+
+        assert get_result.exit_code == 0
+        assert list_result.exit_code == 0
+        assert list_result.output == get_result.output
+        assert "mcp-registry-url: Not set (using default)" in list_result.output
+
     def test_get_all_config_fresh_install(self):
         """auto-integrate is shown even on a fresh install with no key in the file."""
         with patch("apm_cli.config.get_auto_integrate", return_value=True):

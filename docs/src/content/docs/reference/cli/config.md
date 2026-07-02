@@ -12,6 +12,7 @@ Read and write APM CLI configuration stored in `~/.apm/config.json`.
 ```bash
 apm config                       # show current configuration
 apm config get [KEY]             # print one key, or all keys
+apm config list                  # print all user-settable keys
 apm config set KEY VALUE         # write a key
 apm config unset KEY             # remove a key
 ```
@@ -34,6 +35,10 @@ Show the merged project + global configuration as a table. Falls back to plain t
 ### `apm config get [KEY]`
 
 Print the value of `KEY`. With no argument, prints all user-settable keys with their effective values (defaults included).
+
+### `apm config list`
+
+Print all user-settable keys with their effective values. This is an alias for `apm config get` with no `KEY`, provided for users who expect an `npm config list` or `git config --list` style command.
 
 ### `apm config set KEY VALUE`
 
