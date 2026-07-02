@@ -444,3 +444,40 @@ def test_antigravity_instructions_skipped_with_populated_rules_dir(tmp_path: Pat
     # No constitution or other content, so AGENTS.md should not be generated
     agents_md = tmp_path / "AGENTS.md"
     assert not agents_md.exists()
+
+
+def test_antigravity_instructions_not_skipped_with_unrelated_md_file_in_rules_dir(
+    tmp_path: Path,
+) -> None:
+    """With .agents/rules/ containing only unrelated .md files, instructions are NOT skipped from AGENTS.md."""
+    from apm_cli.utils.yaml_io import dump_yaml
+
+    # Minimal apm.yml so discovery works
+    dump_yaml({"name": "test-project", "version": "1.0.0"}, tmp_path / "apm.yml")
+    # Create .apm/instructions with a sample instruction
+    instr_dir = tmp_path / ".apm" / "instructions"
+    instr_dir.mkdir(parents=True)
+    (instr_dir / "style.instructions.md").write_text(
+        "---\ndescription: Style guide\napplyTo: '**/*.py'\n---\nUse type hints.\n",
+        encoding="utf-8",
+    )
+
+    rules_dir = tmp_path / ".agents" / "rules"
+    rules_dir.mkdir(parents=True)
+    (rules_dir / "unrelated.md").write_text(
+        "# Some unrelated rule\n\nManual note.\n",
+        encoding="utf-8",
+    )
+
+    from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+
+    compiler = AgentsCompiler(str(tmp_path))
+    config = CompilationConfig(target="antigravity", dry_run=False)
+    result = compiler.compile(config)
+    assert result.success
+
+    # Since unrelated.md is not an expected rule file for style.instructions.md,
+    # instructions should NOT be skipped, so AGENTS.md should be generated.
+    agents_md = tmp_path / "AGENTS.md"
+    assert agents_md.exists()
+    assert "Use type hints." in agents_md.read_text(encoding="utf-8")
