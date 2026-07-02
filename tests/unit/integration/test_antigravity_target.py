@@ -390,11 +390,10 @@ def test_antigravity_hooks_skip_when_agents_dir_absent(tmp_path: Path) -> None:
 
 def test_antigravity_instructions_included_without_rules_dir(tmp_path: Path) -> None:
     """Without .agents/rules/, instructions appear in AGENTS.md."""
-    import yaml
+    from apm_cli.utils.yaml_io import dump_yaml
 
     # Minimal apm.yml so discovery works
-    with open(tmp_path / "apm.yml", "w") as f:
-        yaml.dump({"name": "test-project", "version": "1.0.0"}, f)
+    dump_yaml({"name": "test-project", "version": "1.0.0"}, tmp_path / "apm.yml")
     # Create .apm/instructions with a sample instruction
     instr_dir = tmp_path / ".apm" / "instructions"
     instr_dir.mkdir(parents=True)
@@ -416,11 +415,10 @@ def test_antigravity_instructions_included_without_rules_dir(tmp_path: Path) -> 
 
 def test_antigravity_instructions_skipped_with_populated_rules_dir(tmp_path: Path) -> None:
     """With .agents/rules/ containing .md files, instructions are skipped from AGENTS.md."""
-    import yaml
+    from apm_cli.utils.yaml_io import dump_yaml
 
     # Minimal apm.yml so discovery works
-    with open(tmp_path / "apm.yml", "w") as f:
-        yaml.dump({"name": "test-project", "version": "1.0.0"}, f)
+    dump_yaml({"name": "test-project", "version": "1.0.0"}, tmp_path / "apm.yml")
     # Create .apm/instructions with a sample instruction
     instr_dir = tmp_path / ".apm" / "instructions"
     instr_dir.mkdir(parents=True)
