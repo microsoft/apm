@@ -1,0 +1,20 @@
+{
+  "name": "@microsoft/apm-cli-{{npm_platform}}-{{npm_arch}}",
+  "version": "{{ version }}",
+  "description": "APM (Agent Package Manager) -- ship and govern AI agent context",
+  "license": "MIT",
+  "author": "Microsoft",
+  "homepage": "https://microsoft.github.io/apm/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/microsoft/apm.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [{{ npm_platform | tojson }}],
+  "cpu": [{{ npm_arch | tojson }}],
+  "publishConfig": {
+    "provenance": true
+  }
+}

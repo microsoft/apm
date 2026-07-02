@@ -52,6 +52,7 @@ dev = [
     "pylint>=3.0.0",
 ]
 build = [
+    "jinja2>=3.1.6",
     "pyinstaller>=6.0.0",
 ]
 
