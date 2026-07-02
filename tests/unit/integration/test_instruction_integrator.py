@@ -1491,6 +1491,14 @@ class TestApplyToCommaSplitting:
         assert '  - "tests/**/*.py"' in result
         assert 'globs: "[' not in result
 
+    def test_antigravity_list_valued_apply_to_with_literal_commas(self):
+        content = "---\napplyTo:\n  - 'src/foo,bar/*.py'\n  - 'tests/**/*.py'\n---\n\n# R"
+        result = InstructionIntegrator._convert_to_antigravity_rules(content)
+        assert "trigger: glob" in result
+        assert "globs:" in result
+        assert '  - "src/foo,bar/*.py"' in result
+        assert '  - "tests/**/*.py"' in result
+
     def test_antigravity_malformed_yaml_fallback(self, caplog):
         import logging
 

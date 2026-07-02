@@ -641,7 +641,7 @@ class InstructionIntegrator(BaseIntegrator):
         from ..utils.yaml_io import load_yaml_str
 
         body = content
-        apply_to = ""
+        globs = []
 
         fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
         if fm_match:
@@ -652,12 +652,13 @@ class InstructionIntegrator(BaseIntegrator):
                 fm = {}
             raw_apply_to = fm.get("applyTo", "")
             if isinstance(raw_apply_to, list):
-                apply_to = ",".join(str(item) for item in raw_apply_to)
+                globs = [
+                    s for item in raw_apply_to
+                    if (s := str(item).replace("\n", " ").replace("\r", " ").strip())
+                ]
             else:
-                apply_to = str(raw_apply_to).strip()
-
-        safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
-        globs = parse_apply_to(safe_apply_to)
+                safe_apply_to = str(raw_apply_to).replace("\n", " ").replace("\r", " ").strip()
+                globs = parse_apply_to(safe_apply_to)
 
         parts = ["---"]
         if globs:
@@ -723,7 +724,7 @@ class InstructionIntegrator(BaseIntegrator):
         from ..utils.yaml_io import load_yaml_str
 
         body = content
-        apply_to = ""
+        globs = []
 
         # Parse existing frontmatter
         fm_match = re.match(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?", content, re.DOTALL)
@@ -740,14 +741,16 @@ class InstructionIntegrator(BaseIntegrator):
                 fm = {}
             raw_apply_to = fm.get("applyTo", "")
             if isinstance(raw_apply_to, list):
-                apply_to = ",".join(str(item) for item in raw_apply_to)
+                globs = [
+                    s for item in raw_apply_to
+                    if (s := str(item).replace("\n", " ").replace("\r", " ").strip())
+                ]
             else:
-                apply_to = str(raw_apply_to).strip()
+                safe_apply_to = str(raw_apply_to).replace("\n", " ").replace("\r", " ").strip()
+                globs = parse_apply_to(safe_apply_to)
 
         # Build Antigravity rules frontmatter
         parts = ["---"]
-        safe_apply_to = apply_to.replace("\n", " ").replace("\r", " ").strip()
-        globs = parse_apply_to(safe_apply_to)
         if globs:
             parts.append("trigger: glob")
             if len(globs) == 1:
