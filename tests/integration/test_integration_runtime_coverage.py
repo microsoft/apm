@@ -1836,7 +1836,7 @@ class TestInstructionConverters:
         content = "---\napplyTo:\n  - '**/*.py'\n  - '**/*.pyi'\n---\n# Python\n"
         result = InstructionIntegrator._convert_to_kiro_steering(content)
         assert "inclusion: fileMatch" in result
-        assert 'fileMatchPattern:' in result
+        assert "fileMatchPattern:" in result
         assert '  - "**/*.py"' in result
         assert '  - "**/*.pyi"' in result
 
