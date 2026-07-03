@@ -96,7 +96,7 @@ Treat `apm.yml` like `package.json`: it is committed, reviewed, and
 shipped. Do not embed tokens. Two patterns work:
 
 ```yaml
-# Env-var indirection -- the harness expands at runtime
+# Env-var indirection -- resolved by APM or the harness per target
 - name: linear
   registry: false
   transport: http
@@ -104,7 +104,7 @@ shipped. Do not embed tokens. Two patterns work:
   headers:
     Authorization: "Bearer ${LINEAR_TOKEN}"
 
-# Stdio env -- value passed verbatim; use ${VAR} for indirection
+# Stdio env -- use ${VAR} for indirection from the installer environment
 - name: my-internal
   registry: false
   transport: stdio
@@ -113,8 +113,14 @@ shipped. Do not embed tokens. Two patterns work:
     API_TOKEN: "${MY_API_TOKEN}"
 ```
 
-Headers and env values are not shell-expanded by APM -- the harness
-does that when it spawns the server or makes the request. Keep the
+Headers and env values are never shell-expanded by APM. For harnesses
+that support runtime env placeholders (for example VS Code and Kiro),
+APM preserves the placeholder so the harness resolves it when the
+server starts or the request is made. For harnesses that require
+literal values (for example Claude Code and Codex self-defined stdio
+env), APM resolves `${VAR}` from the install process environment,
+prompts interactively when the terminal is attached, and leaves
+unresolved placeholders unchanged in non-interactive installs. Keep the
 real secret in the consumer's environment (or their secret manager).
 
 The `github-mcp-server` is a special case: APM injects an
@@ -126,7 +132,7 @@ When a registry server marks an env/input variable optional, APM does
 not generate a prompt or runtime config entry unless a value is already
 available. See the
 [manifest schema reference](../../reference/manifest-schema/#424-variable-references-in-headers-and-env)
-for the canonical required-vs-optional rule.
+for the canonical per-target and required-vs-optional rules.
 
 ## Direct vs transitive: the trust boundary
 
