@@ -19,7 +19,7 @@ import secrets
 from contextlib import suppress
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import yaml
 from frontmatter.default_handlers import YAMLHandler as _FrontmatterYAMLHandler
@@ -291,19 +291,29 @@ def load_yaml_str(text: str) -> dict[str, Any] | None:
 def _roundtrip_yaml() -> Any:
     """Return a configured ruamel.yaml round-trip parser."""
     from ruamel.yaml import YAML
+    from ruamel.yaml.constructor import ConstructorError
+
+    def reject_python_tag(_constructor: Any, tag_suffix: str, node: Any) -> NoReturn:
+        raise ConstructorError(
+            None,
+            None,
+            f"forbidden Python YAML tag: {tag_suffix}",
+            node.start_mark,
+        )
 
     rt = YAML(typ="rt")
+    rt.Constructor.add_multi_constructor("tag:yaml.org,2002:python/", reject_python_tag)
     rt.preserve_quotes = True
     rt.indent(mapping=2, sequence=4, offset=2)
     return rt
 
 
-def _raise_as_pyyaml_error(exc: Exception) -> None:
+def _raise_as_pyyaml_error(exc: Exception) -> NoReturn:
     """Normalize ruamel parser failures to the yaml.YAMLError family."""
     from ruamel.yaml import YAMLError as RuamelYAMLError
 
     if isinstance(exc, RuamelYAMLError):
-        raise yaml.YAMLError(f"round-trip YAML parse failed: {exc}") from exc
+        raise yaml.YAMLError(f"YAML parse failed: {exc}") from exc
     raise exc
 
 
