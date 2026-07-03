@@ -147,6 +147,8 @@ class TestRuntimeSmoke:
         result = run_command(f"'{codex_binary}' --version", check=False)
         if "error while loading shared libraries" in (result.stderr or ""):
             pytest.skip(f"Codex binary has missing system dependencies: {result.stderr}")
+        if sys.platform == "darwin" and result.returncode == -9:
+            pytest.skip("Codex binary was killed by macOS platform trust checks")
         assert result.returncode == 0, f"Codex --version failed: {result.stderr}"
         assert result.stdout.strip(), "Codex version output is empty"
 

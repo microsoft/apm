@@ -770,12 +770,8 @@ def _validate_and_add_packages_to_apm_yml(
 # MCP registry / dry-run helpers are imported at module top (see
 # ``..install.mcp.*`` imports above) so test patches keep working.
 
-# ---------------------------------------------------------------------------
-# install() decomposition: extracted flow helpers
-# ---------------------------------------------------------------------------
 
-
-def _handle_mcp_install(
+def _handle_mcp_install(  # noqa: PLR0913
     *,
     mcp_name,
     transport,
@@ -787,6 +783,7 @@ def _handle_mcp_install(
     dev,
     force,
     runtime,
+    target,
     exclude,
     verbose,
     logger,
@@ -876,6 +873,7 @@ def _handle_mcp_install(
         dev=dev,
         force=force,
         runtime=runtime,
+        explicit_target=target,
         exclude=exclude,
         logger=logger,
         apm_dir=mcp_apm_dir,
@@ -1403,6 +1401,7 @@ def install(  # noqa: PLR0913
                 dev=dev,
                 force=force,
                 runtime=runtime,
+                target=target,
                 exclude=exclude,
                 verbose=verbose,
                 logger=logger,

@@ -169,8 +169,10 @@ Valid targets: claude, copilot, cursor, ...
 ```
 
 Cause: the value passed to `--target` (or listed in `apm.yml` `targets:`) is not a known harness.
+Some names, such as `intellij`, are runtime aliases rather than install targets.
 
-Fix: run `apm targets` for the canonical list. Check for typos.
+Fix: run `apm targets` for the canonical list. For JetBrains Copilot, use
+`--runtime intellij`; it maps to the canonical `copilot` target.
 
 See also: [../reference/cli/targets/](../reference/cli/targets/), [../reference/targets-matrix/](../reference/targets-matrix/)
 

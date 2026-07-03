@@ -24,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - JetBrains users who pass `apm install --target intellij` now get a clear
   redirect to `--runtime intellij`, and install docs no longer list `intellij`
-  as a standalone target. (#1957)
+  as a standalone target. `--mcp --target copilot --runtime intellij` now also
+  honors the explicit target gate for JetBrains MCP writes. (#1957)
 
 ## [0.23.1] - 2026-06-29
 
