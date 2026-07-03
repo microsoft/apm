@@ -78,7 +78,7 @@ class TestDependencyReferenceSkillSubset:
         assert "owner/repo" in result
 
     def test_round_trip_parse_emit(self):
-        """Parse dict with skills, emit, re-parse → same value."""
+        """Parse dict with skills, emit, re-parse -> same value."""
         entry = {"git": "owner/repo#main", "skills": ["web", "cli"]}
         ref = DependencyReference.parse_from_dict(entry)
         emitted = ref.to_apm_yml_entry()
@@ -93,6 +93,19 @@ class TestDependencyReferenceSkillSubset:
         ref = DependencyReference.parse_from_dict(entry)
         assert ref.skill_subset == ["my-skill"]
         assert ref.reference == "v2.0.0"
+
+    def test_local_path_parse_skills(self):
+        """skills: on a path: dep populates skill_subset (regression for issue #1982)."""
+        entry = {"path": "./local", "skills": ["reviewer"]}
+        ref = DependencyReference.parse_from_dict(entry)
+        assert ref.skill_subset == ["reviewer"]
+        assert ref.is_local
+
+    def test_local_path_skills_round_trip(self):
+        """path: dep with skills: emits dict form, not git: form."""
+        entry = {"path": "./local", "skills": ["reviewer"]}
+        emitted = DependencyReference.parse_from_dict(entry).to_apm_yml_entry()
+        assert emitted == {"path": "./local", "skills": ["reviewer"]}
 
 
 # ============================================================================
