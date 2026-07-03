@@ -12,9 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm audit --ci` no longer reports phantom drift for root-local hook files
   when audit replay writes into a scratch project root. (#1980)
 
-- `apm install --target intellij` now explains that `intellij` is a runtime
-  alias for the `copilot` target, and install docs no longer list it as a
-  target. (#1957)
+- JetBrains users who pass `apm install --target intellij` now get a clear
+  redirect to `--runtime intellij`, and install docs no longer list `intellij`
+  as a standalone target. (#1957)
 
 ## [0.23.1] - 2026-06-29
 

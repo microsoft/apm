@@ -265,6 +265,16 @@ def test_unknown_target_rejected():
     assert "claude" in msg or "copilot" in msg
 
 
+def test_runtime_alias_target_suggests_runtime_flag():
+    with pytest.raises(UnknownTargetError) as exc_info:
+        parse_targets_field({"targets": ["intellij"]})
+
+    message = str(exc_info.value)
+    assert "--runtime intellij" in message
+    assert "--target copilot" in message
+    assert "maps to target 'copilot'" in message
+
+
 # ---------------------------------------------------------------------------
 # YAML list under 'target:' singular key (#1188)
 # ---------------------------------------------------------------------------

@@ -81,6 +81,7 @@ def test_unknown_target_error_suggests_runtime_alias_flag():
     assert "--runtime intellij" in text
     assert "--target copilot" in text
     assert "maps to target 'copilot'" in text
+    assert "'intellij' is a runtime alias, not an install target." in text
 
 
 def test_unknown_target_error_suggests_copilot_not_first_alphabetical():

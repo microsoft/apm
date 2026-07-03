@@ -891,8 +891,8 @@ def _handle_mcp_install(
 @click.option(
     "--runtime",
     help=(
-        "Deploy to one MCP/LSP runtime (copilot, claude, codex, cursor, gemini, antigravity, intellij, kiro, opencode, windsurf). "
-        "Runtime aliases map to canonical targets (intellij -> copilot)."
+        "Deploy to one MCP/LSP runtime by alias (for JetBrains, intellij -> copilot). "
+        "For normal deployment targets, use --target or apm targets."
     ),
 )
 @click.option("--exclude", help="Exclude specific runtime from installation")

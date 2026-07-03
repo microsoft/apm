@@ -137,21 +137,22 @@ GitHub Copilot for JetBrains reads MCP servers from a single user-scope
 `mcp.json` (the per-OS path above), so configuration is global rather than
 per-project. Prerequisite: install the GitHub Copilot plugin in your JetBrains
 IDE at least once so the `github-copilot/intellij/` config directory exists --
-that directory is the auto-detect signal.
+that directory is the installed-runtime signal.
 
 ```bash
 # Install an MCP server into the JetBrains user-scope config
-apm install --mcp <package> --runtime intellij
+apm install --mcp <package> --target copilot --runtime intellij
 ```
 
 Notes and limits:
 
 - **Auto-detect is user-scope only.** Unlike project markers such as `.cursor/`
   or `.windsurf/`, JetBrains is detected from the global config directory, not a
-  file in your repo. It is therefore detected for every project on the machine
-  once the plugin directory exists. Use `--runtime intellij` to target it
-  explicitly regardless of auto-detect. `intellij` is a runtime alias that maps
-  to the `copilot` deployment target; do not pass it as `--target intellij`.
+  file in your repo. It is therefore detected as an installed MCP runtime once
+  the plugin directory exists, but project-scope writes are still gated by the
+  active `copilot` target. Use `--target copilot --runtime intellij` when a
+  project has no Copilot marker yet. `intellij` is a runtime alias that maps to
+  the `copilot` deployment target; do not pass it as `--target intellij`.
 - **Runtime env substitution.** JetBrains Copilot resolves `${env:VAR}` in
   `mcp.json` at server start. APM preserves env-var placeholders as
   `${env:VAR}` instead of writing matching host secrets into the config.

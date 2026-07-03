@@ -781,10 +781,17 @@ def _validate_canonical_v2(tokens: list[str]) -> None:
     """Validate every token is a known canonical target."""
     from apm_cli.core.apm_yml import CANONICAL_TARGETS
     from apm_cli.core.errors import UnknownTargetError, render_unknown_target_error
+    from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
 
     for token in tokens:
         if token not in CANONICAL_TARGETS:
-            raise UnknownTargetError(render_unknown_target_error(token, sorted(CANONICAL_TARGETS)))
+            raise UnknownTargetError(
+                render_unknown_target_error(
+                    token,
+                    sorted(CANONICAL_TARGETS),
+                    RUNTIME_TO_CANONICAL_TARGET,
+                )
+            )
 
 
 def resolve_targets(

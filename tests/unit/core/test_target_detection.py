@@ -705,6 +705,19 @@ class TestTargetParamType:
         assert "--target copilot" in message
         assert "maps to target 'copilot'" in message
 
+    def test_runtime_alias_resolve_error_suggests_runtime_flag(self, tmp_path):
+        """Resolver validation keeps the runtime-alias guidance."""
+        from apm_cli.core.errors import UnknownTargetError
+        from apm_cli.core.target_detection import resolve_targets
+
+        with pytest.raises(UnknownTargetError) as exc_info:
+            resolve_targets(tmp_path, flag="intellij")
+
+        message = str(exc_info.value)
+        assert "--runtime intellij" in message
+        assert "--target copilot" in message
+        assert "maps to target 'copilot'" in message
+
     def test_invalid_in_multi(self):
         """Invalid target in comma list produces clean error."""
         with pytest.raises(click.UsageError, match="Unknown target"):

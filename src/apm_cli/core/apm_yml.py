@@ -39,9 +39,17 @@ CANONICAL_TARGETS: frozenset[str] = frozenset(
 
 def _validate_canonical(tokens: list[str]) -> None:
     """Validate every token is in CANONICAL_TARGETS. Raises UnknownTargetError."""
+    from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
+
     for token in tokens:
         if token not in CANONICAL_TARGETS:
-            raise UnknownTargetError(render_unknown_target_error(token, sorted(CANONICAL_TARGETS)))
+            raise UnknownTargetError(
+                render_unknown_target_error(
+                    token,
+                    sorted(CANONICAL_TARGETS),
+                    RUNTIME_TO_CANONICAL_TARGET,
+                )
+            )
 
 
 def parse_targets_field(yaml_data: dict) -> list[str]:
