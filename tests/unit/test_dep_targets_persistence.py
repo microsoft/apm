@@ -8,6 +8,66 @@ from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.models.dependency.reference import DependencyReference
 
 
+class TestLocalPathDepTargets:
+    """Regression tests for issue #1982: targets: ignored on path: deps."""
+
+    def test_local_path_parse_targets(self) -> None:
+        dep = DependencyReference.parse_from_dict({"path": "./local", "targets": ["claude"]})
+
+        assert dep.target_subset == ["claude"]
+        assert dep.is_local
+
+    def test_local_path_parse_no_targets(self) -> None:
+        dep = DependencyReference.parse_from_dict({"path": "./local"})
+
+        assert dep.target_subset is None
+
+    def test_local_path_targets_round_trip(self) -> None:
+        entry = {"path": "./local", "targets": ["codex", "claude"]}
+
+        emitted = DependencyReference.parse_from_dict(entry).to_apm_yml_entry()
+
+        assert emitted == {"path": "./local", "targets": ["claude", "codex"]}
+
+    def test_local_path_targets_and_skills_coexist(self) -> None:
+        entry = {"path": "./local", "targets": ["claude"], "skills": ["reviewer"]}
+
+        dep = DependencyReference.parse_from_dict(entry)
+
+        assert dep.target_subset == ["claude"]
+        assert dep.skill_subset == ["reviewer"]
+        assert dep.to_apm_yml_entry() == {
+            "path": "./local",
+            "skills": ["reviewer"],
+            "targets": ["claude"],
+        }
+
+    def test_local_path_unknown_target_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown target"):
+            DependencyReference.parse_from_dict({"path": "./local", "targets": ["notarealthing"]})
+
+    def test_local_path_parse_alias(self) -> None:
+        dep = DependencyReference.parse_from_dict({"path": "./local", "alias": "my-skills"})
+
+        assert dep.alias == "my-skills"
+        assert dep.is_local
+
+    def test_local_path_alias_round_trip(self) -> None:
+        entry = {"path": "./local", "alias": "my-skills"}
+
+        emitted = DependencyReference.parse_from_dict(entry).to_apm_yml_entry()
+
+        assert emitted == {"path": "./local", "alias": "my-skills"}
+
+    def test_local_path_alias_invalid_chars_raises(self) -> None:
+        with pytest.raises(ValueError, match="Invalid alias"):
+            DependencyReference.parse_from_dict({"path": "./local", "alias": "bad alias!"})
+
+    def test_local_path_unknown_field_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unsupported field"):
+            DependencyReference.parse_from_dict({"path": "./local", "target": ["claude"]})
+
+
 def test_parse_targets_field() -> None:
     dep = DependencyReference.parse_from_dict({"git": "owner/repo", "targets": ["codex"]})
 

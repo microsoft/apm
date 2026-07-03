@@ -167,12 +167,20 @@ instead so `@` remains reserved for git usernames and version syntax.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `path` | REQUIRED | Filesystem path (must start with `./`, `../`, `/`, or `~/`). |
+| `alias` | OPTIONAL | Install under a custom directory name (`^[a-zA-Z0-9._-]+$`). |
+| `skills` | OPTIONAL | Consumer-side skill subset for that dependency. Non-empty list of skill names. |
+| `targets` | OPTIONAL | Consumer-side harness subset for that dependency's target-scoped primitives. Non-empty list of target names. |
 
 Local-path deps inside another local package resolve relative to that
 package's directory, not the project root.
 
 ```yaml
 - path: ./packages/my-skills
+
+- path: ./packages/local-review-kit
+  alias: local-review-kit
+  skills: [reviewer]
+  targets: [claude]
 ```
 
 ### Marketplace (`name` + `marketplace`)
@@ -325,6 +333,7 @@ dependency's target-scoped primitives. They compose via intersection. See
   A non-empty list narrows reach; it never widens beyond what the install
   resolved. An empty list is a parse error; remove the field to mean
   "all".
+- Supported on: both `git:` and `path:` dependency forms.
 
 ```yaml
 dependencies:
@@ -334,6 +343,9 @@ dependencies:
 
     - git: owner/universal-hooks
       # no targets: all active install targets
+
+    - path: ./skills/my-local-skill
+      targets: [claude]         # local deps support targets: too
 ```
 
 The lockfile records `target_subset` for audit/display only. Install
@@ -369,7 +381,7 @@ dependencies:
         #                            and resolved at runtime.
         #                            Kiro: preserved as ${VAR} and resolved at runtime.
         #                            Cursor/Windsurf/OpenCode/Claude/Gemini: resolved at install time.
-        #                            Codex: passed through unchanged.
+        #                            Codex: resolved at install time.
         #   ${input:<id>}         -> VS Code prompts user at runtime
         #   <VAR>                 -> deprecated; auto-translated, emits a warning
         # Registry-declared optional env/input fields are omitted when unset;
