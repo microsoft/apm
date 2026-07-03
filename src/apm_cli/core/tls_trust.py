@@ -31,10 +31,17 @@ import os
 
 logger = logging.getLogger(__name__)
 
-# Env vars through which a user pins an explicit CA bundle. When any is set we
-# respect that choice rather than silently redirecting verification to the OS
-# trust store (which could ignore a deliberately narrow, air-gapped bundle).
-_EXPLICIT_CA_ENV_VARS = ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSL_CERT_FILE")
+# Env vars ``requests`` actually consults for its CA bundle (via
+# ``Session.merge_environment_settings``). When one is set the user has pinned a
+# specific bundle for the HTTP path, so we honour it verbatim instead of
+# redirecting to the OS store.
+#
+# ``SSL_CERT_FILE`` is deliberately NOT in this set: ``requests`` does not read
+# it, and the PyInstaller runtime hook (build/hooks/runtime_hook_ssl_certs.py)
+# sets it to the bundled certifi in the frozen binary. Treating it as an
+# override would silently disable OS-trust injection in exactly the shipped
+# artifact this feature targets.
+_EXPLICIT_CA_ENV_VARS = ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE")
 
 # Escape hatch: set truthy to force the legacy certifi-only behaviour.
 _DISABLE_ENV_VAR = "APM_DISABLE_TRUSTSTORE"
@@ -66,8 +73,11 @@ def configure_tls_trust() -> bool:
 
     try:
         import truststore
-    except ImportError:
-        logger.debug("truststore not installed; verifying TLS against bundled certifi")
+    except Exception as exc:
+        # Usually ImportError (not bundled), but a broken or platform-incompatible
+        # install can raise other errors at import time. Degrade rather than let
+        # TLS setup crash startup.
+        logger.debug("truststore unavailable (%s); verifying TLS against bundled certifi", exc)
         return False
 
     try:

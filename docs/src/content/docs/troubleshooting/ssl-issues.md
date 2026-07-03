@@ -58,7 +58,7 @@ APM verifies HTTPS against the **operating-system trust store** by default (via 
 
 You only need the steps below when the CA is *not* in the OS store, or you want to pin a specific bundle:
 
-- Setting `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, or `SSL_CERT_FILE` makes APM honour that bundle instead of the OS store.
+- Setting `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE` makes APM's HTTP layer verify against that bundle instead of the OS store. (`SSL_CERT_FILE` configures the stdlib `ssl` layer but is *not* read by `requests`, so on its own it does not override the HTTP path — use `REQUESTS_CA_BUNDLE` for that.)
 - `APM_DISABLE_TRUSTSTORE=1` restores the legacy behaviour (verify against APM's bundled `certifi` set only).
 
 ## Configure trust

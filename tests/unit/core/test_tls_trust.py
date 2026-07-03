@@ -21,7 +21,7 @@ from apm_cli.core.tls_trust import (
     configure_tls_trust,
 )
 
-_ALL_TRUST_ENV = (_DISABLE_ENV_VAR, *_EXPLICIT_CA_ENV_VARS)
+_ALL_TRUST_ENV = (_DISABLE_ENV_VAR, "SSL_CERT_FILE", *_EXPLICIT_CA_ENV_VARS)
 
 
 @pytest.fixture(autouse=True)
@@ -59,6 +59,17 @@ def test_explicit_ca_bundle_wins(monkeypatch, var):
 
     assert configure_tls_trust() is False
     assert calls["n"] == 0
+
+
+def test_ssl_cert_file_does_not_suppress_injection(monkeypatch):
+    # SSL_CERT_FILE is not a requests CA override and IS set by the frozen-binary
+    # runtime hook (to bundled certifi). It must NOT disable OS-trust injection,
+    # or the feature becomes a no-op in the shipped artifact.
+    calls = _install_fake_truststore(monkeypatch)
+    monkeypatch.setenv("SSL_CERT_FILE", "/etc/ssl/certs/ca-certificates.crt")
+
+    assert configure_tls_trust() is True
+    assert calls["n"] == 1
 
 
 def test_missing_truststore_falls_back(monkeypatch):

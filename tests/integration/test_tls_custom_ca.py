@@ -150,8 +150,10 @@ def test_verify_with_ca_path_succeeds(custom_ca_server):
     assert resp.text == "ok"
 
 
-def test_explicit_ca_bundle_env_is_honored(custom_ca_server, monkeypatch):
-    monkeypatch.setenv("REQUESTS_CA_BUNDLE", custom_ca_server.ca_path)
+@pytest.mark.parametrize("env_var", ["REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"])
+def test_explicit_ca_bundle_env_is_honored(custom_ca_server, monkeypatch, env_var):
+    # Both env vars requests consults must win end-to-end.
+    monkeypatch.setenv(env_var, custom_ca_server.ca_path)
 
     # An explicit bundle must win: we skip truststore injection...
     assert configure_tls_trust() is False
