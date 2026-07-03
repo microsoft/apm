@@ -371,6 +371,42 @@ class TestLockfileSatisfiesManifest:
         assert ok is True
         assert reasons == []
 
+    def test_satisfied_when_private_git_dep_lock_key_is_host_qualified(self):
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="org/private-skills",
+                host="git.example.com",
+                resolved_ref="main",
+                resolved_commit="a" * 40,
+                depth=1,
+            )
+        )
+        manifest = [DependencyReference.parse("git@git.example.com:org/private-skills.git")]
+
+        ok, reasons = lockfile_satisfies_manifest(lock, manifest)
+
+        assert ok is True
+        assert reasons == []
+
+    def test_satisfied_when_github_git_dep_uses_default_host_key(self):
+        lock = _new_lockfile()
+        lock.add_dependency(
+            LockedDependency(
+                repo_url="org/public-skills",
+                host="github.com",
+                resolved_ref="main",
+                resolved_commit="b" * 40,
+                depth=1,
+            )
+        )
+        manifest = [DependencyReference.parse("git@github.com:org/public-skills.git")]
+
+        ok, reasons = lockfile_satisfies_manifest(lock, manifest)
+
+        assert ok is True
+        assert reasons == []
+
     def test_unsatisfied_when_manifest_dep_missing_from_lock(self):
         lock = _new_lockfile()
         manifest = [_resolved_dep("https://github.com/missing/r", "main", None)]
