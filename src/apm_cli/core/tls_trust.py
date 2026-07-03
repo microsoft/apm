@@ -1,27 +1,17 @@
-"""Default TLS trust configuration for APM's HTTP layer.
+"""Verify HTTPS against the OS trust store by default.
 
-By default ``requests`` verifies HTTPS against the bundled ``certifi`` CA set,
-which does **not** contain internal/corporate root CAs or the certificates
-injected by a TLS-inspecting proxy (Zscaler, Netskope, Palo Alto, ...). APM
-also shells out to ``git``, which reads the OS trust store, so ``git clone``
-of an internal host succeeds while APM's ``requests``-based Contents API calls
-fail against the *same* certificate chain -- a confusing, inconsistent
-failure for enterprise users.
+``requests`` verifies against the bundled ``certifi`` set, which lacks
+internal/corporate root CAs and TLS-proxy certs. Because APM also shells out to
+``git`` (which reads the OS trust store), ``git clone`` of an internal host
+succeeds while APM's ``requests`` calls fail on the same chain. This routes
+``requests`` through the OS store via ``truststore`` so the two agree, with no
+per-shell config.
 
-This module opts APM into the OS trust store via `truststore
-<https://pypi.org/project/truststore/>`_ so both paths verify against the
-same source with zero per-shell configuration. It is deliberately
-best-effort:
+Best-effort -- ``configure_tls_trust`` never raises:
 
-* If the user has pinned an explicit CA bundle (``REQUESTS_CA_BUNDLE`` /
-  ``CURL_CA_BUNDLE`` / ``SSL_CERT_FILE``), that choice wins and we do not
-  override it.
-* If ``truststore`` is unavailable or injection raises for any reason, APM
-  silently falls back to the previous ``certifi`` behaviour.
-* ``APM_DISABLE_TRUSTSTORE`` forces the old behaviour as an escape hatch.
-
-``configure_tls_trust`` never raises: TLS setup must not be able to crash CLI
-startup.
+* An explicit ``REQUESTS_CA_BUNDLE`` / ``CURL_CA_BUNDLE`` wins (no injection).
+* Missing ``truststore`` or a failed injection falls back to ``certifi``.
+* ``APM_DISABLE_TRUSTSTORE`` forces the legacy ``certifi``-only behaviour.
 """
 
 from __future__ import annotations
@@ -31,16 +21,11 @@ import os
 
 logger = logging.getLogger(__name__)
 
-# Env vars ``requests`` actually consults for its CA bundle (via
-# ``Session.merge_environment_settings``). When one is set the user has pinned a
-# specific bundle for the HTTP path, so we honour it verbatim instead of
-# redirecting to the OS store.
-#
-# ``SSL_CERT_FILE`` is deliberately NOT in this set: ``requests`` does not read
-# it, and the PyInstaller runtime hook (build/hooks/runtime_hook_ssl_certs.py)
-# sets it to the bundled certifi in the frozen binary. Treating it as an
-# override would silently disable OS-trust injection in exactly the shipped
-# artifact this feature targets.
+# The CA-bundle env vars ``requests`` honours (via merge_environment_settings);
+# when one is set, respect that pinned bundle and skip injection. SSL_CERT_FILE
+# is excluded on purpose: requests ignores it, and the frozen binary's runtime
+# hook sets it to the bundled certifi -- treating it as an override would make
+# injection a no-op in the shipped artifact.
 _EXPLICIT_CA_ENV_VARS = ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE")
 
 # Escape hatch: set truthy to force the legacy certifi-only behaviour.
@@ -67,22 +52,18 @@ def configure_tls_trust() -> bool:
 
     explicit = next((var for var in _EXPLICIT_CA_ENV_VARS if os.environ.get(var)), None)
     if explicit:
-        # The user asked for a specific bundle; honour it verbatim.
         logger.debug("Explicit CA bundle set via %s; leaving certifi/verify path intact", explicit)
         return False
 
     try:
+        # Broad except: a broken/incompatible install can fail at import, not
+        # only with ImportError -- degrade instead of crashing startup.
         import truststore
     except Exception as exc:
-        # Usually ImportError (not bundled), but a broken or platform-incompatible
-        # install can raise other errors at import time. Degrade rather than let
-        # TLS setup crash startup.
         logger.debug("truststore unavailable (%s); verifying TLS against bundled certifi", exc)
         return False
 
     try:
-        # Broad by design: trust setup must never crash CLI startup, so any
-        # failure degrades to the certifi default rather than propagating.
         truststore.inject_into_ssl()
     except Exception as exc:
         logger.debug("truststore.inject_into_ssl() failed (%s); falling back to certifi", exc)
