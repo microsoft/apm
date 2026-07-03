@@ -174,6 +174,16 @@ export function createHandler(deps) {
                     "--json", "number,title,body,author,labels,state,createdAt,updatedAt,comments",
                 ]);
                 const data = JSON.parse(out);
+                const rawComments = Array.isArray(data.comments) ? data.comments : [];
+                const commentList = rawComments.map(c => ({
+                    id: c.url || c.id || "",
+                    author: c.author?.login || "unknown",
+                    body: c.body || "",
+                    createdAt: c.createdAt || "",
+                    url: c.url || "",
+                    isBot: /\[bot\]/.test(c.author?.login || ""),
+                    isTriagePanel: (c.body || "").includes("```json triage-decision"),
+                }));
                 res.end(JSON.stringify({
                     number: data.number,
                     title: data.title,
@@ -183,7 +193,8 @@ export function createHandler(deps) {
                     state: data.state,
                     createdAt: data.createdAt,
                     updatedAt: data.updatedAt,
-                    comments: Array.isArray(data.comments) ? data.comments.length : (data.comments || 0),
+                    comments: rawComments.length,
+                    commentList,
                 }));
             } catch (e) {
                 res.end(JSON.stringify({ error: String(e.message || e) }));
@@ -426,6 +437,92 @@ export function createHandler(deps) {
                 res.end(JSON.stringify({ ok: true, created }));
             } catch (e) {
                 res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+            }
+            return;
+        }
+
+        // GET /api/triage -- fetch issues with triage-decision comments (lazy, cached)
+        if (req.url === "/api/triage") {
+            res.setHeader("Content-Type", "application/json");
+            const TRIAGE_TTL_MS = 5 * 60 * 1000;
+            const cache = handler._triageCache;
+            if (cache && (Date.now() - cache.fetchedAt) < TRIAGE_TTL_MS) {
+                res.end(JSON.stringify({ items: cache.items, lastUpdated: cache.lastUpdated, total: cache.items.length }));
+                return;
+            }
+            try {
+                const listOut = await ghExec([
+                    "issue", "list",
+                    "--repo", repo,
+                    "--state", "open",
+                    "--limit", "100",
+                    "--json", "number,title,labels,author,url,comments",
+                ]);
+                const issues = JSON.parse(listOut);
+                const withComments = issues.filter(i => {
+                    const cnt = typeof i.comments === "number" ? i.comments : (Array.isArray(i.comments) ? i.comments.length : 0);
+                    return cnt > 0;
+                });
+
+                // Semaphore: max 6 concurrent gh calls
+                let active = 0;
+                const queue = [];
+                function acquireTriage() {
+                    return new Promise((resolve) => {
+                        const run = () => { active++; resolve(() => { active--; if (queue.length) queue.shift()(); }); };
+                        if (active < 6) run(); else queue.push(run);
+                    });
+                }
+
+                const triageItems = [];
+                await Promise.all(withComments.map(async (issue) => {
+                    const release = await acquireTriage();
+                    try {
+                        const cOut = await ghExec([
+                            "issue", "view", String(issue.number),
+                            "--repo", repo,
+                            "--json", "comments",
+                        ]);
+                        const parsed = JSON.parse(cOut);
+                        const comments = Array.isArray(parsed.comments) ? parsed.comments : [];
+                        for (const c of comments) {
+                            const body = c.body || "";
+                            const m = body.match(/```json\s+triage-decision\s*\n([\s\S]*?)\n```/);
+                            if (!m) continue;
+                            try {
+                                const td = JSON.parse(m[1]);
+                                triageItems.push({
+                                    number: issue.number,
+                                    title: (issue.title || "").slice(0, 90),
+                                    url: issue.url || "",
+                                    labels: (issue.labels || []).map(l => l.name),
+                                    triageAuthor: c.author?.login || "unknown",
+                                    triageCreatedAt: c.createdAt || "",
+                                    commentBody: body,
+                                    decision: td.decision || "",
+                                    decisionDetail: td.decision_detail || "",
+                                    theme: td.theme || "",
+                                    areas: Array.isArray(td.areas) ? td.areas : [],
+                                    type: td.type || "",
+                                    status: td.status || "",
+                                    priority: td.priority || "",
+                                    milestone: td.milestone || "",
+                                    nextAction: td.next_action || "",
+                                    preservedLabels: Array.isArray(td.preserved_labels) ? td.preserved_labels : [],
+                                });
+                                break; // one triage-decision per issue
+                            } catch (_) { /* malformed JSON, skip */ }
+                        }
+                    } catch (_) { /* ignore per-issue errors */ } finally {
+                        release();
+                    }
+                }));
+
+                const lastUpdated = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                handler._triageCache = { items: triageItems, fetchedAt: Date.now(), lastUpdated };
+                res.end(JSON.stringify({ items: triageItems, lastUpdated, total: triageItems.length }));
+            } catch (e) {
+                res.end(JSON.stringify({ items: [], error: String(e.message || e) }));
             }
             return;
         }

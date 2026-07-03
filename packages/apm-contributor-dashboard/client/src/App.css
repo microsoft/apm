@@ -628,3 +628,69 @@ tr.filtered-out { display: none; }
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* Triage decision badges */
+.decision-accept { background: #23863630; color: #3fb950; border: 1px solid #238636; }
+.decision-needs-design { background: #6e40c930; color: #bc8cff; border: 1px solid #6e40c9; }
+.decision-decline { background: #f8514920; color: #f85149; border: 1px solid #f85149; }
+.decision-defer { background: #30363d; color: #8b949e; border: 1px solid #484f58; }
+.decision-auto-handle { background: #1f6feb30; color: #58a6ff; border: 1px solid #1f6feb; }
+.decision-duplicate { background: #d2992220; color: #d29922; border: 1px solid #d29922; }
+
+/* Triage detail modal */
+.triage-summary-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0;
+}
+.triage-summary-item {
+  padding: 10px 14px; background: #161b22;
+  border: 1px solid #21262d; border-radius: 8px;
+}
+.triage-summary-item .ts-label {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; color: #8b949e; margin-bottom: 4px;
+}
+.triage-summary-item .ts-value { font-size: 13px; color: #e6edf3; line-height: 1.4; }
+.triage-next-action {
+  padding: 10px 14px; background: #161b22; border: 1px solid #21262d;
+  border-radius: 8px; margin: 12px 0;
+}
+.triage-next-action .ts-label {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; color: #8b949e; margin-bottom: 4px;
+}
+.triage-next-action .ts-value { font-size: 13px; color: #c9d1d9; line-height: 1.5; }
+.triage-areas { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.triage-area-chip {
+  padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+  background: #1f6feb20; color: #58a6ff; border: 1px solid #1f6feb40;
+}
+
+/* Issue comment thread */
+.comment-thread { margin-top: 8px; }
+.comment-item {
+  padding: 10px 14px; margin-bottom: 8px;
+  border: 1px solid #21262d; border-radius: 8px; background: #161b22;
+}
+.comment-item-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px;
+}
+.comment-author { font-weight: 600; color: #58a6ff; }
+.comment-date { color: #484f58; font-size: 11px; margin-left: auto; }
+.comment-kind {
+  display: inline-block; padding: 1px 7px; border-radius: 10px;
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+}
+.comment-kind-human { background: #1f6feb20; color: #58a6ff; }
+.comment-kind-bot { background: #30363d; color: #8b949e; }
+.comment-kind-triage { background: #6e40c930; color: #bc8cff; }
+.comment-body {
+  font-size: 12px; color: #c9d1d9; line-height: 1.5;
+  max-height: 280px; overflow-y: auto; word-wrap: break-word;
+}
+.comment-body h1, .comment-body h2, .comment-body h3 { font-size: 14px; margin: 8px 0 4px; color: #e6edf3; }
+.comment-body code { background: #0d1117; padding: 2px 5px; border-radius: 3px; font-size: 11px; }
+.comment-body pre { background: #0d1117; padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 11px; margin: 6px 0; border: 1px solid #30363d; }
+.comment-body details { margin: 8px 0; }
+.comment-body summary { cursor: pointer; color: #8b949e; font-size: 12px; font-weight: 600; }
+.comment-body summary:hover { color: #e6edf3; }
+.comment-empty { text-align: center; padding: 24px; color: #8b949e; font-size: 13px; }

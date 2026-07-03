@@ -84,3 +84,7 @@ export async function getPermissions() {
 export async function createFollowUpIssues(prNumber, panelReview) {
   return postJson("/create-follow-up-issues", { number: prNumber, panelReview });
 }
+
+export async function getTriageData() {
+  return fetchJson("/api/triage");
+}
