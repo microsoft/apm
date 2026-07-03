@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from apm_cli.marketplace.output_mappers import sanitise_marketplace_name
+from apm_cli.marketplace.output_mappers import sanitize_marketplace_name
 
 
-class TestSanitiseMarketplaceName:
-    """Verify sanitise_marketplace_name produces valid kebab-case output."""
+class TestSanitizeMarketplaceName:
+    """Verify sanitize_marketplace_name produces valid kebab-case output."""
 
     @pytest.mark.parametrize(
         ("raw", "expected"),
@@ -29,13 +29,13 @@ class TestSanitiseMarketplaceName:
         ],
     )
     def test_converts_to_kebab_case(self, raw: str, expected: str) -> None:
-        assert sanitise_marketplace_name(raw) == expected
+        assert sanitize_marketplace_name(raw) == expected
 
     def test_empty_string_returns_fallback(self) -> None:
-        assert sanitise_marketplace_name("") == "marketplace"
+        assert sanitize_marketplace_name("") == "marketplace"
 
     def test_only_special_chars_returns_fallback(self) -> None:
-        assert sanitise_marketplace_name("...") == "marketplace"
+        assert sanitize_marketplace_name("...") == "marketplace"
 
     def test_already_kebab_case_unchanged(self) -> None:
-        assert sanitise_marketplace_name("my-marketplace") == "my-marketplace"
+        assert sanitize_marketplace_name("my-marketplace") == "my-marketplace"
