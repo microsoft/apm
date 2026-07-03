@@ -119,7 +119,7 @@ def _lock_deps(project: Path) -> dict[str, dict[str, Any]]:
     }
 
 
-def _argv(command: Any) -> list[str]:
+def _argv(command: object) -> list[str]:
     """Return a subprocess command as argv tokens for the network sentinel."""
     if isinstance(command, (list, tuple)):
         return [str(part) for part in command]
