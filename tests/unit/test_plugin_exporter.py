@@ -18,8 +18,10 @@ from apm_cli.bundle.plugin_exporter import (
     _collect_mcp,
     _collect_root_plugin_components,
     _deep_merge,
+    _deployed_path_parts,
     _get_dev_dependency_urls,
     _merge_file_map,
+    _plugin_rel_for_deployed_path,
     _rename_prompt,
     _update_plugin_json_paths,
     _validate_output_rel,
@@ -157,6 +159,44 @@ class TestValidateOutputRel:
 
     def test_rejects_absolute_windows(self):
         assert _validate_output_rel("C:\\Windows\\System32") is False
+
+
+class TestDeployedPathParts:
+    def test_normalizes_backslashes_to_posix_parts(self):
+        assert _deployed_path_parts(".agents\\skills\\alpha\\SKILL.md") == (
+            ".agents",
+            "skills",
+            "alpha",
+            "SKILL.md",
+        )
+
+    def test_rejects_absolute_posix_path(self):
+        with pytest.raises(ValueError, match=r"absolute deployed file path"):
+            _deployed_path_parts("/etc/passwd")
+
+    def test_rejects_absolute_windows_path(self):
+        with pytest.raises(ValueError, match=r"absolute deployed file path"):
+            _deployed_path_parts("C:\\Windows\\System32\\cmd.exe")
+
+    def test_rejects_traversal_path(self):
+        with pytest.raises(ValueError, match=r"unsafe deployed file path"):
+            _deployed_path_parts(".agents/skills/../../escape")
+
+
+class TestPluginRelForDeployedPath:
+    def test_top_level_skills_honor_subset(self):
+        dep = LockedDependency(
+            repo_url="acme/skill-bundle",
+            depth=1,
+            package_type="skill_bundle",
+            skill_subset=["alpha"],
+        )
+        skill_subset = set(dep.skill_subset)
+
+        assert _plugin_rel_for_deployed_path("skills/alpha/SKILL.md", dep, skill_subset) == (
+            "skills/alpha/SKILL.md"
+        )
+        assert _plugin_rel_for_deployed_path("skills/gamma/SKILL.md", dep, skill_subset) is None
 
 
 class TestRenamePrompt:
@@ -812,6 +852,24 @@ class TestExportPluginBundle:
         assert {path.name for path in skills_dir.iterdir()} == {"alpha", "beta"}
         assert (skills_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8") == "deployed alpha"
         assert (skills_dir / "beta" / "SKILL.md").read_text(encoding="utf-8") == "deployed beta"
+
+    def test_dependency_skill_subset_empty_resolution_errors(self, tmp_path):
+        project = _setup_plugin_project(tmp_path)
+        deployed_files = _write_deployed_skill(project, "gamma", "deployed gamma")
+        dep = LockedDependency(
+            repo_url="acme/skill-bundle",
+            depth=1,
+            package_type="skill_bundle",
+            deployed_files=deployed_files,
+            skill_subset=["alpha"],
+        )
+        _write_lockfile(project, [dep])
+
+        with pytest.raises(
+            ValueError,
+            match=r"declared skills .* were not found among deployed files",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
 
     def test_dependency_without_deployed_files_or_cache_errors(self, tmp_path):
         project = _setup_plugin_project(tmp_path)

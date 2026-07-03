@@ -433,21 +433,32 @@ def _skill_name_from_deployed_parts(parts: tuple[str, ...]) -> str | None:
     """Return the deployed skill name when *parts* point inside a skills dir."""
     if len(parts) >= 3 and parts[0].startswith(".") and parts[1] == "skills":
         return parts[2]
+    if len(parts) >= 2 and parts[0] == "skills":
+        return parts[1]
     return None
 
 
-def _plugin_rel_for_deployed_path(rel_path: str, dep: LockedDependency) -> str | None:
+def _plugin_rel_for_deployed_path(
+    rel_path: str,
+    dep: LockedDependency,
+    skill_subset: set[str] | None,
+) -> str | None:
     """Map an installed deployed_files path back to plugin-native output layout."""
     parts = _deployed_path_parts(rel_path)
     if not parts:
         return None
 
-    if parts[0] in {"agents", "skills", "commands", "instructions", "extensions"}:
+    if parts[0] == "skills":
+        skill_name = _skill_name_from_deployed_parts(parts)
+        if skill_subset and (skill_name is None or skill_name not in skill_subset):
+            return None
+        plugin_parts = list(parts)
+    elif parts[0] in {"agents", "commands", "instructions", "extensions"}:
         plugin_parts = list(parts)
     elif len(parts) >= 3 and parts[0].startswith("."):
         skill_name = _skill_name_from_deployed_parts(parts)
         if skill_name is not None:
-            if dep.skill_subset and skill_name not in set(dep.skill_subset):
+            if skill_subset and skill_name not in skill_subset:
                 return None
             plugin_parts = ["skills", *parts[2:]]
         elif parts[1] == "agents":
@@ -494,9 +505,10 @@ def _collect_deployed_components(
     components: list[tuple[Path, str]] = []
     missing: list[str] = []
     seen_outputs: set[str] = set()
+    skill_subset = set(dep.skill_subset) if dep.skill_subset else None
 
     for rel_path in dep.deployed_files:
-        plugin_rel = _plugin_rel_for_deployed_path(rel_path, dep)
+        plugin_rel = _plugin_rel_for_deployed_path(rel_path, dep, skill_subset)
         if plugin_rel is None:
             continue
         source = project_root / rel_path
@@ -522,10 +534,14 @@ def _collect_deployed_components(
             _append_deployed_component(components, source, plugin_rel, seen_outputs)
 
     if missing:
+        shown_missing = missing[:10]
+        remaining = len(missing) - len(shown_missing)
+        suffix = f"\n  ... and {remaining} more" if remaining else ""
         raise ValueError(
             f"Cannot pack dependency {dep.repo_url}: lockfile deployed_files are "
             "missing on disk. Run 'apm install' to restore them:\n"
-            + "\n".join(f"  - {path}" for path in missing)
+            + "\n".join(f"  - {path}" for path in shown_missing)
+            + suffix
         )
     return components
 
@@ -620,9 +636,9 @@ def export_plugin_bundle(
                 dep_components = _collect_deployed_components(project_root, dep)
                 if dep.skill_subset and not dep_components:
                     raise ValueError(
-                        f"Cannot pack dependency {dep.repo_url}: lockfile skill_subset "
-                        "did not resolve to deployed skill files. Run 'apm install' "
-                        "to refresh apm.lock.yaml."
+                        f"Cannot pack dependency {dep.repo_url}: declared skills "
+                        f"{dep.skill_subset!r} were not found among deployed files. "
+                        "Run 'apm install' to refresh apm.lock.yaml."
                     )
             else:
                 if not install_path.is_dir():

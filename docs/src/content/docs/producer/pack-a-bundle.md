@@ -131,10 +131,12 @@ For the consumer flags that apply (`--target`, `--global`, `--force`,
 `.apm/<type>/` subdirectories and from convention directories at the
 package root (`agents/`, `skills/`, `instructions/`, etc.). This lets
 you author in whichever layout feels natural during development.
-For installed dependencies, `apm pack` uses `apm.lock.yaml`
-`deployed_files`. If a git dependency declares `skills:`, only those
-deployed skills are emitted; raw `apm_modules` cache content is not a
-source of extra skills.
+For installed git dependencies with lockfile `deployed_files`,
+`apm pack` emits those deployed files. If a dependency declares
+`skills:`, only the named deployed skills are included. Older lockfiles
+without `deployed_files` fall back to `apm_modules` when the cache is
+present; if neither source is available, `apm pack` tells you to run
+`apm install`.
 
 `apm install` is per-primitive and stricter. Each integrator has its own
 discovery rules. For some primitive types the root convention directory
