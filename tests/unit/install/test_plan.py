@@ -389,6 +389,24 @@ class TestLockfileSatisfiesManifest:
         assert ok is True
         assert reasons == []
 
+    def test_non_default_hosts_keep_distinct_lockfile_keys(self):
+        lock = _new_lockfile()
+        for host, commit in (("git-a.example.com", "a"), ("git-b.example.com", "b")):
+            lock.add_dependency(
+                LockedDependency(
+                    repo_url="org/shared-skills",
+                    host=host,
+                    resolved_ref="main",
+                    resolved_commit=commit * 40,
+                    depth=1,
+                )
+            )
+
+        assert sorted(lock.dependencies) == [
+            "git-a.example.com/org/shared-skills",
+            "git-b.example.com/org/shared-skills",
+        ]
+
     def test_satisfied_when_github_git_dep_uses_default_host_key(self):
         lock = _new_lockfile()
         lock.add_dependency(
