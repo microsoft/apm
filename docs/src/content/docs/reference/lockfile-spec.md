@@ -11,6 +11,12 @@ sidebar:
 file APM deployed into the workspace. It is the source of truth for
 reproducible installs and for drift detection. Commit it.
 
+The pin covers the full dependency graph as it existed when APM resolved it,
+including transitive package manifests. A later upstream edit to a transitive
+package's `apm.yml` does not change installs that replay an existing lockfile;
+APM keeps using the recorded commits until you run `apm update`, `apm lock
+--update`, or otherwise regenerate the lockfile after changing `apm.yml`.
+
 ## Purpose
 
 This is a **Working Draft**. The lock file format has two versions in use:
@@ -23,7 +29,10 @@ install or replay.
 The lockfile gives APM four things:
 
 1. **Reproducibility.** `apm install --frozen` reinstalls the exact commits
-   recorded here - no resolution, no network drift.
+   recorded here - no resolution, no network drift. Regular `apm install`
+   also reuses locked commits for unchanged Git dependencies, including
+   transitive entries, so the graph does not silently follow upstream manifest
+   moves.
 2. **Integrity.** Recorded SHA-256 hashes let `apm audit` detect tampering
    with deployed files.
 3. **Cleanup.** The list of deployed files lets `apm prune` remove orphans
