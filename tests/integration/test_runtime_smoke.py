@@ -16,6 +16,7 @@ import pytest
 
 pytestmark = [
     pytest.mark.requires_e2e_mode,
+    pytest.mark.requires_network_integration,
     # Mutates os.environ["HOME"]; must be serialized on a single xdist worker.
     # Requires --dist loadgroup in the xdist invocation (the only
     # scheduler that honors xdist_group); without it the marker is

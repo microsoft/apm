@@ -26,7 +26,10 @@ import yaml
 # Markers and skip gates
 # ---------------------------------------------------------------------------
 
-pytestmark = pytest.mark.live
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.requires_network_integration,
+]
 
 
 # ---------------------------------------------------------------------------
