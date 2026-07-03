@@ -315,6 +315,7 @@ class TestGenericGitBackend:
         assert "some_token" not in url
         assert parsed.username is None and parsed.password is None
         assert parsed.hostname == "gitea.example.com"
+        assert parsed.path == "/owner/repo.git"
 
     def test_ssh_url(self):
         backend = GenericGitBackend(host_info=_info("gitea.example.com", "generic"))

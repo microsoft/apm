@@ -372,6 +372,8 @@ def build_https_clone_url(
 
     ``port`` is embedded in the netloc (``host:port``) when set so custom
     HTTPS ports (e.g. self-hosted Git servers on 8443) are preserved.
+    Returned URLs always carry the ``.git`` suffix, matching SSH and plain-HTTP
+    builders.
 
     Note: callers must avoid logging raw token-bearing URLs.
     """
