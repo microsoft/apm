@@ -9,12 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Marketplace names containing dots, underscores, or other non-kebab-case
-  characters (e.g. `my.marketplace`) are now normalized to kebab-case in the
-  generated `marketplace.json` `name` field, so the Copilot App no longer
-  rejects them with a "name must be kebab-case" validation error. Internal
-  resolution, registry lookups, and the Codex `interface.displayName` keep the
-  original name. (#2008)
+- `apm pack` now produces a `marketplace.json` the Copilot App accepts even
+  when your manifest `name` contains dots, underscores, or other non-kebab-case
+  characters (e.g. `my.marketplace`): the emitted `name` field is normalized to
+  kebab-case, and `apm pack` prints a warning naming the original and emitted
+  values when a rewrite occurs. Internal resolution, registry lookups, and the
+  Codex `interface.displayName` keep the original name. (#2008)
 
 - `apm audit --ci` no longer reports phantom drift for root-local hook files
   when audit replay writes into a scratch project root. (#1980)

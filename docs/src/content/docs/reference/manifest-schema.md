@@ -82,7 +82,7 @@ Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm ini
 |---|---|
 | **Type** | `string` |
 | **Required** | MUST be present |
-| **Description** | Package identifier. Free-form string (no pattern enforced at parse time). Convention: alphanumeric, dots, hyphens, underscores. |
+| **Description** | Package identifier. Free-form string (no pattern enforced at parse time). Convention: alphanumeric, dots, hyphens, underscores. Normalised to kebab-case in the compiled `marketplace.json` -- see [7.2](#72-block-fields). |
 
 ### 3.2. `version`
 

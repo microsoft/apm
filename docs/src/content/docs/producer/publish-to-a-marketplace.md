@@ -117,11 +117,13 @@ marketplace:
 
 The key in `apm.yml` is `packages:`. It becomes `plugins:` in the
 compiled `marketplace.json`. Alongside that rename, `apm pack` normalises
-the top-level `name` to kebab-case in the compiled output (see the
-[schema reference](../../reference/manifest-schema/#72-block-fields)) --
-lowercase letters, digits, and hyphens only -- so the Copilot App accepts
-it; the raw name is preserved for internal resolution and, for Codex, as
-`interface.displayName`. Strict schema: unknown keys raise an error, never
+the top-level `name` to kebab-case in the compiled output -- lowercase
+letters, digits, and hyphens only -- so the Copilot App accepts it (see the
+[schema reference](../../reference/manifest-schema/#72-block-fields)). The
+raw name is preserved for internal resolution and, for Codex, as
+`interface.displayName`. When a rewrite occurs, `apm pack` prints a warning
+showing both the original and emitted name. Strict schema: unknown keys
+raise an error, never
 silently ignored.
 
 Use `sourceBase` when packages live under the same enterprise git base.

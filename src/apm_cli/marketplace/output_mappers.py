@@ -16,6 +16,9 @@ from typing import TYPE_CHECKING, Any
 from .diagnostics import BuildDiagnostic
 from .errors import BuildError
 
+_RE_NON_ALNUM = re.compile(r"[^a-z0-9]")
+_RE_MULTI_DASH = re.compile(r"-{2,}")
+
 
 def sanitize_marketplace_name(name: str) -> str:
     """Normalize a marketplace name to kebab-case for Copilot App compatibility.
@@ -32,11 +35,14 @@ def sanitize_marketplace_name(name: str) -> str:
 
     Note: this is a *display/identity* sanitizer for the emitted JSON only.
     It is distinct from ``client._sanitize_cache_name`` (path-safety for
-    on-disk cache keys); do not use this helper for filesystem paths.
+    on-disk cache keys); do not use this helper for filesystem paths.  The
+    mapping is intentionally many-to-one (``my.pkg`` and ``my_pkg`` both map
+    to ``my-pkg``); do not use it for identity disambiguation or registry-key
+    deduplication.
     """
     result = name.lower()
-    result = re.sub(r"[^a-z0-9]", "-", result)
-    result = re.sub(r"-{2,}", "-", result)
+    result = _RE_NON_ALNUM.sub("-", result)
+    result = _RE_MULTI_DASH.sub("-", result)
     result = result.strip("-")
     return result or "marketplace"
 
@@ -48,8 +54,8 @@ def _sanitized_name_with_diagnostic(config_name: str) -> tuple[str, list[BuildDi
     empty.  When sanitisation actually rewrites the name, a single
     ``warning``-level ``BuildDiagnostic`` is emitted so the user sees that the
     value landing in ``marketplace.json`` differs from what they configured and
-    can rename ``marketplace.yml`` to silence it.  Shared by both output
-    mappers so the message and level stay consistent.
+    can rename it in their marketplace config to silence it.  Shared by both
+    output mappers so the message and level stay consistent.
     """
     sanitized = sanitize_marketplace_name(config_name)
     diagnostics: list[BuildDiagnostic] = []
@@ -60,7 +66,7 @@ def _sanitized_name_with_diagnostic(config_name: str) -> tuple[str, list[BuildDi
                 message=(
                     f"[!] Marketplace name '{config_name}' is not kebab-case -- "
                     f"emitted as '{sanitized}' in marketplace.json for Copilot App "
-                    f"compatibility. Rename it in marketplace.yml to silence this."
+                    f"compatibility. Rename it in your marketplace config to silence this."
                 ),
             )
         )
