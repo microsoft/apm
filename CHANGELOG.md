@@ -37,11 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `apm update`. (#1974)
 - APM now verifies HTTPS against the OS trust store by default (via
   `truststore`), so it works out-of-the-box behind a corporate CA or a
-  TLS-inspecting proxy, matching the behaviour of `git`/`curl` on the same
+  TLS-inspecting proxy -- matching the behaviour of `git`/`curl` on the same
   host instead of failing against the bundled `certifi` set. An explicitly set
   `REQUESTS_CA_BUNDLE` / `CURL_CA_BUNDLE` still wins, and
   `APM_DISABLE_TRUSTSTORE=1` restores the previous certifi-only behaviour.
-  Falls back to `certifi` if `truststore` is unavailable. (#2004)
+  Falls back to `certifi` if `truststore` is unavailable. (closes #2004) (#2005)
 
 ### Fixed
 

@@ -2,7 +2,8 @@
 
 Covers every branch:
 - opt-out via APM_DISABLE_TRUSTSTORE
-- explicit CA bundle env vars win (REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE / SSL_CERT_FILE)
+- explicit CA bundle env vars win (REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE)
+- SSL_CERT_FILE does NOT suppress injection (it is set by the frozen runtime hook)
 - truststore missing -> graceful certifi fallback
 - injection failure -> graceful certifi fallback
 - happy path -> inject_into_ssl called exactly once
