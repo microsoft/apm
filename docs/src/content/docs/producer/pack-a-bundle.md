@@ -133,10 +133,10 @@ package root (`agents/`, `skills/`, `instructions/`, etc.). This lets
 you author in whichever layout feels natural during development.
 When packing git dependencies, `apm pack` prefers the lockfile
 `deployed_files` list as the source of truth. If a dependency declares
-`skills:`, only the named deployed skills are included. Older lockfiles
-without `deployed_files` fall back to `apm_modules` when the cache is
-present; if neither source is available, `apm pack` tells you to run
-`apm install`.
+[`skills:`](../reference/package-types/#skill_bundle), only the named
+deployed skills are included. Older lockfiles without `deployed_files`
+fall back to `apm_modules` when the cache is present; if neither source
+is available, `apm pack` tells you to run `apm install`.
 
 `apm install` is per-primitive and stricter. Each integrator has its own
 discovery rules. For some primitive types the root convention directory

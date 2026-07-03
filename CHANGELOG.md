@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm pack --format plugin` now respects `skills:` subset filters on git
+  dependencies, so plugin bundles include only the deployed skills recorded in
+  the lockfile and older lockfiles still fall back to `apm_modules`. (#2013)
 - `apm pack` now produces a `marketplace.json` the Copilot App accepts even
   when your manifest `name` contains dots, underscores, or other non-kebab-case
   characters (e.g. `my.marketplace`): the emitted `name` field is normalized to

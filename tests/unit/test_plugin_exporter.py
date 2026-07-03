@@ -198,6 +198,28 @@ class TestPluginRelForDeployedPath:
         )
         assert _plugin_rel_for_deployed_path("skills/gamma/SKILL.md", skill_subset) is None
 
+    @pytest.mark.parametrize(
+        ("deployed_path", "expected"),
+        [
+            (".agents/skills/alpha/SKILL.md", "skills/alpha/SKILL.md"),
+            (".agents/agents/helper.agent.md", "agents/helper.agent.md"),
+            (".agents/prompts/do-thing.prompt.md", "commands/do-thing.md"),
+            (".github/instructions/team.instructions.md", "instructions/team.instructions.md"),
+            (".claude/hooks/pre-commit.sh", "hooks/pre-commit.sh"),
+            (".codex/extensions/acme/manifest.json", "extensions/acme/manifest.json"),
+            (".claude/hooks.json", "hooks.json"),
+        ],
+    )
+    def test_target_deployed_paths_map_to_plugin_layout(
+        self,
+        deployed_path: str,
+        expected: str,
+    ) -> None:
+        assert _plugin_rel_for_deployed_path(deployed_path, {"alpha"}) == expected
+
+    def test_target_deployed_skills_honor_subset(self) -> None:
+        assert _plugin_rel_for_deployed_path(".agents/skills/gamma/SKILL.md", {"alpha"}) is None
+
 
 class TestRenamePrompt:
     def test_strips_prompt_infix(self):

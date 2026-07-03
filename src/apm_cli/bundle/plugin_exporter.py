@@ -518,7 +518,8 @@ def _collect_deployed_components(
             source = ensure_path_within(source, project_root)
         except PathTraversalError as exc:
             raise ValueError(
-                f"Refusing to pack unsafe deployed file path for {dep.repo_url}: {rel_path!r}"
+                f"Cannot pack dependency {dep.repo_url}: deployed file path "
+                f"escapes the project root: {rel_path!r}"
             ) from exc
         if not source.exists():
             missing.append(rel_path)
@@ -540,10 +541,9 @@ def _collect_deployed_components(
         remaining = len(missing) - len(shown_missing)
         suffix = f"\n  ... and {remaining} more" if remaining else ""
         raise ValueError(
-            f"Cannot pack dependency {dep.repo_url}: lockfile deployed_files are "
-            "missing on disk. Run 'apm install' to restore them:\n"
-            + "\n".join(f"  - {path}" for path in shown_missing)
-            + suffix
+            f"Cannot pack dependency {dep.repo_url}: installed files listed "
+            "in the lockfile are missing on disk. Run 'apm install' to "
+            "restore them:\n" + "\n".join(f"  - {path}" for path in shown_missing) + suffix
         )
     return components
 
@@ -637,10 +637,11 @@ def export_plugin_bundle(
             if dep.deployed_files:
                 dep_components = _collect_deployed_components(project_root, dep)
                 if dep.skill_subset and not dep_components:
+                    declared_skills = ", ".join(dep.skill_subset)
                     raise ValueError(
                         f"Cannot pack dependency {dep.repo_url}: declared skills "
-                        f"{dep.skill_subset!r} were not found among deployed files. "
-                        "Run 'apm install' to refresh apm.lock.yaml."
+                        f"{declared_skills} were not found among deployed files. "
+                        "Run 'apm install' to re-deploy the expected skills."
                     )
             else:
                 if not install_path.is_dir():
