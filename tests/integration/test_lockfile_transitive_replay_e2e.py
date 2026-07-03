@@ -16,6 +16,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import pytest
 import yaml
@@ -129,11 +130,10 @@ def _argv(command: Any) -> list[str]:
 
 def _looks_remote_token(token: str) -> bool:
     """Return True when a subprocess token points at a remote URL."""
-    return bool(
-        token.startswith(("https://", "http://", "ssh://", "git@"))
-        or "github.com" in token
-        or "gitlab.com" in token
-    )
+    if token.startswith("git@"):
+        return True
+    parsed = urlparse(token)
+    return parsed.scheme in {"https", "http", "ssh"}
 
 
 def _invoke_install(
