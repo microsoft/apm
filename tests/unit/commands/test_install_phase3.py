@@ -252,7 +252,7 @@ class TestMergePackagesIntoYml:
         data = {"dependencies": {"apm": ["existing/pkg"]}}
         current_deps = data["dependencies"]["apm"]
 
-        with patch("apm_cli.utils.yaml_io.dump_yaml") as mock_dump:
+        with patch("apm_cli.utils.yaml_io.dump_yaml_roundtrip") as mock_dump:
             _merge_packages_into_yml(
                 ["new/pkg"],
                 {},
@@ -274,7 +274,7 @@ class TestMergePackagesIntoYml:
         current_deps = data["dependencies"]["apm"]
         apm_yml_entries = {"owner/repo": {"repo": "owner/repo", "ref": "main"}}
 
-        with patch("apm_cli.utils.yaml_io.dump_yaml"):
+        with patch("apm_cli.utils.yaml_io.dump_yaml_roundtrip"):
             _merge_packages_into_yml(
                 ["owner/repo"],
                 apm_yml_entries,
@@ -293,7 +293,7 @@ class TestMergePackagesIntoYml:
         data = {"dependencies": {"apm": []}}
         current_deps = data["dependencies"]["apm"]
 
-        with patch("apm_cli.utils.yaml_io.dump_yaml", side_effect=Exception("disk full")):
+        with patch("apm_cli.utils.yaml_io.dump_yaml_roundtrip", side_effect=Exception("disk full")):
             with pytest.raises(SystemExit) as exc_info:
                 _merge_packages_into_yml(
                     ["owner/repo"],
@@ -313,7 +313,7 @@ class TestMergePackagesIntoYml:
         data = {"devDependencies": {"apm": []}}
         current_deps = data["devDependencies"]["apm"]
 
-        with patch("apm_cli.utils.yaml_io.dump_yaml"):
+        with patch("apm_cli.utils.yaml_io.dump_yaml_roundtrip"):
             _merge_packages_into_yml(
                 ["owner/repo"],
                 {},

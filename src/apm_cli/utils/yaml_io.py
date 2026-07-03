@@ -7,14 +7,17 @@ default file encoding is cp1252, not UTF-8.
 
 Public API::
 
-    load_yaml(path)        -- read a .yml/.yaml file -> dict | None
-    dump_yaml(data, path)  -- write dict -> .yml/.yaml file
-    yaml_to_str(data)      -- serialize dict -> YAML string
+    load_yaml(path)                 -- read a .yml/.yaml file -> dict | None
+    dump_yaml(data, path)           -- write dict -> .yml/.yaml file
+    load_yaml_roundtrip(path)       -- read YAML while preserving comments
+    dump_yaml_roundtrip(data, path) -- write round-trip YAML data
+    yaml_to_str(data)               -- serialize dict -> YAML string
 """
 
 import os
 import secrets
 from contextlib import suppress
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -283,6 +286,51 @@ def load_yaml_str(text: str) -> dict[str, Any] | None:
     on malformed, over-budget, huge-int, or deeply-nested input.
     """
     return _bounded_load(text)
+
+
+def _roundtrip_yaml() -> Any:
+    """Return a configured ruamel.yaml round-trip parser."""
+    from ruamel.yaml import YAML
+
+    rt = YAML(typ="rt")
+    rt.preserve_quotes = True
+    rt.indent(mapping=2, sequence=4, offset=2)
+    return rt
+
+
+def _raise_as_pyyaml_error(exc: Exception) -> None:
+    """Normalize ruamel parser failures to the yaml.YAMLError family."""
+    from ruamel.yaml import YAMLError as RuamelYAMLError
+
+    if isinstance(exc, RuamelYAMLError):
+        raise yaml.YAMLError(f"round-trip YAML parse failed: {exc}") from exc
+    raise exc
+
+
+def load_yaml_roundtrip(path: str | Path) -> Any:
+    """Load YAML while preserving comments and formatting metadata.
+
+    The document is first parsed by the bounded PyYAML loader so the manifest
+    update paths keep the same alias and merge-key safety budget as
+    :func:`load_yaml`. The original text is then parsed with ruamel.yaml
+    round-trip mode so callers can mutate the returned object and write it back
+    without stripping comments.
+    """
+    text = Path(path).read_text(encoding="utf-8")
+    _bounded_load(text)
+    try:
+        return _roundtrip_yaml().load(text)
+    except Exception as exc:
+        _raise_as_pyyaml_error(exc)
+
+
+def dump_yaml_roundtrip(data: Any, path: str | Path) -> None:
+    """Write ruamel round-trip YAML data with explicit UTF-8 encoding."""
+    stream = StringIO()
+    _roundtrip_yaml().dump(data, stream)
+    text = stream.getvalue()
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
 
 
 class _BoundedYAMLHandler(_FrontmatterYAMLHandler):
