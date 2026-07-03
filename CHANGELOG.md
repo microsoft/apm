@@ -22,10 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environment for Claude Code and Codex instead of being written verbatim.
   (#1966)
 
-- `apm install` no longer fails for dependencies on git hosts that serve
-  smart-HTTP only at the `.git` path without redirecting the bare path
-  (e.g. GitBucket): the anonymous HTTPS clone URL builder now keeps the
-  `.git` suffix, matching the token, SSH, and plain-HTTP builders. (#1995)
+- `apm install` no longer fails on self-hosted git hosts such as GitBucket
+  that require the `.git` URL suffix; anonymous HTTPS clone URLs now match
+  the token, SSH, and plain-HTTP builders. (#1995)
 
 ## [0.23.1] - 2026-06-29
 
