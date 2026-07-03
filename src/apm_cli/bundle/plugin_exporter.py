@@ -440,7 +440,6 @@ def _skill_name_from_deployed_parts(parts: tuple[str, ...]) -> str | None:
 
 def _plugin_rel_for_deployed_path(
     rel_path: str,
-    dep: LockedDependency,
     skill_subset: set[str] | None,
 ) -> str | None:
     """Map an installed deployed_files path back to plugin-native output layout."""
@@ -508,7 +507,10 @@ def _collect_deployed_components(
     skill_subset = set(dep.skill_subset) if dep.skill_subset else None
 
     for rel_path in dep.deployed_files:
-        plugin_rel = _plugin_rel_for_deployed_path(rel_path, dep, skill_subset)
+        try:
+            plugin_rel = _plugin_rel_for_deployed_path(rel_path, skill_subset)
+        except ValueError as exc:
+            raise ValueError(f"Cannot pack dependency {dep.repo_url}: {exc}") from exc
         if plugin_rel is None:
             continue
         source = project_root / rel_path

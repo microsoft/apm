@@ -131,8 +131,8 @@ For the consumer flags that apply (`--target`, `--global`, `--force`,
 `.apm/<type>/` subdirectories and from convention directories at the
 package root (`agents/`, `skills/`, `instructions/`, etc.). This lets
 you author in whichever layout feels natural during development.
-For installed git dependencies with lockfile `deployed_files`,
-`apm pack` emits those deployed files. If a dependency declares
+When packing git dependencies, `apm pack` prefers the lockfile
+`deployed_files` list as the source of truth. If a dependency declares
 `skills:`, only the named deployed skills are included. Older lockfiles
 without `deployed_files` fall back to `apm_modules` when the cache is
 present; if neither source is available, `apm pack` tells you to run
@@ -249,10 +249,10 @@ target-agnostic: the consumer's project decides which harness layouts
 receive files at install time. APM records the value in `pack.target` as
 informational metadata only and prints a deprecation warning.
 
-**Empty bundle warning.** If `apm pack` reports "No deployed files found",
-your `apm.lock.yaml` has no `deployed_files` entries. Run `apm install` first
-to populate it -- `apm pack` packs the files your last install actually
-deployed, not the raw `.apm/` source tree.
+**Missing dependency content.** For installed dependencies, `apm pack`
+prefers lockfile `deployed_files`. Older lockfiles can fall back to
+`apm_modules` when the cache is present. If neither source exists,
+`apm pack` stops with an error and tells you to run `apm install`.
 
 **Dry-run before sharing.** Use `apm pack --dry-run --verbose` to see the
 full file list (and any path remappings) without writing anything.

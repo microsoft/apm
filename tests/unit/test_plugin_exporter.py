@@ -193,10 +193,10 @@ class TestPluginRelForDeployedPath:
         )
         skill_subset = set(dep.skill_subset)
 
-        assert _plugin_rel_for_deployed_path("skills/alpha/SKILL.md", dep, skill_subset) == (
+        assert _plugin_rel_for_deployed_path("skills/alpha/SKILL.md", skill_subset) == (
             "skills/alpha/SKILL.md"
         )
-        assert _plugin_rel_for_deployed_path("skills/gamma/SKILL.md", dep, skill_subset) is None
+        assert _plugin_rel_for_deployed_path("skills/gamma/SKILL.md", skill_subset) is None
 
 
 class TestRenamePrompt:
