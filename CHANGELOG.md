@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm install` and `apm uninstall` no longer strip comments from `apm.yml`
-  while updating dependency entries. (#2012)
+  while updating dependency entries, so inline annotations and section notes
+  survive dependency updates. (#2012)
 - `apm pack` now produces a `marketplace.json` the Copilot App accepts even
   when your manifest `name` contains dots, underscores, or other non-kebab-case
   characters (e.g. `my.marketplace`): the emitted `name` field is normalized to

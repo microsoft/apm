@@ -302,6 +302,8 @@ def _roundtrip_yaml() -> Any:
         )
 
     rt = YAML(typ="rt")
+    # Class-level constructor registration is intentional: every round-trip
+    # YAML instance in this process should reject unsafe Python tags.
     rt.Constructor.add_multi_constructor("tag:yaml.org,2002:python/", reject_python_tag)
     rt.preserve_quotes = True
     rt.indent(mapping=2, sequence=4, offset=2)
@@ -337,7 +339,10 @@ def load_yaml_roundtrip(path: str | Path) -> Any:
 def dump_yaml_roundtrip(data: Any, path: str | Path) -> None:
     """Write ruamel round-trip YAML data with explicit UTF-8 encoding."""
     stream = StringIO()
-    _roundtrip_yaml().dump(data, stream)
+    try:
+        _roundtrip_yaml().dump(data, stream)
+    except Exception as exc:
+        _raise_as_pyyaml_error(exc)
     text = stream.getvalue()
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(text)
