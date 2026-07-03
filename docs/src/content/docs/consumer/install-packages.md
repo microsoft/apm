@@ -145,12 +145,15 @@ top-level entries. Versions and content hashes are pinned in
 same bytes. Commit the lockfile.
 
 :::note[Lockfile replay]
-That reproducibility includes the transitive graph as resolved at lock time.
-If an upstream package later moves one of its own entries between
-`dependencies.apm` and `devDependencies.apm`, an existing lockfile still
-replays the previously recorded commits. Run `apm update` or
-`apm lock --update`, or recreate the lockfile after changing `apm.yml`, when
-you want APM to read the newer upstream manifests and produce a new graph.
+Your lockfile pins every package your dependencies pull in, including
+transitive packages resolved at lock time. If an upstream package later moves
+one of its own entries between `dependencies.apm` and `devDependencies.apm`, an
+existing lockfile still replays the previously recorded commits. Run
+`apm update` or `apm lock --update`, or delete `apm.lock.yaml` and re-run
+`apm install` after changing `apm.yml`, when you want APM to read the newer
+upstream manifests and produce a new graph. See the
+[lockfile specification](../../reference/lockfile-spec/) for the replay
+contract.
 :::
 
 Transitive **APM** packages flow through automatically. Transitive

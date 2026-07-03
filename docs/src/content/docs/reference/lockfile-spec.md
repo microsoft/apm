@@ -15,7 +15,8 @@ The pin covers the full dependency graph as it existed when APM resolved it,
 including transitive package manifests. A later upstream edit to a transitive
 package's `apm.yml` does not change installs that replay an existing lockfile;
 APM keeps using the recorded commits until you run `apm update`, `apm lock
---update`, or otherwise regenerate the lockfile after changing `apm.yml`.
+--update`, or delete `apm.lock.yaml` and re-run `apm install` after changing
+`apm.yml`.
 
 ## Purpose
 

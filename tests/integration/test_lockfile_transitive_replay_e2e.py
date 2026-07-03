@@ -133,13 +133,14 @@ def _looks_remote_token(token: str) -> bool:
     if token.startswith("git@"):
         return True
     parsed = urlparse(token)
-    return parsed.scheme in {"https", "http", "ssh"}
+    return parsed.scheme in {"https", "http", "ssh", "git"}
 
 
 def _invoke_install(
     project: Path,
     monkeypatch: pytest.MonkeyPatch,
     repos: dict[str, Path],
+    extra_args: list[str] | None = None,
 ) -> object:
     """Run the real ``apm install`` command with git network calls remapped local."""
     original_popen = subprocess.Popen
@@ -187,25 +188,26 @@ def _invoke_install(
             clone_args["branch"] = branch
         return Repo.clone_from(str(repos[repo_key]), str(target_path), **clone_args)
 
-    monkeypatch.chdir(project)
-    monkeypatch.setenv("APM_NO_CACHE", "1")
-    monkeypatch.setenv("HOME", str(project / ".home"))
-    monkeypatch.setenv("USERPROFILE", str(project / ".home"))
-    for token_name in (
-        "GITHUB_APM_PAT",
-        "GITHUB_TOKEN",
-        "GH_TOKEN",
-        "ADO_APM_PAT",
-        "GITLAB_APM_PAT",
-        "GITLAB_TOKEN",
-    ):
-        monkeypatch.delenv(token_name, raising=False)
-    monkeypatch.setattr(subprocess, "Popen", guarded_popen)
-    monkeypatch.setattr(GitHubPackageDownloader, "resolve_git_reference", resolve_local_ref)
-    monkeypatch.setattr(GitHubPackageDownloader, "_clone_with_fallback", clone_local_repo)
+    with monkeypatch.context() as patch:
+        patch.chdir(project)
+        patch.setenv("APM_NO_CACHE", "1")
+        patch.setenv("HOME", str(project / ".home"))
+        patch.setenv("USERPROFILE", str(project / ".home"))
+        for token_name in (
+            "GITHUB_APM_PAT",
+            "GITHUB_TOKEN",
+            "GH_TOKEN",
+            "ADO_APM_PAT",
+            "GITLAB_APM_PAT",
+            "GITLAB_TOKEN",
+        ):
+            patch.delenv(token_name, raising=False)
+        patch.setattr(subprocess, "Popen", guarded_popen)
+        patch.setattr(GitHubPackageDownloader, "resolve_git_reference", resolve_local_ref)
+        patch.setattr(GitHubPackageDownloader, "_clone_with_fallback", clone_local_repo)
 
-    clear_apm_yml_cache()
-    return CliRunner().invoke(cli, ["install"], catch_exceptions=False)
+        clear_apm_yml_cache()
+        return CliRunner().invoke(cli, ["install", *(extra_args or [])], catch_exceptions=False)
 
 
 def test_lockfile_replay_keeps_locked_transitive_dependencies_graph(
@@ -250,7 +252,6 @@ def test_lockfile_replay_keeps_locked_transitive_dependencies_graph(
 
     # Lockfile replay should keep using the old primary commit and therefore
     # keep the old transitive production dependency in the resolved graph.
-    monkeypatch.undo()
     shutil.rmtree(project / "apm_modules", ignore_errors=True)
     replay = _invoke_install(project, monkeypatch, repos)
     assert replay.exit_code == 0, f"stdout:\n{replay.output}\nstderr:\n{replay.stderr}"
@@ -260,10 +261,20 @@ def test_lockfile_replay_keeps_locked_transitive_dependencies_graph(
     assert replay_deps[TRANSITIVE_REPO]["depth"] == 2
     assert (project / "apm_modules" / "example" / "transitive-package" / "apm.yml").is_file()
 
+    shutil.rmtree(project / "apm_modules", ignore_errors=True)
+    frozen_replay = _invoke_install(project, monkeypatch, repos, extra_args=["--frozen"])
+    assert frozen_replay.exit_code == 0, (
+        f"stdout:\n{frozen_replay.output}\nstderr:\n{frozen_replay.stderr}"
+    )
+    frozen_deps = _lock_deps(project)
+    assert frozen_deps[PRIMARY_REPO]["resolved_commit"] == old_primary_sha
+    assert frozen_deps[TRANSITIVE_REPO]["resolved_commit"] == transitive_sha
+    assert frozen_deps[TRANSITIVE_REPO]["depth"] == 2
+    assert (project / "apm_modules" / "example" / "transitive-package" / "apm.yml").is_file()
+
     # Removing the lockfile regenerates from current upstream state. The same
     # direct dependency now has the transitive entry under devDependencies.apm,
     # and APM does not traverse transitive dev dependencies.
-    monkeypatch.undo()
     (project / "apm.lock.yaml").unlink()
     shutil.rmtree(project / "apm_modules", ignore_errors=True)
     fresh = _invoke_install(project, monkeypatch, repos)
