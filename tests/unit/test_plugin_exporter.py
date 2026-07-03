@@ -125,6 +125,19 @@ def _setup_plugin_project(
     return project
 
 
+def _write_deployed_skill(project: Path, name: str, marker: str) -> list[str]:
+    """Create a deployed skill under the project and return lockfile entries."""
+    skill_dir = project / ".agents" / "skills" / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(marker, encoding="utf-8")
+    (skill_dir / "notes.md").write_text(f"{marker} notes", encoding="utf-8")
+    return [
+        skill_dir.relative_to(project).as_posix(),
+        (skill_dir / "SKILL.md").relative_to(project).as_posix(),
+        (skill_dir / "notes.md").relative_to(project).as_posix(),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Unit tests: helpers
 # ---------------------------------------------------------------------------
@@ -745,6 +758,71 @@ class TestExportPluginBundle:
 
         assert (result.bundle_path / "agents" / "dep-agent.agent.md").exists()
         assert (result.bundle_path / "agents" / "own.agent.md").exists()
+
+    def test_dependency_deployed_skill_subset_wins_over_raw_cache(self, tmp_path):
+        project = _setup_plugin_project(tmp_path)
+
+        deployed_files: list[str] = []
+        for skill in ("alpha", "beta", "gamma"):
+            deployed_files.extend(_write_deployed_skill(project, skill, f"deployed {skill}"))
+        dep = LockedDependency(
+            repo_url="acme/skill-bundle",
+            depth=1,
+            package_type="skill_bundle",
+            deployed_files=deployed_files,
+            skill_subset=["alpha", "beta"],
+        )
+        _write_lockfile(project, [dep])
+
+        dep_path = project / "apm_modules" / "acme" / "skill-bundle"
+        _make_apm_dir(
+            dep_path,
+            skills={
+                "alpha": ["SKILL.md"],
+                "beta": ["SKILL.md"],
+                "gamma": ["SKILL.md"],
+            },
+        )
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        skills_dir = result.bundle_path / "skills"
+        assert {path.name for path in skills_dir.iterdir()} == {"alpha", "beta"}
+        assert (skills_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8") == "deployed alpha"
+        assert (skills_dir / "beta" / "SKILL.md").read_text(encoding="utf-8") == "deployed beta"
+
+    def test_dependency_deployed_skills_survive_without_raw_cache(self, tmp_path):
+        project = _setup_plugin_project(tmp_path)
+
+        deployed_files: list[str] = []
+        for skill in ("alpha", "beta"):
+            deployed_files.extend(_write_deployed_skill(project, skill, f"deployed {skill}"))
+        dep = LockedDependency(
+            repo_url="acme/skill-bundle",
+            depth=1,
+            package_type="skill_bundle",
+            deployed_files=deployed_files,
+            skill_subset=["alpha", "beta"],
+        )
+        _write_lockfile(project, [dep])
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        skills_dir = result.bundle_path / "skills"
+        assert {path.name for path in skills_dir.iterdir()} == {"alpha", "beta"}
+        assert (skills_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8") == "deployed alpha"
+        assert (skills_dir / "beta" / "SKILL.md").read_text(encoding="utf-8") == "deployed beta"
+
+    def test_dependency_without_deployed_files_or_cache_errors(self, tmp_path):
+        project = _setup_plugin_project(tmp_path)
+        dep = LockedDependency(repo_url="acme/missing", depth=1)
+        _write_lockfile(project, [dep])
+
+        with pytest.raises(
+            ValueError,
+            match=r"no deployed_files are recorded.*apm_modules cache is missing",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
 
     def test_virtual_skill_dependency_does_not_duplicate_skills_dir(self, tmp_path):
         project = _setup_plugin_project(tmp_path)

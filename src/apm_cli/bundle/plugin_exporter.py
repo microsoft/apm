@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 import shutil
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import yaml
 
@@ -417,6 +417,119 @@ def _dep_install_path(dep: LockedDependency, apm_modules_dir: Path) -> Path:
     return dep_ref.get_install_path(apm_modules_dir)
 
 
+def _deployed_path_parts(rel_path: str) -> tuple[str, ...]:
+    """Return safe POSIX path parts for a lockfile deployed_files entry."""
+    rel = rel_path.replace("\\", "/")
+    pure = PurePosixPath(rel)
+    if pure.is_absolute() or PureWindowsPath(rel).is_absolute():
+        raise ValueError(f"Refusing to pack absolute deployed file path: {rel_path!r}")
+    parts = pure.parts
+    if any(part in ("", ".", "..") for part in parts):
+        raise ValueError(f"Refusing to pack unsafe deployed file path: {rel_path!r}")
+    return parts
+
+
+def _skill_name_from_deployed_parts(parts: tuple[str, ...]) -> str | None:
+    """Return the deployed skill name when *parts* point inside a skills dir."""
+    if len(parts) >= 3 and parts[0].startswith(".") and parts[1] == "skills":
+        return parts[2]
+    return None
+
+
+def _plugin_rel_for_deployed_path(rel_path: str, dep: LockedDependency) -> str | None:
+    """Map an installed deployed_files path back to plugin-native output layout."""
+    parts = _deployed_path_parts(rel_path)
+    if not parts:
+        return None
+
+    if parts[0] in {"agents", "skills", "commands", "instructions", "extensions"}:
+        plugin_parts = list(parts)
+    elif len(parts) >= 3 and parts[0].startswith("."):
+        skill_name = _skill_name_from_deployed_parts(parts)
+        if skill_name is not None:
+            if dep.skill_subset and skill_name not in set(dep.skill_subset):
+                return None
+            plugin_parts = ["skills", *parts[2:]]
+        elif parts[1] == "agents":
+            plugin_parts = ["agents", *parts[2:]]
+        elif parts[1] in {"commands", "prompts"}:
+            plugin_parts = ["commands", *parts[2:]]
+        elif parts[1] in {"instructions", "rules", "steering"}:
+            plugin_parts = ["instructions", *parts[2:]]
+        elif parts[1] == "extensions":
+            plugin_parts = ["extensions", *parts[2:]]
+        elif parts[1] == "hooks":
+            plugin_parts = ["hooks", *parts[2:]]
+        else:
+            return None
+    elif len(parts) >= 2 and parts[0].startswith(".") and parts[1] == "hooks.json":
+        plugin_parts = ["hooks.json"]
+    else:
+        return None
+
+    if plugin_parts[0] == "commands" and plugin_parts[-1].endswith(".prompt.md"):
+        plugin_parts[-1] = _rename_prompt(plugin_parts[-1])
+    return PurePosixPath(*plugin_parts).as_posix()
+
+
+def _append_deployed_component(
+    components: list[tuple[Path, str]],
+    source: Path,
+    output_rel: str,
+    seen_outputs: set[str],
+) -> None:
+    """Append one deployed component unless it is unsafe or already mapped."""
+    if output_rel in seen_outputs or not _validate_output_rel(output_rel):
+        return
+    if source.is_file() and not source.is_symlink():
+        components.append((source, output_rel))
+        seen_outputs.add(output_rel)
+
+
+def _collect_deployed_components(
+    project_root: Path,
+    dep: LockedDependency,
+) -> list[tuple[Path, str]]:
+    """Collect dependency components from lockfile deployed_files entries."""
+    components: list[tuple[Path, str]] = []
+    missing: list[str] = []
+    seen_outputs: set[str] = set()
+
+    for rel_path in dep.deployed_files:
+        plugin_rel = _plugin_rel_for_deployed_path(rel_path, dep)
+        if plugin_rel is None:
+            continue
+        source = project_root / rel_path
+        try:
+            source = ensure_path_within(source, project_root)
+        except PathTraversalError as exc:
+            raise ValueError(
+                f"Refusing to pack unsafe deployed file path for {dep.repo_url}: {rel_path!r}"
+            ) from exc
+        if not source.exists():
+            missing.append(rel_path)
+            continue
+        if source.is_symlink():
+            continue
+        if source.is_dir():
+            for child in sorted(source.rglob("*")):
+                if not child.is_file() or child.is_symlink():
+                    continue
+                child_rel = child.relative_to(source).as_posix()
+                child_output = (PurePosixPath(plugin_rel) / child_rel).as_posix()
+                _append_deployed_component(components, child, child_output, seen_outputs)
+        else:
+            _append_deployed_component(components, source, plugin_rel, seen_outputs)
+
+    if missing:
+        raise ValueError(
+            f"Cannot pack dependency {dep.repo_url}: lockfile deployed_files are "
+            "missing on disk. Run 'apm install' to restore them:\n"
+            + "\n".join(f"  - {path}" for path in missing)
+        )
+    return components
+
+
 # ---------------------------------------------------------------------------
 # Main exporter
 # ---------------------------------------------------------------------------
@@ -500,33 +613,49 @@ def export_plugin_bundle(
             ):
                 continue
 
-            install_path = _dep_install_path(dep, apm_modules_dir)
-            if not install_path.is_dir():
-                continue
-
             dep_name = dep.repo_url
 
-            # Collect from .apm/
-            dep_apm_dir = install_path / ".apm"
-            dep_components = _collect_apm_components(dep_apm_dir)
+            install_path = _dep_install_path(dep, apm_modules_dir)
+            if dep.deployed_files:
+                dep_components = _collect_deployed_components(project_root, dep)
+                if dep.skill_subset and not dep_components:
+                    raise ValueError(
+                        f"Cannot pack dependency {dep.repo_url}: lockfile skill_subset "
+                        "did not resolve to deployed skill files. Run 'apm install' "
+                        "to refresh apm.lock.yaml."
+                    )
+            else:
+                if not install_path.is_dir():
+                    raise ValueError(
+                        f"Cannot pack dependency {dep.repo_url}: no deployed_files are "
+                        "recorded in apm.lock.yaml and apm_modules cache is missing. "
+                        "Run 'apm install' to restore it."
+                    )
 
-            # Also collect root-level plugin-native dirs from the dep
-            dep_components.extend(_collect_root_plugin_components(install_path))
+                # Collect from .apm/
+                dep_apm_dir = install_path / ".apm"
+                dep_components = _collect_apm_components(dep_apm_dir)
 
-            # Bare Claude skills: SKILL.md at dep root with no skills/ subdir
-            _collect_bare_skill(install_path, dep, dep_components)
+                # Also collect root-level plugin-native dirs from the dep
+                dep_components.extend(_collect_root_plugin_components(install_path))
+
+                # Bare Claude skills: SKILL.md at dep root with no skills/ subdir
+                _collect_bare_skill(install_path, dep, dep_components)
 
             _merge_file_map(file_map, dep_components, dep_name, force, collisions)
 
-            # Hooks -- deps merge (first wins among deps)
-            dep_hooks = _collect_hooks_from_apm(dep_apm_dir)
-            dep_hooks_root = _collect_hooks_from_root(install_path)
-            _deep_merge(dep_hooks, dep_hooks_root, overwrite=False)
-            _deep_merge(merged_hooks, dep_hooks, overwrite=False)
+            if install_path.is_dir():
+                dep_apm_dir = install_path / ".apm"
 
-            # MCP -- deps merge (first wins among deps)
-            dep_mcp = _collect_mcp(install_path)
-            _deep_merge(merged_mcp, dep_mcp, overwrite=False)
+                # Hooks -- deps merge (first wins among deps)
+                dep_hooks = _collect_hooks_from_apm(dep_apm_dir)
+                dep_hooks_root = _collect_hooks_from_root(install_path)
+                _deep_merge(dep_hooks, dep_hooks_root, overwrite=False)
+                _deep_merge(merged_hooks, dep_hooks, overwrite=False)
+
+                # MCP -- deps merge (first wins among deps)
+                dep_mcp = _collect_mcp(install_path)
+                _deep_merge(merged_mcp, dep_mcp, overwrite=False)
 
     # 6. Collect own components (.apm/ and root-level)
     own_apm_dir = project_root / ".apm"
