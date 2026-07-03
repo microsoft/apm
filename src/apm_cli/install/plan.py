@@ -63,7 +63,23 @@ def _dep_ref_key(dep: DependencyReference) -> str:
     resolution.  Non-default git hosts must be part of this key, because
     lockfile entries use host-qualified identity for those repos.
     """
-    return dep.get_unique_key()
+    get_unique_key = getattr(dep, "get_unique_key", None)
+    if callable(get_unique_key):
+        return get_unique_key()
+
+    from apm_cli.models.dependency.identity import build_dependency_unique_key
+
+    # Test fakes in the integration suite are intentionally lightweight.
+    # Keep this mapping in sync with DependencyReference.get_unique_key().
+    return build_dependency_unique_key(
+        getattr(dep, "repo_url", ""),
+        host=getattr(dep, "host", None),
+        source="local" if getattr(dep, "is_local", False) else getattr(dep, "source", None),
+        local_path=getattr(dep, "local_path", None),
+        is_virtual=getattr(dep, "is_virtual", False),
+        virtual_path=getattr(dep, "virtual_path", None),
+        registry_prefix=getattr(dep, "artifactory_prefix", None),
+    )
 
 
 def _short_sha(commit: str | None, length: int = 7) -> str:

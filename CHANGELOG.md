@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm install --frozen` no longer spuriously rejects private Git dependencies
-  hosted on non-default Git servers; lockfile matching now uses the same
-  host-qualified identity as `apm install`. (#2011)
+  hosted on non-default Git servers such as Bitbucket Server, GitLab, or GitHub
+  Enterprise; lockfile matching now uses the same host-qualified identity as
+  `apm install`. (#2011)
 - `apm pack` now produces a `marketplace.json` the Copilot App accepts even
   when your manifest `name` contains dots, underscores, or other non-kebab-case
   characters (e.g. `my.marketplace`): the emitted `name` field is normalized to
