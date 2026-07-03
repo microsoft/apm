@@ -149,8 +149,8 @@ That reproducibility includes the transitive graph as resolved at lock time.
 If an upstream package later moves one of its own entries between
 `dependencies.apm` and `devDependencies.apm`, an existing lockfile still
 replays the previously recorded commits. Run `apm update` or
-`apm lock --update` when you want APM to read the newer upstream manifests and
-produce a new graph.
+`apm lock --update`, or recreate the lockfile after changing `apm.yml`, when
+you want APM to read the newer upstream manifests and produce a new graph.
 :::
 
 Transitive **APM** packages flow through automatically. Transitive
