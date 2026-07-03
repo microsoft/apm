@@ -7,6 +7,7 @@ these classes own format-specific field mapping.
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -14,6 +15,25 @@ from typing import TYPE_CHECKING, Any
 
 from .diagnostics import BuildDiagnostic
 from .errors import BuildError
+
+
+def sanitise_marketplace_name(name: str) -> str:
+    """Convert a marketplace name to kebab-case for Copilot App compatibility.
+
+    Repo names like ``my.marketplace`` or ``My_Package`` are valid on GitHub
+    but rejected by the Copilot App which requires kebab-case
+    (lowercase letters, digits, and hyphens only).
+
+    The conversion lowercases the input, replaces every non-alphanumeric
+    character with a hyphen, collapses consecutive hyphens, and strips
+    leading/trailing hyphens.
+    """
+    result = name.lower()
+    result = re.sub(r"[^a-z0-9]", "-", result)
+    result = re.sub(r"-{2,}", "-", result)
+    result = result.strip("-")
+    return result or "marketplace"
+
 
 if TYPE_CHECKING:
     from .builder import ResolvedPackage
@@ -61,7 +81,7 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
         entry_by_name: dict[str, PackageEntry] = {e.name: e for e in config.packages}
 
         doc: dict[str, Any] = OrderedDict()
-        doc["name"] = config.name
+        doc["name"] = sanitise_marketplace_name(config.name)
         if config.description_overridden and config.description:
             doc["description"] = config.description
         if config.version_overridden and config.version:
@@ -236,7 +256,8 @@ class CodexMarketplaceMapper(MarketplaceOutputMapper):
         entry_by_name: dict[str, PackageEntry] = {e.name: e for e in config.packages}
 
         doc: dict[str, Any] = OrderedDict()
-        doc["name"] = config.name
+        sanitised = sanitise_marketplace_name(config.name)
+        doc["name"] = sanitised
         doc["interface"] = OrderedDict({"displayName": config.name})
 
         plugins: list[dict[str, Any]] = []
