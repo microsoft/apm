@@ -29,12 +29,42 @@ def sanitize_marketplace_name(name: str) -> str:
     The conversion lowercases the input, replaces every non-alphanumeric
     character with a hyphen, collapses consecutive hyphens, and strips
     leading/trailing hyphens.
+
+    Note: this is a *display/identity* sanitizer for the emitted JSON only.
+    It is distinct from ``client._sanitize_cache_name`` (path-safety for
+    on-disk cache keys); do not use this helper for filesystem paths.
     """
     result = name.lower()
     result = re.sub(r"[^a-z0-9]", "-", result)
     result = re.sub(r"-{2,}", "-", result)
     result = result.strip("-")
     return result or "marketplace"
+
+
+def _sanitized_name_with_diagnostic(config_name: str) -> tuple[str, list[BuildDiagnostic]]:
+    """Return the sanitized marketplace name and any diagnostic it warrants.
+
+    When the configured name is already kebab-case the diagnostic list is
+    empty.  When sanitisation actually rewrites the name, a single
+    ``warning``-level ``BuildDiagnostic`` is emitted so the user sees that the
+    value landing in ``marketplace.json`` differs from what they configured and
+    can rename ``marketplace.yml`` to silence it.  Shared by both output
+    mappers so the message and level stay consistent.
+    """
+    sanitized = sanitize_marketplace_name(config_name)
+    diagnostics: list[BuildDiagnostic] = []
+    if sanitized != config_name:
+        diagnostics.append(
+            BuildDiagnostic(
+                level="warning",
+                message=(
+                    f"[!] Marketplace name '{config_name}' is not kebab-case -- "
+                    f"emitted as '{sanitized}' in marketplace.json for Copilot App "
+                    f"compatibility. Rename it in marketplace.yml to silence this."
+                ),
+            )
+        )
+    return sanitized, diagnostics
 
 
 if TYPE_CHECKING:
@@ -83,7 +113,8 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
         entry_by_name: dict[str, PackageEntry] = {e.name: e for e in config.packages}
 
         doc: dict[str, Any] = OrderedDict()
-        doc["name"] = sanitize_marketplace_name(config.name)
+        sanitized_name, name_diagnostics = _sanitized_name_with_diagnostic(config.name)
+        doc["name"] = sanitized_name
         if config.description_overridden and config.description:
             doc["description"] = config.description
         if config.version_overridden and config.version:
@@ -101,7 +132,7 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
         plugin_root = config.metadata.get("pluginRoot", "")
         strip_count = 0
         override_count = 0
-        diagnostics: list[BuildDiagnostic] = []
+        diagnostics: list[BuildDiagnostic] = list(name_diagnostics)
         plugins: list[dict[str, Any]] = []
 
         for pkg in resolved:
@@ -258,7 +289,7 @@ class CodexMarketplaceMapper(MarketplaceOutputMapper):
         entry_by_name: dict[str, PackageEntry] = {e.name: e for e in config.packages}
 
         doc: dict[str, Any] = OrderedDict()
-        sanitized = sanitize_marketplace_name(config.name)
+        sanitized, name_diagnostics = _sanitized_name_with_diagnostic(config.name)
         doc["name"] = sanitized
         doc["interface"] = OrderedDict({"displayName": config.name})
 
@@ -285,7 +316,7 @@ class CodexMarketplaceMapper(MarketplaceOutputMapper):
             plugins.append(plugin)
 
         doc["plugins"] = plugins
-        return MapperResult(doc)
+        return MapperResult(doc, (), tuple(name_diagnostics))
 
 
 MARKETPLACE_OUTPUT_MAPPERS: dict[str, MarketplaceOutputMapper] = {

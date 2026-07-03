@@ -92,6 +92,39 @@ class TestClaudeOutputSanitisesName:
         plugin_names = {p["name"] for p in data["plugins"]}
         assert plugin_names == {"code-reviewer", "test-generator"}
 
+    def test_rewrite_emits_warning_diagnostic(self, tmp_path: Path, mock_ref_resolver):
+        """When the name is rewritten the build surfaces a warning diagnostic."""
+        _write_yml(tmp_path, NON_KEBAB_YML)
+
+        builder = MarketplaceBuilder(tmp_path / "marketplace.yml")
+        report = builder.build()
+
+        name_diags = [
+            d
+            for d in report.diagnostics
+            if d.level == "warning" and RAW_NAME in d.message and EXPECTED_NAME in d.message
+        ]
+        assert name_diags, "expected a warning diagnostic naming the old and new name"
+
+    def test_kebab_name_emits_no_diagnostic(self, tmp_path: Path, mock_ref_resolver):
+        """An already-kebab-case name must not trigger the rewrite warning."""
+        _write_yml(tmp_path, NON_KEBAB_YML.replace(RAW_NAME, "already-kebab"))
+
+        builder = MarketplaceBuilder(tmp_path / "marketplace.yml")
+        report = builder.build()
+
+        assert not [d for d in report.diagnostics if "not kebab-case" in d.message]
+
+    def test_all_special_name_falls_back(self, tmp_path: Path, mock_ref_resolver):
+        """A name of only special characters falls back to the literal 'marketplace'."""
+        _write_yml(tmp_path, NON_KEBAB_YML.replace(RAW_NAME, "..."))
+
+        builder = MarketplaceBuilder(tmp_path / "marketplace.yml")
+        builder.build()
+
+        data = json.loads((tmp_path / "marketplace.json").read_text(encoding="utf-8"))
+        assert data["name"] == "marketplace"
+
 
 class TestCodexOutputSanitisesName:
     """The Codex document must sanitise ``name`` but preserve the display name."""

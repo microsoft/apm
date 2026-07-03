@@ -806,7 +806,7 @@ Overrides exist for the rare case where the published marketplace identity diffe
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `name` | `string` | OPTIONAL (override) | inherited | Override of top-level `name`. |
+| `name` | `string` | OPTIONAL (override) | inherited | Override of top-level `name`. Normalised to kebab-case (lowercase, non-alphanumeric -> hyphen) in the compiled `marketplace.json` for Copilot App compatibility; the raw value is retained internally and, for Codex, as `interface.displayName`. |
 | `description` | `string` | OPTIONAL (override) | inherited | Override of top-level `description`. |
 | `version` | `string` | OPTIONAL (override) | inherited | Override of top-level `version`. Validated as semver. |
 | `owner` | `Owner` | REQUIRED | -- | Marketplace publisher identity. See Section 7.3. |
