@@ -333,6 +333,12 @@ def main():
     """Main entry point for the CLI."""
     _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
+    # Verify HTTPS against the OS trust store by default so APM behaves like
+    # git/curl in corporate-CA / TLS-proxy environments. Best-effort: falls
+    # back to certifi and never raises. Must run before the first HTTPS call.
+    from apm_cli.core.tls_trust import configure_tls_trust
+
+    configure_tls_trust()
     try:
         cli(obj={})
     except Exception as e:

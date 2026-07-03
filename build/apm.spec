@@ -188,6 +188,7 @@ hiddenimports = [
     'frontmatter',
     'requests',
     'certifi',  # CA certificate bundle for SSL verification in frozen binary
+    'truststore',  # OS trust-store verification (corporate CA / TLS proxy support)
     # Rich modules (lazily imported, must be explicitly included)
     'rich',
     'rich.console',

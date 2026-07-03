@@ -52,6 +52,15 @@ Re-run the failing command with `--verbose` to see the underlying exception and 
 apm install --verbose
 ```
 
+## Default behaviour: the OS trust store
+
+APM verifies HTTPS against the **operating-system trust store** by default (via [`truststore`](https://pypi.org/project/truststore/)), the same source `git` and `curl` use. So if your corporate CA or TLS-proxy root is installed in the OS trust store (Keychain on macOS, `update-ca-certificates`/`update-ca-trust` on Linux, the Trusted Root store on Windows), APM picks it up with **no configuration** — importing the CA at the OS level is the recommended fix.
+
+You only need the steps below when the CA is *not* in the OS store, or you want to pin a specific bundle:
+
+- Setting `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, or `SSL_CERT_FILE` makes APM honour that bundle instead of the OS store.
+- `APM_DISABLE_TRUSTSTORE=1` restores the legacy behaviour (verify against APM's bundled `certifi` set only).
+
 ## Configure trust
 
 APM uses `requests` for HTTP and shells out to `git` for repository operations. Both honour standard environment variables. Set them at the shell or in your profile (`~/.zshrc`, `~/.bashrc`, or the Windows user environment).
