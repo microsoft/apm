@@ -7,6 +7,7 @@ these classes own format-specific field mapping.
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -18,6 +19,10 @@ from .errors import BuildError
 if TYPE_CHECKING:
     from .builder import ResolvedPackage
     from .yml_schema import MarketplaceConfig, PackageEntry
+
+
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]")
+_HYPHEN_RUN_RE = re.compile(r"-+")
 
 
 @dataclass(frozen=True)
@@ -45,6 +50,13 @@ class MarketplaceOutputMapper(ABC):
         """Return the output JSON document for resolved packages."""
 
 
+def sanitise_marketplace_name(name: str) -> str:
+    """Return a kebab-case marketplace name safe for consumer JSON output."""
+    sanitized = _NON_ALNUM_RE.sub("-", name.lower())
+    sanitized = _HYPHEN_RUN_RE.sub("-", sanitized).strip("-")
+    return sanitized or "marketplace"
+
+
 class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
     """Map packages into Claude/Anthropic marketplace.json format."""
 
@@ -61,7 +73,7 @@ class ClaudeMarketplaceMapper(MarketplaceOutputMapper):
         entry_by_name: dict[str, PackageEntry] = {e.name: e for e in config.packages}
 
         doc: dict[str, Any] = OrderedDict()
-        doc["name"] = config.name
+        doc["name"] = sanitise_marketplace_name(config.name)
         if config.description_overridden and config.description:
             doc["description"] = config.description
         if config.version_overridden and config.version:
@@ -236,7 +248,7 @@ class CodexMarketplaceMapper(MarketplaceOutputMapper):
         entry_by_name: dict[str, PackageEntry] = {e.name: e for e in config.packages}
 
         doc: dict[str, Any] = OrderedDict()
-        doc["name"] = config.name
+        doc["name"] = sanitise_marketplace_name(config.name)
         doc["interface"] = OrderedDict({"displayName": config.name})
 
         plugins: list[dict[str, Any]] = []
