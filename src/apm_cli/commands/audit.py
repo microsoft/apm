@@ -1036,7 +1036,9 @@ def _audit_content_scan(
 # -- Command --------------------------------------------------------
 
 
-@click.command(help="Scan installed packages for hidden Unicode characters")
+@click.command(
+    help="Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations"
+)
 @click.argument("package", required=False)
 @click.option(
     "--file",

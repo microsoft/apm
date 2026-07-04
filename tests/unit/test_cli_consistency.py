@@ -46,6 +46,17 @@ def test_every_registered_command_has_explicit_help():
     )
 
 
+def test_audit_help_describes_security_and_integrity_modes():
+    result = CliRunner().invoke(cli, ["audit", "--help"])
+
+    assert result.exit_code == 0
+    help_text = " ".join(result.output.split())
+    assert (
+        "Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations"
+    ) in help_text
+    assert "Scan installed packages for hidden Unicode characters" not in result.output
+
+
 def test_experimental_subcommand_help_is_specific():
     runner = CliRunner()
 
