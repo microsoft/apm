@@ -9,14 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm pack --format plugin` now closes a supply-chain provenance hole:
-  dependency content is packed exclusively from lockfile-attested
-  `deployed_files` (each verified against its `deployed_file_hashes`
-  SHA-256), and the unattested `apm_modules` cache -- which can be stale,
-  partial, or tampered -- is never packed. This respects `skills:` subset
-  filters (only deployed skills are included). If a dependency has cached
-  primitives but no `deployed_files`, `apm pack` now fails with an
-  actionable error telling you to run `apm install`. (#2013)
+- `apm pack` now closes a supply-chain provenance hole in **every** format
+  (`--format plugin` and the default `--format apm`): dependency content is
+  packed exclusively from lockfile-attested `deployed_files`, each verified
+  against its `deployed_file_hashes` SHA-256 before it enters the bundle, so a
+  file tampered or corrupted after `apm install` fails the pack instead of
+  shipping silently. The unattested `apm_modules` cache -- which can be stale,
+  partial, or tampered -- is never packed. Subset (`skills:`) filters are
+  respected (only deployed skills are included). If a dependency has cached
+  primitives but no `deployed_files`, `apm pack` fails with an actionable error
+  telling you to run `apm install`. Dependency hooks-config / MCP-config, which
+  is not attested in `deployed_files`, is no longer packed: `apm pack` now warns
+  (`[!]`) and names the dependency (first-party root hooks/MCP are unaffected).
+  Directory entries are walked with per-child containment so a planted
+  directory symlink cannot escape the project root into the bundle. (#2013)
 - `apm install --frozen` no longer spuriously rejects private Git dependencies
   hosted on non-default Git servers such as Bitbucket Server, GitLab, or GitHub
   Enterprise; lockfile matching now uses the same host-qualified identity as

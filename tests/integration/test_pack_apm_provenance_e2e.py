@@ -65,9 +65,7 @@ def _write_deployed_skill(project: Path, name: str, marker: str) -> list[str]:
 def _dep_with_hashes(project: Path, deployed_files: list[str]) -> LockedDependency:
     """Build a locked dep whose deployed_file_hashes match current on-disk bytes."""
     hashes = {
-        rel: compute_file_hash(project / rel)
-        for rel in deployed_files
-        if (project / rel).is_file()
+        rel: compute_file_hash(project / rel) for rel in deployed_files if (project / rel).is_file()
     }
     return LockedDependency(
         repo_url="acme/skill-bundle",
@@ -258,9 +256,7 @@ def test_apm_pack_directory_symlink_does_not_escape(tmp_path: Path) -> None:
         depth=1,
         package_type="skill_bundle",
         deployed_files=[skill_dir.relative_to(project).as_posix() + "/"],
-        deployed_file_hashes={
-            rel: compute_file_hash(project / rel) for rel in deployed
-        },
+        deployed_file_hashes={rel: compute_file_hash(project / rel) for rel in deployed},
     )
     _write_lockfile(project, dep)
 

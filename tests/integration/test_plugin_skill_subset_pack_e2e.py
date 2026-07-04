@@ -277,6 +277,7 @@ def test_pack_plugin_fails_when_dep_has_cache_but_no_deployed_files(
     combined_output = result.stdout + result.stderr
     assert "apm_modules is an unattested cache and cannot be packed" in combined_output
 
+
 def test_pack_plugin_warns_when_dep_hooks_mcp_config_dropped(tmp_path: Path) -> None:
     """A hooks/MCP-config-only dep is skipped cleanly but warns loudly (#2013).
 

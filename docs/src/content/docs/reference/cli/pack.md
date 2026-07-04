@@ -119,7 +119,7 @@ A Claude Code plugin directory under `--output`. Contains:
 
 ### APM bundle (`--format apm`)
 
-The legacy APM layout under `--output`. Files are copied preserving their install-time directory structure. The bundle's `apm.lock.yaml` carries the same `pack:` metadata and `bundle_files` digests. The project's own `apm.lock.yaml` is never modified.
+The legacy APM layout under `--output`. Files are copied preserving their install-time directory structure. Installed dependencies are packed exclusively from lockfile-attested `deployed_files`, and each file is verified against its `deployed_file_hashes` SHA-256 before it is copied (the same integrity gate the `plugin` format applies) -- a file whose bytes no longer match its recorded hash fails the pack with `... does not match the hash recorded in apm.lock.yaml`. Files with no recorded hash (older lockfiles) pack without verification. The bundle's `apm.lock.yaml` carries the same `pack:` metadata and `bundle_files` digests. The project's own `apm.lock.yaml` is never modified.
 
 Example enriched lockfile fragment:
 
