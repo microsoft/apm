@@ -2,8 +2,10 @@
 
 import filecmp
 import hashlib
+import os
 import re
 import shutil
+import stat
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -1627,9 +1629,6 @@ class SkillIntegrator(BaseIntegrator):
         no reason to grant any group/other access regardless of what the
         source package shipped.
         """
-        import os
-        import stat
-
         skip_copy = False
         if dest_file.exists() and not force:
             src_hash = hashlib.sha256(src_file.read_bytes()).hexdigest()
