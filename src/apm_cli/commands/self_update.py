@@ -40,7 +40,7 @@ def _is_windows_platform() -> bool:
     return sys.platform == "win32"
 
 
-def _get_update_installer_url() -> str:
+def _get_update_installer_url(script_ref: str | None = None) -> str:
     """Return the installer URL for the current platform, respecting mirror env vars.
 
     ``APM_INSTALLER_BASE_URL`` wins when configured, using ``install.sh`` on
@@ -65,7 +65,8 @@ def _get_update_installer_url() -> str:
     if github_url == _DEFAULT_GITHUB_URL:
         return "https://aka.ms/apm-windows" if _is_windows_platform() else "https://aka.ms/apm-unix"
 
-    return f"{github_url}/{apm_repo}/raw/{_INSTALL_SCRIPT_REF}/{script_name}"
+    resolved_ref = script_ref or _INSTALL_SCRIPT_REF
+    return f"{github_url}/{apm_repo}/raw/{resolved_ref}/{script_name}"
 
 
 def _get_update_installer_suffix() -> str:
@@ -155,7 +156,7 @@ def _build_self_update_installer_env(latest_version: str) -> dict[str, str]:
     channel = _get_effective_self_update_channel()
     if _ENV_SELF_UPDATE_CHANNEL not in env:
         env[_ENV_SELF_UPDATE_CHANNEL] = channel
-    if channel == "prerelease" and _ENV_VERSION not in env:
+    if _ENV_VERSION not in env:
         env[_ENV_VERSION] = f"v{latest_version}"
     return env
 
@@ -272,7 +273,8 @@ def self_update(check):
             import requests
 
             try:
-                install_script_url = _get_update_installer_url()
+                installer_ref = f"v{latest_version}"
+                install_script_url = _get_update_installer_url(installer_ref)
             except RuntimeError as e:
                 logger.error(str(e))
                 logger.info(
