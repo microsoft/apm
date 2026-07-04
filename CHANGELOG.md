@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kebab-case, and `apm pack` prints a warning naming the original and emitted
   values when a rewrite occurs. Internal resolution, registry lookups, and the
   Codex `interface.displayName` keep the original name. (#2008)
+- Combined hook manifests such as `claude-codex-hooks.json` now deploy to every
+  named target instead of only the last suffix target, so one deprecated
+  filename-routed manifest can still reach both Claude Code and Codex during the
+  migration window. by @garyj (#2021)
 
 - `apm audit --ci` no longer reports phantom drift for root-local hook files
   when audit replay writes into a scratch project root. (#1980)

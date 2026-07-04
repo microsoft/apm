@@ -105,6 +105,8 @@ window and warns at install time.
 
 Before: name the manifest `my-pkg-codex-hooks.json`. After: keep
 `hooks.json` generic and let the consumer set `targets: [codex]`.
+Combined deprecated stems such as `claude-codex-hooks.json` route to every
+named target token during the migration window.
 :::
 
 Supported targets and where the integrator writes:

@@ -16,6 +16,7 @@ from apm_cli.integration.hook_file_routing import (
     "stem, expected",
     [
         ("claude-codex-hooks", {"claude", "codex"}),
+        ("internal-claude-codex-hooks", {"claude", "codex"}),
         ("copilot-hooks", {"copilot", "vscode"}),
         ("my-copilot-hooks", {"copilot", "vscode"}),
         ("pre-claude-launch-hooks", None),
@@ -37,3 +38,25 @@ def test_combined_manifest_selected_for_all_its_targets_and_not_others(tmp_path:
     assert [p.name for p in filter_hook_files_for_target([combined], "claude")] == [combined.name]
     assert [p.name for p in filter_hook_files_for_target([combined], "codex")] == [combined.name]
     assert filter_hook_files_for_target([combined], "copilot") == []
+
+
+def test_unknown_suffix_with_known_token_warns_before_universal_fallback(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    mixed = tmp_path / "claude-launch-hooks.json"
+    warned_packages: set[str] = set()
+
+    assert filter_hook_files_for_target(
+        [mixed],
+        "codex",
+        package_name="ponytail",
+        package_identity="DietrichGebert/ponytail",
+        warned_packages=warned_packages,
+    ) == [mixed]
+
+    output = capsys.readouterr().out
+    assert "hook filename routing could not resolve" in output
+    assert "claude-launch-hooks.json" in output
+    assert "contains target token(s) [claude]" in output
+    assert "treats it as universal" in output

@@ -87,10 +87,19 @@ def _integrate_package_hooks(
     target_name: str,
 ) -> dict[str, Any]:
     """Run the install service dispatch that invokes HookIntegrator for a target."""
+    return _integrate_package_hooks_for_targets(package_info, project_root, [target_name])
+
+
+def _integrate_package_hooks_for_targets(
+    package_info: PackageInfo,
+    project_root: Path,
+    target_names: list[str],
+) -> dict[str, Any]:
+    """Run the install service dispatch for multiple targets in one pass."""
     return integrate_package_primitives(
         package_info,
         project_root,
-        targets=[KNOWN_TARGETS[target_name]],
+        targets=[KNOWN_TARGETS[target_name] for target_name in target_names],
         integrators=IntegratorBundle(
             prompt=None,
             agent=None,
@@ -170,3 +179,29 @@ def test_codex_target_still_gets_the_combined_manifest(tmp_path: Path) -> None:
     assert result["hooks"] == 1
     settings = json.loads((project_root / ".codex" / "hooks.json").read_text(encoding="utf-8"))
     assert set(settings["hooks"]) == {"SessionStart", "SubagentStart"}
+
+
+def test_combined_manifest_deploys_to_all_named_targets_in_one_install_pass(
+    tmp_path: Path,
+) -> None:
+    """One install pass deploys a combined manifest to every named target."""
+    project_root = tmp_path / "project"
+    (project_root / ".claude").mkdir(parents=True)
+    (project_root / ".codex").mkdir(parents=True)
+    package_info = _make_ponytail_package(tmp_path)
+
+    result = _integrate_package_hooks_for_targets(
+        package_info,
+        project_root,
+        ["claude", "codex"],
+    )
+
+    assert result["hooks"] == 2
+    claude_settings = json.loads(
+        (project_root / ".claude" / "settings.json").read_text(encoding="utf-8")
+    )
+    codex_settings = json.loads(
+        (project_root / ".codex" / "hooks.json").read_text(encoding="utf-8")
+    )
+    assert set(claude_settings["hooks"]) == {"SessionStart", "SubagentStart"}
+    assert set(codex_settings["hooks"]) == {"SessionStart", "SubagentStart"}

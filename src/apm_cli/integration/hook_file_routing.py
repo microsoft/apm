@@ -34,6 +34,14 @@ def filter_hook_files_for_target(
     for hook_file in hook_files:
         allowed_targets = _hook_file_allowed_targets(hook_file)
         if allowed_targets is None:
+            _warn_unresolved_target_tokens_if_needed(
+                warned_packages,
+                warning_key,
+                package_name,
+                package_identity,
+                hook_file.name,
+                _hook_file_unresolved_target_tokens(hook_file),
+            )
             universal.append(hook_file)
         elif target_key in allowed_targets:
             _warn_if_needed(
@@ -50,7 +58,11 @@ def filter_hook_files_for_target(
 
 
 def _hook_file_allowed_targets(hook_file: Path) -> set[str] | None:
-    """Return explicit targets for a hook file, or None for universal files."""
+    """Return explicit targets for a hook file, or None for universal files.
+
+    Filename routing is a deprecated package-authoring convenience, not an
+    authorization boundary. Unknown stems intentionally stay universal.
+    """
     stem_lower = hook_file.stem.lower()
     for token, allowed_targets in _HOOK_FILE_TARGET_TOKENS.items():
         if stem_lower == f"hooks-{token}":
@@ -59,21 +71,48 @@ def _hook_file_allowed_targets(hook_file: Path) -> set[str] | None:
     if stem_lower.endswith("-hooks"):
         segments = stem_lower[: -len("-hooks")].split("-")
         per_segment = [_HOOK_FILE_TARGET_TOKENS.get(segment) for segment in segments]
-        if segments and all(per_segment):
+        suffix_targets = _target_suffix_segments(segments)
+        if len(suffix_targets) >= 2:
             # Combined manifest (e.g. claude-codex-hooks): union of every
-            # token's allowed targets, so the file is selected for each.
-            matched: set[str] = set()
-            for segment_targets in per_segment:
-                if segment_targets is not None:
-                    matched |= segment_targets
-            return matched
+            # target suffix token, so the file is selected for each.
+            return _union_target_sets(suffix_targets)
         if per_segment and per_segment[-1]:
-            # `<token>-hooks` or `*-<token>-hooks`: route by the last segment
-            # so descriptive prefixes (e.g. pre-claude-launch-hooks) don't
-            # accidentally match a token that isn't actually the target.
+            # `<token>-hooks` or `*-<token>-hooks`: route by the final target
+            # token. Earlier non-target segments are descriptive prefixes.
             return per_segment[-1]
 
     return None
+
+
+def _target_suffix_segments(segments: list[str]) -> list[set[str]]:
+    """Return contiguous target-token matches at the end of a stem."""
+    suffix: list[set[str]] = []
+    for segment in reversed(segments):
+        segment_targets = _HOOK_FILE_TARGET_TOKENS.get(segment)
+        if segment_targets is None:
+            break
+        suffix.append(segment_targets)
+    suffix.reverse()
+    return suffix
+
+
+def _union_target_sets(target_sets: list[set[str]]) -> set[str]:
+    """Return the union of target sets while preserving simple caller logic."""
+    matched: set[str] = set()
+    for segment_targets in target_sets:
+        matched |= segment_targets
+    return matched
+
+
+def _hook_file_unresolved_target_tokens(hook_file: Path) -> list[str]:
+    """Return known target tokens from stems that still resolve universal."""
+    stem_lower = hook_file.stem.lower()
+    if not stem_lower.endswith("-hooks"):
+        return []
+    segments = stem_lower[: -len("-hooks")].split("-")
+    if _target_suffix_segments(segments):
+        return []
+    return sorted({segment for segment in segments if segment in _HOOK_FILE_TARGET_TOKENS})
 
 
 def _warn_if_needed(
@@ -99,6 +138,32 @@ def _warn_if_needed(
     warned_packages.add(warning_key)
 
 
+def _warn_unresolved_target_tokens_if_needed(
+    warned_packages: set[str] | None,
+    warning_key: str,
+    package_name: str,
+    package_identity: str,
+    hook_filename: str,
+    token_names: list[str],
+) -> None:
+    """Emit a warning when a target-looking filename falls back to universal."""
+    if warned_packages is None or not token_names:
+        return
+    unresolved_key = f"{warning_key}:unresolved:{hook_filename.lower()}"
+    if unresolved_key in warned_packages:
+        return
+    _rich_warning(
+        _unresolved_filename_routing_warning(
+            package_name,
+            package_identity,
+            hook_filename,
+            token_names,
+        ),
+        symbol="warning",
+    )
+    warned_packages.add(unresolved_key)
+
+
 def _deprecated_filename_routing_warning(
     package_name: str,
     package_identity: str,
@@ -118,6 +183,24 @@ def _deprecated_filename_routing_warning(
         f"        targets: [{targets_csv}]\n"
         "\n"
         "    See: https://microsoft.github.io/apm/reference/manifest-schema/#412-object-form"
+    )
+
+
+def _unresolved_filename_routing_warning(
+    package_name: str,
+    package_identity: str,
+    hook_filename: str,
+    token_names: list[str],
+) -> str:
+    """Return the warning for target-looking stems treated as universal."""
+    tokens_csv = ", ".join(token_names)
+    pkg_label = package_name or package_identity or "<owner/repo>"
+    return (
+        f"{pkg_label}: hook filename routing could not resolve '{hook_filename}'.\n"
+        f"    The stem contains target token(s) [{tokens_csv}] but does not end\n"
+        "    with a recognized target suffix, so APM treats it as universal.\n"
+        "    Rename the file to '<prefix>-<target>-hooks.json' or prefer\n"
+        "    per-dependency targets: [...] in apm.yml."
     )
 
 
