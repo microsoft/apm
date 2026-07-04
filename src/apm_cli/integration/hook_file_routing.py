@@ -53,12 +53,26 @@ def _hook_file_allowed_targets(hook_file: Path) -> set[str] | None:
     """Return explicit targets for a hook file, or None for universal files."""
     stem_lower = hook_file.stem.lower()
     for token, allowed_targets in _HOOK_FILE_TARGET_TOKENS.items():
-        if (
-            stem_lower == f"{token}-hooks"
-            or stem_lower.endswith(f"-{token}-hooks")
-            or stem_lower == f"hooks-{token}"
-        ):
+        if stem_lower == f"hooks-{token}":
             return allowed_targets
+
+    if stem_lower.endswith("-hooks"):
+        segments = stem_lower[: -len("-hooks")].split("-")
+        per_segment = [_HOOK_FILE_TARGET_TOKENS.get(segment) for segment in segments]
+        if segments and all(per_segment):
+            # Combined manifest (e.g. claude-codex-hooks): union of every
+            # token's allowed targets, so the file is selected for each.
+            matched: set[str] = set()
+            for segment_targets in per_segment:
+                if segment_targets is not None:
+                    matched |= segment_targets
+            return matched
+        if per_segment and per_segment[-1]:
+            # `<token>-hooks` or `*-<token>-hooks`: route by the last segment
+            # so descriptive prefixes (e.g. pre-claude-launch-hooks) don't
+            # accidentally match a token that isn't actually the target.
+            return per_segment[-1]
+
     return None
 
 
