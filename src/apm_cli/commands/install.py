@@ -609,9 +609,9 @@ def _merge_packages_into_yml(
 
     # Write back to apm.yml
     try:
-        from ..utils.yaml_io import dump_yaml
+        from ..utils.yaml_io import dump_yaml_roundtrip
 
-        dump_yaml(data, apm_yml_path)
+        dump_yaml_roundtrip(data, apm_yml_path)
         if logger:
             logger.success(
                 f"Updated {APM_YML_FILENAME} with {len(validated_packages)} new package(s)"
@@ -660,9 +660,9 @@ def _validate_and_add_packages_to_apm_yml(
 
     # Read current apm.yml
     try:
-        from ..utils.yaml_io import load_yaml
+        from ..utils.yaml_io import load_yaml_roundtrip
 
-        data = load_yaml(apm_yml_path) or {}
+        data = load_yaml_roundtrip(apm_yml_path) or {}
     except Exception as e:
         if logger:
             logger.error(f"Failed to read {APM_YML_FILENAME}: {e}")

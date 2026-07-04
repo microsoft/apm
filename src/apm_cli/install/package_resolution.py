@@ -370,9 +370,9 @@ def persist_dependency_list_if_changed(
         return
     data[dep_section]["apm"] = current_deps
     try:
-        from apm_cli.utils.yaml_io import dump_yaml
+        from apm_cli.utils.yaml_io import dump_yaml_roundtrip
 
-        dump_yaml(data, apm_yml_path)
+        dump_yaml_roundtrip(data, apm_yml_path)
         if logger:
             logger.success(f"Updated {apm_yml_filename} dependency entries")
     except Exception as e:
