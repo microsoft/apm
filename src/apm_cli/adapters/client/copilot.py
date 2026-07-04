@@ -142,8 +142,9 @@ class CopilotClientAdapter(MCPClientAdapter):
         # Ensure directory exists
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(config_path, "w") as f:
+        with open(config_path, "w", encoding="utf-8") as f:
             json.dump(current_config, f, indent=2)
+        os.chmod(config_path, 0o600)
 
     def get_current_config(self):
         """Get the current Copilot CLI MCP configuration.
@@ -157,7 +158,7 @@ class CopilotClientAdapter(MCPClientAdapter):
             return {}
 
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 return json.load(f)
         except (OSError, json.JSONDecodeError):
             return {}

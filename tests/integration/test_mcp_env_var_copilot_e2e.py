@@ -1,4 +1,4 @@
-"""End-to-end regression guard for #1152: Copilot CLI's mcp-config.json
+"""End-to-end regression guard for #1152: Copilot CLI's .mcp.json
 must contain ``${VAR}`` runtime placeholders for env-var references in
 apm.yml -- never the literal value resolved at install time.
 
@@ -59,14 +59,14 @@ def _write_apm_yml(project_dir, mcp_servers):
 
 
 class TestMcpEnvVarHeadersCopilot:
-    """#1152 regression: Copilot mcp-config.json must contain ``${VAR}``
+    """#1152 regression: Copilot .mcp.json must contain ``${VAR}``
     runtime placeholders for env-var references in apm.yml. The literal
     values from the installer's environment must NEVER appear on disk.
     """
 
     def test_self_defined_http_server_translates_env_vars_not_resolves(self, tmp_path, apm_command):
         """``${VAR}`` and ``${env:VAR}`` syntaxes in apm.yml headers must
-        land in mcp-config.json as ``${VAR}`` (Copilot CLI's native runtime
+        land in .mcp.json as ``${VAR}`` (Copilot CLI's native runtime
         substitution syntax). No host env values may leak into the file.
         """
         project_dir = tmp_path / "project"
@@ -128,7 +128,7 @@ class TestMcpEnvVarHeadersCopilot:
         config = json.loads(mcp_config.read_text(encoding="utf-8"))
         servers = config.get("mcpServers") or {}
         assert len(servers) == 1, (
-            f"Expected 1 server in mcp-config.json, got: {list(servers.keys())}"
+            f"Expected 1 server in .mcp.json, got: {list(servers.keys())}"
         )
         server = next(iter(servers.values()))
         headers = server.get("headers") or {}
@@ -145,7 +145,7 @@ class TestMcpEnvVarHeadersCopilot:
         # CRITICAL: no plaintext secret may appear anywhere in the file.
         full_text = mcp_config.read_text(encoding="utf-8")
         assert "should-not-appear-in-copilot-json" not in full_text, (
-            "Copilot mcp-config.json leaked the literal env value -- "
+            "Copilot .mcp.json leaked the literal env value -- "
             "the install-time translation regressed and secrets are now "
             "baked to disk.\n"
             f"File contents:\n{full_text}"
@@ -153,7 +153,7 @@ class TestMcpEnvVarHeadersCopilot:
 
     def test_self_defined_stdio_server_translates_env_vars_in_args(self, tmp_path, apm_command):
         """Self-defined stdio server with env-var placeholders in BOTH the
-        ``env`` block and ``args`` list must land in mcp-config.json with
+        ``env`` block and ``args`` list must land in .mcp.json with
         ``${VAR}`` runtime placeholders. Closes the integration-tier gap
         flagged by test-coverage review for the ``_raw_stdio`` branch of
         ``_format_server_config`` and the supply-chain regression where
@@ -217,7 +217,7 @@ class TestMcpEnvVarHeadersCopilot:
         config = json.loads(mcp_config.read_text(encoding="utf-8"))
         servers = config.get("mcpServers") or {}
         assert len(servers) == 1, (
-            f"Expected 1 server in mcp-config.json, got: {list(servers.keys())}"
+            f"Expected 1 server in .mcp.json, got: {list(servers.keys())}"
         )
         server = next(iter(servers.values()))
 
