@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **95 normative statements** indexed in
+- OpenAPM v0.1 carries **96 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -1705,6 +1705,26 @@ locked counterpart (no drift) when, and only when, the locked
 range. Any difference, including whitespace, MUST trigger
 re-resolution.
 
+<a id="req-rs-015"></a>
+**[req-rs-015]** A conforming **consumer** implementation performing a
+non-update install (that is, not an `apm update` and not an explicit
+`--refresh`/re-resolution invocation) MUST replay a lockfile entry that
+records a `resolved_commit` by reusing that recorded commit as the
+resolution result WITHOUT issuing a network ref-resolution -- no
+commits-API query, no `git ls-remote`, and no clone -- for that entry,
+PROVIDED drift detection against the manifest reference does not require
+re-resolution. When the manifest reference for the entry has changed so
+that the recorded pin no longer matches (drift), or under an explicit
+`apm update` / `--refresh` invocation ([req-rs-011](#req-rs-011),
+[req-rs-012](#req-rs-012)), the consumer MUST re-resolve the reference
+over the network as usual. The recorded `resolved_commit` is the
+lockfile's own trust anchor (see [req-lk-006](#req-lk-006)); this
+requirement makes a warm install of an already-locked reference
+network-free at the resolution step, which is what permits reproducible
+and offline-capable resolution for commit-pinned and branch-tracking
+entries not covered by the semver-range equivalence of
+[req-rs-004](#req-rs-004).
+
 #### 7.5.1 Mirror resolution
 
 OpenAPM v0.1 anchors trust on the recorded `resolved_hash`, not on
@@ -1876,7 +1896,8 @@ This section's normative statements are:
   [req-rs-007](#req-rs-007), [req-rs-008](#req-rs-008),
   [req-rs-009](#req-rs-009), [req-rs-010](#req-rs-010),
   [req-rs-011](#req-rs-011), [req-rs-012](#req-rs-012),
-  [req-rs-013](#req-rs-013), [req-rs-014](#req-rs-014).
+  [req-rs-013](#req-rs-013), [req-rs-014](#req-rs-014),
+  [req-rs-015](#req-rs-015).
 - Producer: [req-pr-004](#req-pr-004).
 - Producer (SHOULD): [req-pr-005](#req-pr-005).
 
@@ -2480,6 +2501,7 @@ conformance statement identifying:
 [req-rs-009](#req-rs-009), [req-rs-010](#req-rs-010),
 [req-rs-011](#req-rs-011), [req-rs-012](#req-rs-012),
 [req-rs-013](#req-rs-013), [req-rs-014](#req-rs-014),
+[req-rs-015](#req-rs-015),
 [req-pr-001](#req-pr-001), [req-pr-002](#req-pr-002),
 [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
 [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
@@ -2882,6 +2904,7 @@ renumbering of conformance classes.
 | [req-rs-012](#req-rs-012)                | MUST    | 7.7     | consumer    |
 | [req-rs-013](#req-rs-013)                | MUST    | 7.2     | consumer    |
 | [req-rs-014](#req-rs-014)                | MUST    | 7.3.1   | consumer    |
+| [req-rs-015](#req-rs-015)                | MUST    | 7.5     | consumer    |
 | [req-pr-001](#req-pr-001)                | MUST    | 8.2     | consumer    |
 | [req-pr-002](#req-pr-002)                | MUST    | 8.3     | consumer    |
 | [req-pr-003](#req-pr-003)                | MUST    | 8.3     | consumer    |
@@ -2907,7 +2930,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 95** (90 MUST, 5 SHOULD).
+**Total normative statements: 96** (91 MUST, 5 SHOULD).
 
 ---
 
@@ -2925,6 +2948,7 @@ renumbering of conformance classes.
 | 0.1.6   | 2026-06-25 | Spec-citation fold for executable trust precedence and audit fidelity. Added Section 10.14 with two consumer MUSTs: [req-sc-011] (executable trust resolves through one deny-wins precedence; an org executables.deny/deny_all overrides any project or user grant; the install gate and the audit MUST reach the identical outcome via the shared resolver) and [req-sc-012] (a required package's audit asserts lockfile presence, not executable deployment; a present-but-withheld required package satisfies the presence requirement and surfaces a distinct withheld-executable signal). Added rows 13 and 14 to the Section 10.11 summary table. Section 11.3.2 and Appendix C updated. Statement count 92 -> 94 (89 MUST, 5 SHOULD). |
 | 0.1.7   | 2026-06-27 | Spec-citation fold for lockfile inventory metadata (closes the #1888 Mode-B silent-extension gate). Added [req-lk-019] (Section 5.2, consumer MUST): the optional per-entry `name` and `version` fields are self-asserted inventory metadata only -- preserved on round-trip per [req-lk-011], never a trust anchor, and never an identity, deduplication, or frozen-replay key (identity/replay derive solely from `repo_url`, `resolved_commit`, `resolved_tag`/`constraint`, and the recorded hash envelopes); their presence is additive and MUST NOT change `lockfile_version`. Added the `name` row to the Section 5.2 per-entry field table and broadened the `version` row note to non-semver sources; added `name` to the `entry` `$defs` in `lockfile-v0.1.schema.json` (sibling of `declared_license`). Section 11.3.2 Consumer enumeration and Appendix C updated. Statement count: 94 -> 95 (90 MUST, 5 SHOULD). |
 | 0.1.8   | 2026-06-29 | Normative amendment (semver-zero `0.x` minor) to [req-lk-012]: redefined the `deployed_file_hashes` / `local_deployed_file_hashes` domain from "bytes as written to disk" to the *canonical content* -- UTF-8 text (decodable, no NUL byte) is hashed over its `\r\n` -> `\n` normalized form (a lone `\r` is preserved); binary is hashed raw. This makes the per-deployed-file hash platform-invariant so `apm audit --ci` no longer reports a false `content-integrity` drift when a file is checked out with `\r\n` on Windows (`core.autocrlf=true`) and `\n` on POSIX (apm#1952); it harmonizes `content-integrity` with the drift-replay normalizer. Preserving a bare `\r` keeps the carriage-return smuggling vector hash-visible. [req-lk-017] reworded to re-verify against the [req-lk-012] canonical domain rather than raw on-disk bytes (consistency, not a new obligation). Migration: lockfiles whose hashes were recorded on Windows before this amendment carry `\r\n`-domain hashes; one `apm install` re-records them in the canonical domain. No statement-count change (existing MUST modified, none added); 95 (90 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel + comment window. |
+| 0.1.9   | 2026-07-04 | Spec-citation fold for network-free lockfile replay (closes the srobroek Mode-B silent-extension gate on the lockfile-seeded resolver cache). Added [req-rs-015] (Section 7.5, consumer MUST): a non-update install (not `apm update` and not `--refresh`/re-resolution) MUST replay a lockfile entry that records a `resolved_commit` by reusing that recorded commit as the resolution result without issuing any network ref-resolution -- no commits-API query, no `git ls-remote`, no clone -- for that entry, PROVIDED drift detection against the manifest reference does not require re-resolution; on drift or under an explicit `apm update`/`--refresh` ([req-rs-011], [req-rs-012]) the consumer MUST re-resolve over the network as usual. The recorded `resolved_commit` is the lockfile's own trust anchor ([req-lk-006]); this makes a warm install of an already-locked reference network-free at the resolution step, extending the reproducible-and-offline resolution guarantee to commit-pinned and branch-tracking entries not covered by the semver-range equivalence of [req-rs-004]. Section 7.11 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 95 -> 96 (91 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel + comment window. |
 
 Errata (none at publication).
 
