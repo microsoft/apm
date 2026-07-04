@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `apm runtime setup codex` now verifies GitHub Releases SHA-256 asset
+  digests before extracting downloaded archives -- by @fallintoplace (#1949)
+
 ### Performance
 
 - `apm install` with a committed lockfile no longer re-resolves branch-pinned
@@ -32,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bundles also get a minimal module-type `package.json` sidecar, which
   prevents a consumer repo's `type: module` from breaking CommonJS hooks.
   (#2023)
+- Marketplace plugin `bin/` deployment now hardens POSIX executable copies to
+  user-only `0o700` permissions and normalizes legacy `bin_deploy.deny` GitHub
+  forms before matching. -- by @WilliamK112 (#1971)
 - `apm audit --help` now accurately describes the command's full scope:
   hidden Unicode scanning, drift detection, and lockfile/policy checks.
   The previous summary named only Unicode scanning and used the legacy

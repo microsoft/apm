@@ -1534,7 +1534,10 @@ class SkillIntegrator(BaseIntegrator):
         bd_policy = policy.bin_deploy
         if bd_policy is None:
             return False
+        from apm_cli.security.executables import normalize_bin_deploy_deny_key
+
         canonical = package_info.get_canonical_dependency_string()
+        normalized_canonical = normalize_bin_deploy_deny_key(canonical)
         if bd_policy.deny_all:
             if logger:
                 logger.progress(
@@ -1542,7 +1545,8 @@ class SkillIntegrator(BaseIntegrator):
                     symbol="info",
                 )
             return True
-        if canonical in bd_policy.deny:
+        deny_entries = {normalize_bin_deploy_deny_key(entry) for entry in bd_policy.deny}
+        if normalized_canonical in deny_entries:
             if logger:
                 logger.progress(
                     f"bin_deploy.deny: skipping bin deploy for {canonical}",

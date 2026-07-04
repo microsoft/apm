@@ -47,6 +47,139 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+extract_release_tag() {
+    grep '"tag_name":' | head -n 1 | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/'
+}
+
+extract_release_asset_digest() {
+    local asset_name="$1"
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -r --arg asset_name "$asset_name" \
+            '.assets[]? | select(.name == $asset_name) | .digest // empty' \
+            | head -n 1
+        return 0
+    fi
+
+    awk -v asset_name="$asset_name" '
+        function json_string_value(record, key, value) {
+            value = record
+            sub(".*\"" key "\"[[:space:]]*:[[:space:]]*\"", "", value)
+            if (value == record) {
+                return ""
+            }
+            sub("\".*", "", value)
+            return value
+        }
+
+        /"name"[[:space:]]*:/ {
+            in_asset = (json_string_value($0, "name") == asset_name)
+        }
+        in_asset && /"digest"[[:space:]]*:/ {
+            print json_string_value($0, "digest")
+            exit
+        }
+        in_asset && /"browser_download_url"[[:space:]]*:/ {
+            exit
+        }
+    ' RS=,
+}
+
+fetch_github_api() {
+    local url="$1"
+    local use_auth="$2"
+    local token=""
+
+    if [[ "$use_auth" == "true" ]]; then
+        if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+            token="$GITHUB_TOKEN"
+        elif [[ -n "${GITHUB_APM_PAT:-}" ]]; then
+            token="$GITHUB_APM_PAT"
+        elif [[ -n "${GH_TOKEN:-}" ]]; then
+            token="$GH_TOKEN"
+        fi
+    fi
+
+    if command -v curl >/dev/null 2>&1; then
+        if [[ -n "$token" ]]; then
+            curl -fsSL -H "Authorization: Bearer $token" "$url"
+        else
+            curl -fsSL "$url"
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if [[ -n "$token" ]]; then
+            wget -qO- --header="Authorization: Bearer $token" "$url"
+        else
+            wget -qO- "$url"
+        fi
+    else
+        log_error "Neither curl nor wget is available. Please install one of them."
+        exit 1
+    fi
+}
+
+fetch_release_metadata() {
+    local url="$1"
+    local response=""
+
+    if [[ -n "${GITHUB_TOKEN:-}" || -n "${GITHUB_APM_PAT:-}" || -n "${GH_TOKEN:-}" ]]; then
+        if response="$(fetch_github_api "$url" true 2>/dev/null)" \
+            && [[ -n "$(printf '%s\n' "$response" | extract_release_tag)" ]]; then
+            printf '%s' "$response"
+            return 0
+        fi
+    fi
+
+    if response="$(fetch_github_api "$url" false 2>/dev/null)" \
+        && [[ -n "$(printf '%s\n' "$response" | extract_release_tag)" ]]; then
+        printf '%s' "$response"
+        return 0
+    fi
+
+    return 1
+}
+
+sha256_file() {
+    local file_path="$1"
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file_path" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file_path" | awk '{print $1}'
+    else
+        log_error "Neither sha256sum nor shasum is available. Please install one of them."
+        exit 1
+    fi
+}
+
+verify_archive_checksum() {
+    local archive_path="$1"
+    local expected_digest="$2"
+    local normalized_expected
+    local actual_digest
+    local normalized_actual
+
+    normalized_expected="$(printf '%s' "$expected_digest" | sed 's/^sha256://' | tr '[:upper:]' '[:lower:]')"
+    if [[ ! "$normalized_expected" =~ ^[0-9a-f]{64}$ ]]; then
+        log_error "GitHub release metadata did not include a valid SHA-256 digest."
+        log_error "Try a different Codex version or retry after upstream release metadata publishes a digest."
+        exit 1
+    fi
+
+    actual_digest="$(sha256_file "$archive_path")"
+    normalized_actual="$(printf '%s' "$actual_digest" | tr '[:upper:]' '[:lower:]')"
+
+    if [[ "$normalized_actual" != "$normalized_expected" ]]; then
+        log_error "Checksum verification failed for downloaded Codex archive."
+        log_error "Expected SHA-256: ${normalized_expected:0:16}..."
+        log_error "Actual SHA-256: ${normalized_actual:0:16}..."
+        log_error "Re-run the command to retry. If this persists, the release may be compromised."
+        exit 1
+    fi
+
+    echo "[+] Verified Codex archive checksum"
+}
+
 setup_codex() {
     log_info "Setting up Codex runtime..."
     
@@ -82,68 +215,65 @@ setup_codex() {
     local codex_binary="$runtime_dir/codex"
     local codex_config_dir="$HOME/.codex"
     local codex_config="$codex_config_dir/config.toml"
-    local temp_dir="/tmp/apm-codex-install"
+    local temp_dir
+    local release_metadata_url
+    local release_metadata
+    local release_tag
+    local archive_name
+    local archive_digest
     
-    # Create temp directory
-    mkdir -p "$temp_dir"
+    temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/apm-codex-install.XXXXXX")"
+    cleanup_codex_temp_dir() {
+        rm -rf "${temp_dir:-}"
+    }
+    trap cleanup_codex_temp_dir EXIT
     
-    # Determine download URL for the tar.gz file
+    # Determine release metadata and download URL for the tar.gz file
     local download_url
     if [[ "$CODEX_VERSION" == "latest" ]]; then
-        # Fetch the latest release tag from GitHub API
         log_info "Fetching latest Codex release information..."
-        local latest_release_url="https://api.github.com/repos/$CODEX_REPO/releases/latest"
-        local latest_tag
-        
-        # Try to get the latest release tag using curl
-        if command -v curl >/dev/null 2>&1; then
-            # Use authenticated request if GITHUB_TOKEN or GITHUB_APM_PAT is available
-            if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-                log_info "Using authenticated GitHub API request (GITHUB_TOKEN - ${#GITHUB_TOKEN} chars)"
-                local auth_header="Authorization: Bearer ${GITHUB_TOKEN}"
-                latest_tag=$(curl -s -H "$auth_header" "$latest_release_url" | grep '"tag_name":' | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/')
-            elif [[ -n "${GITHUB_APM_PAT:-}" ]]; then
-                log_info "Using authenticated GitHub API request (GITHUB_APM_PAT - ${#GITHUB_APM_PAT} chars)"
-                local auth_header="Authorization: Bearer ${GITHUB_APM_PAT}"
-                latest_tag=$(curl -s -H "$auth_header" "$latest_release_url" | grep '"tag_name":' | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/')
-            else
-                log_info "🚨 DEBUG: No tokens available - GITHUB_TOKEN and GITHUB_APM_PAT both unset!"
-                log_info "Using unauthenticated GitHub API request (60 requests/hour limit)"
-                latest_tag=$(curl -s "$latest_release_url" | grep '"tag_name":' | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/')
-            fi
-        else
-            log_error "curl is required to fetch latest release information"
-            exit 1
-        fi
-        
-        # Verify we got a valid tag, fallback to unauthenticated if auth failed
-        if [[ -z "$latest_tag" || "$latest_tag" == "null" ]]; then
-            log_info "Authenticated request did not return a valid tag, retrying without authentication..."
-            latest_tag=$(curl -s "$latest_release_url" | grep '"tag_name":' | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/')
-        fi
-        
-        if [[ -z "$latest_tag" || "$latest_tag" == "null" ]]; then
-            log_error "Failed to fetch latest release tag from GitHub API"
-            log_error "No fallback available. Please check your internet connection or specify a specific version."
-            exit 1
-        fi
-        
-        log_info "Using Codex release: $latest_tag"
-        CODEX_VERSION="$latest_tag"
-        download_url="https://github.com/$CODEX_REPO/releases/download/$latest_tag/codex-$codex_platform.tar.gz"
+        release_metadata_url="https://api.github.com/repos/$CODEX_REPO/releases/latest"
     else
-        download_url="https://github.com/$CODEX_REPO/releases/download/$CODEX_VERSION/codex-$codex_platform.tar.gz"
+        release_metadata_url="https://api.github.com/repos/$CODEX_REPO/releases/tags/$CODEX_VERSION"
     fi
+
+    if ! release_metadata="$(fetch_release_metadata "$release_metadata_url")"; then
+        log_error "Failed to fetch Codex release metadata from GitHub API."
+        log_error "No fallback available. Please check your internet connection or specify a valid version."
+        exit 1
+    fi
+
+    release_tag="$(printf '%s\n' "$release_metadata" | extract_release_tag)"
+    if [[ -z "$release_tag" || "$release_tag" == "null" ]]; then
+        log_error "Failed to determine Codex release tag from GitHub API."
+        exit 1
+    fi
+
+    if [[ "$CODEX_VERSION" == "latest" ]]; then
+        log_info "Using Codex release: $release_tag"
+        CODEX_VERSION="$release_tag"
+    fi
+
+    archive_name="codex-$codex_platform.tar.gz"
+    # Depends on GitHub Releases API asset.digest metadata; fail closed if it disappears.
+    archive_digest="$(printf '%s\n' "$release_metadata" | extract_release_asset_digest "$archive_name")"
+    if [[ -z "$archive_digest" ]]; then
+        log_error "Failed to find checksum metadata for $archive_name."
+        log_error "Try a different Codex version or retry after upstream release metadata publishes a digest."
+        exit 1
+    fi
+
+    download_url="https://github.com/$CODEX_REPO/releases/download/$release_tag/$archive_name"
     
     # Download and extract Codex binary
     log_info "Downloading Codex binary for $codex_platform..."
-    local tar_file="$temp_dir/codex-$codex_platform.tar.gz"
+    local tar_file="$temp_dir/$archive_name"
     download_file "$download_url" "$tar_file" "Codex binary archive"
+    verify_archive_checksum "$tar_file" "$archive_digest"
     
     # Extract the binary
     log_info "Extracting Codex binary..."
-    cd "$temp_dir"
-    tar -xzf "$tar_file"
+    tar -xzf "$tar_file" -C "$temp_dir"
     
     # Find the extracted binary (should be named 'codex-{platform}' or just 'codex')
     local extracted_binary=""
@@ -162,6 +292,7 @@ setup_codex() {
     
     # Clean up temp directory
     rm -rf "$temp_dir"
+    trap - EXIT
     
     # Verify binary
     verify_binary "$codex_binary" "Codex"
