@@ -65,7 +65,7 @@ class TestFormatDistributed:
     def temp_project(self):
         """Create a temporary project directory."""
         temp_dir = tempfile.mkdtemp()
-        yield Path(temp_dir)
+        yield Path(temp_dir).resolve()
         shutil.rmtree(temp_dir, ignore_errors=True)
 
     @pytest.fixture
@@ -136,8 +136,8 @@ class TestFormatDistributed:
         content = result.content_map[temp_project / "CLAUDE.md"]
 
         # Check pattern grouping
-        assert "## Files matching `**/*.py`" in content
-        assert "## Files matching `**/*.js`" in content
+        assert "### Files matching `**/*.py`" in content
+        assert "### Files matching `**/*.js`" in content
         assert "Use type hints and follow PEP 8." in content
         assert "Use ES6+ features." in content
 
@@ -190,6 +190,8 @@ class TestFormatDistributed:
         assert "## Dependencies" in lines
         assert "## Constitution" in lines
         assert "## Project Standards" in lines
+        assert "### Files matching `**/*.py`" in lines
+        assert "## Files matching `**/*.py`" not in lines
 
     def test_format_includes_source_attribution(self, temp_project, sample_primitives):
         """Test that source attribution comments are included."""

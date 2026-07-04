@@ -329,6 +329,7 @@ class ClaudeFormatter:
                     placement.instructions,
                     placement.source_attribution,
                     self.source_dir,
+                    section_heading_prefix="###",
                 )
             )
 

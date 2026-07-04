@@ -52,6 +52,8 @@ def test_compile_claude_project_standards_is_not_duplicate_h1(
     assert "## Dependencies" in claude_lines
     assert "## Constitution" in claude_lines
     assert "## Project Standards" in claude_lines
+    assert "### Files matching `**/*.py`" in claude_lines
     assert "# Dependencies" not in claude_lines
     assert "# Constitution" not in claude_lines
     assert "# Project Standards" not in claude_lines
+    assert "## Files matching `**/*.py`" not in claude_lines

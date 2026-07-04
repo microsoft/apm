@@ -78,6 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   named target instead of only the last suffix target, so one deprecated
   filename-routed manifest can still reach both Claude Code and Codex during the
   migration window. (by @garyj) (#2021)
+- Generated `CLAUDE.md` now uses a single H1 title with nested H2/H3 sections,
+  fixing duplicate top-level headings in Claude Code. (#2014)
 - `apm audit --ci` no longer reports phantom drift for root-local hook files
   when audit replay writes into a scratch project root. (#1980)
 - Self-defined stdio MCP env placeholders now resolve from the install process

@@ -350,7 +350,7 @@ class TestClaudeFormatterIncludesGlobals:
         assert "SCOPED_BODY" in content
         # Project Standards groups Claude instructions below the CLAUDE.md title.
         assert "## Project Standards" in content
-        assert GLOBAL_INSTRUCTIONS_HEADING in content
+        assert "### Global Instructions" in content
         assert content.index("GLOBAL_BODY") < content.index("SCOPED_BODY")
 
     def test_only_globals_emits_general_section_only(self, tmp_path):
@@ -364,7 +364,7 @@ class TestClaudeFormatterIncludesGlobals:
         content = result.content_map[tmp_path / "CLAUDE.md"]
 
         assert "ONLY" in content
-        assert GLOBAL_INSTRUCTIONS_HEADING in content
+        assert "### Global Instructions" in content
         assert "## Files matching" not in content
 
 

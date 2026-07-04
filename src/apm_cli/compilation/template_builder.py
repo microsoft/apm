@@ -25,14 +25,15 @@ def render_instructions_block(
     *,
     base_dir: Path,
     emit_instruction: Callable[[Instruction], list[str]],
-    global_heading: str = GLOBAL_INSTRUCTIONS_HEADING,
+    section_heading_prefix: str = "##",
+    global_heading: str | None = None,
 ) -> list[str]:
     """Render the body lines of an instructions section.
 
     Renders global instructions (those with no ``applyTo`` pattern) under a
     single ``global_heading`` block, then renders pattern-scoped instructions
-    grouped under ``## Files matching `<pattern>``` headings (sorted by
-    pattern). Within each group, instructions are sorted by file path
+    grouped under ``{section_heading_prefix} Files matching `<pattern>```
+    headings (sorted by pattern). Within each group, instructions are sorted by file path
     relative to ``base_dir`` for deterministic output.
 
     The caller controls per-instruction emission via ``emit_instruction`` so
@@ -45,7 +46,11 @@ def render_instructions_block(
             instruction. Typically the source-attribution comment, the
             instruction body, and a trailing blank line. Empty-content
             instructions are filtered out before this is invoked.
-        global_heading: Heading line for the global section.
+        section_heading_prefix: Markdown heading prefix used for instruction
+            groups. The default keeps AGENTS.md groups at H2; callers that
+            wrap instructions under an H2 parent can pass ``"###"``.
+        global_heading: Optional explicit heading line for global instructions.
+            When omitted, the heading is derived from ``section_heading_prefix``.
 
     Returns:
         Lines that the caller will join. Empty list when ``instructions`` is
@@ -55,6 +60,7 @@ def render_instructions_block(
         return []
 
     sections: list[str] = []
+    global_heading = global_heading or f"{section_heading_prefix} Global Instructions"
 
     def _sort_key(inst: Instruction) -> str:
         return portable_relpath(inst.file_path, base_dir)
@@ -75,7 +81,7 @@ def render_instructions_block(
                 sections.extend(emit_instruction(instruction))
 
     for pattern, pattern_instructions in sorted(pattern_groups.items()):
-        sections.append(f"## Files matching `{pattern}`")
+        sections.append(f"{section_heading_prefix} Files matching `{pattern}`")
         sections.append("")
         for instruction in sorted(pattern_instructions, key=_sort_key):
             if instruction.content.strip():
@@ -88,6 +94,8 @@ def build_attributed_instructions(
     instructions: list[Instruction],
     source_attribution: dict | None,
     base_dir: Path,
+    *,
+    section_heading_prefix: str = "##",
 ) -> list[str]:
     """Render an instructions block with optional source-attribution comments.
 
@@ -102,6 +110,8 @@ def build_attributed_instructions(
             When provided, each instruction is prefixed with a
             ``<!-- Source: <label> <rel_path> -->`` comment.
         base_dir: Directory used as anchor for stable sort keys.
+        section_heading_prefix: Markdown heading prefix used for instruction
+            groups.
 
     Returns:
         Lines ready to be joined or extended into a parent ``sections`` list.
@@ -121,6 +131,7 @@ def build_attributed_instructions(
         instructions,
         base_dir=base_dir,
         emit_instruction=_emit,
+        section_heading_prefix=section_heading_prefix,
     )
 
 
