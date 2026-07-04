@@ -128,8 +128,10 @@ hook action under `.kiro/hooks/`.
 
 When a hook command references a script inside `hooks/` or `.apm/hooks/`,
 APM deploys that hook source bundle so sibling helper files resolve at
-runtime. Root hook JSON descriptors, symlinks, and `.apm-pin` markers are
-not deployed. JavaScript and TypeScript hook bundles get a minimal
+runtime. Claude-family merged targets (Claude, Cursor, Codex, Gemini,
+Antigravity, and Windsurf), Copilot, and Kiro receive the same bundle.
+Root hook JSON descriptors, symlinks, and `.apm-pin` markers are not
+deployed. JavaScript and TypeScript hook bundles get a minimal
 `package.json` sidecar with the source package's Node `type` (defaulting
 to `commonjs`); shell-only bundles do not get a sidecar.
 
