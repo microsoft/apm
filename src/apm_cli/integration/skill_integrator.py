@@ -1640,14 +1640,11 @@ class SkillIntegrator(BaseIntegrator):
             shutil.copy2(src_file, dest_file)
 
         if make_executable and os.name == "posix":
-            current = dest_file.stat().st_mode
-            # User-only (0o700-style): grant owner read/write/execute and clear
-            # ALL group and other bits (read/write/execute). Deployed files live
-            # under user-scope ~/.claude/skills/, so no group/other access is
-            # warranted regardless of the mode the source package shipped. Runs
-            # for both fresh copies and idempotent re-installs so that files
+            # User-only (0o700-style): set the exact deploy mode so group,
+            # other, and special bits never survive from the source package.
+            # Runs for both fresh copies and idempotent re-installs so files
             # previously deployed by older APM versions are hardened in-place.
-            dest_file.chmod((current & ~(stat.S_IRWXG | stat.S_IRWXO)) | stat.S_IRWXU)
+            dest_file.chmod(stat.S_IRWXU)
 
         if not skip_copy and logger:
             logger.progress(f"deployed {src_file.name} -> {rel_label}", symbol="check")

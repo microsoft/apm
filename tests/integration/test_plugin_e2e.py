@@ -8,6 +8,7 @@ integrator deployment, orphan detection, and CLI round-trips.
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from datetime import datetime
@@ -490,9 +491,9 @@ def _resolve_apm_executable() -> str:
 
 
 def _build_plugin_with_bin(dest: Path) -> str:
-    """Copy the mock plugin fixture into *dest* and add a 0o755 bin/ executable.
+    """Copy the mock plugin fixture into *dest* and add a loose bin/ executable.
 
-    Returns the shipped mode of the bin executable as an octal-friendly int.
+    Returns the plugin package name.
     """
     shutil.copytree(FIXTURE_DIR, dest)
     (dest / ".claude-plugin").mkdir(exist_ok=True)
@@ -503,7 +504,7 @@ def _build_plugin_with_bin(dest: Path) -> str:
     bin_dir.mkdir(exist_ok=True)
     tool = bin_dir / "mytool"
     tool.write_text("#!/bin/sh\necho hello\n", encoding="utf-8")
-    tool.chmod(0o755)
+    tool.chmod(0o4755)
     return dest.name
 
 
@@ -512,8 +513,9 @@ class TestPluginBinDeployPermissionsE2E:
     """User-scope CLI E2E: a plugin's bin/ executable deploys as owner-only 0o700.
 
     Regression guard for issue #1620 item 3: ``shutil.copy2`` preserves the
-    source mode, so a shipped 0o755 tool would otherwise land group/other
-    readable. The real ``apm install -g`` path must tighten it to 0o700.
+    source mode, so a shipped 0o4755 tool would otherwise land group/other
+    readable with a special bit. The real ``apm install -g`` path must tighten
+    it to 0o700.
     """
 
     def test_install_global_deploys_plugin_bin_as_0700(self, tmp_path):
@@ -547,10 +549,12 @@ class TestPluginBinDeployPermissionsE2E:
             f"stdout:\n{result.stdout}"
         )
         mode = deployed[0].stat().st_mode
+        assert stat.S_ISREG(mode), "Deployed bin must be a regular file"
         assert mode & 0o777 == 0o700, (
             f"Deployed bin must be owner-only 0o700, got {oct(mode & 0o777)}"
         )
         assert mode & 0o077 == 0, "Group/other permission bits must be stripped"
+        assert mode & 0o7000 == 0, "Special permission bits must be stripped"
 
 
 # ===========================================================================

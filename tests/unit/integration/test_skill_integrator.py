@@ -4209,9 +4209,13 @@ class TestPluginBinDeploy:
             mode = deployed_bin.stat().st_mode
             assert mode & _stat.S_IXUSR, "owner execute bit must be set"
             assert (mode & 0o077) == 0, "no group/other permission bits may be set"
+            assert (mode & 0o7000) == 0, "special permission bits must be cleared"
             assert (mode & 0o777) == 0o700, "deployed executable must be 0o700"
 
-    def test_bin_deploy_hardens_permissions_on_idempotent_reinstall(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("previous_mode", [0o644, 0o755, 0o777, 0o4755])
+    def test_bin_deploy_hardens_permissions_on_idempotent_reinstall(
+        self, tmp_path: Path, previous_mode: int
+    ) -> None:
         """Re-install of content-identical bin/ file still applies user-only execute.
 
         Guard against a regression where the hash-match early-return path skips
@@ -4248,11 +4252,12 @@ class TestPluginBinDeploy:
         deployed_bin = project_root / ".claude" / "skills" / "myplugin" / "bin" / "myplugin"
         assert deployed_bin.is_file()
 
-        # Simulate a file previously deployed with loose permissions (0o755).
-        deployed_bin.chmod(0o755)
+        # Simulate a file previously deployed with loose permissions and,
+        # for one case, a special bit preserved from the shipped package.
+        deployed_bin.chmod(previous_mode)
         mode_before = deployed_bin.stat().st_mode
-        assert mode_before & _stat.S_IXGRP, "pre-condition: group-execute set"
-        assert mode_before & _stat.S_IRGRP, "pre-condition: group-read set"
+        assert (mode_before & 0o7777) == previous_mode, "pre-condition: loose mode set"
+        assert mode_before & (0o077 | _stat.S_ISUID), "pre-condition: loose bits set"
 
         # Second install with identical content -- must harden permissions.
         integrator.integrate_package_skill(
@@ -4264,6 +4269,7 @@ class TestPluginBinDeploy:
         mode_after = deployed_bin.stat().st_mode
         assert mode_after & _stat.S_IXUSR, "owner execute bit must be set"
         assert (mode_after & 0o077) == 0, "all group/other bits must be cleared on re-install"
+        assert (mode_after & 0o7000) == 0, "all special bits must be cleared on re-install"
         assert (mode_after & 0o777) == 0o700, "re-install must harden to 0o700"
 
     def test_bin_deploy_suppressed_by_policy_deny(self, tmp_path: Path) -> None:
