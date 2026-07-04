@@ -302,7 +302,7 @@ class ClaudeFormatter:
 
         # Dependencies section (only for root CLAUDE.md)
         if placement.dependencies:
-            sections.append("# Dependencies")
+            sections.append("## Dependencies")
             for dep in placement.dependencies:
                 sections.append(dep)
             sections.append("")
@@ -311,7 +311,7 @@ class ClaudeFormatter:
         if placement.is_root:
             constitution = read_constitution(self.source_dir)
             if constitution:
-                sections.append("# Constitution")
+                sections.append("## Constitution")
                 sections.append("")
                 sections.append(constitution.strip())
                 sections.append("")
