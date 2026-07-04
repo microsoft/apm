@@ -981,7 +981,7 @@ class TestExportPluginBundle:
 
         with pytest.raises(
             ValueError,
-            match=r"declared skills .* were not found among deployed files",
+            match=r"skill_subset: alpha\) were not found among its installed files",
         ):
             export_plugin_bundle(project, tmp_path / "build")
 

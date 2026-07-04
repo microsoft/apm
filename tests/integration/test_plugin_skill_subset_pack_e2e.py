@@ -276,3 +276,42 @@ def test_pack_plugin_fails_when_dep_has_cache_but_no_deployed_files(
     assert result.returncode != 0
     combined_output = result.stdout + result.stderr
     assert "apm_modules is an unattested cache and cannot be packed" in combined_output
+
+def test_pack_plugin_warns_when_dep_hooks_mcp_config_dropped(tmp_path: Path) -> None:
+    """A hooks/MCP-config-only dep is skipped cleanly but warns loudly (#2013).
+
+    The dependency records NO deployed_files (its only cached content is
+    hooks-config + MCP-config, which install merges into shared settings and
+    never attests). Pack must succeed, must NOT pack the unattested config, and
+    must emit a '[!]' transition warning naming the dependency so an author who
+    relied on that merge is not surprised by the silent exclusion.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_apm_yml(project)
+    # No deployed_files, no skill_subset -> clean-skip branch.
+    _write_lockfile(
+        project,
+        LockedDependency(
+            repo_url="acme/skill-bundle",
+            resolved_commit="abc123",
+            depth=1,
+            package_type="mcp_bundle",
+        ),
+    )
+    # Cache carries ONLY hooks-config + MCP-config (no packable primitives).
+    _write_cached_mcp(project, "leaked-server")
+    _write_cached_hooks(project, "preCommit")
+
+    result = _run_pack(project)
+
+    assert result.returncode == 0, result.stderr
+    combined_output = result.stdout + result.stderr
+    # Console wrapping can insert newlines mid-message; collapse whitespace
+    # so the assertion is robust against terminal-width line breaks.
+    normalized = " ".join(combined_output.split())
+    assert "acme/skill-bundle" in normalized
+    assert "hooks/MCP config that is not attested in apm.lock.yaml" in normalized
+    bundle_dir = _bundle_dir(project)
+    assert not (bundle_dir / ".mcp.json").exists()
+    assert not (bundle_dir / "hooks.json").exists()

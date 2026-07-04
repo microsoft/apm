@@ -29,8 +29,8 @@ from ..utils.archive import (
     write_zip_archive,
 )
 from ..utils.console import _rich_warning
-from ..utils.content_hash import compute_file_hash
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
+from .attest import verify_attested_file
 from .packer import PackResult
 
 # ---------------------------------------------------------------------------
@@ -498,23 +498,12 @@ def _verify_attested_hash(
     Files with no recorded hash (older lockfiles predating
     ``deployed_file_hashes``) are packed without verification -- absence of an
     attestation is forward-compat tolerated, presence of a *mismatched* one is
-    a hard error.
+    a hard error. Delegates to the shared :func:`verify_attested_file` helper so
+    the plugin and archive pack paths share one implementation.
     """
-    hashes = dep.deployed_file_hashes
-    if not hashes:
-        return
     rel = source.relative_to(project_root).as_posix()
-    expected = hashes.get(rel)
-    if not expected:
-        return
-    actual = compute_file_hash(source)
-    if actual != expected:
-        raise ValueError(
-            f"Cannot pack dependency {dep.repo_url}: deployed file {rel!r} does "
-            "not match the hash recorded in apm.lock.yaml. The installed copy "
-            "may be stale or tampered. Run 'apm install' to restore attested "
-            "content, then pack again."
-        )
+    expected = dep.deployed_file_hashes.get(rel) if dep.deployed_file_hashes else None
+    verify_attested_file(source, expected, dep.repo_url, rel)
 
 
 def _append_deployed_component(
@@ -568,6 +557,15 @@ def _collect_deployed_components(
             for child in sorted(source.rglob("*")):
                 if not child.is_file() or child.is_symlink():
                     continue
+                # Defense-in-depth: rglob's symlink-following behaviour is
+                # Python-version dependent, so re-assert containment on every
+                # expanded child rather than trusting the walk. A planted
+                # directory symlink whose target escapes ``project_root`` is
+                # rejected here even if an intermediate component was a symlink.
+                try:
+                    ensure_path_within(child, project_root)
+                except PathTraversalError:
+                    continue
                 child_rel = child.relative_to(source).as_posix()
                 child_output = (PurePosixPath(plugin_rel) / child_rel).as_posix()
                 _append_deployed_component(
@@ -583,8 +581,8 @@ def _collect_deployed_components(
         remaining = len(missing) - len(shown_missing)
         suffix = f"\n  ... and {remaining} more" if remaining else ""
         raise ValueError(
-            f"Cannot pack dependency {dep.repo_url}: installed files listed "
-            "in the lockfile are missing on disk. Run 'apm install' to "
+            f"Cannot pack dependency {dep.repo_url}: installed files recorded "
+            "in apm.lock.yaml are missing on disk. Run 'apm install' to "
             "restore them, then pack again:\n"
             + "\n".join(f"  - {path}" for path in shown_missing)
             + suffix
@@ -608,6 +606,27 @@ def _cache_would_contribute_primitives(install_path: Path, dep: LockedDependency
     probe.extend(_collect_root_plugin_components(install_path))
     _collect_bare_skill(install_path, dep, probe)
     return bool(probe)
+
+
+def _cache_would_contribute_hooks_or_mcp(install_path: Path) -> bool:
+    """Return True if the unattested cache holds hooks-config or MCP-config.
+
+    Hooks/MCP *configuration* (``.apm/hooks/*.json``, root ``hooks.json`` /
+    ``hooks/``, ``.mcp.json``) is merged into shared host settings by
+    ``apm install`` and is never recorded in the lockfile ``deployed_files``.
+    Because plugin pack now emits only lockfile-attested content, such config
+    is dropped from the bundle. This probe drives a transition warning that
+    names the dependency whose cached config will NOT be packed; it never
+    copies cache bytes. Hook *scripts* recorded in ``deployed_files`` are
+    unaffected and still pack.
+    """
+    if not install_path.is_dir():
+        return False
+    if _collect_mcp(install_path):
+        return True
+    if _collect_hooks_from_apm(install_path / ".apm"):
+        return True
+    return bool(_collect_hooks_from_root(install_path))
 
 
 # ---------------------------------------------------------------------------
@@ -706,10 +725,10 @@ def export_plugin_bundle(
                 if dep.skill_subset and not dep_components:
                     declared_skills = ", ".join(dep.skill_subset)
                     raise ValueError(
-                        f"Cannot pack dependency {dep.repo_url}: declared skills "
-                        f"{declared_skills} were not found among deployed files. "
-                        "Run 'apm install' to re-deploy the expected skills, then "
-                        "pack again."
+                        f"Cannot pack dependency {dep.repo_url}: the skills "
+                        f"recorded in apm.lock.yaml (skill_subset: {declared_skills}) "
+                        "were not found among its installed files. Run 'apm install' "
+                        "to re-deploy the expected skills, then pack again."
                     )
             elif _cache_would_contribute_primitives(install_path, dep):
                 # Unattested primitives sit in the cache but the lockfile
@@ -727,6 +746,22 @@ def export_plugin_bundle(
                 # dependency contributes no plugin primitives (e.g. an
                 # MCP-only or hooks-config-only package). Skip it cleanly.
                 dep_components = []
+
+            # Transition warning (#2013): dependency hooks/MCP *config* lives in
+            # the unattested cache and is never packed. Name the dependency so
+            # an author who relied on it merging into shared settings is not
+            # surprised by the silent exclusion. Attested primitives are packed
+            # regardless of this warning.
+            if _cache_would_contribute_hooks_or_mcp(install_path):
+                _warn = (
+                    f"dependency {dep.repo_url} contributed hooks/MCP config that "
+                    "is not attested in apm.lock.yaml; it will NOT be packed. "
+                    "Attested primitives (skills/agents/etc.) are unaffected."
+                )
+                if logger:
+                    logger.warning(_warn)
+                else:
+                    _rich_warning(_warn, symbol="warning")
 
             _merge_file_map(file_map, dep_components, dep_name, force, collisions)
 
