@@ -100,35 +100,81 @@ class TestSSLCertRuntimeHook:
 
         assert "SSL_CERT_FILE" not in os.environ
 
-    # -- Happy path: frozen + certifi available ------------------------------
+    def test_respects_existing_curl_ca_bundle(self, monkeypatch):
+        """If the user already set CURL_CA_BUNDLE, do not set SSL_CERT_FILE."""
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+        monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+        monkeypatch.setenv("CURL_CA_BUNDLE", "/custom/curl-bundle.pem")
 
-    def test_sets_ssl_cert_file_when_frozen(self, monkeypatch, tmp_path):
-        """In a frozen binary with certifi, SSL_CERT_FILE is set automatically."""
+        fn = _get_configure_fn()
+        fn()
+
+        assert "SSL_CERT_FILE" not in os.environ
+
+    def test_respects_existing_ssl_cert_dir(self, monkeypatch):
+        """If the user already set SSL_CERT_DIR, do not set SSL_CERT_FILE."""
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+        monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+        monkeypatch.delenv("CURL_CA_BUNDLE", raising=False)
+        monkeypatch.setenv("SSL_CERT_DIR", "/custom/certs")
+
+        fn = _get_configure_fn()
+        fn()
+
+        assert "SSL_CERT_FILE" not in os.environ
+
+    # -- Happy path: frozen + truststore available ----------------------------
+
+    def test_injects_truststore_when_frozen(self, monkeypatch):
+        """In a frozen binary, truststore is used before certifi fallback."""
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+        monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+        monkeypatch.delenv("CURL_CA_BUNDLE", raising=False)
+        monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+
+        mock_truststore = MagicMock()
+
+        with patch.dict("sys.modules", {"truststore": mock_truststore}):
+            fn = _get_configure_fn()
+            fn()
+
+        assert mock_truststore.inject_into_ssl.called
+        assert "SSL_CERT_FILE" not in os.environ
+
+    # -- Fallback: truststore/certifi unavailable -----------------------------
+
+    def test_sets_ssl_cert_file_when_truststore_missing(self, monkeypatch, tmp_path):
+        """If truststore is unavailable, frozen binaries fall back to certifi."""
         ca_file = tmp_path / "cacert.pem"
         ca_file.write_text("--- dummy CA bundle ---")
 
         monkeypatch.setattr(sys, "frozen", True, raising=False)
         monkeypatch.delenv("SSL_CERT_FILE", raising=False)
         monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+        monkeypatch.delenv("CURL_CA_BUNDLE", raising=False)
+        monkeypatch.delenv("SSL_CERT_DIR", raising=False)
 
         mock_certifi = MagicMock()
         mock_certifi.where.return_value = str(ca_file)
 
-        with patch.dict("sys.modules", {"certifi": mock_certifi}):
+        with patch.dict("sys.modules", {"truststore": None, "certifi": mock_certifi}):
             fn = _get_configure_fn()
             fn()
 
         assert os.environ.get("SSL_CERT_FILE") == str(ca_file)
 
-    # -- Fallback: certifi missing -------------------------------------------
-
-    def test_graceful_when_certifi_missing(self, monkeypatch):
-        """If certifi is not importable, the hook silently continues."""
+    def test_graceful_when_truststore_and_certifi_missing(self, monkeypatch):
+        """If both truststore and certifi are unavailable, continue silently."""
         monkeypatch.setattr(sys, "frozen", True, raising=False)
         monkeypatch.delenv("SSL_CERT_FILE", raising=False)
         monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+        monkeypatch.delenv("CURL_CA_BUNDLE", raising=False)
+        monkeypatch.delenv("SSL_CERT_DIR", raising=False)
 
-        with patch.dict("sys.modules", {"certifi": None}):
+        with patch.dict("sys.modules", {"truststore": None, "certifi": None}):
             fn = _get_configure_fn()
             fn()  # must not raise
 
@@ -141,11 +187,13 @@ class TestSSLCertRuntimeHook:
         monkeypatch.setattr(sys, "frozen", True, raising=False)
         monkeypatch.delenv("SSL_CERT_FILE", raising=False)
         monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+        monkeypatch.delenv("CURL_CA_BUNDLE", raising=False)
+        monkeypatch.delenv("SSL_CERT_DIR", raising=False)
 
         mock_certifi = MagicMock()
         mock_certifi.where.return_value = str(tmp_path / "does_not_exist.pem")
 
-        with patch.dict("sys.modules", {"certifi": mock_certifi}):
+        with patch.dict("sys.modules", {"truststore": None, "certifi": mock_certifi}):
             fn = _get_configure_fn()
             fn()
 

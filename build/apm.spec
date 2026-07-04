@@ -187,7 +187,8 @@ hiddenimports = [
     'pathlib',
     'frontmatter',
     'requests',
-    'certifi',  # CA certificate bundle for SSL verification in frozen binary
+    'truststore',  # System trust store support for enterprise TLS roots
+    'certifi',  # Fallback CA bundle for frozen binaries
     # Rich modules (lazily imported, must be explicitly included)
     'rich',
     'rich.console',

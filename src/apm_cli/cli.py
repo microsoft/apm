@@ -3,6 +3,8 @@
 Thin wiring layer  -- all command logic lives in ``apm_cli.commands.*`` modules.
 """
 
+# ruff: noqa: E402
+
 import ctypes
 import logging
 import os
@@ -10,6 +12,10 @@ import sys
 import warnings
 
 import click
+
+from apm_cli.core.tls import configure_system_trust_store
+
+configure_system_trust_store()
 
 from apm_cli.commands._helpers import (
     ERROR,

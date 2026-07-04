@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-`apm install` and `apm audit` reach out to GitHub, GHES, GitLab, Azure DevOps, and package archives over HTTPS. When the system can't verify the server certificate, the operation fails. This page maps the failure modes to fixes.
+`apm install` and `apm audit` reach out to GitHub, GHES, GitLab, Azure DevOps, and package archives over HTTPS. APM uses the operating system trust store by default for Python HTTPS calls, matching the trust roots your browser, curl, and git usually use. When the system can't verify the server certificate, the operation fails. This page maps the failure modes to fixes.
 
 Related: [environment variables](../reference/environment-variables/), [install failures](./install-failures/), [security model](../enterprise/security/), [authentication](../getting-started/authentication/).
 
@@ -14,8 +14,10 @@ Related: [environment variables](../reference/environment-variables/), [install 
 Typical errors APM surfaces or passes through from the underlying HTTP/git stack:
 
 ```text
-[!] TLS verification failed -- if you're behind a corporate proxy or
-    firewall, set REQUESTS_CA_BUNDLE to your organisation's CA bundle.
+[!] TLS verification failed -- APM uses the system trust store by default.
+    If you're behind a corporate proxy or firewall, make sure your
+    organisation's CA is installed in the OS trust store, or set
+    REQUESTS_CA_BUNDLE to a readable PEM bundle.
 ```
 
 ```text
@@ -54,7 +56,7 @@ apm install --verbose
 
 ## Configure trust
 
-APM uses `requests` for HTTP and shells out to `git` for repository operations. Both honour standard environment variables. Set them at the shell or in your profile (`~/.zshrc`, `~/.bashrc`, or the Windows user environment).
+APM uses `truststore` so Python HTTP clients use the OS trust store by default, and it shells out to `git` for repository operations. The best long-term fix is to install the corporate or internal CA into the OS trust store. Use the environment variables below only when you need a per-shell or per-host override.
 
 ### Python HTTP layer
 
@@ -65,7 +67,7 @@ export SSL_CERT_FILE=/path/to/ca-bundle.pem
 export SSL_CERT_DIR=/etc/ssl/certs
 ```
 
-`REQUESTS_CA_BUNDLE` wins for `requests`. `SSL_CERT_FILE` / `SSL_CERT_DIR` cover the rest of the Python TLS stack.
+`REQUESTS_CA_BUNDLE` wins for `requests` and is the right override for APM's Python HTTP layer. `SSL_CERT_FILE` / `SSL_CERT_DIR` cover the rest of the Python TLS stack, but by themselves they are not a reliable requests override; set `REQUESTS_CA_BUNDLE` as well when you need a custom PEM bundle.
 
 ### Git operations
 
@@ -128,7 +130,7 @@ export HTTP_PROXY=http://proxy.example.com:8080
 export NO_PROXY=localhost,127.0.0.1,.internal.example.com
 ```
 
-If the proxy performs TLS interception, you also need the proxy's signing CA in the trust store - see [Configure trust](#configure-trust). Importing the CA into the OS trust store (Keychain on macOS, `update-ca-certificates` on Debian/Ubuntu, `update-ca-trust` on RHEL, the Trusted Root store on Windows) is the most durable fix; consult your OS documentation rather than copying steps from here.
+If the proxy performs TLS interception, you also need the proxy's signing CA in the trust store - see [Configure trust](#configure-trust). Importing the CA into the OS trust store (Keychain on macOS, `update-ca-certificates` on Debian/Ubuntu, `update-ca-trust` on RHEL, the Trusted Root store on Windows) is the most durable fix and is the path APM uses by default; consult your OS documentation rather than copying steps from here.
 
 ## Verify the fix
 
@@ -170,6 +172,6 @@ unset GIT_SSL_NO_VERIFY PYTHONHTTPSVERIFY
 
 [>] Re-run with `--verbose` and capture the full exception chain.
 [>] Check `curl -v https://<host>` from the same shell - if it fails, the problem is the system trust store, not APM.
-[>] Confirm `REQUESTS_CA_BUNDLE` and `GIT_SSL_CAINFO` point at a readable PEM file (`openssl x509 -in $REQUESTS_CA_BUNDLE -noout -subject` should print a subject line).
+[>] If using overrides, confirm `REQUESTS_CA_BUNDLE` and `GIT_SSL_CAINFO` point at a readable PEM file (`openssl x509 -in $REQUESTS_CA_BUNDLE -noout -subject` should print a subject line).
 [>] If only one host fails, see [GHES and GitLab self-managed](#ghes-and-gitlab-self-managed) and the per-host `git config` recipe above.
 [>] If the install proceeds past TLS but then fails, continue at [install failures](./install-failures/).

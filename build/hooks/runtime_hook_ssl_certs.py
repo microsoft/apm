@@ -1,15 +1,14 @@
-# PyInstaller runtime hook -- configures SSL certificate paths for the
-# frozen binary so that HTTPS connections work on every platform without
-# requiring the user to install Python or set environment variables.
+# PyInstaller runtime hook -- configures TLS trust for the frozen binary so
+# HTTPS connections work on every platform without requiring the user to
+# install Python or set environment variables.
 #
-# Problem: PyInstaller bundles OpenSSL, but the compiled-in certificate
-# search path points at the *build machine's* Python framework directory
-# (e.g. /Library/Frameworks/Python.framework/...).  On end-user machines
-# that path rarely exists, causing SSL verification failures.
+# Problem: requests defaults to certifi, while enterprise machines typically
+# install corporate or internal PKI roots into the OS trust store used by git,
+# curl, and browsers. Frozen binaries also have brittle OpenSSL default paths.
 #
-# Solution: Point ``SSL_CERT_FILE`` at the certifi CA bundle shipped
-# inside the frozen binary.  ``requests``, ``urllib3``, and the stdlib
-# ``ssl`` module all honour this variable.
+# Solution: Use truststore first so urllib3/requests/stdlib HTTPS share the OS
+# trust store. If truststore is unavailable, fall back to the bundled certifi
+# CA bundle so frozen binaries still have a working public-web baseline.
 #
 # This hook executes before any application code so the variables are
 # visible to every subsequent import.
@@ -17,14 +16,40 @@
 import os
 import sys
 
+_CA_OVERRIDE_ENV_VARS = (
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+)
+
+
+def _has_explicit_ca_override() -> bool:
+    """Return True when the user explicitly selected a CA bundle/path."""
+    return any((os.environ.get(name) or "").strip() for name in _CA_OVERRIDE_ENV_VARS)
+
+
+def _inject_system_trust_store() -> bool:
+    """Inject truststore into stdlib SSL if available."""
+    try:
+        import truststore
+
+        truststore.inject_into_ssl()
+        return True
+    except Exception:
+        return False
+
 
 def _configure_ssl_certs() -> None:
-    """Set SSL_CERT_FILE to the bundled certifi CA bundle when frozen."""
+    """Configure TLS trust for frozen binaries."""
     if not getattr(sys, "frozen", False):
         return
 
     # Honour explicit user overrides -- never clobber them.
-    if os.environ.get("SSL_CERT_FILE") or os.environ.get("REQUESTS_CA_BUNDLE"):
+    if _has_explicit_ca_override():
+        return
+
+    if _inject_system_trust_store():
         return
 
     try:
