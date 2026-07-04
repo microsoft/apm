@@ -1,9 +1,7 @@
-"""APM audit command -- content integrity scanning for prompt files.
+"""APM audit command -- content integrity scanning for installed primitives.
 
-Scans installed APM packages (or arbitrary files) for hidden Unicode
-characters that could embed invisible instructions.  This is the first
-pillar of ``apm audit``; lock-file consistency (``--ci``) and drift
-detection (``--drift``) are planned as future modes.
+Scans installed APM primitives (or arbitrary files) for hidden Unicode
+characters, drift, and lockfile/policy violations.
 
 Exit codes:
     0 -- clean (no findings, or info-only)

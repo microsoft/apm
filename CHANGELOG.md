@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm audit --help` now accurately describes the command's full scope:
+  hidden Unicode scanning, drift detection, and lockfile/policy checks.
+  The previous summary named only Unicode scanning and used the legacy
+  "packages" terminology. (#2017)
 - `apm install --frozen` no longer spuriously rejects private Git dependencies
   hosted on non-default Git servers such as Bitbucket Server, GitLab, or GitHub
   Enterprise; lockfile matching now uses the same host-qualified identity as
