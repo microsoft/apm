@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Marketplace plugin `bin/` deployment now hardens POSIX executable copies to
+  user-only `0o700` permissions and normalizes legacy `bin_deploy.deny` GitHub
+  forms before matching. -- by @WilliamK112 (#1971)
 - `apm audit --help` now accurately describes the command's full scope:
   hidden Unicode scanning, drift detection, and lockfile/policy checks.
   The previous summary named only Unicode scanning and used the legacy

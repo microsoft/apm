@@ -229,8 +229,9 @@ class BinDeployPolicy:
     ``deny_all``: when ``True``, bin/ deployment is suppressed for all
     marketplace_plugin packages regardless of the ``deny`` list.
 
-    ``deny``: package canonical dependency strings (e.g. ``owner/repo``)
-    whose bin/ executables must NOT be deployed. Matched as exact strings.
+    ``deny``: package identities whose bin/ executables must NOT be
+    deployed. Entries normalize common GitHub forms (case, ``.git`` suffix,
+    and ``github.com/`` prefix) before matching.
     """
 
     deny_all: bool = False
