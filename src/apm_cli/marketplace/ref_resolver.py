@@ -207,8 +207,6 @@ class RefResolver:
                 raise OfflineMissError(package="", remote=owner_repo)
 
             url = build_https_clone_url(self._host, owner_repo, token=self._token)
-            if not url.endswith(".git"):
-                url += ".git"
             env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
             try:
                 result = subprocess.run(
@@ -284,8 +282,6 @@ class RefResolver:
             When the ref does not exist or the subprocess fails.
         """
         url = build_https_clone_url(self._host, owner_repo, token=self._token)
-        if not url.endswith(".git"):
-            url += ".git"
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
         try:
             result = subprocess.run(

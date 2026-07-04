@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale, partial, or tampered cache content could leak into a bundle. If a
   dependency has cached primitives but no `deployed_files`, `apm pack` now
   fails with an actionable error telling you to run `apm install`. (#2013)
+- `apm install --frozen` no longer spuriously rejects private Git dependencies
+  hosted on non-default Git servers such as Bitbucket Server, GitLab, or GitHub
+  Enterprise; lockfile matching now uses the same host-qualified identity as
+  `apm install`. (#2011)
 - `apm install` and `apm uninstall` no longer strip comments from `apm.yml`
   while updating dependency entries, so inline annotations and section notes
   survive dependency updates. (#2012)
@@ -32,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Self-defined stdio MCP env placeholders now resolve from the install process
   environment for Claude Code and Codex instead of being written verbatim.
   (#1966)
+
+- Self-hosted git hosts such as GitBucket that serve smart-HTTP only at the
+  `.git` path now install successfully over anonymous HTTPS; `apm install` no
+  longer drops the suffix. (#1995)
 
 ## [0.23.1] - 2026-06-29
 
