@@ -100,7 +100,11 @@ def _show_all_user_config(logger: CommandLogger) -> None:
     from ..config import (
         get_allow_protocol_fallback,
         get_auto_integrate,
+        get_install_target,
+        get_mcp_registry_url,
         get_prefer_ssh,
+        get_self_update_channel,
+        get_self_update_install_dir,
         get_temp_dir,
     )
 
@@ -110,60 +114,47 @@ def _show_all_user_config(logger: CommandLogger) -> None:
     click.echo(
         f"  temp-dir: {temp_dir if temp_dir is not None else 'Not set (using system default)'}"
     )
-    from ..config import get_install_target as _get_install_target
-
-    _install_target = _get_install_target()
-    if _install_target is not None:
-        click.echo(f"  target: {_render_target_value(_install_target)}")
-    from ..config import (
-        get_self_update_channel as _get_self_update_channel,
-    )
-    from ..config import (
-        get_self_update_install_dir as _get_self_update_install_dir,
-    )
-
-    _self_update_channel = _get_self_update_channel()
-    if _self_update_channel != "stable":
-        click.echo(f"  self-update.channel: {_self_update_channel}")
-    _self_update_install_dir = _get_self_update_install_dir()
-    if _self_update_install_dir is not None:
-        click.echo(f"  self-update.install-dir: {_self_update_install_dir}")
+    install_target = get_install_target()
+    if install_target is not None:
+        click.echo(f"  target: {_render_target_value(install_target)}")
+    self_update_channel = get_self_update_channel()
+    if self_update_channel != "stable":
+        click.echo(f"  self-update.channel: {self_update_channel}")
+    self_update_install_dir = get_self_update_install_dir()
+    if self_update_install_dir is not None:
+        click.echo(f"  self-update.install-dir: {self_update_install_dir}")
     # Only show transport keys when non-default to reduce noise.
-    _apf_val = get_allow_protocol_fallback()
-    _ssh_val = get_prefer_ssh()
-    if _apf_val:
+    if get_allow_protocol_fallback():
         click.echo("  allow-protocol-fallback: true")
-    if _ssh_val:
+    if get_prefer_ssh():
         click.echo("  prefer-ssh: true")
 
-    from ..core.experimental import is_enabled as _is_enabled_get
+    from ..core.experimental import is_enabled
 
-    if _is_enabled_get("external_scanners"):
+    if is_enabled("external_scanners"):
         from ..config import get_audit_on_install, get_scanner_options
         from ..security.external.registry import SUPPORTED_SCANNERS
 
         click.echo(f"  audit-on-install: {get_audit_on_install()}")
-        for _scanner in SUPPORTED_SCANNERS:
-            _llm, _args = get_scanner_options(_scanner)
-            if _llm is not None:
-                click.echo(f"  external.{_scanner}.llm: {str(_llm).lower()}")
-            if _args is not None:
-                click.echo(f"  external.{_scanner}.args: {' '.join(_args)}")
+        for scanner in SUPPORTED_SCANNERS:
+            llm, args = get_scanner_options(scanner)
+            if llm is not None:
+                click.echo(f"  external.{scanner}.llm: {str(llm).lower()}")
+            if args is not None:
+                click.echo(f"  external.{scanner}.args: {' '.join(args)}")
 
-    if _is_enabled_get("copilot_cowork"):
-        from ..config import get_copilot_cowork_skills_dir as _get_csd_get
+    if is_enabled("copilot_cowork"):
+        from ..config import get_copilot_cowork_skills_dir
 
-        csd = _get_csd_get()
+        csd = get_copilot_cowork_skills_dir()
         click.echo(
             f"  copilot-cowork-skills-dir: "
             f"{csd if csd is not None else 'Not set (using auto-detection)'}"
         )
 
-    from ..config import get_mcp_registry_url as _get_mcp_registry_url_all
-
-    mcp_url = _get_mcp_registry_url_all()
+    mcp_url = get_mcp_registry_url()
     click.echo(
-        f"  mcp-registry-url: {mcp_url if mcp_url is not None else 'Not set (using default)'}"
+        f"  mcp-registry-url: {mcp_url if mcp_url is not None else 'Not set (using default https://api.mcp.github.com)'}"
     )
 
 

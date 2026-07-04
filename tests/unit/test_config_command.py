@@ -331,7 +331,10 @@ class TestConfigGet:
         assert get_result.exit_code == 0
         assert list_result.exit_code == 0
         assert list_result.output == get_result.output
-        assert "mcp-registry-url: Not set (using default)" in list_result.output
+        assert (
+            "mcp-registry-url: Not set (using default https://api.mcp.github.com)"
+            in list_result.output
+        )
 
     def test_get_all_config_fresh_install(self):
         """auto-integrate is shown even on a fresh install with no key in the file."""
