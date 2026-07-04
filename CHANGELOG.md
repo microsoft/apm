@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install` now issues a single `git ls-remote` call per repository when
   resolving multiple semver git dependencies from the same remote, reducing
   network round-trips for monorepos with many shared-origin semver deps. (#1975)
+- `apm outdated` now dedupes `git ls-remote` across locked dependencies that
+  share one upstream repository (e.g. several virtual-subdirectory packages
+  from the same monorepo), issuing one listing per repo per run instead of one
+  per dependency. The cache is per-invocation, so a newer upstream ref is still
+  detected on the next run. (#1975)
 
 ## [0.23.1] - 2026-06-29
 
