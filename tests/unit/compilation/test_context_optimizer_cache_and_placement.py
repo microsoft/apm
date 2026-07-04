@@ -84,6 +84,46 @@ class TestCachedGlobUsesFileList:
         assert not any(m.startswith("node_modules") for m in matches)
 
 
+class TestUniversalApplyToFastPath:
+    """Regression coverage for universal ``applyTo: "**"`` placement."""
+
+    def test_universal_apply_to_reuses_directory_analysis(self, tmp_path: Path) -> None:
+        for i in range(30):
+            _touch(tmp_path, f"pkg{i}/file.txt")
+        (tmp_path / "empty").mkdir()
+
+        optimizer = ContextOptimizer(base_dir=str(tmp_path))
+        expected_directories = {tmp_path / f"pkg{i}" for i in range(30)}
+        instruction = Instruction(
+            name="global-standards",
+            file_path=Path("global.instructions.md"),
+            description="Global coding standards",
+            apply_to=" ** ",
+            content="Global standards",
+        )
+
+        with (
+            patch.object(
+                optimizer,
+                "_file_matches_pattern",
+                wraps=optimizer._file_matches_pattern,
+            ) as file_match_spy,
+            patch.object(optimizer, "_cached_glob", wraps=optimizer._cached_glob) as glob_spy,
+        ):
+            result = optimizer.optimize_instruction_placement([instruction])
+
+        assert list(result) == [tmp_path]
+        assert optimizer._optimization_decisions[0].matching_directories == 30
+        assert file_match_spy.call_count == 0
+        assert glob_spy.call_count == 0
+        assert optimizer._pattern_cache["**"] == expected_directories
+        assert " ** " not in optimizer._pattern_cache
+        for directory, analysis in optimizer._directory_cache.items():
+            assert directory in optimizer._pattern_cache["**"]
+            assert analysis.pattern_matches["**"] == analysis.total_files
+            assert " ** " not in analysis.pattern_matches
+
+
 class TestSelectivePlacementNonRootLCA:
     """Regression test for medium-distribution placement at a non-root LCA.
 

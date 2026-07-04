@@ -580,7 +580,7 @@ class ContextOptimizer:
         Returns:
             List[Path]: Mathematically optimal placement(s).
         """
-        pattern = instruction.apply_to
+        pattern = instruction.apply_to.strip()
 
         # Find all directories with matching files
         matching_directories = self._find_matching_directories(pattern)
@@ -800,6 +800,14 @@ class ContextOptimizer:
         # Use cached result if available
         if pattern in self._pattern_cache:
             return self._pattern_cache[pattern]
+
+        normalized_pattern = pattern.strip()
+        if normalized_pattern == "**":
+            matching_dirs = set(self._directory_cache)
+            for analysis in self._directory_cache.values():
+                analysis.pattern_matches[normalized_pattern] = analysis.total_files
+            self._pattern_cache[normalized_pattern] = matching_dirs
+            return matching_dirs
 
         matching_dirs: builtins.set[Path] = set()
 
@@ -1285,7 +1293,9 @@ class ContextOptimizer:
         if not instruction.apply_to:
             return True  # Global instructions are always relevant
 
-        pattern = instruction.apply_to
+        pattern = instruction.apply_to.strip()
+        if not pattern:
+            return True
 
         # Resolve working directory to handle path inconsistencies
         try:

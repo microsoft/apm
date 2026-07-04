@@ -18,6 +18,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sha_passthrough` instead of inflating the `commits_api` counter. --
   by @srobroek (#1973)
 
+### Fixed
+
+- `apm install --frozen` no longer spuriously rejects private Git dependencies
+  hosted on non-default Git servers such as Bitbucket Server, GitLab, or GitHub
+  Enterprise; lockfile matching now uses the same host-qualified identity as
+  `apm install`. (#2011)
+- `apm install` and `apm uninstall` no longer strip comments from `apm.yml`
+  while updating dependency entries, so inline annotations and section notes
+  survive dependency updates. (#2012)
+- `apm pack` now produces a `marketplace.json` the Copilot App accepts even
+  when your manifest `name` contains dots, underscores, or other non-kebab-case
+  characters (e.g. `my.marketplace`): the emitted `name` field is normalized to
+  kebab-case, and `apm pack` prints a warning naming the original and emitted
+  values when a rewrite occurs. Internal resolution, registry lookups, and the
+  Codex `interface.displayName` keep the original name. (#2008)
+
+- `apm audit --ci` no longer reports phantom drift for root-local hook files
+  when audit replay writes into a scratch project root. (#1980)
+- Self-defined stdio MCP env placeholders now resolve from the install process
+  environment for Claude Code and Codex instead of being written verbatim.
+  (#1966)
+
+- Self-hosted git hosts such as GitBucket that serve smart-HTTP only at the
+  `.git` path now install successfully over anonymous HTTPS; `apm install` no
+  longer drops the suffix. (#1995)
+
 ## [0.23.1] - 2026-06-29
 
 ### Fixed
