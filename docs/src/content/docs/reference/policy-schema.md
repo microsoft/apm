@@ -9,7 +9,7 @@ sidebar:
 
 The `apm-policy.yml` schema. One file per org or repo. Loaded by `apm install`, `apm audit --ci`, `apm policy status`, and the install preflight before any package is written to disk.
 
-For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../enterprise/apm-policy-getting-started/). For CLI usage of `apm policy status`, see [apm policy](./cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance overview](../enterprise/governance-overview/).
+For the workflow (where to put the file, how to roll it out), see [Govern with apm-policy.yml](../enterprise/apm-policy/). For CLI usage of `apm policy status`, see [apm policy](./cli/policy/). For the wider governance picture (rulesets, registry proxy, CI gating), see [Governance deep-dive](../enterprise/governance-guide/).
 
 ## What apm-policy.yml governs
 
@@ -487,6 +487,6 @@ No. apm-policy.yml controls what gets installed; your harness controls what runs
 ## See also
 
 - [apm policy](./cli/policy/) -- the `apm policy status` command.
-- [Govern with apm-policy.yml](../enterprise/apm-policy-getting-started/) -- end-to-end rollout guide.
+- [Govern with apm-policy.yml](../enterprise/apm-policy/) -- end-to-end rollout guide.
 - [Enforce in CI](../enterprise/enforce-in-ci/) -- wiring `apm audit --ci` into branch protection.
-- [Governance overview](../enterprise/governance-overview/) -- the full enterprise control surface.
+- [Governance deep-dive](../enterprise/governance-guide/) -- the full enterprise control surface.

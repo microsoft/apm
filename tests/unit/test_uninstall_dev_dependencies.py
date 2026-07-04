@@ -105,3 +105,32 @@ class TestUninstallDevDependencies:
         assert result.exit_code == 0, result.output
         data = _read_apm_yml(tmp_path)
         assert "devDependencies" not in data
+
+    def test_uninstall_preserves_manifest_comments(self, tmp_path: Path, monkeypatch) -> None:
+        """Removing a package must not strip existing apm.yml comments."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(
+            "# project comment\n"
+            "name: test-project\n"
+            "# dependency section comment\n"
+            "dependencies: # dependencies inline comment\n"
+            "  # apm list comment\n"
+            "  apm:\n"
+            "    - microsoft/apm-sample-package # removed package comment\n"
+            "    - acme/keep-prod # kept package comment\n",
+            encoding="utf-8",
+        )
+
+        from apm_cli.cli import cli
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["uninstall", "microsoft/apm-sample-package"])
+
+        assert result.exit_code == 0, result.output
+        text = (tmp_path / "apm.yml").read_text(encoding="utf-8")
+        assert "# project comment" in text
+        assert "# dependency section comment" in text
+        assert "# dependencies inline comment" in text
+        assert "# apm list comment" in text
+        assert "# kept package comment" in text
+        assert "microsoft/apm-sample-package" not in text

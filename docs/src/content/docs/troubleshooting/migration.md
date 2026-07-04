@@ -57,7 +57,7 @@ Migration steps:
 
 ## 3. Lockfile schema upgrades
 
-The current lockfile schema is `lockfile_version: "1"`. When APM bumps this, an older binary reading a newer lockfile (or vice versa) will refuse to proceed and print upgrade instructions.
+The current lockfile schemas are `lockfile_version: "1"` for plain Git projects and `"2"` when registry or Git semver resolution fields are present. When APM bumps this, an older binary reading a newer lockfile (or vice versa) will refuse to proceed and print upgrade instructions.
 
 ```text
 [x] apm.lock.yaml uses lockfile_version "2", this binary supports "1"

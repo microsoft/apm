@@ -21,7 +21,7 @@ lifecycle:
 
 Run `apm lifecycle init` to scaffold this block in the current project.
 Project scripts require explicit trust before they run: `apm lifecycle trust`.
-See the [CLI reference](../../../reference/cli/lifecycle/) for all subcommands.
+See the [CLI reference](../reference/cli/lifecycle/) for all subcommands.
 
 A failing script never aborts the CLI operation. HTTP scripts dispatch in a
 background thread (fire-and-forget), while command scripts run synchronously
@@ -299,7 +299,7 @@ The log file is created automatically on first script execution.
 
 ## CLI commands
 
-For the full command reference, see [apm lifecycle](../../../reference/cli/lifecycle/).
+For the full command reference, see [apm lifecycle](../reference/cli/lifecycle/).
 
 Key workflows:
 

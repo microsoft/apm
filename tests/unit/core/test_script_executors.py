@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -382,13 +383,14 @@ class TestResolveCwd:
         assert _resolve_cwd(script, "/my/project") == "/my/project"
 
     def test_absolute_cwd_used_directly(self) -> None:
-        script = ScriptEntry(script_type="command", event="post-install", cwd="/absolute/path")
-        assert _resolve_cwd(script, "/my/project") == "/absolute/path"
+        abs_cwd = os.path.abspath(os.path.join(os.sep, "absolute", "path"))
+        script = ScriptEntry(script_type="command", event="post-install", cwd=abs_cwd)
+        assert _resolve_cwd(script, "/my/project") == abs_cwd
 
     def test_relative_cwd_resolved_against_project_root(self) -> None:
         script = ScriptEntry(script_type="command", event="post-install", cwd="scripts")
         result = _resolve_cwd(script, "/my/project")
-        assert result == "/my/project/scripts"
+        assert result == str((Path("/my/project") / "scripts").resolve())
 
     def test_traversal_outside_project_root_uses_project_root(self, tmp_path: Path) -> None:
         """cwd values that escape project_root via .. are clamped to project_root.
@@ -420,7 +422,7 @@ class TestGetScriptsLogPath:
     def test_respects_apm_home(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("APM_HOME", "/custom/apm")
         path = _get_scripts_log_path()
-        assert str(path) == "/custom/apm/logs/scripts.log"
+        assert str(path) == str(Path("/custom/apm") / "logs" / "scripts.log")
 
 
 class TestAppendToScriptLog:

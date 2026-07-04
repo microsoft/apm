@@ -182,7 +182,7 @@ class TestValidateAndAddPackagesWriteError:
                 ),
             ),
             patch(
-                "apm_cli.utils.yaml_io.dump_yaml",
+                "apm_cli.utils.yaml_io.dump_yaml_roundtrip",
                 side_effect=OSError("write fail"),
             ),
         ):
@@ -213,7 +213,7 @@ class TestValidateAndAddPackagesWriteError:
                     False,
                 ),
             ),
-            patch("apm_cli.utils.yaml_io.dump_yaml", side_effect=OSError("write fail")),
+            patch("apm_cli.utils.yaml_io.dump_yaml_roundtrip", side_effect=OSError("write fail")),
         ):
             with pytest.raises(SystemExit) as exc_info:
                 _validate_and_add_packages_to_apm_yml(

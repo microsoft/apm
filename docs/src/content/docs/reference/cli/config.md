@@ -11,7 +11,8 @@ Read and write APM CLI configuration stored in `~/.apm/config.json`.
 
 ```bash
 apm config                       # show current configuration
-apm config get [KEY]             # print one key, or all keys
+apm config get [KEY]             # read a key, or print the user config summary
+apm config list                  # alias for get with no key
 apm config set KEY VALUE         # write a key
 apm config unset KEY             # remove a key
 ```
@@ -33,7 +34,15 @@ Show the merged project + global configuration as a table. Falls back to plain t
 
 ### `apm config get [KEY]`
 
-Print the value of `KEY`. With no argument, prints all user-settable keys with their effective values (defaults included).
+Print the value of `KEY`. With no argument, prints the user config summary: effective values for core user-settable keys. Noise-reduction defaults and unset optional values -- such as the stable self-update channel, unset self-update install directory, and disabled transport preferences -- are omitted until configured.
+
+### `apm config list`
+
+Alias for `apm config get` with no argument; produces the same user config summary.
+
+:::note
+Familiar with `npm config list` or `git config --list`? `apm config list` is the equivalent.
+:::
 
 ### `apm config set KEY VALUE`
 

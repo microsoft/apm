@@ -46,6 +46,17 @@ def test_every_registered_command_has_explicit_help():
     )
 
 
+def test_audit_help_describes_security_and_integrity_modes():
+    result = CliRunner().invoke(cli, ["audit", "--help"])
+
+    assert result.exit_code == 0
+    help_text = " ".join(result.output.split())
+    assert (
+        "Scan installed primitives for hidden Unicode, drift, and lockfile/policy violations"
+    ) in help_text
+    assert "Scan installed packages for hidden Unicode characters" not in result.output
+
+
 def test_experimental_subcommand_help_is_specific():
     runner = CliRunner()
 
@@ -68,6 +79,21 @@ def test_experimental_subcommand_help_is_specific():
     assert reset_result.exit_code == 0
     assert "Usage: cli experimental reset [OPTIONS] [NAME]" in reset_result.output
     assert "-y, --yes" in reset_result.output
+
+
+def test_config_help_mentions_no_subcommand_and_list_alias():
+    runner = CliRunner()
+
+    group_result = runner.invoke(cli, ["config", "--help"])
+    assert group_result.exit_code == 0
+    assert "Run with no subcommand to show the merged project" in group_result.output
+    assert "list" in group_result.output
+    assert "List all configuration values" in group_result.output
+
+    list_result = runner.invoke(cli, ["config", "list", "--help"])
+    assert list_result.exit_code == 0
+    assert "Usage: cli config list [OPTIONS]" in list_result.output
+    assert "List all configuration values" in list_result.output
 
 
 def test_runtime_remove_help_includes_short_yes_alias():

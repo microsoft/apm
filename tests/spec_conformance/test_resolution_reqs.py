@@ -160,6 +160,17 @@ def test_resolver_honours_prerelease_inclusion_rules():
     assert pr, "oracle MUST exercise pre-release / build-metadata cases"
 
 
+@pytest.mark.req("req-rs-015")
+def test_resolver_replays_locked_commit_without_network():
+    """A non-update install MUST replay a recorded `resolved_commit`
+    without any network ref-resolution, absent drift."""
+    assert_spec_contains(
+        "non-update install",
+        "WITHOUT issuing a network ref-resolution",
+        "network-free at the resolution step",
+    )
+
+
 # --- req-pr-001..005: primitives ---------------------------------------
 
 

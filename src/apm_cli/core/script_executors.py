@@ -45,6 +45,13 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
+# POSIX permission bits (group/other access) are only meaningful on POSIX.
+# On Windows ``os.fstat`` reports 0o666/0o444-style modes whose 0o077 bits are
+# always set, so the world-readable tamper check in ``_append_to_script_log``
+# must be POSIX-gated -- otherwise every log write "self-heals" the file and
+# then returns without writing, leaving an empty ``scripts.log``.
+_POSIX_PERMS = os.name == "posix"
+
 # Fallback timeouts when script entry does not specify one.
 _DEFAULT_HTTP_TIMEOUT = 10
 _DEFAULT_COMMAND_TIMEOUT = 30
@@ -597,13 +604,15 @@ def _append_to_script_log(
             # fresh 0600 file (also discarding any forged pre-seeded content)
             # instead of being trusted or silently dropped forever.
             _st = os.fstat(fd)
-            if not stat.S_ISREG(_st.st_mode) or (_st.st_mode & 0o077):
+            if not stat.S_ISREG(_st.st_mode) or (_POSIX_PERMS and _st.st_mode & 0o077):
                 os.close(fd)
                 with contextlib.suppress(FileNotFoundError):
                     os.unlink(log_path)
                 fd = os.open(log_path, excl_flags, 0o600)
                 _st_retry = os.fstat(fd)
-                if not stat.S_ISREG(_st_retry.st_mode) or (_st_retry.st_mode & 0o077):
+                if not stat.S_ISREG(_st_retry.st_mode) or (
+                    _POSIX_PERMS and _st_retry.st_mode & 0o077
+                ):
                     # Same-instant adversarial re-plant on the retry: drop only
                     # THIS racing write (bounded), never a persistent blackout.
                     return
@@ -1836,7 +1845,7 @@ def _resolve_cwd(script: ScriptEntry, project_root: str | None) -> str | None:
     root = Path(project_root) if project_root else Path.cwd()
     resolved = (root / script.cwd).resolve()
     root_resolved = root.resolve()
-    if not str(resolved).startswith(str(root_resolved) + "/") and resolved != root_resolved:
+    if not str(resolved).startswith(str(root_resolved) + os.sep) and resolved != root_resolved:
         _logger.warning(
             "Script cwd '%s' escapes project root -- using project root instead", script.cwd
         )

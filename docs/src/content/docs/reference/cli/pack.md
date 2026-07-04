@@ -110,13 +110,16 @@ A Claude Code plugin directory under `--output`. Contains:
 
 - `plugin.json` -- schema-conformant manifest. Convention-dir keys are stripped because Claude Code auto-discovers them.
 - Plugin-native subdirs populated from your `.apm/` content and from installed dependencies: `agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`, `extensions/` (canvas extensions, when the `canvas` experimental flag is enabled).
-- A merged `hooks.json` when multiple sources contribute hooks.
+- Installed dependencies are packed exclusively from lockfile-attested `deployed_files`; the `apm_modules` cache is never packed (it has no provenance or integrity guarantee). Each attested file is verified against its `deployed_file_hashes` SHA-256 before inclusion.
+  - If the dependency declares `skills:`, only the named skills are included; the cache cannot add extras.
+  - If a dependency has cached primitives but no `deployed_files`, `apm pack` fails and tells you to run `apm install`.
+- A merged `hooks.json` from the producer's own hooks. Dependency hook-configs and MCP-configs are not merged into the bundle; dependencies contribute only their attested `deployed_files` (hook scripts recorded there still map into `hooks/`).
 - `apm.lock.yaml` -- enriched copy with `pack:` metadata and a `bundle_files` map of per-file SHA-256 digests, used by `apm install` for install-time integrity verification.
 - `devDependencies` are excluded.
 
 ### APM bundle (`--format apm`)
 
-The legacy APM layout under `--output`. Files are copied preserving their install-time directory structure. The bundle's `apm.lock.yaml` carries the same `pack:` metadata and `bundle_files` digests. The project's own `apm.lock.yaml` is never modified.
+The legacy APM layout under `--output`. Files are copied preserving their install-time directory structure. Installed dependencies are packed exclusively from lockfile-attested `deployed_files`, and each file is verified against its `deployed_file_hashes` SHA-256 before it is copied (the same integrity gate the `plugin` format applies) -- a file whose bytes no longer match its recorded hash fails the pack with `... does not match the hash recorded in apm.lock.yaml`. Files with no recorded hash (older lockfiles) pack without verification. The bundle's `apm.lock.yaml` carries the same `pack:` metadata and `bundle_files` digests. The project's own `apm.lock.yaml` is never modified.
 
 Example enriched lockfile fragment:
 
@@ -140,7 +143,7 @@ Configure marketplace artifact paths in `apm.yml` with the `marketplace.outputs`
 
 ### Plugin manifests
 
-Ship one APM package; consumers get a native plugin for their tool of choice. When `apm.yml` declares a [`target:`](../manifest-schema/#36-target) (or `targets:`) field containing `claude` or `copilot`, `apm pack` generates an ecosystem-specific `plugin.json` so the same source tree drops into a Claude Code plugin directory or a Copilot plugin path with no hand-editing.
+Ship one APM package; consumers get a native plugin for their tool of choice. When `apm.yml` declares a [`target:`](../../manifest-schema/#36-target) (or `targets:`) field containing `claude` or `copilot`, `apm pack` generates an ecosystem-specific `plugin.json` so the same source tree drops into a Claude Code plugin directory or a Copilot plugin path with no hand-editing.
 
 | Ecosystem | Output path |
 |---|---|
@@ -190,9 +193,9 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 
 ## Behavior
 
-- **Lockfile-driven.** The bundle enumerates `deployed_files` from `apm.lock.yaml`. Run `apm install` first if the lockfile is stale or missing.
+- **Lockfile-attested dependencies.** Dependency content is packed exclusively from lockfile `deployed_files` and verified against `deployed_file_hashes`; the `apm_modules` cache is never packed. If a dependency has cached primitives but no `deployed_files`, `apm pack` errors and tells you to run `apm install`.
 - **Hidden-character scan.** Source files are scanned before bundling. Findings are reported as warnings only -- packing is non-blocking. Consumers are protected at install time, where critical findings block.
-- **Empty bundle warning.** If no files match (e.g. nothing was installed yet), `apm pack` emits a warning and exits `0` with an empty bundle. Verbose mode prints a hint to run `apm install` first.
+- **Empty bundle warning.** If no package files match after dependency resolution, `apm pack` emits a warning and exits `0` with an empty bundle. Missing dependency content is an error, not an empty bundle.
 - **Share line.** On success, `apm pack` prints `Share with: apm install <bundle-path>` so the produced bundle is immediately copy-pasteable.
 - **Marketplace fallback.** With no `marketplace:` block in `apm.yml`, a legacy `marketplace.yml` file is read with a deprecation warning. Both files present is a hard error.
 - **Marketplace outputs.** Configure via `marketplace.outputs` map (keyed by format). Claude is included by default. The legacy list form (`outputs: [claude]`) still parses with a deprecation warning. Use `--marketplace=` to filter which formats are built in a given invocation.

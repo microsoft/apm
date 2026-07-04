@@ -46,11 +46,11 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 
 | Flag | Default | Description |
 |---|---|---|
-| `--target`, `-t VALUE` | auto-detect | Force deployment targets. Comma-separated for multiple (`-t claude,cursor`). Values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `windsurf`, `kiro`, `intellij`, `agent-skills`, `all`; experimental `copilot-cowork` and `copilot-app` are also accepted when enabled. `all` expands to every harness above except `agent-skills`; combine `all,agent-skills` for both. Highest precedence in the chain `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. With nothing to detect, install exits `2` with a teaching message. |
+| `--target`, `-t VALUE` | auto-detect | Force deployment targets. Comma-separated for multiple (`-t claude,cursor`). Values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `intellij`, `vscode`, `agent-skills`, `all`; experimental `copilot-cowork` and `copilot-app` are also accepted when enabled. `all` expands to every harness above except `agent-skills` and `antigravity`; combine `all,agent-skills` or `all,antigravity` to add them. Highest precedence in the chain `--target` > `apm.yml targets:` > `apm config set target ...` > auto-detect. With nothing to detect, install exits `2` with a teaching message. |
 | `--runtime VALUE` | unset | Legacy alias for `--target` (single value only). Still accepted; prefer `--target`. |
 | `--exclude VALUE` | unset | Skip a single runtime that auto-detect or `targets:` would otherwise enable. |
 | `--only apm\|mcp` | both | Install only APM packages or only MCP servers. |
-| `-g`, `--global` | off | Install to user scope (`~/.apm/`) instead of the current project. MCP servers deploy only to global-capable runtimes, such as Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Kiro, Windsurf, and JetBrains Copilot. |
+| `-g`, `--global` | off | Install to user scope (`~/.apm/`) instead of the current project. MCP servers deploy only to global-capable runtimes, such as Copilot CLI, Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, Kiro, Windsurf, and JetBrains Copilot. |
 | `--legacy-skill-paths` | off | Deploy skills to per-client paths (`.cursor/skills/`, `.github/skills/`, ...) instead of the converged `.agents/skills/`. Env: `APM_LEGACY_SKILL_PATHS=1`. |
 
 ### Policy and trust
@@ -80,7 +80,7 @@ Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initi
 
 | Flag | Default | Description |
 |---|---|---|
-| `--skill NAME` | all | Install only named skill(s) from a skill collection (`SKILL_BUNDLE` or plugin manifest). Repeatable. For plugin manifests, `NAME` may be the skill name or manifest path, such as `skills/productivity/grill-me`. The selection is persisted to `apm.yml` and `apm.lock.yaml`. Use `--skill '*'` to reset and install all. |
+| `--skill NAME` | all | Install only named skill(s) from a skill collection (`SKILL_BUNDLE` or plugin manifest). Repeatable. For plugin manifests, `NAME` may be the skill name or manifest path, such as `skills/productivity/grill-me`. The selection is persisted to `apm.yml` and `apm.lock.yaml`. `--skill` is additive across separate installs: a later `apm install <bundle> --skill X` adds `X` to the existing pin (union) rather than replacing it -- previously deployed skills are never silently removed. Use `--skill '*'` to reset to the full bundle; to drop a single skill, edit the `skills:` list in `apm.yml` and re-run `apm install`. |
 | `--as ALIAS` | bundle id | Override the log/display label for a local-bundle install. Only valid with a single local-bundle `PACKAGE_REF`. |
 
 ### MCP server entry (use only with `--mcp`)
@@ -100,6 +100,7 @@ Transport env vars: `APM_GIT_PROTOCOL` (`ssh` or `https`) sets the default initi
 - **Auto-bootstrap.** `apm install <pkg>` with no `apm.yml` creates a minimal one. Bare `apm install` with no `apm.yml` exits with a hint to run `apm init` or `apm install <org/repo>`.
 - **Target persistence on bootstrap.** When `--target` maps to recognized manifest targets, those target(s) are persisted to the new manifest's `targets:` field so a later bare `apm update` redeploys to the same targets without re-specifying `--target`.
 - **Diff-aware.** Packages whose ref or version changed in `apm.yml` are re-downloaded automatically; `--update` is only needed to pull a newer ref under a floating constraint. MCP servers with matching config are skipped (`already configured`); changed config is re-applied (`updated`).
+- **Lockfile replay.** For unchanged Git dependencies, install reuses the locked commit for the whole resolved graph, including transitive packages. Upstream changes to a transitive package's `apm.yml` are picked up only when you regenerate the graph, for example with `apm update` or `apm lock --update`. See the [lockfile specification](../../lockfile-spec/) for the replay contract.
 - **Semver ranges on git deps.** `ref:` accepts semver ranges (`^1.2.0`, `~1.4`, `>=2.0 <3`, `1.5.x`) for git-source deps. APM runs `git ls-remote` against the dep, picks the highest tag matching the range, and pins the resolved tag plus commit SHA, version, and original constraint in `apm.lock.yaml`. Subsequent installs replay the lockfile without network; use `--update` (or change the manifest constraint) to re-resolve. See [manage dependencies](../../../consumer/manage-dependencies/#pin-a-semver-range) for the supported syntax.
 - **No-op nudge.** When the lockfile is already satisfied and nothing needs deploying, install prints `[i] Run 'apm update' to check for newer versions.` so you know the silent success was not a missed refresh.
 - **Frozen mode.** With `--frozen`, install resolves only what is in `apm.lock.yaml`. A direct dependency missing from the lockfile, or a missing lockfile entirely, exits `1`. Orphan lockfile entries (locked but no longer in `apm.yml`) are tolerated; local-path deps are skipped. This is a structural check, not a content check -- run `apm audit --ci` for hash verification.
@@ -186,8 +187,9 @@ apm install ./my-bundle --target opencode
 ### Install only a subset of skills from a bundle
 
 ```bash
-apm install owner/skill-bundle --skill review --skill refactor
-apm install owner/skill-bundle --skill '*'   # reset to all skills
+apm install owner/skill-bundle --skill review
+apm install owner/skill-bundle --skill refactor   # adds refactor; review is kept (union)
+apm install owner/skill-bundle --skill '*'         # reset to all skills
 ```
 
 ## Exit codes

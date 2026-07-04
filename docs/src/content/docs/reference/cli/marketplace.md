@@ -1,6 +1,6 @@
 ---
 title: apm marketplace
-description: Register marketplaces, author manifests, and publish updates to consumer repositories.
+description: Register marketplaces, author manifests, and validate updates for consumer repositories.
 sidebar:
   order: 20
 ---
@@ -8,7 +8,7 @@ sidebar:
 Manage marketplaces -- both **consuming** them (registering a remote
 marketplace so packages resolve by `package@marketplace` shorthand)
 and **authoring** one (editing `apm.yml`'s `marketplace:` block,
-validating it, and publishing updates to consumer repositories).
+validating it, and preparing artifacts for consumer repositories).
 
 ## Synopsis
 
@@ -26,9 +26,7 @@ apm marketplace init [--force] [--name N] [--owner O]
 apm marketplace migrate [--force | --dry-run]
 apm marketplace check [--offline]
 apm marketplace audit NAME [--strict] [-v]
-apm marketplace doctor
 apm marketplace outdated [--offline] [--include-prerelease]
-apm marketplace publish [--targets FILE] [--dry-run] [--no-pr] [...]
 
 # Edit packages in the authoring config
 apm marketplace package add SOURCE [...]
@@ -45,8 +43,7 @@ interact with this command:
   can resolve by short name (`my-pkg@my-marketplace`) instead of a
   full git URL. See [`apm install`](../install/).
 - **Authors** maintain a marketplace's `apm.yml` (`marketplace:`
-  block) and ship updates to consumer repositories via
-  `apm marketplace publish`.
+  block) and build marketplace artifacts with [`apm pack`](../pack/).
 
 The authoring config is the `marketplace:` block of `apm.yml` in the
 current working directory. Legacy `marketplace.yml` files are still
@@ -302,11 +299,11 @@ apm marketplace package add my-org/code-reviewer --version '>=1.0.0'
 apm marketplace check
 ```
 
-Preview a publish, then ship it as drafts:
+Check marketplace metadata before packaging:
 
 ```bash
-apm marketplace publish --dry-run
-apm marketplace publish --draft
+apm marketplace check
+apm marketplace check --offline
 ```
 
 ## Related

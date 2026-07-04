@@ -41,6 +41,9 @@ def build_dependency_unique_key(
     github.com remains the implicit default so existing lockfiles keep bare
     ``owner/repo`` keys. Non-default hosts include the host segment to avoid
     collisions between the same ``owner/repo`` on different servers.
+    This deliberately uses the literal ``github.com`` default rather than
+    environment-specific host overrides, so lockfile keys stay portable across
+    machines with different GitHub Enterprise defaults.
 
     Registry-proxy deps (``registry_prefix`` set, e.g. an Artifactory mirror)
     keep the bare logical key: the proxy host is a transport detail, not the

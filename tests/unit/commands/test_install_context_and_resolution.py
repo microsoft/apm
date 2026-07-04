@@ -251,7 +251,7 @@ class TestMergePackagesIntoYml:
         data = {"dependencies": {"apm": ["existing/pkg"]}}
         current_deps = data["dependencies"]["apm"]
 
-        with patch("apm_cli.utils.yaml_io.dump_yaml") as mock_dump:
+        with patch("apm_cli.utils.yaml_io.dump_yaml_roundtrip") as mock_dump:
             _merge_packages_into_yml(
                 ["new/pkg"],
                 {},
@@ -273,7 +273,7 @@ class TestMergePackagesIntoYml:
         current_deps = data["dependencies"]["apm"]
         apm_yml_entries = {"owner/repo": {"repo": "owner/repo", "ref": "main"}}
 
-        with patch("apm_cli.utils.yaml_io.dump_yaml"):
+        with patch("apm_cli.utils.yaml_io.dump_yaml_roundtrip"):
             _merge_packages_into_yml(
                 ["owner/repo"],
                 apm_yml_entries,
@@ -292,7 +292,7 @@ class TestMergePackagesIntoYml:
         data = {"dependencies": {"apm": []}}
         current_deps = data["dependencies"]["apm"]
 
-        with patch("apm_cli.utils.yaml_io.dump_yaml", side_effect=Exception("disk full")):
+        with patch("apm_cli.utils.yaml_io.dump_yaml_roundtrip", side_effect=Exception("disk full")):
             with pytest.raises(SystemExit) as exc_info:
                 _merge_packages_into_yml(
                     ["owner/repo"],
@@ -312,7 +312,7 @@ class TestMergePackagesIntoYml:
         data = {"devDependencies": {"apm": []}}
         current_deps = data["devDependencies"]["apm"]
 
-        with patch("apm_cli.utils.yaml_io.dump_yaml"):
+        with patch("apm_cli.utils.yaml_io.dump_yaml_roundtrip"):
             _merge_packages_into_yml(
                 ["owner/repo"],
                 {},
@@ -420,6 +420,48 @@ class TestValidateAndAddPackagesToApmYml:
                         manifest_path=apm_yml,
                     )
         assert validated == []
+
+    def test_manifest_update_preserves_comments(self, tmp_path: Path) -> None:
+        from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
+
+        apm_yml = tmp_path / "apm.yml"
+        apm_yml.write_text(
+            "# project comment\n"
+            "name: project\n"
+            "# dependency section comment\n"
+            "dependencies: # dependencies inline comment\n"
+            "  # apm list comment\n"
+            "  apm:\n"
+            "    - existing/pkg # existing dependency comment\n",
+            encoding="utf-8",
+        )
+        logger = _make_install_logger()
+        logger.validation_summary.return_value = True
+
+        with patch("apm_cli.commands.install._check_package_conflicts", return_value=set()):
+            with patch("apm_cli.commands.install._resolve_package_references") as mock_resolve:
+                mock_resolve.return_value = (
+                    [("new/pkg", False)],
+                    [],
+                    ["new/pkg"],
+                    {},
+                    {},
+                    False,
+                )
+                validated, _outcome = _validate_and_add_packages_to_apm_yml(
+                    ["new/pkg"],
+                    logger=logger,
+                    manifest_path=apm_yml,
+                )
+
+        text = apm_yml.read_text(encoding="utf-8")
+        assert validated == ["new/pkg"]
+        assert "# project comment" in text
+        assert "# dependency section comment" in text
+        assert "# dependencies inline comment" in text
+        assert "# apm list comment" in text
+        assert "# existing dependency comment" in text
+        assert "new/pkg" in text
 
 
 # ---------------------------------------------------------------------------

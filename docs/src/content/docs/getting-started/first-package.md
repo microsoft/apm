@@ -184,8 +184,9 @@ Output:
 Note the split: **agents** are runtime-specific and land under
 `.github/agents/` (Copilot's directory). **Skills** land under
 `.agents/skills/` -- the cross-client universal location that
-Copilot, Cursor, OpenCode, Codex, and Gemini all read. Claude Code
-is the exception: it reads `.claude/skills/`.
+Copilot, Cursor, OpenCode, Codex, Gemini, and Windsurf all read.
+Claude Code and Kiro are the exceptions: they read `.claude/skills/`
+and `.kiro/skills/`, respectively.
 
 Your tree now has source on the left and runtime-ready output on the right:
 

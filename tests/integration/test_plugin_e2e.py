@@ -8,6 +8,7 @@ integrator deployment, orphan detection, and CLI round-trips.
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from datetime import datetime
@@ -471,6 +472,89 @@ class TestPluginHeroScenarios:
         combined = uninstall.stdout + uninstall.stderr
         assert "Cleaned up 1 integrated agents" in combined
         assert all(not path.exists() for path in deployed_paths)
+
+
+# ===========================================================================
+# Class 1b - LOCAL user-scope bin/ permission E2E (no network, sandboxed HOME)
+# ===========================================================================
+
+
+def _resolve_apm_executable() -> str:
+    """Resolve the apm CLI executable (PATH, then repo .venv, then bare name)."""
+    apm_on_path = shutil.which("apm")
+    if apm_on_path:
+        return apm_on_path
+    venv_apm = Path(__file__).parent.parent.parent / ".venv" / "bin" / "apm"
+    if venv_apm.exists():
+        return str(venv_apm)
+    return "apm"
+
+
+def _build_plugin_with_bin(dest: Path) -> str:
+    """Copy the mock plugin fixture into *dest* and add a loose bin/ executable.
+
+    Returns the plugin package name.
+    """
+    shutil.copytree(FIXTURE_DIR, dest)
+    (dest / ".claude-plugin").mkdir(exist_ok=True)
+    (dest / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": dest.name, "version": "1.0.0"}), encoding="utf-8"
+    )
+    bin_dir = dest / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    tool = bin_dir / "mytool"
+    tool.write_text("#!/bin/sh\necho hello\n", encoding="utf-8")
+    tool.chmod(0o4755)
+    return dest.name
+
+
+@pytest.mark.skipif(os.name != "posix", reason="bin/ chmod hardening is POSIX-only")
+class TestPluginBinDeployPermissionsE2E:
+    """User-scope CLI E2E: a plugin's bin/ executable deploys as owner-only 0o700.
+
+    Regression guard for issue #1620 item 3: ``shutil.copy2`` preserves the
+    source mode, so a shipped 0o4755 tool would otherwise land group/other
+    readable with a special bit. The real ``apm install -g`` path must tighten
+    it to 0o700.
+    """
+
+    def test_install_global_deploys_plugin_bin_as_0700(self, tmp_path):
+        if not FIXTURE_DIR.exists():
+            pytest.skip("mock-marketplace-plugin fixture not found")
+
+        plugin_dir = tmp_path / "myplugin"
+        _build_plugin_with_bin(plugin_dir)
+
+        # Sandbox HOME; pre-create ~/.claude so the Claude skills target (which
+        # does not auto-create) is active at user scope.
+        fake_home = tmp_path / "fakehome"
+        (fake_home / ".claude").mkdir(parents=True)
+
+        env = os.environ.copy()
+        env["HOME"] = str(fake_home)
+
+        result = subprocess.run(
+            [_resolve_apm_executable(), "install", str(plugin_dir), "-g"],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+            env=env,
+            timeout=180,
+        )
+        assert result.returncode == 0, f"Global install failed:\n{result.stdout}\n{result.stderr}"
+
+        deployed = list((fake_home / ".claude" / "skills").glob("*/bin/mytool"))
+        assert len(deployed) == 1, (
+            f"Expected exactly one deployed bin executable, found {deployed}.\n"
+            f"stdout:\n{result.stdout}"
+        )
+        mode = deployed[0].stat().st_mode
+        assert stat.S_ISREG(mode), "Deployed bin must be a regular file"
+        assert mode & 0o777 == 0o700, (
+            f"Deployed bin must be owner-only 0o700, got {oct(mode & 0o777)}"
+        )
+        assert mode & 0o077 == 0, "Group/other permission bits must be stripped"
+        assert mode & 0o7000 == 0, "Special permission bits must be stripped"
 
 
 # ===========================================================================

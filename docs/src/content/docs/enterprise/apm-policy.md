@@ -30,10 +30,11 @@ It declares:
 - Manifest rules (required `apm.yml` fields and explicit `includes:` requirements).
 - Behaviour for unmanaged files in governed directories.
 - Registry-source rules for requiring named registries and blocking non-registry sources.
+- Install-time audit/integrity rules under `security.*`, plus executable-trust controls under `executables.*`.
 
 It does **not** scan code semantics or behave like an antivirus. It enforces declarations against an allow/deny list before APM writes any file.
 
-The policy schema addresses install-time gates exclusively. It has no fields for runtime permissions or agent sandboxing. See [Governance overview](/apm/enterprise/governance-overview/#boundary-statement) for how APM policy coexists with harness configuration.
+The policy schema addresses install-time gates exclusively. It has no fields for runtime permissions or agent sandboxing. See [Governance deep-dive](/apm/enterprise/governance-guide/) for how APM policy coexists with harness configuration.
 
 ---
 
@@ -108,7 +109,7 @@ Policy is evaluated at two points. Both use the same policy file and the same me
 
 `apm install` resolves the dependency tree, then runs the policy gate against the resolved set, then writes any files. A blocking violation halts the install with a non-zero exit code; nothing is written to disk. This protects developers who run `apm install` locally — they cannot accidentally deploy a denied package even without CI.
 
-> **Bypass note:** `apm install --no-policy` and the `APM_POLICY_DISABLE=1` environment variable skip this gate locally. The env var also skips all 19 policy checks when `apm audit --ci` runs in the same shell; the 8 baseline lockfile checks still run. See the [Governance Guide bypass contract](./governance-guide/#7-the-bypass--non-bypass-contract) for the full surface.
+> **Bypass note:** `apm install --no-policy` and the `APM_POLICY_DISABLE=1` environment variable skip this gate locally. The env var also skips all 20 policy checks when `apm audit --ci` runs in the same shell; the 8 baseline lockfile checks still run. See the [Governance Guide bypass contract](./governance-guide/#7-the-bypass--non-bypass-contract) for the full surface.
 
 ### CI time (audit gate)
 
@@ -177,3 +178,98 @@ For lockfile-based forensic recipes, see the [Governance Guide §13: enforcement
 - **Schema and every field** — [Policy Reference](./policy-reference/)
 - **Wire it into CI with SARIF** — [Enforce in CI](./enforce-in-ci/)
 - **Broader governance model** (lock files, audit trails, compliance scenarios) -- [Governance Guide](./governance-guide/)
+
+---
+
+## Get started in 20 minutes
+
+This is nothing-to-working-policy. By the end you have a file in your org's `.github` repo that blocks one bad package across every repo.
+
+### 1. Write the minimal policy
+
+Copy this into `<your-org>/.github/apm-policy.yml`. It blocks one package family and starts in `warn` so you do not break anyone on day one:
+
+```yaml
+name: "Acme baseline policy"
+version: "1.0.0"
+enforcement: warn        # warn | block | off
+
+dependencies:
+  deny:
+    - "untrusted-org/**"
+```
+
+Commit and push. On the next `apm install` in any repo in the org, a user who depends on `untrusted-org/anything` sees a warning. When you are ready to enforce, flip `enforcement: block`.
+
+### 2. Preview before you commit
+
+Point at a policy explicitly to test it before it lands in `.github`:
+
+```bash
+apm policy status --policy-source ./apm-policy.yml
+apm policy status --policy-source contoso/governance     # any owner/repo
+apm audit --ci --policy ./apm-policy.yml
+```
+
+`apm install` has no `--policy` flag — discovery runs automatically from your git remote. Use `--no-cache` to force a fresh fetch.
+
+### 3. The schema in one screen
+
+Every current non-deprecated top-level key. Field names come straight from the schema -- do not invent others.
+
+```yaml
+name: ""                  # display name
+version: ""               # your policy version
+extends: null             # "org" | "<owner>/<repo>" | "https://..."
+enforcement: warn         # warn | block | off
+fetch_failure: warn       # warn | block (when policy can't be fetched)
+cache:
+  ttl: 3600               # seconds
+
+dependencies:
+  allow: null             # null = no opinion; [] = nothing allowed
+  deny: []
+  require: []             # packages every repo must include
+  require_resolution: project-wins   # project-wins | policy-wins | block
+  max_depth: 50
+  require_pinned_constraint: false   # true = ban unbounded version ranges
+
+mcp:
+  allow: null
+  deny: []
+  transport:
+    allow: null           # stdio | sse | http | streamable-http
+  self_defined: warn      # allow | warn | deny (inline MCPs in apm.yml)
+  trust_transitive: false
+
+compilation:
+  target:
+    allow: null           # claude | copilot | cursor | opencode | codex | gemini | windsurf | kiro | agent-skills
+    enforce: null
+  strategy:
+    enforce: null         # distributed | single-file
+  source_attribution: false
+
+manifest:
+  required_fields: []
+  scripts: allow          # allow | deny
+  content_types: null     # {allow: [...]}
+  require_explicit_includes: false
+
+unmanaged_files:
+  action: ignore          # ignore | warn | deny
+  directories: []
+registry_source:
+  require: []             # registry names every dep must use
+  allow_non_registry: true
+security:
+  audit: {}               # on_install, fail_on_drift, external scanners
+  integrity: {}           # require_hashes
+executables: {}           # deny_all, deny, require, recommend, enforce (accepted; degrades to recommend)
+```
+
+Allow-list semantics: `null` means "no opinion", an empty list means "explicitly allow nothing", a populated list means "only these". Deny and require lists accumulate. Per-field detail is in the [Policy Reference](./policy-reference/).
+
+### 4. Roll it out
+
+You have a policy that warns on one bad case. Wire `apm audit --ci --policy org` into your pipeline so CI gates even when a developer passes `--no-policy` locally — see [Enforce in CI](./enforce-in-ci/). Pilot in `warn`, observe, then flip to `block`.

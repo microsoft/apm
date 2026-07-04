@@ -55,20 +55,31 @@ _ACTION_UNCHANGED = "unchanged"
 
 
 def _dep_ref_key(dep: DependencyReference) -> str:
-    """Compute the unique key for a manifest dependency.
+    """Compute the lockfile-compatible unique key for a manifest dependency.
 
-    Mirrors :meth:`LockedDependency.get_unique_key` so that manifest and
-    lockfile entries can be matched 1:1 without round-tripping through
-    a full resolution.
-
-    Local refs use ``local_path``; virtual subdirectory refs use
-    ``repo_url/virtual_path``; everything else is keyed on ``repo_url``.
+    Delegates to the same identity function as
+    :meth:`LockedDependency.get_unique_key` so that manifest and lockfile
+    entries can be matched 1:1 without round-tripping through a full
+    resolution.  Non-default git hosts must be part of this key, because
+    lockfile entries use host-qualified identity for those repos.
     """
-    if getattr(dep, "is_local", False) and dep.local_path:
-        return dep.local_path
-    if getattr(dep, "is_virtual", False) and dep.virtual_path:
-        return f"{dep.repo_url}/{dep.virtual_path}"
-    return dep.repo_url
+    get_unique_key = getattr(dep, "get_unique_key", None)
+    if callable(get_unique_key):
+        return get_unique_key()
+
+    from apm_cli.models.dependency.identity import build_dependency_unique_key
+
+    # Test fakes in the integration suite are intentionally lightweight.
+    # Keep this mapping in sync with DependencyReference.get_unique_key().
+    return build_dependency_unique_key(
+        getattr(dep, "repo_url", ""),
+        host=getattr(dep, "host", None),
+        source="local" if getattr(dep, "is_local", False) else getattr(dep, "source", None),
+        local_path=getattr(dep, "local_path", None),
+        is_virtual=getattr(dep, "is_virtual", False),
+        virtual_path=getattr(dep, "virtual_path", None),
+        registry_prefix=getattr(dep, "artifactory_prefix", None),
+    )
 
 
 def _short_sha(commit: str | None, length: int = 7) -> str:

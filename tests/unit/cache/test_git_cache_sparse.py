@@ -214,6 +214,48 @@ class TestPartialBareFlavor:
         ).stdout.strip()
         assert pfilter == "blob:none"
 
+    def test_promisor_setup_uses_single_config_spawn(self, tmp_path: Path, monkeypatch):
+        """The promisor keys ride on the clone via ``-c``; only ``remote.origin.url``
+        needs a post-clone ``git config`` (clone always rewrites url to the source).
+
+        Guards the spawn-count reduction: three ``git config`` subprocesses
+        collapsed to one, which matters on hosts where each process exec is
+        expensive.
+        """
+        bare, sha = _build_local_bare_repo(tmp_path)
+        cache = GitCache(tmp_path / "cache")
+
+        real_run = subprocess.run
+        clone_cmds: list[list[str]] = []
+        config_cmds: list[list[str]] = []
+
+        def _spy(cmd, *args, **kwargs):
+            # Normalize any argv sequence (list/tuple) to a copied list so a
+            # call site that passes a tuple can't slip past this spawn guard.
+            # A bare str command (shell=True) is wrapped so ``in`` still works.
+            argv = [cmd] if isinstance(cmd, (str, bytes)) else list(cmd)
+            if "clone" in argv:
+                clone_cmds.append(argv)
+            if "config" in argv:
+                config_cmds.append(argv)
+            return real_run(cmd, *args, **kwargs)
+
+        monkeypatch.setattr(subprocess, "run", _spy)
+
+        url = bare.as_uri()
+        cache.get_checkout(url, "main", locked_sha=sha, sparse_paths=["alpha"])
+
+        # The consumer clone carries the two clone-survivable promisor keys.
+        consumer_clone = next(c for c in clone_cmds if "--no-checkout" in c and "--shared" in c)
+        joined = " ".join(consumer_clone)
+        assert "remote.origin.promisor=true" in joined
+        assert "remote.origin.partialclonefilter=blob:none" in joined
+        # Exactly one post-clone `git config` -- for remote.origin.url only.
+        url_configs = [c for c in config_cmds if "remote.origin.url" in c]
+        assert len(url_configs) == 1
+        assert not any("remote.origin.promisor" in c for c in config_cmds)
+        assert not any("remote.origin.partialclonefilter" in c for c in config_cmds)
+
     def test_full_consumer_has_no_promisor_config(self, tmp_path: Path):
         bare, sha = _build_local_bare_repo(tmp_path)
         cache_root = tmp_path / "cache"

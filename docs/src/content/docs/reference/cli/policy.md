@@ -101,7 +101,7 @@ apm policy explain PACKAGE
 The effective decision follows the deny-wins precedence: an organization
 `executables.deny` / `deny_all` is the ceiling no project or user grant can
 widen. See [Executable approval](../approve/) for the trust model and
-[apm-policy.yml schema](../policy-schema/#executables) for the
+[apm-policy.yml schema](../../policy-schema/#executables) for the
 `executables` ceiling.
 
 ## Examples
@@ -150,9 +150,9 @@ APM Policy Status
   complements `apm policy status --check`.
 - [Policy reference](../../../enterprise/policy-reference/) -- canonical
   `apm-policy.yml` schema and enforcement semantics.
-- [Governance overview](../../../enterprise/governance-overview/) --
+- [Governance deep-dive](../../../enterprise/governance-guide/) --
   how policy fits the broader enterprise governance model.
-- [APM policy: getting started](../../../enterprise/apm-policy-getting-started/)
+- [APM policy: getting started](../../../enterprise/apm-policy/)
   -- author and publish your first `apm-policy.yml`.
 - [Enforce in CI](../../../enterprise/enforce-in-ci/) -- wire `audit`
   and `policy status` into pipelines.

@@ -61,7 +61,8 @@ class TestScriptEntry:
             bash="./bash.sh",
             command="echo fallback",
         )
-        assert script.effective_command == "./bash.sh"
+        with patch("platform.system", return_value="Linux"):
+            assert script.effective_command == "./bash.sh"
 
     def test_effective_command_prefers_command_on_windows(self) -> None:
         script = ScriptEntry(

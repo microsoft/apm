@@ -128,7 +128,10 @@ installing N separate CLAUDE_SKILL packages.
 from the bundle (repeatable). The selection is **persisted** in `apm.yml`
 (as a `skills:` field) and `apm.lock.yaml` (as `skill_subset`), so
 subsequent bare `apm install` commands are deterministic.
-Use `--skill '*'` to reset and install all skills.
+Use `--skill '*'` to reset and install all skills. `--skill` is additive
+across separate installs (a later `--skill X` unions onto the existing pin
+and never removes already-deployed skills) -- see
+[apm install](../cli/install/).
 
 ```bash
 # Install only two skills (persisted to apm.yml):

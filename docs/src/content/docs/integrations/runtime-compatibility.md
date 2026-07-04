@@ -94,7 +94,7 @@ apm runtime setup codex
 This automatically:
 - Downloads Codex binary `rust-v0.118.0` for your platform (override with `--version`)
 - Installs to `~/.apm/runtimes/codex`
-- Creates configuration for GitHub Models (`github/gpt-4o`)
+- Creates configuration for GitHub Models (`openai/gpt-4o`)
 - Updates your PATH
 
 #### 2. Set GitHub Token
@@ -187,7 +187,7 @@ apm install
 # Result: .gemini/settings.json updated with mcpServers entries
 ```
 
-See the [IDE & Tool Integration guide](../../integrations/ide-tool-integration/#gemini-cli-gemini) for the full list of primitives deployed by `apm install --target gemini`.
+See the [IDE & Tool Integration guide](../ide-tool-integration/) for the full list of primitives deployed by `apm install --target gemini`.
 
 ## LLM Runtime
 

@@ -1,6 +1,6 @@
 ---
 title: Author a prompt
-description: Ship a parameterized, single-purpose AI workflow as a .prompt.md primitive that compiles to every harness's slash-command format.
+description: Ship a parameterized, single-purpose AI workflow as a .prompt.md primitive that deploys to each supported prompt or command surface.
 ---
 
 A prompt is a single-purpose, parameterized AI workflow. Write one
@@ -135,7 +135,7 @@ the parameter bound and invokes the harness. See
   command frontmatter.
 - **Codex receives nothing.** Do not assume a prompt is universal.
   If Codex coverage matters, ship the same workflow as a
-  [skill](./skills/) -- skills route to all seven harnesses.
+  [skill](./skills/) -- skills route to all canonical skill targets.
 - **One file, one command name.** Two prompts with the same base
   filename in `.apm/prompts/` and at the package root collide; the
   later writer wins on copilot and the transform fails on

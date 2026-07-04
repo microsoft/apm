@@ -96,10 +96,11 @@ accepted in target lists for symmetry only. Unknown slugs are
 rejected before any work runs.
 
 Experimental targets (`hermes`, `openclaw`, `copilot-cowork`,
-`copilot-app`) are also accepted once their flag is enabled via
-`apm experimental enable <flag>`, but are excluded from `--all`.
-`apm compile -t hermes` emits `AGENTS.md` (the `hermes` target shares
-the `agents` compile family). See
+`copilot-app`) are deployment targets for `apm install --target <flag>`
+once enabled via `apm experimental enable <flag>`, and are excluded
+from `--all`. `apm compile` does not emit harness-specific output for
+them: Hermes and the other agents-family harnesses read the standard
+`AGENTS.md` your normal `apm compile` flow already produces. See
 [Hermes Agent](../integrations/hermes/).
 
 ## Detection cascade
@@ -166,10 +167,10 @@ AGENTS.md consumer is Copilot. When compiling for targets that do not read
 `.github/instructions/` (Codex, OpenCode, Windsurf, etc.), instructions
 are always included in `AGENTS.md` regardless of whether
 `.github/instructions/` exists. To opt out of deduplication even for
-Copilot-only compiles, pass `--no-dedup` (alias: `--force-instructions`):
+Copilot-only compiles, pass `--force-instructions` (alias: `--no-dedup`):
 
 ```bash
-apm compile --target copilot --no-dedup
+apm compile --target copilot --force-instructions
 ```
 :::
 
@@ -188,10 +189,10 @@ re-running `apm compile` restores the instructions section to
 
 To opt out of the deduplication and always include the instructions
 section in `CLAUDE.md` (for debugging or when you intentionally want
-both copies), pass `--no-dedup` (alias: `--force-instructions`):
+both copies), pass `--force-instructions` (alias: `--no-dedup`):
 
 ```bash
-apm compile --target claude --no-dedup
+apm compile --target claude --force-instructions
 ```
 
 This flag affects both the Claude and Copilot deduplication paths (see

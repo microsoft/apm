@@ -20,7 +20,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../reference/ta
 | Cursor               | `.cursor/`                           | Rules, commands, MCP                   |
 | Codex CLI            | `.codex/`                            | Skills, MCP                            |
 | Gemini CLI           | `.gemini/` or `GEMINI.md`            | Single-file or distributed             |
-| Antigravity CLI      | `.agents/`                           | Rules, skills, hooks, MCP              |
+| Antigravity CLI      | explicit `--target antigravity`       | Rules, skills, hooks, MCP              |
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
 | Kiro                 | `.kiro/`                             | Steering + Skills + Hooks + MCP        |
@@ -31,7 +31,7 @@ For exact per-target capabilities (which primitives are supported, transformer u
 
 ## How target detection works
 
-When you run `apm install` or `apm compile` without `--target`, APM auto-detects which tools your project uses by looking for the markers above. Multiple targets can be active simultaneously.
+When you run `apm install` or `apm compile` without `--target`, APM auto-detects tools with project markers above. Explicit-only targets such as Antigravity and `agent-skills` must be selected with `--target`.
 
 ```bash
 apm targets                    # list detected and supported targets
