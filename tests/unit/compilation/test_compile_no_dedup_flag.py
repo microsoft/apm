@@ -126,8 +126,7 @@ class TestNoDedupSkipsDeduplicationLogic:
 
     def test_with_no_dedup_instructions_are_included(self, project_with_rules):
         """When no_dedup=True the compiler forces skip_instructions=False even
-        when .claude/rules/ is populated, so '# Project Standards' appears in
-        CLAUDE.md."""
+        when .claude/rules/ is populated, so instructions appear in CLAUDE.md."""
         tmp_path, primitives = project_with_rules
 
         # Write a minimal apm.yml so the compiler does not bail out
@@ -156,7 +155,7 @@ class TestNoDedupSkipsDeduplicationLogic:
             "CLAUDE.md must be created even with .claude/rules/ populated when no_dedup=True"
         )
         body = claude_md.read_text(encoding="utf-8")
-        assert "# Project Standards" in body, (
+        assert "## Files matching `**/*.py`" in body and "Use type hints." in body, (
             "With no_dedup=True, instructions section must be present in CLAUDE.md "
             "even when .claude/rules/ is pre-populated. Got:\n" + body
         )

@@ -708,7 +708,9 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         self.assertTrue(result.success)
         claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
         self.assertTrue(claude_md.exists())
-        self.assertIn("# Project Standards", claude_md.read_text())
+        body = claude_md.read_text()
+        self.assertIn("## Files matching `**/*.py`", body)
+        self.assertIn("Use type hints.", body)
 
     def test_instructions_skipped_with_populated_rules_dir(self):
         """With .claude/rules/ containing .md files, instructions are skipped."""
@@ -738,7 +740,8 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
         self.assertTrue(claude_md.exists())
         content = claude_md.read_text()
-        self.assertIn("# Project Standards", content)
+        self.assertIn("## Files matching `**/*.py`", content)
+        self.assertIn("Use type hints.", content)
 
     def test_instructions_not_skipped_with_non_md_files_in_rules_dir(self):
         """Non-.md files in .claude/rules/ do not trigger instruction skipping."""
@@ -755,7 +758,8 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
         self.assertTrue(claude_md.exists())
         content = claude_md.read_text()
-        self.assertIn("# Project Standards", content)
+        self.assertIn("## Files matching `**/*.py`", content)
+        self.assertIn("Use type hints.", content)
 
     def test_skip_instructions_dry_run(self):
         """Dry-run respects skip_instructions when .claude/rules/ is populated."""
@@ -840,7 +844,9 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
             # Instructions should NOT be skipped (symlink escapes project root)
             claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
             self.assertTrue(claude_md.exists())
-            self.assertIn("# Project Standards", claude_md.read_text())
+            body = claude_md.read_text()
+            self.assertIn("## Files matching `**/*.py`", body)
+            self.assertIn("Use type hints.", body)
         finally:
             shutil.rmtree(external_dir, ignore_errors=True)
 

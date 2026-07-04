@@ -273,7 +273,7 @@ class ClaudeFormatter:
         Args:
             placement (ClaudePlacement): Placement result with instructions.
             primitives (PrimitiveCollection): Full primitive collection.
-            skip_instructions (bool): If True, omit the Project Standards section.
+            skip_instructions (bool): If True, omit inline instruction content.
             source_attribution (bool): Controls the opt-in cosmetic annotations
                 only: when True, the APM Version comment and the footer are
                 included; when False (default) they are omitted to reduce token
@@ -316,14 +316,11 @@ class ClaudeFormatter:
                 sections.append(constitution.strip())
                 sections.append("")
 
-        # Project Standards section (grouped by pattern).
+        # Inline instructions grouped by pattern.
         # Skipped when instructions are already deployed to .claude/rules/ by
         # `apm install`, since Claude Code reads both locations and would see
         # duplicate content.
         if placement.instructions and not skip_instructions:
-            sections.append("# Project Standards")
-            sections.append("")
-
             sections.extend(
                 build_attributed_instructions(
                     placement.instructions,

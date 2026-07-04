@@ -141,15 +141,17 @@ class TestFormatDistributed:
         assert "Use type hints and follow PEP 8." in content
         assert "Use ES6+ features." in content
 
-    def test_format_includes_project_standards_section(self, temp_project, sample_primitives):
-        """Test that Project Standards section is generated."""
+    def test_format_keeps_single_h1_heading(self, temp_project, sample_primitives):
+        """Test that CLAUDE.md does not add a second H1 before instructions."""
         formatter = ClaudeFormatter(str(temp_project))
 
         placement_map = {temp_project: list(sample_primitives.instructions)}
         result = formatter.format_distributed(sample_primitives, placement_map)
 
         content = result.content_map[temp_project / "CLAUDE.md"]
-        assert "# Project Standards" in content
+        assert "# Project Standards" not in content
+        assert [line for line in content.splitlines() if line.startswith("# ")] == ["# CLAUDE.md"]
+        assert "## Files matching `**/*.py`" in content
 
     def test_format_includes_source_attribution(self, temp_project, sample_primitives):
         """Test that source attribution comments are included."""
@@ -545,7 +547,7 @@ class TestSkipInstructions:
         return primitives
 
     def test_skip_instructions_omits_project_standards(self, temp_project, sample_primitives):
-        """When skip_instructions is True, Project Standards section is omitted."""
+        """When skip_instructions is True, inline instructions are omitted."""
         formatter = ClaudeFormatter(str(temp_project))
         placement_map = {temp_project: list(sample_primitives.instructions)}
 
@@ -628,7 +630,7 @@ class TestSkipInstructions:
         assert result.success
         assert len(result.content_map) == 0
 
-    def test_no_skip_instructions_includes_project_standards(self, temp_project, sample_primitives):
+    def test_no_skip_instructions_includes_instructions(self, temp_project, sample_primitives):
         """When skip_instructions is False (default), instructions are included."""
         formatter = ClaudeFormatter(str(temp_project))
         placement_map = {temp_project: list(sample_primitives.instructions)}
@@ -639,7 +641,7 @@ class TestSkipInstructions:
         assert result.success
         assert len(result.content_map) == 1
         content = result.content_map[temp_project / "CLAUDE.md"]
-        assert "# Project Standards" in content
+        assert "# Project Standards" not in content
         assert "Use type hints and follow PEP 8." in content
 
     def test_is_root_flag_used_for_skip_filtering(self, temp_project, sample_primitives):
