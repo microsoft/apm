@@ -42,6 +42,8 @@ apm runtime setup RUNTIME [--version VERSION] [--vanilla]
 
 Downloads the runtime binary from its official source and writes a default APM configuration that points at GitHub Models (free) where applicable. On Windows, setup scripts run through PowerShell automatically.
 
+For Codex, APM verifies the GitHub Releases SHA-256 asset digest before extracting the archive and fails if the digest is missing or mismatched.
+
 | Flag | Default | Description |
 |---|---|---|
 | `--version VERSION` | latest | Pin a specific upstream version. |

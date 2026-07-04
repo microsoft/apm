@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `apm runtime setup codex` now verifies GitHub Releases SHA-256 asset
+  digests before extracting downloaded archives -- by @fallintoplace (#1949)
+
 ### Performance
 
 - `apm install` with a committed lockfile no longer re-resolves branch-pinned

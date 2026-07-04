@@ -54,18 +54,35 @@ extract_release_tag() {
 extract_release_asset_digest() {
     local asset_name="$1"
 
+    if command -v jq >/dev/null 2>&1; then
+        jq -r --arg asset_name "$asset_name" \
+            '.assets[]? | select(.name == $asset_name) | .digest // empty' \
+            | head -n 1
+        return 0
+    fi
+
     awk -v asset_name="$asset_name" '
-        index($0, "\"name\": \"" asset_name "\",") > 0 { in_asset=1; next }
-        in_asset && /"digest":/ {
-            gsub(/.*"digest":[[:space:]]*"/, "")
-            gsub(/".*/, "")
-            print
+        function json_string_value(record, key, value) {
+            value = record
+            sub(".*\"" key "\"[[:space:]]*:[[:space:]]*\"", "", value)
+            if (value == record) {
+                return ""
+            }
+            sub("\".*", "", value)
+            return value
+        }
+
+        /"name"[[:space:]]*:/ {
+            in_asset = (json_string_value($0, "name") == asset_name)
+        }
+        in_asset && /"digest"[[:space:]]*:/ {
+            print json_string_value($0, "digest")
             exit
         }
-        in_asset && /"browser_download_url":/ {
+        in_asset && /"browser_download_url"[[:space:]]*:/ {
             exit
         }
-    '
+    ' RS=,
 }
 
 fetch_github_api() {
@@ -78,6 +95,8 @@ fetch_github_api() {
             token="$GITHUB_TOKEN"
         elif [[ -n "${GITHUB_APM_PAT:-}" ]]; then
             token="$GITHUB_APM_PAT"
+        elif [[ -n "${GH_TOKEN:-}" ]]; then
+            token="$GH_TOKEN"
         fi
     fi
 
@@ -103,7 +122,7 @@ fetch_release_metadata() {
     local url="$1"
     local response=""
 
-    if [[ -n "${GITHUB_TOKEN:-}" || -n "${GITHUB_APM_PAT:-}" ]]; then
+    if [[ -n "${GITHUB_TOKEN:-}" || -n "${GITHUB_APM_PAT:-}" || -n "${GH_TOKEN:-}" ]]; then
         if response="$(fetch_github_api "$url" true 2>/dev/null)" \
             && [[ -n "$(printf '%s\n' "$response" | extract_release_tag)" ]]; then
             printf '%s' "$response"
@@ -143,6 +162,7 @@ verify_archive_checksum() {
     normalized_expected="$(printf '%s' "$expected_digest" | sed 's/^sha256://' | tr '[:upper:]' '[:lower:]')"
     if [[ ! "$normalized_expected" =~ ^[0-9a-f]{64}$ ]]; then
         log_error "GitHub release metadata did not include a valid SHA-256 digest."
+        log_error "Try a different Codex version or retry after upstream release metadata publishes a digest."
         exit 1
     fi
 
@@ -151,10 +171,13 @@ verify_archive_checksum() {
 
     if [[ "$normalized_actual" != "$normalized_expected" ]]; then
         log_error "Checksum verification failed for downloaded Codex archive."
+        log_error "Expected SHA-256: ${normalized_expected:0:16}..."
+        log_error "Actual SHA-256: ${normalized_actual:0:16}..."
+        log_error "Re-run the command to retry. If this persists, the release may be compromised."
         exit 1
     fi
 
-    log_success "Verified Codex archive checksum"
+    echo "[+] Verified Codex archive checksum"
 }
 
 setup_codex() {
@@ -200,7 +223,10 @@ setup_codex() {
     local archive_digest
     
     temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/apm-codex-install.XXXXXX")"
-    trap "rm -rf '$temp_dir'" EXIT
+    cleanup_codex_temp_dir() {
+        rm -rf "${temp_dir:-}"
+    }
+    trap cleanup_codex_temp_dir EXIT
     
     # Determine release metadata and download URL for the tar.gz file
     local download_url
@@ -229,9 +255,11 @@ setup_codex() {
     fi
 
     archive_name="codex-$codex_platform.tar.gz"
+    # Depends on GitHub Releases API asset.digest metadata; fail closed if it disappears.
     archive_digest="$(printf '%s\n' "$release_metadata" | extract_release_asset_digest "$archive_name")"
     if [[ -z "$archive_digest" ]]; then
         log_error "Failed to find checksum metadata for $archive_name."
+        log_error "Try a different Codex version or retry after upstream release metadata publishes a digest."
         exit 1
     fi
 
