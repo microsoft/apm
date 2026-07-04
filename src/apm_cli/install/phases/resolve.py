@@ -23,6 +23,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.utils.short_sha import format_short_sha
 
@@ -989,6 +990,7 @@ def run(ctx: InstallContext) -> None:
     _load_lockfile(ctx)
     _ensure_modules_dir(ctx)
     _setup_downloader(ctx)
+    seed_ref_resolver_from_lockfile(ctx)
     _resolve_dependencies(ctx)
     if ctx.only_packages:
         _apply_only_filter(ctx)

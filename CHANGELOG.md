@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- `apm install` with a committed lockfile no longer re-resolves branch-pinned
+  and tagless locked dependencies over the network. The tiered ref resolver's
+  L0 cache is now seeded from the lockfile before resolution runs, eliminating
+  redundant commits-API calls on every locked install (2 calls -> 0 on a
+  1-direct + 1-transitive branch-pinned install). Skipped under `--update` /
+  `--refresh`. Verbose tier stats now also correctly track concrete-SHA refs as
+  `sha_passthrough` instead of inflating the `commits_api` counter. --
+  by @srobroek (#1973)
+
 ### Changed
 
 - Collapsed repeated `git config` subprocess calls from 3 to 1 per repository

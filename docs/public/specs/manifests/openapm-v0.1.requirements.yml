@@ -308,6 +308,10 @@ requirements:
     keyword: MUST
     section: "7.3.1"
     conformance_class: consumer
+  - id: req-rs-015
+    keyword: MUST
+    section: "7.5"
+    conformance_class: consumer
   - id: req-pr-001
     keyword: MUST
     section: "8.2"
