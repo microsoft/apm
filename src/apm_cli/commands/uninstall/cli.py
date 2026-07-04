@@ -95,11 +95,11 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         )
 
         # Read current apm.yml
-        from ...utils.yaml_io import dump_yaml, load_yaml
+        from ...utils.yaml_io import dump_yaml_roundtrip, load_yaml_roundtrip
 
         apm_yml_path = manifest_path
         try:
-            data = load_yaml(apm_yml_path) or {}
+            data = load_yaml_roundtrip(apm_yml_path) or {}
         except Exception as e:
             logger.error(f"Failed to read {apm_yml_path}: {e}")
             sys.exit(1)
@@ -166,7 +166,7 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             if not data["devDependencies"] and not had_dev_section:
                 del data["devDependencies"]
         try:
-            dump_yaml(data, apm_yml_path)
+            dump_yaml_roundtrip(data, apm_yml_path)
             logger.success(f"Updated {apm_yml_path} (removed {len(packages_to_remove)} package(s))")
         except Exception as e:
             logger.error(f"Failed to write {apm_yml_path}: {e}")
