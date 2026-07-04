@@ -131,13 +131,15 @@ For the consumer flags that apply (`--target`, `--global`, `--force`,
 `.apm/<type>/` subdirectories and from convention directories at the
 package root (`agents/`, `skills/`, `instructions/`, etc.). This lets
 you author in whichever layout feels natural during development.
+
 When packing git dependencies, `apm pack` emits **only** what the
 lockfile attests. Dependency content is sourced exclusively from the
 lockfile `deployed_files` list -- the `apm_modules` cache is never
 packed, because it carries no provenance or integrity guarantee (it can
 be stale, partial, or tampered). Each attested file is verified against
 its recorded `deployed_file_hashes` SHA-256 before it is included. If a
-dependency declares [`skills:`](../reference/package-types/#skill_bundle),
+dependency declares
+[`skills:`](../reference/package-types/#skill-collection-skillsnameskillmd),
 only the named deployed skills are included. If a dependency has cached
 primitives but no `deployed_files` (a stale or partial install), `apm
 pack` fails and tells you to run `apm install` to record provenance.

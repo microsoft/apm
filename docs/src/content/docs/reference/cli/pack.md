@@ -113,7 +113,7 @@ A Claude Code plugin directory under `--output`. Contains:
 - Installed dependencies are packed exclusively from lockfile-attested `deployed_files`; the `apm_modules` cache is never packed (it has no provenance or integrity guarantee). Each attested file is verified against its `deployed_file_hashes` SHA-256 before inclusion.
   - If the dependency declares `skills:`, only the named skills are included; the cache cannot add extras.
   - If a dependency has cached primitives but no `deployed_files`, `apm pack` fails and tells you to run `apm install`.
-- A merged `hooks.json` when multiple sources contribute hooks.
+- A merged `hooks.json` from the producer's own hooks. Dependency hook-configs and MCP-configs are not merged into the bundle; dependencies contribute only their attested `deployed_files` (hook scripts recorded there still map into `hooks/`).
 - `apm.lock.yaml` -- enriched copy with `pack:` metadata and a `bundle_files` map of per-file SHA-256 digests, used by `apm install` for install-time integrity verification.
 - `devDependencies` are excluded.
 

@@ -585,7 +585,9 @@ def _collect_deployed_components(
         raise ValueError(
             f"Cannot pack dependency {dep.repo_url}: installed files listed "
             "in the lockfile are missing on disk. Run 'apm install' to "
-            "restore them:\n" + "\n".join(f"  - {path}" for path in shown_missing) + suffix
+            "restore them, then pack again:\n"
+            + "\n".join(f"  - {path}" for path in shown_missing)
+            + suffix
         )
     return components
 
@@ -706,7 +708,8 @@ def export_plugin_bundle(
                     raise ValueError(
                         f"Cannot pack dependency {dep.repo_url}: declared skills "
                         f"{declared_skills} were not found among deployed files. "
-                        "Run 'apm install' to re-deploy the expected skills."
+                        "Run 'apm install' to re-deploy the expected skills, then "
+                        "pack again."
                     )
             elif _cache_would_contribute_primitives(install_path, dep):
                 # Unattested primitives sit in the cache but the lockfile

@@ -29,6 +29,7 @@ from apm_cli.bundle.plugin_exporter import (
 )
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.deps.plugin_parser import synthesize_plugin_json_from_apm_yml
+from apm_cli.utils.content_hash import compute_file_hash
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -842,6 +843,60 @@ class TestExportPluginBundle:
 
         assert (result.bundle_path / "agents" / "dep-agent.agent.md").exists()
         assert (result.bundle_path / "agents" / "own.agent.md").exists()
+
+    def test_dependency_hash_mismatch_rejects_pack(self, tmp_path):
+        """A deployed file whose SHA-256 diverges from the lockfile must fail loud.
+
+        ``_verify_attested_hash`` is the integrity half of the provenance
+        guarantee: a deployed file tampered or corrupted after ``apm install``
+        must never enter the bundle silently. This regression trap tampers the
+        on-disk copy so its content no longer matches the recorded
+        ``deployed_file_hashes`` and asserts pack refuses.
+        """
+        project = _setup_plugin_project(tmp_path, agents=["own.agent.md"])
+
+        deployed = _write_deployed_agent(project, "dep-agent.agent.md", "attested body")
+        rel = deployed[0]
+        # Record the hash of the attested content, then tamper the file on disk
+        # so the packed bytes no longer match the lockfile attestation.
+        attested_hash = compute_file_hash(project / rel)
+        (project / rel).write_text("tampered body", encoding="utf-8")
+        dep = LockedDependency(
+            repo_url="acme/tools",
+            depth=1,
+            deployed_files=deployed,
+            deployed_file_hashes={rel: attested_hash},
+        )
+        _write_lockfile(project, [dep])
+
+        with pytest.raises(
+            ValueError,
+            match=r"does not match the hash recorded in apm\.lock\.yaml",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_dependency_hash_match_packs_successfully(self, tmp_path):
+        """A deployed file whose SHA-256 matches the lockfile packs cleanly.
+
+        Complements ``test_dependency_hash_mismatch_rejects_pack``: the same
+        verification path that rejects a tampered file must accept an intact
+        one, so the guard does not become a false-positive blocker.
+        """
+        project = _setup_plugin_project(tmp_path, agents=["own.agent.md"])
+
+        deployed = _write_deployed_agent(project, "dep-agent.agent.md", "attested body")
+        rel = deployed[0]
+        dep = LockedDependency(
+            repo_url="acme/tools",
+            depth=1,
+            deployed_files=deployed,
+            deployed_file_hashes={rel: compute_file_hash(project / rel)},
+        )
+        _write_lockfile(project, [dep])
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert (result.bundle_path / "agents" / "dep-agent.agent.md").exists()
 
     def test_dependency_unattested_cache_is_not_packed(self, tmp_path):
         """apm_modules cache content with no lockfile attestation must fail loud."""
