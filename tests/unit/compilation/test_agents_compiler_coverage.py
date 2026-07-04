@@ -709,7 +709,8 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
         self.assertTrue(claude_md.exists())
         body = claude_md.read_text()
-        self.assertIn("## Files matching `**/*.py`", body)
+        self.assertIn("## Project Standards", body)
+        self.assertIn("### Files matching `**/*.py`", body)
         self.assertIn("Use type hints.", body)
 
     def test_instructions_skipped_with_populated_rules_dir(self):
@@ -740,7 +741,8 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
         self.assertTrue(claude_md.exists())
         content = claude_md.read_text()
-        self.assertIn("## Files matching `**/*.py`", content)
+        self.assertIn("## Project Standards", content)
+        self.assertIn("### Files matching `**/*.py`", content)
         self.assertIn("Use type hints.", content)
 
     def test_instructions_not_skipped_with_non_md_files_in_rules_dir(self):
@@ -758,7 +760,8 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
         claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
         self.assertTrue(claude_md.exists())
         content = claude_md.read_text()
-        self.assertIn("## Files matching `**/*.py`", content)
+        self.assertIn("## Project Standards", content)
+        self.assertIn("### Files matching `**/*.py`", content)
         self.assertIn("Use type hints.", content)
 
     def test_skip_instructions_dry_run(self):
@@ -845,7 +848,8 @@ class TestClaudeCompileSkipInstructions(unittest.TestCase):
             claude_md = Path(self.tmp_resolved) / "CLAUDE.md"
             self.assertTrue(claude_md.exists())
             body = claude_md.read_text()
-            self.assertIn("## Files matching `**/*.py`", body)
+            self.assertIn("## Project Standards", body)
+            self.assertIn("### Files matching `**/*.py`", body)
             self.assertIn("Use type hints.", body)
         finally:
             shutil.rmtree(external_dir, ignore_errors=True)

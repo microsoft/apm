@@ -155,7 +155,8 @@ class TestNoDedupSkipsDeduplicationLogic:
             "CLAUDE.md must be created even with .claude/rules/ populated when no_dedup=True"
         )
         body = claude_md.read_text(encoding="utf-8")
-        assert "## Files matching `**/*.py`" in body and "Use type hints." in body, (
+        assert "## Project Standards" in body
+        assert "### Files matching `**/*.py`" in body and "Use type hints." in body, (
             "With no_dedup=True, instructions section must be present in CLAUDE.md "
             "even when .claude/rules/ is pre-populated. Got:\n" + body
         )

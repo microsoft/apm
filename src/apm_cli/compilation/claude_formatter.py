@@ -316,18 +316,19 @@ class ClaudeFormatter:
                 sections.append(_demote_h1_headings(constitution).strip())
                 sections.append("")
 
-        # Inline instructions grouped by pattern.
+        # Project standards section (inline instructions grouped by pattern).
         # Skipped when instructions are already deployed to .claude/rules/ by
         # `apm install`, since Claude Code reads both locations and would see
         # duplicate content.
         if placement.instructions and not skip_instructions:
-            sections.extend(
-                build_attributed_instructions(
-                    placement.instructions,
-                    placement.source_attribution,
-                    self.source_dir,
-                )
+            sections.append("## Project Standards")
+            sections.append("")
+            instruction_sections = build_attributed_instructions(
+                placement.instructions,
+                placement.source_attribution,
+                self.source_dir,
             )
+            sections.extend(_demote_h2_headings(instruction_sections))
 
         # Agents/workflows go to .github/agents/ as separate files, not here.
 
@@ -391,3 +392,8 @@ def _demote_h1_headings(markdown: str) -> str:
     return "\n".join(
         f"#{line}" if line.startswith("# ") else line for line in markdown.splitlines()
     )
+
+
+def _demote_h2_headings(markdown_lines: list[str]) -> list[str]:
+    """Nest inline instruction sections beneath the Project Standards H2."""
+    return [f"#{line}" if line.startswith("## ") else line for line in markdown_lines]

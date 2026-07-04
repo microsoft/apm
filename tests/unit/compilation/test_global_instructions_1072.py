@@ -348,11 +348,11 @@ class TestClaudeFormatterIncludesGlobals:
         content = result.content_map[claude_path]
         assert "GLOBAL_BODY" in content
         assert "SCOPED_BODY" in content
-        assert "# Project Standards" not in content
         h1_headings = [line for line in content.splitlines() if line.startswith("# ")]
-        assert h1_headings[0] == "# CLAUDE.md"
+        assert h1_headings == ["# CLAUDE.md"]
         assert "# Project Standards" not in h1_headings
-        assert GLOBAL_INSTRUCTIONS_HEADING in content
+        assert "## Project Standards" in content
+        assert "### Global Instructions" in content
         assert content.index("GLOBAL_BODY") < content.index("SCOPED_BODY")
 
     def test_only_globals_emits_general_section_only(self, tmp_path):
@@ -366,7 +366,8 @@ class TestClaudeFormatterIncludesGlobals:
         content = result.content_map[tmp_path / "CLAUDE.md"]
 
         assert "ONLY" in content
-        assert GLOBAL_INSTRUCTIONS_HEADING in content
+        assert "## Project Standards" in content
+        assert "### Global Instructions" in content
         assert "## Files matching" not in content
 
 

@@ -136,8 +136,9 @@ class TestFormatDistributed:
         content = result.content_map[temp_project / "CLAUDE.md"]
 
         # Check pattern grouping
-        assert "## Files matching `**/*.py`" in content
-        assert "## Files matching `**/*.js`" in content
+        assert "## Project Standards" in content
+        assert "### Files matching `**/*.py`" in content
+        assert "### Files matching `**/*.js`" in content
         assert "Use type hints and follow PEP 8." in content
         assert "Use ES6+ features." in content
 
@@ -149,11 +150,11 @@ class TestFormatDistributed:
         result = formatter.format_distributed(sample_primitives, placement_map)
 
         content = result.content_map[temp_project / "CLAUDE.md"]
-        assert "# Project Standards" not in content
         h1_headings = [line for line in content.splitlines() if line.startswith("# ")]
-        assert h1_headings[0] == "# CLAUDE.md"
+        assert h1_headings == ["# CLAUDE.md"]
         assert "# Project Standards" not in h1_headings
-        assert "## Files matching `**/*.py`" in content
+        assert "## Project Standards" in content
+        assert "### Files matching `**/*.py`" in content
 
     def test_format_keeps_single_h1_with_dependencies_and_constitution(
         self, temp_project, sample_primitives
@@ -178,7 +179,7 @@ class TestFormatDistributed:
         assert [line for line in content.splitlines() if line.startswith("# ")] == ["# CLAUDE.md"]
         assert "## Dependencies" in content
         assert "## Constitution" in content
-        assert "# Project Standards" not in content
+        assert "## Project Standards" in content
 
     def test_format_includes_source_attribution(self, temp_project, sample_primitives):
         """Test that source attribution comments are included."""
@@ -668,7 +669,7 @@ class TestSkipInstructions:
         assert result.success
         assert len(result.content_map) == 1
         content = result.content_map[temp_project / "CLAUDE.md"]
-        assert "# Project Standards" not in content
+        assert "## Project Standards" in content
         assert "Use type hints and follow PEP 8." in content
 
     def test_is_root_flag_used_for_skip_filtering(self, temp_project, sample_primitives):
