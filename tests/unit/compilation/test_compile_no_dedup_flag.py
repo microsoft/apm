@@ -126,11 +126,11 @@ class TestNoDedupSkipsDeduplicationLogic:
             config={"skip_instructions": True},
         )
         for content in result.content_map.values():
-            assert "# Project Standards" not in content
+            assert "Project Standards" not in content
 
     def test_with_no_dedup_instructions_are_included(self, project_with_rules):
         """When no_dedup=True the compiler forces skip_instructions=False even
-        when .claude/rules/ is populated, so '# Project Standards' appears in
+        when .claude/rules/ is populated, so Project Standards appears in
         CLAUDE.md."""
         tmp_path, primitives = project_with_rules
 
@@ -160,7 +160,7 @@ class TestNoDedupSkipsDeduplicationLogic:
             "CLAUDE.md must be created even with .claude/rules/ populated when no_dedup=True"
         )
         body = claude_md.read_text(encoding="utf-8")
-        assert "# Project Standards" in body, (
+        assert "## Project Standards" in body, (
             "With no_dedup=True, instructions section must be present in CLAUDE.md "
             "even when .claude/rules/ is pre-populated. Got:\n" + body
         )

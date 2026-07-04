@@ -149,7 +149,20 @@ class TestFormatDistributed:
         result = formatter.format_distributed(sample_primitives, placement_map)
 
         content = result.content_map[temp_project / "CLAUDE.md"]
-        assert "# Project Standards" in content
+        assert "## Project Standards" in content
+
+    def test_project_standards_is_not_second_h1(self, temp_project, sample_primitives):
+        """Project Standards must sit below the CLAUDE.md title."""
+        formatter = ClaudeFormatter(str(temp_project))
+
+        placement_map = {temp_project: list(sample_primitives.instructions)}
+        result = formatter.format_distributed(sample_primitives, placement_map)
+
+        content = result.content_map[temp_project / "CLAUDE.md"]
+        h1_lines = [line for line in content.splitlines() if line.startswith("# ")]
+        assert h1_lines == ["# CLAUDE.md"]
+        assert "## Project Standards" in content.splitlines()
+        assert "# Project Standards" not in content.splitlines()
 
     def test_format_includes_source_attribution(self, temp_project, sample_primitives):
         """Test that source attribution comments are included."""
@@ -580,7 +593,7 @@ class TestSkipInstructions:
         content = result.content_map[temp_project / "CLAUDE.md"]
         assert "# Constitution" in content
         assert "Always be helpful." in content
-        assert "# Project Standards" not in content
+        assert "Project Standards" not in content
 
     def test_skip_instructions_preserves_dependencies(self, temp_project, sample_primitives):
         """When skip_instructions is True, dependencies are still included."""
@@ -600,7 +613,7 @@ class TestSkipInstructions:
         content = result.content_map[temp_project / "CLAUDE.md"]
         assert "# Dependencies" in content
         assert "@apm_modules/owner/package/CLAUDE.md" in content
-        assert "# Project Standards" not in content
+        assert "Project Standards" not in content
 
     def test_skip_instructions_omits_subdirectory_files(self, temp_project, sample_primitives):
         """When skip_instructions is True, subdirectory CLAUDE.md files are not generated."""
@@ -639,7 +652,7 @@ class TestSkipInstructions:
         assert result.success
         assert len(result.content_map) == 1
         content = result.content_map[temp_project / "CLAUDE.md"]
-        assert "# Project Standards" in content
+        assert "## Project Standards" in content
         assert "Use type hints and follow PEP 8." in content
 
     def test_is_root_flag_used_for_skip_filtering(self, temp_project, sample_primitives):
@@ -662,4 +675,4 @@ class TestSkipInstructions:
         assert result.placements[0].is_root is True
         content = next(iter(result.content_map.values()))
         assert "# Dependencies" in content
-        assert "# Project Standards" not in content
+        assert "Project Standards" not in content

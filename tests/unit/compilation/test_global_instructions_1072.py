@@ -348,8 +348,8 @@ class TestClaudeFormatterIncludesGlobals:
         content = result.content_map[claude_path]
         assert "GLOBAL_BODY" in content
         assert "SCOPED_BODY" in content
-        # Project Standards top-level header still present, with global heading nested.
-        assert "# Project Standards" in content
+        # Project Standards groups Claude instructions below the CLAUDE.md title.
+        assert "## Project Standards" in content
         assert GLOBAL_INSTRUCTIONS_HEADING in content
         assert content.index("GLOBAL_BODY") < content.index("SCOPED_BODY")
 

@@ -321,7 +321,7 @@ class ClaudeFormatter:
         # `apm install`, since Claude Code reads both locations and would see
         # duplicate content.
         if placement.instructions and not skip_instructions:
-            sections.append("# Project Standards")
+            sections.append("## Project Standards")
             sections.append("")
 
             sections.extend(

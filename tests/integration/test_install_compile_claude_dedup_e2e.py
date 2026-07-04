@@ -120,7 +120,7 @@ def test_install_then_compile_skips_duplicated_instructions(project_with_instruc
         # The PR's contract: when .claude/rules/ is populated, the
         # "Project Standards" instructions section is omitted from
         # CLAUDE.md to keep Claude's context window lean.
-        assert "# Project Standards" not in body, (
+        assert "Project Standards" not in body, (
             "CLAUDE.md must NOT carry the duplicated instructions "
             "section after install populated .claude/rules/. "
             "Body was:\n" + body
@@ -188,7 +188,7 @@ def test_compile_alone_then_compile_again_skips_on_second_run(project_with_instr
     claude_md = proj / "CLAUDE.md"
     if claude_md.exists():
         body = claude_md.read_text(encoding="utf-8")
-        assert "# Project Standards" not in body, (
+        assert "Project Standards" not in body, (
             "Second compile must dedup against its own previously-emitted "
             ".claude/rules/ files. Body was:\n" + body
         )
