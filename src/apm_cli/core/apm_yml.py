@@ -30,6 +30,7 @@ CANONICAL_TARGETS: frozenset[str] = frozenset(
         "opencode",
         "codex",
         "gemini",
+        "antigravity",
         "windsurf",
         "kiro",
         "agent-skills",

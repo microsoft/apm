@@ -13,7 +13,11 @@ import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.compilation.agents_compiler import AgentsCompiler, CompilationConfig
+from apm_cli.compilation.agents_compiler import (
+    AgentsCompiler,
+    CompilationConfig,
+    _build_expected_rule_filenames,
+)
 from apm_cli.compilation.claude_formatter import ClaudeFormatter
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
@@ -170,15 +174,14 @@ class TestNoDedupSkipsDeduplicationLogic:
 class TestAgentsMdInstructionDedup:
     """Regression tests: AGENTS.md dedup must be target-aware."""
 
-    @pytest.fixture
-    def project_with_github_instructions(self, tmp_path):
-        """Project with .github/instructions/ populated + primitives."""
-        # Pre-populate .github/instructions/ so dedup would normally fire
-        instr_dir = tmp_path / ".github" / "instructions"
-        instr_dir.mkdir(parents=True)
-        (instr_dir / "style.md").write_text("# Style\nUse type hints.\n", encoding="utf-8")
-
-        # Create primitives
+    @staticmethod
+    def _project_with_instruction(
+        tmp_path,
+        *,
+        rules_dir: str | None = None,
+        rules_filename: str | None = None,
+    ):
+        """Create a project with one style instruction and an optional rule file."""
         (tmp_path / "apm.yml").write_text("name: test\nversion: 1.0.0\n", encoding="utf-8")
         apm_instr_dir = tmp_path / ".apm" / "instructions"
         apm_instr_dir.mkdir(parents=True)
@@ -186,6 +189,14 @@ class TestAgentsMdInstructionDedup:
             "---\ndescription: Style rule\napplyTo: '**/*.py'\n---\n# Style\nUse type hints.\n",
             encoding="utf-8",
         )
+
+        if rules_dir and rules_filename:
+            deployed_dir = tmp_path / rules_dir
+            deployed_dir.mkdir(parents=True)
+            (deployed_dir / rules_filename).write_text(
+                "# Unrelated\nThis file should not trigger dedup.\n",
+                encoding="utf-8",
+            )
 
         instruction = Instruction(
             name="style",
@@ -199,6 +210,33 @@ class TestAgentsMdInstructionDedup:
         primitives = PrimitiveCollection()
         primitives.add_primitive(instruction)
         return tmp_path, primitives
+
+    @pytest.fixture
+    def project_with_github_instructions(self, tmp_path):
+        """Project with .github/instructions/ populated + primitives."""
+        # Pre-populate .github/instructions/ so dedup would normally fire
+        instr_dir = tmp_path / ".github" / "instructions"
+        instr_dir.mkdir(parents=True)
+        (instr_dir / "style.instructions.md").write_text(
+            "# Style\nUse type hints.\n",
+            encoding="utf-8",
+        )
+
+        return self._project_with_instruction(tmp_path)
+
+    @pytest.mark.parametrize(
+        ("target_key", "expected"),
+        [
+            ("copilot", {"style.instructions.md"}),
+            ("claude", {"style.md"}),
+            ("antigravity", {"style.md"}),
+        ],
+    )
+    def test_expected_rule_filenames_match_target_extensions(self, tmp_path, target_key, expected):
+        """Filename matching must use the deployed extension for each target."""
+        _, primitives = self._project_with_instruction(tmp_path)
+
+        assert _build_expected_rule_filenames(target_key, primitives) == expected
 
     def test_codex_target_preserves_instructions(self, project_with_github_instructions):
         """Codex does not read .github/instructions/ -- AGENTS.md must keep
@@ -235,6 +273,48 @@ class TestAgentsMdInstructionDedup:
         assert "Use type hints" not in result.content, (
             "Copilot-only dedup should omit instructions from AGENTS.md "
             "when .github/instructions/ is populated"
+        )
+
+    def test_copilot_does_not_dedup_for_unrelated_md(self, tmp_path):
+        """An unrelated .md in .github/instructions/ must not trigger dedup."""
+        tmp_path, primitives = self._project_with_instruction(
+            tmp_path,
+            rules_dir=".github/instructions",
+            rules_filename="unrelated.md",
+        )
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(target="vscode", dry_run=False)
+
+        result = compiler._compile_distributed(config, primitives)
+
+        assert result.success
+        agents_md = tmp_path / "AGENTS.md"
+        assert agents_md.exists(), "AGENTS.md must be generated without a matching rule file"
+        body = agents_md.read_text(encoding="utf-8")
+        assert "Use type hints" in body, (
+            "Copilot dedup must require the expected instruction filename, "
+            "not any unrelated .md file in .github/instructions/"
+        )
+
+    def test_claude_does_not_dedup_for_unrelated_md(self, tmp_path):
+        """An unrelated .md in .claude/rules/ must not trigger dedup."""
+        tmp_path, primitives = self._project_with_instruction(
+            tmp_path,
+            rules_dir=".claude/rules",
+            rules_filename="unrelated.md",
+        )
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(target="claude", dry_run=False)
+
+        result = compiler._compile_claude_md(config, primitives)
+
+        assert result.success
+        claude_md = tmp_path / "CLAUDE.md"
+        assert claude_md.exists(), "CLAUDE.md must be generated without a matching rule file"
+        body = claude_md.read_text(encoding="utf-8")
+        assert "Use type hints" in body, (
+            "Claude dedup must require the expected instruction filename, "
+            "not any unrelated .md file in .claude/rules/"
         )
 
     def test_multi_target_copilot_codex_preserves_instructions(

@@ -104,6 +104,7 @@ YAML array under `paths:` / `globs:` / `fileMatchPattern:`.
 | cursor | `.cursor/rules/<name>.mdc` | `applyTo` -> `globs:` (scalar for single glob, YAML array for comma-lists); description auto-derived if missing |
 | windsurf | `.windsurf/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> `trigger: always_on` |
 | kiro | `.kiro/steering/<name>.md` | `applyTo` -> `inclusion: fileMatch` + `fileMatchPattern:`; missing `applyTo` -> `inclusion: always` |
+| antigravity | `.agents/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array) |
 | codex | folded into `AGENTS.md` | compile-only, no per-file deploy |
 | gemini | folded into `GEMINI.md` | compile-only, no per-file deploy |
 | opencode | folded into `AGENTS.md` | compile-only, no per-file deploy |

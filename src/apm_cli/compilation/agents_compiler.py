@@ -87,7 +87,7 @@ def _detect_deployed_instructions(
 
 def _build_expected_rule_filenames(
     target_key: str,
-    primitives: "AgentPrimitives",
+    primitives: PrimitiveCollection,
 ) -> set[str]:
     """Return the set of expected rule filenames for *target_key* given *primitives*.
 
@@ -106,6 +106,8 @@ def _build_expected_rule_filenames(
         set if the target profile is unknown or lacks an ``instructions``
         primitive mapping.
     """
+    # Late import avoids a circular dependency: integration.targets imports
+    # integration helpers that eventually reach the compilation package.
     from ..integration.targets import KNOWN_TARGETS
 
     expected: set[str] = set()
@@ -541,23 +543,15 @@ class AgentsCompiler:
                 symbol="info",
             )
         else:
-            rules_dir_rel = get_dedup_rules_dir(config.target)
-            if rules_dir_rel is None:
+            dedup_rules = get_dedup_rules_dir(config.target)
+            if dedup_rules is None:
                 skip_instructions = False
             else:
+                rules_dir_rel, target_key = dedup_rules
                 dep_dir = self.base_dir / rules_dir_rel
                 log_dep_dir = f"{rules_dir_rel}/"
 
-                # Determine the target key using exact equality against the
-                # canonical paths returned by get_dedup_rules_dir() to avoid
-                # accidental substring matches if paths ever change.
-                target_key = "copilot"
-                if rules_dir_rel == ".agents/rules":
-                    target_key = "antigravity"
-
-                expected_filenames = _build_expected_rule_filenames(
-                    target_key, primitives
-                )
+                expected_filenames = _build_expected_rule_filenames(target_key, primitives)
 
                 skip_instructions = _detect_deployed_instructions(
                     dep_dir,

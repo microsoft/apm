@@ -306,16 +306,18 @@ def should_compile_copilot_instructions_md(target: CompileTargetType) -> bool:
     return target in ("vscode", "all")
 
 
-def get_dedup_rules_dir(target: CompileTargetType) -> str | None:
-    """Get the relative directory path where deployed instructions reside for a target.
+def get_dedup_rules_dir(target: CompileTargetType) -> tuple[str, str] | None:
+    """Get the deployed-instruction directory and target key for dedup.
 
     Args:
         target: The detected or configured target. May be a string or a
             frozenset of compiler families for multi-target lists.
 
     Returns:
-        str | None: Relative path (e.g., '.agents/rules' or '.github/instructions')
-        or None if the target does not support instruction deduplication.
+        tuple[str, str] | None: Relative path (e.g., '.agents/rules' or
+        '.github/instructions') and canonical target key for expected filename
+        mapping, or None when the target does not support instruction
+        deduplication.
     """
     if isinstance(target, frozenset):
         # Conservative policy: only dedup when the target set is exactly
@@ -324,14 +326,14 @@ def get_dedup_rules_dir(target: CompileTargetType) -> str | None:
         # .github/instructions/ may be present, so we keep instructions
         # in AGENTS.md to be safe.
         if target == frozenset({"vscode"}):
-            return ".github/instructions"
+            return ".github/instructions", "copilot"
         return None
     if isinstance(target, str):
         target = TARGET_ALIASES.get(target, target)
     if target == "vscode":
-        return ".github/instructions"
+        return ".github/instructions", "copilot"
     if target == "antigravity":
-        return ".agents/rules"
+        return ".agents/rules", "antigravity"
     return None
 
 

@@ -1082,13 +1082,13 @@ class TestGetDedupRulesDir:
     @pytest.mark.parametrize(
         ("target", "expected"),
         [
-            ("vscode", ".github/instructions"),
-            ("copilot", ".github/instructions"),
-            ("agents", ".github/instructions"),
-            ("antigravity", ".agents/rules"),
-            ("agy", ".agents/rules"),
+            ("vscode", (".github/instructions", "copilot")),
+            ("copilot", (".github/instructions", "copilot")),
+            ("agents", (".github/instructions", "copilot")),
+            ("antigravity", (".agents/rules", "antigravity")),
+            ("agy", (".agents/rules", "antigravity")),
             ("claude", None),
-            (frozenset({"vscode"}), ".github/instructions"),
+            (frozenset({"vscode"}), (".github/instructions", "copilot")),
             (frozenset({"vscode", "agents"}), None),
         ],
     )

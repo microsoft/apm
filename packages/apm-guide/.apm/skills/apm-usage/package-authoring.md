@@ -227,7 +227,11 @@ way to specify multiple patterns, as it is portably expanded into target-specifi
 YAML arrays/lists (under `paths:` / `globs:` / `fileMatchPattern:`) across
 Claude, Cursor, Windsurf, Kiro, and Antigravity.
 
-A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) may work for some targets, but it is not portable: some converters ignore sequences or treat them as a string, while others (like Antigravity and Kiro) parse and expand them. For maximum portability, use a comma-separated string for multiple globs.
+A YAML sequence (e.g., `applyTo: ['**/*.py', '**/tests/**/*.py']`) may work
+for some targets, but it is not portable: some converters ignore sequences or
+treat them as a string, while others (like Antigravity and Kiro) parse and
+expand them. For maximum portability, use a comma-separated string for multiple
+globs.
 
 Commas inside brace alternation (`**/*.{css,scss}`) are part of the glob
 and are NOT separators -- only top-level commas split the list. On Copilot

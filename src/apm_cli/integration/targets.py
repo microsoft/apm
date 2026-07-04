@@ -645,7 +645,8 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # workspace directory of its own, so this target is EXPLICIT-ONLY --
     # never auto-detected and not part of `--target all` -- modelled on
     # the agent-skills target.
-    # Rules are plain markdown under .agents/rules/ (frontmatter stripped).
+    # Rules are native markdown under .agents/rules/ with trigger/globs
+    # frontmatter mapped from instruction applyTo patterns.
     # Skills use the cross-tool .agents/skills/ standard.
     # Hooks merge into a single .agents/hooks.json file in Antigravity's
     # OWN native schema (PreToolUse/PostToolUse/PreInvocation/
