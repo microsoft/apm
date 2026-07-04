@@ -7,7 +7,7 @@
 //   const server = createServer(handler);
 
 import { readFileSync } from "node:fs";
-import { isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { randomBytes } from "node:crypto";
 import { parsePanelReview, extractFollowUpItems } from "./logic.mjs";
 
@@ -752,7 +752,7 @@ query($owner: String!, $repo: String!, $cursor: String) {
             const root = resolve(distDir);
             const resolved = resolve(root, normalize(urlPath.slice(1)));
             const rel = relative(root, resolved);
-            if (rel.startsWith("..") || isAbsolute(rel)) {
+            if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
                 res.writeHead(403); res.end("Forbidden"); return;
             }
             serveStatic(res, resolved);
