@@ -56,21 +56,31 @@ def get_shared_ref_resolver(
 
     When ``cache`` is provided, resolvers are memoized so the second and
     later deps from a repo reuse the instance (and its ref cache). The cache
-    key is ``(host, fingerprint(token))`` -- a non-reversible token
+    key is ``(normalized_host, fingerprint(token))`` -- a non-reversible token
     fingerprint, never the raw PAT, so the credential is not exposed via the
-    context object this cache lives on. When ``lock`` is also provided, the
-    get-or-create runs under it -- required because the BFS download callback
-    runs on a worker pool, where unguarded concurrent first-touches would
-    each build a resolver and defeat the dedup. ``cache=None`` (the default
-    caller behavior) builds a fresh resolver per call, preserving the legacy
-    one-per-dep path.
+    context object this cache lives on. ``host`` is normalized to ``None``
+    meaning "use RefResolver default (github.com)", so a dep written with an
+    explicit ``host='github.com'`` and one with no host collapse to the same
+    cache bucket. When ``lock`` is also provided, the get-or-create runs under
+    it -- required because the BFS download callback runs on a worker pool,
+    where unguarded concurrent first-touches would each build a resolver and
+    defeat the dedup. ``cache=None`` (the default caller behavior) builds a
+    fresh resolver per call, preserving the legacy one-per-dep path. Token
+    rotation mid-run is intentionally unsupported: once a resolver is cached,
+    its embedded token is fixed for the lifetime of the run (APM installs are
+    short-lived; tokens do not rotate mid-process).
     """
     from apm_cli.marketplace.ref_resolver import RefResolver
+
+    # Normalize the default github.com host so deps that omit host and deps
+    # that spell out 'github.com' explicitly share the same cache bucket.
+    _DEFAULT_HOST = "github.com"
+    canonical_host = host if host and host != _DEFAULT_HOST else None
 
     if cache is None:
         return RefResolver(host=host, token=token)
 
-    key = (host, _token_fingerprint(token))
+    key = (canonical_host, _token_fingerprint(token))
     if lock is not None:
         with lock:
             resolver = cache.get(key)

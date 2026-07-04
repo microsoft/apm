@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.git` path now install successfully over anonymous HTTPS; `apm install` no
   longer drops the suffix. (#1995)
 
+### Performance
+
+- `apm install` now issues a single `git ls-remote` call per repository when
+  resolving multiple semver git dependencies from the same remote, reducing
+  network round-trips for monorepos with many shared-origin semver deps. (#1975)
+
 ## [0.23.1] - 2026-06-29
 
 ### Fixed
