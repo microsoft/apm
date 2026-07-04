@@ -6,7 +6,7 @@ import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { createHandler } from "../.apm/extensions/issue-monitor/server-handler.mjs";
-import { join, dirname } from "node:path";
+import { basename, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -616,5 +616,22 @@ describe("Path traversal protection", () => {
     it("returns 404 for nonexistent assets", async () => {
         const res = await fetch(`${baseUrl}/assets/nonexistent.js`);
         assert.equal(res.status, 404);
+    });
+
+    it("blocks sibling prefix traversal to dist-evil paths", async () => {
+        const evilPath = `/assets/../../${basename(DIST_DIR)}-evil/secret.txt`;
+        const url = new URL(`${baseUrl}${evilPath}`);
+        const http = await import("node:http");
+        const res = await new Promise((resolve) => {
+            const req = http.request({
+                hostname: url.hostname,
+                port: url.port,
+                path: evilPath,
+                method: "GET",
+            }, resolve);
+            req.end();
+        });
+
+        assert.equal(res.statusCode, 403);
     });
 });
