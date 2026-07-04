@@ -13,6 +13,7 @@ from ..utils.archive import (
     write_tar_archive,
     write_zip_archive,
 )
+from .attest import verify_attested_file
 from .lockfile_enrichment import _filter_files_by_target, enrich_lockfile_for_pack
 
 
@@ -158,10 +159,19 @@ def pack_bundle(
     #    not portable and is bundled separately via the project's own files
     #    (or rejected outright at L89-97 for manifest-declared local deps).
     all_deployed: list[str] = []
+    # Provenance map: deployed-path -> (attested SHA-256, dependency label).
+    # ``deployed_file_hashes`` is keyed by the on-disk deployed path recorded
+    # at install time (see install/phases/lockfile.compute_deployed_hashes), so
+    # verification below must look up the on-disk path, not the bundle path.
+    deployed_hashes: dict[str, str] = {}
+    hash_dep_labels: dict[str, str] = {}
     for dep in lockfile.get_all_dependencies():
         if dep.source == "local":
             continue
         all_deployed.extend(dep.deployed_files)
+        for _dpath, _dhash in dep.deployed_file_hashes.items():
+            deployed_hashes[_dpath] = _dhash
+            hash_dep_labels[_dpath] = dep.repo_url
 
     filtered_files, path_mappings = _filter_files_by_target(all_deployed, effective_target)
     # Deduplicate while preserving order
@@ -250,7 +260,12 @@ def pack_bundle(
     bundle_dir.mkdir(parents=True, exist_ok=True)
     bundle_dir_resolved = bundle_dir.resolve()
 
-    # 7. Copy files preserving directory structure
+    # 7. Copy files preserving directory structure.
+    #    Provenance gate (#2013): each dependency file recorded in the lockfile
+    #    is verified against its attested SHA-256 before it enters the bundle --
+    #    the same integrity guarantee the plugin format enforces, applied to the
+    #    default/most-used ``apm`` format. Files with no recorded hash (older
+    #    lockfiles) pack without verification; a mismatch fails loud.
     for rel_path in unique_files:
         # For cross-target mapped files, read from the original disk path
         disk_path = path_mappings.get(rel_path, rel_path)
@@ -264,8 +279,35 @@ def pack_bundle(
         if src.is_dir():
             from ..security.gate import ignore_non_content
 
+            # Verify each contained file's attested hash and re-assert
+            # containment per child. copytree already drops symlinks via
+            # ignore_non_content, but the walk guards against a directory
+            # symlink whose target escapes the project root regardless of the
+            # walker's version-specific symlink-following behaviour.
+            disk_base = disk_path.rstrip("/")
+            for child in sorted(src.rglob("*")):
+                if not child.is_file() or child.is_symlink():
+                    continue
+                if not child.resolve().is_relative_to(project_root_resolved):
+                    raise ValueError(
+                        f"Refusing to pack path that escapes project root: "
+                        f"{child.relative_to(project_root)!r}"
+                    )
+                child_key = f"{disk_base}/{child.relative_to(src).as_posix()}"
+                verify_attested_file(
+                    child,
+                    deployed_hashes.get(child_key),
+                    hash_dep_labels.get(child_key, "dependency"),
+                    child_key,
+                )
             shutil.copytree(src, dest, dirs_exist_ok=True, ignore=ignore_non_content)
         else:
+            verify_attested_file(
+                src,
+                deployed_hashes.get(disk_path),
+                hash_dep_labels.get(disk_path, "dependency"),
+                disk_path,
+            )
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest, follow_symlinks=False)
 
