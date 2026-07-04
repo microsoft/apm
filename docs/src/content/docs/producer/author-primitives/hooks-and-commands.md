@@ -85,6 +85,13 @@ file lives in `hooks/` or `.apm/hooks/`, a path like
 `./hooks/run-hook.sh` resolves from the package root so the deployed
 path is not doubled.
 
+When a hook command points at a script inside a package hook directory,
+APM deploys that whole hook directory so sibling helper modules stay
+available at runtime. It also writes a minimal `package.json` beside the
+deployed scripts with the source package's Node `type`; packages without
+an explicit `type` deploy as `commonjs` so the consumer repo's
+`package.json` cannot change hook module semantics.
+
 For multi-target packages, prefer simple hook filenames plus consumer
 per-dependency `targets:` in `dependencies.apm` to limit reach. If the
 same manifest stem is mirrored in both `hooks/` and `.apm/hooks/`, APM

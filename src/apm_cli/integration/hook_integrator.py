@@ -47,7 +47,6 @@ Script path handling:
 import json
 import logging
 import re
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -55,6 +54,7 @@ from typing import Any
 import yaml
 
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
+from apm_cli.integration.hook_bundle import copy_deployed_hook_bundle
 from apm_cli.integration.hook_file_routing import filter_hook_files_for_target
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import (
@@ -1299,21 +1299,19 @@ class HookIntegrator(BaseIntegrator):
                 )
             )
 
-            # Copy referenced scripts (individual file tracking)
-            for source_file, target_rel in scripts:
-                target_script = project_root / target_rel
-                ensure_path_within(target_script, project_root)
-                if self.try_adopt_identical(target_script, source_file, target_paths):
-                    scripts_adopted += 1
-                    continue
-                if self.check_collision(
-                    target_script, target_rel, managed_files, force, diagnostics=diagnostics
-                ):
-                    continue
-                target_script.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source_file, target_script)
-                scripts_copied += 1
-                target_paths.append(target_script)
+            copy_result = copy_deployed_hook_bundle(
+                self,
+                package_path=package_info.install_path,
+                hook_file_dir=hook_file.parent,
+                project_root=project_root,
+                scripts=scripts,
+                managed_files=managed_files,
+                force=force,
+                diagnostics=diagnostics,
+                target_paths=target_paths,
+            )
+            scripts_copied += copy_result.scripts_copied
+            scripts_adopted += copy_result.files_adopted
 
         return HookIntegrationResult(
             files_integrated=hooks_integrated,
@@ -1648,25 +1646,19 @@ class HookIntegrator(BaseIntegrator):
                     config.target_key,
                 )
 
-            # Copy referenced scripts
-            for source_file, target_rel in scripts:
-                target_script = project_root / target_rel
-                ensure_path_within(target_script, project_root)
-                if self.try_adopt_identical(target_script, source_file, target_paths):
-                    scripts_adopted += 1
-                    continue
-                if self.check_collision(
-                    target_script,
-                    target_rel,
-                    managed_files,
-                    force,
-                    diagnostics=diagnostics,
-                ):
-                    continue
-                target_script.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source_file, target_script)
-                scripts_copied += 1
-                target_paths.append(target_script)
+            copy_result = copy_deployed_hook_bundle(
+                self,
+                package_path=package_info.install_path,
+                hook_file_dir=hook_file.parent,
+                project_root=project_root,
+                scripts=scripts,
+                managed_files=managed_files,
+                force=force,
+                diagnostics=diagnostics,
+                target_paths=target_paths,
+            )
+            scripts_copied += copy_result.scripts_copied
+            scripts_adopted += copy_result.files_adopted
 
         # Write JSON config back
         # Don't track the config file in target_paths -- it's a shared

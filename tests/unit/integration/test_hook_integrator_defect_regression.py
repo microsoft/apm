@@ -170,3 +170,64 @@ def test_claude_hook_script_path_no_doubling(tmp_path: Path) -> None:
     command = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
     assert command == ".claude/hooks/superpowers/hooks/run-hook.cmd start"
     assert (project / ".claude" / "hooks" / "superpowers" / "hooks" / "run-hook.cmd").exists()
+
+
+def _setup_commonjs_hook_package(
+    tmp_path: Path, target_manifest: str = "hooks.json"
+) -> PackageInfo:
+    package_path = tmp_path / "ponytail"
+    hooks_dir = package_path / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (package_path / "package.json").write_text(
+        json.dumps({"type": "commonjs"}),
+        encoding="utf-8",
+    )
+    (hooks_dir / "ponytail.js").write_text(
+        "const config = require('./ponytail-config');\nconsole.log(config.message);\n",
+        encoding="utf-8",
+    )
+    (hooks_dir / "ponytail-config.js").write_text(
+        "module.exports = { message: 'ok' };\n",
+        encoding="utf-8",
+    )
+    (hooks_dir / target_manifest).write_text(
+        json.dumps(_session_start_hook("${CLAUDE_PLUGIN_ROOT}/hooks/ponytail.js session-start")),
+        encoding="utf-8",
+    )
+    return _package_info(package_path, "ponytail")
+
+
+def test_claude_deploys_hook_directory_siblings_and_package_module_type(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "package.json").write_text(json.dumps({"type": "module"}), encoding="utf-8")
+    pkg_info = _setup_commonjs_hook_package(tmp_path)
+
+    HookIntegrator().integrate_package_hooks_claude(pkg_info, project)
+
+    deployed_script = project / ".claude" / "hooks" / "ponytail" / "hooks" / "ponytail.js"
+    deployed_package_json = deployed_script.parent / "package.json"
+    assert deployed_script.exists()
+    assert (deployed_script.parent / "ponytail-config.js").exists()
+    assert json.loads(deployed_package_json.read_text(encoding="utf-8")) == {"type": "commonjs"}
+
+
+def test_copilot_deploys_hook_directory_siblings_and_package_module_type(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "package.json").write_text(json.dumps({"type": "module"}), encoding="utf-8")
+    pkg_info = _setup_commonjs_hook_package(tmp_path, "hooks-copilot.json")
+
+    HookIntegrator().integrate_package_hooks(pkg_info, project)
+
+    deployed_script = (
+        project / ".github" / "hooks" / "scripts" / "ponytail" / "hooks" / "ponytail.js"
+    )
+    deployed_package_json = deployed_script.parent / "package.json"
+    assert deployed_script.exists()
+    assert (deployed_script.parent / "ponytail-config.js").exists()
+    assert json.loads(deployed_package_json.read_text(encoding="utf-8")) == {"type": "commonjs"}
