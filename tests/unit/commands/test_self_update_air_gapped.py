@@ -122,6 +122,24 @@ class TestInstallerUrlAirGap:
         parsed = urlparse(url)
         assert parsed.path.endswith("install.sh")
 
+    def test_custom_github_url_uses_supplied_script_ref(self) -> None:
+        """Supplying a script ref points installer downloads to that tag path."""
+        from urllib.parse import urlparse
+
+        env = self._clean_env()
+        env["GITHUB_URL"] = "https://gh.corp.com"
+        env["APM_REPO"] = "corp/apm"
+        with patch.dict("os.environ", env, clear=True):
+            with patch(
+                "apm_cli.commands.self_update._is_windows_platform",
+                return_value=False,
+            ):
+                from apm_cli.commands.self_update import _get_update_installer_url
+
+                url = _get_update_installer_url("v1.2.3")
+        parsed = urlparse(url)
+        assert parsed.path == "/corp/apm/raw/v1.2.3/install.sh"
+
     def test_github_url_with_trailing_slash_is_normalised(self) -> None:
         """GITHUB_URL with a trailing slash must not produce double-slash in the URL."""
         env = self._clean_env()
@@ -356,4 +374,66 @@ class TestEnterpriseBootstrapSelfUpdate:
             "/apm/latest.json",
             "/apm/installers/install.sh",
         ]
+        mock_run.assert_called_once()
+
+    def test_self_update_pins_installer_ref_to_latest_version(self) -> None:
+        """Self-update downloads installer from the exact latest release ref."""
+        env = self._clean_env()
+        env.update(
+            {
+                "APM_NO_DIRECT_FALLBACK": "1",
+                "APM_RELEASE_METADATA_URL": "https://mirror.corp.example/apm/latest.json",
+                "GITHUB_URL": "https://gh.corp.com",
+                "APM_TEMP_DIR": str(self.scratch),
+                "APM_REPO": "corp/apm",
+                "APM_E2E_TESTS": "1",
+            }
+        )
+        requested_urls: list[str] = []
+        target_version = "1.1.0"
+        expected_installer_path = f"/corp/apm/raw/v{target_version}/install.sh"
+
+        def fake_get(url: str, **_kwargs: object) -> Mock:
+            requested_urls.append(url)
+            parsed = urlparse(url)
+            if parsed.hostname == "mirror.corp.example":
+                if parsed.path == "/apm/latest.json":
+                    response = Mock()
+                    response.status_code = 200
+                    response.raise_for_status.return_value = None
+                    response.json.return_value = {"tag_name": f"v{target_version}"}
+                    return response
+                raise AssertionError(f"unexpected mirror request: {url}")
+
+            if parsed.hostname == "gh.corp.com":
+                if parsed.path == expected_installer_path:
+                    response = Mock()
+                    response.status_code = 200
+                    response.raise_for_status.return_value = None
+                    response.text = "echo install"
+                    return response
+                raise AssertionError(f"unexpected github request: {url}")
+
+            raise AssertionError(f"unexpected request: {url}")
+
+        with (
+            patch.dict("os.environ", env, clear=True),
+            patch("requests.get", side_effect=fake_get),
+            patch("subprocess.run", return_value=Mock(returncode=0)) as mock_run,
+            patch("apm_cli.commands.self_update.get_version", return_value="1.0.0"),
+            patch("apm_cli.commands.self_update.os.chmod"),
+            patch.object(update_module.sys, "platform", "linux"),
+            patch("apm_cli.commands.self_update.os.path.exists", return_value=True),
+        ):
+            result = self.runner.invoke(cli, ["self-update"])
+
+        assert result.exit_code == 0
+        assert "Successfully updated to version 1.1.0" in result.output
+        parsed_paths = [urlparse(url).path for url in requested_urls]
+        assert parsed_paths == [
+            "/apm/latest.json",
+            expected_installer_path,
+        ]
+        assert "/main/" not in "".join(parsed_paths)
+        assert f"/raw/v{target_version}/" in "".join(parsed_paths)
         mock_run.assert_called_once()
