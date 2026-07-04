@@ -1456,9 +1456,10 @@ class SkillIntegrator(BaseIntegrator):
         Bash tool PATH.  The contract is Claude-specific by design; other
         harnesses have no equivalent, so only Claude targets are considered.
 
-        Each binary is made executable (user-only +x, stripping group/other
-        execute bits) on POSIX systems.  The deployed root is user-scoped
-        (~/.claude/skills/), so tighter-than-0o755 permissions are correct.
+        Each binary is tightened to user-only ``0o700``-style permissions
+        (owner read/write/execute; all group/other bits cleared) on POSIX
+        systems.  The deployed root is user-scoped (~/.claude/skills/), so
+        tighter-than-0o755 permissions are correct.
 
         Returns ``(deployed_paths, skip_reason)``.  ``skip_reason`` is non-None
         ONLY when the package ships a bin/ but it could not be deployed for an
@@ -1619,10 +1620,11 @@ class SkillIntegrator(BaseIntegrator):
         Skips the copy when an identical file already exists (unless *force*),
         keeping repeated installs quiet and idempotent.
 
-        When *make_executable* is True, only the owner (user) execute bit is
-        set; group and other execute bits are explicitly cleared.  Deployed
+        When *make_executable* is True, the deployed file is tightened to
+        user-only ``0o700``-style permissions: the owner read/write/execute
+        bits are set and every group and other bit is cleared.  Deployed
         files live under ~/.claude/skills/ which is user-scoped, so there is
-        no reason to grant group/other execute access regardless of what the
+        no reason to grant any group/other access regardless of what the
         source package shipped.
         """
         import os
@@ -1639,10 +1641,13 @@ class SkillIntegrator(BaseIntegrator):
 
         if make_executable and os.name == "posix":
             current = dest_file.stat().st_mode
-            # User-only execute: set S_IXUSR, clear group and other execute bits.
-            # Runs for both fresh copies and idempotent re-installs so that files
+            # User-only (0o700-style): grant owner read/write/execute and clear
+            # ALL group and other bits (read/write/execute). Deployed files live
+            # under user-scope ~/.claude/skills/, so no group/other access is
+            # warranted regardless of the mode the source package shipped. Runs
+            # for both fresh copies and idempotent re-installs so that files
             # previously deployed by older APM versions are hardened in-place.
-            dest_file.chmod((current & ~(stat.S_IXGRP | stat.S_IXOTH)) | stat.S_IXUSR)
+            dest_file.chmod((current & ~(stat.S_IRWXG | stat.S_IRWXO)) | stat.S_IRWXU)
 
         if not skip_copy and logger:
             logger.progress(f"deployed {src_file.name} -> {rel_label}", symbol="check")

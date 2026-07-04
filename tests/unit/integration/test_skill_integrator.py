@@ -4200,15 +4200,16 @@ class TestPluginBinDeploy:
         assert deployed_bin in tp_files, "deployed bin not in target_paths"
         assert deployed_manifest in tp_files, "plugin.json not in target_paths"
 
-        # Verify user-only execute: S_IXUSR set, S_IXGRP and S_IXOTH cleared.
+        # Verify full user-only (0o700-style) permissions: owner rwx, and no
+        # group/other read/write/execute bits at all.
         import os
         import stat as _stat
 
         if os.name == "posix":
             mode = deployed_bin.stat().st_mode
             assert mode & _stat.S_IXUSR, "owner execute bit must be set"
-            assert not (mode & _stat.S_IXGRP), "group execute bit must NOT be set"
-            assert not (mode & _stat.S_IXOTH), "other execute bit must NOT be set"
+            assert (mode & 0o077) == 0, "no group/other permission bits may be set"
+            assert (mode & 0o777) == 0o700, "deployed executable must be 0o700"
 
     def test_bin_deploy_hardens_permissions_on_idempotent_reinstall(self, tmp_path: Path) -> None:
         """Re-install of content-identical bin/ file still applies user-only execute.
@@ -4251,6 +4252,7 @@ class TestPluginBinDeploy:
         deployed_bin.chmod(0o755)
         mode_before = deployed_bin.stat().st_mode
         assert mode_before & _stat.S_IXGRP, "pre-condition: group-execute set"
+        assert mode_before & _stat.S_IRGRP, "pre-condition: group-read set"
 
         # Second install with identical content -- must harden permissions.
         integrator.integrate_package_skill(
@@ -4261,8 +4263,8 @@ class TestPluginBinDeploy:
 
         mode_after = deployed_bin.stat().st_mode
         assert mode_after & _stat.S_IXUSR, "owner execute bit must be set"
-        assert not (mode_after & _stat.S_IXGRP), "group execute bit must be cleared on re-install"
-        assert not (mode_after & _stat.S_IXOTH), "other execute bit must be cleared on re-install"
+        assert (mode_after & 0o077) == 0, "all group/other bits must be cleared on re-install"
+        assert (mode_after & 0o777) == 0o700, "re-install must harden to 0o700"
 
     def test_bin_deploy_suppressed_by_policy_deny(self, tmp_path: Path) -> None:
         """bin_deploy.deny list suppresses deployment for the matching package."""
