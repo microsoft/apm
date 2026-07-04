@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Collapsed repeated `git config` subprocess calls from 3 to 1 per repository
+  during cache operations, cutting process-spawn overhead on `apm install` and
+  `apm update`. (#1974)
+
 ### Fixed
 
 - `apm audit --help` now accurately describes the command's full scope:
