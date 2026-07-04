@@ -248,7 +248,7 @@ class _LocalArchiveDownloader:
 
 
 def _real_archive_downloader() -> DownloadDelegate:
-    """Build a real DownloadDelegate with enough host surface for integration tests."""
+    """Build the production downloader with enough host surface for local HTTP."""
     host = SimpleNamespace(registry_config=None, artifactory_token=None)
     delegate = DownloadDelegate(host)
     host._resilient_get = delegate.resilient_get
