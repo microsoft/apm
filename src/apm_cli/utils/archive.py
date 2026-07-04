@@ -14,6 +14,7 @@ import shutil
 import tarfile
 import uuid
 import zipfile
+from collections.abc import Callable
 from pathlib import Path, PureWindowsPath
 from typing import IO, TypeVar
 from urllib.parse import urlparse
@@ -191,11 +192,14 @@ def safe_extract_zip(
     max_entries: int = MAX_ZIP_ENTRIES,
     max_uncompressed: int = MAX_ZIP_UNCOMPRESSED,
     error_type: type[_ErrorT] = ValueError,
+    member_name_transform: Callable[[str], str | None] | None = None,
 ) -> list[str]:
     """Safely stream-extract *zf* under *dest_root* with zip-bomb limits.
 
     The uncompressed-size limit is enforced against bytes actually read from
     each entry, not against attacker-controlled ZipInfo.file_size metadata.
+    ``member_name_transform`` can strip or reject names before validation; the
+    returned list contains the transformed member names that were written.
     """
     dest_root.mkdir(parents=True, exist_ok=True)
     members = zf.infolist()
@@ -208,7 +212,12 @@ def safe_extract_zip(
         unix_mode = (info.external_attr >> 16) & 0xFFFF
         if unix_mode and (unix_mode & 0xF000) == 0xA000:
             _raise(error_type, f"Refusing to extract symlink: {info.filename}")
-        target = _zip_member_target(info.filename, dest_root, error_type=error_type)
+        member_name = info.filename
+        if member_name_transform is not None:
+            member_name = member_name_transform(member_name)
+        if member_name is None:
+            continue
+        target = _zip_member_target(member_name, dest_root, error_type=error_type)
         if target is None:
             continue
         if info.is_dir():
@@ -232,7 +241,7 @@ def safe_extract_zip(
                 total_uncompressed = next_total
         if unix_mode:
             os.chmod(target, unix_mode & 0o755)
-        extracted.append(info.filename)
+        extracted.append(member_name)
     return extracted
 
 

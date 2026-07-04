@@ -126,6 +126,7 @@ def _make_mock_response(
     resp.status_code = status_code
     resp.content = content
     resp.headers = headers or {}
+    resp.iter_content.return_value = iter([content] if content else [])
     resp.raise_for_status = MagicMock()
     if status_code >= 400:
         http_err = requests.exceptions.HTTPError(response=resp)

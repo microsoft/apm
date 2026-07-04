@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Artifactory registry-proxy ZIP installs now use the shared safe extraction
+  path for traversal, symlink, and zip-bomb guards instead of direct ZIP
+  extraction. -- by @fallintoplace (#1948)
 - `apm runtime setup codex` now verifies GitHub Releases SHA-256 asset
   digests before extracting downloaded archives -- by @fallintoplace (#1949)
 

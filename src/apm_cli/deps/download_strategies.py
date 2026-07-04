@@ -12,9 +12,11 @@ import json
 import os
 import random
 import sys
+import tempfile
 import threading
 import time
 import weakref
+import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
@@ -22,6 +24,7 @@ import requests
 
 from ..core.auth import AuthResolver, HostInfo
 from ..models.apm_package import DependencyReference
+from ..utils.archive import ArchiveError, safe_extract_zip
 from ..utils.github_host import (
     build_ado_api_url,
     build_artifactory_archive_url,
@@ -49,6 +52,17 @@ def _debug(message: str) -> None:
     """Print debug message if APM_DEBUG environment variable is set."""
     if os.environ.get("APM_DEBUG"):
         print(f"[DEBUG] {message}", file=sys.stderr)
+
+
+def _close_response(response: requests.Response, context: str) -> None:
+    """Close an HTTP response and preserve failures in debug diagnostics."""
+    try:
+        response.close()
+    except Exception as exc:
+        _debug(f"{context} response close failed: {exc}")
+
+
+_ARTIFACTORY_DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 def _close_git_file_transports(transports: dict[object, object]) -> None:
@@ -111,6 +125,8 @@ class DownloadDelegate:
         headers: dict[str, str],
         timeout: int = 30,
         max_retries: int = 3,
+        *,
+        stream: bool = False,
     ) -> requests.Response:
         """HTTP GET with retry on 429/503 and rate-limit header awareness.
 
@@ -119,6 +135,7 @@ class DownloadDelegate:
             headers: HTTP headers
             timeout: Request timeout in seconds
             max_retries: Maximum retry attempts for transient failures
+            stream: Whether to stream the response body instead of buffering it
 
         Returns:
             requests.Response (caller should call .raise_for_status() as needed)
@@ -130,7 +147,7 @@ class DownloadDelegate:
         last_response = None
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, headers=headers, timeout=timeout)
+                response = requests.get(url, headers=headers, timeout=timeout, stream=stream)
 
                 # Handle rate limiting -- GitHub returns 429 for secondary limits
                 # and 403 with X-RateLimit-Remaining: 0 for primary limits.
@@ -164,6 +181,8 @@ class DownloadDelegate:
                         f"Rate limited ({response.status_code}), retry in "
                         f"{wait:.1f}s (attempt {attempt + 1}/{max_retries})"
                     )
+                    if attempt < max_retries - 1:
+                        _close_response(response, "rate-limit retry")
                     time.sleep(wait)
                     continue
 
@@ -321,6 +340,63 @@ class DownloadDelegate:
             headers["Authorization"] = f"Bearer {self._host.artifactory_token}"
         return headers
 
+    def _stream_artifactory_archive(
+        self,
+        response: requests.Response,
+        output_path: Path,
+        url: str,
+        max_archive_bytes: int,
+    ) -> None:
+        """Stream an Artifactory archive response to disk with a byte cap."""
+        content_length = response.headers.get("Content-Length", "")
+        if content_length:
+            try:
+                declared_size = int(content_length)
+            except (TypeError, ValueError):
+                declared_size = None
+            else:
+                if declared_size > max_archive_bytes:
+                    raise ArchiveError(f"Archive too large ({declared_size} bytes) from {url}")
+
+        total_bytes = 0
+        with open(output_path, "wb") as archive_file:
+            for chunk in response.iter_content(chunk_size=_ARTIFACTORY_DOWNLOAD_CHUNK_BYTES):
+                if not chunk:
+                    continue
+                total_bytes += len(chunk)
+                if total_bytes > max_archive_bytes:
+                    raise ArchiveError(f"Archive too large ({total_bytes} bytes) from {url}")
+                archive_file.write(chunk)
+
+    def _extract_artifactory_zip(self, zf: zipfile.ZipFile, target_path: Path, url: str) -> None:
+        """Extract an Artifactory VCS archive with shared ZIP safety guards."""
+        names = zf.namelist()
+        if not names:
+            raise RuntimeError(f"Empty archive from {url}")
+
+        root_prefix = names[0]
+        if root_prefix.endswith("/"):
+
+            def _strip_root(member_name: str) -> str | None:
+                if member_name == root_prefix:
+                    return None
+                if not member_name.startswith(root_prefix):
+                    raise ArchiveError(
+                        f"Archive member is outside root prefix {root_prefix!r}: {member_name!r}"
+                    )
+                rel_path = member_name[len(root_prefix) :]
+                return rel_path or None
+
+            safe_extract_zip(
+                zf,
+                target_path,
+                error_type=ArchiveError,
+                member_name_transform=_strip_root,
+            )
+            return
+
+        safe_extract_zip(zf, target_path, error_type=ArchiveError)
+
     def download_artifactory_archive(
         self,
         host: str,
@@ -340,8 +416,9 @@ class DownloadDelegate:
 
         Raises RuntimeError on failure.
         """
-        import io
         import zipfile
+
+        from ..config import get_apm_temp_dir
 
         archive_urls = build_artifactory_archive_url(host, prefix, owner, repo, ref, scheme=scheme)
         headers = self.get_artifactory_headers()
@@ -352,57 +429,38 @@ class DownloadDelegate:
         last_error = None
         for url in archive_urls:
             _debug(f"Trying Artifactory archive: {url}")
+            resp = None
             try:
-                resp = self._host._resilient_get(url, headers=headers, timeout=60)
+                resp = self._host._resilient_get(url, headers=headers, timeout=60, stream=True)
                 if resp.status_code == 200:
-                    if len(resp.content) > max_archive_bytes:
-                        last_error = f"Archive too large ({len(resp.content)} bytes) from {url}"
-                        _debug(last_error)
-                        continue
-                    # Extract zip, stripping the top-level directory
                     target_path.mkdir(parents=True, exist_ok=True)
-                    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
-                        # Identify the root prefix (e.g., "repo-main/")
-                        names = zf.namelist()
-                        if not names:
-                            raise RuntimeError(f"Empty archive from {url}")
-                        root_prefix = names[0]
-                        if not root_prefix.endswith("/"):
-                            # Single file archive; extract as-is
-                            zf.extractall(target_path)
-                            return
-                        for member in zf.infolist():
-                            # Strip root prefix
-                            if member.filename == root_prefix:
-                                continue
-                            rel = member.filename[len(root_prefix) :]
-                            if not rel:
-                                continue
-                            # Guard: prevent zip path traversal (CWE-22)
-                            dest = target_path / rel
-                            if not dest.resolve().is_relative_to(target_path.resolve()):
-                                _debug(f"Skipping zip entry escaping target: {member.filename}")
-                                continue
-                            unix_mode = (member.external_attr >> 16) & 0xFFFF
-                            if member.is_dir():
-                                dest.mkdir(parents=True, exist_ok=True)
-                            else:
-                                dest.parent.mkdir(parents=True, exist_ok=True)
-                                with zf.open(member) as src, open(dest, "wb") as dst:
-                                    dst.write(src.read())
-                                if unix_mode:
-                                    os.chmod(dest, unix_mode & 0o755)
+                    with tempfile.TemporaryDirectory(dir=get_apm_temp_dir()) as temp_dir:
+                        archive_path = Path(temp_dir) / "artifactory-download.zip"
+                        self._stream_artifactory_archive(
+                            resp,
+                            archive_path,
+                            url,
+                            max_archive_bytes,
+                        )
+                        with zipfile.ZipFile(archive_path) as zf:
+                            self._extract_artifactory_zip(zf, target_path, url)
                     _debug(f"Extracted Artifactory archive to {target_path}")
                     return
                 else:
                     last_error = f"HTTP {resp.status_code} from {url}"
                     _debug(last_error)
+            except ArchiveError as e:
+                last_error = f"Unsafe zip archive from {url}: {e}"
+                _debug(last_error)
             except zipfile.BadZipFile:
                 last_error = f"Invalid zip archive from {url}"
                 _debug(last_error)
             except requests.RequestException as e:
                 last_error = str(e)
                 _debug(f"Request failed: {last_error}")
+            finally:
+                if resp is not None:
+                    _close_response(resp, "artifactory archive")
 
         raise RuntimeError(
             f"Failed to download package {owner}/{repo}#{ref} from Artifactory "

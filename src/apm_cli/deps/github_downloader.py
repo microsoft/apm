@@ -489,11 +489,17 @@ class GitHubPackageDownloader:
         )
 
     def _resilient_get(
-        self, url: str, headers: dict[str, str], timeout: int = 30, max_retries: int = 3
+        self,
+        url: str,
+        headers: dict[str, str],
+        timeout: int = 30,
+        max_retries: int = 3,
+        *,
+        stream: bool = False,
     ) -> requests.Response:
         """Backward-compat stub -- delegates to download strategies."""
         return self._strategies.resilient_get(
-            url, headers, timeout=timeout, max_retries=max_retries
+            url, headers, timeout=timeout, max_retries=max_retries, stream=stream
         )
 
     def _sanitize_git_error(self, error_message: str) -> str:
