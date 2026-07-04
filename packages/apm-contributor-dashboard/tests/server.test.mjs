@@ -4,9 +4,11 @@
 
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createHandler } from "../.apm/extensions/issue-monitor/server-handler.mjs";
 import { basename, join, dirname } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -594,6 +596,49 @@ describe("CSRF protection", () => {
 describe("Path traversal protection", () => {
     before(() => setupServer());
     after(teardownServer);
+
+    it("rejects symlinked assets that resolve outside dist directory", async () => {
+        if (process.platform === "win32") {
+            return;
+        }
+
+        const workDir = await mkdtemp(join(tmpdir(), "apm-issue-monitor-test-"));
+        const distDir = join(workDir, "dist");
+        const evilRoot = join(workDir, "outside");
+        const evilFile = join(evilRoot, "secret.txt");
+        const evilRequestPath = `/assets/${basename(DIST_DIR)}-evil/secret.txt`;
+
+        await mkdir(distDir, { recursive: true });
+        await mkdir(evilRoot, { recursive: true });
+        await writeFile(evilFile, "top-secret", "utf8");
+        await symlink(evilRoot, join(distDir, `${basename(DIST_DIR)}-evil`), "dir");
+
+        const state = createMockDeps({ distDir });
+        const handler = createHandler(state.deps);
+        const symlinkServer = createServer(handler);
+
+        try {
+            await new Promise((resolve) => {
+                symlinkServer.listen(0, "127.0.0.1", resolve);
+            });
+            const url = new URL(`http://127.0.0.1:${symlinkServer.address().port}`);
+            const http = await import("node:http");
+            const res = await new Promise((resolve) => {
+                const req = http.request({
+                    hostname: url.hostname,
+                    port: url.port,
+                    path: evilRequestPath,
+                    method: "GET",
+                }, resolve);
+                req.end();
+            });
+
+            assert.equal(res.statusCode, 403);
+        } finally {
+            await new Promise((resolve) => symlinkServer.close(resolve));
+            await rm(workDir, { recursive: true, force: true });
+        }
+    });
 
     it("blocks path traversal attempts via encoded dots in /assets/", async () => {
         // Use raw HTTP to send encoded path traversal that bypasses fetch URL normalization
