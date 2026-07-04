@@ -909,7 +909,7 @@ class TestExportPluginBundle:
 
         with pytest.raises(
             ValueError,
-            match=r"apm_modules is an unattested cache and cannot be packed",
+            match=r"installed content that cannot be verified exists in the apm_modules cache",
         ):
             export_plugin_bundle(project, tmp_path / "build")
 

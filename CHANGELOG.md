@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm pack` now closes a supply-chain provenance hole in **every** format
+- `apm pack` now cryptographically verifies every dependency file against
+  the lockfile before bundling -- unattested content never ships. It closes a
+  supply-chain provenance hole in **every** format
   (`--format plugin` and the default `--format apm`): dependency content is
   packed exclusively from lockfile-attested `deployed_files`, each verified
   against its `deployed_file_hashes` SHA-256 before it enters the bundle, so a

@@ -736,9 +736,9 @@ def export_plugin_bundle(
                 # to pack the cache -- fail loudly with a fix.
                 raise ValueError(
                     f"Cannot pack dependency {dep.repo_url}: the lockfile records "
-                    "no deployed files for it, but installable content exists in "
-                    "the apm_modules cache. apm_modules is an unattested cache and "
-                    "cannot be packed. Run 'apm install' to record provenance in "
+                    "no deployed files for it, but installed content that cannot "
+                    "be verified exists in the apm_modules cache (a stale or "
+                    "partial install). Run 'apm install' to record provenance in "
                     "apm.lock.yaml, then pack again."
                 )
             else:

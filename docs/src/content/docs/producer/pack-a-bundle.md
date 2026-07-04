@@ -139,8 +139,9 @@ lockfile `deployed_files` list -- the `apm_modules` cache is never
 packed, because it carries no provenance or integrity guarantee (it can
 be stale, partial, or tampered). Each attested file is verified against
 its recorded `deployed_file_hashes` SHA-256 before it is included; a file
-whose bytes no longer match its recorded hash fails the pack. If a
-dependency declares
+whose bytes no longer match its recorded hash fails the pack. (Files from
+an older lockfile that predates `deployed_file_hashes` have no recorded
+hash and pack without verification.) If a dependency declares
 [`skills:`](../reference/package-types/#skill-collection-skillsnameskillmd),
 only the named deployed skills are included. If a dependency has cached
 primitives but no `deployed_files` (a stale or partial install), `apm
@@ -274,10 +275,10 @@ never packed. If a dependency has cached primitives but no
 **Attested-file mismatch.** If a dependency file was edited or corrupted
 after `apm install`, its bytes no longer match the `deployed_file_hashes`
 SHA-256 recorded in `apm.lock.yaml` and `apm pack` fails with
-`... does not match the hash recorded in apm.lock.yaml`. The same error's
-sibling ("installed files recorded in apm.lock.yaml are missing on disk")
-covers deleted files. Run `apm install` to restore the attested content,
-then pack again.
+`... does not match the hash recorded in apm.lock.yaml`. A deleted file
+raises a sibling error that also points at `apm install` (the exact
+wording differs between `--format apm` and `--format plugin`). Run
+`apm install` to restore the attested content, then pack again.
 
 **Dry-run before sharing.** Use `apm pack --dry-run --verbose` to see the
 full file list (and any path remappings) without writing anything.

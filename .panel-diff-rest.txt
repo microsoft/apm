@@ -1,0 +1,1231 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 042fcda6b..16eedc183 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ 
+ ### Fixed
+ 
++- `apm pack` now closes a supply-chain provenance hole in **every** format
++  (`--format plugin` and the default `--format apm`): dependency content is
++  packed exclusively from lockfile-attested `deployed_files`, each verified
++  against its `deployed_file_hashes` SHA-256 before it enters the bundle, so a
++  file tampered or corrupted after `apm install` fails the pack instead of
++  shipping silently. The unattested `apm_modules` cache -- which can be stale,
++  partial, or tampered -- is never packed. Subset (`skills:`) filters are
++  respected (only deployed skills are included). If a dependency has cached
++  primitives but no `deployed_files`, `apm pack` fails with an actionable error
++  telling you to run `apm install`. Dependency hooks-config / MCP-config, which
++  is not attested in `deployed_files`, is no longer packed: `apm pack` now warns
++  (`[!]`) and names the dependency (first-party root hooks/MCP are unaffected).
++  Directory entries are walked with per-child containment so a planted
++  directory symlink cannot escape the project root into the bundle. (#2013)
+ - `apm install --frozen` no longer spuriously rejects private Git dependencies
+   hosted on non-default Git servers such as Bitbucket Server, GitLab, or GitHub
+   Enterprise; lockfile matching now uses the same host-qualified identity as
+diff --git a/docs/src/content/docs/producer/pack-a-bundle.md b/docs/src/content/docs/producer/pack-a-bundle.md
+index c55e9c4e3..a39e23a64 100644
+--- a/docs/src/content/docs/producer/pack-a-bundle.md
++++ b/docs/src/content/docs/producer/pack-a-bundle.md
+@@ -132,6 +132,28 @@ For the consumer flags that apply (`--target`, `--global`, `--force`,
+ package root (`agents/`, `skills/`, `instructions/`, etc.). This lets
+ you author in whichever layout feels natural during development.
+ 
++When packing git dependencies, `apm pack` emits **only** what the
++lockfile attests, in every format (`--format plugin` and the default
++`--format apm`). Dependency content is sourced exclusively from the
++lockfile `deployed_files` list -- the `apm_modules` cache is never
++packed, because it carries no provenance or integrity guarantee (it can
++be stale, partial, or tampered). Each attested file is verified against
++its recorded `deployed_file_hashes` SHA-256 before it is included; a file
++whose bytes no longer match its recorded hash fails the pack. If a
++dependency declares
++[`skills:`](../reference/package-types/#skill-collection-skillsnameskillmd),
++only the named deployed skills are included. If a dependency has cached
++primitives but no `deployed_files` (a stale or partial install), `apm
++pack` fails and tells you to run `apm install` to record provenance.
++
++Dependency **hooks-config and MCP-config** (the `hooks.json` / `.mcp.json`
++entries `apm install` merges into shared host settings) are *not*
++attested in `deployed_files`, so they are not packed; `apm pack` warns
++loudly (`[!]`) and names the dependency when this happens. First-party
++root hooks/MCP authored by the packaging project itself **are** packed --
++only unattested dependency config is dropped. Hook *scripts* recorded in
++`deployed_files` still pack normally.
++
+ `apm install` is per-primitive and stricter. Each integrator has its own
+ discovery rules. For some primitive types the root convention directory
+ is not scanned at install time, so a file that appears in the pack
+@@ -243,10 +265,19 @@ target-agnostic: the consumer's project decides which harness layouts
+ receive files at install time. APM records the value in `pack.target` as
+ informational metadata only and prints a deprecation warning.
+ 
+-**Empty bundle warning.** If `apm pack` reports "No deployed files found",
+-your `apm.lock.yaml` has no `deployed_files` entries. Run `apm install` first
+-to populate it -- `apm pack` packs the files your last install actually
+-deployed, not the raw `.apm/` source tree.
++**Missing dependency content.** For installed dependencies, `apm pack`
++emits only lockfile-attested `deployed_files`; the `apm_modules` cache is
++never packed. If a dependency has cached primitives but no
++`deployed_files`, `apm pack` stops with an error and tells you to run
++`apm install` so the content is attested.
++
++**Attested-file mismatch.** If a dependency file was edited or corrupted
++after `apm install`, its bytes no longer match the `deployed_file_hashes`
++SHA-256 recorded in `apm.lock.yaml` and `apm pack` fails with
++`... does not match the hash recorded in apm.lock.yaml`. The same error's
++sibling ("installed files recorded in apm.lock.yaml are missing on disk")
++covers deleted files. Run `apm install` to restore the attested content,
++then pack again.
+ 
+ **Dry-run before sharing.** Use `apm pack --dry-run --verbose` to see the
+ full file list (and any path remappings) without writing anything.
+diff --git a/docs/src/content/docs/reference/cli/pack.md b/docs/src/content/docs/reference/cli/pack.md
+index f13d0966c..4068dff5d 100644
+--- a/docs/src/content/docs/reference/cli/pack.md
++++ b/docs/src/content/docs/reference/cli/pack.md
+@@ -110,13 +110,16 @@ A Claude Code plugin directory under `--output`. Contains:
+ 
+ - `plugin.json` -- schema-conformant manifest. Convention-dir keys are stripped because Claude Code auto-discovers them.
+ - Plugin-native subdirs populated from your `.apm/` content and from installed dependencies: `agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`, `extensions/` (canvas extensions, when the `canvas` experimental flag is enabled).
+-- A merged `hooks.json` when multiple sources contribute hooks.
++- Installed dependencies are packed exclusively from lockfile-attested `deployed_files`; the `apm_modules` cache is never packed (it has no provenance or integrity guarantee). Each attested file is verified against its `deployed_file_hashes` SHA-256 before inclusion.
++  - If the dependency declares `skills:`, only the named skills are included; the cache cannot add extras.
++  - If a dependency has cached primitives but no `deployed_files`, `apm pack` fails and tells you to run `apm install`.
++- A merged `hooks.json` from the producer's own hooks. Dependency hook-configs and MCP-configs are not merged into the bundle; dependencies contribute only their attested `deployed_files` (hook scripts recorded there still map into `hooks/`).
+ - `apm.lock.yaml` -- enriched copy with `pack:` metadata and a `bundle_files` map of per-file SHA-256 digests, used by `apm install` for install-time integrity verification.
+ - `devDependencies` are excluded.
+ 
+ ### APM bundle (`--format apm`)
+ 
+-The legacy APM layout under `--output`. Files are copied preserving their install-time directory structure. The bundle's `apm.lock.yaml` carries the same `pack:` metadata and `bundle_files` digests. The project's own `apm.lock.yaml` is never modified.
++The legacy APM layout under `--output`. Files are copied preserving their install-time directory structure. Installed dependencies are packed exclusively from lockfile-attested `deployed_files`, and each file is verified against its `deployed_file_hashes` SHA-256 before it is copied (the same integrity gate the `plugin` format applies) -- a file whose bytes no longer match its recorded hash fails the pack with `... does not match the hash recorded in apm.lock.yaml`. Files with no recorded hash (older lockfiles) pack without verification. The bundle's `apm.lock.yaml` carries the same `pack:` metadata and `bundle_files` digests. The project's own `apm.lock.yaml` is never modified.
+ 
+ Example enriched lockfile fragment:
+ 
+@@ -190,9 +193,9 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
+ 
+ ## Behavior
+ 
+-- **Lockfile-driven.** The bundle enumerates `deployed_files` from `apm.lock.yaml`. Run `apm install` first if the lockfile is stale or missing.
++- **Lockfile-attested dependencies.** Dependency content is packed exclusively from lockfile `deployed_files` and verified against `deployed_file_hashes`; the `apm_modules` cache is never packed. If a dependency has cached primitives but no `deployed_files`, `apm pack` errors and tells you to run `apm install`.
+ - **Hidden-character scan.** Source files are scanned before bundling. Findings are reported as warnings only -- packing is non-blocking. Consumers are protected at install time, where critical findings block.
+-- **Empty bundle warning.** If no files match (e.g. nothing was installed yet), `apm pack` emits a warning and exits `0` with an empty bundle. Verbose mode prints a hint to run `apm install` first.
++- **Empty bundle warning.** If no package files match after dependency resolution, `apm pack` emits a warning and exits `0` with an empty bundle. Missing dependency content is an error, not an empty bundle.
+ - **Share line.** On success, `apm pack` prints `Share with: apm install <bundle-path>` so the produced bundle is immediately copy-pasteable.
+ - **Marketplace fallback.** With no `marketplace:` block in `apm.yml`, a legacy `marketplace.yml` file is read with a deprecation warning. Both files present is a hard error.
+ - **Marketplace outputs.** Configure via `marketplace.outputs` map (keyed by format). Claude is included by default. The legacy list form (`outputs: [claude]`) still parses with a deprecation warning. Use `--marketplace=` to filter which formats are built in a given invocation.
+diff --git a/packages/apm-guide/.apm/skills/apm-usage/commands.md b/packages/apm-guide/.apm/skills/apm-usage/commands.md
+index 0a52c8fd6..ad38fcf28 100644
+--- a/packages/apm-guide/.apm/skills/apm-usage/commands.md
++++ b/packages/apm-guide/.apm/skills/apm-usage/commands.md
+@@ -104,7 +104,7 @@ Lifecycle scripts fire on six events: `pre-install`, `post-install`, `pre-update
+ 
+ | Command | Purpose | Key flags |
+ |---------|---------|-----------|
+-| `apm pack` | Build distributable artifacts (bundle and/or marketplace.json -- driven by `apm.yml`). Default output is a Claude Code plugin directory. Bundles are **target-agnostic**: `pack.target` is recorded in every bundle for diagnostic purposes (typically `"all"` for target-agnostic packs, or the project's detected target) and is not authoritative at install time; `pack.bundle_files` (path -> sha256) drives integrity verification. The consumer's project decides where files land. Marketplace-publishing projects (`marketplace:` block, no `dependencies:`) no longer emit the misleading "No plugin.json found" warning; after a successful build, a vendor-neutral catalog of artifact paths is appended together with a single docs pointer (`producer/publish-to-a-marketplace/#consume-from-any-assistant`) listing per-assistant install paths. Release-time gates `--check-versions` and `--check-clean` are opt-in: when present, they run after the build and exit non-zero on misalignment / drift (codes 3 and 4 respectively) so release pipelines can fail fast. When `apm.yml` declares `target: claude` or `target: copilot` (or the plural `targets:` equivalent), `apm pack` also generates an ecosystem-specific `plugin.json`: `.claude-plugin/plugin.json` for Claude (includes `mcpServers` from `.mcp.json` if present) and `.github/plugin/plugin.json` for Copilot (omits `mcpServers`). An existing file at the target path is preserved (a warning is emitted and the write is skipped) unless `--force` is passed; `--dry-run` prevents writes. Credential-bearing keys and secret-shaped values in `.mcp.json` are stripped recursively at any depth from the Claude manifest before writing, so a committed manifest never leaks secrets (see the apm pack reference, `reference/cli/pack/#credential-stripping-claude-mcpservers`). | `-o PATH`, `--archive` (produce a `.zip` archive instead of a directory; changed from `.tar.gz`), `--archive-format [zip\|tar.gz]` (default `zip`; use `tar.gz` for smaller legacy CI artifacts; only active with `--archive`), `--dry-run`, `--format [plugin\|apm]` (default `plugin`), `--force`, `--offline`, `--include-prerelease`, `--marketplace=FORMATS`, `--marketplace-path FORMAT=PATH`, `--json`, `--check-versions` (release gate: per-package versions match `marketplace.versioning.strategy`; exit 3 on failure), `--check-clean` (release gate: regenerate-and-diff against the committed `marketplace.json`; exit 4 on drift). `-t/--target` is **deprecated** (warn only). Exit codes: `0` success, `1` build/runtime error, `2` schema validation error, `3` `--check-versions` misalignment, `4` `--check-clean` drift. |
++| `apm pack` | Build distributable artifacts (bundle and/or marketplace.json -- driven by `apm.yml`). Default output is a Claude Code plugin directory. Bundles are **target-agnostic**: `pack.target` is recorded in every bundle for diagnostic purposes (typically `"all"` for target-agnostic packs, or the project's detected target) and is not authoritative at install time; `pack.bundle_files` (path -> sha256) drives integrity verification. The consumer's project decides where files land. Dependency content is packed **exclusively** from lockfile-attested `deployed_files` (in both `--format plugin` and the default `--format apm`); the `apm_modules` cache is never packed. Each file is verified against its `deployed_file_hashes` SHA-256 before inclusion, so a file tampered after `apm install` (hash mismatch) or deleted (missing on disk) fails the pack with a message pointing at `apm install`; files with no recorded hash (older lockfiles) pack unverified. Dependency hooks-config / MCP-config is not attested, so it is not packed -- `apm pack` warns (`[!]`) and names the dependency (first-party root hooks/MCP are still packed). Marketplace-publishing projects (`marketplace:` block, no `dependencies:`) no longer emit the misleading "No plugin.json found" warning; after a successful build, a vendor-neutral catalog of artifact paths is appended together with a single docs pointer (`producer/publish-to-a-marketplace/#consume-from-any-assistant`) listing per-assistant install paths. Release-time gates `--check-versions` and `--check-clean` are opt-in: when present, they run after the build and exit non-zero on misalignment / drift (codes 3 and 4 respectively) so release pipelines can fail fast. When `apm.yml` declares `target: claude` or `target: copilot` (or the plural `targets:` equivalent), `apm pack` also generates an ecosystem-specific `plugin.json`: `.claude-plugin/plugin.json` for Claude (includes `mcpServers` from `.mcp.json` if present) and `.github/plugin/plugin.json` for Copilot (omits `mcpServers`). An existing file at the target path is preserved (a warning is emitted and the write is skipped) unless `--force` is passed; `--dry-run` prevents writes. Credential-bearing keys and secret-shaped values in `.mcp.json` are stripped recursively at any depth from the Claude manifest before writing, so a committed manifest never leaks secrets (see the apm pack reference, `reference/cli/pack/#credential-stripping-claude-mcpservers`). | `-o PATH`, `--archive` (produce a `.zip` archive instead of a directory; changed from `.tar.gz`), `--archive-format [zip\|tar.gz]` (default `zip`; use `tar.gz` for smaller legacy CI artifacts; only active with `--archive`), `--dry-run`, `--format [plugin\|apm]` (default `plugin`), `--force`, `--offline`, `--include-prerelease`, `--marketplace=FORMATS`, `--marketplace-path FORMAT=PATH`, `--json`, `--check-versions` (release gate: per-package versions match `marketplace.versioning.strategy`; exit 3 on failure), `--check-clean` (release gate: regenerate-and-diff against the committed `marketplace.json`; exit 4 on drift). `-t/--target` is **deprecated** (warn only). Exit codes: `0` success, `1` build/runtime error, `2` schema validation error, `3` `--check-versions` misalignment, `4` `--check-clean` drift. |
+ | `apm unpack BUNDLE` | **[Deprecated]** Extract a bundle. Use `apm install <bundle-path>` instead -- it deploys directly with integrity verification and target resolution. | `-o PATH`, `--skip-verify`, `--force`, `--dry-run` |
+ 
+ `apm install <BUNDLE-PATH>` -- when the positional argument resolves to a directory containing `plugin.json` at its root, or to a `.zip` (or legacy `.tar.gz`/`.tgz`) archive whose extracted root contains `plugin.json`, install switches to local-bundle mode: the bundle is integrity-verified against its embedded `apm.lock.yaml` (`pack.bundle_files`) and deployed into the consumer's resolved target. Target resolution follows the same precedence as registry installs (`--target` > `apm.yml` > directory detection); the bundle itself carries no target binding. Compile-only targets (opencode, codex, gemini, antigravity) receive instructions staged under `apm_modules/<slug>/.apm/instructions/` and the install emits a hint to run `apm compile` to merge them. Other existing paths (e.g. a source-package directory without `plugin.json`) still flow through the normal local-path dependency-resolver pipeline. Files are recorded under `local_deployed_files` in the project lockfile -- `apm.yml` is **never** mutated. Honours `--target`, `--global`, `--force`, `--dry-run`, `--verbose`, plus `--as ALIAS` (log/display label only). Resolver/MCP/registry/policy flags (`--update`, `--mcp`, `--parallel-downloads`, `--allow-insecure-host`, `--skill`, ...) are rejected with a single consolidated error -- local-bundle install is an imperative deploy and bypasses those subsystems.
+diff --git a/tests/integration/test_pack_apm_provenance_e2e.py b/tests/integration/test_pack_apm_provenance_e2e.py
+new file mode 100644
+index 000000000..6e267fa52
+--- /dev/null
++++ b/tests/integration/test_pack_apm_provenance_e2e.py
+@@ -0,0 +1,270 @@
++"""Hermetic e2e coverage for provenance hardening of ``apm pack --format apm``.
++
++The archive (``apm``) format is the default and most-used pack format
++(consumed by apm-action + CI). This suite proves that dependency files are
++verified against the per-file SHA-256 recorded in ``apm.lock.yaml``
++(``deployed_file_hashes``) before they enter the bundle -- a deployed file
++tampered after ``apm install`` must fail the pack loudly rather than ship
++silently. It also proves cross-target path mapping does not produce false
++mismatches, and that a directory symlink planted inside a deployed dir cannot
++escape the project root into the bundle.
++"""
++
++import os
++import subprocess
++import sys
++from pathlib import Path
++
++import pytest
++import yaml
++
++from apm_cli.deps.lockfile import LockedDependency, LockFile
++from apm_cli.utils.content_hash import compute_file_hash
++
++pytestmark = [
++    pytest.mark.integration,
++    pytest.mark.requires_e2e_mode,
++]
++
++
++def _write_apm_yml(project: Path, target: str = "copilot") -> None:
++    project.joinpath("apm.yml").write_text(
++        yaml.safe_dump(
++            {
++                "name": "apm-provenance-e2e",
++                "version": "1.0.0",
++                "description": "Hermetic apm-format provenance fixture",
++                "target": target,
++                "dependencies": {
++                    "apm": [{"git": "acme/skill-bundle", "ref": "abc123"}],
++                    "mcp": [],
++                },
++            },
++            sort_keys=False,
++        ),
++        encoding="utf-8",
++    )
++    # Seed a copilot detection signal so target resolution succeeds.
++    github = project / ".github"
++    github.mkdir(exist_ok=True)
++    (github / "copilot-instructions.md").write_text("# provenance fixture\n", encoding="utf-8")
++
++
++def _write_deployed_skill(project: Path, name: str, marker: str) -> list[str]:
++    """Write a deployed skill under .github/skills/<name>/ and return rel paths."""
++    skill_dir = project / ".github" / "skills" / name
++    skill_dir.mkdir(parents=True, exist_ok=True)
++    (skill_dir / "SKILL.md").write_text(marker, encoding="utf-8")
++    (skill_dir / "notes.md").write_text(f"{marker} notes", encoding="utf-8")
++    return [
++        (skill_dir / "SKILL.md").relative_to(project).as_posix(),
++        (skill_dir / "notes.md").relative_to(project).as_posix(),
++    ]
++
++
++def _dep_with_hashes(project: Path, deployed_files: list[str]) -> LockedDependency:
++    """Build a locked dep whose deployed_file_hashes match current on-disk bytes."""
++    hashes = {
++        rel: compute_file_hash(project / rel) for rel in deployed_files if (project / rel).is_file()
++    }
++    return LockedDependency(
++        repo_url="acme/skill-bundle",
++        resolved_commit="abc123",
++        depth=1,
++        package_type="skill_bundle",
++        deployed_files=deployed_files,
++        deployed_file_hashes=hashes,
++    )
++
++
++def _write_lockfile(project: Path, dep: LockedDependency) -> None:
++    lockfile = LockFile()
++    lockfile.add_dependency(dep)
++    lockfile.write(project / "apm.lock.yaml")
++
++
++def _run_pack_apm(
++    project: Path, target: str | None = None, output_name: str = "build"
++) -> subprocess.CompletedProcess[str]:
++    env = os.environ.copy()
++    for name in ("GITHUB_TOKEN", "GITHUB_APM_PAT", "ADO_APM_PAT"):
++        env.pop(name, None)
++    home = project / ".home"
++    home.mkdir(exist_ok=True)
++    env.update({"APM_E2E_TESTS": "1", "HOME": str(home), "PYTHONUTF8": "1"})
++    args = [
++        sys.executable,
++        "-m",
++        "apm_cli.cli",
++        "pack",
++        "--format",
++        "apm",
++        "--output",
++        output_name,
++    ]
++    if target is not None:
++        args += ["--target", target]
++    return subprocess.run(
++        args,
++        cwd=project,
++        env=env,
++        capture_output=True,
++        text=True,
++        timeout=120,
++        check=False,
++    )
++
++
++def _bundle_dir(project: Path, output_name: str = "build") -> Path:
++    return project / output_name / "apm-provenance-e2e-1.0.0"
++
++
++def test_apm_pack_accepts_matching_deployed_file(tmp_path: Path) -> None:
++    """Untampered deployed files pack cleanly (guards against false positives)."""
++    project = tmp_path / "project"
++    project.mkdir()
++    _write_apm_yml(project)
++    deployed = _write_deployed_skill(project, "alpha", "deployed alpha")
++    _write_lockfile(project, _dep_with_hashes(project, deployed))
++
++    result = _run_pack_apm(project)
++
++    assert result.returncode == 0, result.stdout + result.stderr
++    bundle = _bundle_dir(project)
++    assert (bundle / ".github" / "skills" / "alpha" / "SKILL.md").read_text(
++        encoding="utf-8"
++    ) == "deployed alpha"
++
++
++def test_apm_pack_rejects_tampered_deployed_file(tmp_path: Path) -> None:
++    """A deployed file tampered after install must fail the pack loudly.
++
++    This is the RED-without-fix / GREEN-with-fix provenance gate for the
++    default archive format: the recorded SHA-256 no longer matches the on-disk
++    bytes, so the file must never enter the bundle silently.
++    """
++    project = tmp_path / "project"
++    project.mkdir()
++    _write_apm_yml(project)
++    deployed = _write_deployed_skill(project, "alpha", "deployed alpha")
++    _write_lockfile(project, _dep_with_hashes(project, deployed))
++
++    # Tamper the deployed file AFTER the lockfile recorded its attested hash.
++    (project / ".github" / "skills" / "alpha" / "SKILL.md").write_text(
++        "tampered payload", encoding="utf-8"
++    )
++
++    result = _run_pack_apm(project)
++
++    combined = result.stdout + result.stderr
++    assert result.returncode != 0, combined
++    assert "does not match the hash recorded in apm.lock.yaml" in combined
++    packed = _bundle_dir(project) / ".github" / "skills" / "alpha" / "SKILL.md"
++    assert not packed.exists() or packed.read_text(encoding="utf-8") != "tampered payload"
++
++
++def test_apm_pack_rejects_tampered_file_in_deployed_directory(tmp_path: Path) -> None:
++    """A tampered file inside a deployed *directory* entry also fails loud.
++
++    Directory entries are copied via copytree; the provenance walk verifies
++    each contained file against its attested hash before the copy.
++    """
++    project = tmp_path / "project"
++    project.mkdir()
++    _write_apm_yml(project)
++    _write_deployed_skill(project, "alpha", "deployed alpha")
++    skill_dir = project / ".github" / "skills" / "alpha"
++    # Hash the contained files, but list the DIRECTORY in deployed_files.
++    file_rels = [
++        (skill_dir / "SKILL.md").relative_to(project).as_posix(),
++        (skill_dir / "notes.md").relative_to(project).as_posix(),
++    ]
++    hashes = {rel: compute_file_hash(project / rel) for rel in file_rels}
++    dep = LockedDependency(
++        repo_url="acme/skill-bundle",
++        resolved_commit="abc123",
++        depth=1,
++        package_type="skill_bundle",
++        deployed_files=[skill_dir.relative_to(project).as_posix() + "/"],
++        deployed_file_hashes=hashes,
++    )
++    _write_lockfile(project, dep)
++
++    (skill_dir / "notes.md").write_text("tampered notes", encoding="utf-8")
++
++    result = _run_pack_apm(project)
++
++    combined = result.stdout + result.stderr
++    assert result.returncode != 0, combined
++    assert "does not match the hash recorded in apm.lock.yaml" in combined
++
++
++def test_apm_pack_cross_target_mapped_file_no_false_positive(tmp_path: Path) -> None:
++    """Cross-target mapped files verify against the on-disk key, not bundle key.
++
++    Files deployed under ``.github/skills/`` are hashed against their on-disk
++    (``.github``) path. Packing for the ``claude`` target remaps the bundle
++    path to ``.claude/skills/`` while still reading from disk under
++    ``.github``. Verification must look up the on-disk key, so an untampered
++    mapped file must NOT be reported as a mismatch.
++    """
++    project = tmp_path / "project"
++    project.mkdir()
++    _write_apm_yml(project, target="claude")
++    deployed = _write_deployed_skill(project, "alpha", "deployed alpha")
++    _write_lockfile(project, _dep_with_hashes(project, deployed))
++
++    result = _run_pack_apm(project, target="claude")
++
++    assert result.returncode == 0, result.stdout + result.stderr
++    bundle = _bundle_dir(project)
++    # Remapped into the claude layout, content intact.
++    assert (bundle / ".claude" / "skills" / "alpha" / "SKILL.md").read_text(
++        encoding="utf-8"
++    ) == "deployed alpha"
++
++
++def test_apm_pack_directory_symlink_does_not_escape(tmp_path: Path) -> None:
++    """A directory symlink inside a deployed dir must not leak external bytes.
++
++    Defense-in-depth: the copytree ignore filter drops symlinks and the
++    provenance walk re-asserts containment, so a planted directory symlink
++    whose target sits outside the project root contributes nothing to the
++    bundle.
++    """
++    project = tmp_path / "project"
++    project.mkdir()
++    _write_apm_yml(project)
++    deployed = _write_deployed_skill(project, "alpha", "deployed alpha")
++
++    # Secret material outside the project root.
++    secret_dir = tmp_path / "outside"
++    secret_dir.mkdir()
++    (secret_dir / "secret.md").write_text("TOP SECRET", encoding="utf-8")
++
++    # Plant a directory symlink INSIDE the deployed skill dir pointing outside.
++    skill_dir = project / ".github" / "skills" / "alpha"
++    link = skill_dir / "leak"
++    try:
++        link.symlink_to(secret_dir, target_is_directory=True)
++    except (OSError, NotImplementedError):
++        pytest.skip("platform does not support directory symlinks")
++
++    dep = LockedDependency(
++        repo_url="acme/skill-bundle",
++        resolved_commit="abc123",
++        depth=1,
++        package_type="skill_bundle",
++        deployed_files=[skill_dir.relative_to(project).as_posix() + "/"],
++        deployed_file_hashes={rel: compute_file_hash(project / rel) for rel in deployed},
++    )
++    _write_lockfile(project, dep)
++
++    result = _run_pack_apm(project)
++
++    # Pack succeeds (attested files copy) but the symlinked secret never lands.
++    assert result.returncode == 0, result.stdout + result.stderr
++    bundle = _bundle_dir(project)
++    assert not (bundle / ".github" / "skills" / "alpha" / "leak").exists()
++    leaked = list(bundle.rglob("secret.md"))
++    assert not leaked, f"external secret leaked into bundle: {leaked}"
+diff --git a/tests/integration/test_plugin_skill_subset_pack_e2e.py b/tests/integration/test_plugin_skill_subset_pack_e2e.py
+new file mode 100644
+index 000000000..34694c26e
+--- /dev/null
++++ b/tests/integration/test_plugin_skill_subset_pack_e2e.py
+@@ -0,0 +1,318 @@
++"""Hermetic e2e coverage for plugin packing filtered skill dependencies."""
++
++import json
++import os
++import shutil
++import subprocess
++import sys
++from pathlib import Path
++
++import pytest
++import yaml
++
++from apm_cli.deps.lockfile import LockedDependency, LockFile
++
++pytestmark = [
++    pytest.mark.integration,
++    pytest.mark.requires_e2e_mode,
++]
++
++
++def _write_apm_yml(project: Path) -> None:
++    project.joinpath("apm.yml").write_text(
++        yaml.safe_dump(
++            {
++                "name": "subset-pack-e2e",
++                "version": "1.0.0",
++                "description": "Hermetic plugin pack subset fixture",
++                "target": "copilot",
++                "dependencies": {
++                    "apm": [
++                        {
++                            "git": "acme/skill-bundle",
++                            "ref": "abc123",
++                            "skills": ["alpha", "beta"],
++                        }
++                    ],
++                    "mcp": [],
++                },
++            },
++            sort_keys=False,
++        ),
++        encoding="utf-8",
++    )
++
++
++def _write_lockfile(project: Path, dep: LockedDependency) -> None:
++    lockfile = LockFile()
++    lockfile.add_dependency(dep)
++    lockfile.write(project / "apm.lock.yaml")
++
++
++def _write_deployed_skill(project: Path, name: str, marker: str) -> list[str]:
++    skill_dir = project / ".agents" / "skills" / name
++    skill_dir.mkdir(parents=True, exist_ok=True)
++    skill_file = skill_dir / "SKILL.md"
++    notes_file = skill_dir / "notes.md"
++    skill_file.write_text(marker, encoding="utf-8")
++    notes_file.write_text(f"{marker} notes", encoding="utf-8")
++    return [
++        skill_dir.relative_to(project).as_posix(),
++        skill_file.relative_to(project).as_posix(),
++        notes_file.relative_to(project).as_posix(),
++    ]
++
++
++def _write_cached_skill(project: Path, name: str, marker: str) -> None:
++    skill_dir = project / "apm_modules" / "acme" / "skill-bundle" / ".apm" / "skills" / name
++    skill_dir.mkdir(parents=True, exist_ok=True)
++    (skill_dir / "SKILL.md").write_text(marker, encoding="utf-8")
++
++
++def _write_cached_mcp(project: Path, server_name: str) -> None:
++    """Plant an UNATTESTED .mcp.json in the apm_modules cache for the dep.
++
++    Nothing in this file is recorded in the lockfile deployed_files, so an
++    attested-only pack must never surface it in the bundle.
++    """
++    dep_root = project / "apm_modules" / "acme" / "skill-bundle"
++    dep_root.mkdir(parents=True, exist_ok=True)
++    (dep_root / ".mcp.json").write_text(
++        json.dumps({"mcpServers": {server_name: {"command": "leaked-binary"}}}),
++        encoding="utf-8",
++    )
++
++
++def _write_cached_hooks(project: Path, hook_event: str) -> None:
++    """Plant an UNATTESTED .apm/hooks/hooks.json in the apm_modules cache."""
++    hooks_dir = project / "apm_modules" / "acme" / "skill-bundle" / ".apm" / "hooks"
++    hooks_dir.mkdir(parents=True, exist_ok=True)
++    (hooks_dir / "hooks.json").write_text(
++        json.dumps({hook_event: ["leaked-hook-command"]}),
++        encoding="utf-8",
++    )
++
++
++def _run_pack(project: Path, output_name: str = "build") -> subprocess.CompletedProcess[str]:
++    env = os.environ.copy()
++    for name in ("GITHUB_TOKEN", "GITHUB_APM_PAT", "ADO_APM_PAT"):
++        env.pop(name, None)
++    home = project / ".home"
++    home.mkdir(exist_ok=True)
++    env.update(
++        {
++            "APM_E2E_TESTS": "1",
++            "HOME": str(home),
++            "PYTHONUTF8": "1",
++        }
++    )
++    return subprocess.run(
++        [
++            sys.executable,
++            "-m",
++            "apm_cli.cli",
++            "pack",
++            "--format",
++            "plugin",
++            "--output",
++            output_name,
++        ],
++        cwd=project,
++        env=env,
++        capture_output=True,
++        text=True,
++        timeout=120,
++        check=False,
++    )
++
++
++def _bundle_dir(project: Path, output_name: str = "build") -> Path:
++    return project / output_name / "subset-pack-e2e-1.0.0"
++
++
++def _assert_only_subset_skills(bundle_dir: Path) -> None:
++    skills_dir = bundle_dir / "skills"
++    assert {path.name for path in skills_dir.iterdir()} == {"alpha", "beta"}
++    assert (skills_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8") == "deployed alpha"
++    assert (skills_dir / "beta" / "SKILL.md").read_text(encoding="utf-8") == "deployed beta"
++    assert not (skills_dir / "gamma").exists()
++
++
++def test_pack_plugin_uses_deployed_skill_subset_and_survives_missing_cache(
++    tmp_path: Path,
++) -> None:
++    """apm pack must export the installed subset, not raw apm_modules."""
++    project = tmp_path / "project"
++    project.mkdir()
++    _write_apm_yml(project)
++    deployed_files = [
++        file
++        for skill in ("alpha", "beta")
++        for file in _write_deployed_skill(project, skill, f"deployed {skill}")
++    ]
++    _write_lockfile(
++        project,
++        LockedDependency(
++            repo_url="acme/skill-bundle",
++            resolved_commit="abc123",
++            depth=1,
++            package_type="skill_bundle",
++            deployed_files=deployed_files,
++            skill_subset=["alpha", "beta"],
++        ),
++    )
++    for skill in ("alpha", "beta", "gamma"):
++        _write_cached_skill(project, skill, f"raw cache {skill}")
++
++    result = _run_pack(project)
++
++    assert result.returncode == 0, result.stderr
++    _assert_only_subset_skills(_bundle_dir(project))
++
++    shutil.rmtree(project / "apm_modules")
++    shutil.rmtree(project / "build")
++
++    result_without_cache = _run_pack(project)
++
++    assert result_without_cache.returncode == 0, result_without_cache.stderr
++    _assert_only_subset_skills(_bundle_dir(project))
++
++
++def test_pack_plugin_excludes_unattested_cache_hooks_and_mcp(tmp_path: Path) -> None:
++    """Provenance guarantee: unattested apm_modules content is never packed.
++
++    The dependency has an attested skill subset (alpha, beta), but its
++    apm_modules cache ALSO carries a .mcp.json and a hooks.json that are NOT
++    recorded in the lockfile deployed_files. apm pack must emit ONLY what the
++    lockfile attests: the subset skills, and no bytes derived from the
++    unattested cache config. This is the RED-without-fix / GREEN-with-fix gate.
++    """
++    project = tmp_path / "project"
++    project.mkdir()
++    _write_apm_yml(project)
++    deployed_files = [
++        file
++        for skill in ("alpha", "beta")
++        for file in _write_deployed_skill(project, skill, f"deployed {skill}")
++    ]
++    _write_lockfile(
++        project,
++        LockedDependency(
++            repo_url="acme/skill-bundle",
++            resolved_commit="abc123",
++            depth=1,
++            package_type="skill_bundle",
++            deployed_files=deployed_files,
++            skill_subset=["alpha", "beta"],
++        ),
++    )
++    # Unattested cache bytes -- present on disk, absent from deployed_files.
++    _write_cached_mcp(project, "leaked-server")
++    _write_cached_hooks(project, "preCommit")
++    # An unattested extra skill in the cache, too.
++    _write_cached_skill(project, "zeta", "raw cache zeta")
++
++    result = _run_pack(project)
++
++    assert result.returncode == 0, result.stderr
++    bundle_dir = _bundle_dir(project)
++    # (a) #1999 subset behavior preserved.
++    _assert_only_subset_skills(bundle_dir)
++    # (b) unattested cache content is NOT packed.
++    assert not (bundle_dir / ".mcp.json").exists(), "unattested dep MCP leaked into bundle"
++    assert not (bundle_dir / "hooks.json").exists(), "unattested dep hooks leaked into bundle"
++    assert not (bundle_dir / "skills" / "zeta").exists(), "unattested cache skill leaked"
++
++
++def test_pack_plugin_rejects_unsafe_deployed_paths(tmp_path: Path) -> None:
++    """apm pack must reject unsafe deployed_files paths before copying."""
++    project = tmp_path / "project"
++    project.mkdir()
++    _write_apm_yml(project)
++    _write_lockfile(
++        project,
++        LockedDependency(
++            repo_url="acme/skill-bundle",
++            resolved_commit="abc123",
++            depth=1,
++            package_type="skill_bundle",
++            deployed_files=[".agents/skills/../escape/SKILL.md"],
++            skill_subset=["alpha"],
++        ),
++    )
++
++    result = _run_pack(project)
++
++    assert result.returncode != 0
++    combined_output = result.stdout + result.stderr
++    assert "unsafe deployed file path" in combined_output
++
++
++def test_pack_plugin_fails_when_dep_has_cache_but_no_deployed_files(
++    tmp_path: Path,
++) -> None:
++    """A dep with cached primitives but no attested deployed_files fails loud.
++
++    apm_modules is an unattested cache: rather than silently packing content
++    the lockfile never recorded, pack refuses and points the user at
++    'apm install' to record provenance.
++    """
++    project = tmp_path / "project"
++    project.mkdir()
++    _write_apm_yml(project)
++    _write_lockfile(
++        project,
++        LockedDependency(
++            repo_url="acme/skill-bundle",
++            resolved_commit="abc123",
++            depth=1,
++            package_type="skill_bundle",
++        ),
++    )
++    _write_cached_skill(project, "legacy", "legacy cache skill")
++
++    result = _run_pack(project)
++
++    assert result.returncode != 0
++    combined_output = result.stdout + result.stderr
++    assert "apm_modules is an unattested cache and cannot be packed" in combined_output
++
++
++def test_pack_plugin_warns_when_dep_hooks_mcp_config_dropped(tmp_path: Path) -> None:
++    """A hooks/MCP-config-only dep is skipped cleanly but warns loudly (#2013).
++
++    The dependency records NO deployed_files (its only cached content is
++    hooks-config + MCP-config, which install merges into shared settings and
++    never attests). Pack must succeed, must NOT pack the unattested config, and
++    must emit a '[!]' transition warning naming the dependency so an author who
++    relied on that merge is not surprised by the silent exclusion.
++    """
++    project = tmp_path / "project"
++    project.mkdir()
++    _write_apm_yml(project)
++    # No deployed_files, no skill_subset -> clean-skip branch.
++    _write_lockfile(
++        project,
++        LockedDependency(
++            repo_url="acme/skill-bundle",
++            resolved_commit="abc123",
++            depth=1,
++            package_type="mcp_bundle",
++        ),
++    )
++    # Cache carries ONLY hooks-config + MCP-config (no packable primitives).
++    _write_cached_mcp(project, "leaked-server")
++    _write_cached_hooks(project, "preCommit")
++
++    result = _run_pack(project)
++
++    assert result.returncode == 0, result.stderr
++    combined_output = result.stdout + result.stderr
++    # Console wrapping can insert newlines mid-message; collapse whitespace
++    # so the assertion is robust against terminal-width line breaks.
++    normalized = " ".join(combined_output.split())
++    assert "acme/skill-bundle" in normalized
++    assert "hooks/MCP config that is not attested in apm.lock.yaml" in normalized
++    bundle_dir = _bundle_dir(project)
++    assert not (bundle_dir / ".mcp.json").exists()
++    assert not (bundle_dir / "hooks.json").exists()
+diff --git a/tests/unit/bundle/test_plugin_exporter_lockfile.py b/tests/unit/bundle/test_plugin_exporter_lockfile.py
+index 99ce04446..67e5cb425 100644
+--- a/tests/unit/bundle/test_plugin_exporter_lockfile.py
++++ b/tests/unit/bundle/test_plugin_exporter_lockfile.py
+@@ -19,6 +19,7 @@ import yaml
+ 
+ from apm_cli.bundle.plugin_exporter import export_plugin_bundle
+ from apm_cli.deps.lockfile import LockedDependency, LockFile
++from apm_cli.utils.content_hash import compute_file_hash
+ 
+ # ---------------------------------------------------------------------------
+ # Helpers (reuse patterns from test_plugin_exporter.py)
+@@ -89,7 +90,10 @@ def _setup_project_with_skill(tmp_path: Path, *, target: str = "copilot") -> Pat
+             ".github/skills/coding/SKILL.md",
+         ],
+         deployed_file_hashes={
+-            ".github/skills/coding/SKILL.md": _sha256_file(gh_skill / "SKILL.md"),
++            # Mirror how `apm install` records hashes (compute_file_hash ->
++            # "sha256:<hex>"), so attested-hash verification at pack time
++            # accepts the untouched deployed file.
++            ".github/skills/coding/SKILL.md": compute_file_hash(gh_skill / "SKILL.md"),
+         },
+     )
+     _write_lockfile(project, [dep])
+diff --git a/tests/unit/test_plugin_exporter.py b/tests/unit/test_plugin_exporter.py
+index 5a213e37b..908f200ba 100644
+--- a/tests/unit/test_plugin_exporter.py
++++ b/tests/unit/test_plugin_exporter.py
+@@ -18,8 +18,10 @@ from apm_cli.bundle.plugin_exporter import (
+     _collect_mcp,
+     _collect_root_plugin_components,
+     _deep_merge,
++    _deployed_path_parts,
+     _get_dev_dependency_urls,
+     _merge_file_map,
++    _plugin_rel_for_deployed_path,
+     _rename_prompt,
+     _update_plugin_json_paths,
+     _validate_output_rel,
+@@ -27,6 +29,7 @@ from apm_cli.bundle.plugin_exporter import (
+ )
+ from apm_cli.deps.lockfile import LockedDependency, LockFile
+ from apm_cli.deps.plugin_parser import synthesize_plugin_json_from_apm_yml
++from apm_cli.utils.content_hash import compute_file_hash
+ 
+ # ---------------------------------------------------------------------------
+ # Helpers
+@@ -125,6 +128,42 @@ def _setup_plugin_project(
+     return project
+ 
+ 
++def _write_deployed_skill(project: Path, name: str, marker: str) -> list[str]:
++    """Create a deployed skill under the project and return lockfile entries."""
++    skill_dir = project / ".agents" / "skills" / name
++    skill_dir.mkdir(parents=True, exist_ok=True)
++    (skill_dir / "SKILL.md").write_text(marker, encoding="utf-8")
++    (skill_dir / "notes.md").write_text(f"{marker} notes", encoding="utf-8")
++    return [
++        skill_dir.relative_to(project).as_posix(),
++        (skill_dir / "SKILL.md").relative_to(project).as_posix(),
++        (skill_dir / "notes.md").relative_to(project).as_posix(),
++    ]
++
++
++def _write_deployed_agent(project: Path, filename: str, marker: str) -> list[str]:
++    """Create a deployed agent file under the project and return lockfile entries."""
++    agents_dir = project / ".agents" / "agents"
++    agents_dir.mkdir(parents=True, exist_ok=True)
++    agent_file = agents_dir / filename
++    agent_file.write_text(marker, encoding="utf-8")
++    return [agent_file.relative_to(project).as_posix()]
++
++
++def _write_deployed_agent_at(project: Path, target: str, filename: str, content: str) -> list[str]:
++    """Deploy an agent under a specific target dir (e.g. ``.github``/``.claude``).
++
++    Different targets map to the same plugin-native ``agents/<filename>`` output,
++    which lets two dependencies collide on one bundle path while each has its
++    own attested on-disk deployed file.
++    """
++    agents_dir = project / target / "agents"
++    agents_dir.mkdir(parents=True, exist_ok=True)
++    agent_file = agents_dir / filename
++    agent_file.write_text(content, encoding="utf-8")
++    return [agent_file.relative_to(project).as_posix()]
++
++
+ # ---------------------------------------------------------------------------
+ # Unit tests: helpers
+ # ---------------------------------------------------------------------------
+@@ -146,6 +185,66 @@ class TestValidateOutputRel:
+         assert _validate_output_rel("C:\\Windows\\System32") is False
+ 
+ 
++class TestDeployedPathParts:
++    def test_normalizes_backslashes_to_posix_parts(self):
++        assert _deployed_path_parts(".agents\\skills\\alpha\\SKILL.md") == (
++            ".agents",
++            "skills",
++            "alpha",
++            "SKILL.md",
++        )
++
++    def test_rejects_absolute_posix_path(self):
++        with pytest.raises(ValueError, match=r"absolute deployed file path"):
++            _deployed_path_parts("/etc/passwd")
++
++    def test_rejects_absolute_windows_path(self):
++        with pytest.raises(ValueError, match=r"absolute deployed file path"):
++            _deployed_path_parts("C:\\Windows\\System32\\cmd.exe")
++
++    def test_rejects_traversal_path(self):
++        with pytest.raises(ValueError, match=r"unsafe deployed file path"):
++            _deployed_path_parts(".agents/skills/../../escape")
++
++
++class TestPluginRelForDeployedPath:
++    def test_top_level_skills_honor_subset(self):
++        dep = LockedDependency(
++            repo_url="acme/skill-bundle",
++            depth=1,
++            package_type="skill_bundle",
++            skill_subset=["alpha"],
++        )
++        skill_subset = set(dep.skill_subset)
++
++        assert _plugin_rel_for_deployed_path("skills/alpha/SKILL.md", skill_subset) == (
++            "skills/alpha/SKILL.md"
++        )
++        assert _plugin_rel_for_deployed_path("skills/gamma/SKILL.md", skill_subset) is None
++
++    @pytest.mark.parametrize(
++        ("deployed_path", "expected"),
++        [
++            (".agents/skills/alpha/SKILL.md", "skills/alpha/SKILL.md"),
++            (".agents/agents/helper.agent.md", "agents/helper.agent.md"),
++            (".agents/prompts/do-thing.prompt.md", "commands/do-thing.md"),
++            (".github/instructions/team.instructions.md", "instructions/team.instructions.md"),
++            (".claude/hooks/pre-commit.sh", "hooks/pre-commit.sh"),
++            (".codex/extensions/acme/manifest.json", "extensions/acme/manifest.json"),
++            (".claude/hooks.json", "hooks.json"),
++        ],
++    )
++    def test_target_deployed_paths_map_to_plugin_layout(
++        self,
++        deployed_path: str,
++        expected: str,
++    ) -> None:
++        assert _plugin_rel_for_deployed_path(deployed_path, {"alpha"}) == expected
++
++    def test_target_deployed_skills_honor_subset(self) -> None:
++        assert _plugin_rel_for_deployed_path(".agents/skills/gamma/SKILL.md", {"alpha"}) is None
++
++
+ class TestRenamePrompt:
+     def test_strips_prompt_infix(self):
+         assert _rename_prompt("foo.prompt.md") == "foo.md"
+@@ -734,11 +833,10 @@ class TestExportPluginBundle:
+     def test_dependency_components_included(self, tmp_path):
+         project = _setup_plugin_project(tmp_path, agents=["own.agent.md"])
+ 
+-        # Set up a dependency in apm_modules
+-        dep = LockedDependency(repo_url="acme/tools", depth=1)
++        # Dependency content is packed only from lockfile-attested deployed_files.
++        deployed = _write_deployed_agent(project, "dep-agent.agent.md", "dep agent body")
++        dep = LockedDependency(repo_url="acme/tools", depth=1, deployed_files=deployed)
+         _write_lockfile(project, [dep])
+-        dep_path = project / "apm_modules" / "acme" / "tools"
+-        _make_apm_dir(dep_path, agents=["dep-agent.agent.md"])
+ 
+         out = tmp_path / "build"
+         result = export_plugin_bundle(project, out)
+@@ -746,27 +844,175 @@ class TestExportPluginBundle:
+         assert (result.bundle_path / "agents" / "dep-agent.agent.md").exists()
+         assert (result.bundle_path / "agents" / "own.agent.md").exists()
+ 
++    def test_dependency_hash_mismatch_rejects_pack(self, tmp_path):
++        """A deployed file whose SHA-256 diverges from the lockfile must fail loud.
++
++        ``_verify_attested_hash`` is the integrity half of the provenance
++        guarantee: a deployed file tampered or corrupted after ``apm install``
++        must never enter the bundle silently. This regression trap tampers the
++        on-disk copy so its content no longer matches the recorded
++        ``deployed_file_hashes`` and asserts pack refuses.
++        """
++        project = _setup_plugin_project(tmp_path, agents=["own.agent.md"])
++
++        deployed = _write_deployed_agent(project, "dep-agent.agent.md", "attested body")
++        rel = deployed[0]
++        # Record the hash of the attested content, then tamper the file on disk
++        # so the packed bytes no longer match the lockfile attestation.
++        attested_hash = compute_file_hash(project / rel)
++        (project / rel).write_text("tampered body", encoding="utf-8")
++        dep = LockedDependency(
++            repo_url="acme/tools",
++            depth=1,
++            deployed_files=deployed,
++            deployed_file_hashes={rel: attested_hash},
++        )
++        _write_lockfile(project, [dep])
++
++        with pytest.raises(
++            ValueError,
++            match=r"does not match the hash recorded in apm\.lock\.yaml",
++        ):
++            export_plugin_bundle(project, tmp_path / "build")
++
++    def test_dependency_hash_match_packs_successfully(self, tmp_path):
++        """A deployed file whose SHA-256 matches the lockfile packs cleanly.
++
++        Complements ``test_dependency_hash_mismatch_rejects_pack``: the same
++        verification path that rejects a tampered file must accept an intact
++        one, so the guard does not become a false-positive blocker.
++        """
++        project = _setup_plugin_project(tmp_path, agents=["own.agent.md"])
++
++        deployed = _write_deployed_agent(project, "dep-agent.agent.md", "attested body")
++        rel = deployed[0]
++        dep = LockedDependency(
++            repo_url="acme/tools",
++            depth=1,
++            deployed_files=deployed,
++            deployed_file_hashes={rel: compute_file_hash(project / rel)},
++        )
++        _write_lockfile(project, [dep])
++
++        result = export_plugin_bundle(project, tmp_path / "build")
++
++        assert (result.bundle_path / "agents" / "dep-agent.agent.md").exists()
++
++    def test_dependency_unattested_cache_is_not_packed(self, tmp_path):
++        """apm_modules cache content with no lockfile attestation must fail loud."""
++        project = _setup_plugin_project(tmp_path, agents=["own.agent.md"])
++
++        dep = LockedDependency(repo_url="acme/tools", depth=1)
++        _write_lockfile(project, [dep])
++        dep_path = project / "apm_modules" / "acme" / "tools"
++        _make_apm_dir(dep_path, agents=["dep-agent.agent.md"])
++
++        with pytest.raises(
++            ValueError,
++            match=r"apm_modules is an unattested cache and cannot be packed",
++        ):
++            export_plugin_bundle(project, tmp_path / "build")
++
++    def test_dependency_deployed_skill_subset_wins_over_raw_cache(self, tmp_path):
++        project = _setup_plugin_project(tmp_path)
++
++        deployed_files: list[str] = []
++        for skill in ("alpha", "beta", "gamma"):
++            deployed_files.extend(_write_deployed_skill(project, skill, f"deployed {skill}"))
++        dep = LockedDependency(
++            repo_url="acme/skill-bundle",
++            depth=1,
++            package_type="skill_bundle",
++            deployed_files=deployed_files,
++            skill_subset=["alpha", "beta"],
++        )
++        _write_lockfile(project, [dep])
++
++        dep_path = project / "apm_modules" / "acme" / "skill-bundle"
++        _make_apm_dir(
++            dep_path,
++            skills={
++                "alpha": ["SKILL.md"],
++                "beta": ["SKILL.md"],
++                "gamma": ["SKILL.md"],
++            },
++        )
++
++        result = export_plugin_bundle(project, tmp_path / "build")
++
++        skills_dir = result.bundle_path / "skills"
++        assert {path.name for path in skills_dir.iterdir()} == {"alpha", "beta"}
++        assert (skills_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8") == "deployed alpha"
++        assert (skills_dir / "beta" / "SKILL.md").read_text(encoding="utf-8") == "deployed beta"
++
++    def test_dependency_deployed_skills_survive_without_raw_cache(self, tmp_path):
++        project = _setup_plugin_project(tmp_path)
++
++        deployed_files: list[str] = []
++        for skill in ("alpha", "beta"):
++            deployed_files.extend(_write_deployed_skill(project, skill, f"deployed {skill}"))
++        dep = LockedDependency(
++            repo_url="acme/skill-bundle",
++            depth=1,
++            package_type="skill_bundle",
++            deployed_files=deployed_files,
++            skill_subset=["alpha", "beta"],
++        )
++        _write_lockfile(project, [dep])
++
++        result = export_plugin_bundle(project, tmp_path / "build")
++
++        skills_dir = result.bundle_path / "skills"
++        assert {path.name for path in skills_dir.iterdir()} == {"alpha", "beta"}
++        assert (skills_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8") == "deployed alpha"
++        assert (skills_dir / "beta" / "SKILL.md").read_text(encoding="utf-8") == "deployed beta"
++
++    def test_dependency_skill_subset_empty_resolution_errors(self, tmp_path):
++        project = _setup_plugin_project(tmp_path)
++        deployed_files = _write_deployed_skill(project, "gamma", "deployed gamma")
++        dep = LockedDependency(
++            repo_url="acme/skill-bundle",
++            depth=1,
++            package_type="skill_bundle",
++            deployed_files=deployed_files,
++            skill_subset=["alpha"],
++        )
++        _write_lockfile(project, [dep])
++
++        with pytest.raises(
++            ValueError,
++            match=r"skill_subset: alpha\) were not found among its installed files",
++        ):
++            export_plugin_bundle(project, tmp_path / "build")
++
++    def test_dependency_without_deployed_files_or_cache_skips_cleanly(self, tmp_path):
++        """A dep with no attested files and no cached primitives packs cleanly.
++
++        Such a dependency contributes no plugin primitives (e.g. an MCP-only
++        or hooks-config-only package), so pack skips it rather than failing.
++        """
++        project = _setup_plugin_project(tmp_path, agents=["own.agent.md"])
++        dep = LockedDependency(repo_url="acme/missing", depth=1)
++        _write_lockfile(project, [dep])
++
++        result = export_plugin_bundle(project, tmp_path / "build")
++
++        assert (result.bundle_path / "agents" / "own.agent.md").exists()
++        assert not (result.bundle_path / "skills").exists()
++
+     def test_virtual_skill_dependency_does_not_duplicate_skills_dir(self, tmp_path):
+         project = _setup_plugin_project(tmp_path)
+ 
++        deployed_files = _write_deployed_skill(project, "javascript-typescript-jest", "# Jest")
+         dep = LockedDependency(
+             repo_url="github/awesome-copilot",
+             depth=1,
+             resolved_commit="abc123",
+             virtual_path="skills/javascript-typescript-jest",
+             is_virtual=True,
++            deployed_files=deployed_files,
+         )
+         _write_lockfile(project, [dep])
+-        dep_path = (
+-            project
+-            / "apm_modules"
+-            / "github"
+-            / "awesome-copilot"
+-            / "skills"
+-            / "javascript-typescript-jest"
+-        )
+-        dep_path.mkdir(parents=True)
+-        (dep_path / "SKILL.md").write_text("# Jest", encoding="utf-8")
+ 
+         out = tmp_path / "build"
+         result = export_plugin_bundle(project, out)
+@@ -797,40 +1043,29 @@ class TestExportPluginBundle:
+     def test_collision_first_wins(self, tmp_path):
+         project = _setup_plugin_project(tmp_path)
+ 
+-        # Two deps with the same agent file
+-        dep1 = LockedDependency(repo_url="acme/first", depth=1)
+-        dep2 = LockedDependency(repo_url="acme/second", depth=1)
++        # Two deps whose attested deployed files map to the same bundle path
++        deployed1 = _write_deployed_agent_at(project, ".github", "shared.agent.md", "from-first")
++        deployed2 = _write_deployed_agent_at(project, ".claude", "shared.agent.md", "from-second")
++        dep1 = LockedDependency(repo_url="acme/first", depth=1, deployed_files=deployed1)
++        dep2 = LockedDependency(repo_url="acme/second", depth=1, deployed_files=deployed2)
+         _write_lockfile(project, [dep1, dep2])
+ 
+-        dep1_path = project / "apm_modules" / "acme" / "first"
+-        _make_apm_dir(dep1_path, agents=["shared.agent.md"])
+-        dep2_path = project / "apm_modules" / "acme" / "second"
+-        _make_apm_dir(dep2_path, agents=["shared.agent.md"])
+-
+         out = tmp_path / "build"
+         with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
+             result = export_plugin_bundle(project, out)
+ 
+         content = (result.bundle_path / "agents" / "shared.agent.md").read_text()
+-        assert "shared.agent.md" in content  # From dep1
++        assert content == "from-first"  # First writer wins
+ 
+     def test_collision_force_last_wins(self, tmp_path):
+         project = _setup_plugin_project(tmp_path)
+ 
+-        dep1 = LockedDependency(repo_url="acme/first", depth=1)
+-        dep2 = LockedDependency(repo_url="acme/second", depth=1)
++        deployed1 = _write_deployed_agent_at(project, ".github", "shared.agent.md", "from-first")
++        deployed2 = _write_deployed_agent_at(project, ".claude", "shared.agent.md", "from-second")
++        dep1 = LockedDependency(repo_url="acme/first", depth=1, deployed_files=deployed1)
++        dep2 = LockedDependency(repo_url="acme/second", depth=1, deployed_files=deployed2)
+         _write_lockfile(project, [dep1, dep2])
+ 
+-        dep1_path = project / "apm_modules" / "acme" / "first"
+-        agents1 = dep1_path / ".apm" / "agents"
+-        agents1.mkdir(parents=True)
+-        (agents1 / "shared.agent.md").write_text("from-first")
+-
+-        dep2_path = project / "apm_modules" / "acme" / "second"
+-        agents2 = dep2_path / ".apm" / "agents"
+-        agents2.mkdir(parents=True)
+-        (agents2 / "shared.agent.md").write_text("from-second")
+-
+         out = tmp_path / "build"
+         with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
+             result = export_plugin_bundle(project, out, force=True)
+@@ -839,6 +1074,12 @@ class TestExportPluginBundle:
+         assert content == "from-second"
+ 
+     def test_hooks_merged(self, tmp_path):
++        """Root (first-party) hooks are packed; dependency cache hooks are not.
++
++        Dependency hooks live in the unattested apm_modules cache, so they are
++        no longer merged into the bundle (provenance guarantee). Only the
++        project's own hooks reach hooks.json.
++        """
+         project = _setup_plugin_project(tmp_path)
+ 
+         # Root hooks
+@@ -846,7 +1087,7 @@ class TestExportPluginBundle:
+         root_hooks_dir.mkdir(parents=True, exist_ok=True)
+         (root_hooks_dir / "hooks.json").write_text(json.dumps({"preCommit": ["root-lint"]}))
+ 
+-        # Dep hooks
++        # Dep hooks planted in the unattested cache -- must be ignored
+         dep = LockedDependency(repo_url="acme/hooks-pkg", depth=1)
+         _write_lockfile(project, [dep])
+         dep_path = project / "apm_modules" / "acme" / "hooks-pkg"
+@@ -860,12 +1101,18 @@ class TestExportPluginBundle:
+         result = export_plugin_bundle(project, out)
+ 
+         hooks = json.loads((result.bundle_path / "hooks.json").read_text())
+-        # Root wins on key collision
++        # Only first-party (root) hooks are packed
+         assert hooks["preCommit"] == ["root-lint"]
+-        # Dep-only key preserved
+-        assert hooks["postPush"] == ["deploy"]
++        # Unattested dependency-only hook keys are NOT packed
++        assert "postPush" not in hooks
+ 
+     def test_mcp_merged(self, tmp_path):
++        """Root (first-party) MCP is packed; dependency cache MCP is not.
++
++        Dependency .mcp.json lives in the unattested apm_modules cache and is
++        not recorded in deployed_files, so it is no longer merged into the
++        bundle. Only the project's own MCP config reaches .mcp.json.
++        """
+         project = _setup_plugin_project(tmp_path)
+ 
+         # Root MCP
+@@ -873,7 +1120,7 @@ class TestExportPluginBundle:
+             json.dumps({"mcpServers": {"root-db": {"command": "root-server"}}})
+         )
+ 
+-        # Dep MCP
++        # Dep MCP planted in the unattested cache -- must be ignored
+         dep = LockedDependency(repo_url="acme/mcp-pkg", depth=1)
+         _write_lockfile(project, [dep])
+         dep_path = project / "apm_modules" / "acme" / "mcp-pkg"
+@@ -893,10 +1140,10 @@ class TestExportPluginBundle:
+         result = export_plugin_bundle(project, out)
+ 
+         mcp = json.loads((result.bundle_path / ".mcp.json").read_text())
+-        # Root wins on name collision
++        # Only first-party (root) MCP servers are packed
+         assert mcp["mcpServers"]["root-db"]["command"] == "root-server"
+-        # Dep-only server preserved
+-        assert mcp["mcpServers"]["dep-only"]["command"] == "extra"
++        # Unattested dependency-only server is NOT packed
++        assert "dep-only" not in mcp["mcpServers"]
+ 
+     def test_empty_project(self, tmp_path):
+         project = _setup_plugin_project(tmp_path)
+@@ -984,20 +1231,12 @@ class TestExportPluginBundleViaPackBundle:
+         from apm_cli.bundle.packer import pack_bundle
+ 
+         project = _setup_plugin_project(tmp_path)
+-        dep1 = LockedDependency(repo_url="acme/first", depth=1)
+-        dep2 = LockedDependency(repo_url="acme/second", depth=1)
++        deployed1 = _write_deployed_agent_at(project, ".github", "shared.agent.md", "from-first")
++        deployed2 = _write_deployed_agent_at(project, ".claude", "shared.agent.md", "from-second")
++        dep1 = LockedDependency(repo_url="acme/first", depth=1, deployed_files=deployed1)
++        dep2 = LockedDependency(repo_url="acme/second", depth=1, deployed_files=deployed2)
+         _write_lockfile(project, [dep1, dep2])
+ 
+-        dep1_path = project / "apm_modules" / "acme" / "first"
+-        a1 = dep1_path / ".apm" / "agents"
+-        a1.mkdir(parents=True)
+-        (a1 / "shared.agent.md").write_text("from-first")
+-
+-        dep2_path = project / "apm_modules" / "acme" / "second"
+-        a2 = dep2_path / ".apm" / "agents"
+-        a2.mkdir(parents=True)
+-        (a2 / "shared.agent.md").write_text("from-second")
+-
+         out = tmp_path / "build"
+         with patch("apm_cli.bundle.plugin_exporter._rich_warning"):
+             result = pack_bundle(project, out, fmt="plugin", force=True)

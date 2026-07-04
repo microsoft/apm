@@ -262,9 +262,17 @@ def test_apm_pack_directory_symlink_does_not_escape(tmp_path: Path) -> None:
 
     result = _run_pack_apm(project)
 
-    # Pack succeeds (attested files copy) but the symlinked secret never lands.
-    assert result.returncode == 0, result.stdout + result.stderr
-    bundle = _bundle_dir(project)
-    assert not (bundle / ".github" / "skills" / "alpha" / "leak").exists()
-    leaked = list(bundle.rglob("secret.md"))
-    assert not leaked, f"external secret leaked into bundle: {leaked}"
+    # Two acceptable outcomes prove the same invariant across Python versions:
+    #  (a) pack succeeds and the symlinked secret simply never lands (rglob
+    #      does not descend directory symlinks on 3.12+), or
+    #  (b) the per-child containment guard fires and pack fails loud with an
+    #      escape error (stronger refusal).
+    # Either way, the external secret must NOT enter the bundle.
+    combined = result.stdout + result.stderr
+    if result.returncode != 0:
+        assert "escapes project root" in combined, combined
+    else:
+        bundle = _bundle_dir(project)
+        assert not (bundle / ".github" / "skills" / "alpha" / "leak").exists()
+        leaked = list(bundle.rglob("secret.md"))
+        assert not leaked, f"external secret leaked into bundle: {leaked}"
