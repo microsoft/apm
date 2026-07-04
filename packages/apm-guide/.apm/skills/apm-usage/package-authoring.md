@@ -115,6 +115,9 @@ Before: encode the target in a filename such as `my-pkg-codex-hooks.json`.
 After: keep hook filenames generic and let the consumer set `targets: [codex]`.
 Combined deprecated stems such as `claude-codex-hooks.json` route to every
 named target token during the migration window.
+Stems with target tokens outside the trailing target suffix (for example
+`codex-launch-hooks.json`) fall back to universal or suffix routing and print a
+warning naming the ignored token.
 
 During the deprecation window, existing suffix-named hook files still
 route to their matching harness and emit an install-time warning. Once a

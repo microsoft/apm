@@ -107,6 +107,9 @@ Before: name the manifest `my-pkg-codex-hooks.json`. After: keep
 `hooks.json` generic and let the consumer set `targets: [codex]`.
 Combined deprecated stems such as `claude-codex-hooks.json` route to every
 named target token during the migration window.
+Stems with target tokens outside the trailing target suffix (for example
+`codex-launch-hooks.json`) fall back to universal or suffix routing and print a
+warning naming the ignored token.
 :::
 
 Supported targets and where the integrator writes:

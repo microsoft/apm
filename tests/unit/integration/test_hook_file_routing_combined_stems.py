@@ -59,4 +59,39 @@ def test_unknown_suffix_with_known_token_warns_before_universal_fallback(
     assert "hook filename routing could not resolve" in output
     assert "claude-launch-hooks.json" in output
     assert "contains target token(s) [claude]" in output
-    assert "treats it as universal" in output
+    assert "universal fallback" in output
+
+
+def test_known_token_outside_target_suffix_warns_when_routed_to_last_token(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    mixed = tmp_path / "claude-approval-codex-hooks.json"
+    warned_packages: set[str] = set()
+
+    assert [
+        p.name
+        for p in filter_hook_files_for_target(
+            [mixed],
+            "codex",
+            package_name="ponytail",
+            package_identity="DietrichGebert/ponytail",
+            warned_packages=warned_packages,
+        )
+    ] == [mixed.name]
+    assert (
+        filter_hook_files_for_target(
+            [mixed],
+            "claude",
+            package_name="ponytail",
+            package_identity="DietrichGebert/ponytail",
+            warned_packages=warned_packages,
+        )
+        == []
+    )
+
+    output = capsys.readouterr().out
+    assert "hook filename routing could not resolve" in output
+    assert "claude-approval-codex-hooks.json" in output
+    assert "contains target token(s) [claude]" in output
+    assert "uses the suffix" in output
