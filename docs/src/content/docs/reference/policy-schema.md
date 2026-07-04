@@ -463,7 +463,7 @@ This realizes Claude Code's "skills-directory plugin" contract: a folder under a
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `deny_all` | `bool` | `false` | When `true`, suppresses bin/ deployment for every `marketplace_plugin` package, regardless of individual `deny` entries. |
-| `deny` | `list<string>` | `[]` | Package canonical strings whose bin/ executables must not be deployed. Entries are normalized before matching, so `MyOrg/MyPlugin`, `github.com/myorg/myplugin`, and `https://github.com/myorg/myplugin.git` all match `myorg/myplugin`. |
+| `deny` | `list<string>` | `[]` | Package identities whose bin/ executables must not be deployed. Entries are normalized before matching, so `MyOrg/MyPlugin`, `github.com/myorg/myplugin`, and `https://github.com/myorg/myplugin.git` all match `myorg/myplugin`. |
 
 ```yaml
 bin_deploy:
