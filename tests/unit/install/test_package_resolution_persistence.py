@@ -13,7 +13,7 @@ def test_persist_dependency_list_reports_generic_manifest_update():
     data = {"dependencies": {"apm": []}}
     current_deps = ["danielmeppiel/genesis#v0.4.0"]
 
-    with patch("apm_cli.utils.yaml_io.dump_yaml") as dump_yaml:
+    with patch("apm_cli.utils.yaml_io.dump_yaml_roundtrip") as dump_yaml_roundtrip:
         persist_dependency_list_if_changed(
             dependencies_changed=True,
             data=data,
@@ -26,5 +26,5 @@ def test_persist_dependency_list_reports_generic_manifest_update():
             sys_exit=Mock(),
         )
 
-    dump_yaml.assert_called_once_with(data, "apm.yml")
+    dump_yaml_roundtrip.assert_called_once_with(data, "apm.yml")
     logger.success.assert_called_once_with("Updated apm.yml dependency entries")

@@ -29,7 +29,7 @@ If a script named `start` exists, it is marked as the default and runs when you 
 
 None. `apm list` takes no flags or arguments.
 
-The root command exposes only `--version` and `--help`.
+`apm list` exposes only `--help`.
 
 ## Examples
 

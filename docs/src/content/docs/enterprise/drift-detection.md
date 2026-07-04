@@ -23,7 +23,7 @@ Four concrete categories. Each has a different signal and a different fix.
 
 Marketplace-shadow drift -- the same plugin name appearing under more than
 one registered marketplace -- is reported inline by `apm install` when it
-happens; see [security and supply chain](./security-and-supply-chain/).
+happens; see [security model](./security/).
 
 ## The local commands
 
@@ -123,8 +123,10 @@ so it only provides the CLI without running `apm install`, then audit with
 `--no-drift` skips the install-replay (which requires a warm cache that
 `setup-only` does not populate). The `content-integrity` check verifies
 SHA-256 hashes of every deployed file against `deployed_file_hashes` in
-`apm.lock.yaml` without needing to replay the install. Any byte-level
-change to a deployed file since the last install is caught by this check.
+`apm.lock.yaml` without needing to replay the install. Any content
+change to a deployed file since the last install is caught by this check
+(line-ending-only differences are normalized away per req-lk-012, so a
+CRLF/LF flip alone is not flagged).
 
 See [Enforce in CI](./enforce-in-ci/#audit-only-ci-pattern) for the full
 recipe and a comparison table of the two patterns.
@@ -174,14 +176,15 @@ phone home; the harness is yours.
 
 ## Reporting formats
 
-`apm audit --ci` and `apm audit` both accept `--format` and `--output`.
+`apm audit --ci` accepts `--format text|json|sarif` and `--output`;
+non-CI `apm audit` also accepts `markdown`.
 
 | Format | Use |
 |---|---|
 | `text` (default) | Terminal review, pull-request logs |
 | `json` | Custom dashboards, ticketing integrations |
 | `sarif` | GitHub code scanning, Defender for Cloud, any SARIF-aware viewer |
-| `markdown` | Pull-request comments, weekly status digests |
+| `markdown` | Pull-request comments, weekly status digests (non-CI `apm audit` only) |
 
 `--format json|sarif|markdown` cannot be combined with `--strip` or
 `--dry-run`; those modes are interactive by design.
@@ -193,7 +196,7 @@ Once drift is detected, remediation routes back to two pages:
 - [Enforce in CI](./enforce-in-ci/) -- wire `apm audit --ci` into branch
   protection so future drift cannot land. The same command that detects
   drift here is the one that gates merges.
-- [Security and supply chain](./security-and-supply-chain/) -- scope
+- [Security model](./security/) -- scope
   tokens, lock the registry proxy, and tighten `apm-policy.yml` so the
   drift you cleaned up cannot reappear from a new source.
 

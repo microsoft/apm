@@ -9,7 +9,7 @@ You wrote a new rule in `<org>/.github/apm-policy.yml`. Do not flip it to `block
 
 This page is the rollout sequence. Author in `warn`, measure, remediate, then escalate to `block`. Per-rule mode flips do not exist; the dial is the top-level `enforcement` field.
 
-For the schema, see [Policy Reference](./policy-reference/). For the trust contract and bypass surfaces, see [Governance overview](./governance-overview/). For wiring the gate into pull requests, see [Enforce in CI](./enforce-in-ci/).
+For the schema, see [Policy Reference](./policy-reference/). For the trust contract and bypass surfaces, see [Governance deep-dive](./governance-guide/). For wiring the gate into pull requests, see [Enforce in CI](./enforce-in-ci/).
 
 ---
 
@@ -99,7 +99,7 @@ There is no `dependencies.deny.enforcement: block` knob. The top-level `enforcem
 If you need a single rule to block while everything else only warns, you have two options:
 
 - **Stage rules.** Land rule A in `warn`. When clean, merge rule B in `warn`. When both are clean, flip `enforcement: block`. Slower, but the policy file stays simple.
-- **Split policies via `extends:`.** Author a strict child policy that `extends:` your org policy and lives in a specific scope (e.g., a sub-org's `.github/apm-policy.yml`). Inheritance is tighten-only, so the child can escalate `warn` to `block` for its repos only. See `policy/inheritance.py` and the [Governance overview](./governance-overview/) section on composition.
+- **Split policies via `extends:`.** Author a strict child policy that `extends:` your org policy and lives in a specific scope (e.g., a sub-org's `.github/apm-policy.yml`). Inheritance is tighten-only, so the child can escalate `warn` to `block` for its repos only. See `policy/inheritance.py` and the [Governance deep-dive](./governance-guide/) section on composition.
 
 ---
 

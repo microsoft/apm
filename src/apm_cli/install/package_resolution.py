@@ -180,6 +180,87 @@ def normalize_and_merge_skill_subset(
     return sorted(seen)
 
 
+def effective_deploy_skill_subset(
+    *,
+    skill_subset_from_cli: bool,
+    cli_subset: builtins.tuple[str, ...] | builtins.list[str] | None,
+    persisted_subset: builtins.tuple[str, ...] | builtins.list[str] | None,
+) -> builtins.tuple[str, ...] | None:
+    """Resolve the skill subset to *deploy* for a SKILL_BUNDLE.
+
+    ``--skill`` is additive (issue #1786): a targeted ``--skill B`` install must
+    land on top of skills already pinned for the bundle instead of erasing them.
+    The deployment therefore uses the union of the persisted manifest subset and
+    the current CLI ``--skill`` values -- not the raw CLI subset alone.
+
+    ``--skill '*'`` (signalled by ``skill_subset_from_cli`` True with an empty
+    ``cli_subset``) resets the bundle to its full set, so this returns ``None``
+    meaning "deploy all skills".
+
+    Returns a sorted, deduplicated tuple, or ``None`` for "deploy all".
+    """
+    if skill_subset_from_cli and not cli_subset:
+        return None  # --skill '*' -> full bundle
+    merged: builtins.set[str] = builtins.set()
+    if persisted_subset:
+        merged.update(persisted_subset)
+    if cli_subset:
+        merged.update(cli_subset)
+    return builtins.tuple(sorted(merged)) or None
+
+
+def cli_skill_subset(
+    skill_names: builtins.tuple[str, ...],
+) -> builtins.tuple[str, ...] | None:
+    """Resolve raw CLI ``--skill`` names to a subset, or None for absent / ``'*'``.
+
+    ``--skill '*'`` means "all skills" (same as absent); the resolver still
+    learns the flag was present via a separate CLI-origin flag, so this
+    collapses both the absent and ``'*'`` cases to None.
+    """
+    if skill_names and not any(s == "*" for s in skill_names):
+        return builtins.tuple(skill_names)
+    return None
+
+
+def apply_cli_skill_pin(
+    dep_ref: Any,
+    cli_subset: builtins.tuple[str, ...] | None,
+    skill_subset_from_cli: bool,
+    current_deps: builtins.list,
+    apm_yml_entries: dict,
+    *,
+    dependency_reference_cls: Any,
+    logger: Any | None = None,
+) -> None:
+    """Attach, merge, or reset a CLI ``--skill`` pin on ``dep_ref`` in place.
+
+    With an explicit ``cli_subset``, merge it additively with any persisted
+    ``skills:`` so repeated ``--skill`` invocations union rather than replace
+    (issue #1771). With ``--skill '*'`` (``skill_subset_from_cli`` True and an
+    empty ``cli_subset``), reset the pin back to the full bundle and record the
+    refreshed plain-string ``apm.yml`` entry under the reference's canonical key
+    so manifest and on-disk state agree on the whole bundle (issue #1786 reset).
+    """
+    identity = dep_ref.get_identity()
+    if cli_subset:
+        dep_ref.skill_subset = normalize_and_merge_skill_subset(
+            cli_subset,
+            current_deps,
+            identity,
+            dependency_reference_cls=dependency_reference_cls,
+        )
+        return
+    if skill_subset_from_cli:
+        dep_ref.skill_subset = None
+        apm_yml_entries[dep_ref.to_canonical()] = dep_ref.to_apm_yml_entry()
+        if logger:
+            logger.verbose_detail(
+                f"    [i] {identity}: skill pin reset to full bundle "
+                "(--skill '*'); a later bare 'apm install' deploys all skills"
+            )
+
+
 def manifest_has_different_entry_for_identity(
     current_deps: builtins.list,
     identity: str,
@@ -289,9 +370,9 @@ def persist_dependency_list_if_changed(
         return
     data[dep_section]["apm"] = current_deps
     try:
-        from apm_cli.utils.yaml_io import dump_yaml
+        from apm_cli.utils.yaml_io import dump_yaml_roundtrip
 
-        dump_yaml(data, apm_yml_path)
+        dump_yaml_roundtrip(data, apm_yml_path)
         if logger:
             logger.success(f"Updated {apm_yml_filename} dependency entries")
     except Exception as e:

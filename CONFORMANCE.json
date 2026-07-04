@@ -901,6 +901,17 @@
     },
     {
       "conformance_class": "consumer",
+      "id": "req-rs-015",
+      "keyword": "MUST",
+      "section": "7.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_resolution_reqs.py::test_resolver_replays_locked_commit_without_network"
+      ]
+    },
+    {
+      "conformance_class": "consumer",
       "id": "req-sc-001",
       "keyword": "MUST",
       "section": "10.4",
@@ -1079,7 +1090,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 66,
+      "active": 67,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1103,5 +1114,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 95
+  "total_requirements": 96
 }

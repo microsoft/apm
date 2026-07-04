@@ -74,7 +74,12 @@ class TestCommandExecutor:
         assert "stdout:" in written
 
     def test_timeout_path_logs_timeout(self, apm_log_home: Path) -> None:
-        entry = _cmd("sleep 5", timeout_sec=1)
+        import sys
+
+        # Use a portable long-running process (python sleep) so the 1s timeout
+        # reliably fires on every platform -- ``sleep`` is not a Windows shell
+        # builtin, so a literal "sleep 5" exits immediately on Windows.
+        entry = _cmd(f'{sys.executable} -c "import time; time.sleep(5)"', timeout_sec=1)
         se.execute_script(entry, _event())
         assert "status=timeout" in apm_log_home.read_text()
 

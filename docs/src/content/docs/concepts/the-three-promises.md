@@ -11,11 +11,11 @@ these three.
 
 ## Promise 1: Portable by manifest
 
-One `apm.yml`. Seven harnesses. Reproducible AI agent setup.
+One `apm.yml`. Eight default harnesses. Reproducible AI agent setup.
 
 Every developer who clones the repo runs `apm install` and gets the
 same skills, prompts, instructions, hooks, and MCP servers wired into
-Copilot, Claude, Cursor, OpenCode, Codex, Gemini, and Windsurf. The
+Copilot, Claude, Cursor, OpenCode, Codex, Gemini, Windsurf, and Kiro. The
 lockfile pins exact versions and content hashes. New contributor
 onboarding for AI context goes from "follow this 12-step README" to
 one command.
@@ -32,8 +32,8 @@ git clone <repo> && cd <repo> && apm install
   manifest with `dependencies`, `devDependencies`, `scripts`, `includes`,
   and `targets` / `target` fields consumed by every harness.
 - `src/apm_cli/integration/targets.py` -- the registered harnesses an
-  install fans out to (Copilot, Claude, Cursor, Codex, Gemini,
-  OpenCode, and Windsurf, with `vscode` as the Copilot-compatible alias).
+  install fans out to by default (Copilot, Claude, Cursor, Codex, Gemini,
+  OpenCode, Windsurf, and Kiro); Antigravity is registered as an explicit-only target.
 - `src/apm_cli/deps/lockfile.py` -- the `LockEntry.content_hash`
   field (SHA-256 of the package file tree) that makes "same install
   on every clone" mean byte-for-byte the same.
@@ -128,7 +128,7 @@ apm install --dry-run <package>
 The verbs rhyme on purpose -- `apm install`, `apm update`,
 `apm list`, `apm prune`. The package model does not. APM resolves
 primitives (skills, prompts, instructions, hooks, MCP servers) and
-deploys them into seven different agent harnesses from one manifest.
+deploys them into eight default agent harnesses from one manifest.
 npm has no equivalent of the harness fan-out, the install-time
 policy gate, or the Unicode scan. Promise 1 is the npm-shaped half;
 Promise 2 and Promise 3 are not.

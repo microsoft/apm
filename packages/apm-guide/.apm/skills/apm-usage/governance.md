@@ -348,7 +348,7 @@ These checks run without a policy file:
 - `deployed-files-present` -- all deployed files exist
 - `no-orphaned-packages` -- no packages in lockfile absent from manifest
 - `config-consistency` -- MCP configs match lockfile
-- `content-integrity` -- no critical Unicode in deployed files
+- `content-integrity` -- no critical Unicode in deployed files, and no SHA-256 drift between on-disk content and the hash recorded at install time (line endings are normalized, so CRLF/LF platform differences never false-positive)
 
 ## Policy checks (with --policy)
 

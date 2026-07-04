@@ -1,0 +1,73 @@
+name: CRLF Invariance (apm#1952)
+
+# Empirical cross-platform proof that the per-deployed-file content hash is
+# line-ending invariant. The probe drives the REAL git core.autocrlf=true
+# translation through the product's compute_file_hash (the single function both
+# `apm install` record and `apm audit` verify call), so a Windows checkout
+# (CRLF on disk) and a POSIX checkout (LF on disk) MUST yield the identical
+# hash. The gather job fails if the three OS hashes are not byte-identical.
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/apm_cli/utils/content_hash.py'
+      - 'src/apm_cli/utils/atomic_io.py'
+      - 'scripts/crlf_invariance_probe.py'
+      - '.github/workflows/crlf-invariance.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  probe:
+    name: Probe (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Run cross-platform content-hash probe
+        run: uv run --python ${{ env.PYTHON_VERSION }} python scripts/crlf_invariance_probe.py --out hash.txt
+
+      - name: Upload hash artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crlf-hash-${{ matrix.os }}
+          path: hash.txt
+
+  gather:
+    name: Assert identical hashes
+    needs: probe
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all hash artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: crlf-hash-*
+          path: hashes
+
+      - name: Compare hashes across platforms
+        run: |
+          set -euo pipefail
+          echo "Per-OS recorded hashes:"
+          for f in hashes/*/hash.txt; do
+            printf '  %-28s %s\n' "$f" "$(cat "$f")"
+          done
+          UNIQUE=$(cat hashes/*/hash.txt | sort -u | wc -l | tr -d ' ')
+          if [ "$UNIQUE" != "1" ]; then
+            echo "::error::content hash diverges across platforms ($UNIQUE distinct values) -- apm#1952 regression"
+            exit 1
+          fi
+          echo "[+] All platform hashes are byte-identical -- line-ending invariant."

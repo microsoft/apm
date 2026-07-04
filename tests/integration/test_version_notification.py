@@ -30,7 +30,7 @@ class TestVersionNotificationIntegration(unittest.TestCase):
             # Check that update notification appears in output
             self.assertIn("A new version", result.output)
             self.assertIn("0.7.0", result.output)
-            self.assertIn("apm update", result.output)
+            self.assertIn("apm self-update", result.output)
 
     @patch("apm_cli.commands._helpers.check_for_updates")
     def test_no_notification_when_up_to_date(self, mock_check):
@@ -45,7 +45,7 @@ class TestVersionNotificationIntegration(unittest.TestCase):
 
             # Check that update notification does NOT appear
             self.assertNotIn("A new version", result.output)
-            self.assertNotIn("apm update", result.output)
+            self.assertNotIn("apm self-update", result.output)
 
     @patch("apm_cli.commands._helpers.check_for_updates")
     def test_notification_does_not_block_command(self, mock_check):

@@ -16,7 +16,7 @@ For dev-only versus prod separation in the manifest, see
 
 ## Why they are target-specific
 
-A skill is a markdown file APM can route to seven harnesses. A hook
+A skill is a markdown file APM can route to every canonical skill target. A hook
 is a runtime callback fired by one harness inside its own tool loop.
 A slash command is a command-palette entry surfaced by an IDE.
 Neither generalizes: nothing reaches `AGENTS.md`, nothing routes to

@@ -492,6 +492,8 @@ def run_replay(config: ReplayConfig, logger: CheckLogger) -> Path:
                     )
 
                 package_info = _build_package_info(lock_dep, install_path)
+                if lock_dep.local_path == _SELF_KEY:
+                    package_info.root_local_project_root = project_root
                 dep_key = lock_dep.get_unique_key()
 
                 integrate_package_primitives(

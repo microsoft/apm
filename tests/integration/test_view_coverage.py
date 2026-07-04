@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from click.testing import CliRunner
 
+from apm_cli.cli import cli
 from apm_cli.commands.view import (
     _lookup_lockfile_ref,
     resolve_package_path,
@@ -163,3 +166,64 @@ class TestLookupLockfileRef:
 
             assert ref == ""
             assert commit == ""
+
+
+class TestViewVersionsRegistryRouting:
+    """Integration tests for the --registry CLI surface.
+
+    These tests exercise the real Click-decorated ``view`` command with a
+    real ``apm.yml`` fixture on disk.  Only external I/O is mocked:
+    ``resolve_effective_registries``, ``resolve_for_url``, and
+    ``RegistryClient``.  This verifies that the ``--registry NAME`` flag
+    routes through ``_display_registry_versions`` and renders the
+    version/published-timestamp table, and that ``--registry UNKNOWN``
+    exits 1 with an informative error message.
+    """
+
+    def test_registry_flag_routes_to_named_registry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--registry NAME routes to the named registry and prints version data."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text("name: test-project\nversion: 1.0.0\n")
+
+        mock_entry = SimpleNamespace(version="2.3.0", published_at="2024-06-01")
+
+        with (
+            patch(
+                "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+                return_value=({"my-registry": "https://example.com/r"}, "my-registry"),
+            ),
+            patch("apm_cli.deps.registry.auth.resolve_for_url", return_value=None),
+            patch("apm_cli.deps.registry.client.RegistryClient") as mock_cls,
+        ):
+            mock_cls.return_value.list_versions.return_value = [mock_entry]
+            runner = CliRunner()
+            result = runner.invoke(
+                cli,
+                ["view", "acme/web-skills", "versions", "--registry", "my-registry"],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "2.3.0" in result.output
+
+    def test_registry_flag_unknown_name_exits_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--registry UNKNOWN exits 1 and names the missing registry."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text("name: test-project\nversion: 1.0.0\n")
+
+        with patch(
+            "apm_cli.deps.registry.config_loader.resolve_effective_registries",
+            return_value=({"known-reg": "https://example.com/r"}, "known-reg"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli,
+                ["view", "acme/web-skills", "versions", "--registry", "unknown-name"],
+            )
+
+        assert result.exit_code == 1
+        assert "unknown-name" in result.output
+        assert "not configured" in result.output

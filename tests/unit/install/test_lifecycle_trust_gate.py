@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from apm_cli.core.lifecycle_scripts import (
     LifecycleEvent,
@@ -17,12 +18,19 @@ from apm_cli.core.script_trust import trust_project_scripts
 
 
 def _write_apm_yml(path: Path, sentinel: Path) -> None:
-    """Write an apm.yml with a post-install command that creates sentinel."""
-    cmd = f"{sys.executable} -c \\\"open('{sentinel}', 'w').close()\\\""
-    path.write_text(
-        f'name: test-pkg\nlifecycle:\n  post-install:\n    - type: command\n      run: "{cmd}"\n',
-        encoding="utf-8",
-    )
+    """Write an apm.yml with a post-install command that creates sentinel.
+
+    The command path and sentinel path may contain Windows backslashes, so the
+    YAML is emitted via ``yaml.safe_dump`` (which quotes/escapes correctly) and
+    the embedded Python code uses a raw string literal so backslashes survive
+    both YAML round-trip and Python parsing on every platform.
+    """
+    cmd = f"{sys.executable} -c \"open(r'{sentinel}', 'w').close()\""
+    data = {
+        "name": "test-pkg",
+        "lifecycle": {"post-install": [{"type": "command", "run": cmd}]},
+    }
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
 
 def _fire_post_install(project_root: Path) -> None:

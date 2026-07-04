@@ -94,7 +94,7 @@ changed, file B must also change" rule.** The check is enforced by
 APM itself, not by the ruleset.
 
 `apm audit --ci` runs lockfile consistency checks unconditionally
-(see [Governance overview](./governance-overview/) for the non-bypass contract).
+(see [Governance deep-dive](./governance-guide/) for the non-bypass contract).
 A PR that edits `apm.yml` without updating `apm.lock.yaml` -- or
 commits a lockfile that does not match the manifest -- fails the
 `audit` check. So Recipe 1 already covers this case: if `audit` is
@@ -120,7 +120,7 @@ the lockfile pins what was published, and signed commits give you a
 verifiable author chain on the source side.
 
 This is most valuable on the `<org>/.github` repo that hosts
-`apm-policy.yml` -- see [Governance overview](./governance-overview/) for the
+`apm-policy.yml` -- see [Governance deep-dive](./governance-guide/) for the
 trust-anchor rationale.
 
 ## Pitfalls
@@ -148,7 +148,7 @@ trust-anchor rationale.
 
 - [Enforce in CI](./enforce-in-ci/) -- the workflow that emits the
   check this page requires.
-- [Governance overview](./governance-overview/) -- bypass contract, install-gate
+- [Governance deep-dive](./governance-guide/) -- bypass contract, install-gate
   guarantees, what `apm audit --ci` actually verifies.
 - [APM policy reference](./policy-reference/) -- the policy schema
   the audit check evaluates.

@@ -7,15 +7,129 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Removed
+### Performance
 
-- Removed legacy `.chatmode.md` primitive format and `chatmodes/` subdirectory
-  support. Use `.agent.md` files in `.apm/agents/` instead. All discovery
-  patterns, integrator file-scan paths, watcher watch-paths, and extension maps
-  have been updated to the `agents/` + `.agent.md` convention. (#840)
+- `apm install` with a committed lockfile no longer re-resolves branch-pinned
+  and tagless locked dependencies over the network. The tiered ref resolver's
+  L0 cache is now seeded from the lockfile before resolution runs, eliminating
+  redundant commits-API calls on every locked install (2 calls -> 0 on a
+  1-direct + 1-transitive branch-pinned install). Skipped under `--update` /
+  `--refresh`. Verbose tier stats now also correctly track concrete-SHA refs as
+  `sha_passthrough` instead of inflating the `commits_api` counter. --
+  by @srobroek (#1973)
+
+### Changed
+
+- Collapsed repeated `git config` subprocess calls from 3 to 1 per repository
+  during cache operations, cutting process-spawn overhead on `apm install` and
+  `apm update`. (#1974)
 
 ### Fixed
 
+- `apm audit --help` now accurately describes the command's full scope:
+  hidden Unicode scanning, drift detection, and lockfile/policy checks.
+  The previous summary named only Unicode scanning and used the legacy
+  "packages" terminology. (#2017)
+- `apm pack` now cryptographically verifies every dependency file against
+  the lockfile before bundling -- unattested content never ships. It closes a
+  supply-chain provenance hole in **every** format
+  (`--format plugin` and the default `--format apm`): dependency content is
+  packed exclusively from lockfile-attested `deployed_files`, each verified
+  against its `deployed_file_hashes` SHA-256 before it enters the bundle, so a
+  file tampered or corrupted after `apm install` fails the pack instead of
+  shipping silently. The unattested `apm_modules` cache -- which can be stale,
+  partial, or tampered -- is never packed. Subset (`skills:`) filters are
+  respected (only deployed skills are included). If a dependency has cached
+  primitives but no `deployed_files`, `apm pack` fails with an actionable error
+  telling you to run `apm install`. Dependency hooks-config / MCP-config, which
+  is not attested in `deployed_files`, is no longer packed: `apm pack` now warns
+  (`[!]`) and names the dependency (first-party root hooks/MCP are unaffected).
+  Directory entries are walked with per-child containment so a planted
+  directory symlink cannot escape the project root into the bundle. (#2013)
+- `apm install --frozen` no longer spuriously rejects private Git dependencies
+  hosted on non-default Git servers such as Bitbucket Server, GitLab, or GitHub
+  Enterprise; lockfile matching now uses the same host-qualified identity as
+  `apm install`. (#2011)
+- `apm install` and `apm uninstall` no longer strip comments from `apm.yml`
+  while updating dependency entries, so inline annotations and section notes
+  survive dependency updates. (#2012)
+- `apm pack` now produces a `marketplace.json` the Copilot App accepts even
+  when your manifest `name` contains dots, underscores, or other non-kebab-case
+  characters (e.g. `my.marketplace`): the emitted `name` field is normalized to
+  kebab-case, and `apm pack` prints a warning naming the original and emitted
+  values when a rewrite occurs. Internal resolution, registry lookups, and the
+  Codex `interface.displayName` keep the original name. (#2008)
+
+- `apm audit --ci` no longer reports phantom drift for root-local hook files
+  when audit replay writes into a scratch project root. (#1980)
+- Self-defined stdio MCP env placeholders now resolve from the install process
+  environment for Claude Code and Codex instead of being written verbatim.
+  (#1966)
+
+- Self-hosted git hosts such as GitBucket that serve smart-HTTP only at the
+  `.git` path now install successfully over anonymous HTTPS; `apm install` no
+  longer drops the suffix. (#1995)
+
+### Performance
+
+- `apm install` now issues a single `git ls-remote` call per repository when
+  resolving multiple semver git dependencies from the same remote, reducing
+  network round-trips for monorepos with many shared-origin semver deps. (#1975)
+- `apm outdated` now dedupes `git ls-remote` across locked dependencies that
+  share one upstream repository (e.g. several virtual-subdirectory packages
+  from the same monorepo), issuing one listing per repo per run instead of one
+  per dependency. The cache is per-invocation, so a newer upstream ref is still
+  detected on the next run. (#1975)
+
+## [0.23.1] - 2026-06-29
+
+### Fixed
+
+- `apm audit --ci` no longer reports a false `content-integrity` hash-drift
+  failure when a deployed text file is checked out with Windows (`\r\n`) line
+  endings on one platform and POSIX (`\n`) line endings on another. Per-
+  deployed-file hashes are now computed over canonical content (UTF-8 text
+  normalized `\r\n` -> `\n` with a lone `\r` preserved so the carriage-return
+  smuggling vector is still caught, binary hashed raw), so they match across
+  platforms; lockfiles recorded on Windows before this fix re-record once on
+  the next `apm install`. (#1952, #1959)
+
+- `apm install <bundle> --skill X` is now properly additive: a later
+  `apm install <bundle> --skill Y` adds `Y` on top of the existing pin instead
+  of silently removing the previously deployed `X` from disk. Reset the pin to
+  the full bundle with `--skill '*'`, or drop a single skill by editing the
+  `skills:` list in `apm.yml` and re-running `apm install`. (#1955)
+
+## [0.23.0] - 2026-06-28
+
+### Added
+
+- Added a general-purpose lifecycle hooks framework: embed shell-command or
+  HTTPS-webhook scripts in `apm.yml` under a `lifecycle:` key that fire at
+  `pre`/`post` install/update/uninstall events, gated behind `apm lifecycle trust`
+  so nothing runs without explicit consent. The new `apm lifecycle` command
+  (`init`/`validate`/`test`/`trust`/`untrust`) manages and dry-runs them, with
+  cross-platform Windows support. (by @sergio-sisternes-epam) (#1798, #1947)
+- `apm view <package> versions` now routes plain shorthands (e.g.
+  `acme/web-skills`) to the configured default registry, matching `apm install`
+  routing. Added `--registry [NAME]` for explicit control: bare `--registry` uses
+  the lockfile entry or configured default, `--registry NAME` forces a named
+  registry, and a full git URL forces the git path. (by @nadav-y) (#1938)
+
+### Removed
+
+- **BREAKING:** Removed the legacy `.chatmode.md` primitive format and
+  `chatmodes/` directory support across discovery, integration, the watcher, and
+  extension maps. Use `.agent.md` files in `.apm/agents/` instead. (closes #840)
+  (#1931)
+
+### Fixed
+
+- Fixed startup version-check hint to reference `apm self-update` instead
+  of the deprecated `apm update` command. (by @syf2211; closes #1939) (#1943)
+- Fixed GFM table rendering in the documentation site by enabling `markdown.gfm` in the Astro
+  config, restoring pipe tables, strikethrough, and task-list support for all `.mdx` content.
+  (by @syf2211; closes #1940) (#1944)
 - `apm outdated` tag-pattern matching for monorepo virtual subdirectory
   dependencies now derives the `{name}` segment from the `virtual_path`
   basename (e.g., `packages/my-pkg` -> `my-pkg`), aligning with `apm update`
@@ -30,6 +144,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependencies are not reported as updated. (by @nadav-y) (#1927)
 - Fixed spurious version-range diffs for cached transitive registry
   dependencies during `apm update`. (by @nadav-y) (#1921)
+- Fixed `apm install -g --mcp NAME` ignoring the package `targets:` field and
+  `--target` flag at user scope; previously user-scope MCP install wrote to all
+  detected runtimes unconditionally, creating unintended folders (e.g. `~/.kiro/`)
+  when a package targets only a subset. (by @sergio-sisternes-epam) (#1941)
+- Applied six `--help` and flag-naming consistency fixes from the CLI Consistency
+  Report: surfaced the `apm deps update` deprecation and `apm install --runtime`
+  legacy-alias status in help text, dropped the misleading `vscode` runtime value,
+  and promoted `apm compile --force-instructions` as the primary flag (`--no-dedup`
+  kept as a hidden alias). (by @sergio-sisternes-epam; closes #1928) (#1929)
+- Fixed `apm preview <script>` crashing with `ValueError: too many values to
+  unpack` by unpacking all three values returned by the auto-compile step. (by
+  @fmferrari) (#1721)
+- Fixed two false-positive `unintegrated` drift reports in `apm audit --ci` by
+  honoring per-dependency `targets:` and the plural `targets:` key during drift
+  replay. (by @sergio-sisternes-epam) (#1930)
 
 ### Security
 
@@ -43,15 +172,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.22.0] - 2026-06-26
 
 ### Added
-
-- Lifecycle scripts (`apm lifecycle`): run validated shell commands or HTTPS webhooks
-  at `pre/post-install/update/uninstall` events with zero config files beyond
-  `apm.yml`. Project and user lifecycle config lives inside `apm.yml` under
-  `lifecycle:` (no separate files to lose across environments). Project scripts are
-  gated behind `apm lifecycle trust`, which hashes only the canonical `lifecycle:`
-  subtree so editing unrelated `apm.yml` keys never revokes trust. `APM_NO_SCRIPTS=1`
-  kills all scripts for one run; org `executables.deny_all` suppresses scripts as a
-  one-directional safety ceiling. (#1798, #1919)
 
 - Per-dependency `targets:` scopes a dependency's target-specific primitives
   to selected harnesses (for example `targets: [copilot, claude]`), preventing

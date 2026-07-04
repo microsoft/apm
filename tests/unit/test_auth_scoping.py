@@ -141,7 +141,7 @@ class TestBuildRepoUrlTokenScoping:
             url = dl._build_repo_url("acme/rules", use_ssh=False, dep_ref=dep)
         assert "ghp_SHOULD_NOT_LEAK" not in url
         assert "oauth2" not in url
-        assert url == "https://gitlab.com/acme/rules"
+        assert url == "https://gitlab.com/acme/rules.git"
 
     def test_bitbucket_does_not_get_github_token(self):
         dl = _make_downloader(github_token="ghp_TESTTOKEN")

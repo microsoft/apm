@@ -85,7 +85,7 @@ apm lock export [OPTIONS]
 | `--global`, `-g` | off | Read the user-scope (`~/.apm/`) lockfile instead of the current project. |
 | `--timestamp TS` | auto | Pin the SBOM timestamp (ISO 8601, e.g. `2024-06-01T00:00:00+00:00`) for reproducible output. Defaults to `SOURCE_DATE_EPOCH`, then the lockfile's `generated_at`. |
 
-Component identity is a Package URL (`pkg:github/<owner>/<repo>@<commit>` for git deps, `pkg:oci/<name>@<digest>` for registry deps, `pkg:generic/<name>@<content_hash>` for local primitives), and the declared license is passed through verbatim (or `NOASSERTION` when undeclared). Output is deterministic -- components sorted by purl with a pinned timestamp -- so two runs are byte-identical. Credentials in recorded URLs are scrubbed. The diagnostic line routes to stderr, so `apm lock export | jq` stays clean. See [Inventory export (SBOM)](../../enterprise/security-and-supply-chain/#inventory-export-sbom) for the full model.
+Component identity is a Package URL (`pkg:github/<owner>/<repo>@<commit>` for git deps, `pkg:oci/<name>@<digest>` for registry deps, `pkg:generic/<name>@<content_hash>` for local primitives), and the declared license is passed through verbatim (or `NOASSERTION` when undeclared). Output is deterministic -- components sorted by purl with a pinned timestamp -- so two runs are byte-identical. Credentials in recorded URLs are scrubbed. The diagnostic line routes to stderr, so `apm lock export | jq` stays clean. See [Inventory export (SBOM)](../../../enterprise/security/#inventory-export-sbom) for the full model.
 
 Export a CycloneDX SBOM to a file:
 
@@ -125,4 +125,4 @@ To verify the lockfile is up to date in a PR check (and fail if it drifts), use 
 - [`apm install --frozen`](../install/) -- reproduce the lockfile exactly; fails on drift. Use this in CI.
 - [`apm update`](../update/) -- re-resolve, show a plan, prompt for consent, then install.
 - [`apm outdated`](../outdated/) -- report which dependencies have newer refs available.
-- [Inventory export (SBOM)](../../enterprise/security-and-supply-chain/#inventory-export-sbom) -- the SBOM/declared-license model behind `apm lock export`.
+- [Inventory export (SBOM)](../../../enterprise/security/#inventory-export-sbom) -- the SBOM/declared-license model behind `apm lock export`.
