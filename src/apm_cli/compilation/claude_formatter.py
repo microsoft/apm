@@ -302,7 +302,7 @@ class ClaudeFormatter:
 
         # Dependencies section (only for root CLAUDE.md)
         if placement.dependencies:
-            sections.append("# Dependencies")
+            sections.append("## Dependencies")
             for dep in placement.dependencies:
                 sections.append(dep)
             sections.append("")
@@ -311,9 +311,9 @@ class ClaudeFormatter:
         if placement.is_root:
             constitution = read_constitution(self.source_dir)
             if constitution:
-                sections.append("# Constitution")
+                sections.append("## Constitution")
                 sections.append("")
-                sections.append(constitution.strip())
+                sections.append(_demote_h1_headings(constitution).strip())
                 sections.append("")
 
         # Inline instructions grouped by pattern.
@@ -384,3 +384,10 @@ def format_claude_md(
     """
     formatter = ClaudeFormatter(base_dir)
     return formatter.format_distributed(primitives, placement_map, config)
+
+
+def _demote_h1_headings(markdown: str) -> str:
+    """Demote embedded H1 headings so CLAUDE.md keeps a single top-level title."""
+    return "\n".join(
+        f"#{line}" if line.startswith("# ") else line for line in markdown.splitlines()
+    )

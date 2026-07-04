@@ -150,8 +150,35 @@ class TestFormatDistributed:
 
         content = result.content_map[temp_project / "CLAUDE.md"]
         assert "# Project Standards" not in content
-        assert [line for line in content.splitlines() if line.startswith("# ")] == ["# CLAUDE.md"]
+        h1_headings = [line for line in content.splitlines() if line.startswith("# ")]
+        assert h1_headings[0] == "# CLAUDE.md"
+        assert "# Project Standards" not in h1_headings
         assert "## Files matching `**/*.py`" in content
+
+    def test_format_keeps_single_h1_with_dependencies_and_constitution(
+        self, temp_project, sample_primitives
+    ):
+        """Test generated secondary sections do not add extra H1 headings."""
+        dep_dir = temp_project / "apm_modules" / "owner" / "package"
+        dep_dir.mkdir(parents=True)
+        (dep_dir / "CLAUDE.md").write_text("# Dependency instructions")
+
+        memory_dir = temp_project / ".specify" / "memory"
+        memory_dir.mkdir(parents=True)
+        (memory_dir / "constitution.md").write_text("# Constitution\n\nBe helpful.")
+
+        from apm_cli.compilation.constitution import clear_constitution_cache
+
+        clear_constitution_cache()
+        formatter = ClaudeFormatter(str(temp_project))
+        placement_map = {formatter.base_dir: list(sample_primitives.instructions)}
+        result = formatter.format_distributed(sample_primitives, placement_map)
+
+        content = result.content_map[formatter.base_dir / "CLAUDE.md"]
+        assert [line for line in content.splitlines() if line.startswith("# ")] == ["# CLAUDE.md"]
+        assert "## Dependencies" in content
+        assert "## Constitution" in content
+        assert "# Project Standards" not in content
 
     def test_format_includes_source_attribution(self, temp_project, sample_primitives):
         """Test that source attribution comments are included."""

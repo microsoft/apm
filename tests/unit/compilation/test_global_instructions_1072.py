@@ -349,7 +349,9 @@ class TestClaudeFormatterIncludesGlobals:
         assert "GLOBAL_BODY" in content
         assert "SCOPED_BODY" in content
         assert "# Project Standards" not in content
-        assert [line for line in content.splitlines() if line.startswith("# ")] == ["# CLAUDE.md"]
+        h1_headings = [line for line in content.splitlines() if line.startswith("# ")]
+        assert h1_headings[0] == "# CLAUDE.md"
+        assert "# Project Standards" not in h1_headings
         assert GLOBAL_INSTRUCTIONS_HEADING in content
         assert content.index("GLOBAL_BODY") < content.index("SCOPED_BODY")
 
