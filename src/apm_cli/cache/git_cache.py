@@ -535,33 +535,12 @@ class GitCache:
             subprocess_env = env if env is not None else git_subprocess_env()
 
             try:
-                # Configure the consumer as a promisor pointing at the
-                # real upstream URL so missing blobs (the partial bare only
-                # carries trees) are lazy-fetched during checkout. Without
-                # this, ``git checkout`` would fail with "fatal: unable to
-                # read tree/blob" for any object missing from the local
-                # alternates. The fetch goes to ``promisor_url`` directly;
-                # auth comes from the inherited subprocess_env.
-                #
-                # ``promisor`` and ``partialclonefilter`` are set via
-                # ``-c key=val`` on the clone itself so they land in one git
-                # invocation. ``remote.origin.url`` cannot ride along -- git
-                # clone always writes it to the clone SOURCE (the local
-                # bare) after applying ``-c``, clobbering any override -- so
-                # it needs one post-clone ``git config``. Net: the promisor
-                # setup drops from three ``git config`` subprocesses to one.
-                # Fewer process spawns matters on hosts where each ``git``
-                # exec carries fixed overhead (e.g. on-access security
-                # scanning); behaviour is identical.
-                promisor_clone_args: list[str] = []
-                if promisor_url:
-                    promisor_clone_args = [
-                        "-c",
-                        "remote.origin.promisor=true",
-                        "-c",
-                        "remote.origin.partialclonefilter=blob:none",
-                    ]
-                # Clone from local bare repo (fast, no network)
+                # Clone from local bare repo (fast, no network).
+                # ``promisor`` and ``partialclonefilter`` ride on the clone
+                # via ``-c key=val`` (one spawn). ``remote.origin.url``
+                # needs a separate post-clone ``git config`` because git
+                # clone always rewrites it to the clone source after
+                # applying ``-c`` overrides.
                 subprocess.run(
                     [
                         git_exe,
@@ -571,7 +550,16 @@ class GitCache:
                         "--shared",
                         "--no-checkout",
                         "--no-recurse-submodules",
-                        *promisor_clone_args,
+                        *(
+                            [
+                                "-c",
+                                "remote.origin.promisor=true",
+                                "-c",
+                                "remote.origin.partialclonefilter=blob:none",
+                            ]
+                            if promisor_url
+                            else []
+                        ),
                         str(bare_dir),
                         str(staged),
                     ],
