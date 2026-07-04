@@ -31,11 +31,13 @@ import zipfile
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import pytest
 
 from apm_cli.deps.artifactory_orchestrator import ArtifactoryOrchestrator
+from apm_cli.deps.download_strategies import DownloadDelegate
 from apm_cli.models.apm_package import DependencyReference, PackageInfo, PackageType
 from apm_cli.utils.archive import ArchiveError, safe_extract_zip
 
@@ -96,20 +98,38 @@ def _build_apm_zip() -> bytes:
 _ZIP_BYTES: bytes = _build_apm_zip()
 
 
+def _build_traversal_zip() -> bytes:
+    """Return a ZIP whose root-stripped member attempts to escape target_path."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        root_info = zipfile.ZipInfo(_ZIP_ROOT)
+        root_info.external_attr = 0o755 << 16
+        zf.writestr(root_info, "")
+        zf.writestr(_ZIP_ROOT + "../escape.txt", b"pwned")
+    return buf.getvalue()
+
+
 # ---------------------------------------------------------------------------
 # Helpers: in-process HTTP server
 # ---------------------------------------------------------------------------
+
+
+class _ArchiveHTTPServer(HTTPServer):
+    """HTTP server carrying the archive bytes served by ``_ZipHandler``."""
+
+    archive_bytes: bytes
 
 
 class _ZipHandler(BaseHTTPRequestHandler):
     """Serve the pre-built ZIP for any GET request path."""
 
     def do_GET(self) -> None:
+        archive_bytes = self.server.archive_bytes
         self.send_response(200)
         self.send_header("Content-Type", "application/zip")
-        self.send_header("Content-Length", str(len(_ZIP_BYTES)))
+        self.send_header("Content-Length", str(len(archive_bytes)))
         self.end_headers()
-        self.wfile.write(_ZIP_BYTES)
+        self.wfile.write(archive_bytes)
 
     def log_message(self, fmt: str, *args: object) -> None:  # pragma: no cover
         # Suppress request logs in test output
@@ -119,8 +139,9 @@ class _ZipHandler(BaseHTTPRequestHandler):
 class _LocalZipServer:
     """Thin wrapper: start / stop an in-process HTTPServer on 127.0.0.1:0."""
 
-    def __init__(self) -> None:
-        self._server = HTTPServer(("127.0.0.1", 0), _ZipHandler)
+    def __init__(self, archive_bytes: bytes = _ZIP_BYTES) -> None:
+        self._server = _ArchiveHTTPServer(("127.0.0.1", 0), _ZipHandler)
+        self._server.archive_bytes = archive_bytes
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
     @property
@@ -224,6 +245,14 @@ class _LocalArchiveDownloader:
                 return
 
             safe_extract_zip(zf, target_path, error_type=ArchiveError)
+
+
+def _real_archive_downloader() -> DownloadDelegate:
+    """Build a real DownloadDelegate with enough host surface for integration tests."""
+    host = SimpleNamespace(registry_config=None, artifactory_token=None)
+    delegate = DownloadDelegate(host)
+    host._resilient_get = delegate.resilient_get
+    return delegate
 
 
 # ---------------------------------------------------------------------------
@@ -344,3 +373,26 @@ class TestArtifactoryInstallE2E:
 
         # Must end with .zip (GitHub-style candidate)
         assert parsed.path.endswith(".zip")
+
+    def test_malicious_zip_traversal_rejected_through_real_downloader(self, tmp_path: Path) -> None:
+        """Real Artifactory install path rejects zip-slip and writes no escape file."""
+        zip_server = _LocalZipServer(_build_traversal_zip())
+        zip_server.start()
+        try:
+            downloader = _real_archive_downloader()
+            orchestrator = ArtifactoryOrchestrator(archive_downloader=downloader)
+            dep_ref = DependencyReference(
+                repo_url=f"{_OWNER}/{_REPO}",
+                host="github.com",
+                reference=_REF,
+            )
+            proxy_info = (zip_server.host, _PROXY_PREFIX, "http")
+            target_path = tmp_path / "installed-malicious"
+
+            with pytest.raises(RuntimeError, match=r"Unsafe zip archive.*path-traversal"):
+                orchestrator.download_package(dep_ref, target_path, proxy_info=proxy_info)
+
+            assert not (tmp_path / "escape.txt").exists()
+            assert not (target_path / "escape.txt").exists()
+        finally:
+            zip_server.stop()

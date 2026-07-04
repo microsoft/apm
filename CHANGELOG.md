@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Artifactory registry-proxy ZIP installs now use the shared safe extraction
+  path for traversal, symlink, and zip-bomb guards instead of direct ZIP
+  extraction. -- by @fallintoplace (#1948)
+
 ### Performance
 
 - `apm install` with a committed lockfile no longer re-resolves branch-pinned

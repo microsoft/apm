@@ -76,6 +76,7 @@ def fake_response(
     response.content = content
     response.headers = headers or {}
     response.text = content.decode("utf-8", errors="replace")
+    response.iter_content.return_value = iter([content] if content else [])
     if status_code >= 400:
         response.raise_for_status.side_effect = requests.exceptions.HTTPError(response=response)
     else:
@@ -187,7 +188,7 @@ class TestDownloadArtifactoryArchivePhase3W5:
                     tmp_path,
                 )
 
-    def test_directory_entries_and_traversal_are_handled(self, tmp_path: Path) -> None:
+    def test_directory_entries_and_traversal_are_rejected(self, tmp_path: Path) -> None:
         host = make_host()
         delegate = DownloadDelegate(host)
         archive_bytes = make_zip(
@@ -203,17 +204,16 @@ class TestDownloadArtifactoryArchivePhase3W5:
             "apm_cli.deps.download_strategies.build_artifactory_archive_url",
             return_value=["https://art.example.com/archive.zip"],
         ):
-            delegate.download_artifactory_archive(
-                "art.example.com",
-                "proxy",
-                "owner",
-                "repo",
-                "main",
-                tmp_path,
-            )
+            with pytest.raises(RuntimeError, match=r"Unsafe zip archive.*path-traversal"):
+                delegate.download_artifactory_archive(
+                    "art.example.com",
+                    "proxy",
+                    "owner",
+                    "repo",
+                    "main",
+                    tmp_path,
+                )
 
-        assert (tmp_path / "nested").is_dir()
-        assert (tmp_path / "nested" / "file.txt").read_text() == "safe"
         assert not (tmp_path.parent / "escape.txt").exists()
 
     def test_request_exception_becomes_last_error(self, tmp_path: Path) -> None:

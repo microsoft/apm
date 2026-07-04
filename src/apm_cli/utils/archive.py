@@ -198,6 +198,8 @@ def safe_extract_zip(
 
     The uncompressed-size limit is enforced against bytes actually read from
     each entry, not against attacker-controlled ZipInfo.file_size metadata.
+    ``member_name_transform`` can strip or reject names before validation; the
+    returned list contains the transformed member names that were written.
     """
     dest_root.mkdir(parents=True, exist_ok=True)
     members = zf.infolist()

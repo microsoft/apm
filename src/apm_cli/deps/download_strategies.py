@@ -8,7 +8,6 @@ operations to it (Facade/Delegate pattern).
 """
 
 import base64
-import contextlib
 import json
 import os
 import random
@@ -17,6 +16,7 @@ import tempfile
 import threading
 import time
 import weakref
+import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
@@ -52,6 +52,14 @@ def _debug(message: str) -> None:
     """Print debug message if APM_DEBUG environment variable is set."""
     if os.environ.get("APM_DEBUG"):
         print(f"[DEBUG] {message}", file=sys.stderr)
+
+
+def _close_response(response: requests.Response, context: str) -> None:
+    """Close an HTTP response and preserve failures in debug diagnostics."""
+    try:
+        response.close()
+    except Exception as exc:
+        _debug(f"{context} response close failed: {exc}")
 
 
 _ARTIFACTORY_DOWNLOAD_CHUNK_BYTES = 1024 * 1024
@@ -174,8 +182,7 @@ class DownloadDelegate:
                         f"{wait:.1f}s (attempt {attempt + 1}/{max_retries})"
                     )
                     if attempt < max_retries - 1:
-                        with contextlib.suppress(Exception):
-                            response.close()
+                        _close_response(response, "rate-limit retry")
                     time.sleep(wait)
                     continue
 
@@ -361,7 +368,7 @@ class DownloadDelegate:
                     raise ArchiveError(f"Archive too large ({total_bytes} bytes) from {url}")
                 archive_file.write(chunk)
 
-    def _extract_artifactory_zip(self, zf, target_path: Path, url: str) -> None:
+    def _extract_artifactory_zip(self, zf: zipfile.ZipFile, target_path: Path, url: str) -> None:
         """Extract an Artifactory VCS archive with shared ZIP safety guards."""
         names = zf.namelist()
         if not names:
@@ -453,8 +460,7 @@ class DownloadDelegate:
                 _debug(f"Request failed: {last_error}")
             finally:
                 if resp is not None:
-                    with contextlib.suppress(Exception):
-                        resp.close()
+                    _close_response(resp, "artifactory archive")
 
         raise RuntimeError(
             f"Failed to download package {owner}/{repo}#{ref} from Artifactory "

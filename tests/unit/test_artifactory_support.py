@@ -45,6 +45,7 @@ def _mock_stream_response(
     resp.iter_content.return_value = iter([content] if content else [])
     return resp
 
+
 # ── github_host.py: Artifactory path helpers ──
 
 
