@@ -18,8 +18,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sha_passthrough` instead of inflating the `commits_api` counter. --
   by @srobroek (#1973)
 
+### Changed
+
+- Collapsed repeated `git config` subprocess calls from 3 to 1 per repository
+  during cache operations, cutting process-spawn overhead on `apm install` and
+  `apm update`. (#1974)
+
 ### Fixed
 
+- `apm audit --help` now accurately describes the command's full scope:
+  hidden Unicode scanning, drift detection, and lockfile/policy checks.
+  The previous summary named only Unicode scanning and used the legacy
+  "packages" terminology. (#2017)
+- `apm pack` now cryptographically verifies every dependency file against
+  the lockfile before bundling -- unattested content never ships. It closes a
+  supply-chain provenance hole in **every** format
+  (`--format plugin` and the default `--format apm`): dependency content is
+  packed exclusively from lockfile-attested `deployed_files`, each verified
+  against its `deployed_file_hashes` SHA-256 before it enters the bundle, so a
+  file tampered or corrupted after `apm install` fails the pack instead of
+  shipping silently. The unattested `apm_modules` cache -- which can be stale,
+  partial, or tampered -- is never packed. Subset (`skills:`) filters are
+  respected (only deployed skills are included). If a dependency has cached
+  primitives but no `deployed_files`, `apm pack` fails with an actionable error
+  telling you to run `apm install`. Dependency hooks-config / MCP-config, which
+  is not attested in `deployed_files`, is no longer packed: `apm pack` now warns
+  (`[!]`) and names the dependency (first-party root hooks/MCP are unaffected).
+  Directory entries are walked with per-child containment so a planted
+  directory symlink cannot escape the project root into the bundle. (#2013)
 - `apm install --frozen` no longer spuriously rejects private Git dependencies
   hosted on non-default Git servers such as Bitbucket Server, GitLab, or GitHub
   Enterprise; lockfile matching now uses the same host-qualified identity as
@@ -43,6 +69,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Self-hosted git hosts such as GitBucket that serve smart-HTTP only at the
   `.git` path now install successfully over anonymous HTTPS; `apm install` no
   longer drops the suffix. (#1995)
+
+### Performance
+
+- `apm install` now issues a single `git ls-remote` call per repository when
+  resolving multiple semver git dependencies from the same remote, reducing
+  network round-trips for monorepos with many shared-origin semver deps. (#1975)
+- `apm outdated` now dedupes `git ls-remote` across locked dependencies that
+  share one upstream repository (e.g. several virtual-subdirectory packages
+  from the same monorepo), issuing one listing per repo per run instead of one
+  per dependency. The cache is per-invocation, so a newer upstream ref is still
+  detected on the next run. (#1975)
 
 ## [0.23.1] - 2026-06-29
 

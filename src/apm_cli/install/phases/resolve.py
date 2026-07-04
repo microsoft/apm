@@ -80,6 +80,8 @@ def _maybe_resolve_git_semver(
     existing_lockfile,
     update_refs: bool,
     auth_resolver=None,
+    ref_resolver_cache=None,
+    ref_resolver_cache_lock=None,
 ):
     """Resolve a git-source semver-range ``ref:`` to a concrete tag.
 
@@ -153,24 +155,17 @@ def _maybe_resolve_git_semver(
 
     # Fresh resolution: call git ls-remote and pick the highest matching tag.
     from apm_cli.deps.git_semver_resolver import GitSemverResolver
-    from apm_cli.marketplace.ref_resolver import RefResolver
+    from apm_cli.install.helpers.ref_reuse import (
+        get_shared_ref_resolver,
+        resolve_dep_token,
+    )
 
-    # Resolve the per-dep token via AuthResolver so ls-remote uses the
-    # same credential source the downstream clone will use. Without this
-    # threading, ls-remote on a private repo would rely on the host's
-    # git credential helper (present on dev laptops, absent in CI).
-    token: str | None = None
-    if auth_resolver is not None:
-        try:
-            auth_ctx = auth_resolver.resolve_for_dep(dep_ref)
-            token = auth_ctx.token if auth_ctx is not None else None
-        except Exception:
-            # Auth lookup is best-effort here: if it fails the unauth path
-            # remains, the downstream clone will surface the real auth
-            # error with its own actionable diagnostic.
-            token = None
-
-    ref_resolver = RefResolver(host=dep_ref.host, token=token)
+    # Reuse one RefResolver per (host, token) so same-repo deps share a
+    # single ls-remote tag listing (see helpers.ref_reuse for rationale).
+    token = resolve_dep_token(dep_ref, auth_resolver)
+    ref_resolver = get_shared_ref_resolver(
+        dep_ref.host, token, ref_resolver_cache, ref_resolver_cache_lock
+    )
     resolver = GitSemverResolver(ref_resolver)
     return resolver.resolve(
         owner_repo=owner_repo,
@@ -644,6 +639,8 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
                 existing_lockfile=existing_lockfile,
                 update_refs=update_refs,
                 auth_resolver=ctx.auth_resolver,
+                ref_resolver_cache=ctx.ref_resolver_cache,
+                ref_resolver_cache_lock=callback_lock,
             )
             if _semver_resolution is not None:
                 with callback_lock:

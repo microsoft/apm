@@ -121,6 +121,12 @@ class TestMcpGroupHelp:
         runner = CliRunner()
         result = runner.invoke(mcp, ["install", "--help"])
         assert result.exit_code == 0
+        description, options = result.output.split("Options:", 1)
+        assert "Forwarded install options" in description
+        assert "--transport [stdio|http|sse|streamable-http]" in description
+        assert "--mcp-version VER" in description
+        assert "Common options" not in options
+        assert "--transport [stdio|http|sse|streamable-http]" not in options
 
 
 class TestMcpSearch:

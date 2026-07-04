@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 import shutil
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import yaml
 
@@ -30,6 +30,7 @@ from ..utils.archive import (
 )
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
+from .attest import verify_attested_file
 from .packer import PackResult
 
 # ---------------------------------------------------------------------------
@@ -417,6 +418,217 @@ def _dep_install_path(dep: LockedDependency, apm_modules_dir: Path) -> Path:
     return dep_ref.get_install_path(apm_modules_dir)
 
 
+def _deployed_path_parts(rel_path: str) -> tuple[str, ...]:
+    """Return safe POSIX path parts for a lockfile deployed_files entry."""
+    rel = rel_path.replace("\\", "/")
+    pure = PurePosixPath(rel)
+    if pure.is_absolute() or PureWindowsPath(rel).is_absolute():
+        raise ValueError(f"Refusing to pack absolute deployed file path: {rel_path!r}")
+    parts = pure.parts
+    if any(part in ("", ".", "..") for part in parts):
+        raise ValueError(f"Refusing to pack unsafe deployed file path: {rel_path!r}")
+    return parts
+
+
+def _skill_name_from_deployed_parts(parts: tuple[str, ...]) -> str | None:
+    """Return the deployed skill name when *parts* point inside a skills dir."""
+    if len(parts) >= 3 and parts[0].startswith(".") and parts[1] == "skills":
+        return parts[2]
+    if len(parts) >= 2 and parts[0] == "skills":
+        return parts[1]
+    return None
+
+
+def _plugin_rel_for_deployed_path(
+    rel_path: str,
+    skill_subset: set[str] | None,
+) -> str | None:
+    """Map an installed deployed_files path back to plugin-native output layout."""
+    parts = _deployed_path_parts(rel_path)
+    if not parts:
+        return None
+
+    if parts[0] == "skills":
+        skill_name = _skill_name_from_deployed_parts(parts)
+        if skill_subset and (skill_name is None or skill_name not in skill_subset):
+            return None
+        plugin_parts = list(parts)
+    elif parts[0] in {"agents", "commands", "instructions", "extensions"}:
+        plugin_parts = list(parts)
+    elif len(parts) >= 3 and parts[0].startswith("."):
+        skill_name = _skill_name_from_deployed_parts(parts)
+        if skill_name is not None:
+            if skill_subset and skill_name not in skill_subset:
+                return None
+            plugin_parts = ["skills", *parts[2:]]
+        elif parts[1] == "agents":
+            plugin_parts = ["agents", *parts[2:]]
+        elif parts[1] in {"commands", "prompts"}:
+            plugin_parts = ["commands", *parts[2:]]
+        elif parts[1] in {"instructions", "rules", "steering"}:
+            plugin_parts = ["instructions", *parts[2:]]
+        elif parts[1] == "extensions":
+            plugin_parts = ["extensions", *parts[2:]]
+        elif parts[1] == "hooks":
+            plugin_parts = ["hooks", *parts[2:]]
+        else:
+            return None
+    elif len(parts) >= 2 and parts[0].startswith(".") and parts[1] == "hooks.json":
+        plugin_parts = ["hooks.json"]
+    else:
+        return None
+
+    if plugin_parts[0] == "commands" and plugin_parts[-1].endswith(".prompt.md"):
+        plugin_parts[-1] = _rename_prompt(plugin_parts[-1])
+    return PurePosixPath(*plugin_parts).as_posix()
+
+
+def _verify_attested_hash(
+    source: Path,
+    project_root: Path,
+    dep: LockedDependency,
+) -> None:
+    """Fail loudly when a packed deployed file diverges from its attested hash.
+
+    ``deployed_file_hashes`` records the SHA-256 (``"sha256:<hex>"``) of each
+    file at install time. Verifying the on-disk copy before packing closes the
+    integrity half of the provenance hole: a deployed file that was tampered
+    or corrupted after ``apm install`` must never enter the bundle silently.
+
+    Files with no recorded hash (older lockfiles predating
+    ``deployed_file_hashes``) are packed without verification -- absence of an
+    attestation is forward-compat tolerated, presence of a *mismatched* one is
+    a hard error. Delegates to the shared :func:`verify_attested_file` helper so
+    the plugin and archive pack paths share one implementation.
+    """
+    rel = source.relative_to(project_root).as_posix()
+    expected = dep.deployed_file_hashes.get(rel) if dep.deployed_file_hashes else None
+    verify_attested_file(source, expected, dep.repo_url, rel)
+
+
+def _append_deployed_component(
+    components: list[tuple[Path, str]],
+    source: Path,
+    output_rel: str,
+    seen_outputs: set[str],
+    project_root: Path,
+    dep: LockedDependency,
+) -> None:
+    """Append one deployed component unless it is unsafe or already mapped."""
+    if output_rel in seen_outputs or not _validate_output_rel(output_rel):
+        return
+    if source.is_file() and not source.is_symlink():
+        _verify_attested_hash(source, project_root, dep)
+        components.append((source, output_rel))
+        seen_outputs.add(output_rel)
+
+
+def _collect_deployed_components(
+    project_root: Path,
+    dep: LockedDependency,
+) -> list[tuple[Path, str]]:
+    """Collect dependency components from lockfile deployed_files entries."""
+    components: list[tuple[Path, str]] = []
+    missing: list[str] = []
+    seen_outputs: set[str] = set()
+    skill_subset = set(dep.skill_subset) if dep.skill_subset else None
+
+    for rel_path in dep.deployed_files:
+        try:
+            plugin_rel = _plugin_rel_for_deployed_path(rel_path, skill_subset)
+        except ValueError as exc:
+            raise ValueError(f"Cannot pack dependency {dep.repo_url}: {exc}") from exc
+        if plugin_rel is None:
+            continue
+        source = project_root / rel_path
+        try:
+            source = ensure_path_within(source, project_root)
+        except PathTraversalError as exc:
+            raise ValueError(
+                f"Cannot pack dependency {dep.repo_url}: deployed file path "
+                f"escapes the project root: {rel_path!r}"
+            ) from exc
+        if not source.exists():
+            missing.append(rel_path)
+            continue
+        if source.is_symlink():
+            continue
+        if source.is_dir():
+            for child in sorted(source.rglob("*")):
+                if not child.is_file() or child.is_symlink():
+                    continue
+                # Defense-in-depth: rglob's symlink-following behaviour is
+                # Python-version dependent, so re-assert containment on every
+                # expanded child rather than trusting the walk. A planted
+                # directory symlink whose target escapes ``project_root`` is
+                # rejected here even if an intermediate component was a symlink.
+                try:
+                    ensure_path_within(child, project_root)
+                except PathTraversalError:
+                    continue
+                child_rel = child.relative_to(source).as_posix()
+                child_output = (PurePosixPath(plugin_rel) / child_rel).as_posix()
+                _append_deployed_component(
+                    components, child, child_output, seen_outputs, project_root, dep
+                )
+        else:
+            _append_deployed_component(
+                components, source, plugin_rel, seen_outputs, project_root, dep
+            )
+
+    if missing:
+        shown_missing = missing[:10]
+        remaining = len(missing) - len(shown_missing)
+        suffix = f"\n  ... and {remaining} more" if remaining else ""
+        raise ValueError(
+            f"Cannot pack dependency {dep.repo_url}: installed files recorded "
+            "in apm.lock.yaml are missing on disk. Run 'apm install' to "
+            "restore them, then pack again:\n"
+            + "\n".join(f"  - {path}" for path in shown_missing)
+            + suffix
+        )
+    return components
+
+
+def _cache_would_contribute_primitives(install_path: Path, dep: LockedDependency) -> bool:
+    """Return True if the unattested apm_modules cache holds packable primitives.
+
+    Used ONLY to decide whether to fail loudly when a locked dependency records
+    no ``deployed_files``. This reads the cache to DETECT a provenance gap; it
+    never copies cache bytes into the bundle. A dependency that installed
+    real components but recorded none of them in the lockfile is a stale or
+    partial install -- packing its cache would leak unattested content, so we
+    refuse rather than silently pack it.
+    """
+    if not install_path.is_dir():
+        return False
+    probe = _collect_apm_components(install_path / ".apm")
+    probe.extend(_collect_root_plugin_components(install_path))
+    _collect_bare_skill(install_path, dep, probe)
+    return bool(probe)
+
+
+def _cache_would_contribute_hooks_or_mcp(install_path: Path) -> bool:
+    """Return True if the unattested cache holds hooks-config or MCP-config.
+
+    Hooks/MCP *configuration* (``.apm/hooks/*.json``, root ``hooks.json`` /
+    ``hooks/``, ``.mcp.json``) is merged into shared host settings by
+    ``apm install`` and is never recorded in the lockfile ``deployed_files``.
+    Because plugin pack now emits only lockfile-attested content, such config
+    is dropped from the bundle. This probe drives a transition warning that
+    names the dependency whose cached config will NOT be packed; it never
+    copies cache bytes. Hook *scripts* recorded in ``deployed_files`` are
+    unaffected and still pack.
+    """
+    if not install_path.is_dir():
+        return False
+    if _collect_mcp(install_path):
+        return True
+    if _collect_hooks_from_apm(install_path / ".apm"):
+        return True
+    return bool(_collect_hooks_from_root(install_path))
+
+
 # ---------------------------------------------------------------------------
 # Main exporter
 # ---------------------------------------------------------------------------
@@ -500,33 +712,58 @@ def export_plugin_bundle(
             ):
                 continue
 
-            install_path = _dep_install_path(dep, apm_modules_dir)
-            if not install_path.is_dir():
-                continue
-
             dep_name = dep.repo_url
 
-            # Collect from .apm/
-            dep_apm_dir = install_path / ".apm"
-            dep_components = _collect_apm_components(dep_apm_dir)
+            # Provenance rule (issue #1999 follow-up): a dependency's content
+            # is packed EXCLUSIVELY from what the lockfile attests via
+            # ``deployed_files`` (+ per-file ``deployed_file_hashes``).
+            # ``apm_modules`` is an unattested cache -- it carries no integrity
+            # or provenance guarantee, so no bytes from it may reach the bundle.
+            install_path = _dep_install_path(dep, apm_modules_dir)
+            if dep.deployed_files:
+                dep_components = _collect_deployed_components(project_root, dep)
+                if dep.skill_subset and not dep_components:
+                    declared_skills = ", ".join(dep.skill_subset)
+                    raise ValueError(
+                        f"Cannot pack dependency {dep.repo_url}: the skills "
+                        f"recorded in apm.lock.yaml (skill_subset: {declared_skills}) "
+                        "were not found among its installed files. Run 'apm install' "
+                        "to re-deploy the expected skills, then pack again."
+                    )
+            elif _cache_would_contribute_primitives(install_path, dep):
+                # Unattested primitives sit in the cache but the lockfile
+                # recorded none of them: a stale or partial install. Refuse
+                # to pack the cache -- fail loudly with a fix.
+                raise ValueError(
+                    f"Cannot pack dependency {dep.repo_url}: the lockfile records "
+                    "no deployed files for it, but installed content that cannot "
+                    "be verified exists in the apm_modules cache (a stale or "
+                    "partial install). Run 'apm install' to record provenance in "
+                    "apm.lock.yaml, then pack again."
+                )
+            else:
+                # No attested content and nothing packable in the cache: the
+                # dependency contributes no plugin primitives (e.g. an
+                # MCP-only or hooks-config-only package). Skip it cleanly.
+                dep_components = []
 
-            # Also collect root-level plugin-native dirs from the dep
-            dep_components.extend(_collect_root_plugin_components(install_path))
-
-            # Bare Claude skills: SKILL.md at dep root with no skills/ subdir
-            _collect_bare_skill(install_path, dep, dep_components)
+            # Transition warning (#2013): dependency hooks/MCP *config* lives in
+            # the unattested cache and is never packed. Name the dependency so
+            # an author who relied on it merging into shared settings is not
+            # surprised by the silent exclusion. Attested primitives are packed
+            # regardless of this warning.
+            if _cache_would_contribute_hooks_or_mcp(install_path):
+                _warn = (
+                    f"dependency {dep.repo_url} contributed hooks/MCP config that "
+                    "is not attested in apm.lock.yaml; it will NOT be packed. "
+                    "Attested primitives (skills/agents/etc.) are unaffected."
+                )
+                if logger:
+                    logger.warning(_warn)
+                else:
+                    _rich_warning(_warn, symbol="warning")
 
             _merge_file_map(file_map, dep_components, dep_name, force, collisions)
-
-            # Hooks -- deps merge (first wins among deps)
-            dep_hooks = _collect_hooks_from_apm(dep_apm_dir)
-            dep_hooks_root = _collect_hooks_from_root(install_path)
-            _deep_merge(dep_hooks, dep_hooks_root, overwrite=False)
-            _deep_merge(merged_hooks, dep_hooks, overwrite=False)
-
-            # MCP -- deps merge (first wins among deps)
-            dep_mcp = _collect_mcp(install_path)
-            _deep_merge(merged_mcp, dep_mcp, overwrite=False)
 
     # 6. Collect own components (.apm/ and root-level)
     own_apm_dir = project_root / ".apm"

@@ -519,6 +519,14 @@ def outdated(global_, verbose, parallel_checks):
 
         registry_ctx = load_registry_outdated_context(project_root, lockfile)
 
+    # Dedupe redundant ``git ls-remote`` across same-repo deps for the span
+    # of this invocation (e.g. many virtual-subdirectory packages from one
+    # monorepo). Mirrors the install-path RefResolver reuse (#1975); fresh
+    # per run, so a newer upstream ref is still seen on the next invocation.
+    from ..deps.outdated_ref_cache import OutdatedRefCache
+
+    downloader = OutdatedRefCache(downloader)
+
     # Check deps with progress feedback and optional parallelism
     rows = _check_deps_with_progress(
         checkable, downloader, verbose, parallel_checks, logger, registry_ctx
