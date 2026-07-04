@@ -3,7 +3,7 @@ must contain ``${VAR}`` runtime placeholders for env-var references in
 apm.yml -- never the literal value resolved at install time.
 
 This exercises the full pipeline:
-    apm.yml  ->  apm install --target copilot  ->  ~/.copilot/mcp-config.json
+    apm.yml  ->  apm install --target copilot  ->  <project>/.mcp.json
 
 The unit tests in tests/unit/test_copilot_adapter.py cover translation in
 isolation; this test pins the integration boundary so plaintext secrets
@@ -75,9 +75,8 @@ class TestMcpEnvVarHeadersCopilot:
         # copilot/vscode runtime detection chain.
         (project_dir / ".github").mkdir()
 
-        # Isolated HOME so we don't touch the developer's real
-        # ~/.copilot/mcp-config.json. The Copilot adapter uses
-        # ``Path.home() / ".copilot"``.
+        # Isolated HOME so user-scope config is never touched.
+        # Project-scope Copilot writes to project_dir/.mcp.json.
         fake_home = tmp_path / "home"
         fake_home.mkdir()
 
@@ -120,9 +119,9 @@ class TestMcpEnvVarHeadersCopilot:
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
 
-        mcp_config = fake_home / ".copilot" / "mcp-config.json"
+        mcp_config = project_dir / ".mcp.json"
         assert mcp_config.exists(), (
-            f"Expected ~/.copilot/mcp-config.json to exist after install.\n"
+            f"Expected .mcp.json to exist after install.\n"
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
 
@@ -209,9 +208,9 @@ class TestMcpEnvVarHeadersCopilot:
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
 
-        mcp_config = fake_home / ".copilot" / "mcp-config.json"
+        mcp_config = project_dir / ".mcp.json"
         assert mcp_config.exists(), (
-            f"Expected ~/.copilot/mcp-config.json to exist after install.\n"
+            f"Expected .mcp.json to exist after install.\n"
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
 

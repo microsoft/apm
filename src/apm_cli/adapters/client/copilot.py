@@ -1,8 +1,9 @@
 """GitHub Copilot CLI implementation of MCP client adapter.
 
-This adapter implements the Copilot CLI-specific handling of MCP server configuration,
-targeting the global ~/.copilot/mcp-config.json file as specified in the MCP installation
-architecture specification.
+Project scope writes ``.mcp.json`` at the project root using Copilot CLI's
+workspace MCP schema (top-level ``mcpServers``). User scope writes
+``~/.copilot/mcp-config.json``. Both scopes use the same Copilot CLI
+``mcpServers`` entry shape.
 """
 
 import json
@@ -36,9 +37,9 @@ from .base import (
 class CopilotClientAdapter(MCPClientAdapter):
     """Copilot CLI implementation of MCP client adapter.
 
-    This adapter handles Copilot CLI-specific configuration for MCP servers using
-    a global ~/.copilot/mcp-config.json file, following the JSON format for
-    MCP server configuration.
+    Project installs write ``<project_root>/.mcp.json`` so servers are scoped
+    to the repository. User-scope installs (``-g`` / ``--global``) keep the
+    existing Copilot CLI user config path, ``~/.copilot/mcp-config.json``.
     """
 
     supports_user_scope: bool = True
@@ -103,14 +104,22 @@ class CopilotClientAdapter(MCPClientAdapter):
         self.registry_client = SimpleRegistryClient(registry_url)
         self.registry_integration = RegistryIntegration(registry_url)
 
+    def _project_mcp_path(self) -> Path:
+        return self.project_root / ".mcp.json"
+
+    def _user_mcp_path(self) -> Path:
+        return Path.home() / ".copilot" / "mcp-config.json"
+
     def get_config_path(self):
         """Get the path to the Copilot CLI MCP configuration file.
 
         Returns:
-            str: Path to ~/.copilot/mcp-config.json
+            str: Project ``.mcp.json`` by default, or
+            ``~/.copilot/mcp-config.json`` for user scope.
         """
-        copilot_dir = Path.home() / ".copilot"
-        return str(copilot_dir / "mcp-config.json")
+        if self.user_scope:
+            return str(self._user_mcp_path())
+        return str(self._project_mcp_path())
 
     def update_config(self, config_updates):
         """Update the Copilot CLI MCP configuration.

@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+from apm_cli.core.scope import InstallScope
 from apm_cli.integration.mcp_integrator import MCPIntegrator, _is_vscode_available
 from apm_cli.models.dependency.mcp import MCPDependency
 
@@ -718,25 +719,64 @@ class TestInstallProjectRootDetection:
 
 
 class TestRemoveStaleCopilot:
-    def _write_copilot_mcp(self, home: Path, servers: dict) -> Path:
+    def _write_project_copilot_mcp(self, root: Path, servers: dict) -> Path:
+        root.mkdir(parents=True, exist_ok=True)
+        cfg = root / ".mcp.json"
+        cfg.write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
+        return cfg
+
+    def _write_user_copilot_mcp(self, home: Path, servers: dict) -> Path:
         copilot_dir = home / ".copilot"
         copilot_dir.mkdir(parents=True, exist_ok=True)
         cfg = copilot_dir / "mcp-config.json"
         cfg.write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
         return cfg
 
-    def test_removes_stale_from_copilot(self, tmp_path):
-        cfg = self._write_copilot_mcp(tmp_path, {"old": {}, "keep": {}})
+    def test_removes_stale_from_project_copilot_mcp_json(self, tmp_path):
+        cfg = self._write_project_copilot_mcp(tmp_path, {"old": {}, "keep": {}})
 
-        with (
-            patch("apm_cli.integration.mcp_integrator.Path.cwd", return_value=tmp_path),
-            patch("pathlib.Path.home", return_value=tmp_path),
-        ):
-            MCPIntegrator.remove_stale({"old"}, runtime="copilot")
+        MCPIntegrator.remove_stale(
+            {"old"},
+            runtime="copilot",
+            project_root=tmp_path,
+            scope=InstallScope.PROJECT,
+        )
 
         remaining = json.loads(cfg.read_text())
         assert "old" not in remaining["mcpServers"]
         assert "keep" in remaining["mcpServers"]
+
+    def test_removes_stale_from_user_copilot_mcp_config(self, tmp_path):
+        cfg = self._write_user_copilot_mcp(tmp_path, {"old": {}, "keep": {}})
+
+        with patch.object(Path, "home", return_value=tmp_path):
+            MCPIntegrator.remove_stale(
+                {"old"},
+                runtime="copilot",
+                project_root=tmp_path / "project",
+                scope=InstallScope.USER,
+            )
+
+        remaining = json.loads(cfg.read_text())
+        assert "old" not in remaining["mcpServers"]
+        assert "keep" in remaining["mcpServers"]
+
+    def test_project_cleanup_does_not_touch_user_copilot_config(self, tmp_path):
+        project_cfg = self._write_project_copilot_mcp(tmp_path / "project", {"old": {}})
+        user_cfg = self._write_user_copilot_mcp(tmp_path / "home", {"old": {}})
+        user_raw = user_cfg.read_text(encoding="utf-8")
+
+        with patch.object(Path, "home", return_value=tmp_path / "home"):
+            MCPIntegrator.remove_stale(
+                {"old"},
+                runtime="copilot",
+                project_root=tmp_path / "project",
+                scope=InstallScope.PROJECT,
+            )
+
+        project_remaining = json.loads(project_cfg.read_text(encoding="utf-8"))
+        assert "old" not in project_remaining["mcpServers"]
+        assert user_cfg.read_text(encoding="utf-8") == user_raw
 
 
 # ===========================================================================

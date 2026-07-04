@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install --mcp NAME --target copilot` now writes project-scoped Copilot
+  CLI MCP configuration to `.mcp.json`; use `-g` / `--global` to keep writing
+  `~/.copilot/mcp-config.json`. Stale MCP cleanup now follows the same scope.
 - `apm pack` now produces a `marketplace.json` the Copilot App accepts even
   when your manifest `name` contains dots, underscores, or other non-kebab-case
   characters (e.g. `my.marketplace`): the emitted `name` field is normalized to

@@ -5,9 +5,94 @@ import os
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from apm_cli.adapters.client.copilot import CopilotClientAdapter
+
+
+class TestCopilotClientAdapterScope(unittest.TestCase):
+    """Project and user scope path routing for Copilot MCP config."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.home = self.root / "home"
+        self.home_patcher = patch.object(Path, "home", return_value=self.home)
+        self.home_patcher.start()
+        self.registry_patcher = patch("apm_cli.adapters.client.copilot.SimpleRegistryClient")
+        self.registry_patcher.start()
+        self.integration_patcher = patch("apm_cli.adapters.client.copilot.RegistryIntegration")
+        self.integration_patcher.start()
+
+    def tearDown(self) -> None:
+        self.integration_patcher.stop()
+        self.registry_patcher.stop()
+        self.home_patcher.stop()
+        self.tmp.cleanup()
+
+    def test_project_scope_config_path_uses_project_mcp_json(self) -> None:
+        adapter = CopilotClientAdapter(project_root=self.root)
+
+        self.assertEqual(Path(adapter.get_config_path()), self.root / ".mcp.json")
+
+    def test_user_scope_config_path_uses_copilot_user_config(self) -> None:
+        adapter = CopilotClientAdapter(project_root=self.root, user_scope=True)
+
+        self.assertEqual(
+            Path(adapter.get_config_path()),
+            self.home / ".copilot" / "mcp-config.json",
+        )
+
+    def test_project_get_current_config_reads_project_mcp_json(self) -> None:
+        expected = {"mcpServers": {"project": {"command": "python"}}}
+        (self.root / ".mcp.json").write_text(json.dumps(expected), encoding="utf-8")
+        adapter = CopilotClientAdapter(project_root=self.root)
+
+        self.assertEqual(adapter.get_current_config(), expected)
+
+    def test_user_get_current_config_reads_copilot_user_config(self) -> None:
+        expected = {"mcpServers": {"user": {"command": "node"}}}
+        user_path = self.home / ".copilot" / "mcp-config.json"
+        user_path.parent.mkdir(parents=True)
+        user_path.write_text(json.dumps(expected), encoding="utf-8")
+        adapter = CopilotClientAdapter(project_root=self.root, user_scope=True)
+
+        self.assertEqual(adapter.get_current_config(), expected)
+
+    def test_project_update_config_creates_project_mcp_json(self) -> None:
+        adapter = CopilotClientAdapter(project_root=self.root)
+
+        adapter.update_config({"srv": {"command": "node", "args": ["server.js"]}})
+
+        mcp_path = self.root / ".mcp.json"
+        self.assertTrue(mcp_path.exists())
+        data = json.loads(mcp_path.read_text(encoding="utf-8"))
+        self.assertEqual(data["mcpServers"]["srv"]["command"], "node")
+
+    def test_project_update_config_preserves_existing_servers(self) -> None:
+        mcp_path = self.root / ".mcp.json"
+        mcp_path.write_text(
+            json.dumps({"mcpServers": {"keep": {"command": "python"}}}),
+            encoding="utf-8",
+        )
+        adapter = CopilotClientAdapter(project_root=self.root)
+
+        adapter.update_config({"new": {"command": "node"}})
+
+        data = json.loads(mcp_path.read_text(encoding="utf-8"))
+        self.assertIn("keep", data["mcpServers"])
+        self.assertIn("new", data["mcpServers"])
+
+    def test_user_update_config_keeps_existing_user_path_behavior(self) -> None:
+        adapter = CopilotClientAdapter(project_root=self.root, user_scope=True)
+
+        adapter.update_config({"srv": {"command": "node"}})
+
+        user_path = self.home / ".copilot" / "mcp-config.json"
+        self.assertTrue(user_path.exists())
+        data = json.loads(user_path.read_text(encoding="utf-8"))
+        self.assertIn("srv", data["mcpServers"])
 
 
 class TestCopilotRemoteTransportValidation(unittest.TestCase):

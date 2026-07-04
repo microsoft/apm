@@ -623,11 +623,22 @@ class MCPIntegrator:
             )
 
         if "copilot" in target_runtimes:
+            from apm_cli.factory import ClientFactory
+
+            copilot_user_scope = user_scope or scope is InstallScope.USER
+            copilot_cfg = Path(
+                ClientFactory.create_client(
+                    "copilot",
+                    project_root=project_root_path,
+                    user_scope=copilot_user_scope,
+                ).get_config_path()
+            )
+            copilot_label = "Copilot CLI user config" if copilot_user_scope else ".mcp.json"
             _clean_json_mcp_config(
-                Path.home() / ".copilot" / "mcp-config.json",
+                copilot_cfg,
                 expanded_stale,
                 logger,
-                "Copilot CLI config",
+                copilot_label,
                 use_rich=True,
             )
 
