@@ -1068,6 +1068,10 @@ class TestResolveCompileTargetMixedTargets:
         """Single codex target stays a bare string."""
         assert self._resolve(["codex"]) == "codex"
 
+    def test_antigravity_codex_keeps_agents_family_frozenset(self):
+        """Mixed Antigravity+Codex must not collapse to Antigravity."""
+        assert self._resolve(["antigravity", "codex"]) == frozenset({"agents"})
+
     def test_copilot_claude_keeps_frozenset(self):
         """[copilot, claude] produces a frozenset with vscode and claude families."""
         result = self._resolve(["copilot", "claude"])

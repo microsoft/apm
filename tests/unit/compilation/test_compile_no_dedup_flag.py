@@ -338,6 +338,26 @@ class TestAgentsMdInstructionDedup:
             "Mixed copilot+codex target must include instructions in AGENTS.md. Got:\n" + body
         )
 
+    def test_multi_target_antigravity_codex_preserves_instructions(self, tmp_path):
+        """[antigravity, codex] must not dedup AGENTS.md against Antigravity rules."""
+        tmp_path, primitives = self._project_with_instruction(
+            tmp_path,
+            rules_dir=".agents/rules",
+            rules_filename="style.md",
+        )
+        compiler = AgentsCompiler(str(tmp_path))
+        config = CompilationConfig(target=frozenset({"agents"}), dry_run=False)
+
+        result = compiler._compile_distributed(config, primitives)
+
+        assert result.success
+        agents_md = tmp_path / "AGENTS.md"
+        assert agents_md.exists(), "AGENTS.md must be generated for mixed antigravity+codex target"
+        body = agents_md.read_text(encoding="utf-8")
+        assert "Use type hints" in body, (
+            "Mixed antigravity+codex target must include instructions in AGENTS.md. Got:\n" + body
+        )
+
     def test_no_dedup_flag_overrides_agents_md_dedup(self, project_with_github_instructions):
         """--no-dedup on vscode target must include instructions despite dedup
         conditions being met."""

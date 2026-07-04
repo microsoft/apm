@@ -250,6 +250,11 @@ def _resolve_compile_target(target):
                 if not has_non_vscode_agents:
                     return "vscode"
             return frozenset(families)
+        if families == {"agents"} and "antigravity" in target_set and len(target_set) > 1:
+            # Mixed Antigravity + AGENTS.md-only consumers share AGENTS.md but
+            # do not all read .agents/rules/. Preserve mixed-target context so
+            # downstream dedup stays disabled for AGENTS.md-only consumers.
+            return frozenset({"agents"})
         if "claude" in families:
             return "claude"
         if "gemini" in families:
@@ -957,9 +962,10 @@ def _run_compilation(
     help=(
         "Include the instructions section in CLAUDE.md even when .claude/rules/ is "
         "already populated, and in AGENTS.md even when .github/instructions/ is "
-        "already populated. Overrides the default deduplication that normally omits "
-        "these sections to avoid duplicate context. Affects both the Claude and "
-        "Copilot (AGENTS.md) deduplication paths. Alias: --no-dedup."
+        "already populated, or .agents/rules/ for Antigravity. Overrides the "
+        "default deduplication that normally omits these sections to avoid "
+        "duplicate context. Affects the Claude, Copilot, and Antigravity "
+        "deduplication paths. Alias: --no-dedup."
     ),
 )
 @click.option(
