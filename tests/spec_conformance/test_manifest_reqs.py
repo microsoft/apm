@@ -1,7 +1,7 @@
 """Manifest (apm.yml) + scheme + tag + conformance-class tests.
 
 Covers req-mf-001..021, req-ext-001..002, req-sc-001..010,
-req-tg-001..004, req-cf-001..002.
+req-tg-001..005, req-cf-001..002.
 
 Every requirement is exercised either by (a) schema validation
 against shipped fixtures (positive + negative), (b) a verbatim
@@ -62,7 +62,7 @@ def test_manifest_version_is_semver_2_0_0():
 def test_manifest_target_enum_is_pinned():
     """req-mf-005 says producer MUST reject unknown target values."""
     assert_spec_contains(
-        "copilot, claude, cursor, codex, gemini, opencode, windsurf, agent-skills, all"
+        "copilot, claude, cursor, codex, gemini, antigravity, opencode, windsurf, agent-skills, all"
     )
     assert_spec_contains("x-[a-z][a-z0-9-]*-[a-z][a-z0-9-]*")
 
@@ -375,6 +375,17 @@ def test_consumer_routes_vendor_target_identifiers_to_handlers():
         "x-[a-z][a-z0-9-]*-[a-z][a-z0-9-]*",
         "MUST route detection",
         "MUST NOT silently",
+    )
+
+
+@pytest.mark.req("req-tg-005")
+def test_consumer_deploys_antigravity_rules_with_expected_dedup():
+    assert_spec_contains(
+        "For the Antigravity target, instruction rules MUST be written under",
+        "`.agents/rules/<name>.md`",
+        "`trigger: glob` plus a `globs` field",
+        "either a scalar\nglob or a YAML sequence of glob strings",
+        "unrelated `.md` files under `.agents/rules/` MUST NOT\nsuppress",
     )
 
 

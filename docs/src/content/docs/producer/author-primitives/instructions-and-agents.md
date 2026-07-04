@@ -70,9 +70,10 @@ applyTo:
   - "**/*.py"
 ```
 
-When a YAML sequence contains multiple patterns, APM uses the first
-pattern and ignores the rest (single-pattern limitation of downstream
-consumers). Prefer the comma-separated string form for multiple globs.
+When a YAML sequence contains multiple patterns, APM preserves the full
+sequence for targets whose native rule format supports multiple globs.
+Prefer the comma-separated string form when you want identical output
+across every target.
 
 ```markdown
 ---
@@ -82,8 +83,9 @@ applyTo: "**/*.{css,scss},**/*.tsx"
 ```
 
 On Copilot the comma-list is preserved verbatim (Copilot splits it
-natively). On Claude, Cursor, Windsurf, and Kiro the list is expanded to a
-YAML array under `paths:` / `globs:` / `fileMatchPattern:`.
+natively). On Claude, Cursor, Windsurf, Kiro, and Antigravity the list is
+expanded to a YAML array under `paths:` / `globs:` /
+`fileMatchPattern:`.
 
 ### Body conventions
 
@@ -104,7 +106,7 @@ YAML array under `paths:` / `globs:` / `fileMatchPattern:`.
 | cursor | `.cursor/rules/<name>.mdc` | `applyTo` -> `globs:` (scalar for single glob, YAML array for comma-lists); description auto-derived if missing |
 | windsurf | `.windsurf/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> `trigger: always_on` |
 | kiro | `.kiro/steering/<name>.md` | `applyTo` -> `inclusion: fileMatch` + `fileMatchPattern:`; missing `applyTo` -> `inclusion: always` |
-| antigravity | `.agents/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array) |
+| antigravity | `.agents/rules/<name>.md` | `applyTo` -> `trigger: glob` + `globs:` (scalar or YAML array); missing `applyTo` -> no frontmatter (unconditional rule) |
 | codex | folded into `AGENTS.md` | compile-only, no per-file deploy |
 | gemini | folded into `GEMINI.md` | compile-only, no per-file deploy |
 | opencode | folded into `AGENTS.md` | compile-only, no per-file deploy |

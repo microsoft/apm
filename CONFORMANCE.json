@@ -1085,12 +1085,23 @@
       "tests": [
         "tests/spec_conformance/test_manifest_reqs.py::test_consumer_routes_vendor_target_identifiers_to_handlers"
       ]
+    },
+    {
+      "conformance_class": "consumer",
+      "id": "req-tg-005",
+      "keyword": "MUST",
+      "section": "8.5",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_manifest_reqs.py::test_consumer_deploys_antigravity_rules_with_expected_dedup"
+      ]
     }
   ],
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 67,
+      "active": 68,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1114,5 +1125,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 96
+  "total_requirements": 97
 }
