@@ -33,6 +33,16 @@ def seed_ref_resolver_from_lockfile(ctx: InstallContext) -> None:
     Safe: the seeded SHA is the lockfile's own trust anchor; drift detection
     in ``download_callback`` still runs against the manifest ref, so a
     changed pin is still caught and re-resolved.
+
+    Cache-key invariant: correctness relies on ``locked.repo_url`` and
+    ``locked.resolved_ref`` being identical to the ``(repo_url, ref)`` pair
+    that ``resolve()`` will look up at download time. Both originate from the
+    same ``DependencyReference`` that was serialised into the lockfile, so
+    the invariant holds today. Any future URL canonicalisation (e.g. ``.git``
+    suffix stripping, case folding, or host-qualification) must be applied
+    symmetrically at lockfile-write and lockfile-read time; an asymmetric
+    change silently degrades the seed to a no-op (graceful fallback to the
+    pre-PR resolve path, no incorrectness).
     """
     if ctx.update_refs or ctx.refresh:
         return
@@ -52,5 +62,5 @@ def seed_ref_resolver_from_lockfile(ctx: InstallContext) -> None:
             seeded += 1
     if seeded and ctx.logger:
         ctx.logger.verbose_detail(
-            f"[*] Seeded ref resolver from lockfile: {seeded} ref(s) (0 round-trips)"
+            f"[i] Seeded ref resolver from lockfile: {seeded} ref(s) (0 round-trips)"
         )

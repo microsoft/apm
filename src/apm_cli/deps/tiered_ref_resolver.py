@@ -345,7 +345,7 @@ class TieredRefResolver:
     def seed(self, repo_url: str, ref: str, sha: str) -> bool:
         """Pre-populate the L0 per-run cache with a known ``ref -> sha``.
 
-        Used by the resolve phase to inject a lockfile-verified commit
+        Used by the resolve phase to inject a lockfile-recorded commit
         (``resolved_commit``) for a named ``resolved_ref`` -- a branch OR a
         tag name, whichever the lockfile recorded -- BEFORE any download
         runs, so the subsequent ``resolve()`` for that same ref gets an L0
