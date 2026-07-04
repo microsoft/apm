@@ -10,10 +10,10 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from apm_cli.integration.hook_bundle import copy_deployed_hook_bundle
 from apm_cli.integration.hook_integrator import (
     _HOOK_EVENT_MAP,
     HookIntegrationResult,
@@ -210,34 +210,29 @@ def _display_payload(
 def _copy_scripts(
     integrator: HookIntegrator,
     scripts,
+    package_path: Path,
+    hook_file_dir: Path,
     project_root: Path,
     managed_files,
     force: bool,
     diagnostics,
     target_paths: list[Path],
+    hook_descriptor_files: set[Path],
 ) -> tuple[int, int]:
     """Copy Kiro hook scripts and return copied/adopted counts."""
-    scripts_copied = 0
-    scripts_adopted = 0
-    for source_file, target_rel in scripts:
-        target_script = project_root / target_rel
-        ensure_path_within(target_script, project_root)
-        if integrator.try_adopt_identical(target_script, source_file, target_paths):
-            scripts_adopted += 1
-            continue
-        if integrator.check_collision(
-            target_script,
-            target_rel,
-            managed_files,
-            force,
-            diagnostics=diagnostics,
-        ):
-            continue
-        target_script.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_file, target_script)
-        scripts_copied += 1
-        target_paths.append(target_script)
-    return scripts_copied, scripts_adopted
+    copy_result = copy_deployed_hook_bundle(
+        integrator,
+        package_path=package_path,
+        hook_file_dir=hook_file_dir,
+        project_root=project_root,
+        scripts=scripts,
+        managed_files=managed_files,
+        force=force,
+        diagnostics=diagnostics,
+        target_paths=target_paths,
+        hook_descriptor_files=hook_descriptor_files,
+    )
+    return copy_result.scripts_copied, copy_result.files_adopted
 
 
 def integrate_kiro_hooks(
@@ -314,7 +309,16 @@ def integrate_kiro_hooks(
         files_skipped += skipped
         files_adopted += adopted
         copied, adopted_scripts = _copy_scripts(
-            integrator, scripts, project_root, managed_files, force, diagnostics, target_paths
+            integrator,
+            scripts,
+            package_info.install_path,
+            hook_file.parent,
+            project_root,
+            managed_files,
+            force,
+            diagnostics,
+            target_paths,
+            set(hook_files),
         )
         scripts_copied += copied
         scripts_adopted += adopted_scripts

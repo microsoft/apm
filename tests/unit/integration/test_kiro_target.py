@@ -250,6 +250,65 @@ def test_kiro_hooks_expand_each_apm_hook_to_individual_json(tmp_path: Path) -> N
     assert (tmp_path / ".kiro" / "hooks" / "hookify" / "hooks" / "prompt.py").exists()
 
 
+def test_kiro_deploys_hook_directory_siblings_and_package_module_type(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "ponytail"
+    hooks_dir = package_dir / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (package_dir / "package.json").write_text(
+        json.dumps({"type": "commonjs"}),
+        encoding="utf-8",
+    )
+    (hooks_dir / "ponytail.js").write_text(
+        "const config = require('./ponytail-config');\nconsole.log(config.message);\n",
+        encoding="utf-8",
+    )
+    (hooks_dir / "ponytail-config.js").write_text(
+        "module.exports = { message: 'ok' };\n",
+        encoding="utf-8",
+    )
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "node ${PLUGIN_ROOT}/hooks/ponytail.js",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = HookIntegrator().integrate_hooks_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir, "ponytail"),
+        tmp_path,
+    )
+
+    deployed_root = tmp_path / ".kiro" / "hooks" / "ponytail" / "hooks"
+    deployed_script = deployed_root / "ponytail.js"
+    deployed_sibling = deployed_root / "ponytail-config.js"
+    deployed_package_json = deployed_root / "package.json"
+    assert result.files_integrated == 1
+    assert result.scripts_copied == 1
+    assert deployed_script.exists()
+    assert deployed_sibling.exists()
+    assert json.loads(deployed_package_json.read_text(encoding="utf-8")) == {"type": "commonjs"}
+    assert deployed_script in result.target_paths
+    assert deployed_sibling in result.target_paths
+    assert deployed_package_json in result.target_paths
+
+
 def test_kiro_hooks_convert_prompt_actions_to_ask_agent(tmp_path: Path) -> None:
     (tmp_path / ".kiro").mkdir()
     package_dir = tmp_path / "prompt-hooks"

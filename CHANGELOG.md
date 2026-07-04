@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` now deploys hook script directories as self-contained
+  bundles for Claude-family targets, Copilot, and Kiro, so sibling
+  helper modules resolve at runtime. JavaScript and TypeScript hook
+  bundles also get a minimal module-type `package.json` sidecar, which
+  prevents a consumer repo's `type: module` from breaking CommonJS hooks.
+  (#2023)
 - `apm audit --help` now accurately describes the command's full scope:
   hidden Unicode scanning, drift detection, and lockfile/policy checks.
   The previous summary named only Unicode scanning and used the legacy

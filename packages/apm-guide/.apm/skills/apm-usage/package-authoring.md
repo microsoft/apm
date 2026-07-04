@@ -126,6 +126,13 @@ becomes `PostToolUse` in Claude) and rewrites path variables
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
 
+When a hook command references a script inside `hooks/` or `.apm/hooks/`,
+APM deploys that hook source bundle so sibling helper files resolve at
+runtime. Root hook JSON descriptors, symlinks, and `.apm-pin` markers are
+not deployed. JavaScript and TypeScript hook bundles get a minimal
+`package.json` sidecar with the source package's Node `type` (defaulting
+to `commonjs`); shell-only bundles do not get a sidecar.
+
 ### Hook command paths: project-scope stays repo-relative
 
 `apm install` (project-scope, no `-g`) keeps hook `command` paths

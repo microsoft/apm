@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 
@@ -178,16 +180,23 @@ def _setup_commonjs_hook_package(
     package_path = tmp_path / "ponytail"
     hooks_dir = package_path / "hooks"
     hooks_dir.mkdir(parents=True)
+    (hooks_dir / "lib").mkdir()
     (package_path / "package.json").write_text(
         json.dumps({"type": "commonjs"}),
         encoding="utf-8",
     )
     (hooks_dir / "ponytail.js").write_text(
-        "const config = require('./ponytail-config');\nconsole.log(config.message);\n",
+        "const config = require('./ponytail-config');\n"
+        "const helper = require('./lib/helper');\n"
+        "console.log(config.message, helper.message);\n",
         encoding="utf-8",
     )
     (hooks_dir / "ponytail-config.js").write_text(
         "module.exports = { message: 'ok' };\n",
+        encoding="utf-8",
+    )
+    (hooks_dir / "lib" / "helper.js").write_text(
+        "module.exports = { message: 'nested' };\n",
         encoding="utf-8",
     )
     (hooks_dir / target_manifest).write_text(
@@ -205,13 +214,18 @@ def test_claude_deploys_hook_directory_siblings_and_package_module_type(
     (project / "package.json").write_text(json.dumps({"type": "module"}), encoding="utf-8")
     pkg_info = _setup_commonjs_hook_package(tmp_path)
 
-    HookIntegrator().integrate_package_hooks_claude(pkg_info, project)
+    result = HookIntegrator().integrate_package_hooks_claude(pkg_info, project)
 
     deployed_script = project / ".claude" / "hooks" / "ponytail" / "hooks" / "ponytail.js"
     deployed_package_json = deployed_script.parent / "package.json"
     assert deployed_script.exists()
     assert (deployed_script.parent / "ponytail-config.js").exists()
+    assert (deployed_script.parent / "lib" / "helper.js").exists()
     assert json.loads(deployed_package_json.read_text(encoding="utf-8")) == {"type": "commonjs"}
+    assert deployed_script in result.target_paths
+    assert (deployed_script.parent / "ponytail-config.js") in result.target_paths
+    assert (deployed_script.parent / "lib" / "helper.js") in result.target_paths
+    assert deployed_package_json in result.target_paths
 
 
 def test_copilot_deploys_hook_directory_siblings_and_package_module_type(
@@ -222,7 +236,7 @@ def test_copilot_deploys_hook_directory_siblings_and_package_module_type(
     (project / "package.json").write_text(json.dumps({"type": "module"}), encoding="utf-8")
     pkg_info = _setup_commonjs_hook_package(tmp_path, "hooks-copilot.json")
 
-    HookIntegrator().integrate_package_hooks(pkg_info, project)
+    result = HookIntegrator().integrate_package_hooks(pkg_info, project)
 
     deployed_script = (
         project / ".github" / "hooks" / "scripts" / "ponytail" / "hooks" / "ponytail.js"
@@ -230,4 +244,107 @@ def test_copilot_deploys_hook_directory_siblings_and_package_module_type(
     deployed_package_json = deployed_script.parent / "package.json"
     assert deployed_script.exists()
     assert (deployed_script.parent / "ponytail-config.js").exists()
+    assert (deployed_script.parent / "lib" / "helper.js").exists()
     assert json.loads(deployed_package_json.read_text(encoding="utf-8")) == {"type": "commonjs"}
+    assert deployed_script in result.target_paths
+    assert (deployed_script.parent / "ponytail-config.js") in result.target_paths
+    assert (deployed_script.parent / "lib" / "helper.js") in result.target_paths
+    assert deployed_package_json in result.target_paths
+
+
+def test_hook_bundle_defaults_sidecar_to_commonjs_without_package_type(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    package_path = tmp_path / "defaulttype"
+    hooks_dir = package_path / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "entry.js").write_text("console.log('ok');\n", encoding="utf-8")
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps(_session_start_hook("${CLAUDE_PLUGIN_ROOT}/hooks/entry.js")),
+        encoding="utf-8",
+    )
+
+    HookIntegrator().integrate_package_hooks_claude(
+        _package_info(package_path, "defaulttype"), project
+    )
+
+    deployed_package_json = project / ".claude" / "hooks" / "defaulttype" / "hooks" / "package.json"
+    assert json.loads(deployed_package_json.read_text(encoding="utf-8")) == {"type": "commonjs"}
+
+
+def test_hook_bundle_does_not_deploy_root_hook_descriptor_manifest(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    pkg_info = _setup_commonjs_hook_package(tmp_path)
+
+    HookIntegrator().integrate_package_hooks_claude(pkg_info, project)
+
+    deployed_root = project / ".claude" / "hooks" / "ponytail" / "hooks"
+    assert not (deployed_root / "hooks.json").exists()
+
+
+def test_hook_bundle_skips_package_sidecar_for_shell_only_hooks(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    package_path = tmp_path / "shellhooks"
+    hooks_dir = package_path / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "run.sh").write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps(_session_start_hook("${CLAUDE_PLUGIN_ROOT}/hooks/run.sh")),
+        encoding="utf-8",
+    )
+
+    HookIntegrator().integrate_package_hooks_claude(
+        _package_info(package_path, "shellhooks"), project
+    )
+
+    deployed_root = project / ".claude" / "hooks" / "shellhooks" / "hooks"
+    assert (deployed_root / "run.sh").exists()
+    assert not (deployed_root / "package.json").exists()
+
+
+def test_hook_bundle_excludes_symlinks(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    package_path = tmp_path / "linkhooks"
+    hooks_dir = package_path / "hooks"
+    hooks_dir.mkdir(parents=True)
+    outside_file = tmp_path / "outside-secret.js"
+    outside_file.write_text("module.exports = 'secret';\n", encoding="utf-8")
+    (hooks_dir / "entry.js").write_text("require('./linked-secret');\n", encoding="utf-8")
+    try:
+        (hooks_dir / "linked-secret.js").symlink_to(outside_file)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps(_session_start_hook("${CLAUDE_PLUGIN_ROOT}/hooks/entry.js")),
+        encoding="utf-8",
+    )
+
+    HookIntegrator().integrate_package_hooks_claude(
+        _package_info(package_path, "linkhooks"), project
+    )
+
+    deployed_root = project / ".claude" / "hooks" / "linkhooks" / "hooks"
+    assert (deployed_root / "entry.js").exists()
+    assert not (deployed_root / "linked-secret.js").exists()
+
+
+def test_hook_bundle_stale_sibling_removed_from_target_paths(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    pkg_info = _setup_commonjs_hook_package(tmp_path)
+    integrator = HookIntegrator()
+
+    result = integrator.integrate_package_hooks_claude(pkg_info, project)
+    stale_sibling = project / ".claude" / "hooks" / "ponytail" / "hooks" / "ponytail-config.js"
+    assert stale_sibling in result.target_paths
+    managed_files = {path.relative_to(project).as_posix() for path in result.target_paths}
+
+    sync_result = integrator.sync_integration(None, project, managed_files=managed_files)
+
+    assert sync_result["files_removed"] >= 4
+    assert not stale_sibling.exists()

@@ -5,9 +5,12 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from apm_cli.install.cache_pin import MARKER_FILENAME
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
+
+_HOOK_SCRIPT_EXTENSIONS = {".js", ".mjs", ".cjs", ".ts"}
 
 
 @dataclass
@@ -80,6 +83,18 @@ def _same_text(path: Path, content: str) -> bool:
         return False
 
 
+def _is_root_hook_descriptor(
+    source_file: Path, source_root: Path, descriptor_files: set[Path]
+) -> bool:
+    """Return True for root-level hook manifests that should not deploy."""
+    if source_file in descriptor_files:
+        return True
+    if source_file.parent != source_root or source_file.suffix.lower() != ".json":
+        return False
+    stem = source_file.stem.lower()
+    return stem == "hooks" or stem.startswith("hooks-") or stem.endswith("-hooks")
+
+
 def copy_deployed_hook_bundle(
     integrator: BaseIntegrator,
     *,
@@ -91,11 +106,14 @@ def copy_deployed_hook_bundle(
     force: bool,
     diagnostics=None,
     target_paths: list[Path],
+    hook_descriptor_files: set[Path] | None = None,
 ) -> HookBundleCopyResult:
     """Copy each referenced script's whole hooks root and module type."""
     result = HookBundleCopyResult()
     source_target_roots: dict[tuple[Path, Path], str] = {}
+    root_has_js_hook: dict[tuple[Path, Path], bool] = {}
     command_target_rels = {target_rel for _source_file, target_rel in scripts}
+    descriptor_files = hook_descriptor_files or set()
 
     for source_file, target_rel in scripts:
         target_script = project_root / target_rel
@@ -109,15 +127,23 @@ def copy_deployed_hook_bundle(
             package_path,
             source_root,
         )
+        root_has_js_hook.setdefault((source_root, target_root), False)
 
     copy_plan: dict[str, Path] = {}
     for source_root, target_root in source_target_roots:
         for source_file in sorted(source_root.rglob("*")):
-            if not source_file.is_file() or source_file.name == "package.json":
+            if (
+                source_file.is_symlink()
+                or not source_file.is_file()
+                or source_file.name in {"package.json", MARKER_FILENAME}
+                or _is_root_hook_descriptor(source_file, source_root, descriptor_files)
+            ):
                 continue
             source_rel = source_file.relative_to(source_root)
             target_file = target_root / source_rel
             copy_plan[portable_relpath(target_file, project_root)] = source_file
+            if source_file.suffix.lower() in _HOOK_SCRIPT_EXTENSIONS:
+                root_has_js_hook[(source_root, target_root)] = True
 
     for target_rel, source_file in copy_plan.items():
         target_file = project_root / target_rel
@@ -141,6 +167,8 @@ def copy_deployed_hook_bundle(
         target_paths.append(target_file)
 
     for (_source_root, target_root), module_type in source_target_roots.items():
+        if not root_has_js_hook.get((_source_root, target_root), False):
+            continue
         target_file = target_root / "package.json"
         target_rel = portable_relpath(target_file, project_root)
         ensure_path_within(target_file, project_root)

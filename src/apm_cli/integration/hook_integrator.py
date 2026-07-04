@@ -1309,6 +1309,7 @@ class HookIntegrator(BaseIntegrator):
                 force=force,
                 diagnostics=diagnostics,
                 target_paths=target_paths,
+                hook_descriptor_files=set(hook_files),
             )
             scripts_copied += copy_result.scripts_copied
             scripts_adopted += copy_result.files_adopted
@@ -1656,6 +1657,7 @@ class HookIntegrator(BaseIntegrator):
                 force=force,
                 diagnostics=diagnostics,
                 target_paths=target_paths,
+                hook_descriptor_files=set(hook_files),
             )
             scripts_copied += copy_result.scripts_copied
             scripts_adopted += copy_result.files_adopted

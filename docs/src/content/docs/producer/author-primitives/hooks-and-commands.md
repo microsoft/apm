@@ -86,11 +86,14 @@ file lives in `hooks/` or `.apm/hooks/`, a path like
 path is not doubled.
 
 When a hook command points at a script inside a package hook directory,
-APM deploys that whole hook directory so sibling helper modules stay
-available at runtime. It also writes a minimal `package.json` beside the
-deployed scripts with the source package's Node `type`; packages without
-an explicit `type` deploy as `commonjs` so the consumer repo's
-`package.json` cannot change hook module semantics.
+APM deploys the hook source bundle for Claude-family targets, Copilot,
+and Kiro so sibling helper modules stay available at runtime. Root hook
+JSON descriptors, symlinks, and `.apm-pin` markers are not deployed. For
+JavaScript and TypeScript hook bundles, APM writes a minimal
+`package.json` beside the deployed scripts with the nearest source
+package's Node `type`; packages without an explicit `type` deploy as
+`commonjs` so the consumer repo's `package.json` cannot change hook
+module semantics. Shell-only bundles do not get a sidecar.
 
 For multi-target packages, prefer simple hook filenames plus consumer
 per-dependency `targets:` in `dependencies.apm` to limit reach. If the
