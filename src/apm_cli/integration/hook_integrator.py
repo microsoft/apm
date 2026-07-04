@@ -49,7 +49,7 @@ import logging
 import re
 import shutil
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -465,6 +465,145 @@ def _resolve_relative_hook_script(
         if candidate.exists() and candidate.is_file():
             return candidate
     return last_candidate
+
+
+def _same_file_or_path(left: Path, right: Path) -> bool:
+    """Return True when two paths identify the same file or path string."""
+    try:
+        return left.samefile(right)
+    except OSError:
+        try:
+            return left.resolve() == right.resolve()
+        except (OSError, RuntimeError):
+            return left == right
+
+
+def _nearest_package_json_for_script(source_file: Path, package_path: Path) -> Path | None:
+    """Find the package scope that controls a deployed hook script."""
+    try:
+        package_root = package_path.resolve()
+        current = ensure_path_within(source_file.parent, package_path).resolve()
+    except (OSError, RuntimeError, PathTraversalError):
+        return None
+
+    while True:
+        package_json = current / "package.json"
+        if package_json.is_file() and not package_json.is_symlink():
+            return package_json
+        if current == package_root:
+            return None
+        parent = current.parent
+        if parent == current:
+            return None
+        try:
+            current.relative_to(package_root)
+        except ValueError:
+            return None
+        current = parent
+
+
+def _target_child_path(target_parent: PurePosixPath, relative_child: Path) -> str:
+    """Build a forward-slash target path for a copied runtime file."""
+    return (target_parent / relative_child.as_posix()).as_posix()
+
+
+def _hook_runtime_source_root(source_file: Path, package_path: Path) -> Path:
+    """Return the package subtree that should travel with a hook entrypoint."""
+    try:
+        rel_source = source_file.relative_to(package_path)
+    except ValueError:
+        return source_file.parent
+    if rel_source.parts and rel_source.parts[0] in {"hooks", "scripts"}:
+        return package_path / rel_source.parts[0]
+    return source_file.parent
+
+
+def _hook_runtime_target_root(
+    source_file: Path,
+    target_rel: str,
+    runtime_source_root: Path,
+) -> PurePosixPath:
+    """Return the target subtree corresponding to ``runtime_source_root``."""
+    target_path = PurePosixPath(target_rel)
+    try:
+        source_child = source_file.relative_to(runtime_source_root)
+    except ValueError:
+        return target_path.parent
+    child_parts = source_child.parts
+    if not child_parts or len(target_path.parts) <= len(child_parts):
+        return target_path.parent
+    return PurePosixPath(*target_path.parts[: -len(child_parts)])
+
+
+def _iter_hook_runtime_files(
+    source_file: Path,
+    target_rel: str,
+    package_path: Path,
+    hook_file: Path,
+) -> list[tuple[Path, str]]:
+    """Return files needed to run a deployed hook entry script.
+
+    Hook packages often keep small CommonJS helper modules next to, or
+    one directory above, the command entrypoint.  Copying only the
+    entrypoint leaves relative ``require("./helper")`` imports broken;
+    copying the nearest package scope preserves the source package's
+    ``type`` semantics inside consumer projects that use a different
+    module system.
+    """
+    source_dir = _hook_runtime_source_root(source_file, package_path)
+    target_root = _hook_runtime_target_root(source_file, target_rel, source_dir)
+    runtime_files: list[tuple[Path, str]] = []
+
+    try:
+        ensure_path_within(source_dir, package_path)
+    except PathTraversalError:
+        return [(source_file, target_rel)]
+
+    try:
+        candidates = sorted(source_dir.rglob("*"), key=lambda p: p.as_posix())
+    except OSError:
+        candidates = [source_file]
+
+    for candidate in candidates:
+        try:
+            if candidate.is_symlink() or not candidate.is_file():
+                continue
+            ensure_path_within(candidate, package_path)
+        except (OSError, RuntimeError, PathTraversalError):
+            continue
+        if _same_file_or_path(candidate, hook_file):
+            continue
+        try:
+            rel_child = candidate.relative_to(source_dir)
+        except ValueError:
+            continue
+        runtime_files.append((candidate, _target_child_path(target_root, rel_child)))
+
+    package_json = _nearest_package_json_for_script(source_file, package_path)
+    if package_json is not None:
+        runtime_files.append((package_json, (target_root / "package.json").as_posix()))
+
+    if not runtime_files:
+        runtime_files.append((source_file, target_rel))
+    return runtime_files
+
+
+def _expand_hook_runtime_scripts(
+    scripts: list[tuple[Path, str]],
+    package_path: Path,
+    hook_file: Path,
+) -> list[tuple[Path, str]]:
+    """Expand command entrypoints into copy targets for their runtime context."""
+    seen_targets: dict[str, Path] = {}
+    for source_file, target_rel in scripts:
+        for runtime_source, runtime_target in _iter_hook_runtime_files(
+            source_file,
+            target_rel,
+            package_path,
+            hook_file,
+        ):
+            seen_targets.setdefault(runtime_target, runtime_source)
+    return [(source, target) for target, source in seen_targets.items()]
 
 
 class HookIntegrator(BaseIntegrator):
@@ -1257,6 +1396,7 @@ class HookIntegrator(BaseIntegrator):
                 hook_file_dir=hook_file.parent,
                 root_dir=root_dir,
             )
+            scripts = _expand_hook_runtime_scripts(scripts, package_info.install_path, hook_file)
 
             # Generate target filename (clean, no -apm suffix)
             stem = hook_file.stem
@@ -1482,6 +1622,7 @@ class HookIntegrator(BaseIntegrator):
                 root_dir=root_dir,
                 deploy_root=_deploy_root_for_rewrite,
             )
+            scripts = _expand_hook_runtime_scripts(scripts, package_info.install_path, hook_file)
 
             # Merge hooks into config (additive)
             hooks = rewritten.get("hooks", {})
