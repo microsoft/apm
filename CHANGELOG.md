@@ -9,9 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm pack --format plugin` now respects `skills:` subset filters on git
-  dependencies, so plugin bundles include only the deployed skills recorded in
-  the lockfile and older lockfiles still fall back to `apm_modules`. (#2013)
+- `apm pack --format plugin` now emits only lockfile-attested dependency
+  content: it packs git-dependency files exclusively from the lockfile
+  `deployed_files` (verified against `deployed_file_hashes`) and never packs
+  the unattested `apm_modules` cache. This respects `skills:` subset filters
+  (only deployed skills are included) and closes a provenance hole where
+  stale, partial, or tampered cache content could leak into a bundle. If a
+  dependency has cached primitives but no `deployed_files`, `apm pack` now
+  fails with an actionable error telling you to run `apm install`. (#2013)
 - `apm install` and `apm uninstall` no longer strip comments from `apm.yml`
   while updating dependency entries, so inline annotations and section notes
   survive dependency updates. (#2012)

@@ -110,9 +110,9 @@ A Claude Code plugin directory under `--output`. Contains:
 
 - `plugin.json` -- schema-conformant manifest. Convention-dir keys are stripped because Claude Code auto-discovers them.
 - Plugin-native subdirs populated from your `.apm/` content and from installed dependencies: `agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`, `extensions/` (canvas extensions, when the `canvas` experimental flag is enabled).
-- Installed dependencies with lockfile `deployed_files` use those deployed files directly.
-  - If the dependency declares `skills:`, only the named skills are included; stale `apm_modules` cache cannot add extras.
-  - Older lockfiles without `deployed_files` fall back to `apm_modules` when the cache is present.
+- Installed dependencies are packed exclusively from lockfile-attested `deployed_files`; the `apm_modules` cache is never packed (it has no provenance or integrity guarantee). Each attested file is verified against its `deployed_file_hashes` SHA-256 before inclusion.
+  - If the dependency declares `skills:`, only the named skills are included; the cache cannot add extras.
+  - If a dependency has cached primitives but no `deployed_files`, `apm pack` fails and tells you to run `apm install`.
 - A merged `hooks.json` when multiple sources contribute hooks.
 - `apm.lock.yaml` -- enriched copy with `pack:` metadata and a `bundle_files` map of per-file SHA-256 digests, used by `apm install` for install-time integrity verification.
 - `devDependencies` are excluded.
@@ -193,7 +193,7 @@ Plugin manifest generation runs after BUNDLE and MARKETPLACE phases so the gener
 
 ## Behavior
 
-- **Lockfile-driven dependencies.** Dependency content prefers lockfile `deployed_files`. Older lockfiles fall back to `apm_modules` when the cache is present. If neither source exists, `apm pack` errors and tells you to run `apm install`.
+- **Lockfile-attested dependencies.** Dependency content is packed exclusively from lockfile `deployed_files` and verified against `deployed_file_hashes`; the `apm_modules` cache is never packed. If a dependency has cached primitives but no `deployed_files`, `apm pack` errors and tells you to run `apm install`.
 - **Hidden-character scan.** Source files are scanned before bundling. Findings are reported as warnings only -- packing is non-blocking. Consumers are protected at install time, where critical findings block.
 - **Empty bundle warning.** If no package files match after dependency resolution, `apm pack` emits a warning and exits `0` with an empty bundle. Missing dependency content is an error, not an empty bundle.
 - **Share line.** On success, `apm pack` prints `Share with: apm install <bundle-path>` so the produced bundle is immediately copy-pasteable.

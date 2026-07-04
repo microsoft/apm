@@ -131,12 +131,16 @@ For the consumer flags that apply (`--target`, `--global`, `--force`,
 `.apm/<type>/` subdirectories and from convention directories at the
 package root (`agents/`, `skills/`, `instructions/`, etc.). This lets
 you author in whichever layout feels natural during development.
-When packing git dependencies, `apm pack` prefers the lockfile
-`deployed_files` list as the source of truth. If a dependency declares
-[`skills:`](../reference/package-types/#skill_bundle), only the named
-deployed skills are included. Older lockfiles without `deployed_files`
-fall back to `apm_modules` when the cache is present; if neither source
-is available, `apm pack` tells you to run `apm install`.
+When packing git dependencies, `apm pack` emits **only** what the
+lockfile attests. Dependency content is sourced exclusively from the
+lockfile `deployed_files` list -- the `apm_modules` cache is never
+packed, because it carries no provenance or integrity guarantee (it can
+be stale, partial, or tampered). Each attested file is verified against
+its recorded `deployed_file_hashes` SHA-256 before it is included. If a
+dependency declares [`skills:`](../reference/package-types/#skill_bundle),
+only the named deployed skills are included. If a dependency has cached
+primitives but no `deployed_files` (a stale or partial install), `apm
+pack` fails and tells you to run `apm install` to record provenance.
 
 `apm install` is per-primitive and stricter. Each integrator has its own
 discovery rules. For some primitive types the root convention directory
@@ -250,9 +254,10 @@ receive files at install time. APM records the value in `pack.target` as
 informational metadata only and prints a deprecation warning.
 
 **Missing dependency content.** For installed dependencies, `apm pack`
-prefers lockfile `deployed_files`. Older lockfiles can fall back to
-`apm_modules` when the cache is present. If neither source exists,
-`apm pack` stops with an error and tells you to run `apm install`.
+emits only lockfile-attested `deployed_files`; the `apm_modules` cache is
+never packed. If a dependency has cached primitives but no
+`deployed_files`, `apm pack` stops with an error and tells you to run
+`apm install` so the content is attested.
 
 **Dry-run before sharing.** Use `apm pack --dry-run --verbose` to see the
 full file list (and any path remappings) without writing anything.

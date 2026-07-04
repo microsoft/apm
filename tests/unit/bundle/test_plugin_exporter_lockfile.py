@@ -19,6 +19,7 @@ import yaml
 
 from apm_cli.bundle.plugin_exporter import export_plugin_bundle
 from apm_cli.deps.lockfile import LockedDependency, LockFile
+from apm_cli.utils.content_hash import compute_file_hash
 
 # ---------------------------------------------------------------------------
 # Helpers (reuse patterns from test_plugin_exporter.py)
@@ -89,7 +90,10 @@ def _setup_project_with_skill(tmp_path: Path, *, target: str = "copilot") -> Pat
             ".github/skills/coding/SKILL.md",
         ],
         deployed_file_hashes={
-            ".github/skills/coding/SKILL.md": _sha256_file(gh_skill / "SKILL.md"),
+            # Mirror how `apm install` records hashes (compute_file_hash ->
+            # "sha256:<hex>"), so attested-hash verification at pack time
+            # accepts the untouched deployed file.
+            ".github/skills/coding/SKILL.md": compute_file_hash(gh_skill / "SKILL.md"),
         },
     )
     _write_lockfile(project, [dep])

@@ -29,6 +29,7 @@ from ..utils.archive import (
     write_zip_archive,
 )
 from ..utils.console import _rich_warning
+from ..utils.content_hash import compute_file_hash
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
 from .packer import PackResult
 
@@ -482,16 +483,53 @@ def _plugin_rel_for_deployed_path(
     return PurePosixPath(*plugin_parts).as_posix()
 
 
+def _verify_attested_hash(
+    source: Path,
+    project_root: Path,
+    dep: LockedDependency,
+) -> None:
+    """Fail loudly when a packed deployed file diverges from its attested hash.
+
+    ``deployed_file_hashes`` records the SHA-256 (``"sha256:<hex>"``) of each
+    file at install time. Verifying the on-disk copy before packing closes the
+    integrity half of the provenance hole: a deployed file that was tampered
+    or corrupted after ``apm install`` must never enter the bundle silently.
+
+    Files with no recorded hash (older lockfiles predating
+    ``deployed_file_hashes``) are packed without verification -- absence of an
+    attestation is forward-compat tolerated, presence of a *mismatched* one is
+    a hard error.
+    """
+    hashes = dep.deployed_file_hashes
+    if not hashes:
+        return
+    rel = source.relative_to(project_root).as_posix()
+    expected = hashes.get(rel)
+    if not expected:
+        return
+    actual = compute_file_hash(source)
+    if actual != expected:
+        raise ValueError(
+            f"Cannot pack dependency {dep.repo_url}: deployed file {rel!r} does "
+            "not match the hash recorded in apm.lock.yaml. The installed copy "
+            "may be stale or tampered. Run 'apm install' to restore attested "
+            "content, then pack again."
+        )
+
+
 def _append_deployed_component(
     components: list[tuple[Path, str]],
     source: Path,
     output_rel: str,
     seen_outputs: set[str],
+    project_root: Path,
+    dep: LockedDependency,
 ) -> None:
     """Append one deployed component unless it is unsafe or already mapped."""
     if output_rel in seen_outputs or not _validate_output_rel(output_rel):
         return
     if source.is_file() and not source.is_symlink():
+        _verify_attested_hash(source, project_root, dep)
         components.append((source, output_rel))
         seen_outputs.add(output_rel)
 
@@ -532,9 +570,13 @@ def _collect_deployed_components(
                     continue
                 child_rel = child.relative_to(source).as_posix()
                 child_output = (PurePosixPath(plugin_rel) / child_rel).as_posix()
-                _append_deployed_component(components, child, child_output, seen_outputs)
+                _append_deployed_component(
+                    components, child, child_output, seen_outputs, project_root, dep
+                )
         else:
-            _append_deployed_component(components, source, plugin_rel, seen_outputs)
+            _append_deployed_component(
+                components, source, plugin_rel, seen_outputs, project_root, dep
+            )
 
     if missing:
         shown_missing = missing[:10]
@@ -546,6 +588,24 @@ def _collect_deployed_components(
             "restore them:\n" + "\n".join(f"  - {path}" for path in shown_missing) + suffix
         )
     return components
+
+
+def _cache_would_contribute_primitives(install_path: Path, dep: LockedDependency) -> bool:
+    """Return True if the unattested apm_modules cache holds packable primitives.
+
+    Used ONLY to decide whether to fail loudly when a locked dependency records
+    no ``deployed_files``. This reads the cache to DETECT a provenance gap; it
+    never copies cache bytes into the bundle. A dependency that installed
+    real components but recorded none of them in the lockfile is a stale or
+    partial install -- packing its cache would leak unattested content, so we
+    refuse rather than silently pack it.
+    """
+    if not install_path.is_dir():
+        return False
+    probe = _collect_apm_components(install_path / ".apm")
+    probe.extend(_collect_root_plugin_components(install_path))
+    _collect_bare_skill(install_path, dep, probe)
+    return bool(probe)
 
 
 # ---------------------------------------------------------------------------
@@ -633,6 +693,11 @@ def export_plugin_bundle(
 
             dep_name = dep.repo_url
 
+            # Provenance rule (issue #1999 follow-up): a dependency's content
+            # is packed EXCLUSIVELY from what the lockfile attests via
+            # ``deployed_files`` (+ per-file ``deployed_file_hashes``).
+            # ``apm_modules`` is an unattested cache -- it carries no integrity
+            # or provenance guarantee, so no bytes from it may reach the bundle.
             install_path = _dep_install_path(dep, apm_modules_dir)
             if dep.deployed_files:
                 dep_components = _collect_deployed_components(project_root, dep)
@@ -643,38 +708,24 @@ def export_plugin_bundle(
                         f"{declared_skills} were not found among deployed files. "
                         "Run 'apm install' to re-deploy the expected skills."
                     )
+            elif _cache_would_contribute_primitives(install_path, dep):
+                # Unattested primitives sit in the cache but the lockfile
+                # recorded none of them: a stale or partial install. Refuse
+                # to pack the cache -- fail loudly with a fix.
+                raise ValueError(
+                    f"Cannot pack dependency {dep.repo_url}: the lockfile records "
+                    "no deployed files for it, but installable content exists in "
+                    "the apm_modules cache. apm_modules is an unattested cache and "
+                    "cannot be packed. Run 'apm install' to record provenance in "
+                    "apm.lock.yaml, then pack again."
+                )
             else:
-                if not install_path.is_dir():
-                    raise ValueError(
-                        f"Cannot pack dependency {dep.repo_url}: no deployed_files are "
-                        "recorded in apm.lock.yaml and apm_modules cache is missing. "
-                        "Run 'apm install' to restore it."
-                    )
-
-                # Collect from .apm/
-                dep_apm_dir = install_path / ".apm"
-                dep_components = _collect_apm_components(dep_apm_dir)
-
-                # Also collect root-level plugin-native dirs from the dep
-                dep_components.extend(_collect_root_plugin_components(install_path))
-
-                # Bare Claude skills: SKILL.md at dep root with no skills/ subdir
-                _collect_bare_skill(install_path, dep, dep_components)
+                # No attested content and nothing packable in the cache: the
+                # dependency contributes no plugin primitives (e.g. an
+                # MCP-only or hooks-config-only package). Skip it cleanly.
+                dep_components = []
 
             _merge_file_map(file_map, dep_components, dep_name, force, collisions)
-
-            if install_path.is_dir():
-                dep_apm_dir = install_path / ".apm"
-
-                # Hooks -- deps merge (first wins among deps)
-                dep_hooks = _collect_hooks_from_apm(dep_apm_dir)
-                dep_hooks_root = _collect_hooks_from_root(install_path)
-                _deep_merge(dep_hooks, dep_hooks_root, overwrite=False)
-                _deep_merge(merged_hooks, dep_hooks, overwrite=False)
-
-                # MCP -- deps merge (first wins among deps)
-                dep_mcp = _collect_mcp(install_path)
-                _deep_merge(merged_mcp, dep_mcp, overwrite=False)
 
     # 6. Collect own components (.apm/ and root-level)
     own_apm_dir = project_root / ".apm"

@@ -1,5 +1,6 @@
 """Hermetic e2e coverage for plugin packing filtered skill dependencies."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -66,6 +67,30 @@ def _write_cached_skill(project: Path, name: str, marker: str) -> None:
     skill_dir = project / "apm_modules" / "acme" / "skill-bundle" / ".apm" / "skills" / name
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(marker, encoding="utf-8")
+
+
+def _write_cached_mcp(project: Path, server_name: str) -> None:
+    """Plant an UNATTESTED .mcp.json in the apm_modules cache for the dep.
+
+    Nothing in this file is recorded in the lockfile deployed_files, so an
+    attested-only pack must never surface it in the bundle.
+    """
+    dep_root = project / "apm_modules" / "acme" / "skill-bundle"
+    dep_root.mkdir(parents=True, exist_ok=True)
+    (dep_root / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {server_name: {"command": "leaked-binary"}}}),
+        encoding="utf-8",
+    )
+
+
+def _write_cached_hooks(project: Path, hook_event: str) -> None:
+    """Plant an UNATTESTED .apm/hooks/hooks.json in the apm_modules cache."""
+    hooks_dir = project / "apm_modules" / "acme" / "skill-bundle" / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps({hook_event: ["leaked-hook-command"]}),
+        encoding="utf-8",
+    )
 
 
 def _run_pack(project: Path, output_name: str = "build") -> subprocess.CompletedProcess[str]:
@@ -153,6 +178,52 @@ def test_pack_plugin_uses_deployed_skill_subset_and_survives_missing_cache(
     _assert_only_subset_skills(_bundle_dir(project))
 
 
+def test_pack_plugin_excludes_unattested_cache_hooks_and_mcp(tmp_path: Path) -> None:
+    """Provenance guarantee: unattested apm_modules content is never packed.
+
+    The dependency has an attested skill subset (alpha, beta), but its
+    apm_modules cache ALSO carries a .mcp.json and a hooks.json that are NOT
+    recorded in the lockfile deployed_files. apm pack must emit ONLY what the
+    lockfile attests: the subset skills, and no bytes derived from the
+    unattested cache config. This is the RED-without-fix / GREEN-with-fix gate.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_apm_yml(project)
+    deployed_files = [
+        file
+        for skill in ("alpha", "beta")
+        for file in _write_deployed_skill(project, skill, f"deployed {skill}")
+    ]
+    _write_lockfile(
+        project,
+        LockedDependency(
+            repo_url="acme/skill-bundle",
+            resolved_commit="abc123",
+            depth=1,
+            package_type="skill_bundle",
+            deployed_files=deployed_files,
+            skill_subset=["alpha", "beta"],
+        ),
+    )
+    # Unattested cache bytes -- present on disk, absent from deployed_files.
+    _write_cached_mcp(project, "leaked-server")
+    _write_cached_hooks(project, "preCommit")
+    # An unattested extra skill in the cache, too.
+    _write_cached_skill(project, "zeta", "raw cache zeta")
+
+    result = _run_pack(project)
+
+    assert result.returncode == 0, result.stderr
+    bundle_dir = _bundle_dir(project)
+    # (a) #1999 subset behavior preserved.
+    _assert_only_subset_skills(bundle_dir)
+    # (b) unattested cache content is NOT packed.
+    assert not (bundle_dir / ".mcp.json").exists(), "unattested dep MCP leaked into bundle"
+    assert not (bundle_dir / "hooks.json").exists(), "unattested dep hooks leaked into bundle"
+    assert not (bundle_dir / "skills" / "zeta").exists(), "unattested cache skill leaked"
+
+
 def test_pack_plugin_rejects_unsafe_deployed_paths(tmp_path: Path) -> None:
     """apm pack must reject unsafe deployed_files paths before copying."""
     project = tmp_path / "project"
@@ -177,10 +248,15 @@ def test_pack_plugin_rejects_unsafe_deployed_paths(tmp_path: Path) -> None:
     assert "unsafe deployed file path" in combined_output
 
 
-def test_pack_plugin_older_lockfile_without_deployed_files_uses_cache(
+def test_pack_plugin_fails_when_dep_has_cache_but_no_deployed_files(
     tmp_path: Path,
 ) -> None:
-    """Older lockfiles still pack dependency skills from apm_modules."""
+    """A dep with cached primitives but no attested deployed_files fails loud.
+
+    apm_modules is an unattested cache: rather than silently packing content
+    the lockfile never recorded, pack refuses and points the user at
+    'apm install' to record provenance.
+    """
     project = tmp_path / "project"
     project.mkdir()
     _write_apm_yml(project)
@@ -197,8 +273,6 @@ def test_pack_plugin_older_lockfile_without_deployed_files_uses_cache(
 
     result = _run_pack(project)
 
-    assert result.returncode == 0, result.stderr
-    bundle_dir = _bundle_dir(project)
-    assert (bundle_dir / "skills" / "legacy" / "SKILL.md").read_text(
-        encoding="utf-8"
-    ) == "legacy cache skill"
+    assert result.returncode != 0
+    combined_output = result.stdout + result.stderr
+    assert "apm_modules is an unattested cache and cannot be packed" in combined_output
