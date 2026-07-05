@@ -587,6 +587,43 @@ describe("CSRF protection", () => {
     });
 });
 
+describe("POST body size limits", () => {
+    before(() => setupServer());
+    after(teardownServer);
+
+    it("returns 413 for oversized payloads on default POST endpoints", async () => {
+        const oversizedBody = { number: 1, title: "x".repeat(70 * 1024) };
+        const res = await fetch(`${baseUrl}/start-session`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Canvas-Token": TEST_CSRF_TOKEN,
+            },
+            body: JSON.stringify(oversizedBody),
+        });
+        assert.equal(res.status, 413);
+        const json = await res.json();
+        assert.equal(json.ok, false);
+        assert.ok(String(json.error).includes("limit"));
+    });
+
+    it("returns 413 for oversized refine-comment drafts", async () => {
+        const oversizedRefine = { type: "issue", number: 1, title: "big", draft: "y".repeat(1024 * 1024 + 1) };
+        const res = await fetch(`${baseUrl}/refine-comment`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Canvas-Token": TEST_CSRF_TOKEN,
+            },
+            body: JSON.stringify(oversizedRefine),
+        });
+        assert.equal(res.status, 413);
+        const json = await res.json();
+        assert.equal(json.ok, false);
+        assert.ok(String(json.error).includes("limit"));
+    });
+});
+
 // ---------------------------------------------------------------------------
 // Path traversal protection
 // ---------------------------------------------------------------------------

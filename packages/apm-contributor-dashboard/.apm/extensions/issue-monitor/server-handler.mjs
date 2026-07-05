@@ -31,6 +31,9 @@ const MIME_TYPES = {
     ".ttf": "font/ttf",
 };
 
+const DEFAULT_POST_BODY_LIMIT_BYTES = 64 * 1024;
+const REFINED_COMMENT_BODY_LIMIT_BYTES = 1024 * 1024;
+
 // Write endpoints that perform state-changing operations
 const WRITE_ENDPOINTS = new Set([
     "/start-session", "/open-session", "/run-panel", "/approve-pipeline",
@@ -52,12 +55,73 @@ function serveStatic(res, filePath) {
     }
 }
 
+function createPayloadTooLargeError() {
+    const error = new Error("Request body exceeds server limit");
+    error.code = "PAYLOAD_TOO_LARGE";
+    error.statusCode = 413;
+    return error;
+}
+
+function isPayloadTooLargeError(error) {
+    return error?.code === "PAYLOAD_TOO_LARGE" || error?.statusCode === 413;
+}
+
+function sendPayloadTooLarge(res) {
+    res.writeHead(413, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "Request body exceeds server limit" }));
+}
+
 function readBody(req) {
-    return new Promise((resolve) => {
-        let body = "";
-        req.on("data", (chunk) => { body += chunk; });
-        req.on("end", () => resolve(body));
+    const maxBytes = req.maxBytes || DEFAULT_POST_BODY_LIMIT_BYTES;
+    const limit = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : DEFAULT_POST_BODY_LIMIT_BYTES;
+
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        let bytes = 0;
+        const cleanup = () => {
+            req.off("data", onData);
+            req.off("end", onEnd);
+            req.off("error", onError);
+        };
+        const onData = (chunk) => {
+            bytes += chunk.length;
+            if (bytes > limit) {
+                cleanup();
+                req.destroy();
+                reject(createPayloadTooLargeError());
+                return;
+            }
+            chunks.push(chunk);
+        };
+        const onError = (error) => {
+            cleanup();
+            reject(error);
+        };
+        const onEnd = () => {
+            cleanup();
+            resolve(Buffer.concat(chunks).toString("utf8"));
+        };
+        req.on("data", onData);
+        req.on("end", onEnd);
+        req.on("error", onError);
     });
+}
+
+function getBodyLimitForPath(pathname) {
+    if (pathname === "/refine-comment") return REFINED_COMMENT_BODY_LIMIT_BYTES;
+    return DEFAULT_POST_BODY_LIMIT_BYTES;
+}
+
+async function readBodyWithLimit(req, pathname) {
+    req.maxBytes = getBodyLimitForPath(pathname);
+    try {
+        return await readBody(req);
+    } catch (error) {
+        if (isPayloadTooLargeError(error)) {
+            return { isPayloadTooLarge: true };
+        }
+        throw error;
+    }
 }
 
 /**
@@ -107,7 +171,11 @@ export function createHandler(deps) {
 
         // POST /start-session
         if (req.method === "POST" && req.url === "/start-session") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
             try {
                 const { number, title } = JSON.parse(raw);
                 startedSessions.add(number);
@@ -129,7 +197,11 @@ export function createHandler(deps) {
 
         // POST /open-session
         if (req.method === "POST" && req.url === "/open-session") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
             try {
                 const { number, title } = JSON.parse(raw);
                 res.setHeader("Content-Type", "application/json");
@@ -243,7 +315,11 @@ export function createHandler(deps) {
 
         // POST /run-panel
         if (req.method === "POST" && req.url === "/run-panel") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
             try {
                 const { number } = JSON.parse(raw);
                 try {
@@ -269,7 +345,11 @@ export function createHandler(deps) {
 
         // POST /approve-pipeline
         if (req.method === "POST" && req.url === "/approve-pipeline") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
             try {
                 const { number } = JSON.parse(raw);
                 const checksOut = await ghExec(["pr", "checks", String(number), "--repo", repo, "--json", "name,state,link"]);
@@ -295,7 +375,11 @@ export function createHandler(deps) {
 
         // POST /approve-pr
         if (req.method === "POST" && req.url === "/approve-pr") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
             try {
                 const { number } = JSON.parse(raw);
                 await ghExec(["pr", "review", String(number), "--repo", repo, "--approve"]);
@@ -310,7 +394,11 @@ export function createHandler(deps) {
 
         // POST /approve-workflow-runs
         if (req.method === "POST" && req.url === "/approve-workflow-runs") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
             try {
                 const { branch } = JSON.parse(raw);
                 const runsOut = await ghExec(["run", "list", "--repo", repo, "--branch", branch, "--limit", "10", "--json", "databaseId,conclusion"]);
@@ -331,7 +419,11 @@ export function createHandler(deps) {
 
         // POST /merge-when-ready
         if (req.method === "POST" && req.url === "/merge-when-ready") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
             try {
                 const { number } = JSON.parse(raw);
                 await ghExec(["pr", "merge", String(number), "--repo", repo, "--auto", "--squash"]);
@@ -346,7 +438,11 @@ export function createHandler(deps) {
 
         // POST /submit-comment -- post a comment to an issue or PR via gh CLI
         if (req.method === "POST" && req.url === "/submit-comment") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
             try {
                 const { type, number, body } = JSON.parse(raw);
                 const cmd = type === "pr" ? "pr" : "issue";
@@ -363,7 +459,11 @@ export function createHandler(deps) {
 
         // POST /refine-comment -- send a draft to the chat session for agent refinement
         if (req.method === "POST" && req.url === "/refine-comment") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
             try {
                 const { type, number, draft, title } = JSON.parse(raw);
                 res.setHeader("Content-Type", "application/json");
@@ -400,7 +500,11 @@ export function createHandler(deps) {
 
         // POST /create-follow-up-issues -- create GitHub issues from panel review deferred/recommended items
         if (req.method === "POST" && req.url === "/create-follow-up-issues") {
-            const raw = await readBody(req);
+            const raw = await readBodyWithLimit(req, req.url);
+            if (raw?.isPayloadTooLarge) {
+                sendPayloadTooLarge(res);
+                return;
+            }
             res.setHeader("Content-Type", "application/json");
             try {
                 const { number, panelReview } = JSON.parse(raw);
