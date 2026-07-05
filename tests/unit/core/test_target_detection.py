@@ -60,6 +60,16 @@ class TestDetectTarget:
         assert target == "vscode"
         assert reason == "explicit --target flag"
 
+    def test_explicit_target_intellij_maps_to_vscode(self, tmp_path):
+        """Explicit --target intellij maps to vscode (MCP-only target, #1957)."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target="intellij",
+        )
+
+        assert target == "vscode"
+        assert reason == "explicit --target flag"
+
     def test_explicit_target_claude_wins(self, tmp_path):
         """Explicit --target claude always wins."""
         (tmp_path / ".github").mkdir()
