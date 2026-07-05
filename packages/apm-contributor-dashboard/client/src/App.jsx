@@ -1,4 +1,4 @@
-import { createSignal, Show } from "solid-js";
+import { createSignal, Show, onMount } from "solid-js";
 import Navbar from "./components/Navbar";
 import TabBar from "./components/TabBar";
 import IssuesTab from "./components/issues/IssuesTab";
@@ -17,6 +17,10 @@ export default function App() {
     { id: "issues", label: "Issues", count: () => issueResource()?.issues?.length || 0 },
     { id: "prs", label: "Pull Requests", count: () => prResource()?.prs?.length || 0 },
   ];
+
+  onMount(() => {
+    if (activeTab() === "triage") activateTriage();
+  });
 
   function handleTabSwitch(id) {
     if (id === "triage") activateTriage();

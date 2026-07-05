@@ -442,6 +442,8 @@ export function createHandler(deps) {
         }
 
         // GET /api/triage -- fetch issues with triage-decision comments (lazy, cached)
+        // Performance: single GraphQL query fetches all open issues + their recent comments
+        // in one round trip (vs the old N+1 approach of one gh-issue-view call per issue).
         if (req.url === "/api/triage") {
             res.setHeader("Content-Type", "application/json");
             const TRIAGE_TTL_MS = 5 * 60 * 1000;
@@ -451,40 +453,41 @@ export function createHandler(deps) {
                 return;
             }
             try {
-                const listOut = await ghExec([
-                    "issue", "list",
-                    "--repo", repo,
-                    "--state", "open",
-                    "--limit", "100",
-                    "--json", "number,title,labels,author,url,comments",
-                ]);
-                const issues = JSON.parse(listOut);
-                const withComments = issues.filter(i => {
-                    const cnt = typeof i.comments === "number" ? i.comments : (Array.isArray(i.comments) ? i.comments.length : 0);
-                    return cnt > 0;
-                });
-
-                // Semaphore: max 6 concurrent gh calls
-                let active = 0;
-                const queue = [];
-                function acquireTriage() {
-                    return new Promise((resolve) => {
-                        const run = () => { active++; resolve(() => { active--; if (queue.length) queue.shift()(); }); };
-                        if (active < 6) run(); else queue.push(run);
-                    });
-                }
-
+                const [owner, repoName] = repo.split("/");
+                // Paginate: GitHub GraphQL returns max 100 issues per page.
+                // Two pages covers up to 200 open issues which is more than enough.
+                const gql = `
+query($owner: String!, $repo: String!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    issues(first: 100, states: [OPEN], after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number
+        title
+        url
+        labels(first: 10) { nodes { name } }
+        comments(last: 20) {
+          nodes {
+            body
+            createdAt
+            author { login }
+          }
+        }
+      }
+    }
+  }
+}`.trim();
                 const triageItems = [];
-                await Promise.all(withComments.map(async (issue) => {
-                    const release = await acquireTriage();
-                    try {
-                        const cOut = await ghExec([
-                            "issue", "view", String(issue.number),
-                            "--repo", repo,
-                            "--json", "comments",
-                        ]);
-                        const parsed = JSON.parse(cOut);
-                        const comments = Array.isArray(parsed.comments) ? parsed.comments : [];
+                let cursor = null;
+                let pages = 0;
+                while (pages < 2) {
+                    const vars = JSON.stringify({ owner, repo: repoName, cursor });
+                    const gqlOut = await ghExec(["api", "graphql", "-f", `query=${gql}`, "-f", `variables=${vars}`]);
+                    const gqlData = JSON.parse(gqlOut);
+                    const issuesPage = gqlData?.data?.repository?.issues;
+                    if (!issuesPage) break;
+                    for (const issue of issuesPage.nodes) {
+                        const comments = issue.comments?.nodes || [];
                         for (const c of comments) {
                             const body = c.body || "";
                             const m = body.match(/```json\s+triage-decision\s*\n([\s\S]*?)\n```/);
@@ -495,7 +498,7 @@ export function createHandler(deps) {
                                     number: issue.number,
                                     title: (issue.title || "").slice(0, 90),
                                     url: issue.url || "",
-                                    labels: (issue.labels || []).map(l => l.name),
+                                    labels: (issue.labels?.nodes || []).map(l => l.name),
                                     triageAuthor: c.author?.login || "unknown",
                                     triageCreatedAt: c.createdAt || "",
                                     commentBody: body,
@@ -510,14 +513,14 @@ export function createHandler(deps) {
                                     nextAction: td.next_action || "",
                                     preservedLabels: Array.isArray(td.preserved_labels) ? td.preserved_labels : [],
                                 });
-                                break; // one triage-decision per issue
-                            } catch (_) { /* malformed JSON, skip */ }
+                                break; // first triage-decision per issue wins
+                            } catch (_) { /* malformed JSON */ }
                         }
-                    } catch (_) { /* ignore per-issue errors */ } finally {
-                        release();
                     }
-                }));
-
+                    if (!issuesPage.pageInfo.hasNextPage) break;
+                    cursor = issuesPage.pageInfo.endCursor;
+                    pages++;
+                }
                 const lastUpdated = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
                 handler._triageCache = { items: triageItems, fetchedAt: Date.now(), lastUpdated };
                 res.end(JSON.stringify({ items: triageItems, lastUpdated, total: triageItems.length }));
