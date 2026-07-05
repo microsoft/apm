@@ -153,3 +153,54 @@ def test_cli_bootstrap_injects_before_requests_import(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert sentinel.read_text(encoding="utf-8") == "requests_imported=False"
+
+
+def test_cli_bootstrap_is_idempotent_across_import_and_main(tmp_path):
+    sentinel = tmp_path / "sentinel.txt"
+    fake_truststore = tmp_path / "truststore.py"
+    fake_truststore.write_text(
+        "\n".join(
+            [
+                "import os",
+                "import pathlib",
+                "",
+                "def inject_into_ssl():",
+                "    path = pathlib.Path(os.environ['TRUSTSTORE_SENTINEL'])",
+                "    count = int(path.read_text(encoding='utf-8') or '0') if path.exists() else 0",
+                "    path.write_text(str(count + 1), encoding='utf-8')",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    for name in (
+        _DISABLE_ENV_VAR,
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+    ):
+        env.pop(name, None)
+    env["PYTHONPATH"] = f"{tmp_path}{os.pathsep}{_repo_root() / 'src'}"
+    env["TRUSTSTORE_SENTINEL"] = str(sentinel)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import apm_cli.cli as c\n"
+            "def fake_cli(*, obj):\n"
+            "    return None\n"
+            "c.cli = fake_cli\n"
+            "c.main()\n",
+        ],
+        cwd=_repo_root(),
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert sentinel.read_text(encoding="utf-8") == "1"
