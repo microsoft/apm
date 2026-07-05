@@ -466,14 +466,16 @@ query($owner: String!, $repo: String!, $cursor: String) {
         number
         title
         url
-        labels(first: 10) { nodes { name } }
-        comments(last: 20) {
-          nodes {
-            body
-            createdAt
-            author { login }
-          }
+      body
+      labels(first: 10) { nodes { name } }
+      comments(last: 20) {
+        nodes {
+          body
+          createdAt
+          author { login avatarUrl }
+          isMinimized
         }
+      }
       }
     }
   }
@@ -490,35 +492,44 @@ query($owner: String!, $repo: String!, $cursor: String) {
                     if (!issuesPage) break;
                     for (const issue of issuesPage.nodes) {
                         const comments = issue.comments?.nodes || [];
+                        let triageComment = null;
                         for (const c of comments) {
                             const body = c.body || "";
                             const m = body.match(/```json\s+triage-decision\s*\n([\s\S]*?)\n```/);
                             if (!m) continue;
                             try {
                                 const td = JSON.parse(m[1]);
-                                triageItems.push({
-                                    number: issue.number,
-                                    title: (issue.title || "").slice(0, 90),
-                                    url: issue.url || "",
-                                    labels: (issue.labels?.nodes || []).map(l => l.name),
-                                    triageAuthor: c.author?.login || "unknown",
-                                    triageCreatedAt: c.createdAt || "",
-                                    commentBody: body,
-                                    commentMarkdown: td.comment_markdown || "",
-                                    decision: td.decision || "",
-                                    decisionDetail: td.decision_detail || "",
-                                    theme: td.theme || "",
-                                    areas: Array.isArray(td.areas) ? td.areas : [],
-                                    type: td.type || "",
-                                    status: td.status || "",
-                                    priority: td.priority || "",
-                                    milestone: td.milestone || "",
-                                    nextAction: td.next_action || "",
-                                    preservedLabels: Array.isArray(td.preserved_labels) ? td.preserved_labels : [],
-                                });
-                                break; // first triage-decision per issue wins
+                                triageComment = { comment: c, td };
+                                break;
                             } catch (_) { /* malformed JSON */ }
                         }
+                        if (!triageComment) continue;
+                        const { comment: c, td } = triageComment;
+                        const nonTriageComments = comments
+                            .filter(x => x !== c && !x.isMinimized)
+                            .map(x => ({ author: x.author?.login || "ghost", createdAt: x.createdAt, body: x.body || "" }));
+                        triageItems.push({
+                            number: issue.number,
+                            title: (issue.title || "").slice(0, 90),
+                            url: issue.url || "",
+                            issueBody: issue.body || "",
+                            labels: (issue.labels?.nodes || []).map(l => l.name),
+                            triageAuthor: c.author?.login || "unknown",
+                            triageCreatedAt: c.createdAt || "",
+                            commentBody: c.body,
+                            commentMarkdown: td.comment_markdown || "",
+                            nonTriageComments,
+                            decision: td.decision || "",
+                            decisionDetail: td.decision_detail || "",
+                            theme: td.theme || "",
+                            areas: Array.isArray(td.areas) ? td.areas : [],
+                            type: td.type || "",
+                            status: td.status || "",
+                            priority: td.priority || "",
+                            milestone: td.milestone || "",
+                            nextAction: td.next_action || "",
+                            preservedLabels: Array.isArray(td.preserved_labels) ? td.preserved_labels : [],
+                        });
                     }
                     if (!issuesPage.pageInfo.hasNextPage) break;
                     cursor = issuesPage.pageInfo.endCursor;

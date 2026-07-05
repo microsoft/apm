@@ -684,6 +684,30 @@ details[open] > .td-expandable-summary::before { content: "-"; }
   background: #6e40c920; color: #bc8cff; border-color: #6e40c940;
 }
 
+/* Comment thread inside triage detail */
+.td-comments-thread { padding: 8px 0; }
+.td-comment {
+  padding: 10px 12px; margin-bottom: 8px; border-radius: 6px;
+  border-left: 3px solid #30363d;
+}
+.td-comment-human { border-left-color: #1f6feb; background: #0d1117; }
+.td-comment-bot { border-left-color: #6e40c9; background: #161b22; }
+.td-comment-header {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+}
+.td-comment-author { font-size: 12px; font-weight: 600; color: #e6edf3; }
+.td-comment-role-badge {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  padding: 1px 5px; border-radius: 3px;
+  background: #6e40c930; color: #bc8cff; border: 1px solid #6e40c940;
+}
+.td-comment-date { font-size: 11px; color: #8b949e; margin-left: auto; }
+.td-comment-body { font-size: 12px; }
+.td-count-badge {
+  font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px;
+  background: #30363d; color: #8b949e;
+}
+
 /* Keep old triage-summary-grid/next-action for backwards compat */
 .triage-summary-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0;

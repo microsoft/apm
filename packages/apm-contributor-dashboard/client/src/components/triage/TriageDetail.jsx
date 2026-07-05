@@ -45,6 +45,13 @@ function priorityClass(p) {
   return "prio-normal";
 }
 
+function fmtDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) +
+         " at " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
 // Parse <details><summary>...</summary>...\n</details> blocks from raw markdown.
 function parseLensNotes(body) {
   const notes = [];
@@ -54,6 +61,10 @@ function parseLensNotes(body) {
     notes.push({ title: m[1].trim(), body: m[2].trim() });
   }
   return notes;
+}
+
+function isBotAuthor(login) {
+  return login && (login.endsWith("[bot]") || login.includes("copilot") || login === "github-actions");
 }
 
 export default function TriageDetail(props) {
@@ -85,6 +96,7 @@ export default function TriageDetail(props) {
       <Show when={item()}>
         {(d) => {
           const lensNotes = () => parseLensNotes(d().commentBody || "");
+          const hasDiscussion = () => (d().nonTriageComments || []).length > 0;
           return (
             <>
               {/* Decision metadata chips row */}
@@ -130,6 +142,41 @@ export default function TriageDetail(props) {
                   <div class="td-section-label">Next Action</div>
                   <div class="td-next-action-body">{d().nextAction}</div>
                 </div>
+              </Show>
+
+              {/* Original issue body -- expandable */}
+              <Show when={d().issueBody}>
+                <details class="td-expandable">
+                  <summary class="td-expandable-summary">Original Issue</summary>
+                  <div class="td-expandable-body issue-body"
+                    innerHTML={renderMarkdown(d().issueBody)} />
+                </details>
+              </Show>
+
+              {/* Discussion (non-triage comments) -- expandable */}
+              <Show when={hasDiscussion()}>
+                <details class="td-expandable">
+                  <summary class="td-expandable-summary">
+                    Discussion
+                    <span class="td-count-badge">{(d().nonTriageComments || []).length}</span>
+                  </summary>
+                  <div class="td-expandable-body td-comments-thread">
+                    <For each={d().nonTriageComments || []}>
+                      {(c) => (
+                        <div class={`td-comment ${isBotAuthor(c.author) ? "td-comment-bot" : "td-comment-human"}`}>
+                          <div class="td-comment-header">
+                            <span class="td-comment-author">{c.author}</span>
+                            <Show when={isBotAuthor(c.author)}>
+                              <span class="td-comment-role-badge">bot</span>
+                            </Show>
+                            <span class="td-comment-date">{fmtDate(c.createdAt)}</span>
+                          </div>
+                          <div class="td-comment-body issue-body" innerHTML={renderMarkdown(c.body)} />
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </details>
               </Show>
 
               {/* Suggested comment -- expandable */}
