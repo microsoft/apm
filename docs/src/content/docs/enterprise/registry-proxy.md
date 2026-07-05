@@ -278,6 +278,7 @@ and `apm cache clean`.
 | `ERROR: ... locked to direct VCS hosts` | Lockfile predates the proxy | `apm install --update` |
 | HTTP 401/403 from the proxy | Missing or invalid `PROXY_REGISTRY_TOKEN` | Verify the token has read on the upstream repo path |
 | `git clone` hangs through the proxy | `HTTPS_PROXY` not set in the env that runs `git` | Export it in the shell that invokes `apm install`; CI secrets often miss this |
+| `TLS verification failed` | Corporate proxy CA is not trusted by the OS store | Install the CA into the OS trust store, or set `REQUESTS_CA_BUNDLE`; see [SSL / TLS issues](../troubleshooting/ssl-issues/) |
 | `DeprecationWarning: ARTIFACTORY_BASE_URL is deprecated` | Legacy env names | Rename to `PROXY_REGISTRY_*` |
 | Plaintext-token warning on proxy startup | Token sent over `http://` | Use `https://`, or set `PROXY_REGISTRY_ALLOW_HTTP=1` if the link is internal-only |
 | `Invalid zip archive` with a body that starts `<!DOCTYPE html>` and is ~17KB | Upstream returned a sign-in page; proxy cached the HTML | Configure upstream credentials on the registry remote, purge the cache, then refetch |
@@ -293,5 +294,6 @@ connected host with `apm pack` and restore offline. See
 
 - [Authentication](../consumer/authentication/) -- token resolution order
 - [Private and org packages](../consumer/private-and-org-packages/) -- per-host PAT scoping
+- [SSL / TLS issues](../troubleshooting/ssl-issues/) -- corporate CA and TLS proxy trust
 - [Pack and distribute](../producer/pack-a-bundle/) -- air-gapped bundle delivery
 - [Governance deep-dive](./governance-guide/) -- policy-cache offline story
