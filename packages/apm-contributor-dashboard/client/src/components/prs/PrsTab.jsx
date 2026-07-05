@@ -89,6 +89,8 @@ export default function PrsTab() {
     showToast("Panel review triggered for selected PRs");
   }
 
+  const isLoading = () => prResource.loading;
+
   return (
     <>
       <StatsCards id="prStats" cards={stats} />
@@ -111,7 +113,10 @@ export default function PrsTab() {
           <button class="btn-clear-filters" onClick={clearFilters}>Clear all</button>
         </div>
       </Show>
-      <Show when={!prResource.loading || prs().length > 0} fallback={
+      <Show when={prResource()?.error}>
+        <div class="error-bar">{prResource().error}</div>
+      </Show>
+      <Show when={!isLoading() || prs().length > 0} fallback={
         <div class="loading-state">
           <div class="spinner"></div>
           <p>Fetching pull requests from microsoft/apm...</p>
