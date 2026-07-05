@@ -416,6 +416,13 @@ EXPERIMENTAL_TARGETS: frozenset[str] = frozenset(
 #: so there is no Antigravity-unique signal to auto-detect on.
 EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset({"agent-skills", "antigravity"})
 
+#: MCP-only pseudo-targets that have a client adapter but no
+#: ``KNOWN_TARGETS`` entry (they map to a canonical target for primitive
+#: deployment via ``RUNTIME_TO_CANONICAL_TARGET``).  They must be accepted
+#: by ``--target`` so the CLI validates them, but they are excluded from
+#: ``"all"`` expansion and do not participate in target-profile machinery.
+MCP_ONLY_TARGETS: frozenset[str] = frozenset({"intellij"})
+
 #: Alias mapping: user-facing name -> canonical internal name.
 TARGET_ALIASES: dict[str, str] = {
     "copilot": "vscode",
@@ -496,6 +503,7 @@ VALID_TARGET_VALUES: frozenset[str] = (
     ALL_CANONICAL_TARGETS
     | EXPERIMENTAL_TARGETS
     | EXPLICIT_ONLY_TARGETS
+    | MCP_ONLY_TARGETS
     | frozenset(TARGET_ALIASES)
     | frozenset({"all"})
 )
@@ -610,7 +618,7 @@ def parse_target_field(
     # ---- "all" handling ----
     if "all" in raw_parts:
         non_all_tokens = {t for t in raw_parts if t != "all"}
-        if non_all_tokens - EXPLICIT_ONLY_TARGETS:
+        if non_all_tokens - EXPLICIT_ONLY_TARGETS - MCP_ONLY_TARGETS:
             raise ValueError(
                 _target_error(
                     "'all' cannot be combined with other targets",

@@ -556,6 +556,10 @@ class TestTargetParamType:
         """VALID_TARGET_VALUES contains 'all'."""
         assert "all" in VALID_TARGET_VALUES
 
+    def test_valid_target_values_includes_intellij(self):
+        """VALID_TARGET_VALUES contains 'intellij' (MCP-only target, #1957)."""
+        assert "intellij" in VALID_TARGET_VALUES
+
     # -- None passthrough -------------------------------------------------
 
     def test_none_returns_none(self):
@@ -608,6 +612,10 @@ class TestTargetParamType:
         """'all' returns string 'all' for backward compat."""
         assert self.tp.convert("all", None, None) == "all"
 
+    def test_single_intellij(self):
+        """intellij is accepted as a valid MCP-only target (#1957)."""
+        assert self.tp.convert("intellij", None, None) == "intellij"
+
     def test_single_target_returns_string_type(self):
         """Single target must return str, not list."""
         result = self.tp.convert("claude", None, None)
@@ -645,6 +653,11 @@ class TestTargetParamType:
     def test_multi_three_targets(self):
         result = self.tp.convert("claude,cursor,codex", None, None)
         assert result == ["claude", "cursor", "codex"]
+
+    def test_multi_intellij_with_claude(self):
+        """intellij,claude keeps intellij as-is in multi-target (#1957)."""
+        result = self.tp.convert("intellij,claude", None, None)
+        assert result == ["intellij", "claude"]
 
     # -- Alias deduplication ----------------------------------------------
 
@@ -868,6 +881,16 @@ class TestTargetParamType:
         """'all,codex' is still rejected (non-explicit-only combo)."""
         with pytest.raises(click.exceptions.BadParameter, match="cannot be combined"):
             self.tp.convert("all,codex", None, None)
+
+    def test_all_combined_with_intellij_allowed(self):
+        """'all,intellij' is allowed -- intellij is an MCP-only target (#1957)."""
+        from apm_cli.core.target_detection import parse_target_field
+
+        result = parse_target_field("all,intellij")
+        assert isinstance(result, list)
+        for t in ALL_CANONICAL_TARGETS:
+            assert t in result
+        assert "intellij" in result
 
 
 # ---------------------------------------------------------------------------
