@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Cursor instruction output now ports explicit universal `applyTo: "**"` to
+  `alwaysApply: true` instead of `globs: "**"`, preserving always-on intent
+  while leaving scoped globs unchanged. (#1744)
+
 ## [0.26.0] - 2026-07-18
 
 ### Added
