@@ -109,6 +109,21 @@ export default function TriageDetail(props) {
                 <span class="td-triaged-by">triaged by <code>{d().triageAuthor}</code></span>
               </div>
 
+              {/* Classification labels row (theme + areas + preserved) */}
+              <Show when={d().theme || d().areas?.length > 0 || d().preservedLabels?.length > 0}>
+                <div class="td-labels-row">
+                  <Show when={d().theme}>
+                    <span class="triage-area-chip td-chip-theme">{d().theme}</span>
+                  </Show>
+                  <For each={d().areas || []}>
+                    {(a) => <span class="triage-area-chip">{a}</span>}
+                  </For>
+                  <For each={d().preservedLabels || []}>
+                    {(l) => <span class="label-tag">{l}</span>}
+                  </For>
+                </div>
+              </Show>
+
               {/* Next Action callout */}
               <Show when={d().nextAction}>
                 <div class="td-next-action">

@@ -676,6 +676,13 @@ details[open] > .td-expandable-summary::before { content: "-"; }
   font-size: 10px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.5px; color: #8b949e; margin-bottom: 4px;
 }
+.td-labels-row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding-bottom: 12px; border-bottom: 1px solid #21262d; margin-bottom: 14px;
+}
+.td-chip-theme {
+  background: #6e40c920; color: #bc8cff; border-color: #6e40c940;
+}
 
 /* Keep old triage-summary-grid/next-action for backwards compat */
 .triage-summary-grid {
