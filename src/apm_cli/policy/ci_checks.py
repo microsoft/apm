@@ -53,7 +53,7 @@ def _check_lockfile_exists(
             message="No apm.yml found -- nothing to check",
         )
 
-    has_deps = manifest.has_apm_dependencies() or bool(manifest.get_mcp_dependencies())
+    has_deps = manifest.has_any_apm_dependencies() or bool(manifest.get_mcp_dependencies())
     lockfile_path = get_lockfile_path(project_root)
 
     # Local-only repos may declare no remote/MCP deps but still have a
@@ -98,7 +98,7 @@ def _check_ref_consistency(
     from ..drift import detect_ref_change
 
     mismatches: list[str] = []
-    for dep_ref in manifest.get_apm_dependencies():
+    for dep_ref in manifest.get_all_apm_dependencies():
         key = dep_ref.get_unique_key()
         locked_dep = lock.get_dependency(key)
         if locked_dep is None:
@@ -167,7 +167,7 @@ def _check_no_orphans(
     sub-package's manifest, not the root manifest, so the root manifest
     cannot make them go away by editing its ``dependencies.apm`` list.
     """
-    manifest_keys = {dep.get_unique_key() for dep in manifest.get_apm_dependencies()}
+    manifest_keys = {dep.get_unique_key() for dep in manifest.get_all_apm_dependencies()}
     orphaned = [
         dep_key
         for dep_key, locked_dep in lock.dependencies.items()
@@ -195,7 +195,7 @@ def _check_skill_subset_consistency(
 ) -> CheckResult:
     """Verify lockfile skill_subset matches manifest skills: for each entry."""
     mismatches: list[str] = []
-    for dep_ref in manifest.get_apm_dependencies():
+    for dep_ref in manifest.get_all_apm_dependencies():
         key = dep_ref.get_unique_key()
         locked_dep = lock.get_dependency(key)
         if locked_dep is None:
