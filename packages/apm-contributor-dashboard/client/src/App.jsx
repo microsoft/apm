@@ -10,7 +10,7 @@ import { prResource, refetchPrs } from "./stores/prs";
 import { triageResource, refetchTriage, activateTriage } from "./stores/triage";
 
 export default function App() {
-  const [activeTab, setActiveTab] = createSignal("triage");
+  const [activeTab, setActiveTab] = createSignal("issues");
 
   const tabs = [
     { id: "triage", label: "Triaged Issues", count: () => triageResource()?.items?.length || 0 },

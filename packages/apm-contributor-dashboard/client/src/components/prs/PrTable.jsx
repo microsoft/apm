@@ -1,4 +1,4 @@
-import { For, createMemo } from "solid-js";
+import { For, createMemo, createEffect } from "solid-js";
 import ActionDropdown from "../ActionDropdown";
 import { runPanel, rerunCi, approvePr, approveWorkflowRuns, mergeWhenReady } from "../../services/api";
 import { showToast } from "../Toast";
@@ -12,6 +12,13 @@ export default function PrTable(props) {
   const pageNumbers = () => (props.prs || []).map(pr => pr.number);
   const allPageSelected = () => pageNumbers().length > 0 && pageNumbers().every(n => props.selected().has(n));
   const somePageSelected = () => pageNumbers().some(n => props.selected().has(n));
+
+  // Reactive indeterminate state for the header checkbox.
+  // The ref callback fires only once; createEffect re-runs whenever selection changes.
+  let headerCheckboxRef;
+  createEffect(() => {
+    if (headerCheckboxRef) headerCheckboxRef.indeterminate = somePageSelected() && !allPageSelected();
+  });
 
   function buildDropdownItems(pr) {
     const items = [];
@@ -47,7 +54,7 @@ export default function PrTable(props) {
               type="checkbox"
               class="row-checkbox"
               checked={allPageSelected()}
-              ref={el => { if (el) el.indeterminate = somePageSelected() && !allPageSelected(); }}
+              ref={el => { headerCheckboxRef = el; }}
               onChange={() => props.onTogglePage(pageNumbers())}
             />
           </th>

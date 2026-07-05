@@ -92,7 +92,7 @@ export default function TriageTable(props) {
         <For each={props.items}>
           {(item) => (
             <tr>
-              <td><a href={item.url} target="_blank">#{item.number}</a></td>
+              <td><a href={item.url} target="_blank" rel="noreferrer noopener">#{item.number}</a></td>
               <td class="title-cell" title={item.title}>{item.title}</td>
               <td>
                 <span

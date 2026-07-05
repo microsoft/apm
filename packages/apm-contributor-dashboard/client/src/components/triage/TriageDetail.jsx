@@ -90,7 +90,7 @@ export default function TriageDetail(props) {
 
   const footer = () => (
     <div class="modal-actions">
-      <a class="btn btn-secondary" href={item()?.url} target="_blank">View on GitHub</a>
+      <a class="btn btn-secondary" href={item()?.url} target="_blank" rel="noreferrer noopener">View on GitHub</a>
       <Show when={item()?.hasSession}>
         <button class="btn btn-primary btn-open-session" onClick={handleOpen}>Go to Active Session</button>
       </Show>

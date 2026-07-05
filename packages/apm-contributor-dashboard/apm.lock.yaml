@@ -1,0 +1,17 @@
+lockfile_version: '1'
+generated_at: '2026-07-03T12:23:41.314445+00:00'
+dependencies: []
+local_deployed_files:
+- .github/extensions/issue-monitor/dist/assets/index-BLgntLwJ.css
+- .github/extensions/issue-monitor/dist/assets/index-CdtUszuy.js
+- .github/extensions/issue-monitor/dist/index.html
+- .github/extensions/issue-monitor/extension.mjs
+- .github/extensions/issue-monitor/logic.mjs
+- .github/extensions/issue-monitor/server-handler.mjs
+local_deployed_file_hashes:
+  .github/extensions/issue-monitor/dist/assets/index-BLgntLwJ.css: sha256:d42f8aa440e47401483aef826aee7d2bba77fc551a2d190feb11e887edc7b67b
+  .github/extensions/issue-monitor/dist/assets/index-CdtUszuy.js: sha256:d08ee202a69b6e16fb4e2c58d90ed27ded2d75d57c65fb5c09eddf092c6d6997
+  .github/extensions/issue-monitor/dist/index.html: sha256:c2d19061b8c39062e1cf14f48ee6a690b03f2f0df1ce7c2a62d932da346c7a4e
+  .github/extensions/issue-monitor/extension.mjs: sha256:311cfef74b42084976ab39aa852802b4a721cdb332f8dc08b3f0d9dedd34055c
+  .github/extensions/issue-monitor/logic.mjs: sha256:c44f3fcde09cbebb1356cedf719cf866a1fdfd9f62717d9c2b88d38837f33d89
+  .github/extensions/issue-monitor/server-handler.mjs: sha256:48515165862a91f472010258ce3a8036e4d6c467f26830f312f0f19629798732
