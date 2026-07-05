@@ -51,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `apm install` no longer aborts with a false "package not accessible" error
+  when GitHub's API rate limit (primary 60/hr or secondary concurrency) throttles
+  the pre-flight probe; a throttled response is now treated as indeterminate and
+  the download step confirms the package. Genuine 404s and permission 403s still
+  fail closed. (#2032)
 - Generated `CLAUDE.md` now uses a single H1 title with nested H2/H3 sections,
   fixing duplicate top-level headings in Claude Code. (by @WilliamK112, #2016)
 - `apm install` now deploys hook script directories as self-contained bundles
