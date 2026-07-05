@@ -53,7 +53,7 @@ def _check_lockfile_exists(
             message="No apm.yml found -- nothing to check",
         )
 
-    has_deps = manifest.has_any_apm_dependencies() or bool(manifest.get_mcp_dependencies())
+    has_deps = manifest.has_any_apm_dependencies() or bool(manifest.get_all_mcp_dependencies())
     lockfile_path = get_lockfile_path(project_root)
 
     # Local-only repos may declare no remote/MCP deps but still have a
@@ -165,7 +165,7 @@ def _check_no_orphans(
     Only DIRECT dependencies (``depth == 1`` / no ``resolved_by``) are
     candidates for orphan detection. Transitive deps belong to a
     sub-package's manifest, not the root manifest, so the root manifest
-    cannot make them go away by editing its ``dependencies.apm`` list.
+    cannot make them go away by editing its dependency lists.
     """
     manifest_keys = {dep.get_unique_key() for dep in manifest.get_all_apm_dependencies()}
     orphaned = [
