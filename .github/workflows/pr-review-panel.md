@@ -94,6 +94,47 @@ imports:
 tools:
   github:
     toolsets: [default]
+    # Integrity exemption for community contributor PRs.
+    #
+    # On public repos gh-aw's MCP guard automatically elevates the
+    # minimum integrity floor to `approved` when safe-outputs (write
+    # actions) are configured. GitHub classifies PR resources by
+    # author association:
+    #
+    #   COLLABORATOR / MEMBER / OWNER  -->  approved   (panel works)
+    #   CONTRIBUTOR                    -->  unapproved (panel blocked)
+    #   FIRST_TIME_CONTRIBUTOR / NONE  -->  none       (panel blocked)
+    #
+    # Without an explicit override the panel silently fails on every
+    # community contributor PR with:
+    #   McpError: MCP error 0: [Filtered] pr:microsoft/apm#NNNN
+    #   exists but is not accessible -- filtered by integrity policy
+    #
+    # Setting min-integrity to `unapproved` restores visibility of PRs
+    # authored by CONTRIBUTOR-level users (people who have had at least
+    # one PR merged). This covers the vast majority of community PRs
+    # while still filtering out completely unknown authors
+    # (FIRST_TIME_CONTRIBUTOR / NONE).
+    #
+    # Why `unapproved` and not `none`:
+    #   - `none` would also expose PRs from FIRST_TIME_CONTRIBUTOR and
+    #     NONE-association authors, whose content has zero provenance
+    #     signal. While the panel only READS PR content and never
+    #     executes it, broader exposure increases the prompt-injection
+    #     surface from completely untrusted authors. The triage-panel
+    #     uses `none` because it must classify issues from any author;
+    #     the review panel has a narrower mandate (labelled PRs from
+    #     known contributors) and can afford the tighter bound.
+    #   - If the panel is ever needed for first-time contributors,
+    #     change this to `none` -- but pair it with additional prompt
+    #     hardening (body-size cap, content sanitisation) to compensate
+    #     for the wider blast radius.
+    #
+    # `allowed-repos` is pinned to this repo so the integrity exemption
+    # does not widen the read scope to other repos the workflow token
+    # can reach.
+    min-integrity: unapproved
+    allowed-repos: ["microsoft/apm"]
   bash: true
 
 network:
