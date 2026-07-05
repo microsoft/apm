@@ -254,6 +254,18 @@ Deployed executables are placed on Claude Code's `PATH` and invoked
 without further confirmation, so use this field to opt out in
 environments where plugin executables are not trusted by default.
 
+### CLI consent flag
+
+In addition to policy-level controls, the `--trust-bin` / `--no-trust-bin`
+flags on `apm install` give per-invocation consent:
+
+- `--trust-bin` -- explicitly consent to bin/ deployment (suppresses the
+  trust-posture warning).
+- `--no-trust-bin` -- explicitly deny bin/ deployment for this invocation,
+  even if the project policy allows it.
+- Default (neither flag) -- deploy bin/ but emit a prominent warning
+  advising the user to pass `--trust-bin` for explicit consent.
+
 ## Canvas extension trust (experimental)
 
 Behind the `canvas` experimental flag, a package may ship a Copilot CLI canvas

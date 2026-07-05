@@ -172,6 +172,7 @@ def _integrate_materialization(
             dep_target_subset=dep_ref.target_subset,
             ctx=ctx,
             allow_executables=_effective_allow(ctx),
+            trust_bin=getattr(ctx, "trust_bin", None),
         )
         mutation_keys = (
             "prompts",

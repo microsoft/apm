@@ -225,6 +225,7 @@ class InstallContext:
     skill_subset: "builtins.tuple[str, ...] | None" = None
     skill_subset_from_cli: bool = False
     audit_override: str | None = None
+    trust_bin: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1107,6 +1108,18 @@ def _handle_mcp_install(
     ),
 )
 @click.option(
+    "--trust-bin/--no-trust-bin",
+    "trust_bin",
+    default=None,
+    help=(
+        "Consent posture for bin/ executable deployment. "
+        "--trust-bin explicitly approves bin/ deployment (suppresses the "
+        "trust-posture warning). --no-trust-bin explicitly skips bin/ "
+        "deployment even when policy allows it. Default (neither flag): "
+        "deploys bin/ but emits a prominent trust-posture warning."
+    ),
+)
+@click.option(
     "--root",
     "root",
     type=click.Path(file_okay=False, resolve_path=True),
@@ -1156,6 +1169,7 @@ def install(  # noqa: PLR0913
     refresh,
     legacy_skill_paths,
     alias,
+    trust_bin,
     root,
 ):
     """Install APM and MCP dependencies from apm.yml (like npm install).
@@ -1561,6 +1575,7 @@ def install(  # noqa: PLR0913
             plan_callback=None,
             skill_subset=_skill_subset,
             skill_subset_from_cli=bool(skill_names),
+            trust_bin=trust_bin,
         )
 
         apm_count, mcp_count, lsp_count, apm_diagnostics = _install_apm_packages(
