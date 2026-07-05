@@ -504,6 +504,7 @@ query($owner: String!, $repo: String!, $cursor: String) {
                                     triageAuthor: c.author?.login || "unknown",
                                     triageCreatedAt: c.createdAt || "",
                                     commentBody: body,
+                                    commentMarkdown: td.comment_markdown || "",
                                     decision: td.decision || "",
                                     decisionDetail: td.decision_detail || "",
                                     theme: td.theme || "",

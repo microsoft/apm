@@ -1,4 +1,4 @@
-import { createSignal, Show } from "solid-js";
+import { Show, For } from "solid-js";
 import Modal from "../Modal";
 import { renderMarkdown } from "../../utils/markdown";
 import { startTriageSession } from "../../services/api";
@@ -22,22 +22,42 @@ function decisionClass(decision) {
 
 function decisionLabel(decision) {
   if (!decision) return "--";
-  const detail = decision.startsWith("decline-with-reason:") ? `: ${decision.slice("decline-with-reason:".length).trim()}` : "";
   const base = decision.startsWith("decline-with-reason") ? "Decline" :
-               decision.startsWith("duplicate-of") ? `Duplicate ${decision.slice("duplicate-of:".length || 0).trim()}` :
+               decision.startsWith("duplicate-of") ? `Duplicate ${decision.slice(("duplicate-of:").length).trim()}` :
                { accept: "Accept", "needs-design": "Needs Design", "defer-later": "Defer", "auto-handle": "Auto-handle" }[decision] || decision;
-  return base + detail;
+  return base;
+}
+
+function priorityLabel(p) {
+  if (!p) return null;
+  if (p.includes("critical")) return "P0";
+  if (p.includes("high")) return "P1";
+  if (p.includes("medium") || p.includes("normal")) return "P2";
+  if (p.includes("low")) return "P3";
+  return p.replace("priority/", "");
+}
+
+function priorityClass(p) {
+  if (!p) return "prio-normal";
+  if (p.includes("critical")) return "prio-critical";
+  if (p.includes("high")) return "prio-high";
+  if (p.includes("low")) return "prio-low";
+  return "prio-normal";
+}
+
+// Parse <details><summary>...</summary>...\n</details> blocks from raw markdown.
+function parseLensNotes(body) {
+  const notes = [];
+  const re = /<details>\s*<summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/g;
+  let m;
+  while ((m = re.exec(body)) !== null) {
+    notes.push({ title: m[1].trim(), body: m[2].trim() });
+  }
+  return notes;
 }
 
 export default function TriageDetail(props) {
   const item = () => props.item;
-  const [subTab, setSubTab] = createSignal("summary");
-
-  const subTabs = [
-    { id: "summary", label: "Summary" },
-    { id: "comment", label: "Triage Comment" },
-    { id: "labels", label: "Labels" },
-  ];
 
   async function handleStart() {
     try {
@@ -58,108 +78,103 @@ export default function TriageDetail(props) {
   return (
     <Modal
       open={() => item() !== null}
-      title={() => item() ? `#${item().number} -- Triage Decision` : ""}
+      title={() => item() ? `#${item().number} -- ${item().title}` : ""}
       onClose={props.onClose}
       footer={footer()}
     >
       <Show when={item()}>
-        {(d) => (
-          <>
-            <div class="meta-row">
-              <div class="meta-item"><strong>Issue:</strong> #{d().number}</div>
-              <div class="meta-item">
-                <strong>Decision:</strong>{" "}
+        {(d) => {
+          const lensNotes = () => parseLensNotes(d().commentBody || "");
+          return (
+            <>
+              {/* Decision metadata chips row */}
+              <div class="td-meta-bar">
                 <span class={`badge ${decisionClass(d().decision)}`}>{decisionLabel(d().decision)}</span>
-              </div>
-              <div class="meta-item"><strong>Triaged by:</strong> <code>{d().triageAuthor}</code></div>
-              <div class="meta-item"><strong>Date:</strong> {d().triageCreatedAt ? new Date(d().triageCreatedAt).toLocaleDateString() : "--"}</div>
-            </div>
-
-            <div class="activity-body-tabs">
-              {subTabs.map((tab) => (
-                <button
-                  class={`activity-body-tab ${subTab() === tab.id ? "active" : ""}`}
-                  onClick={() => setSubTab(tab.id)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            <Show when={subTab() === "summary"}>
-              <div class="triage-summary-grid">
-                <div class="triage-summary-item">
-                  <div class="ts-label">Priority</div>
-                  <div class="ts-value">{d().priority ? d().priority.replace("priority/", "") : "--"}</div>
-                </div>
-                <div class="triage-summary-item">
-                  <div class="ts-label">Type</div>
-                  <div class="ts-value">{d().type ? d().type.replace("type/", "") : "--"}</div>
-                </div>
-                <div class="triage-summary-item">
-                  <div class="ts-label">Status</div>
-                  <div class="ts-value">{d().status ? d().status.replace("status/", "") : "--"}</div>
-                </div>
-                <div class="triage-summary-item">
-                  <div class="ts-label">Milestone</div>
-                  <div class="ts-value">{d().milestone || "--"}</div>
-                </div>
-                <Show when={d().theme}>
-                  <div class="triage-summary-item">
-                    <div class="ts-label">Theme</div>
-                    <div class="ts-value">{d().theme}</div>
-                  </div>
+                <Show when={priorityLabel(d().priority)}>
+                  <span class={`badge ${priorityClass(d().priority)}`}>{priorityLabel(d().priority)}</span>
                 </Show>
-                <Show when={d().decisionDetail}>
-                  <div class="triage-summary-item">
-                    <div class="ts-label">Detail</div>
-                    <div class="ts-value">{d().decisionDetail}</div>
-                  </div>
+                <Show when={d().type}>
+                  <span class="badge" style={{ background: "#1f2328", border: "1px solid #30363d", color: "#e6edf3" }}>
+                    {d().type.replace("type/", "")}
+                  </span>
                 </Show>
+                <Show when={d().status}>
+                  <span class="badge" style={{ background: "#1f6feb20", color: "#58a6ff" }}>
+                    {d().status.replace("status/", "")}
+                  </span>
+                </Show>
+                <Show when={d().milestone}>
+                  <span class="badge" style={{ background: "#30363d", color: "#e6edf3" }}>{d().milestone}</span>
+                </Show>
+                <span class="td-triaged-by">triaged by <code>{d().triageAuthor}</code></span>
               </div>
+
+              {/* Next Action callout */}
               <Show when={d().nextAction}>
-                <div class="triage-next-action">
-                  <div class="ts-label">Next Action</div>
-                  <div class="ts-value">{d().nextAction}</div>
+                <div class="td-next-action">
+                  <div class="td-section-label">Next Action</div>
+                  <div class="td-next-action-body">{d().nextAction}</div>
                 </div>
               </Show>
-            </Show>
 
-            <Show when={subTab() === "comment"}>
-              <div class="issue-body" innerHTML={renderMarkdown(d().commentBody)} />
-            </Show>
+              {/* Suggested comment -- expandable */}
+              <Show when={d().commentMarkdown}>
+                <details class="td-expandable">
+                  <summary class="td-expandable-summary">Suggested Comment</summary>
+                  <div class="td-expandable-body issue-body"
+                    innerHTML={renderMarkdown(d().commentMarkdown)} />
+                </details>
+              </Show>
 
-            <Show when={subTab() === "labels"}>
-              <div style={{ "margin-top": "12px" }}>
-                <Show when={d().theme}>
-                  <div style={{ "margin-bottom": "8px" }}>
-                    <div style={{ "font-size": "11px", "color": "#8b949e", "margin-bottom": "4px", "text-transform": "uppercase", "letter-spacing": "0.5px" }}>Theme</div>
-                    <span class="triage-area-chip">{d().theme}</span>
+              {/* Per-lens notes -- one expandable per lens */}
+              <Show when={lensNotes().length > 0}>
+                <div class="td-section-label" style={{ "margin-top": "16px", "margin-bottom": "4px" }}>
+                  Per-lens Notes
+                </div>
+                <For each={lensNotes()}>
+                  {(note) => (
+                    <details class="td-expandable">
+                      <summary class="td-expandable-summary">{note.title}</summary>
+                      <div class="td-expandable-body issue-body"
+                        innerHTML={renderMarkdown(note.body)} />
+                    </details>
+                  )}
+                </For>
+              </Show>
+
+              {/* Labels -- expandable */}
+              <Show when={d().theme || d().areas?.length > 0 || d().preservedLabels?.length > 0}>
+                <details class="td-expandable">
+                  <summary class="td-expandable-summary">Labels</summary>
+                  <div class="td-expandable-body">
+                    <Show when={d().theme}>
+                      <div class="td-label-group">
+                        <div class="td-chip-label">Theme</div>
+                        <span class="triage-area-chip">{d().theme}</span>
+                      </div>
+                    </Show>
+                    <Show when={d().areas?.length > 0}>
+                      <div class="td-label-group">
+                        <div class="td-chip-label">Areas</div>
+                        <div class="triage-areas">
+                          {d().areas.map(a => <span class="triage-area-chip">{a}</span>)}
+                        </div>
+                      </div>
+                    </Show>
+                    <Show when={d().preservedLabels?.length > 0}>
+                      <div class="td-label-group">
+                        <div class="td-chip-label">Preserved</div>
+                        <div class="triage-areas">
+                          {d().preservedLabels.map(l => <span class="label-tag">{l}</span>)}
+                        </div>
+                      </div>
+                    </Show>
                   </div>
-                </Show>
-                <Show when={d().areas?.length > 0}>
-                  <div style={{ "margin-bottom": "8px" }}>
-                    <div style={{ "font-size": "11px", "color": "#8b949e", "margin-bottom": "4px", "text-transform": "uppercase", "letter-spacing": "0.5px" }}>Areas</div>
-                    <div class="triage-areas">
-                      {d().areas.map(a => <span class="triage-area-chip">{a}</span>)}
-                    </div>
-                  </div>
-                </Show>
-                <Show when={d().preservedLabels?.length > 0}>
-                  <div>
-                    <div style={{ "font-size": "11px", "color": "#8b949e", "margin-bottom": "4px", "text-transform": "uppercase", "letter-spacing": "0.5px" }}>Preserved Labels</div>
-                    <div class="triage-areas">
-                      {d().preservedLabels.map(l => <span class="label-tag">{l}</span>)}
-                    </div>
-                  </div>
-                </Show>
-                <Show when={!d().theme && !d().areas?.length && !d().preservedLabels?.length}>
-                  <div class="empty">No label information available.</div>
-                </Show>
-              </div>
-            </Show>
-          </>
-        )}
+                </details>
+              </Show>
+            </>
+          );
+        }}
       </Show>
     </Modal>
   );
