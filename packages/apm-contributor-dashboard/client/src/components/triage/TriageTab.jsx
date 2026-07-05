@@ -1,5 +1,6 @@
 import { createSignal, createMemo, Show } from "solid-js";
 import { triageResource, refetchTriage } from "../../stores/triage";
+import { issueResource } from "../../stores/issues";
 import StatsCards from "../StatsCards";
 import TriageTable from "./TriageTable";
 import TriageDetail from "./TriageDetail";
@@ -57,7 +58,12 @@ export default function TriageTab() {
   });
 
   const stats = [
-    { label: "Total", value: () => items().length },
+    { label: "Triaged", value: () => items().length },
+    {
+      label: "Not Triaged",
+      color: "#f0883e",
+      value: () => Math.max(0, (issueResource()?.issues?.length || 0) - items().length),
+    },
     { label: "Accept", color: "#3fb950", value: () => items().filter(i => decisionKey(i.decision) === "accept").length },
     { label: "Needs Design", color: "#bc8cff", value: () => items().filter(i => decisionKey(i.decision) === "needs-design").length },
     { label: "Decline", color: "#f85149", value: () => items().filter(i => decisionKey(i.decision) === "decline").length },
