@@ -41,6 +41,10 @@ export async function startSession(number, title) {
   return postJson("/start-session", { number, title });
 }
 
+export async function startTriageSession(number, title) {
+  return postJson("/start-session", { number, title, model: "claude-opus-4.6" });
+}
+
 export async function openSession(number, title) {
   return postJson("/open-session", { number, title });
 }

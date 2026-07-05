@@ -1,6 +1,8 @@
 import { createSignal, Show } from "solid-js";
 import Modal from "../Modal";
 import { renderMarkdown } from "../../utils/markdown";
+import { startTriageSession } from "../../services/api";
+import { showToast } from "../Toast";
 
 const decisionClasses = {
   accept: "decision-accept",
@@ -37,8 +39,18 @@ export default function TriageDetail(props) {
     { id: "labels", label: "Labels" },
   ];
 
+  async function handleStart() {
+    try {
+      await startTriageSession(item().number, item().title);
+      showToast(`Session started for #${item().number}`);
+    } catch (e) {
+      showToast(`Error: ${e.message}`);
+    }
+  }
+
   const footer = () => (
     <div class="modal-actions">
+      <button class="btn btn-primary" onClick={handleStart}>Start Session</button>
       <a class="btn btn-secondary" href={item()?.url} target="_blank">View on GitHub</a>
     </div>
   );

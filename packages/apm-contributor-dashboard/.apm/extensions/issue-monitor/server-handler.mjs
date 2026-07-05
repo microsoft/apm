@@ -109,15 +109,16 @@ export function createHandler(deps) {
         if (req.method === "POST" && req.url === "/start-session") {
             const raw = await readBody(req);
             try {
-                const { number, title } = JSON.parse(raw);
+                const { number, title, model } = JSON.parse(raw);
                 startedSessions.add(number);
                 saveSessions();
                 res.setHeader("Content-Type", "application/json");
                 res.end(JSON.stringify({ ok: true }));
                 const safeTitle = sanitizeForPrompt(title);
+                const modelClause = model ? ` Use model "${model}".` : "";
                 setTimeout(() => {
                     session.send({
-                        prompt: `Open a new session for issue #${number} ("Title: ${safeTitle}") in ${repo}. Use the open_issue_session tool with repo_full_name "${repo}", issue_number ${number}, issue_title "#${number} ${safeTitle}", and kickoff_mode "plan". The session should plan the implementation of this issue.`,
+                        prompt: `Open a new session for issue #${number} ("Title: ${safeTitle}") in ${repo}. Use the open_issue_session tool with repo_full_name "${repo}", issue_number ${number}, issue_title "#${number} ${safeTitle}", and kickoff_mode "plan".${modelClause} The session should plan the implementation of this issue.`,
                     });
                 }, 0);
             } catch (e) {

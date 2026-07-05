@@ -1,5 +1,7 @@
 import { For } from "solid-js";
 import ActionDropdown from "../ActionDropdown";
+import { startTriageSession } from "../../services/api";
+import { showToast } from "../Toast";
 
 const decisionClasses = {
   accept: "decision-accept",
@@ -51,6 +53,15 @@ export default function TriageTable(props) {
   function sortIndicator(col) {
     if (props.sortCol() !== col) return "";
     return props.sortAsc() ? " ^" : " v";
+  }
+
+  async function handleStart(item) {
+    try {
+      await startTriageSession(item.number, item.title);
+      showToast(`Session started for #${item.number}`);
+    } catch (e) {
+      showToast(`Error: ${e.message}`);
+    }
   }
 
   return (
@@ -108,7 +119,9 @@ export default function TriageTable(props) {
               <td class="action-cell">
                 <ActionDropdown
                   onDetails={() => props.onDetail(item)}
-                  items={[]}
+                  items={[
+                    { label: "Start Session", class: "dropdown-session", action: () => handleStart(item) },
+                  ]}
                 />
               </td>
             </tr>
