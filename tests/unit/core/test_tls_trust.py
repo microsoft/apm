@@ -3,7 +3,7 @@
 Covers every branch:
 - opt-out via APM_DISABLE_TRUSTSTORE
 - explicit CA bundle env vars win (REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE)
-- SSL_CERT_FILE does NOT suppress injection (it is set by the frozen runtime hook)
+- SSL_CERT_FILE / SSL_CERT_DIR do NOT suppress injection
 - truststore missing -> graceful certifi fallback
 - injection failure -> graceful certifi fallback
 - happy path -> inject_into_ssl called exactly once
@@ -11,8 +11,11 @@ Covers every branch:
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -20,9 +23,11 @@ from apm_cli.core.tls_trust import (
     _DISABLE_ENV_VAR,
     _EXPLICIT_CA_ENV_VARS,
     configure_tls_trust,
+    has_explicit_ca_override,
 )
 
-_ALL_TRUST_ENV = (_DISABLE_ENV_VAR, "SSL_CERT_FILE", *_EXPLICIT_CA_ENV_VARS)
+_NON_REQUESTS_CA_ENV_VARS = ("SSL_CERT_FILE", "SSL_CERT_DIR")
+_ALL_TRUST_ENV = (_DISABLE_ENV_VAR, *_NON_REQUESTS_CA_ENV_VARS, *_EXPLICIT_CA_ENV_VARS)
 
 
 @pytest.fixture(autouse=True)
@@ -47,29 +52,30 @@ def _install_fake_truststore(monkeypatch, inject=None):
 
 def test_opt_out_disables_injection(monkeypatch):
     calls = _install_fake_truststore(monkeypatch)
-    monkeypatch.setenv(_DISABLE_ENV_VAR, "1")
 
-    assert configure_tls_trust() is False
+    assert configure_tls_trust(env={_DISABLE_ENV_VAR: "1"}) is False
     assert calls["n"] == 0
 
 
 @pytest.mark.parametrize("var", _EXPLICIT_CA_ENV_VARS)
 def test_explicit_ca_bundle_wins(monkeypatch, var):
     calls = _install_fake_truststore(monkeypatch)
-    monkeypatch.setenv(var, "/etc/ssl/certs/custom-ca.pem")
 
-    assert configure_tls_trust() is False
+    assert has_explicit_ca_override(env={var: "/etc/ssl/certs/custom-ca.pem"}) is True
+    assert configure_tls_trust(env={var: "/etc/ssl/certs/custom-ca.pem"}) is False
     assert calls["n"] == 0
 
 
-def test_ssl_cert_file_does_not_suppress_injection(monkeypatch):
-    # SSL_CERT_FILE is not a requests CA override and IS set by the frozen-binary
-    # runtime hook (to bundled certifi). It must NOT disable OS-trust injection,
-    # or the feature becomes a no-op in the shipped artifact.
+@pytest.mark.parametrize("var", _NON_REQUESTS_CA_ENV_VARS)
+def test_non_requests_ca_env_does_not_suppress_injection(monkeypatch, var):
+    # SSL_CERT_FILE and SSL_CERT_DIR are not requests CA overrides. The frozen
+    # runtime hook sets SSL_CERT_FILE to bundled certifi, so these vars must not
+    # disable OS-trust injection in the shipped artifact.
     calls = _install_fake_truststore(monkeypatch)
-    monkeypatch.setenv("SSL_CERT_FILE", "/etc/ssl/certs/ca-certificates.crt")
+    env = {var: "/etc/ssl/certs/ca-certificates.crt"}
 
-    assert configure_tls_trust() is True
+    assert has_explicit_ca_override(env=env) is False
+    assert configure_tls_trust(env=env) is True
     assert calls["n"] == 1
 
 
@@ -94,3 +100,56 @@ def test_happy_path_injects_once(monkeypatch):
 
     assert configure_tls_trust() is True
     assert calls["n"] == 1
+
+
+def _repo_root() -> Path:
+    current = Path(__file__).resolve().parent
+    for parent in (current, *current.parents):
+        if (parent / "pyproject.toml").is_file():
+            return parent
+    raise RuntimeError("Cannot locate repository root")
+
+
+def test_cli_bootstrap_injects_before_requests_import(tmp_path):
+    sentinel = tmp_path / "sentinel.txt"
+    fake_truststore = tmp_path / "truststore.py"
+    fake_truststore.write_text(
+        "\n".join(
+            [
+                "import os",
+                "import pathlib",
+                "import sys",
+                "",
+                "def inject_into_ssl():",
+                "    pathlib.Path(os.environ['TRUSTSTORE_SENTINEL']).write_text(",
+                "        'requests_imported=' + str('requests' in sys.modules),",
+                "        encoding='utf-8',",
+                "    )",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    for name in (
+        _DISABLE_ENV_VAR,
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+    ):
+        env.pop(name, None)
+    env["PYTHONPATH"] = f"{tmp_path}{os.pathsep}{_repo_root() / 'src'}"
+    env["TRUSTSTORE_SENTINEL"] = str(sentinel)
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import apm_cli.cli"],
+        cwd=_repo_root(),
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert sentinel.read_text(encoding="utf-8") == "requests_imported=False"

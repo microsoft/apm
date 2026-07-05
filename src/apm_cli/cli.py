@@ -3,6 +3,8 @@
 Thin wiring layer  -- all command logic lives in ``apm_cli.commands.*`` modules.
 """
 
+# ruff: noqa: E402
+
 import ctypes
 import logging
 import os
@@ -10,6 +12,22 @@ import sys
 import warnings
 
 import click
+
+from apm_cli.core.tls_trust import configure_tls_trust
+
+_TLS_TRUST_CONFIGURED = False
+
+
+def _configure_process_tls_trust() -> None:
+    """Configure process-wide TLS trust before network clients are imported."""
+    global _TLS_TRUST_CONFIGURED
+    if _TLS_TRUST_CONFIGURED:
+        return
+    configure_tls_trust()
+    _TLS_TRUST_CONFIGURED = True
+
+
+_configure_process_tls_trust()
 
 from apm_cli.commands._helpers import (
     ERROR,
@@ -333,12 +351,7 @@ def main():
     """Main entry point for the CLI."""
     _configure_logging()  # honours APM_LOG_LEVEL env var; --verbose upgrades in cli()
     _configure_encoding()
-    # Verify HTTPS against the OS trust store by default so APM behaves like
-    # git/curl in corporate-CA / TLS-proxy environments. Best-effort: falls
-    # back to certifi and never raises. Must run before the first HTTPS call.
-    from apm_cli.core.tls_trust import configure_tls_trust
-
-    configure_tls_trust()
+    _configure_process_tls_trust()
     try:
         cli(obj={})
     except Exception as e:

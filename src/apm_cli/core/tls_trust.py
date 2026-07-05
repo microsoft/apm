@@ -18,14 +18,16 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 
 logger = logging.getLogger(__name__)
 
 # The CA-bundle env vars ``requests`` honours (via merge_environment_settings);
 # when one is set, respect that pinned bundle and skip injection. SSL_CERT_FILE
-# is excluded on purpose: requests ignores it, and the frozen binary's runtime
-# hook sets it to the bundled certifi -- treating it as an override would make
-# injection a no-op in the shipped artifact.
+# and SSL_CERT_DIR are excluded on purpose: requests ignores those standalone
+# variables, and the frozen binary's runtime hook sets SSL_CERT_FILE to bundled
+# certifi -- treating either as an override would make injection a no-op in the
+# shipped artifact.
 _EXPLICIT_CA_ENV_VARS = ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE")
 
 # Escape hatch: set truthy to force the legacy certifi-only behaviour.
@@ -34,11 +36,18 @@ _DISABLE_ENV_VAR = "APM_DISABLE_TRUSTSTORE"
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
-def _env_flag(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in _TRUTHY
+def _env_flag(name: str, env: Mapping[str, str] | None = None) -> bool:
+    environ = os.environ if env is None else env
+    return environ.get(name, "").strip().lower() in _TRUTHY
 
 
-def configure_tls_trust() -> bool:
+def has_explicit_ca_override(env: Mapping[str, str] | None = None) -> bool:
+    """Return True when requests has an explicit CA bundle override."""
+    environ = os.environ if env is None else env
+    return any((environ.get(var) or "").strip() for var in _EXPLICIT_CA_ENV_VARS)
+
+
+def configure_tls_trust(env: Mapping[str, str] | None = None) -> bool:
     """Route HTTPS verification through the OS trust store when possible.
 
     Call once at process startup, before the first HTTPS request. Returns
@@ -46,13 +55,12 @@ def configure_tls_trust() -> bool:
     ``certifi`` behaviour was left in place (explicit override, opt-out,
     ``truststore`` missing, or injection failure). Never raises.
     """
-    if _env_flag(_DISABLE_ENV_VAR):
+    if _env_flag(_DISABLE_ENV_VAR, env):
         logger.debug("OS trust-store injection disabled via %s", _DISABLE_ENV_VAR)
         return False
 
-    explicit = next((var for var in _EXPLICIT_CA_ENV_VARS if os.environ.get(var)), None)
-    if explicit:
-        logger.debug("Explicit CA bundle set via %s; leaving certifi/verify path intact", explicit)
+    if has_explicit_ca_override(env):
+        logger.debug("Explicit CA bundle set; leaving certifi/verify path intact")
         return False
 
     try:

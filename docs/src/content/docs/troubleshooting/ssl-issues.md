@@ -14,8 +14,10 @@ Related: [environment variables](../reference/environment-variables/), [install 
 Typical errors APM surfaces or passes through from the underlying HTTP/git stack:
 
 ```text
-[!] TLS verification failed -- if you're behind a corporate proxy or
-    firewall, set REQUESTS_CA_BUNDLE to your organisation's CA bundle.
+[!] TLS verification failed -- APM uses the system trust store by default.
+    If you're behind a corporate proxy or firewall, make sure your
+    organisation's CA is installed in the OS trust store, or set
+    REQUESTS_CA_BUNDLE to a readable PEM bundle and retry.
 ```
 
 ```text
@@ -69,12 +71,9 @@ APM uses `requests` for HTTP and shells out to `git` for repository operations. 
 
 ```bash
 export REQUESTS_CA_BUNDLE=/path/to/ca-bundle.pem
-# or, more general:
-export SSL_CERT_FILE=/path/to/ca-bundle.pem
-export SSL_CERT_DIR=/etc/ssl/certs
 ```
 
-`REQUESTS_CA_BUNDLE` wins for `requests`. `SSL_CERT_FILE` / `SSL_CERT_DIR` cover the rest of the Python TLS stack.
+`REQUESTS_CA_BUNDLE` wins for `requests`. `SSL_CERT_FILE` / `SSL_CERT_DIR` cover parts of the stdlib TLS stack, but on their own they are not reliable overrides for the `requests` HTTP path APM uses.
 
 ### Git operations
 

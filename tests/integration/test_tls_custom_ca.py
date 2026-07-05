@@ -35,7 +35,12 @@ pytestmark = [
     pytest.mark.skipif(shutil.which("openssl") is None, reason="openssl CLI not available"),
 ]
 
-_TRUST_ENV_VARS = ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSL_CERT_FILE", "APM_DISABLE_TRUSTSTORE")
+_TRUST_ENV_VARS = (
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "SSL_CERT_FILE",
+    "APM_DISABLE_TRUSTSTORE",
+)
 
 _CA_CNF = """\
 [req]
@@ -71,18 +76,61 @@ def _openssl(*args) -> None:
 def _mint_ca_and_leaf(dirpath):
     """Generate a private CA and a localhost leaf cert signed by it."""
     ca_key, ca_pem = dirpath / "ca.key", dirpath / "ca.pem"
-    srv_key, srv_csr, srv_pem = dirpath / "server.key", dirpath / "server.csr", dirpath / "server.pem"
+    srv_key, srv_csr, srv_pem = (
+        dirpath / "server.key",
+        dirpath / "server.csr",
+        dirpath / "server.pem",
+    )
     ca_cnf, srv_cnf = dirpath / "ca.cnf", dirpath / "server.cnf"
     ca_cnf.write_text(_CA_CNF)
     srv_cnf.write_text(_SERVER_CNF)
 
-    _openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes",
-             "-keyout", ca_key, "-out", ca_pem, "-days", "2", "-config", ca_cnf)
-    _openssl("req", "-newkey", "rsa:2048", "-nodes",
-             "-keyout", srv_key, "-out", srv_csr, "-config", srv_cnf)
-    _openssl("x509", "-req", "-in", srv_csr, "-CA", ca_pem, "-CAkey", ca_key,
-             "-CAcreateserial", "-out", srv_pem, "-days", "2",
-             "-extfile", srv_cnf, "-extensions", "v3_req")
+    _openssl(
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-keyout",
+        ca_key,
+        "-out",
+        ca_pem,
+        "-days",
+        "2",
+        "-config",
+        ca_cnf,
+    )
+    _openssl(
+        "req",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-keyout",
+        srv_key,
+        "-out",
+        srv_csr,
+        "-config",
+        srv_cnf,
+    )
+    _openssl(
+        "x509",
+        "-req",
+        "-in",
+        srv_csr,
+        "-CA",
+        ca_pem,
+        "-CAkey",
+        ca_key,
+        "-CAcreateserial",
+        "-out",
+        srv_pem,
+        "-days",
+        "2",
+        "-extfile",
+        srv_cnf,
+        "-extensions",
+        "v3_req",
+    )
     return ca_pem, srv_pem, srv_key
 
 

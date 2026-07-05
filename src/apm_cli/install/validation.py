@@ -66,9 +66,10 @@ def _log_tls_failure(host_display: str, exc: BaseException, verbose_log, logger)
     Verbose: also include the host name and the underlying exception text.
     """
     logger.warning(
-        "TLS verification failed -- if you're behind a corporate proxy or "
-        "firewall, set the REQUESTS_CA_BUNDLE environment variable to the "
-        "path of your organisation's CA bundle (a PEM file) and retry. "
+        "TLS verification failed -- APM uses the system trust store by default. "
+        "If you're behind a corporate proxy or firewall, make sure your "
+        "organisation's CA is installed in the OS trust store, or set "
+        "REQUESTS_CA_BUNDLE to a readable PEM bundle and retry. "
         "See: https://microsoft.github.io/apm/troubleshooting/ssl-issues/"
     )
     if verbose_log:

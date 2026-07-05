@@ -26,7 +26,12 @@ from apm_cli.core.tls_trust import configure_tls_trust
 
 pytestmark = pytest.mark.integration
 
-_TRUST_ENV_VARS = ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSL_CERT_FILE", "APM_DISABLE_TRUSTSTORE")
+_TRUST_ENV_VARS = (
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "SSL_CERT_FILE",
+    "APM_DISABLE_TRUSTSTORE",
+)
 _HOOK_PATH = Path(__file__).resolve().parents[2] / "build" / "hooks" / "runtime_hook_ssl_certs.py"
 
 
