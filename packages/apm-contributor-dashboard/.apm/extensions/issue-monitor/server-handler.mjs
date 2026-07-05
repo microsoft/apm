@@ -71,6 +71,11 @@ function sendPayloadTooLarge(res) {
     res.end(JSON.stringify({ ok: false, error: "Request body exceeds server limit" }));
 }
 
+function sendBodyReadError(res, error = new Error("Unable to read request body")) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: String(error.message || error) }));
+}
+
 function readBody(req) {
     const maxBytes = req.maxBytes || DEFAULT_POST_BODY_LIMIT_BYTES;
     const limit = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : DEFAULT_POST_BODY_LIMIT_BYTES;
@@ -120,7 +125,7 @@ async function readBodyWithLimit(req, pathname) {
         if (isPayloadTooLargeError(error)) {
             return { isPayloadTooLarge: true };
         }
-        throw error;
+        return { isBodyReadError: true, error };
     }
 }
 
@@ -176,6 +181,10 @@ export function createHandler(deps) {
                 sendPayloadTooLarge(res);
                 return;
             }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             try {
                 const { number, title } = JSON.parse(raw);
                 startedSessions.add(number);
@@ -200,6 +209,10 @@ export function createHandler(deps) {
             const raw = await readBodyWithLimit(req, req.url);
             if (raw?.isPayloadTooLarge) {
                 sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
                 return;
             }
             try {
@@ -320,6 +333,10 @@ export function createHandler(deps) {
                 sendPayloadTooLarge(res);
                 return;
             }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             try {
                 const { number } = JSON.parse(raw);
                 try {
@@ -348,6 +365,10 @@ export function createHandler(deps) {
             const raw = await readBodyWithLimit(req, req.url);
             if (raw?.isPayloadTooLarge) {
                 sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
                 return;
             }
             try {
@@ -380,6 +401,10 @@ export function createHandler(deps) {
                 sendPayloadTooLarge(res);
                 return;
             }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             try {
                 const { number } = JSON.parse(raw);
                 await ghExec(["pr", "review", String(number), "--repo", repo, "--approve"]);
@@ -397,6 +422,10 @@ export function createHandler(deps) {
             const raw = await readBodyWithLimit(req, req.url);
             if (raw?.isPayloadTooLarge) {
                 sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
                 return;
             }
             try {
@@ -424,6 +453,10 @@ export function createHandler(deps) {
                 sendPayloadTooLarge(res);
                 return;
             }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
+                return;
+            }
             try {
                 const { number } = JSON.parse(raw);
                 await ghExec(["pr", "merge", String(number), "--repo", repo, "--auto", "--squash"]);
@@ -441,6 +474,10 @@ export function createHandler(deps) {
             const raw = await readBodyWithLimit(req, req.url);
             if (raw?.isPayloadTooLarge) {
                 sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
                 return;
             }
             try {
@@ -462,6 +499,10 @@ export function createHandler(deps) {
             const raw = await readBodyWithLimit(req, req.url);
             if (raw?.isPayloadTooLarge) {
                 sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
                 return;
             }
             try {
@@ -503,6 +544,10 @@ export function createHandler(deps) {
             const raw = await readBodyWithLimit(req, req.url);
             if (raw?.isPayloadTooLarge) {
                 sendPayloadTooLarge(res);
+                return;
+            }
+            if (raw?.isBodyReadError) {
+                sendBodyReadError(res, raw.error);
                 return;
             }
             res.setHeader("Content-Type", "application/json");
