@@ -9,32 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `apm install` now formats and emits Antigravity-native `trigger: glob` and `globs` frontmatter in `.agents/rules/*.md`, `apm compile` now omits instructions from `AGENTS.md` when they are already present in `.agents/rules/` (deduplication), and `docs/src/content/docs/specs/openapm-v0.1.md` now cites the target contract. (by @okamiconcept) (#1984)
-
-### Security
-
-- Artifactory registry-proxy ZIP installs now use the shared safe extraction
-  path for traversal, symlink, and zip-bomb guards instead of direct ZIP
-  extraction. -- by @fallintoplace (#1948)
-- `apm runtime setup codex` now verifies GitHub Releases SHA-256 asset
-  digests before extracting downloaded archives -- by @fallintoplace (#1949)
-
-### Performance
-
-- `apm install` with a committed lockfile no longer re-resolves branch-pinned
-  and tagless locked dependencies over the network. The tiered ref resolver's
-  L0 cache is now seeded from the lockfile before resolution runs, eliminating
-  redundant commits-API calls on every locked install (2 calls -> 0 on a
-  1-direct + 1-transitive branch-pinned install). Skipped under `--update` /
-  `--refresh`. Verbose tier stats now also correctly track concrete-SHA refs as
-  `sha_passthrough` instead of inflating the `commits_api` counter. --
-  by @srobroek (#1973)
-
-### Changed
-
-- Collapsed repeated `git config` subprocess calls from 3 to 1 per repository
-  during cache operations, cutting process-spawn overhead on `apm install` and
-  `apm update`. (#1974)
 - APM now verifies HTTPS against the OS trust store by default (via
   `truststore`) for both `apm install` and `apm run` (child runtimes), so it
   works out-of-the-box behind a corporate CA or a TLS-inspecting proxy --
@@ -47,76 +21,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   supported, and Windows `schannel` trust has caveats; Node-based runtimes are
   not covered by the child-shim propagation. (closes #2004) (#2005)
 
-### Fixed
+## [0.24.0] - 2026-07-05
 
-- `apm install` now deploys hook script directories as self-contained
-  bundles for Claude-family targets, Copilot, and Kiro, so sibling
-  helper modules resolve at runtime. JavaScript and TypeScript hook
-  bundles also get a minimal module-type `package.json` sidecar, which
-  prevents a consumer repo's `type: module` from breaking CommonJS hooks.
-  (#2023)
-- Marketplace plugin `bin/` deployment now hardens POSIX executable copies to
-  user-only `0o700` permissions and normalizes legacy `bin_deploy.deny` GitHub
-  forms before matching. -- by @WilliamK112 (#1971)
-- `apm audit --help` now accurately describes the command's full scope:
-  hidden Unicode scanning, drift detection, and lockfile/policy checks.
-  The previous summary named only Unicode scanning and used the legacy
-  "packages" terminology. (#2017)
-- `apm pack` now cryptographically verifies every dependency file against
-  the lockfile before bundling -- unattested content never ships. It closes a
-  supply-chain provenance hole in **every** format
-  (`--format plugin` and the default `--format apm`): dependency content is
-  packed exclusively from lockfile-attested `deployed_files`, each verified
-  against its `deployed_file_hashes` SHA-256 before it enters the bundle, so a
-  file tampered or corrupted after `apm install` fails the pack instead of
-  shipping silently. The unattested `apm_modules` cache -- which can be stale,
-  partial, or tampered -- is never packed. Subset (`skills:`) filters are
-  respected (only deployed skills are included). If a dependency has cached
-  primitives but no `deployed_files`, `apm pack` fails with an actionable error
-  telling you to run `apm install`. Dependency hooks-config / MCP-config, which
-  is not attested in `deployed_files`, is no longer packed: `apm pack` now warns
-  (`[!]`) and names the dependency (first-party root hooks/MCP are unaffected).
-  Directory entries are walked with per-child containment so a planted
-  directory symlink cannot escape the project root into the bundle. (#2013)
-- `apm install --frozen` no longer spuriously rejects private Git dependencies
-  hosted on non-default Git servers such as Bitbucket Server, GitLab, or GitHub
-  Enterprise; lockfile matching now uses the same host-qualified identity as
-  `apm install`. (#2011)
-- `apm install` and `apm uninstall` no longer strip comments from `apm.yml`
-  while updating dependency entries, so inline annotations and section notes
-  survive dependency updates. (#2012)
-- `apm pack` now produces a `marketplace.json` the Copilot App accepts even
-  when your manifest `name` contains dots, underscores, or other non-kebab-case
-  characters (e.g. `my.marketplace`): the emitted `name` field is normalized to
-  kebab-case, and `apm pack` prints a warning naming the original and emitted
-  values when a rewrite occurs. Internal resolution, registry lookups, and the
-  Codex `interface.displayName` keep the original name. (#2008)
-- Combined hook manifests such as `claude-codex-hooks.json` now deploy to every
-  named target instead of only the last suffix target, so one deprecated
-  filename-routed manifest can still reach both Claude Code and Codex during the
-  migration window. (by @garyj) (#2021)
-- Generated `CLAUDE.md` now uses a single H1 title with nested H2/H3 sections,
-  fixing duplicate top-level headings in Claude Code. (#2014)
-- `apm audit --ci` no longer reports phantom drift for root-local hook files
-  when audit replay writes into a scratch project root. (#1980)
-- Self-defined stdio MCP env placeholders now resolve from the install process
-  environment for Claude Code and Codex instead of being written verbatim.
-  (#1966)
+### Added
 
-- Self-hosted git hosts such as GitBucket that serve smart-HTTP only at the
-  `.git` path now install successfully over anonymous HTTPS; `apm install` no
-  longer drops the suffix. (#1995)
+- `apm install` and `apm compile` now emit Antigravity-native `trigger: glob`
+  and `globs` frontmatter in `.agents/rules/*.md`, and `apm compile` omits
+  instructions from `AGENTS.md` when they already exist in `.agents/rules/`
+  (compile-time dedup). (by @okamiconcept, #1984)
+- `apm config list` is now available as a discoverable alias for `apm config
+  get` with no key, listing all resolved configuration values. (by @WilliamK112,
+  #1991)
+
+### Security
+
+- Artifactory registry-proxy ZIP installs now use the shared safe-extraction
+  path with traversal, symlink, and zip-bomb guards instead of direct ZIP
+  extraction. (by @fallintoplace, #1948)
+- `apm runtime setup codex` now verifies GitHub Releases SHA-256 asset digests
+  before extracting downloaded archives. (by @fallintoplace, #1949)
+- Marketplace plugin `bin/` executables now deploy with user-only `0o700`
+  permissions (group/other bits cleared) and legacy `bin_deploy.deny` GitHub
+  forms are normalized before matching. (by @WilliamK112, #1971, #2024)
 
 ### Performance
 
-- `apm install` now issues a single `git ls-remote` call per repository when
-  resolving multiple semver git dependencies from the same remote, reducing
-  network round-trips for monorepos with many shared-origin semver deps. (#1975)
-- `apm outdated` now dedupes `git ls-remote` across locked dependencies that
-  share one upstream repository (e.g. several virtual-subdirectory packages
-  from the same monorepo), issuing one listing per repo per run instead of one
-  per dependency. The cache is per-invocation, so a newer upstream ref is still
-  detected on the next run. (#1975)
+- `apm install` with a committed lockfile no longer re-resolves branch-pinned
+  and tagless locked dependencies over the network -- the tiered ref resolver's
+  L0 cache is seeded from the lockfile before resolution runs (2 commits-API
+  calls -> 0 on a 1-direct + 1-transitive branch-pinned install), skipped under
+  `--update`/`--refresh`. (by @srobroek, #1973)
+- `apm install` and `apm outdated` now issue a single `git ls-remote` per
+  repository when resolving multiple semver git dependencies that share one
+  upstream, cutting network round-trips for monorepos with many shared-origin
+  deps. (by @srobroek, #1975)
+- Repeated `git config` subprocess calls during cache operations were collapsed
+  from 3 to 1 per repository, and promisor config is now applied on the clone,
+  cutting process-spawn overhead on `apm install` and `apm update`. (by
+  @srobroek, #1974)
+- `apm compile` fast-paths universal (`**`) `applyTo` matching by reusing the
+  built directory-analysis cache, speeding up compilation for repos with many
+  universal instructions. (by @WilliamK112, #1993)
+
+### Fixed
+
+- Generated `CLAUDE.md` now uses a single H1 title with nested H2/H3 sections,
+  fixing duplicate top-level headings in Claude Code. (by @WilliamK112, #2016)
+- `apm install` now deploys hook script directories as self-contained bundles
+  for Claude-family targets, Copilot, and Kiro so sibling helper modules resolve
+  at runtime, and JS/TS hook bundles get a minimal module-type `package.json`
+  sidecar so a consumer repo's `type: module` no longer breaks CommonJS hooks.
+  (closes #2023, #2025)
+- Combined hook manifests such as `claude-codex-hooks.json` now deploy to every
+  named target instead of only the last suffix target, so one deprecated
+  filename-routed manifest still reaches both Claude Code and Codex. (by @garyj,
+  closes #2020, #2021)
+- Copilot hooks declared with Claude-shape event names (`PreToolUse`,
+  `PostToolUse`) are now renamed to Copilot's camelCase during merge, fixing a
+  casing mismatch that left the hooks inert. (closes #1977, #1979)
+- `apm audit --help` now describes the command's full scope -- hidden-Unicode
+  scanning, drift detection, and lockfile/policy checks -- instead of naming
+  only Unicode scanning. (by @WilliamK112, #2017)
+- `apm mcp install --help` now surfaces the forwarded `apm install` options
+  inside the command description under a clearer "Forwarded install options"
+  heading. (by @WilliamK112, #2018)
+- `apm pack` now packs dependency content exclusively from lockfile-attested
+  `deployed_files`, verifying each against its recorded SHA-256 before bundling,
+  so tampered or unattested content fails the pack instead of shipping silently.
+  This closes a supply-chain provenance hole in both `--format apm` and `--format
+  plugin`; unattested dependency hooks/MCP config is no longer packed and
+  directory entries are walked with per-child symlink containment. (closes #1999,
+  #2013)
+- `apm install --frozen` no longer spuriously rejects private Git dependencies
+  on non-default hosts (Bitbucket Server, GitLab, GitHub Enterprise); lockfile
+  matching now uses the same host-qualified identity as `apm install`. (closes
+  #1996, #2011)
+- Self-hosted Git hosts such as GitBucket that serve smart-HTTP only at the
+  `.git` path now install over anonymous HTTPS -- `apm install` no longer drops
+  the `.git` suffix. (by @mia106dev, closes #1995, #1997)
+- `apm install` and `apm uninstall` no longer strip comments from `apm.yml` when
+  updating dependency entries, so inline annotations and section notes survive.
+  (closes #2000, #2012)
+- `apm pack` now emits a `marketplace.json` the Copilot App accepts when the
+  manifest `name` contains dots or underscores: the `name` is normalized to
+  kebab-case with a warning naming the original and emitted values, while
+  internal resolution keeps the original name. (by @sergio-sisternes-epam, #2008)
+- `targets:`, `skills:`, and `alias:` on a `path:` dependency entry are no longer
+  silently ignored during `apm install`, and now round-trip on serialization.
+  (by @sergio-sisternes-epam, closes #1982, #1987)
+- Self-defined stdio MCP env `${VAR}` placeholders now resolve from the
+  install-process environment for Claude Code and Codex instead of being written
+  verbatim. (closes #1963, #1966)
+- `apm audit --ci` no longer reports phantom drift for root-local hook files when
+  audit replay writes into a scratch project root. (closes #1978, #1980)
 
 ## [0.23.1] - 2026-06-29
 
