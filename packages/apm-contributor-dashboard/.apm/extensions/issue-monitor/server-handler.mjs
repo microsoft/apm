@@ -67,6 +67,7 @@ function readBody(req) {
  * @param {function} deps.ghExec - async (args: string[]) => string
  * @param {object}  deps.session - { send(payload) }
  * @param {Set}     deps.startedSessions - Set<number>
+ * @param {Map}     deps.sessionIds - Map<number, string> issue number -> project_session_id
  * @param {function} deps.saveSessions - () => void
  * @param {function} deps.getIssueData - () => array
  * @param {function} deps.getPrData - () => array
@@ -76,7 +77,7 @@ function readBody(req) {
  * @param {string}  deps.distDir - absolute path to dist/ folder
  */
 export function createHandler(deps) {
-    const { ghExec, session, startedSessions, saveSessions, getIssueData, getPrData, getLastUpdated, getLastError, repo, distDir } = deps;
+    const { ghExec, session, startedSessions, sessionIds = new Map(), saveSessions, getIssueData, getPrData, getLastUpdated, getLastError, repo, distDir } = deps;
 
     // CSRF token -- generated once per server lifetime, embedded in index.html
     const csrfToken = deps.csrfToken || randomBytes(32).toString("hex");
@@ -118,7 +119,7 @@ export function createHandler(deps) {
                 const modelClause = model ? ` Use model "${model}".` : "";
                 setTimeout(() => {
                     session.send({
-                        prompt: `Open a new session for issue #${number} ("Title: ${safeTitle}") in ${repo}. Use the open_issue_session tool with repo_full_name "${repo}", issue_number ${number}, issue_title "#${number} ${safeTitle}", and kickoff_mode "plan".${modelClause} The session should plan the implementation of this issue.`,
+                        prompt: `Open a new session for issue #${number} ("Title: ${safeTitle}") in ${repo}. Use the open_issue_session tool with repo_full_name "${repo}", issue_number ${number}, issue_title "#${number} ${safeTitle}", and kickoff_mode "plan".${modelClause} The session should plan the implementation of this issue. After the session is created, immediately call the register_session canvas action with the new session's project_session_id and issue_number ${number} so the dashboard can navigate directly next time.`,
                     });
                 }, 0);
             } catch (e) {
@@ -137,9 +138,16 @@ export function createHandler(deps) {
                 res.end(JSON.stringify({ ok: true }));
                 const safeTitle = sanitizeForPrompt(title);
                 setTimeout(() => {
-                    session.send({
-                        prompt: `Navigate to the existing session for issue #${number} ("${safeTitle}") in ${repo}. Use the list_sessions_and_chats tool to find a session linked to issue #${number}, then use navigate_to with its project_session_id to open it.`,
-                    });
+                    const knownId = sessionIds.get(number);
+                    if (knownId) {
+                        // Direct navigate -- no session lookup needed, single tool call
+                        session.send({ prompt: `Call navigate_to with id="${knownId}". No other response needed.` });
+                    } else {
+                        // Fallback: search and navigate, then register for next time
+                        session.send({
+                            prompt: `Navigate to the existing session for issue #${number} ("${safeTitle}") in ${repo}. Use the list_sessions_and_chats tool to find a session linked to issue #${number}, then use navigate_to with its project_session_id to open it. After navigating, call the register_session canvas action with that project_session_id and issue_number ${number}.`,
+                        });
+                    }
                 }, 0);
             } catch (e) {
                 res.setHeader("Content-Type", "application/json");
