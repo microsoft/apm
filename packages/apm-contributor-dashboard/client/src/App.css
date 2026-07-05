@@ -114,6 +114,25 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; }
   border: 1px solid #1f6feb; background: #1f6feb30; color: #58a6ff; font-weight: 600;
 }
 .btn-open-session:hover { background: #1f6feb50; }
+.btn-sm {
+  padding: 4px 12px; font-size: 12px; font-weight: 600; border-radius: 6px;
+  cursor: pointer; border: 1px solid #30363d; background: #21262d; color: #e6edf3;
+}
+.btn-sm:hover { background: #30363d; }
+.btn-purple { border-color: #6e40c9; background: #6e40c920; color: #bc8cff; }
+.btn-purple:hover { background: #6e40c940; }
+.bulk-action-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; margin-bottom: 8px;
+  background: #1f6feb18; border: 1px solid #1f6feb40; border-radius: 8px;
+}
+.bulk-count { font-size: 12px; font-weight: 600; color: #58a6ff; margin-right: 4px; }
+.checkbox-col { width: 32px; text-align: center; }
+.row-checkbox {
+  width: 14px; height: 14px; cursor: pointer;
+  accent-color: #1f6feb;
+}
+tr.row-selected td { background: #1f6feb0c; }
 .btn-details {
   background: transparent; color: #58a6ff;
   border: 1px solid #30363d; border-radius: 6px;

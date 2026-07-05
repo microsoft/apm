@@ -1,5 +1,7 @@
 import { createSignal, createMemo, Show } from "solid-js";
 import { prResource, refetchPrs } from "../../stores/prs";
+import { runPanel, rerunCi } from "../../services/api";
+import { showToast } from "../Toast";
 import StatsCards from "../StatsCards";
 import PrTable from "./PrTable";
 import PrDetail from "./PrDetail";
@@ -10,6 +12,7 @@ export default function PrsTab() {
   const [pageSize, setPageSize] = createSignal(25);
   const [filters, setFilters] = createSignal({});
   const [detailPr, setDetailPr] = createSignal(null);
+  const [selectedPrs, setSelectedPrs] = createSignal(new Set());
 
   const prs = () => prResource()?.prs || [];
 
@@ -52,9 +55,51 @@ export default function PrsTab() {
 
   function clearFilters() { setFilters({}); setPage(0); }
 
+  function toggleSelect(n) {
+    setSelectedPrs(s => {
+      const next = new Set(s);
+      if (next.has(n)) next.delete(n); else next.add(n);
+      return next;
+    });
+  }
+
+  function togglePage(numbers) {
+    setSelectedPrs(s => {
+      const next = new Set(s);
+      const allSelected = numbers.every(n => next.has(n));
+      if (allSelected) numbers.forEach(n => next.delete(n));
+      else numbers.forEach(n => next.add(n));
+      return next;
+    });
+  }
+
+  function clearSelection() { setSelectedPrs(new Set()); }
+
+  async function runBulkCi() {
+    const nums = [...selectedPrs()];
+    showToast(`Re-running CI on ${nums.length} PR${nums.length > 1 ? "s" : ""}...`);
+    await Promise.all(nums.map(n => rerunCi(n).catch(() => {})));
+    showToast("CI re-run triggered for selected PRs");
+  }
+
+  async function runBulkPanel() {
+    const nums = [...selectedPrs()];
+    showToast(`Triggering panel on ${nums.length} PR${nums.length > 1 ? "s" : ""}...`);
+    await Promise.all(nums.map(n => runPanel(n).catch(() => {})));
+    showToast("Panel review triggered for selected PRs");
+  }
+
   return (
     <>
       <StatsCards id="prStats" cards={stats} />
+      <Show when={selectedPrs().size > 0}>
+        <div class="bulk-action-bar">
+          <span class="bulk-count">{selectedPrs().size} PR{selectedPrs().size > 1 ? "s" : ""} selected</span>
+          <button class="btn btn-sm" onClick={runBulkCi}>Run CI</button>
+          <button class="btn btn-sm btn-purple" onClick={runBulkPanel}>Run Panel</button>
+          <button class="btn-clear-filters" onClick={clearSelection}>Clear</button>
+        </div>
+      </Show>
       <Show when={Object.keys(filters()).length > 0}>
         <div class="filter-bar">
           <span class="filter-label">Filters:</span>
@@ -73,7 +118,14 @@ export default function PrsTab() {
         </div>
       }>
         <Show when={prs().length > 0} fallback={<div class="empty">No open pull requests found.</div>}>
-          <PrTable prs={paged()} onFilter={toggleFilter} onDetail={(pr) => setDetailPr(pr)} />
+          <PrTable
+            prs={paged()}
+            selected={selectedPrs}
+            onToggle={toggleSelect}
+            onTogglePage={togglePage}
+            onFilter={toggleFilter}
+            onDetail={(pr) => setDetailPr(pr)}
+          />
           <Pagination
             page={page}
             pageSize={pageSize}

@@ -1,4 +1,4 @@
-import { For } from "solid-js";
+import { For, createMemo } from "solid-js";
 import ActionDropdown from "../ActionDropdown";
 import { runPanel, rerunCi, approvePr, approveWorkflowRuns, mergeWhenReady } from "../../services/api";
 import { showToast } from "../Toast";
@@ -9,6 +9,10 @@ const pipelineClasses = { green: "signal-green", yellow: "signal-yellow", red: "
 const panelClasses = { green: "signal-green", yellow: "signal-yellow", red: "signal-red", none: "signal-none" };
 
 export default function PrTable(props) {
+  const pageNumbers = () => (props.prs || []).map(pr => pr.number);
+  const allPageSelected = () => pageNumbers().length > 0 && pageNumbers().every(n => props.selected().has(n));
+  const somePageSelected = () => pageNumbers().some(n => props.selected().has(n));
+
   function buildDropdownItems(pr) {
     const items = [];
     if (pr.pipeline?.status === "red" || pr.pipeline?.status === "yellow") {
@@ -38,6 +42,15 @@ export default function PrTable(props) {
     <table>
       <thead>
         <tr>
+          <th class="checkbox-col">
+            <input
+              type="checkbox"
+              class="row-checkbox"
+              checked={allPageSelected()}
+              ref={el => { if (el) el.indeterminate = somePageSelected() && !allPageSelected(); }}
+              onChange={() => props.onTogglePage(pageNumbers())}
+            />
+          </th>
           <th>PR</th>
           <th>Title</th>
           <th class="clickable">Author</th>
@@ -50,7 +63,15 @@ export default function PrTable(props) {
       <tbody>
         <For each={props.prs}>
           {(pr) => (
-            <tr>
+            <tr class={props.selected().has(pr.number) ? "row-selected" : ""}>
+              <td class="checkbox-col">
+                <input
+                  type="checkbox"
+                  class="row-checkbox"
+                  checked={props.selected().has(pr.number)}
+                  onChange={() => props.onToggle(pr.number)}
+                />
+              </td>
               <td><a href={pr.url} target="_blank">#{pr.number}</a></td>
               <td class="title-cell" title={pr.title}>{pr.title}</td>
               <td><code class="filterable" onClick={() => props.onFilter("author", pr.author)}>{pr.author}</code></td>
