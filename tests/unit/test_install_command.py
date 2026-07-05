@@ -474,18 +474,10 @@ class TestValidationFailureReasonMessages:
         "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
         return_value=None,
     )
-    @patch("urllib.request.urlopen")
-    def test_verbose_validation_failure_calls_build_error_context(self, mock_urlopen, _mock_cred):
+    @patch("apm_cli.install.validation.requests.get")
+    def test_verbose_validation_failure_calls_build_error_context(self, mock_get, _mock_cred):
         """When GitHub validation fails in verbose mode, build_error_context should be invoked."""
-        import urllib.error
-
-        mock_urlopen.side_effect = urllib.error.HTTPError(
-            url="https://api.github.com/repos/owner/repo",
-            code=404,
-            msg="Not Found",
-            hdrs={},
-            fp=None,
-        )
+        mock_get.return_value = MagicMock(ok=False, status_code=404, reason="Not Found", headers={})
 
         with patch.object(
             __import__("apm_cli.core.auth", fromlist=["AuthResolver"]).AuthResolver,
@@ -1194,18 +1186,11 @@ class TestGenericHostSshFirstValidation:
     def test_github_host_skips_ssh_attempt(self, mock_run):
         """GitHub.com repositories do NOT go through the SSH-first ls-remote path."""
 
-        import urllib.error
-        import urllib.request
-
         from apm_cli.commands.install import _validate_package_exists
 
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.side_effect = urllib.error.HTTPError(
-                url="https://api.github.com/repos/owner/repo",
-                code=404,
-                msg="Not Found",
-                hdrs={},
-                fp=None,
+        with patch("apm_cli.install.validation.requests.get") as mock_get:
+            mock_get.return_value = MagicMock(
+                ok=False, status_code=404, reason="Not Found", headers={}
             )
             result = _validate_package_exists("owner/repo", verbose=False)
 
