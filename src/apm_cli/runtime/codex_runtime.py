@@ -1,8 +1,10 @@
 """Codex runtime adapter for APM."""
 
+import os
 import subprocess
 from typing import Any
 
+from ..core.tls_trust import build_child_tls_env
 from .base import RuntimeAdapter
 from .utils import find_runtime_binary
 
@@ -45,6 +47,7 @@ class CodexRuntime(RuntimeAdapter):
                 text=True,
                 encoding="utf-8",
                 bufsize=1,  # Line buffered
+                env=build_child_tls_env(os.environ),
             )
 
             output_lines = []

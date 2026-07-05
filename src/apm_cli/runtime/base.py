@@ -1,23 +1,34 @@
 """Base runtime adapter interface for APM."""
 
+import os
 import subprocess
 from abc import ABC, abstractmethod
 from typing import Any
 
+from ..core.tls_trust import build_child_tls_env
 
-def _stream_subprocess_output(cmd: list, timeout: int | None = None) -> tuple[list, int]:
+
+def _stream_subprocess_output(
+    cmd: list, timeout: int | None = None, env: dict | None = None
+) -> tuple[list, int]:
     """Run *cmd* as a subprocess, stream stdout in real-time, and return output.
 
     Args:
         cmd: Command and arguments list passed to :class:`subprocess.Popen`.
         timeout: Optional wait timeout in seconds passed to
             :meth:`subprocess.Popen.wait`.  ``None`` waits indefinitely.
+        env: Optional child environment. When ``None``, the current process
+            environment is used with the OS-trust child shim wired in so the
+            child runtime verifies HTTPS against the OS trust store too.
 
     Returns:
         ``(output_lines, return_code)`` where *output_lines* is the list of
         streamed stdout lines (including newlines) and *return_code* is the
         process exit code.
     """
+    if env is None:
+        env = build_child_tls_env(os.environ)
+
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -25,6 +36,7 @@ def _stream_subprocess_output(cmd: list, timeout: int | None = None) -> tuple[li
         text=True,
         encoding="utf-8",
         bufsize=1,  # Line buffered
+        env=env,
     )
 
     output_lines = []

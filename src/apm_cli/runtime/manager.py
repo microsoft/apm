@@ -13,6 +13,7 @@ from pathlib import Path
 import click
 from colorama import Fore, Style
 
+from ..core.tls_trust import build_child_tls_env
 from ..core.token_manager import setup_runtime_environment
 
 
@@ -183,6 +184,10 @@ class RuntimeManager:
 
                 # Setup GitHub tokens using centralized manager
                 env = setup_runtime_environment(env)  # Pass env to preserve CI tokens
+
+                # Wire OS-trust child shim so the setup subprocess (and any
+                # Python runtime it spawns) verifies HTTPS against the OS store.
+                env = build_child_tls_env(env)
 
                 result = subprocess.run(
                     cmd,
