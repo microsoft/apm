@@ -12,15 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - APM now verifies HTTPS against the OS trust store by default (via
   `truststore`), so it works out-of-the-box behind a corporate CA or a
   TLS-inspecting proxy -- matching the behaviour of `git`/`curl` on the same
-  host instead of failing against the bundled `certifi` set. This covers `apm
-  install` (in-process) and the Python-based `llm` child runtime spawned by `apm
-  run`, into whose venv APM installs `truststore` and a self-contained `.pth`
-  bootstrap at setup time. The frozen binary honours the system store as well,
-  with `certifi` as a genuine fallback. An explicitly set `REQUESTS_CA_BUNDLE` /
-  `CURL_CA_BUNDLE` still wins, and `APM_DISABLE_TRUSTSTORE=1` restores the
-  previous certifi-only behaviour. Node-based (Copilot) and Rust-based (Codex)
-  child runtimes are not yet covered and continue to use their own default
-  trust; tracked in #2034. (closes #2004) (#2005)
+  host instead of failing against the bundled `certifi` set. This covers the
+  Python-based paths: `apm install` (in-process) and the Python-based `llm`
+  child runtime spawned by `apm run`, into whose venv APM installs `truststore`
+  and a self-contained `.pth` bootstrap at setup time. The frozen binary honours
+  the system store as well, with `certifi` as a genuine fallback. An explicitly
+  set `REQUESTS_CA_BUNDLE` / `CURL_CA_BUNDLE` still wins, and
+  `APM_DISABLE_TRUSTSTORE=1` restores the previous certifi-only behaviour.
+  Node-based (Copilot) and Rust-based (Codex) child runtimes are not yet covered
+  and continue to use their own default trust; tracked in #2034. (closes #2004)
+  (#2005)
 
 ## [0.24.0] - 2026-07-05
 

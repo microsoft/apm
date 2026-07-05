@@ -395,3 +395,97 @@ def test_ensure_child_tls_bootstrap_is_idempotent(tmp_path):
 def test_ensure_child_tls_bootstrap_returns_false_for_missing_site_packages(tmp_path):
     # A path with no venv site-packages layout -> best-effort False, no raise.
     assert ensure_child_tls_bootstrap(tmp_path / "does-not-exist") is False
+
+
+# ---------------------------------------------------------------------------
+# T2 (H1) -- the .pth is GENERATED inline, so delivery does not depend on the
+# source .pth being packaged into the wheel (setuptools' packages.find drops
+# stray .pth data files). Prove the content is produced, not copied.
+# ---------------------------------------------------------------------------
+
+
+def test_pth_is_generated_not_copied(tmp_path, monkeypatch):
+    import apm_cli.core.tls_trust as tls
+
+    venv = _fake_venv(tmp_path)
+
+    # Point _child_bootstrap_dir at a source dir that has the MODULE but NO
+    # .pth file -- if delivery copied the .pth it would fail; generation must
+    # still produce it.
+    fake_src = tmp_path / "shipped"
+    fake_src.mkdir()
+    (fake_src / "_apm_tls_bootstrap.py").write_text("# bootstrap\n", encoding="ascii")
+    assert not (fake_src / "_apm_tls.pth").exists()
+    monkeypatch.setattr(tls, "_child_bootstrap_dir", lambda: str(fake_src))
+
+    assert ensure_child_tls_bootstrap(venv) is True
+
+    site = venv / "lib" / "python3.12" / "site-packages"
+    pth = site / "_apm_tls.pth"
+    assert pth.is_file()
+    # Exact generated content: a single import line the interpreter runs.
+    assert pth.read_text(encoding="ascii") == "import _apm_tls_bootstrap\n"
+    assert (site / "_apm_tls_bootstrap.py").read_text(encoding="ascii") == "# bootstrap\n"
+
+
+# ---------------------------------------------------------------------------
+# T4 (M2) -- build_child_tls_env drops a BUNDLED certifi SSL_CERT_FILE so the
+# child truststore reaches the OS store on Linux, but PRESERVES a genuine user
+# SSL_CERT_FILE. The marker is still stripped either way.
+# ---------------------------------------------------------------------------
+
+
+def test_build_child_tls_env_drops_bundled_certifi_ssl_cert_file():
+    import certifi
+
+    base = {
+        _BUNDLED_CERT_MARKER: "1",
+        "SSL_CERT_FILE": certifi.where(),
+        "PATH": "/usr/bin",
+    }
+    child = build_child_tls_env(base)
+    assert "SSL_CERT_FILE" not in child
+    assert _BUNDLED_CERT_MARKER not in child
+    assert child["PATH"] == "/usr/bin"
+
+
+def test_build_child_tls_env_drops_frozen_meipass_certifi_tail(tmp_path):
+    # A frozen _MEIPASS path won't equal the live certifi.where(); the
+    # certifi/cacert.pem tail match must still catch it.
+    frozen = "/tmp/_MEIabc123/certifi/cacert.pem"
+    child = build_child_tls_env({_BUNDLED_CERT_MARKER: "1", "SSL_CERT_FILE": frozen})
+    assert "SSL_CERT_FILE" not in child
+
+
+def test_build_child_tls_env_preserves_genuine_user_ssl_cert_file(tmp_path):
+    user_ca = tmp_path / "corp" / "custom-ca.pem"
+    user_ca.parent.mkdir(parents=True)
+    user_ca.write_text("-----BEGIN CERTIFICATE-----\n", encoding="ascii")
+    base = {"SSL_CERT_FILE": str(user_ca), "PATH": "/usr/bin"}
+    child = build_child_tls_env(base)
+    # A genuine user CA path must NEVER be dropped.
+    assert child["SSL_CERT_FILE"] == str(user_ca)
+
+
+# ---------------------------------------------------------------------------
+# T5 (M3) -- a write failure must leave NO partial _apm_tls_bootstrap.py under a
+# live .pth and must return False (atomic-write contract).
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_child_tls_bootstrap_write_failure_leaves_no_partial(tmp_path, monkeypatch):
+    import apm_cli.core.tls_trust as tls
+
+    venv = _fake_venv(tmp_path)
+    site = venv / "lib" / "python3.12" / "site-packages"
+
+    def _boom(src, dst):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(tls.os, "replace", _boom)
+
+    assert ensure_child_tls_bootstrap(venv) is False
+    # No partial artifacts left behind, and no leftover temp files.
+    assert not (site / "_apm_tls_bootstrap.py").exists()
+    assert not (site / "_apm_tls.pth").exists()
+    assert list(site.glob(".apm_tls_*.tmp")) == []

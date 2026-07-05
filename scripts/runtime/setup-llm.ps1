@@ -43,7 +43,12 @@ function Install-Llm {
     # bootstrap into this venv's site-packages after setup; that bootstrap
     # depends only on truststore, which must be present here.
     Write-Info "Installing truststore for OS-trust HTTPS verification..."
-    & $pipExe install truststore
+    try {
+        & $pipExe install "truststore>=0.10.0"
+        if ($LASTEXITCODE -ne 0) { throw "pip exited $LASTEXITCODE" }
+    } catch {
+        Write-WarningText "truststore install failed; llm child will fall back to bundled CAs behind a proxy"
+    }
 
     # Install GitHub Models plugin in non-vanilla mode
     if (-not $Vanilla) {

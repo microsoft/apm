@@ -25,10 +25,11 @@ Rust (Codex) runtimes verify against their own default trust for now (#2034).
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
-import shutil
 import sys
+import tempfile
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 
@@ -57,10 +58,20 @@ _BUNDLED_CERT_MARKER = "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT"
 # Directory (relative to the installed package) that holds the child bootstrap.
 _CHILD_SHIM_DIRNAME = "_child_tls"
 
-# The two artifacts copied into a child venv's site-packages to deliver
-# OS-trust at interpreter startup (see ensure_child_tls_bootstrap).
+# The two artifacts delivered into a child venv's site-packages to deliver
+# OS-trust at interpreter startup (see ensure_child_tls_bootstrap). The module
+# ships as a data file; the .pth is generated inline (its content is trivial and
+# setuptools' packages.find omits stray .pth files from the wheel).
 _BOOTSTRAP_MODULE_FILE = "_apm_tls_bootstrap.py"
 _BOOTSTRAP_PTH_FILE = "_apm_tls.pth"
+
+# Importable name of the bootstrap module (drives the generated .pth line).
+_BOOTSTRAP_MODULE_NAME = _BOOTSTRAP_MODULE_FILE.removesuffix(".py")
+
+# Exact content of the generated .pth: a single import line the interpreter runs
+# at startup. ASCII, trailing newline. Generated inline so child-trust delivery
+# never depends on the .pth being packaged into the wheel.
+_PTH_CONTENT = f"import {_BOOTSTRAP_MODULE_NAME}\n"
 
 _TRUTHY = {"1", "true", "yes", "on"}
 
@@ -190,17 +201,47 @@ def _venv_site_packages(venv_path: Path) -> Path | None:
     return None
 
 
+def _atomic_write(target: Path, data: bytes) -> None:
+    """Write *data* to *target* atomically via a same-dir temp file + os.replace.
+
+    A same-directory temp file guarantees ``os.replace`` performs a rename
+    (atomic on POSIX and NTFS), so a reader never observes a truncated file
+    under a live ``.pth``. On any OSError the temp file is removed and the error
+    re-raised so the caller can report failure without leaving a partial file.
+    """
+    fd, tmp_name = tempfile.mkstemp(dir=str(target.parent), prefix=".apm_tls_", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        os.replace(tmp_name, target)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
+        raise
+
+
 def ensure_child_tls_bootstrap(venv_path: str | os.PathLike[str]) -> bool:
     """Install the self-contained OS-trust bootstrap into a child venv.
 
-    Copies ``_apm_tls_bootstrap.py`` and ``_apm_tls.pth`` into the venv's
-    site-packages so its interpreter injects ``truststore`` at startup -- no
-    ``apm_cli`` dependency, no ``PYTHONPATH`` mutation. Python-driven (rather
-    than shell-globbed) so it resolves the shipped source identically for a
-    source install (package dir) and a frozen binary (``sys._MEIPASS``).
+    Writes ``_apm_tls_bootstrap.py`` (the shipped module) and a generated
+    ``_apm_tls.pth`` into the venv's site-packages so its interpreter injects
+    ``truststore`` at startup -- no ``apm_cli`` dependency, no ``PYTHONPATH``
+    mutation. Python-driven (rather than shell-globbed) so it resolves the
+    shipped module identically for a source install (package dir) and a frozen
+    binary (``sys._MEIPASS``).
+
+    The ``.pth`` content is GENERATED inline rather than copied: setuptools'
+    ``packages.find`` omits stray ``.pth`` data files from the wheel, so copying
+    it would silently no-op on the PyPI channel. Delivery therefore depends only
+    on the module data file, which is packaged.
+
+    Both files are written atomically, module FIRST, so the ``.pth`` is never
+    present without a complete bootstrap module behind it (avoiding a truncated
+    module under a live ``.pth`` -> per-invocation stderr traceback storm).
 
     Idempotent and best-effort: returns ``True`` when both files are present
-    after the call, ``False`` on any failure. Never raises.
+    after the call, ``False`` on any failure (no partial file left). Never
+    raises.
     """
     try:
         site_packages = _venv_site_packages(Path(venv_path))
@@ -209,13 +250,35 @@ def ensure_child_tls_bootstrap(venv_path: str | os.PathLike[str]) -> bool:
         source_dir = _child_bootstrap_dir()
         if not source_dir:
             return False
-        source = Path(source_dir)
-        for name in (_BOOTSTRAP_MODULE_FILE, _BOOTSTRAP_PTH_FILE):
-            src_file = source / name
-            if not src_file.is_file():
-                return False
-            shutil.copyfile(src_file, site_packages / name)
+        module_src = Path(source_dir) / _BOOTSTRAP_MODULE_FILE
+        if not module_src.is_file():
+            return False
+        # Module first (atomic), then the generated .pth (atomic) -- the write
+        # order guarantees the .pth never activates an incomplete module.
+        _atomic_write(site_packages / _BOOTSTRAP_MODULE_FILE, module_src.read_bytes())
+        _atomic_write(site_packages / _BOOTSTRAP_PTH_FILE, _PTH_CONTENT.encode("ascii"))
         return True
+    except Exception:
+        return False
+
+
+def _is_bundled_certifi(path: str) -> bool:
+    """Return True when *path* is APM's bundled certifi CA set (not a user value).
+
+    The frozen runtime hook (build/hooks/runtime_hook_ssl_certs.py) sets
+    ``SSL_CERT_FILE`` to ``certifi.where()``. A genuine user-set ``SSL_CERT_FILE``
+    must NEVER match. We compare against ``certifi.where()`` and, as a
+    frozen-safe fallback, the ``certifi/cacert.pem`` path tail (the frozen
+    ``_MEIPASS`` path may differ from the live dev ``certifi.where()``).
+    """
+    if not path:
+        return False
+    if path.replace("\\", "/").endswith("certifi/cacert.pem"):
+        return True
+    try:
+        import certifi
+
+        return os.path.abspath(path) == os.path.abspath(certifi.where())
     except Exception:
         return False
 
@@ -228,10 +291,20 @@ def build_child_tls_env(base_env: Mapping[str, str]) -> dict[str, str]:
     -- prepending a shim dir would shadow a user/corporate ``sitecustomize.py``
     and only reached children that shared this process's ``sys.path``.
 
-    This function is now an env-hygiene pass: it strips the internal
-    bundled-default marker so the frozen binary's ``SSL_CERT_FILE`` marker never
-    leaks into a child, then returns the env unchanged otherwise.
+    This function is an env-hygiene pass:
+
+    * strips the internal bundled-default marker so the frozen binary's
+      ``SSL_CERT_FILE`` marker never leaks into a child, and
+    * drops ``SSL_CERT_FILE`` WHEN it points at the bundled certifi set, so the
+      child's ``truststore`` reaches the OS store on Linux (where truststore
+      honours ``SSL_CERT_FILE``). A frozen parent whose injection failed
+      restores ``SSL_CERT_FILE=certifi`` and would otherwise leak it, pinning
+      the child to certifi instead of the OS store. A GENUINE user
+      ``SSL_CERT_FILE`` is preserved -- only the bundled default is dropped.
     """
     child = dict(base_env)
     child.pop(_BUNDLED_CERT_MARKER, None)
+    cert_file = child.get(_SSL_CERT_FILE_VAR)
+    if cert_file and _is_bundled_certifi(cert_file):
+        child.pop(_SSL_CERT_FILE_VAR, None)
     return child

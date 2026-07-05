@@ -58,6 +58,8 @@ apm install --verbose
 
 APM verifies HTTPS against the **operating-system trust store** by default (via [`truststore`](https://pypi.org/project/truststore/)), the same source `git` and `curl` use. This applies to `apm install` (in-process) and to the Python-based `llm` child runtime that `apm run` spawns: `apm runtime setup llm` installs `truststore` into the runtime's virtual environment and drops a self-contained bootstrap into it, so that interpreter also verifies against the OS store. So if your corporate CA or TLS-proxy root is installed in the OS trust store (Keychain on macOS, `update-ca-certificates`/`update-ca-trust` on Linux, the Trusted Root store on Windows), APM picks it up with **no configuration** -- importing the CA at the OS level is the recommended fix. The standalone frozen binary honours the system store as well, falling back to its bundled `certifi` set only when the OS store is unavailable.
 
+**Scope caveat:** only the Python-based paths are covered. The Node-based (Copilot) and Rust-based (Codex) child runtimes are **not yet** wired to the OS store (tracked in #2034). Behind a TLS-proxy today, export `NODE_EXTRA_CA_CERTS=/path/to/org-ca-bundle.pem` for the Node runtime (and configure the Codex/Rust runtime's own trust) until #2034 lands.
+
 You only need the steps below when the CA is *not* in the OS store, or you want to pin a specific bundle:
 
 - Setting `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE` makes APM's HTTP layer verify against that bundle instead of the OS store. (`SSL_CERT_FILE` configures the stdlib `ssl` layer but is *not* read by `requests`, so on its own it does not override the HTTP path -- use `REQUESTS_CA_BUNDLE` for that.)
@@ -66,6 +68,7 @@ You only need the steps below when the CA is *not* in the OS store, or you want 
 ### Known limitations
 
 - The Node-based (Copilot) and Rust-based (Codex) child runtimes are **not yet covered** by OS-trust propagation and continue to use their own default trust; behind a TLS-inspecting proxy, configure those runtimes' own trust or export `REQUESTS_CA_BUNDLE`/`NODE_EXTRA_CA_CERTS` for them. Tracked in #2034.
+- The initial `pip install` run *during* `apm runtime setup llm` uses pip's **own** certificate resolution, not APM's OS-trust path. Behind a MITM proxy, `pip` may fail to fetch `llm`/`truststore` before the bootstrap is even in place. Export `PIP_CERT=/path/to/org-ca-bundle.pem` (or run `pip config set global.cert /path/to/org-ca-bundle.pem`) before running setup so pip trusts your proxy CA.
 - An additive `APM_EXTRA_CA_BUNDLE` (trust the OS store *and* an extra bundle) is not yet available -- use `REQUESTS_CA_BUNDLE` to pin a single bundle for now.
 - On Windows, the `schannel` backend has trust caveats.
 
@@ -184,6 +187,7 @@ unset GIT_SSL_NO_VERIFY PYTHONHTTPSVERIFY
 
 [>] Re-run with `--verbose` and capture the full exception chain.
 [>] Check `curl -v https://<host>` from the same shell - if it fails, the problem is the system trust store, not APM.
-[>] Confirm `REQUESTS_CA_BUNDLE` and `GIT_SSL_CAINFO` point at a readable PEM file (`openssl x509 -in $REQUESTS_CA_BUNDLE -noout -subject` should print a subject line).
+[>] Confirm `REQUESTS_CA_BUNDLE` and `GIT_SSL_CAINFO` point at a readable PEM file (`openssl x509 -in $REQUESTS_CA_BUNDLE -noout -subject` should print a subject line). Note `REQUESTS_CA_BUNDLE` *replaces* the OS store rather than augmenting it (like `git`'s `http.sslCAInfo` and `curl --cacert`), so a bundle missing your proxy root will still fail even though the OS store has it.
+[>] If `git`/`curl` succeed but `apm` does not, suspect a **stale `REQUESTS_CA_BUNDLE`** (or `CURL_CA_BUNDLE`) pinning APM to an old bundle that predates the OS store. `unset REQUESTS_CA_BUNDLE CURL_CA_BUNDLE` and retry to let APM fall back to the OS trust store.
 [>] If only one host fails, see [GHES and GitLab self-managed](#ghes-and-gitlab-self-managed) and the per-host `git config` recipe above.
 [>] If the install proceeds past TLS but then fails, continue at [install failures](./install-failures/).

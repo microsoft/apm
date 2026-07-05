@@ -51,3 +51,41 @@ def test_ssl_docs_scope_and_known_limitations():
     assert "not yet covered" in docs
     # The stale round-1 claim that codex re-runs the bootstrap must be gone.
     assert "the `llm` and `codex` CLIs) re-run the same OS-trust bootstrap" not in docs
+
+
+def test_changelog_scopes_python_based():
+    changelog = (_repo_root() / "CHANGELOG.md").read_text(encoding="utf-8")
+    block = _unreleased_block(changelog)
+    # The #2005 entry must scope coverage to the Python-based paths explicitly,
+    # so it never overclaims Node/Codex coverage.
+    assert "Python-based" in block
+
+
+def test_ssl_docs_node_caveat_appears_early():
+    docs = (
+        _repo_root() / "docs" / "src" / "content" / "docs" / "troubleshooting" / "ssl-issues.md"
+    ).read_text(encoding="utf-8")
+
+    heading = "## Default behaviour: the OS trust store"
+    start = docs.index(heading)
+    known_limits = docs.index("### Known limitations")
+    # The Node/Codex caveat must surface EARLY -- inside the Default behaviour
+    # section, well before the Known limitations block far below.
+    caveat = docs.index("Scope caveat", start)
+    assert caveat < known_limits, "Node/Codex caveat must appear before Known limitations"
+    # And it must offer the workaround users can apply today.
+    caveat_region = docs[start:known_limits]
+    assert "NODE_EXTRA_CA_CERTS" in caveat_region
+
+
+def test_ssl_docs_pip_cert_and_replaces_notes():
+    docs = (
+        _repo_root() / "docs" / "src" / "content" / "docs" / "troubleshooting" / "ssl-issues.md"
+    ).read_text(encoding="utf-8")
+
+    # M4-docs: the pip-own-cert caveat during runtime setup.
+    assert "PIP_CERT" in docs
+    # L1: REQUESTS_CA_BUNDLE replaces (not augments) the OS store, plus the
+    # stale-bundle "still failing?" note.
+    assert "*replaces*" in docs or "replaces" in docs
+    assert "stale `REQUESTS_CA_BUNDLE`" in docs
