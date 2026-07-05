@@ -99,11 +99,15 @@ tools:
     # On public repos gh-aw's MCP guard automatically elevates the
     # minimum integrity floor to `approved` when safe-outputs (write
     # actions) are configured. GitHub classifies PR resources by
-    # author association:
+    # author association (default floor = `approved`):
     #
-    #   COLLABORATOR / MEMBER / OWNER  -->  approved   (panel works)
-    #   CONTRIBUTOR                    -->  unapproved (panel blocked)
-    #   FIRST_TIME_CONTRIBUTOR / NONE  -->  none       (panel blocked)
+    #   COLLABORATOR / MEMBER / OWNER  -->  approved    (readable)
+    #   CONTRIBUTOR                    -->  unapproved  (blocked by default)
+    #   FIRST_TIME_CONTRIBUTOR / NONE  -->  none        (blocked by default)
+    #
+    # The override below lowers the floor to `unapproved`, so
+    # CONTRIBUTOR PRs become readable while FIRST_TIME_CONTRIBUTOR
+    # and NONE remain filtered:
     #
     # Without an explicit override the panel silently fails on every
     # community contributor PR with:
