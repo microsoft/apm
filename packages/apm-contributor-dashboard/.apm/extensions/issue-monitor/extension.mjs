@@ -306,6 +306,7 @@ const session = await joinSession({
                     },
                 },
                 {
+                    name: "mark_sessions",
                     description: "Mark issue numbers that have active sessions. Buttons will show 'Open Session' instead of 'Start Session' for these issues.",
                     inputSchema: {
                         type: "object",
