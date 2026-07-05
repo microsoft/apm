@@ -148,6 +148,12 @@ class _OkHandler(http.server.BaseHTTPRequestHandler):
 @pytest.fixture(scope="module")
 def custom_ca_server(tmp_path_factory):
     """A loopback HTTPS server presenting a leaf signed by a private CA."""
+    try:
+        import truststore
+
+        truststore.extract_from_ssl()
+    except Exception:
+        pass
     dirpath = tmp_path_factory.mktemp("tls_custom_ca")
     ca_pem, srv_pem, srv_key = _mint_ca_and_leaf(dirpath)
 
