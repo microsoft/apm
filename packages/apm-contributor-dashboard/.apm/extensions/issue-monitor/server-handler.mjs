@@ -481,8 +481,9 @@ query($owner: String!, $repo: String!, $cursor: String) {
                 let cursor = null;
                 let pages = 0;
                 while (pages < 2) {
-                    const vars = JSON.stringify({ owner, repo: repoName, cursor });
-                    const gqlOut = await ghExec(["api", "graphql", "-f", `query=${gql}`, "-f", `variables=${vars}`]);
+                    const args = ["api", "graphql", "-f", `query=${gql}`, "-F", `owner=${owner}`, "-F", `repo=${repoName}`];
+                    if (cursor) args.push("-F", `cursor=${cursor}`);
+                    const gqlOut = await ghExec(args);
                     const gqlData = JSON.parse(gqlOut);
                     const issuesPage = gqlData?.data?.repository?.issues;
                     if (!issuesPage) break;
