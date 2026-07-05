@@ -55,7 +55,7 @@ setup_llm() {
     # bootstrap into this venv's site-packages after setup; that bootstrap
     # depends only on truststore, which must be present here.
     log_info "Installing truststore for OS-trust HTTPS verification..."
-    "$llm_venv/bin/pip" install "truststore>=0.10.0" || log_warning "truststore install failed; llm child will fall back to bundled CAs behind a proxy"
+    "$llm_venv/bin/pip" install "truststore>=0.10.0" || log_warning "truststore install failed (needs Python 3.10+; stock macOS python3 is 3.9); llm child will fall back to bundled CAs behind a proxy"
     
     # Install GitHub Models plugin in non-vanilla mode
     if [[ "$VANILLA_MODE" == "false" ]]; then

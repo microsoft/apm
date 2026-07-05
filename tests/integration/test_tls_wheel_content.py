@@ -17,6 +17,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -66,3 +67,46 @@ def test_wheel_ships_child_tls_bootstrap_and_pth(tmp_path):
     pth = "apm_cli/core/_child_tls/_apm_tls.pth"
     assert module in names, f"{module} missing from wheel: {names}"
     assert pth in names, f"{pth} missing from wheel: {names}"
+
+
+def _build_sdist(out_dir: Path) -> Path:
+    """Build an sdist into *out_dir* and return its path. Prefer uv, fall back to build."""
+    repo = _repo_root()
+    if shutil.which("uv"):
+        cmd = ["uv", "build", "--sdist", "--out-dir", str(out_dir)]
+    else:
+        cmd = [sys.executable, "-m", "build", "--sdist", "--outdir", str(out_dir)]
+    result = subprocess.run(
+        cmd,
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        pytest.skip(
+            f"sdist build unavailable in this environment: {result.stdout}\n{result.stderr}"
+        )
+    sdists = list(out_dir.glob("*.tar.gz"))
+    if not sdists:
+        pytest.skip("sdist build produced no .tar.gz artifact")
+    return sdists[0]
+
+
+def test_sdist_ships_child_tls_bootstrap_and_pth(tmp_path):
+    """LOW-1 (round-4): guard the sdist channel too.
+
+    The bootstrap MODULE is a plain package ``.py`` (auto-shipped), but the
+    ``.pth`` rides on ``package-data`` and can silently diverge from the wheel
+    across setuptools versions. Assert BOTH members are in the tarball so a
+    future backend bump that drops the ``.pth`` from the sdist is caught.
+    """
+    sdist = _build_sdist(tmp_path)
+    with tarfile.open(sdist, "r:gz") as archive:
+        names = archive.getnames()
+
+    # sdist members are prefixed with the top-level "<name>-<version>/" dir.
+    module_tail = "src/apm_cli/core/_child_tls/_apm_tls_bootstrap.py"
+    pth_tail = "src/apm_cli/core/_child_tls/_apm_tls.pth"
+    assert any(n.endswith(module_tail) for n in names), f"{module_tail} missing from sdist: {names}"
+    assert any(n.endswith(pth_tail) for n in names), f"{pth_tail} missing from sdist: {names}"

@@ -68,6 +68,7 @@ You only need the steps below when the CA is *not* in the OS store, or you want 
 ### Known limitations
 
 - The Node-based (Copilot) and Rust-based (Codex) child runtimes are **not yet covered** by OS-trust propagation and continue to use their own default trust; behind a TLS-inspecting proxy, configure those runtimes' own trust or export `REQUESTS_CA_BUNDLE`/`NODE_EXTRA_CA_CERTS` for them. Tracked in #2034.
+- The `llm` child runtime's OS-trust bootstrap needs the runtime venv's interpreter to be **Python 3.10+** (the `truststore` library requires 3.10). On systems where `apm runtime setup llm` builds the venv from a stock **Python 3.9** (for example Apple's `/usr/bin/python3`), `truststore` cannot install and the `llm` child silently falls back to its bundled `certifi` set behind a proxy. Use a Python 3.10+ `python3` on your `PATH` before running setup.
 - The initial `pip install` run *during* `apm runtime setup llm` uses pip's **own** certificate resolution, not APM's OS-trust path. Behind a MITM proxy, `pip` may fail to fetch `llm`/`truststore` before the bootstrap is even in place. Export `PIP_CERT=/path/to/org-ca-bundle.pem` (or run `pip config set global.cert /path/to/org-ca-bundle.pem`) before running setup so pip trusts your proxy CA.
 - An additive `APM_EXTRA_CA_BUNDLE` (trust the OS store *and* an extra bundle) is not yet available -- use `REQUESTS_CA_BUNDLE` to pin a single bundle for now.
 - On Windows, the `schannel` backend has trust caveats.

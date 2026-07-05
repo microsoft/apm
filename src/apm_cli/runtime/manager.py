@@ -283,9 +283,10 @@ class RuntimeManager:
         """Drop the OS-trust bootstrap into the llm runtime venv (best-effort).
 
         The llm venv is created by ``setup-llm.sh`` with ``truststore``
-        installed; this copies the ``.pth`` bootstrap into its site-packages so
-        the child interpreter injects the OS trust store at startup. Silent and
-        non-fatal -- a bootstrap failure must not fail runtime setup.
+        installed; this generates the ``.pth`` and copies the bootstrap module
+        into its site-packages so the child interpreter injects the OS trust
+        store at startup. Silent and non-fatal -- a bootstrap failure must not
+        fail runtime setup.
         """
         venv_path = self.runtime_dir / "llm-venv"
         try:

@@ -467,6 +467,24 @@ def test_build_child_tls_env_preserves_genuine_user_ssl_cert_file(tmp_path):
     assert child["SSL_CERT_FILE"] == str(user_ca)
 
 
+def test_build_child_tls_env_preserves_certifi_lookalike_dir():
+    # F1 (round-4): the match is on path COMPONENTS, not a raw suffix. A user
+    # bundle under a directory that merely ENDS in "certifi" (e.g. a corporate
+    # "mycertifi/") must be preserved, not mistaken for APM's bundled set.
+    for lookalike in (
+        "/opt/mycertifi/cacert.pem",
+        "/opt/supercertifi/cacert.pem",
+        "/a/notcertifi/cacert.pem",
+    ):
+        child = build_child_tls_env({_BUNDLED_CERT_MARKER: "1", "SSL_CERT_FILE": lookalike})
+        assert child.get("SSL_CERT_FILE") == lookalike, f"lookalike {lookalike} was wrongly dropped"
+    # The genuine component boundary still matches.
+    child = build_child_tls_env(
+        {_BUNDLED_CERT_MARKER: "1", "SSL_CERT_FILE": "/x/certifi/cacert.pem"}
+    )
+    assert "SSL_CERT_FILE" not in child
+
+
 # ---------------------------------------------------------------------------
 # T5 (M3) -- a write failure must leave NO partial _apm_tls_bootstrap.py under a
 # live .pth and must return False (atomic-write contract).

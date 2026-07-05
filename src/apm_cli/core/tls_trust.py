@@ -273,7 +273,9 @@ def _is_bundled_certifi(path: str) -> bool:
     """
     if not path:
         return False
-    if path.replace("\\", "/").endswith("certifi/cacert.pem"):
+    # Match on path COMPONENTS, not a raw suffix: a genuine user bundle at
+    # e.g. /opt/mycertifi/cacert.pem must NOT be treated as APM's bundled set.
+    if path.replace("\\", "/").split("/")[-2:] == ["certifi", "cacert.pem"]:
         return True
     try:
         import certifi
