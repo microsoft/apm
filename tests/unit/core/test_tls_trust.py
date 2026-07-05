@@ -21,9 +21,12 @@ from pathlib import Path
 import pytest
 
 from apm_cli.core.tls_trust import (
+    _BUNDLED_CERT_MARKER,
     _DISABLE_ENV_VAR,
     _EXPLICIT_CA_ENV_VARS,
+    build_child_tls_env,
     configure_tls_trust,
+    ensure_child_tls_bootstrap,
     has_explicit_ca_override,
 )
 
@@ -269,3 +272,126 @@ def test_diag_import_failure_names_certifi_fallback(monkeypatch, caplog):
     ), messages
     for message in messages:
         message.encode("ascii")
+
+
+# ---------------------------------------------------------------------------
+# T4 -- the internal bundled-default marker must NEVER leak out of
+# configure_tls_trust, on ANY of its return branches. A leaked marker would tell
+# a child interpreter to pop a SSL_CERT_FILE that is not actually a bundled
+# default, silently weakening trust.
+# ---------------------------------------------------------------------------
+
+
+def _marker_env(**extra):
+    env = {_BUNDLED_CERT_MARKER: "1"}
+    env.update(extra)
+    return env
+
+
+def test_marker_cleared_on_opt_out_branch(monkeypatch):
+    _install_fake_truststore(monkeypatch)
+    env = _marker_env(**{_DISABLE_ENV_VAR: "1"})
+    assert configure_tls_trust(env=env) is False
+    assert _BUNDLED_CERT_MARKER not in env
+
+
+def test_marker_cleared_on_explicit_override_branch(monkeypatch):
+    _install_fake_truststore(monkeypatch)
+    env = _marker_env(REQUESTS_CA_BUNDLE="/etc/ssl/corp.pem")
+    assert configure_tls_trust(env=env) is False
+    assert _BUNDLED_CERT_MARKER not in env
+
+
+def test_marker_cleared_on_truststore_import_failure(monkeypatch):
+    monkeypatch.setitem(sys.modules, "truststore", None)
+    env = _marker_env(SSL_CERT_FILE="/bundled/certifi.pem")
+    assert configure_tls_trust(env=env) is False
+    assert _BUNDLED_CERT_MARKER not in env
+
+
+def test_marker_cleared_on_inject_failure(monkeypatch):
+    def _boom():
+        raise RuntimeError("platform trust API unavailable")
+
+    _install_fake_truststore(monkeypatch, inject=_boom)
+    env = _marker_env(SSL_CERT_FILE="/bundled/certifi.pem")
+    assert configure_tls_trust(env=env) is False
+    assert _BUNDLED_CERT_MARKER not in env
+    # certifi fallback restored (never zero trust).
+    assert env.get("SSL_CERT_FILE") == "/bundled/certifi.pem"
+
+
+def test_marker_cleared_on_inject_success(monkeypatch):
+    _install_fake_truststore(monkeypatch)
+    env = _marker_env(SSL_CERT_FILE="/bundled/certifi.pem")
+    assert configure_tls_trust(env=env) is True
+    assert _BUNDLED_CERT_MARKER not in env
+    # bundled default popped so the OS store is consulted.
+    assert "SSL_CERT_FILE" not in env
+
+
+# ---------------------------------------------------------------------------
+# build_child_tls_env is now an env-hygiene pass: it strips the bundled-default
+# marker and does NOT mutate PYTHONPATH (no more sitecustomize shim hijack).
+# ---------------------------------------------------------------------------
+
+
+def test_build_child_tls_env_strips_marker():
+    base = {_BUNDLED_CERT_MARKER: "1", "PATH": "/usr/bin", "FOO": "bar"}
+    child = build_child_tls_env(base)
+    assert _BUNDLED_CERT_MARKER not in child
+    assert child["PATH"] == "/usr/bin"
+    assert child["FOO"] == "bar"
+
+
+def test_build_child_tls_env_does_not_touch_pythonpath():
+    base = {"PYTHONPATH": "/user/site"}
+    child = build_child_tls_env(base)
+    # No shim dir prepended -- a user/corporate PYTHONPATH survives untouched.
+    assert child["PYTHONPATH"] == "/user/site"
+
+
+def test_build_child_tls_env_returns_independent_copy():
+    base = {"PATH": "/usr/bin"}
+    child = build_child_tls_env(base)
+    child["PATH"] = "/mutated"
+    assert base["PATH"] == "/usr/bin"
+
+
+# ---------------------------------------------------------------------------
+# T7 -- ensure_child_tls_bootstrap drops both delivery artifacts into a venv's
+# site-packages so the child interpreter can import the bootstrap.
+# ---------------------------------------------------------------------------
+
+
+def _fake_venv(tmp_path: Path) -> Path:
+    """Create a POSIX-style venv skeleton with an empty site-packages dir."""
+    site = tmp_path / "venv" / "lib" / "python3.12" / "site-packages"
+    site.mkdir(parents=True)
+    return tmp_path / "venv"
+
+
+def test_ensure_child_tls_bootstrap_installs_both_files(tmp_path):
+    venv = _fake_venv(tmp_path)
+    assert ensure_child_tls_bootstrap(venv) is True
+
+    site = venv / "lib" / "python3.12" / "site-packages"
+    module = site / "_apm_tls_bootstrap.py"
+    pth = site / "_apm_tls.pth"
+    assert module.is_file()
+    assert pth.is_file()
+    # The .pth is exactly the one-line import that triggers the bootstrap.
+    assert pth.read_text(encoding="utf-8").strip() == "import _apm_tls_bootstrap"
+    # The bootstrap has no apm_cli dependency (self-contained).
+    assert "import apm_cli" not in module.read_text(encoding="utf-8")
+
+
+def test_ensure_child_tls_bootstrap_is_idempotent(tmp_path):
+    venv = _fake_venv(tmp_path)
+    assert ensure_child_tls_bootstrap(venv) is True
+    assert ensure_child_tls_bootstrap(venv) is True
+
+
+def test_ensure_child_tls_bootstrap_returns_false_for_missing_site_packages(tmp_path):
+    # A path with no venv site-packages layout -> best-effort False, no raise.
+    assert ensure_child_tls_bootstrap(tmp_path / "does-not-exist") is False

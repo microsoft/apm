@@ -38,6 +38,13 @@ function Install-Llm {
     & $pipExe install --upgrade pip
     & $pipExe install llm
 
+    # Install truststore so the llm venv verifies HTTPS against the OS trust
+    # store (corporate CA / TLS-proxy support). APM drops a self-contained .pth
+    # bootstrap into this venv's site-packages after setup; that bootstrap
+    # depends only on truststore, which must be present here.
+    Write-Info "Installing truststore for OS-trust HTTPS verification..."
+    & $pipExe install truststore
+
     # Install GitHub Models plugin in non-vanilla mode
     if (-not $Vanilla) {
         Write-Info "Installing GitHub Models plugin for APM defaults..."

@@ -49,6 +49,13 @@ setup_llm() {
     log_info "Installing LLM library..."
     "$llm_venv/bin/pip" install --upgrade pip
     "$llm_venv/bin/pip" install llm
+
+    # Install truststore so the llm venv verifies HTTPS against the OS trust
+    # store (corporate CA / TLS-proxy support). APM drops a self-contained .pth
+    # bootstrap into this venv's site-packages after setup; that bootstrap
+    # depends only on truststore, which must be present here.
+    log_info "Installing truststore for OS-trust HTTPS verification..."
+    "$llm_venv/bin/pip" install truststore
     
     # Install GitHub Models plugin in non-vanilla mode
     if [[ "$VANILLA_MODE" == "false" ]]; then

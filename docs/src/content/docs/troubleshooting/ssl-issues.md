@@ -56,14 +56,18 @@ apm install --verbose
 
 ## Default behaviour: the OS trust store
 
-APM verifies HTTPS against the **operating-system trust store** by default (via [`truststore`](https://pypi.org/project/truststore/)), the same source `git` and `curl` use. This applies to both `apm install` and `apm run` -- the child runtimes APM spawns (for example the `llm` and `codex` CLIs) re-run the same OS-trust bootstrap at their own startup. So if your corporate CA or TLS-proxy root is installed in the OS trust store (Keychain on macOS, `update-ca-certificates`/`update-ca-trust` on Linux, the Trusted Root store on Windows), APM picks it up with **no configuration** -- importing the CA at the OS level is the recommended fix. The standalone frozen binary honours the system store as well, falling back to its bundled `certifi` set only when the OS store is unavailable.
+APM verifies HTTPS against the **operating-system trust store** by default (via [`truststore`](https://pypi.org/project/truststore/)), the same source `git` and `curl` use. This applies to `apm install` (in-process) and to the Python-based `llm` child runtime that `apm run` spawns: `apm runtime setup llm` installs `truststore` into the runtime's virtual environment and drops a self-contained bootstrap into it, so that interpreter also verifies against the OS store. So if your corporate CA or TLS-proxy root is installed in the OS trust store (Keychain on macOS, `update-ca-certificates`/`update-ca-trust` on Linux, the Trusted Root store on Windows), APM picks it up with **no configuration** -- importing the CA at the OS level is the recommended fix. The standalone frozen binary honours the system store as well, falling back to its bundled `certifi` set only when the OS store is unavailable.
 
 You only need the steps below when the CA is *not* in the OS store, or you want to pin a specific bundle:
 
 - Setting `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE` makes APM's HTTP layer verify against that bundle instead of the OS store. (`SSL_CERT_FILE` configures the stdlib `ssl` layer but is *not* read by `requests`, so on its own it does not override the HTTP path -- use `REQUESTS_CA_BUNDLE` for that.)
 - `APM_DISABLE_TRUSTSTORE=1` restores the legacy behaviour (verify against APM's bundled `certifi` set only).
 
-Known limitations (fast-follow): an additive `APM_EXTRA_CA_BUNDLE` (trust the OS store *and* an extra bundle) is not yet available -- use `REQUESTS_CA_BUNDLE` to pin a single bundle for now. On Windows, the `schannel` backend has trust caveats. Node-based child runtimes are not covered by the OS-trust propagation and continue to use their own default trust.
+### Known limitations
+
+- The Node-based (Copilot) and Rust-based (Codex) child runtimes are **not yet covered** by OS-trust propagation and continue to use their own default trust; behind a TLS-inspecting proxy, configure those runtimes' own trust or export `REQUESTS_CA_BUNDLE`/`NODE_EXTRA_CA_CERTS` for them. Tracked in #2034.
+- An additive `APM_EXTRA_CA_BUNDLE` (trust the OS store *and* an extra bundle) is not yet available -- use `REQUESTS_CA_BUNDLE` to pin a single bundle for now.
+- On Windows, the `schannel` backend has trust caveats.
 
 ## Configure trust
 

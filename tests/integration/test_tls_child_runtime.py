@@ -1,27 +1,29 @@
-"""B1 verifier: OS-store trust must propagate into a REAL child process.
+"""C1 verifier: OS-trust must reach a FOREIGN child venv via the .pth bootstrap.
 
-The parent cannot monkeypatch a child runtime's ``ssl`` module across ``exec``;
-``build_child_tls_env`` must carry trust across the process boundary by
-prepending the ``sitecustomize`` shim dir to the child ``PYTHONPATH`` so the
-child re-runs :func:`configure_tls_trust` at its own interpreter startup.
+The flagship ``llm`` runtime runs in its own venv (``~/.apm/runtimes/llm-venv``)
+that has NEITHER ``apm_cli`` NOR (historically) ``truststore``. The round-1
+design re-ran ``configure_tls_trust`` in the child by prepending a
+``sitecustomize`` shim dir to the child ``PYTHONPATH``; in the real ``llm`` venv
+that import failed silently, so the child fell back to ``certifi`` and ``apm
+run`` still failed behind a proxy. It also shadowed any user ``sitecustomize``.
 
-These are independent end-to-end tests written from the acceptance spec for
-PR #2005 -- they spawn genuine child interpreters and prove:
+The round-2 mechanism delivers trust at venv-setup time instead: APM installs
+``truststore`` into the runtime venv and copies a self-contained ``.pth``
+bootstrap into its site-packages, so the child interpreter injects the OS trust
+store at startup with no ``apm_cli`` dependency and no ``PYTHONPATH`` mutation.
 
-* the shim actually executes in the child (``ssl.SSLContext`` becomes
-  truststore-backed) and does so only via the env, not inheritance;
-* a real ``requests.get`` against a private-CA HTTPS server succeeds only when
-  trust is delivered through the ``build_child_tls_env``-produced env, and fails
-  with the identical child under a plain env (the asymmetry is the proof);
-* ``APM_DISABLE_TRUSTSTORE`` suppresses the shim entirely.
+These tests spawn a genuine FOREIGN venv (created with ``python -m venv``, WITH
+NO ``apm_cli`` installed) and prove:
 
-Platform note: on macOS ``truststore`` verifies against the system keychain and
-does not consult ``SSL_CERT_FILE``, so the file-based system default cannot be
-honored through truststore there. On macOS the env-delivered trust is therefore
-proven via ``REQUESTS_CA_BUNDLE`` carried through the same
-``build_child_tls_env``-produced env; on Linux ``SSL_CERT_FILE`` is honored by
-truststore's ``set_default_verify_paths()``. Either way the trust reaches the
-child solely through the env this feature builds.
+* C1 -- with the shipped ``_apm_tls_bootstrap.py`` + ``_apm_tls.pth`` dropped in,
+  the child's ``ssl.SSLContext`` becomes truststore-backed; remove the ``.pth``
+  and it reverts to stdlib ``ssl`` (the asymmetry is the proof).
+* T2 -- the ``.pth`` is additive: a pre-existing user ``sitecustomize.py`` in the
+  same venv still runs AND truststore still injects.
+
+Offline-by-design: ``truststore`` is copied from the running dev environment
+into the foreign venv rather than ``pip install``-ed, so the tests need no
+network. The interpreter under test is still a foreign venv without ``apm_cli``.
 """
 
 from __future__ import annotations
@@ -31,12 +33,22 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
-from apm_cli.core.tls_trust import build_child_tls_env
+from apm_cli.core.tls_trust import _child_bootstrap_dir, _venv_site_packages
 
 pytestmark = pytest.mark.integration
+
+_truststore_missing = importlib.util.find_spec("truststore") is None
+_requires_truststore = pytest.mark.skipif(
+    _truststore_missing, reason="truststore not importable in this environment"
+)
+
+# Child that reports which module owns ssl.SSLContext -- truststore-backed after
+# the bootstrap runs, plain "ssl" otherwise.
+_SSL_MODULE_PROBE = "import ssl; print(ssl.SSLContext.__module__)"
 
 _TRUST_ENV_VARS = (
     "REQUESTS_CA_BUNDLE",
@@ -45,167 +57,113 @@ _TRUST_ENV_VARS = (
     "SSL_CERT_DIR",
     "APM_DISABLE_TRUSTSTORE",
     "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT",
-)
-
-_truststore_missing = importlib.util.find_spec("truststore") is None
-_requires_truststore = pytest.mark.skipif(
-    _truststore_missing, reason="truststore not importable in this environment"
-)
-_requires_openssl = pytest.mark.skipif(
-    shutil.which("openssl") is None, reason="openssl CLI not available"
-)
-
-# Child that reports which module owns ssl.SSLContext -- truststore-backed after
-# the shim runs, plain "ssl" otherwise.
-_SSL_MODULE_PROBE = "import ssl; print(ssl.SSLContext.__module__)"
-
-# Child that performs a real HTTPS GET and prints exactly one RESULT token.
-_REQUEST_PROBE = (
-    "import sys\n"
-    "import ssl\n"
-    "import requests\n"
-    "try:\n"
-    "    r = requests.get(sys.argv[1], timeout=5)\n"
-    "    print('RESULT:OK' if r.status_code == 200 else 'RESULT:BAD')\n"
-    "except (ssl.SSLError, requests.exceptions.SSLError):\n"
-    "    print('RESULT:SSLERROR')\n"
+    "PYTHONPATH",
 )
 
 
-@pytest.fixture(autouse=True)
-def _isolate_trust():
-    """Undo any global truststore/ssl injection so parent state cannot bleed in or out.
-
-    These tests spawn isolated child interpreters, but the in-parent private-CA
-    server must be built with the stdlib ssl backend -- a prior test that left
-    truststore injected would otherwise break the server's wrap_socket.
-    """
-    import ssl as _ssl
-
-    saved_ctx = _ssl.SSLContext
-    try:
-        import truststore
-
-        truststore.extract_from_ssl()
-    except Exception:
-        pass
-    try:
-        yield
-    finally:
-        try:
-            import truststore
-
-            truststore.extract_from_ssl()
-        except Exception:
-            pass
-        _ssl.SSLContext = saved_ctx
-
-
-def _clean_base_env() -> dict[str, str]:
+def _clean_env() -> dict[str, str]:
     """os.environ copy with every trust-related var stripped (pristine start)."""
     return {k: v for k, v in os.environ.items() if k not in _TRUST_ENV_VARS}
 
 
-def _ca_delivery_env(base: dict[str, str], ca_path: str) -> dict[str, str]:
-    """Return *base* augmented so an honest child would trust *ca_path*.
+def _venv_python(venv: Path) -> Path:
+    """Return the interpreter path inside *venv* for the current platform."""
+    if sys.platform == "win32":
+        return venv / "Scripts" / "python.exe"
+    return venv / "bin" / "python"
 
-    Uses the delivery channel the platform's truststore backend actually
-    honors: ``REQUESTS_CA_BUNDLE`` on macOS (keychain backend ignores
-    ``SSL_CERT_FILE``), ``SSL_CERT_FILE`` on Linux/other.
+
+def _make_foreign_venv(root: Path) -> tuple[Path, Path]:
+    """Create a foreign venv (no apm_cli) and return (venv_python, site_packages).
+
+    ``truststore`` is copied in from the running dev environment so the test is
+    fully offline; ``apm_cli`` is deliberately NOT installed so the interpreter
+    matches the real ``llm`` runtime venv.
     """
-    env = dict(base)
-    if sys.platform == "darwin":
-        env["REQUESTS_CA_BUNDLE"] = ca_path
-    else:
-        env["SSL_CERT_FILE"] = ca_path
-    return env
-
-
-@_requires_truststore
-def test_shim_runs_in_child_via_env_not_inheritance():
-    """Test 1: build_child_tls_env makes ssl.SSLContext truststore-backed in the child."""
-    base = _clean_base_env()
-
-    with_shim = subprocess.run(
-        [sys.executable, "-c", _SSL_MODULE_PROBE],
-        env=build_child_tls_env(base),
+    venv = root / "foreign-venv"
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(venv)],
+        check=True,
         capture_output=True,
-        text=True,
     )
-    assert with_shim.returncode == 0, with_shim.stderr
-    assert with_shim.stdout.strip().startswith("truststore"), (
-        f"child ssl module should be truststore-backed, got {with_shim.stdout!r}"
-    )
+    site_packages = _venv_site_packages(venv)
+    assert site_packages is not None, "could not locate foreign venv site-packages"
 
-    # Control: a plain env (no shim dir on PYTHONPATH) must stay on stdlib ssl,
-    # proving the trust crosses the boundary via the env, not process inheritance.
-    control = subprocess.run(
-        [sys.executable, "-c", _SSL_MODULE_PROBE],
-        env=base,
-        capture_output=True,
-        text=True,
-    )
-    assert control.returncode == 0, control.stderr
-    assert control.stdout.strip() == "ssl", (
-        f"control child should use stdlib ssl, got {control.stdout!r}"
-    )
+    import truststore
+
+    ts_src = Path(truststore.__file__).resolve().parent
+    shutil.copytree(ts_src, site_packages / "truststore")
+
+    return _venv_python(venv), site_packages
 
 
-@_requires_truststore
-@_requires_openssl
-def test_real_child_gains_trust_only_through_env(tmp_path):
-    """Test 2: a real requests.get in a child succeeds only via the env-delivered trust."""
-    from ._tls_ca_server import private_ca_https_server
-
-    with private_ca_https_server(tmp_path) as server:
-        base = _clean_base_env()
-
-        # Trust delivered ONLY through the build_child_tls_env-produced env.
-        trusted_env = build_child_tls_env(_ca_delivery_env(base, server.ca_path))
-        trusted = subprocess.run(
-            [sys.executable, "-c", _REQUEST_PROBE, server.url],
-            env=trusted_env,
-            capture_output=True,
-            text=True,
-        )
-        assert trusted.returncode == 0, trusted.stderr
-        # No shim contamination: stdout is exactly the RESULT token, stderr empty.
-        assert trusted.stdout.strip() == "RESULT:OK", (
-            f"trusted child stdout should be only RESULT:OK, got {trusted.stdout!r}"
-        )
-        assert trusted.stderr == "", f"shim must not write to child stderr, got {trusted.stderr!r}"
-
-        # Control: identical child, plain env (private CA absent) -> SSL failure.
-        control = subprocess.run(
-            [sys.executable, "-c", _REQUEST_PROBE, server.url],
-            env=base,
-            capture_output=True,
-            text=True,
-        )
-        assert control.returncode == 0, control.stderr
-        assert control.stdout.strip() == "RESULT:SSLERROR", (
-            f"control child should fail verification, got {control.stdout!r}"
-        )
+def _drop_bootstrap(site_packages: Path) -> None:
+    """Copy the shipped bootstrap module + .pth into *site_packages*."""
+    source = Path(_child_bootstrap_dir())
+    shutil.copyfile(source / "_apm_tls_bootstrap.py", site_packages / "_apm_tls_bootstrap.py")
+    shutil.copyfile(source / "_apm_tls.pth", site_packages / "_apm_tls.pth")
 
 
-@_requires_truststore
-def test_disable_flag_suppresses_child_shim():
-    """Test 3: APM_DISABLE_TRUSTSTORE keeps the shim out and the child on stdlib ssl."""
-    base = _clean_base_env()
-    base["APM_DISABLE_TRUSTSTORE"] = "1"
-
-    child_env = build_child_tls_env(base)
-    shim_dir = os.path.dirname(importlib.util.find_spec("apm_cli.core.tls_trust").origin)
-    # The shim dir must NOT have been prepended to PYTHONPATH.
-    assert os.path.join(shim_dir, "_child_tls") not in child_env.get("PYTHONPATH", "")
-
+def _probe_ssl_module(venv_python: Path) -> str:
     result = subprocess.run(
-        [sys.executable, "-c", _SSL_MODULE_PROBE],
-        env=child_env,
+        [str(venv_python), "-c", _SSL_MODULE_PROBE],
+        env=_clean_env(),
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "ssl", (
-        f"disabled child should use stdlib ssl, got {result.stdout!r}"
+    return result.stdout.strip()
+
+
+@_requires_truststore
+def test_foreign_venv_bootstrap_injects_truststore(tmp_path):
+    """C1: the shipped .pth bootstrap makes a foreign venv verify via the OS store."""
+    venv_python, site_packages = _make_foreign_venv(tmp_path)
+
+    # Control first: no bootstrap -> stdlib ssl. Proves the venv is foreign and
+    # would otherwise verify against certifi (the field failure mode).
+    assert _probe_ssl_module(venv_python) == "ssl", "foreign venv should start on stdlib ssl"
+
+    # Drop the bootstrap -> the child's ssl becomes truststore-backed.
+    _drop_bootstrap(site_packages)
+    module = _probe_ssl_module(venv_python)
+    assert module.startswith("truststore"), (
+        f"child ssl module should be truststore-backed after bootstrap, got {module!r}"
+    )
+
+
+@_requires_truststore
+def test_bootstrap_is_additive_to_user_sitecustomize(tmp_path):
+    """T2: the .pth bootstrap does not shadow a user sitecustomize -- both run."""
+    venv_python, site_packages = _make_foreign_venv(tmp_path)
+    _drop_bootstrap(site_packages)
+
+    sentinel = tmp_path / "sitecustomize-ran.txt"
+    (site_packages / "sitecustomize.py").write_text(
+        "\n".join(
+            [
+                "import os",
+                "import pathlib",
+                "pathlib.Path(os.environ['APM_TEST_SENTINEL']).write_text('ran', encoding='utf-8')",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    env = _clean_env()
+    env["APM_TEST_SENTINEL"] = str(sentinel)
+    result = subprocess.run(
+        [str(venv_python), "-c", _SSL_MODULE_PROBE],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+    # The user sitecustomize ran (bootstrap did not shadow it)...
+    assert sentinel.exists(), "user sitecustomize.py must still run alongside the .pth bootstrap"
+    assert sentinel.read_text(encoding="utf-8") == "ran"
+    # ...AND truststore still injected (the .pth is additive, not exclusive).
+    assert result.stdout.strip().startswith("truststore"), (
+        f"truststore must still inject with a user sitecustomize present, got {result.stdout!r}"
     )

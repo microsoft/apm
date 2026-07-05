@@ -88,10 +88,12 @@ entry_point = repo_root / 'src' / 'apm_cli' / 'cli.py'
 datas = [
     (str(repo_root / 'scripts' / 'runtime'), 'scripts/runtime'),  # Bundle runtime setup scripts
     (str(repo_root / 'pyproject.toml'), '.'),  # Bundle pyproject.toml for version reading
-    # Child-runtime TLS trust shim: ships at apm_cli/core/_child_tls/ so
-    # build_child_tls_env() can prepend it to a child's PYTHONPATH in the
-    # frozen binary, letting Python child runtimes re-run the OS-trust bootstrap.
-    (str(repo_root / 'src' / 'apm_cli' / 'core' / '_child_tls' / 'sitecustomize.py'),
+    # Child-runtime TLS trust bootstrap: ships at apm_cli/core/_child_tls/ so
+    # ensure_child_tls_bootstrap() can copy the self-contained .pth bootstrap
+    # into a child runtime venv's site-packages from the frozen binary.
+    (str(repo_root / 'src' / 'apm_cli' / 'core' / '_child_tls' / '_apm_tls_bootstrap.py'),
+     'apm_cli/core/_child_tls'),
+    (str(repo_root / 'src' / 'apm_cli' / 'core' / '_child_tls' / '_apm_tls.pth'),
      'apm_cli/core/_child_tls'),
 ]
 

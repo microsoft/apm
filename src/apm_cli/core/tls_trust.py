@@ -13,17 +13,21 @@ Best-effort -- ``configure_tls_trust`` never raises:
 * Missing ``truststore`` or a failed injection falls back to ``certifi``.
 * ``APM_DISABLE_TRUSTSTORE`` forces the legacy ``certifi``-only behaviour.
 
-Child runtimes (``llm``, ``codex``, ``copilot``, ...) are Python/CLI
-subprocesses spawned after ``exec``; the parent cannot monkeypatch their
-``ssl`` module. ``build_child_tls_env`` propagates trust by prepending a
-``sitecustomize`` shim directory to the child ``PYTHONPATH`` so each Python
-child re-runs :func:`configure_tls_trust` at its own interpreter startup.
+Child runtimes are Python/CLI subprocesses spawned after ``exec``; the parent
+cannot monkeypatch their ``ssl`` module. Trust is delivered to the Python
+``llm`` runtime at venv-setup time: :func:`ensure_child_tls_bootstrap` drops a
+self-contained ``.pth`` bootstrap into the runtime venv's site-packages so its
+interpreter injects ``truststore`` at startup with no ``apm_cli`` dependency and
+no ``PYTHONPATH`` mutation (which would shadow a user ``sitecustomize.py``).
+:func:`build_child_tls_env` is now an env-hygiene pass only. Node (Copilot) and
+Rust (Codex) runtimes verify against their own default trust for now (#2034).
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sys
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
@@ -50,8 +54,13 @@ _SSL_CERT_FILE_VAR = "SSL_CERT_FILE"
 # binary set SSL_CERT_FILE to bundled certifi (vs a genuine user value).
 _BUNDLED_CERT_MARKER = "APM_SSL_CERT_FILE_IS_BUNDLED_DEFAULT"
 
-# Directory (relative to the installed package) that holds the child shim.
+# Directory (relative to the installed package) that holds the child bootstrap.
 _CHILD_SHIM_DIRNAME = "_child_tls"
+
+# The two artifacts copied into a child venv's site-packages to deliver
+# OS-trust at interpreter startup (see ensure_child_tls_bootstrap).
+_BOOTSTRAP_MODULE_FILE = "_apm_tls_bootstrap.py"
+_BOOTSTRAP_PTH_FILE = "_apm_tls.pth"
 
 _TRUTHY = {"1", "true", "yes", "on"}
 
@@ -100,6 +109,16 @@ def configure_tls_trust(env: Mapping[str, str] | None = None) -> bool:
     ``certifi`` behaviour was left in place (explicit override, opt-out,
     ``truststore`` missing, or injection failure). Never raises.
     """
+    environ = _mutable_environ(env)
+
+    # Clear the bundled-default marker unconditionally, up-front, so it can
+    # never leak into child processes on ANY return path (opt-out, explicit
+    # override, truststore-import failure, inject success, or inject failure).
+    # Capture its truthiness first -- the pop-before-inject logic below needs
+    # to know whether the current SSL_CERT_FILE was OUR bundled default.
+    had_bundled_marker = _env_flag(_BUNDLED_CERT_MARKER, env)
+    environ.pop(_BUNDLED_CERT_MARKER, None)
+
     if _env_flag(_DISABLE_ENV_VAR, env):
         logger.debug("[i] TLS: OS trust-store injection disabled (%s)", _DISABLE_ENV_VAR)
         return False
@@ -116,13 +135,11 @@ def configure_tls_trust(env: Mapping[str, str] | None = None) -> bool:
         logger.debug("[i] TLS: verifying against bundled CA (certifi fallback) [%s]", exc)
         return False
 
-    environ = _mutable_environ(env)
-
     # If the frozen hook pinned SSL_CERT_FILE to bundled certifi, pop it so
     # truststore's set_default_verify_paths() reads the genuine system default.
     # A user-set SSL_CERT_FILE (no marker) is left untouched.
     bundled_cert: str | None = None
-    if environ.get(_SSL_CERT_FILE_VAR) and _env_flag(_BUNDLED_CERT_MARKER, env):
+    if environ.get(_SSL_CERT_FILE_VAR) and had_bundled_marker:
         bundled_cert = environ.get(_SSL_CERT_FILE_VAR)
         environ.pop(_SSL_CERT_FILE_VAR, None)
 
@@ -133,18 +150,15 @@ def configure_tls_trust(env: Mapping[str, str] | None = None) -> bool:
         # musl/minimal-container hosts still verify against certifi.
         if bundled_cert is not None:
             environ[_SSL_CERT_FILE_VAR] = bundled_cert
-        environ.pop(_BUNDLED_CERT_MARKER, None)
         logger.debug("[i] TLS: verifying against bundled CA (certifi fallback) [%s]", exc)
         return False
 
-    # Clear the marker so it does not leak into child processes.
-    environ.pop(_BUNDLED_CERT_MARKER, None)
     logger.debug("[i] TLS: verifying against OS trust store (truststore)")
     return True
 
 
-def _child_shim_dir() -> str | None:
-    """Absolute path to the directory containing the child ``sitecustomize``.
+def _child_bootstrap_dir() -> str | None:
+    """Absolute path to the directory holding the child TLS bootstrap files.
 
     Resolves for both source-installed and frozen (PyInstaller) layouts. Returns
     ``None`` if the path cannot be determined -- callers degrade gracefully.
@@ -162,26 +176,62 @@ def _child_shim_dir() -> str | None:
         return None
 
 
+def _venv_site_packages(venv_path: Path) -> Path | None:
+    """Return the site-packages dir of *venv_path*, or ``None`` if not found.
+
+    Handles the POSIX ``lib/pythonX.Y/site-packages`` and the Windows
+    ``Lib/site-packages`` layouts. Picks the first existing match.
+    """
+    candidates = list(venv_path.glob("lib/python*/site-packages"))
+    candidates.extend(venv_path.glob("Lib/site-packages"))
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def ensure_child_tls_bootstrap(venv_path: str | os.PathLike[str]) -> bool:
+    """Install the self-contained OS-trust bootstrap into a child venv.
+
+    Copies ``_apm_tls_bootstrap.py`` and ``_apm_tls.pth`` into the venv's
+    site-packages so its interpreter injects ``truststore`` at startup -- no
+    ``apm_cli`` dependency, no ``PYTHONPATH`` mutation. Python-driven (rather
+    than shell-globbed) so it resolves the shipped source identically for a
+    source install (package dir) and a frozen binary (``sys._MEIPASS``).
+
+    Idempotent and best-effort: returns ``True`` when both files are present
+    after the call, ``False`` on any failure. Never raises.
+    """
+    try:
+        site_packages = _venv_site_packages(Path(venv_path))
+        if site_packages is None:
+            return False
+        source_dir = _child_bootstrap_dir()
+        if not source_dir:
+            return False
+        source = Path(source_dir)
+        for name in (_BOOTSTRAP_MODULE_FILE, _BOOTSTRAP_PTH_FILE):
+            src_file = source / name
+            if not src_file.is_file():
+                return False
+            shutil.copyfile(src_file, site_packages / name)
+        return True
+    except Exception:
+        return False
+
+
 def build_child_tls_env(base_env: Mapping[str, str]) -> dict[str, str]:
-    """Return a child env that re-runs the trust bootstrap at its startup.
+    """Return a copy of *base_env* scrubbed for a spawned child runtime.
 
-    Prepends the ``sitecustomize`` shim directory to ``PYTHONPATH`` (preserving
-    any existing value) so each Python child imports the shim and re-invokes
-    :func:`configure_tls_trust` -- single source of truth, no logic duplicated.
+    Trust is now delivered at venv-setup time via the ``.pth`` bootstrap
+    (:func:`ensure_child_tls_bootstrap`), NOT at spawn time via ``PYTHONPATH``
+    -- prepending a shim dir would shadow a user/corporate ``sitecustomize.py``
+    and only reached children that shared this process's ``sys.path``.
 
-    * ``APM_DISABLE_TRUSTSTORE`` truthy: return the env unchanged (no shim).
-    * An explicit CA override still gets the shim; the shim's own
-      ``configure_tls_trust`` declines to inject and leaves the bundle intact.
+    This function is now an env-hygiene pass: it strips the internal
+    bundled-default marker so the frozen binary's ``SSL_CERT_FILE`` marker never
+    leaks into a child, then returns the env unchanged otherwise.
     """
     child = dict(base_env)
-
-    if _env_flag(_DISABLE_ENV_VAR, base_env):
-        return child
-
-    shim_dir = _child_shim_dir()
-    if not shim_dir:
-        return child
-
-    existing = child.get("PYTHONPATH", "")
-    child["PYTHONPATH"] = shim_dir + os.pathsep + existing if existing else shim_dir
+    child.pop(_BUNDLED_CERT_MARKER, None)
     return child
