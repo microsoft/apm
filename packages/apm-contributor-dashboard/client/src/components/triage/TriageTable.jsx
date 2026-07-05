@@ -1,6 +1,6 @@
-import { For } from "solid-js";
+import { For, Show } from "solid-js";
 import ActionDropdown from "../ActionDropdown";
-import { startTriageSession } from "../../services/api";
+import { startTriageSession, openSession } from "../../services/api";
 import { showToast } from "../Toast";
 
 const decisionClasses = {
@@ -64,6 +64,15 @@ export default function TriageTable(props) {
     }
   }
 
+  async function handleOpen(item) {
+    try {
+      await openSession(item.number, item.title);
+      showToast(`Opening session for #${item.number}`);
+    } catch (e) {
+      showToast(`Error: ${e.message}`);
+    }
+  }
+
   return (
     <table>
       <thead>
@@ -120,7 +129,9 @@ export default function TriageTable(props) {
                 <ActionDropdown
                   onDetails={() => props.onDetail(item)}
                   items={[
-                    { label: "Start Session", class: "dropdown-session", action: () => handleStart(item) },
+                    item.hasSession
+                      ? { label: "Go to Active Session", class: "dropdown-session", action: () => handleOpen(item) }
+                      : { label: "Start Session", class: "dropdown-session", action: () => handleStart(item) },
                   ]}
                 />
               </td>

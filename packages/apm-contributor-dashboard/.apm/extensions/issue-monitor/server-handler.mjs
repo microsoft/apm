@@ -450,7 +450,8 @@ export function createHandler(deps) {
             const TRIAGE_TTL_MS = 5 * 60 * 1000;
             const cache = handler._triageCache;
             if (cache && (Date.now() - cache.fetchedAt) < TRIAGE_TTL_MS) {
-                res.end(JSON.stringify({ items: cache.items, lastUpdated: cache.lastUpdated, total: cache.items.length }));
+                const items = cache.items.map(i => ({ ...i, hasSession: startedSessions.has(i.number) }));
+                res.end(JSON.stringify({ items, lastUpdated: cache.lastUpdated, total: items.length }));
                 return;
             }
             try {
@@ -537,7 +538,8 @@ query($owner: String!, $repo: String!, $cursor: String) {
                 }
                 const lastUpdated = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
                 handler._triageCache = { items: triageItems, fetchedAt: Date.now(), lastUpdated };
-                res.end(JSON.stringify({ items: triageItems, lastUpdated, total: triageItems.length }));
+                const enriched = triageItems.map(i => ({ ...i, hasSession: startedSessions.has(i.number) }));
+                res.end(JSON.stringify({ items: enriched, lastUpdated, total: enriched.length }));
             } catch (e) {
                 res.end(JSON.stringify({ items: [], error: String(e.message || e) }));
             }

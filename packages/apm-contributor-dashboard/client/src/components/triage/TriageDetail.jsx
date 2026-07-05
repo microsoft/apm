@@ -1,7 +1,7 @@
 import { Show, For } from "solid-js";
 import Modal from "../Modal";
 import { renderMarkdown } from "../../utils/markdown";
-import { startTriageSession } from "../../services/api";
+import { startTriageSession, openSession } from "../../services/api";
 import { showToast } from "../Toast";
 
 const decisionClasses = {
@@ -79,10 +79,24 @@ export default function TriageDetail(props) {
     }
   }
 
+  async function handleOpen() {
+    try {
+      await openSession(item().number, item().title);
+      showToast(`Opening session for #${item().number}`);
+    } catch (e) {
+      showToast(`Error: ${e.message}`);
+    }
+  }
+
   const footer = () => (
     <div class="modal-actions">
-      <button class="btn btn-primary" onClick={handleStart}>Start Session</button>
       <a class="btn btn-secondary" href={item()?.url} target="_blank">View on GitHub</a>
+      <Show when={item()?.hasSession}>
+        <button class="btn btn-primary btn-open-session" onClick={handleOpen}>Go to Active Session</button>
+      </Show>
+      <Show when={!item()?.hasSession}>
+        <button class="btn btn-primary" onClick={handleStart}>Start Session</button>
+      </Show>
     </div>
   );
 
