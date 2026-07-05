@@ -10,12 +10,12 @@ import { prResource, refetchPrs } from "./stores/prs";
 import { triageResource, refetchTriage, activateTriage } from "./stores/triage";
 
 export default function App() {
-  const [activeTab, setActiveTab] = createSignal("issues");
+  const [activeTab, setActiveTab] = createSignal("triage");
 
   const tabs = [
+    { id: "triage", label: "Triage", count: () => triageResource()?.items?.length || 0 },
     { id: "issues", label: "Issues", count: () => issueResource()?.issues?.length || 0 },
     { id: "prs", label: "Pull Requests", count: () => prResource()?.prs?.length || 0 },
-    { id: "triage", label: "Triage", count: () => triageResource()?.items?.length || 0 },
   ];
 
   function handleTabSwitch(id) {
