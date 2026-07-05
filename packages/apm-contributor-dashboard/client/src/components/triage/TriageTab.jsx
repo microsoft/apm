@@ -39,13 +39,34 @@ export default function TriageTab() {
     });
   });
 
+  // Priority rank: lower number = higher priority (P0 first)
+  function prioRank(p) {
+    if (!p) return 99;
+    if (p.includes("critical")) return 0;
+    if (p.includes("high")) return 1;
+    if (p.includes("medium") || p.includes("normal")) return 2;
+    if (p.includes("low")) return 3;
+    return 99;
+  }
+
   const sorted = createMemo(() => {
     const col = sortCol();
     const dir = sortAsc() ? 1 : -1;
     const copy = [...filtered()];
-    if (!col) return copy;
+    if (!col) {
+      // Default: priority ascending rank (P0 first), then issue number descending
+      return copy.sort((a, b) => {
+        const pd = prioRank(a.priority) - prioRank(b.priority);
+        if (pd !== 0) return pd;
+        return b.number - a.number;
+      });
+    }
     return copy.sort((a, b) => {
       if (col === "number") return dir * (a.number - b.number);
+      if (col === "priority") {
+        const pd = dir * (prioRank(a.priority) - prioRank(b.priority));
+        return pd !== 0 ? pd : b.number - a.number;
+      }
       const va = (a[col] || "").toLowerCase();
       const vb = (b[col] || "").toLowerCase();
       return dir * va.localeCompare(vb);
