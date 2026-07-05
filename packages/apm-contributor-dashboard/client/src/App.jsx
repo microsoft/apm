@@ -13,7 +13,7 @@ export default function App() {
   const [activeTab, setActiveTab] = createSignal("triage");
 
   const tabs = [
-    { id: "triage", label: "Triage", count: () => triageResource()?.items?.length || 0 },
+    { id: "triage", label: "Triaged Issues", count: () => triageResource()?.items?.length || 0 },
     { id: "issues", label: "Issues", count: () => issueResource()?.issues?.length || 0 },
     { id: "prs", label: "Pull Requests", count: () => prResource()?.prs?.length || 0 },
   ];
