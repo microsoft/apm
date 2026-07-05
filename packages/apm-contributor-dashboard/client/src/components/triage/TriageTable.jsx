@@ -27,9 +27,19 @@ function decisionLabel(decision) {
 
 function priorityClass(priority) {
   if (!priority) return "prio-normal";
+  if (priority.includes("critical")) return "prio-critical";
   if (priority.includes("high")) return "prio-high";
   if (priority.includes("low")) return "prio-low";
   return "prio-normal";
+}
+
+function priorityLabel(priority) {
+  if (!priority) return "--";
+  if (priority.includes("critical")) return "P0";
+  if (priority.includes("high")) return "P1";
+  if (priority.includes("medium") || priority.includes("normal")) return "P2";
+  if (priority.includes("low")) return "P3";
+  return priority.replace("priority/", "");
 }
 
 function typeLabel(type) {
@@ -77,7 +87,7 @@ export default function TriageTable(props) {
                   class={`badge ${priorityClass(item.priority)} filterable`}
                   onClick={() => props.onFilter("priority", item.priority)}
                 >
-                  {item.priority ? item.priority.replace("priority/", "") : "--"}
+                  {priorityLabel(item.priority)}
                 </span>
               </td>
               <td>
