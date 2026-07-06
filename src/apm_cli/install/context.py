@@ -74,6 +74,12 @@ class InstallContext:
     only_packages: list[str] | None = None
     protocol_pref: Any = None  # ProtocolPreference (NONE/SSH/HTTPS) for shorthand transport
     allow_protocol_fallback: bool | None = None  # None => read APM_ALLOW_PROTOCOL_FALLBACK env
+    # Set by the pipeline before the resolve phase runs when the caller
+    # (``apm update``) has a plan-confirmation gate. Only its presence is
+    # consulted (by resolve.py, to decide whether cached semver paths must
+    # be staged for possible rollback rather than deleted outright) -- the
+    # pipeline itself still owns invoking it.
+    plan_callback: Any = None
 
     # ------------------------------------------------------------------
     # Resolve phase outputs
@@ -96,6 +102,13 @@ class InstallContext:
     callback_downloaded: dict[str, Any] = field(default_factory=dict)  # resolve
     callback_failures: set[str] = field(default_factory=set)  # resolve
     transitive_failures: list[tuple[str, str]] = field(default_factory=list)  # resolve
+    # dep_key -> backup path for cached semver installs moved aside by
+    # ``update_backup.purge_cached_semver_paths_for_update`` (populated only
+    # when ``plan_callback`` is set). The pipeline calls
+    # ``update_backup.restore_update_backups`` once the plan-confirmation
+    # gate resolves, to either discard these (applied) or restore them
+    # (declined / non-interactive abort / --dry-run).
+    update_backups: dict[str, Any] = field(default_factory=dict)  # resolve
 
     # ------------------------------------------------------------------
     # Targets phase outputs
