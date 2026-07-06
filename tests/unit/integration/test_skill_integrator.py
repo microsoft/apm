@@ -3965,6 +3965,131 @@ class TestPromoteSubSkillsCowork:
         assert not (cowork_root / "my-skill" / ".apm").exists()
 
 
+class TestSubSkillOwnershipIdentity:
+    """Regression tests: sub-skill self-overwrite detection must key on the
+    durable unique dependency identity (owner/repo), not the leaf install
+    directory name. Two different packages can share a repo/leaf name (e.g.
+    two orgs each publishing a "shared-skill" or "utils" repo) -- comparing
+    only the leaf would falsely treat the second as the first re-installing
+    itself, silently suppressing the cross-package collision warning exactly
+    when it matters most."""
+
+    def test_same_leaf_name_different_owner_is_flagged_as_collision(self, tmp_path: Path) -> None:
+        from apm_cli.utils.diagnostics import CATEGORY_OVERWRITE, DiagnosticCollector
+
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        cowork_target = _make_resolved_cowork_target(cowork_root)
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        # Two packages from DIFFERENT owners that happen to share the same
+        # leaf/repo name ("shared-skill") -- package_path.name is identical
+        # for both, but they are unrelated packages.
+        pkg_a_dir = tmp_path / "orga" / "shared-skill"
+        sub_a = pkg_a_dir / ".apm" / "skills" / "topic"
+        sub_a.mkdir(parents=True)
+        (sub_a / "SKILL.md").write_text("# From Org A")
+
+        pkg_b_dir = tmp_path / "orgb" / "shared-skill"
+        sub_b = pkg_b_dir / ".apm" / "skills" / "topic"
+        sub_b.mkdir(parents=True)
+        (sub_b / "SKILL.md").write_text("# From Org B")
+
+        pkg_a = _make_package_info(pkg_a_dir)
+        pkg_a.dependency_ref = MagicMock()
+        pkg_a.dependency_ref.get_unique_key.return_value = "orga/shared-skill"
+
+        pkg_b = _make_package_info(pkg_b_dir)
+        pkg_b.dependency_ref = MagicMock()
+        pkg_b.dependency_ref.get_unique_key.return_value = "orgb/shared-skill"
+
+        integrator = SkillIntegrator()
+        count_a, _ = integrator._promote_sub_skills_standalone(
+            pkg_a, project_root, targets=[cowork_target]
+        )
+        assert count_a == 1
+        assert (cowork_root / "topic" / "SKILL.md").read_text() == "# From Org A"
+
+        diag = DiagnosticCollector()
+        # Simulate the lockfile recording org A's install from a prior run --
+        # the real _build_skill_ownership_map would return the durable key
+        # "orga/shared-skill" (see _build_ownership_maps), not "shared-skill".
+        with patch.object(
+            SkillIntegrator,
+            "_build_skill_ownership_map",
+            return_value={"topic": "orga/shared-skill"},
+        ):
+            count_b, _ = integrator._promote_sub_skills_standalone(
+                pkg_b,
+                project_root,
+                targets=[cowork_target],
+                diagnostics=diag,
+                force=True,
+            )
+
+        assert count_b == 1
+        # Org B's content must have actually landed (force=True) ...
+        assert (cowork_root / "topic" / "SKILL.md").read_text() == "# From Org B"
+        # ... and the collision must be reported as cross-package, not
+        # silently swallowed as org A "re-installing itself".
+        groups = diag.by_category()
+        assert CATEGORY_OVERWRITE in groups
+        assert any(e.package == "orgb/shared-skill" for e in groups[CATEGORY_OVERWRITE])
+
+    def test_same_leaf_name_different_owner_without_force_is_protected(
+        self, tmp_path: Path
+    ) -> None:
+        """Without --force, org B's colliding sub-skill must be skipped (not
+        silently treated as org A's own content), matching the existing
+        collision-skip behavior for genuinely foreign packages."""
+        cowork_root = tmp_path / "cowork-skills"
+        cowork_root.mkdir()
+        cowork_target = _make_resolved_cowork_target(cowork_root)
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        pkg_a_dir = tmp_path / "orga" / "shared-skill"
+        sub_a = pkg_a_dir / ".apm" / "skills" / "topic"
+        sub_a.mkdir(parents=True)
+        (sub_a / "SKILL.md").write_text("# From Org A")
+
+        pkg_b_dir = tmp_path / "orgb" / "shared-skill"
+        sub_b = pkg_b_dir / ".apm" / "skills" / "topic"
+        sub_b.mkdir(parents=True)
+        (sub_b / "SKILL.md").write_text("# From Org B")
+
+        pkg_a = _make_package_info(pkg_a_dir)
+        pkg_a.dependency_ref = MagicMock()
+        pkg_a.dependency_ref.get_unique_key.return_value = "orga/shared-skill"
+
+        pkg_b = _make_package_info(pkg_b_dir)
+        pkg_b.dependency_ref = MagicMock()
+        pkg_b.dependency_ref.get_unique_key.return_value = "orgb/shared-skill"
+
+        integrator = SkillIntegrator()
+        integrator._promote_sub_skills_standalone(pkg_a, project_root, targets=[cowork_target])
+
+        with patch.object(
+            SkillIntegrator,
+            "_build_skill_ownership_map",
+            return_value={"topic": "orga/shared-skill"},
+        ):
+            # managed_files=set() means nothing is APM-managed from this
+            # run's perspective, exercising the "not managed, protect it"
+            # skip path rather than the cross-package overwrite path.
+            integrator._promote_sub_skills_standalone(
+                pkg_b,
+                project_root,
+                targets=[cowork_target],
+                managed_files=set(),
+                force=False,
+            )
+
+        # Org A's content must survive untouched.
+        assert (cowork_root / "topic" / "SKILL.md").read_text() == "# From Org A"
+
+
 class TestAgentSkillsDedupAndSecurity:
     """Dedup and security tests for the agent-skills target (#737)."""
 

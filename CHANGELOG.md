@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Sub-skill and native-skill ownership tracking now keys on the full
+  dependency identity (`owner/repo`) instead of the last path segment.
+  Two different packages that happen to share a repo/leaf name (e.g. two
+  orgs each publishing a `shared-skill` or `utils` repo) were previously
+  treated as the same owner, silently suppressing the cross-package
+  collision warning exactly when it mattered -- an unrelated package
+  could overwrite another's skill with no signal. `apm install --force`
+  now correctly reports the collision regardless of dependency source
+  (registry or git), and the lockfile no longer records both packages as
+  owning the same deployed file after a collision. (by @nadav-y)
+
 ## [0.24.0] - 2026-07-05
 
 ### Added
