@@ -569,6 +569,19 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     try:
         ctx.tui.start_phase("resolve", total=len(all_apm_deps) or 1)
         _run_phase("resolve", _resolve_phase, ctx)
+    except Exception:
+        # A dep may already have been purged-to-backup (see
+        # update_backup.purge_cached_semver_paths_for_update) before
+        # resolution itself raised -- e.g. a network error on a different
+        # dep, or a bad transitive manifest. Restore it now rather than
+        # leaving it orphaned in the backup dir with its install path
+        # missing. A no-op when ``ctx.update_backups`` is empty (the
+        # common case: no plan_callback, or nothing needed purging).
+        if getattr(ctx, "update_backups", None):
+            from .phases.update_backup import restore_update_backups
+
+            restore_update_backups(ctx, keep_new=False)
+        raise
     finally:
         ctx.tui.__exit__()
 

@@ -15,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from apm_cli.install.phases.update_backup import (
+    _sanitize_backup_name,
     purge_cached_semver_paths_for_update,
     restore_update_backups,
 )
@@ -45,6 +46,30 @@ def _write(path: Path, content: str) -> None:
 def _read(path: Path) -> str | None:
     marker = path / "marker.txt"
     return marker.read_text(encoding="utf-8") if marker.exists() else None
+
+
+class TestSanitizeBackupName:
+    """Sanitizing alone is not injective -- distinct dep keys that differ only
+    in a character the sanitizer collapses (``/``, ``_``, ``:``) must not map
+    to the same backup directory name, or one dep's backup could silently
+    overwrite another's."""
+
+    def test_distinct_keys_produce_distinct_names(self) -> None:
+        names = {
+            _sanitize_backup_name("owner/repo"),
+            _sanitize_backup_name("owner_repo"),
+            _sanitize_backup_name("owner:repo"),
+        }
+        assert len(names) == 3
+
+    def test_same_key_is_deterministic(self) -> None:
+        assert _sanitize_backup_name("owner/repo") == _sanitize_backup_name("owner/repo")
+
+    def test_name_is_filesystem_safe(self) -> None:
+        import re
+
+        name = _sanitize_backup_name("github.com/owner/repo#v1.0.0")
+        assert re.fullmatch(r"[A-Za-z0-9._-]+", name)
 
 
 class TestPurgeCachedSemverPathsForUpdate:

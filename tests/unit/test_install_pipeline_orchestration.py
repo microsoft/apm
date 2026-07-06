@@ -313,6 +313,104 @@ class TestRunInstallPipelinePlanCallback:
 
 
 # ---------------------------------------------------------------------------
+# run_install_pipeline -- resolve-phase failure restores staged backups
+# ---------------------------------------------------------------------------
+
+
+class TestRunInstallPipelineResolveFailureRestoresBackups:
+    """A dep can be purged-to-backup before resolution itself raises (e.g. a
+    network error on a *different* dep, or a bad transitive manifest). The
+    backup must not be left orphaned with the dep's install path missing --
+    see update_backup.restore_update_backups."""
+
+    def _make_apm_package(self):
+        pkg = MagicMock()
+        pkg.get_apm_dependencies.return_value = [MagicMock()]
+        pkg.get_dev_apm_dependencies.return_value = []
+        pkg.get_mcp_dependencies.return_value = []
+        return pkg
+
+    def test_resolve_exception_triggers_restore_when_backups_staged(self, tmp_path):
+        from apm_cli.install.pipeline import run_install_pipeline
+
+        pkg = self._make_apm_package()
+
+        mock_ctx = MagicMock()
+        mock_ctx.root_has_local_primitives = False
+        mock_ctx.tui = MagicMock()
+        # Simulate: purge_cached_semver_paths_for_update already moved a dep
+        # aside before resolve_dependencies() raised.
+        mock_ctx.update_backups = {"owner/repo": tmp_path / "backup" / "owner_repo"}
+
+        mock_resolve = MagicMock()
+        mock_resolve.run = MagicMock(side_effect=RuntimeError("network error on other dep"))
+
+        mock_restore = MagicMock()
+
+        with (
+            patch("apm_cli.core.scope.get_deploy_root", return_value=tmp_path),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=tmp_path),
+            patch(
+                "apm_cli.install.phases.local_content._project_has_root_primitives",
+                return_value=False,
+            ),
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
+            patch("apm_cli.install.context.InstallContext", return_value=mock_ctx),
+            patch("apm_cli.utils.install_tui.InstallTui", return_value=MagicMock()),
+            patch("apm_cli.install.phases.resolve", mock_resolve),
+            patch("apm_cli.install.phases.update_backup.restore_update_backups", mock_restore),
+        ):
+            mock_ctx.tui.__enter__ = MagicMock(return_value=mock_ctx.tui)
+            mock_ctx.tui.__exit__ = MagicMock(return_value=False)
+            mock_ctx.tui.start_phase = MagicMock()
+
+            with pytest.raises(RuntimeError, match="network error on other dep"):
+                run_install_pipeline(pkg, plan_callback=MagicMock())
+
+        mock_restore.assert_called_once_with(mock_ctx, keep_new=False)
+
+    def test_resolve_exception_skips_restore_when_no_backups_staged(self, tmp_path):
+        """No plan_callback (e.g. apm install --update) never stages backups --
+        the restore call must not fire, and the original exception still
+        propagates unchanged."""
+        from apm_cli.install.pipeline import run_install_pipeline
+
+        pkg = self._make_apm_package()
+
+        mock_ctx = MagicMock()
+        mock_ctx.root_has_local_primitives = False
+        mock_ctx.tui = MagicMock()
+        mock_ctx.update_backups = {}
+
+        mock_resolve = MagicMock()
+        mock_resolve.run = MagicMock(side_effect=RuntimeError("boom"))
+
+        mock_restore = MagicMock()
+
+        with (
+            patch("apm_cli.core.scope.get_deploy_root", return_value=tmp_path),
+            patch("apm_cli.core.scope.get_apm_dir", return_value=tmp_path),
+            patch(
+                "apm_cli.install.phases.local_content._project_has_root_primitives",
+                return_value=False,
+            ),
+            patch("apm_cli.deps.lockfile.LockFile.read", return_value=None),
+            patch("apm_cli.install.context.InstallContext", return_value=mock_ctx),
+            patch("apm_cli.utils.install_tui.InstallTui", return_value=MagicMock()),
+            patch("apm_cli.install.phases.resolve", mock_resolve),
+            patch("apm_cli.install.phases.update_backup.restore_update_backups", mock_restore),
+        ):
+            mock_ctx.tui.__enter__ = MagicMock(return_value=mock_ctx.tui)
+            mock_ctx.tui.__exit__ = MagicMock(return_value=False)
+            mock_ctx.tui.start_phase = MagicMock()
+
+            with pytest.raises(RuntimeError, match="boom"):
+                run_install_pipeline(pkg)
+
+        mock_restore.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # run_install_pipeline -- exception wrapping
 # ---------------------------------------------------------------------------
 
