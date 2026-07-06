@@ -45,6 +45,21 @@ def _make_stdio_dep(name: str = "test-srv") -> MCPDependency:
     )
 
 
+def _make_remote_dep(name: str = "test-remote") -> MCPDependency:
+    """Build a synthetic remote MCP dependency that needs no network."""
+    return MCPDependency.from_dict(
+        {
+            "name": name,
+            "registry": False,
+            "transport": "http",
+            "url": "https://api.example.com/mcp/",
+            "headers": {
+                "Authorization": "Bearer TEST_TOKEN",
+            },
+        }
+    )
+
+
 def _seed_signal(project: Path, target: str) -> None:
     """Seed an on-disk signal that ``detect_signals`` recognizes."""
     if target == "copilot":
@@ -75,6 +90,10 @@ def _cursor_mcp_path(project: Path) -> Path:
 
 def _codex_mcp_path(project: Path) -> Path:
     return project / ".codex" / "config.toml"
+
+
+def _agents_mcp_path(project: Path) -> Path:
+    return project / ".agents" / "mcp_config.json"
 
 
 class TestMCPTargetsGatingE2E:
@@ -207,3 +226,44 @@ class TestMCPTargetsGatingE2E:
             "not receive a silent copilot-vscode MCP write -- the "
             "pre-#1336 fallback is gone."
         )
+
+    def test_targets_whitelist_antigravity_allows_listed_runtimes(self, tmp_path, monkeypatch):
+        """``targets: [antigravity]`` -> antigravity MCP config IS written
+        when .agents/ project-scope directory exists.
+        """
+        project = tmp_path / "proj-whitelist-antigravity"
+        project.mkdir()
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+
+        # Seed the .agents directory (the required signal for project scope)
+        (project / ".agents").mkdir()
+
+        MCPIntegrator.install(
+            [
+                _make_stdio_dep("e2e-antigravity-stdio"),
+                _make_remote_dep("e2e-antigravity-remote"),
+            ],
+            project_root=project,
+            apm_config={"targets": ["antigravity"]},
+        )
+
+        assert _agents_mcp_path(project).exists(), (
+            "antigravity MCP config MUST be written when antigravity IS in targets "
+            "and .agents/ directory exists."
+        )
+        agents_data = json.loads(_agents_mcp_path(project).read_text(encoding="utf-8"))
+
+        # Verify stdio server formatting
+        stdio_srv = agents_data.get("mcpServers", {}).get("e2e-antigravity-stdio", {})
+        assert stdio_srv.get("command") == "echo"
+        assert stdio_srv.get("args") == ["mcp-targets-gate-e2e"]
+
+        # Verify remote server formatting uses serverUrl instead of url or httpUrl
+        remote_srv = agents_data.get("mcpServers", {}).get("e2e-antigravity-remote", {})
+        assert "serverUrl" in remote_srv
+        assert remote_srv["serverUrl"] == "https://api.example.com/mcp/"
+        assert "url" not in remote_srv
+        assert "httpUrl" not in remote_srv
+        assert remote_srv.get("headers", {}).get("Authorization") == "Bearer TEST_TOKEN"

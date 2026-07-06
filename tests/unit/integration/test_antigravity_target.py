@@ -267,6 +267,51 @@ def test_antigravity_mcp_writes_mcp_servers_to_dedicated_file(tmp_path: Path) ->
     assert data["mcpServers"]["demo"]["command"] == "npx"
 
 
+def test_antigravity_mcp_remote_server_uses_server_url(tmp_path: Path) -> None:
+    (tmp_path / ".agents").mkdir()
+    adapter = AntigravityClientAdapter(project_root=tmp_path, user_scope=False)
+
+    server_info = {
+        "name": "remote-demo",
+        "remotes": [
+            {
+                "url": "https://api.example.com/mcp/",
+                "transport_type": "sse",
+            }
+        ],
+    }
+    server_config = adapter._format_server_config(server_info)
+    assert "serverUrl" in server_config
+    assert server_config["serverUrl"] == "https://api.example.com/mcp/"
+    assert "url" not in server_config
+    assert "httpUrl" not in server_config
+
+
+def test_antigravity_mcp_runtime_is_detected_when_agents_dir_exists(tmp_path: Path) -> None:
+    from apm_cli.integration.mcp_integrator_install import _discover_installed_runtimes
+
+    # Without .agents, not detected
+    assert "antigravity" not in _discover_installed_runtimes(tmp_path, user_scope=False)
+
+    # With .agents, detected
+    (tmp_path / ".agents").mkdir()
+    assert "antigravity" in _discover_installed_runtimes(tmp_path, user_scope=False)
+
+
+def test_antigravity_mcp_runtime_is_detected_at_user_scope_when_agy_binary_exists(
+    monkeypatch,
+) -> None:
+    import shutil
+
+    from apm_cli.integration.mcp_integrator_install import _discover_installed_runtimes
+
+    # Mock shutil.which to find 'agy'
+    monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/local/bin/agy" if cmd == "agy" else None)
+
+    # At user scope, should detect antigravity since 'agy' binary exists
+    assert "antigravity" in _discover_installed_runtimes(Path("/nonexistent"), user_scope=True)
+
+
 # ---------------------------------------------------------------------------
 # Hooks -> .agents/hooks.json in Antigravity's OWN native schema
 # ---------------------------------------------------------------------------
