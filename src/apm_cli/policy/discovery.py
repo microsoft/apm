@@ -3,13 +3,14 @@
 Discovery flow:
 1. Extract org from git remote (github.com/contoso/my-project -> "contoso")
 2. Determine host profile (default or ado) to select candidate repos
-3. Try candidate repos in precedence order (.github > .apm > _apm)
+3. Try candidate repos in precedence order (.github-private > .github > .apm > _apm)
 4. Fetch apm-policy.yml via GitHub Contents API or ADO Items API
 5. Resolve inheritance chain via resolve_policy_chain
 6. Cache the **merged effective policy** with chain metadata
 7. Parse and return ApmPolicy
 
 Candidate repo precedence:
+- .github-private -- private org-wide config (preferred; skipped on ADO)
 - .github  -- GitHub convention (skipped on ADO)
 - .apm     -- cross-platform convention (skipped on ADO)
 - _apm     -- universal fallback (valid on every git host)
@@ -68,7 +69,7 @@ logger = logging.getLogger(__name__)
 
 # Candidate repo names in precedence order (first valid policy wins).
 # Host profiles select which candidates are valid for a given git host.
-_DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github", ".apm", "_apm")
+_DEFAULT_POLICY_REPOS: tuple[str, ...] = (".github-private", ".github", ".apm", "_apm")
 _ADO_POLICY_REPOS: tuple[str, ...] = ("_apm",)
 
 # ADO project name for the policy repo (ADO requires a project container).
@@ -655,7 +656,7 @@ def _auto_discover(
     1. Run git remote get-url origin
     2. Parse org + host from URL
     3. Select host profile to determine candidate repos
-    4. Try each candidate in precedence order (.github > .apm > _apm)
+    4. Try each candidate in precedence order (.github-private > .github > .apm > _apm)
        - 404/absent -> continue to next candidate
        - Error (auth, timeout, malformed) -> fail-closed immediately
        - Found -> return (first match wins)

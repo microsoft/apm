@@ -100,7 +100,7 @@ Inherit from a parent policy. See [Inheritance](#inheritance).
 
 | Value | Source |
 |-------|--------|
-| `org` | Parent org's `.github/apm-policy.yml` |
+| `org` | Parent org's `.github-private/apm-policy.yml` (falls back to `.github`) |
 | `owner/repo` | Cross-org policy from a specific repository |
 | `https://...` | Direct URL to a policy file |
 

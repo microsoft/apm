@@ -44,9 +44,10 @@ APM discovers your org-level policy by checking candidate repos in this order --
 
 | Priority | Repo name | Valid on |
 |----------|-----------|---------|
-| 1 | `.github` | GitHub and GitHub API-compatible hosts |
-| 2 | `.apm` | GitHub and GitHub API-compatible hosts |
-| 3 | `_apm` | GitHub API-compatible hosts and Azure DevOps |
+| 1 | `.github-private` | GitHub and GitHub API-compatible hosts |
+| 2 | `.github` | GitHub and GitHub API-compatible hosts |
+| 3 | `.apm` | GitHub and GitHub API-compatible hosts |
+| 4 | `_apm` | GitHub API-compatible hosts and Azure DevOps |
 
 Azure DevOps does not allow repository names starting or ending with a period, so only `_apm` is tried on ADO hosts. ADO requires repositories to live inside projects; the convention uses `_apm` for both the project and repo:
 
@@ -57,11 +58,11 @@ Azure DevOps does not allow repository names starting or ending with a period, s
       apm-policy.yml
 ```
 
-On GitHub and GitHub API-compatible hosts, the `.github` convention remains the recommended default:
+On GitHub and GitHub API-compatible hosts, the `.github-private` repo is preferred because policy files typically contain internal governance rules that should not be public. If `.github-private` does not exist, APM falls back to `.github`:
 
 ```
 <org>/
-  .github/
+  .github-private/
     apm-policy.yml         # auto-discovered by every repo in <org>
 ```
 
@@ -183,11 +184,11 @@ For lockfile-based forensic recipes, see the [Governance Guide §13: enforcement
 
 ## Get started in 20 minutes
 
-This is nothing-to-working-policy. By the end you have a file in your org's `.github` repo that blocks one bad package across every repo.
+This is nothing-to-working-policy. By the end you have a file in your org's `.github-private` repo (or `.github` if you prefer public policy) that blocks one bad package across every repo.
 
 ### 1. Write the minimal policy
 
-Copy this into `<your-org>/.github/apm-policy.yml`. It blocks one package family and starts in `warn` so you do not break anyone on day one:
+Copy this into `<your-org>/.github-private/apm-policy.yml` (or `<your-org>/.github/apm-policy.yml`). It blocks one package family and starts in `warn` so you do not break anyone on day one:
 
 ```yaml
 name: "Acme baseline policy"
@@ -203,7 +204,7 @@ Commit and push. On the next `apm install` in any repo in the org, a user who de
 
 ### 2. Preview before you commit
 
-Point at a policy explicitly to test it before it lands in `.github`:
+Point at a policy explicitly to test it before it lands in `.github-private`:
 
 ```bash
 apm policy status --policy-source ./apm-policy.yml
