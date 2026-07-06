@@ -636,7 +636,7 @@ class TestDiscoverPolicy(unittest.TestCase):
             stdout="https://github.com/contoso/my-project.git\n",
         )
         # .github-private will 404, falling through to .github which has a cache hit
-        mock_fetch.return_value = (None, "404: Not Found")
+        mock_fetch.return_value = (None, "404: Policy file not found")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
