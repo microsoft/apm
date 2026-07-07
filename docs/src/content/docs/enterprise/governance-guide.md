@@ -393,7 +393,7 @@ graph TD
     style P4 fill:#fce4ec,stroke:#c2185b,stroke-width:3px,color:#000
 ```
 
-**Phase 1 -- ship a warn-mode policy.** Land `apm-policy.yml` in `<org>/.github` with `enforcement: warn`. Nothing breaks anywhere. Every `apm install` in the org now discovers the policy, runs the checks, and logs `[!]` warnings for violations -- but proceeds.
+**Phase 1 -- ship a warn-mode policy.** Land `apm-policy.yml` in `<org>/.github-private` (or `<org>/.github`) with `enforcement: warn`. Nothing breaks anywhere. Every `apm install` in the org now discovers the policy, runs the checks, and logs `[!]` warnings for violations -- but proceeds.
 
 **Phase 2 -- wire audit into CI.** Use a shared GitHub Actions template (or composite action) that runs `apm audit --ci --policy org -f sarif` and uploads the SARIF to GitHub Code Scanning. Violations become visible to repo owners as code-scanning alerts. Be honest with stakeholders here: in `warn` mode, audit rewrites violations to `passed=True` so the exit code stays 0. CI does not fail. The visibility is in the SARIF + Code Scanning UI, not in the green/red check. Branch protection cannot enforce yet.
 
@@ -423,9 +423,9 @@ For richer customization (matrix builds, monorepo splits, vendored policy paths)
 `apm audit --ci` in warn mode rewrites violations to `passed=True` (audit.py:589-598), so the audit command exits 0 even on policy violations. Visibility is in the SARIF upload + Code Scanning UI, not in branch-protection status. To gate merges on policy violations, you must run in `block` mode.
 :::
 
-**Phase 3 -- triage and clean up.** Repo owners either fix their `apm.yml` to comply with the policy, or they open a PR to `<org>/.github/apm-policy.yml` to add an explicit allow entry with rationale. The PR flow is the policy change-management trail (see section 12).
+**Phase 3 -- triage and clean up.** Repo owners either fix their `apm.yml` to comply with the policy, or they open a PR to the org policy repo (`<org>/.github-private/apm-policy.yml` or `<org>/.github/apm-policy.yml`) to add an explicit allow entry with rationale. The PR flow is the policy change-management trail (see section 12).
 
-**Phase 4 -- flip to block.** Once Code Scanning shows the violation backlog is drained, change `enforcement: block` in `<org>/.github/apm-policy.yml`. Stage by team if the org is large: a team can adopt block early by setting `enforcement: block` in its own team-level intermediate policy, leaving the org policy at `warn`. (Tighten-only merge means the team's `block` wins for repos under that team's `extends:` chain.) Use `apm policy status --check` in CI as a pre-flight that explains the effective policy and surfaces what would be blocked, before the gate phase actually blocks it.
+**Phase 4 -- flip to block.** Once Code Scanning shows the violation backlog is drained, change `enforcement: block` in the org policy repo. Stage by team if the org is large: a team can adopt block early by setting `enforcement: block` in its own team-level intermediate policy, leaving the org policy at `warn`. (Tighten-only merge means the team's `block` wins for repos under that team's `extends:` chain.) Use `apm policy status --check` in CI as a pre-flight that explains the effective policy and surfaces what would be blocked, before the gate phase actually blocks it.
 
 **Circuit-breaker rollout for large fleets.** For 100+ repos, do not flip block org-wide in one commit. Stage: enable `block` for 10% of repos for 1 week (via team-level extends), monitor SARIF alert volume and on-call pages, expand to 50% for 1 week, then 100%. If SARIF volume spikes or on-call escalations cluster, revert to `warn` at the org level (one commit) while you triage.
 
@@ -437,13 +437,13 @@ For step-by-step CI YAML and SARIF upload examples beyond the snippet above, see
 
 The org policy file is the trust root. Protecting it is on you, not on APM.
 
-- **CODEOWNERS on `<org>/.github/apm-policy.yml`** -- restrict to a security team. Every change requires their review.
-- **Branch protection on `<org>/.github` main** -- required reviewers, no force push, no direct push to main, dismiss stale approvals on new commits.
-- **GitHub Ruleset on the org `.github` repo** (recommended) -- requires approval from a specific team for any change to policy files. See [GitHub Rulesets](../integrations/github-rulesets/).
+- **CODEOWNERS on `<org>/.github-private/apm-policy.yml`** (or `<org>/.github/apm-policy.yml`) -- restrict to a security team. Every change requires their review.
+- **Branch protection on `<org>/.github-private` main** (or `<org>/.github`) -- required reviewers, no force push, no direct push to main, dismiss stale approvals on new commits.
+- **GitHub Ruleset on the org `.github-private` repo** (recommended) -- requires approval from a specific team for any change to policy files. See [GitHub Rulesets](../integrations/github-rulesets/).
 - **Change history is `git log apm-policy.yml`.** Rationale lives in commit messages and PR descriptions. Make commit-message rationale a CODEOWNERS-checked review item.
 - **Policy change cooling period** (recommended) -- every change to `apm-policy.yml` requires a PR with rationale and a 24-72 hour waiting period before merge. This is a process control, not a code control, but it is the single most important thing you can add.
 
-**Separation of duties for SOX / SOD-sensitive environments.** CODEOWNERS for `apm-policy.yml` should require approvals from a team distinct from the team authoring the change. Configure GitHub Rulesets on the `<org>/.github` repo to require reviewers from `@org/policy-approvers`, where that team is disjoint from `@org/policy-authors`. The same author cannot self-approve, and the approval team has no commit rights to the policy file directly.
+**Separation of duties for SOX / SOD-sensitive environments.** CODEOWNERS for `apm-policy.yml` should require approvals from a team distinct from the team authoring the change. Configure GitHub Rulesets on the `<org>/.github-private` (or `<org>/.github`) repo to require reviewers from `@org/policy-approvers`, where that team is disjoint from `@org/policy-authors`. The same author cannot self-approve, and the approval team has no commit rights to the policy file directly.
 
 **Lint for bypass flags in CI workflows.** Add a pre-merge check that fails any PR introducing a policy-bypass flag without an explicit security review label:
 
@@ -541,7 +541,7 @@ graph TD
     style HubYaml fill:#fce4ec,stroke:#c2185b,stroke-width:1px,color:#000
 ```
 
-**Minimal policy (1-10 repos)** -- one file at `<org>/.github/apm-policy.yml`:
+**Minimal policy (1-10 repos)** -- one file at `<org>/.github-private/apm-policy.yml` (or `<org>/.github/apm-policy.yml`):
 
 ```yaml
 name: "Starter policy"
@@ -577,14 +577,14 @@ compilation:
 **Hub + org + repo (100+ repos)** -- enterprise hub with broad allows, org extending and tightening, repos pinning the hash:
 
 ```yaml
-# enterprise-hub-org/.github/apm-policy.yml
+# enterprise-hub-org/.github-private/apm-policy.yml
 name: "Enterprise baseline"
 version: "1.0.0"
 enforcement: warn
 dependencies:
   allow: ["microsoft/*", "contoso/*", "partner-corp/*"]
 
-# contoso/.github/apm-policy.yml
+# contoso/.github-private/apm-policy.yml
 extends: "enterprise-hub-org"
 enforcement: block
 dependencies:
@@ -601,7 +601,7 @@ policy:
 ## 16. Where to next
 
 :::tip[Starting a pilot?]
-**15-minute path:** copy `templates/apm-policy-starter.yml` to `<your-org>/.github/apm-policy.yml`, wire the CI YAML from section 11 Phase 2, ship in warn mode. Flip to block once SARIF is clean.
+**15-minute path:** copy `templates/apm-policy-starter.yml` to `<your-org>/.github-private/apm-policy.yml` (or `<your-org>/.github/apm-policy.yml`), wire the CI YAML from section 11 Phase 2, ship in warn mode. Flip to block once SARIF is clean.
 :::
 
 - [`apm-policy.yml`](./apm-policy/) -- the file's mental model.

@@ -943,7 +943,7 @@ All violation messages above flow through `InstallLogger.policy_violation`; unde
 
 Checklist to publish a policy:
 
-1. Create `<org>/.github/apm-policy.yml` in the org's `.github` repository.
+1. Create `<org>/.github-private/apm-policy.yml` (or `<org>/.github/apm-policy.yml`) in the org's policy repository.
 2. Start from the [Standard org policy](#standard-org-policy) example above and trim it to the minimum that reflects your governance posture.
 3. Set `enforcement: warn` first. Let CI surface diagnostics across consuming repos for one cycle without breaking installs.
 4. When the warn-cycle is clean, switch to `enforcement: block`. Communicate the change in your org's CHANGELOG/announcements channel — `apm install` will start failing for any non-compliant repo.

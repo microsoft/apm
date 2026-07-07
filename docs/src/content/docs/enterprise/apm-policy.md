@@ -204,7 +204,7 @@ Commit and push. On the next `apm install` in any repo in the org, a user who de
 
 ### 2. Preview before you commit
 
-Point at a policy explicitly to test it before it lands in `.github-private`:
+Point at a policy explicitly to test it before it lands in your policy repo (`.github-private` or `.github`):
 
 ```bash
 apm policy status --policy-source ./apm-policy.yml

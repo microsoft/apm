@@ -700,6 +700,17 @@ def _auto_discover(
                 candidate_repo,
                 host,
             )
+            # Warn when .github-private is absent on a GitHub host -- GitHub
+            # returns 404 (not 403) when the token lacks private-repo scope,
+            # so an absent result may mask a token-permission problem.
+            if candidate_repo == ".github-private" and _is_github_host(host):
+                logger.warning(
+                    "Policy repo %s/%s not found (or token lacks private-repo "
+                    "read scope). If your org publishes policy in .github-private, "
+                    "ensure the token has Contents:read permission on that repo.",
+                    org,
+                    candidate_repo,
+                )
             continue
 
         # Any other outcome (found, error, malformed, etc.) -> return immediately
