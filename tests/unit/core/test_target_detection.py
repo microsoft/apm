@@ -8,6 +8,7 @@ import pytest
 from apm_cli.core.target_detection import (
     ALL_CANONICAL_TARGETS,
     EXPERIMENTAL_TARGETS,
+    MCP_ONLY_TARGETS,
     VALID_TARGET_VALUES,
     TargetParamType,
     can_dedup_agents_md_instructions,
@@ -901,6 +902,40 @@ class TestTargetParamType:
         for t in ALL_CANONICAL_TARGETS:
             assert t in result
         assert "intellij" in result
+
+
+class TestIntelliJConstantGuards:
+    """Constant-split guards ensuring intellij stays MCP-only (#1957).
+
+    IntelliJ is an MCP-only pseudo-target -- it must be in MCP_ONLY_TARGETS
+    and VALID_TARGET_VALUES, but NOT in ALL_CANONICAL_TARGETS. The 'all'
+    expansion must never include it.
+    """
+
+    def test_intellij_not_in_all_canonical_targets(self):
+        """'intellij' must NOT appear in ALL_CANONICAL_TARGETS.
+
+        ALL_CANONICAL_TARGETS drives the 'all' expansion. IntelliJ is
+        MCP-only and must live in MCP_ONLY_TARGETS instead.
+        """
+        assert "intellij" not in ALL_CANONICAL_TARGETS
+
+    def test_intellij_in_mcp_only_targets(self):
+        """'intellij' must appear in MCP_ONLY_TARGETS (constant guard)."""
+        assert "intellij" in MCP_ONLY_TARGETS
+
+    def test_all_expansion_excludes_intellij(self):
+        """normalize_target_list('all') must NOT include 'intellij'.
+
+        'all' expands only to ALL_CANONICAL_TARGETS. MCP-only targets
+        require explicit opt-in via '--target intellij' or 'all,intellij'.
+        """
+        result = normalize_target_list("all")
+        assert isinstance(result, list)
+        assert "intellij" not in result
+        # Verify all canonical targets ARE present
+        for t in ALL_CANONICAL_TARGETS:
+            assert t in result
 
 
 # ---------------------------------------------------------------------------

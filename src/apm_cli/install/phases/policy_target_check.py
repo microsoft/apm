@@ -61,6 +61,14 @@ def run(ctx: InstallContext) -> None:
         return  # no target to check -- trivially passes
 
     # ------------------------------------------------------------------
+    # 3b. Normalize MCP-only pseudo-targets to their canonical form so
+    #     policy allow-lists match (e.g. intellij -> copilot).
+    # ------------------------------------------------------------------
+    from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
+
+    effective_target = RUNTIME_TO_CANONICAL_TARGET.get(effective_target, effective_target)
+
+    # ------------------------------------------------------------------
     # 4. Run policy checks with effective_target populated
     # ------------------------------------------------------------------
     from apm_cli.policy.policy_checks import run_dependency_policy_checks

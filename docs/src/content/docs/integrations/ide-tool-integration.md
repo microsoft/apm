@@ -141,7 +141,7 @@ that directory is the auto-detect signal.
 
 ```bash
 # Install an MCP server into the JetBrains user-scope config
-apm install --mcp --runtime intellij <package>
+apm install --mcp --target intellij <package>
 ```
 
 Notes and limits:
@@ -149,7 +149,7 @@ Notes and limits:
 - **Auto-detect is user-scope only.** Unlike project markers such as `.cursor/`
   or `.windsurf/`, JetBrains is detected from the global config directory, not a
   file in your repo. It is therefore detected for every project on the machine
-  once the plugin directory exists. Use `--runtime intellij` to target it
+  once the plugin directory exists. Use `--target intellij` to target it
   explicitly regardless of auto-detect.
 - **Runtime env substitution.** JetBrains Copilot resolves `${env:VAR}` in
   `mcp.json` at server start. APM preserves env-var placeholders as
