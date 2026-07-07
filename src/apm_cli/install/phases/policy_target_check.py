@@ -63,10 +63,14 @@ def run(ctx: InstallContext) -> None:
     # ------------------------------------------------------------------
     # 3b. Normalize MCP-only pseudo-targets to their canonical form so
     #     policy allow-lists match (e.g. intellij -> copilot).
+    #     Only MCP_ONLY_TARGETS need this -- canonical targets like
+    #     'vscode' must pass through unchanged.
     # ------------------------------------------------------------------
+    from apm_cli.core.target_detection import MCP_ONLY_TARGETS
     from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
 
-    effective_target = RUNTIME_TO_CANONICAL_TARGET.get(effective_target, effective_target)
+    if effective_target in MCP_ONLY_TARGETS:
+        effective_target = RUNTIME_TO_CANONICAL_TARGET.get(effective_target, effective_target)
 
     # ------------------------------------------------------------------
     # 4. Run policy checks with effective_target populated
