@@ -537,8 +537,33 @@ class TestOrphanDetectionIncludesDevDeps:
         manifest.has_apm_dependencies.return_value = False
         manifest.has_any_apm_dependencies.return_value = True
         manifest.get_mcp_dependencies.return_value = []
+        manifest.get_all_mcp_dependencies.return_value = []
 
         # No lockfile on disk -- should say "lockfile missing", not "no deps"
         result = _check_lockfile_exists(tmp_path, manifest)
         assert result.passed is False
         assert "missing" in result.message.lower()
+
+    def test_check_ref_consistency_detects_dev_dep_mismatch(self) -> None:
+        """_check_ref_consistency should detect ref mismatches in dev deps."""
+        from apm_cli.policy.ci_checks import _check_ref_consistency
+
+        dev_dep = DependencyReference(repo_url="owner/dev-pkg", reference="v2.0")
+        manifest = MagicMock(spec=APMPackage)
+        manifest.get_apm_dependencies.return_value = []
+        manifest.get_dev_apm_dependencies.return_value = [dev_dep]
+        manifest.get_all_apm_dependencies.return_value = APMPackage.get_all_apm_dependencies(
+            manifest
+        )
+
+        lock = MagicMock(spec=LockFile)
+        lock.get_dependency.return_value = LockedDependency(
+            repo_url="owner/dev-pkg",
+            is_dev=True,
+            resolved_ref="v1.0",
+            resolved_by=None,
+        )
+
+        result = _check_ref_consistency(manifest, lock)
+        assert result.passed is False
+        assert "ref mismatch" in result.message.lower()

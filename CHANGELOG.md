@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm prune`, `apm audit --ci` orphan detection, and the lockfile-exists
+  check now include `devDependencies.apm` entries, fixing false orphan
+  reports, spurious CI failures, and a misleading message for dev-only
+  projects. (#2042, closes #2033)
+
 ## [0.24.0] - 2026-07-05
 
 ### Added

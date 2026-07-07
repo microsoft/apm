@@ -234,7 +234,7 @@ def _check_config_consistency(
     from ..drift import detect_config_drift
     from ..integration.mcp_integrator import MCPIntegrator
 
-    mcp_deps = manifest.get_mcp_dependencies()
+    mcp_deps = manifest.get_all_mcp_dependencies()
     current_configs = MCPIntegrator.get_server_configs(mcp_deps)
     stored_configs = lock.mcp_configs or {}
 

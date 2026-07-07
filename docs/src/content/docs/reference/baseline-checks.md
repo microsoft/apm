@@ -59,14 +59,14 @@ the [policy schema](./policy-schema/).
 
 ### `lockfile-exists`
 
-- **What it verifies.** That `apm.lock.yaml` is present whenever the project has APM or MCP dependencies, or whenever an existing lockfile records local content under the synthesized self-entry.
-- **Fails when.** `apm.yml` declares dependencies but no lockfile is on disk.
+- **What it verifies.** That `apm.lock.yaml` is present whenever the project has APM or MCP dependencies (including `devDependencies`), or whenever an existing lockfile records local content under the synthesized self-entry.
+- **Fails when.** `apm.yml` declares dependencies (production or dev) but no lockfile is on disk.
 - **Effect.** Subsequent checks are skipped (the lockfile is required input).
 - **Remediation.** Run `apm install` to generate `apm.lock.yaml` and commit it.
 
 ### `ref-consistency`
 
-- **What it verifies.** That every dependency's `reference` in `apm.yml` matches the `resolved_ref` recorded in the lockfile.
+- **What it verifies.** That every dependency's `reference` in `apm.yml` (both `dependencies.apm` and `devDependencies.apm`) matches the `resolved_ref` recorded in the lockfile.
 - **Fails when.** A manifest ref differs from the lockfile entry, or the manifest declares a dependency that is missing from the lockfile.
 - **Remediation.** Run `apm install` so the lockfile re-resolves to the manifest, then commit `apm.lock.yaml`.
 
@@ -78,7 +78,7 @@ the [policy schema](./policy-schema/).
 
 ### `no-orphaned-packages`
 
-- **What it verifies.** That every dependency in the lockfile is still declared in `apm.yml`. The synthesized self-entry is excluded.
+- **What it verifies.** That every dependency in the lockfile is still declared in `apm.yml` (in either `dependencies.apm` or `devDependencies.apm`). The synthesized self-entry is excluded.
 - **Fails when.** The lockfile holds a package that the manifest no longer lists.
 - **Remediation.** Run `apm install` to prune the orphan, then commit `apm.lock.yaml`.
 
