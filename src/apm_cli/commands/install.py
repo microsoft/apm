@@ -85,6 +85,7 @@ from apm_cli.install.services import (
 # level name lookup -- keeping it co-located means @patch on this module
 # intercepts those calls without test changes.
 from apm_cli.install.validation import (
+    _generic_host_ambiguous_subpath_hint,
     _local_path_failure_reason,
     _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _validate_package_exists,
@@ -544,6 +545,8 @@ def _resolve_package_references(
                 _marketplace_provenance[identity] = marketplace_provenance
         else:
             reason = _local_path_failure_reason(dep_ref)
+            if not reason:
+                reason = _generic_host_ambiguous_subpath_hint(dep_ref)
             if not reason:
                 # Round-4 panel fix (devx-ux): name the four-step probe
                 # chain explicitly when the validator exhausted it

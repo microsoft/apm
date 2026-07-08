@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install host/org/repo/subpath#ref` on an unrecognised self-hosted FQDN
+  no longer fails with a misleading "not accessible or doesn't exist" error.
+  The failure reason now explains that the whole path was folded into a
+  single repository path and suggests setting `GITLAB_HOST` /
+  `APM_GITLAB_HOSTS` if the target is a self-hosted GitLab instance, or using
+  an explicit `git:` + `path:` entry in `apm.yml` otherwise. (by @rrazvd,
+  closes #2066)
+
 ## [0.24.0] - 2026-07-05
 
 ### Added
