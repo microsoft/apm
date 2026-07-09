@@ -5,7 +5,8 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
-import toml
+import tomlkit
+from tomlkit.exceptions import ParseError
 
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
@@ -94,8 +95,7 @@ class CodexClientAdapter(MCPClientAdapter):
         # Ensure directory exists
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(config_path, "w", encoding="utf-8") as f:
-            toml.dump(current_config, f)
+        config_path.write_text(tomlkit.dumps(current_config), encoding="utf-8")
         os.chmod(config_path, 0o600)
         _log.debug("Codex config written to %s", config_path)
         return True
@@ -113,9 +113,9 @@ class CodexClientAdapter(MCPClientAdapter):
             return {}
 
         try:
-            with open(config_path, encoding="utf-8") as f:
-                return toml.load(f)
-        except toml.TomlDecodeError as exc:
+            with open(config_path, encoding="utf-8") as config_file:
+                return tomlkit.load(config_file)
+        except ParseError as exc:
             _log.debug("Failed to parse Codex config at %s", config_path, exc_info=True)
             _rich_warning(
                 f"Could not parse {config_path}: {exc} -- skipping config write to avoid data loss",

@@ -218,6 +218,7 @@ dependencies = [
     { name = "ruamel-yaml" },
     { name = "toml" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "tomlkit" },
     { name = "watchdog" },
     { name = "websockets" },
 ]
@@ -262,6 +263,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.11.0" },
     { name = "toml", specifier = ">=0.10.2" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=1.2.0" },
+    { name = "tomlkit", specifier = ">=0.13" },
     { name = "watchdog", specifier = ">=3.0.0" },
     { name = "websockets", specifier = ">=12,<17" },
 ]
