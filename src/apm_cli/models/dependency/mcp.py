@@ -24,6 +24,12 @@ _KNOWN_DICT_KEYS = frozenset(
         "url",
         "command",
         "extra",  # explicit extra block is also a known key
+        # Install-time provenance field: reserved here so a manifest key named
+        # ``resolved_by`` is treated as known (ignored by from_dict, never
+        # constructed from user input) instead of passing through ``extra`` into
+        # the serialized config. Only MCPIntegrator.collect_transitive may set
+        # it. Keeps the "never leaks into mcp_configs" invariant airtight (#2081).
+        "resolved_by",
     }
 )
 

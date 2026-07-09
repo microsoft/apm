@@ -604,6 +604,48 @@ class TestUpdateLockfile:
         lf = LockFile.read(lock_path)
         assert lf.mcp_servers == []
 
+    def test_updates_provenance_when_provided(self, tmp_path):
+        lock_path = tmp_path / "apm.lock.yaml"
+        self._write_minimal_lockfile(lock_path)
+        configs = {"shadcn": {"name": "shadcn"}}
+        prov = {"shadcn": "@qado/agent-config"}
+
+        MCPIntegrator.update_lockfile(
+            {"shadcn"}, lock_path=lock_path, mcp_configs=configs, mcp_config_provenance=prov
+        )
+
+        from apm_cli.deps.lockfile import LockFile
+
+        lf = LockFile.read(lock_path)
+        assert lf.mcp_config_provenance == prov
+
+    def test_prunes_dangling_provenance_when_config_removed(self, tmp_path):
+        # Seed a lockfile that carries provenance for 'shadcn'. A later update
+        # rewrites mcp_configs WITHOUT 'shadcn' and without an explicit
+        # provenance arg (the single-add path). The dangling 'shadcn'
+        # provenance must be pruned so it cannot exempt an orphan (#2081).
+        lock_path = tmp_path / "apm.lock.yaml"
+        lock_path.write_text(
+            "lockfile_version: '1'\n"
+            "generated_at: '2026-01-01'\n"
+            "dependencies: []\n"
+            "mcp_configs:\n"
+            "  shadcn:\n"
+            "    name: shadcn\n"
+            "mcp_config_provenance:\n"
+            "  shadcn: '@qado/agent-config'\n",
+            encoding="utf-8",
+        )
+
+        MCPIntegrator.update_lockfile(
+            {"other"}, lock_path=lock_path, mcp_configs={"other": {"name": "other"}}
+        )
+
+        from apm_cli.deps.lockfile import LockFile
+
+        lf = LockFile.read(lock_path)
+        assert lf.mcp_config_provenance == {}
+
 
 # ===========================================================================
 # MCPIntegrator.remove_stale - vscode

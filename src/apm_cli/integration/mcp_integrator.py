@@ -836,6 +836,17 @@ class MCPIntegrator:
                 lockfile.mcp_configs = mcp_configs
             if mcp_config_provenance is not None:
                 lockfile.mcp_config_provenance = mcp_config_provenance
+            # Invariant: provenance only carries entries that still have a live
+            # config. Prune dangling keys unconditionally so a caller that
+            # rewrites mcp_configs without an explicit provenance argument (e.g.
+            # the single-server ``apm install mcp`` path) can never leave a
+            # stale entry that would exempt a genuinely orphaned server (#2081).
+            if lockfile.mcp_config_provenance:
+                lockfile.mcp_config_provenance = {
+                    name: pkg
+                    for name, pkg in lockfile.mcp_config_provenance.items()
+                    if name in lockfile.mcp_configs
+                }
             if lockfile.is_semantically_equivalent(existing_lockfile):
                 _log.debug("MCP lockfile unchanged -- skipping write")
                 return
