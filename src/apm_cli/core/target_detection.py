@@ -126,9 +126,8 @@ def detect_target(  # noqa: PLR0911
     """
     # Priority 1: Explicit --target flag
     if explicit_target:
-        if (
-            explicit_target in ("copilot", "vscode", "agents")
-            or explicit_target in MCP_ONLY_TARGETS
+        if explicit_target in ("copilot", "vscode", "agents") or (
+            isinstance(explicit_target, str) and explicit_target in MCP_ONLY_TARGETS
         ):
             return "vscode", "explicit --target flag"
         elif explicit_target == "claude":
@@ -154,7 +153,9 @@ def detect_target(  # noqa: PLR0911
 
     # Priority 2: apm.yml target setting
     if config_target:
-        if config_target in ("copilot", "vscode", "agents") or config_target in MCP_ONLY_TARGETS:
+        if config_target in ("copilot", "vscode", "agents") or (
+            isinstance(config_target, str) and config_target in MCP_ONLY_TARGETS
+        ):
             return "vscode", "apm.yml target"
         elif config_target == "claude":
             return "claude", "apm.yml target"

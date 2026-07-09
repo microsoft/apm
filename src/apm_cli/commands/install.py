@@ -946,7 +946,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     "target",
     type=TargetParamType(),
     default=None,
-    help="Target harness(es) to deploy to. Use commas for multiple targets; repeated flags are not supported. Values: copilot, claude, cursor, opencode, codex, gemini, antigravity, windsurf, kiro, intellij, agent-skills, all. 'intellij' is MCP-only and configures JetBrains Copilot without file-level primitive deployment. 'all' excludes agent-skills, antigravity, and intellij; combine them explicitly when needed. Experimental copilot-cowork and copilot-app values require their feature flags. Resolution order: --target > apm.yml targets: > apm config target > auto-detect.",
+    help="Target harness(es) to deploy to. Use commas for multiple targets; repeated flags are not supported. Values: copilot, claude, cursor, opencode, codex, gemini, antigravity, windsurf, kiro, intellij, agent-skills, all. 'intellij' is MCP-only and configures JetBrains Copilot without file-level primitive deployment. 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro; combine agent-skills, antigravity, or intellij explicitly when needed. Experimental copilot-cowork and copilot-app values require their feature flags. Resolution order: --target > apm.yml targets: > apm config target > auto-detect.",
 )
 @click.option(
     "--allow-insecure",
