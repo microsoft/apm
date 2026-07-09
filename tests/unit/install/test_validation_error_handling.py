@@ -275,7 +275,6 @@ class TestGenericHostAmbiguousSubpathHint:
         assert reason is not None
         assert "GITLAB_HOST=gitlab.company.com" in reason
         assert "APM_GITLAB_HOSTS" in reason
-        assert "gitlab.company.com" in reason
 
 
 # ---------------------------------------------------------------------------

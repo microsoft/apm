@@ -80,12 +80,11 @@ from apm_cli.install.services import (
 
 # Re-export validation leaf helpers so that existing test patches like
 # @patch("apm_cli.commands.install._validate_package_exists") keep working.
-# _validate_and_add_packages_to_apm_yml stays here (not moved) because it
-# calls _validate_package_exists and _local_path_failure_reason via module-
-# level name lookup -- keeping it co-located means @patch on this module
-# intercepts those calls without test changes.
+# _validate_and_add_packages_to_apm_yml stays co-located (module lookup keeps @patch working).
 from apm_cli.install.validation import (
-    _generic_host_ambiguous_subpath_hint,
+    _generic_host_ambiguous_subpath_hint as _ambiguous_subpath_hint,
+)
+from apm_cli.install.validation import (
     _local_path_failure_reason,
     _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _validate_package_exists,
@@ -544,9 +543,7 @@ def _resolve_package_references(
             if marketplace_provenance:
                 _marketplace_provenance[identity] = marketplace_provenance
         else:
-            reason = _local_path_failure_reason(dep_ref)
-            if not reason:
-                reason = _generic_host_ambiguous_subpath_hint(dep_ref)
+            reason = _local_path_failure_reason(dep_ref) or _ambiguous_subpath_hint(dep_ref)
             if not reason:
                 # Round-4 panel fix (devx-ux): name the four-step probe
                 # chain explicitly when the validator exhausted it
