@@ -2033,19 +2033,24 @@ rule filename pattern and frontmatter mapping for the active target.
 For the `antigravity` target, instruction rules MUST be written under
 `.agents/rules/<name>.md`; when the source instruction declares
 `applyTo`, the emitted frontmatter MUST represent it as
-`trigger: glob` plus a `globs` field. To keep deployed-file content
-hashes reproducible across conforming implementations, `globs` MUST be
+`trigger: glob` plus a `globs` field. To reduce sources of divergence
+in deployed-file content hashes across conforming implementations
+(contributing to the canonical-content equivalence check of
+[req-lk-012](#req-lk-012)), `globs` MUST be
 emitted as a YAML scalar when `applyTo` resolves to exactly one glob
 pattern and as a YAML block sequence when it resolves to two or more
 patterns; when `applyTo` is absent or empty the emitted rule file MUST
 NOT carry a frontmatter block. Compile-time deduplication MUST treat
 only those files whose names derive from the currently-resolved
-instruction primitives (as recorded in `apm.lock.yaml` and the
-manifest) as deployed rules; any other `.md` file under
+instruction primitives (specifically, for each resolved instruction
+primitive of name N the derived filename is `.agents/rules/N.md`; the
+authoritative set is the lockfile `deployed_files` list when a
+lockfile is present, falling back to manifest instruction entries on
+first install) as deployed rules; any other `.md` file under
 `.agents/rules/` MUST NOT be treated as a deployed rule and MUST NOT
 suppress instruction content in `AGENTS.md`.
 
-> **Editorial note.** req-tg-005 names the `antigravity` deploy path
+> **Editorial note.** [req-tg-005](#req-tg-005) names the `antigravity` deploy path
 > and frontmatter keys in the normative text rather than delegating
 > them to the non-normative Target Registry companion (contrast
 > [req-tg-002](#req-tg-002)). This is a deliberate, scoped exception:
