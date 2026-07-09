@@ -185,6 +185,45 @@ class TestGetServerConfigs:
         configs = MCPIntegrator.get_server_configs(deps)
         assert set(configs.keys()) == {"a", "b"}
 
+    def test_resolved_by_not_leaked_into_config(self):
+        # Provenance is transient install-time metadata; it must never appear
+        # in the serialized config (else it pollutes drift comparisons) (#2081).
+        dep = _make_dep("svc", transport="stdio")
+        dep.resolved_by = "@qado/agent-config"
+        configs = MCPIntegrator.get_server_configs([dep])
+        assert "resolved_by" not in configs["svc"]
+
+
+# ===========================================================================
+# MCPIntegrator.get_server_provenance
+# ===========================================================================
+
+
+class TestGetServerProvenance:
+    def test_empty(self):
+        assert MCPIntegrator.get_server_provenance([]) == {}
+
+    def test_direct_dep_has_no_provenance(self):
+        # resolved_by defaults to None for root-declared servers -> omitted.
+        assert MCPIntegrator.get_server_provenance([_make_dep("svc")]) == {}
+
+    def test_transitive_dep_recorded(self):
+        dep = _make_dep("shadcn")
+        dep.resolved_by = "@qado/agent-config"
+        assert MCPIntegrator.get_server_provenance([dep]) == {"shadcn": "@qado/agent-config"}
+
+    def test_root_wins_over_transitive_after_dedup(self):
+        # deduplicate() lists the root (resolved_by=None) entry first and drops
+        # the transitive duplicate, so the surviving 'svc' is treated as direct.
+        root = _make_dep("svc")
+        transitive = _make_dep("svc")
+        transitive.resolved_by = "@qado/agent-config"
+        deduped = MCPIntegrator.deduplicate([root, transitive])
+        assert MCPIntegrator.get_server_provenance(deduped) == {}
+
+    def test_string_deps_ignored(self):
+        assert MCPIntegrator.get_server_provenance(["plain-server"]) == {}
+
 
 # ===========================================================================
 # MCPIntegrator._append_drifted_to_install_list

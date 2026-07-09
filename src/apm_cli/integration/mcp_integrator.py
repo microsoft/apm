@@ -261,6 +261,13 @@ class MCPIntegrator:
                                 else:
                                     logger.warning(_trust_msg)
                                 continue
+                        # Record provenance: every server collected here is
+                        # contributed by a sub-package's apm.yml, so it is
+                        # transitive w.r.t. the ROOT manifest even when the
+                        # declaring package is itself a direct dependency. The
+                        # audit's config-consistency check uses this to exempt
+                        # such servers from the orphaned-MCP branch (#2081).
+                        dep.resolved_by = pkg.name or apm_yml_path.parent.name
                         collected.append(dep)
             except Exception:
                 _log.debug(
@@ -449,6 +456,26 @@ class MCPIntegrator:
             elif isinstance(dep, str):
                 configs[dep] = {"name": dep}
         return configs
+
+    @staticmethod
+    def get_server_provenance(mcp_deps: list) -> builtins.dict:
+        """Extract transitive provenance as {name: declaring_package} from MCP deps.
+
+        Only servers carrying a ``resolved_by`` (set by
+        :meth:`collect_transitive` for servers declared by a sub-package)
+        are included. Servers declared directly in the root manifest have
+        ``resolved_by is None`` and are omitted -- absence means "direct",
+        mirroring the dependency-side convention. Because ``mcp_deps`` is the
+        final deduplicated list (root entries listed first, first-wins), a
+        server declared both in the root and transitively resolves to the
+        root entry and is correctly treated as direct here (#2081).
+        """
+        provenance: builtins.dict = {}
+        for dep in mcp_deps:
+            resolved_by = getattr(dep, "resolved_by", None)
+            if resolved_by and hasattr(dep, "name"):
+                provenance[dep.name] = resolved_by
+        return provenance
 
     @staticmethod
     def _append_drifted_to_install_list(
@@ -777,6 +804,7 @@ class MCPIntegrator:
         lock_path: Path | None = None,
         *,
         mcp_configs: builtins.dict | None = None,
+        mcp_config_provenance: builtins.dict | None = None,
     ) -> None:
         """Update the lockfile with the current set of APM-managed MCP server names.
 
@@ -788,6 +816,11 @@ class MCPIntegrator:
             lock_path: Path to the lockfile.  Defaults to ``apm.lock.yaml`` in CWD.
             mcp_configs: Keyword-only.  When provided, overwrites ``mcp_configs``
                          in the lockfile (used for drift-detection baseline).
+            mcp_config_provenance: Keyword-only.  When provided, overwrites
+                         ``mcp_config_provenance`` (name -> declaring package for
+                         transitively-contributed servers). Passed in lockstep
+                         with ``mcp_configs`` so the two never diverge (#2081).
+                         ``None`` leaves the existing value untouched.
         """
         if lock_path is None:
             lock_path = get_lockfile_path(Path.cwd())
@@ -801,6 +834,8 @@ class MCPIntegrator:
             lockfile.mcp_servers = sorted(mcp_server_names)
             if mcp_configs is not None:
                 lockfile.mcp_configs = mcp_configs
+            if mcp_config_provenance is not None:
+                lockfile.mcp_config_provenance = mcp_config_provenance
             if lockfile.is_semantically_equivalent(existing_lockfile):
                 _log.debug("MCP lockfile unchanged -- skipping write")
                 return

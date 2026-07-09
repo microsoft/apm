@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm audit --ci` no longer raises a false `config-consistency` failure for an
+  MCP server declared by a local-path sub-package. Such transitively-contributed
+  servers are now recorded in the lockfile with a new `mcp_config_provenance`
+  map and exempted from the orphaned-MCP branch, mirroring the `resolved_by`
+  exemption already applied to package dependencies. (#2081)
+
 ## [0.24.0] - 2026-07-05
 
 ### Added

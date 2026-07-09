@@ -64,6 +64,13 @@ class MCPDependency:
     url: str | None = None  # Required for self-defined http/sse transports
     command: str | None = None  # Required for self-defined stdio transports
     extra: dict[str, Any] | None = None  # Harness-specific passthrough keys (e.g. oauth)
+    # Install-time provenance: the declaring package identity when this server
+    # was contributed transitively (via a sub-package's apm.yml), else None for
+    # servers declared directly in the root manifest. Set by
+    # ``MCPIntegrator.collect_transitive``; deliberately NOT serialized in
+    # ``to_dict`` so it never leaks into the lockfile ``mcp_configs`` values or
+    # the config-drift comparison (#2081).
+    resolved_by: str | None = None
 
     @classmethod
     def from_string(cls, s: str) -> "MCPDependency":
