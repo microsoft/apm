@@ -201,9 +201,12 @@ class TestClaudeClientAdapterUser(unittest.TestCase):
         self.claude_json = self.home / ".claude.json"
         self.adapter = ClaudeClientAdapter(user_scope=True)
         self._home = patch.object(Path, "home", return_value=self.home)
+        self._config_dir = patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": ""})
         self._home.start()
+        self._config_dir.start()
 
     def tearDown(self):
+        self._config_dir.stop()
         self._home.stop()
         self.tmp.cleanup()
 
@@ -217,6 +220,14 @@ class TestClaudeClientAdapterUser(unittest.TestCase):
         self.assertIn("projects", data)
         self.assertIn("x", data["mcpServers"])
         self.assertIn("y", data["mcpServers"])
+
+    def test_get_config_path_honors_claude_config_dir(self):
+        config_dir = self.home / "custom-claude"
+        with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(config_dir)}):
+            self.assertEqual(
+                Path(self.adapter.get_config_path()),
+                config_dir / ".claude.json",
+            )
 
     def test_new_user_claude_json_created_with_0600_perms(self):
         """New ~/.claude.json must be created with 0o600 to avoid leaking OAuth state."""

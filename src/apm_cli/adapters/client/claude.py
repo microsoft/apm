@@ -4,11 +4,11 @@ Project scope: ``.mcp.json`` at the project root with top-level ``mcpServers``
 (``--scope project`` in Claude Code). Writes are opt-in when ``.claude/`` exists,
 mirroring the Cursor/OpenCode directory-presence convention.
 
-User scope: top-level ``mcpServers`` in ``~/.claude.json`` (``--scope user``).
-Writes are atomic and create the file with ``0o600`` permissions on first
-write so the shared Claude Code config is not silently truncated by a
-concurrent writer and cannot leak any embedded OAuth state to other users
-on a multi-user host.
+User scope: top-level ``mcpServers`` in ``$CLAUDE_CONFIG_DIR/.claude.json``
+when configured, otherwise ``~/.claude.json`` (``--scope user``). Writes are
+atomic and create the file with ``0o600`` permissions on first write so the
+shared Claude Code config is not silently truncated by a concurrent writer
+and cannot leak any embedded OAuth state to other users on a multi-user host.
 
 Local scope (Claude Code's third scope -- the default for ``claude mcp add``,
 storing per-project private config under ``~/.claude.json -> projects.<abs_path>
@@ -20,6 +20,7 @@ See https://code.claude.com/docs/en/mcp
 """
 
 import json
+import os
 from pathlib import Path
 
 from ...utils.atomic_io import atomic_write_text
@@ -141,6 +142,9 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         return self.project_root / ".mcp.json"
 
     def _user_claude_json_path(self) -> Path:
+        config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+        if config_dir:
+            return Path(config_dir).expanduser() / ".claude.json"
         return Path.home() / ".claude.json"
 
     def _should_write_project(self) -> bool:
