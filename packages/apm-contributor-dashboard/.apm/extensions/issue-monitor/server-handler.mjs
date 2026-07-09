@@ -92,7 +92,8 @@ function readBody(req) {
             bytes += chunk.length;
             if (bytes > limit) {
                 cleanup();
-                req.destroy();
+                req.once("error", () => {});
+                req.resume();
                 reject(createPayloadTooLargeError());
                 return;
             }
