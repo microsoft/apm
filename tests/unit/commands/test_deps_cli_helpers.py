@@ -159,3 +159,18 @@ class TestResolveScopeDepsWithPackages:
         installed, _orphaned = _resolve_scope_deps(tmp_path, _make_logger())
         assert installed is not None
         assert any(pkg["name"].endswith("skill-repo") for pkg in installed)
+
+    def test_nested_package_manifest_is_not_an_orphan(self, tmp_path):
+        """A nested subpackage belongs to its installed parent package."""
+        modules_dir = tmp_path / APM_MODULES_DIR
+        parent = modules_dir / "_local" / "package"
+        nested = parent / "sub-package"
+        nested.mkdir(parents=True)
+        (parent / APM_YML_FILENAME).write_text("name: package\nversion: 1.0.0\n")
+        (nested / APM_YML_FILENAME).write_text("name: sub-package\nversion: 1.0.0\n")
+
+        installed, orphaned = _resolve_scope_deps(tmp_path, _make_logger())
+
+        assert installed is not None
+        assert [package["name"] for package in installed] == ["_local/package"]
+        assert orphaned == ["_local/package"]

@@ -461,6 +461,18 @@ class TestScanInstalledPackages:
         result = _scan_installed_packages(tmp_path)
         assert "org/project/repo" in result
 
+    def test_nested_package_manifest_is_part_of_parent(self, tmp_path):
+        """A package manifest nested inside an installed package is not top-level."""
+        parent = tmp_path / "_local" / "package"
+        nested = parent / "sub-package"
+        nested.mkdir(parents=True)
+        _make_apm_yml(parent, "package")
+        _make_apm_yml(nested, "sub-package")
+
+        result = _scan_installed_packages(tmp_path)
+
+        assert result == ["_local/package"]
+
     def test_hidden_dirs_skipped(self, tmp_path):
         """Directories starting with '.' are skipped."""
         hidden = tmp_path / "org" / ".hidden"

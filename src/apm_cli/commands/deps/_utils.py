@@ -10,8 +10,10 @@ from ...models.apm_package import APMPackage
 def _scan_installed_packages(apm_modules_dir: Path) -> list:
     """Scan *apm_modules_dir* for installed package paths.
 
-    Walks the tree to find directories containing ``apm.yml`` or ``.apm``,
-    supporting GitHub (2-level), ADO (3-level), and subdirectory packages.
+    Walks the tree to find top-level directories containing ``apm.yml`` or
+    ``.apm``, supporting GitHub (2-level), ADO (3-level), and subdirectory
+    packages. Package manifests nested below another package are part of that
+    parent package and are excluded.
 
     Returns:
         List of ``"owner/repo"`` or ``"org/project/repo"`` path keys.
@@ -24,6 +26,8 @@ def _scan_installed_packages(apm_modules_dir: Path) -> list:
             continue
         if not ((candidate / APM_YML_FILENAME).exists() or (candidate / APM_DIR).exists()):
             continue
+        if _is_nested_under_package(candidate, apm_modules_dir):
+            continue
         rel_parts = candidate.relative_to(apm_modules_dir).parts
         if len(rel_parts) >= 2:
             installed.append("/".join(rel_parts))
@@ -33,9 +37,9 @@ def _scan_installed_packages(apm_modules_dir: Path) -> list:
 def _is_nested_under_package(candidate: Path, apm_modules_path: Path) -> bool:
     """Check if *candidate* is a sub-directory of another installed package.
 
-    When a plugin ships ``skills/*/SKILL.md`` at its root (outside ``.apm/``),
-    the ``rglob`` scan would otherwise treat each skill sub-directory as an
-    independent package.  This helper walks up from *candidate* towards
+    When a package ships nested package or skill manifests, the ``rglob`` scan
+    would otherwise treat each sub-directory as an independent package. This
+    helper walks up from *candidate* towards
     *apm_modules_path* and returns ``True`` if any intermediate parent already
     contains ``apm.yml``  -- meaning the candidate is a deployment artifact, not
     a standalone package.

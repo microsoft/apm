@@ -221,13 +221,8 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         if ".apm" in rel_parts:
             continue
 
-        # Skip skill sub-dirs nested inside another package (e.g. plugin
-        # skills/ directories that are deployment artifacts, not packages).
-        if (
-            has_skill_md
-            and not has_apm_yml
-            and _is_nested_under_package(candidate, apm_modules_path)
-        ):
+        # Nested manifests are deployment artifacts owned by the parent package.
+        if _is_nested_under_package(candidate, apm_modules_path):
             continue
         scanned_candidates.append((candidate, "/".join(rel_parts), has_apm_yml, has_skill_md))
 
@@ -613,7 +608,7 @@ def _build_dep_tree(apm_dir):
             continue
         if ".apm" in rel_parts:
             continue
-        if has_skill and not has_apm and _is_nested_under_package(candidate, apm_modules_path):
+        if _is_nested_under_package(candidate, apm_modules_path):
             continue
         info = _get_package_display_info(candidate)
         primitives = _count_primitives(candidate)
