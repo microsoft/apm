@@ -512,6 +512,48 @@ class TestDepsTreeCommand(_DepsCmdBase):
         # The self-entry must not appear under any of its representations.
         assert "<self>" not in result.output
 
+    def test_tree_does_not_self_nest_same_repo_virtual_dependencies(self):
+        """Same-repo virtual dependencies appear once in their depth hierarchy."""
+        from apm_cli.deps.lockfile import LockedDependency, LockFile
+
+        repo_url = "example/monorepo"
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text("name: consumer\n")
+            lock = LockFile(
+                lockfile_version="1",
+                generated_at="2025-01-01T00:00:00+00:00",
+                apm_version="0.0.0-test",
+            )
+            for dependency in (
+                LockedDependency(repo_url=repo_url, depth=1, version="1.0.0"),
+                LockedDependency(
+                    repo_url=repo_url,
+                    virtual_path="packages/inner",
+                    is_virtual=True,
+                    depth=2,
+                    resolved_by=repo_url,
+                    version="1.0.0",
+                ),
+                LockedDependency(
+                    repo_url=repo_url,
+                    virtual_path="packages/leaf",
+                    is_virtual=True,
+                    depth=3,
+                    resolved_by=repo_url,
+                    version="1.0.0",
+                ),
+            ):
+                lock.add_dependency(dependency)
+            (tmp / "apm.lock.yaml").write_text(lock.to_yaml())
+
+            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp):
+                result = self.runner.invoke(cli, ["deps", "tree"])
+
+        assert result.exit_code == 0, result.output
+        assert result.output.count("example/monorepo@1.0.0") == 1
+        assert result.output.count("example/monorepo/packages/inner@1.0.0") == 1
+        assert result.output.count("example/monorepo/packages/leaf@1.0.0") == 1
+
 
 class TestDepsInfoCommand(_DepsCmdBase):
     """Tests for apm deps info."""

@@ -70,14 +70,20 @@ def _dep_display_name(dep) -> str:
     return f"{key}@{version}"
 
 
-def _add_tree_children(parent_branch, parent_repo_url, children_map, has_rich, depth=0):
+def _add_tree_children(parent_branch, parent_key, children_map, has_rich, depth=0):
     """Recursively add transitive deps as nested children of a tree node."""
-    kids = children_map.get(parent_repo_url, [])
+    kids = children_map.get(parent_key, [])
     for child_dep in kids:
         child_name = _dep_display_name(child_dep)
         child_branch = parent_branch.add(f"[dim]{child_name}[/dim]") if has_rich else child_name
         if depth < 5:  # Prevent infinite recursion
-            _add_tree_children(child_branch, child_dep.repo_url, children_map, has_rich, depth + 1)
+            _add_tree_children(
+                child_branch,
+                child_dep.get_unique_key(),
+                children_map,
+                has_rich,
+                depth + 1,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -490,7 +496,7 @@ def _build_dep_tree(apm_dir):
             'apm_modules_path': Path,
             'source': 'lockfile' | 'directory',
             'direct': [dep, ...],           # lockfile mode only
-            'children_map': {url: [dep]},   # lockfile mode only
+            'children_map': {key: [dep]},   # lockfile mode only
             'scanned_packages': [{...}],    # directory fallback only
             'has_modules': bool,
         }
@@ -533,6 +539,21 @@ def _build_dep_tree(apm_dir):
                     children_map: dict[str, list] = {}
                     for dep in transitive:
                         parent_key = dep.resolved_by or ""
+                        parent_candidates = [
+                            candidate
+                            for candidate in lockfile_deps
+                            if candidate.depth == dep.depth - 1
+                            and candidate.get_unique_key() == parent_key
+                        ]
+                        if not parent_candidates:
+                            parent_candidates = [
+                                candidate
+                                for candidate in lockfile_deps
+                                if candidate.depth == dep.depth - 1
+                                and candidate.repo_url == parent_key
+                            ]
+                        if len(parent_candidates) == 1:
+                            parent_key = parent_candidates[0].get_unique_key()
                         if parent_key not in children_map:
                             children_map[parent_key] = []
                         children_map[parent_key].append(dep)
@@ -624,7 +645,7 @@ def tree(global_):
                             prim_summary = _format_primitive_counts(_count_primitives(install_path))
                             if prim_summary:
                                 branch.add(f"[dim]{prim_summary}[/dim]")
-                        _add_tree_children(branch, dep.repo_url, children_map, has_rich)
+                        _add_tree_children(branch, dep.get_unique_key(), children_map, has_rich)
                 console.print(root_tree)
             else:
                 click.echo(f"{project_name} (local)")
@@ -637,7 +658,7 @@ def tree(global_):
                         display = _dep_display_name(dep)
                         click.echo(f"{prefix}{display}")
                         # Show transitive deps
-                        kids = children_map.get(dep.repo_url, [])
+                        kids = children_map.get(dep.get_unique_key(), [])
                         sub_prefix = "    " if is_last else "|   "
                         for j, child in enumerate(kids):
                             child_is_last = j == len(kids) - 1
