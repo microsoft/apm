@@ -785,10 +785,30 @@ jobs:
           echo "Linux x86_64 SHA: $LINUX_X86_64_SHA"
           echo "Linux ARM64 SHA: $LINUX_ARM64_SHA"
 
+      # Mint a short-lived (1h) GitHub App installation token scoped to the
+      # tap repo. App installation tokens are NOT personal access tokens, so
+      # they are exempt from the 'Microsoft Open Source' enterprise policy that
+      # forbids fine-grained PATs with a lifetime > 8 days. This removes the
+      # unsustainable 8-day PAT-rotation treadmill that previously broke this
+      # job. Requires two org/repo secrets, set once, that never expire:
+      #   HOMEBREW_TAP_APP_ID          -- the GitHub App's numeric App ID
+      #   HOMEBREW_TAP_APP_PRIVATE_KEY -- the App's PEM private key
+      # The App must be installed on microsoft/homebrew-apm with
+      # Repository permissions: Contents = Read and write (repository_dispatch
+      # is delivered on the target repo's Contents write scope).
+      - name: Mint Homebrew tap installation token
+        id: tap-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: microsoft
+          repositories: homebrew-apm
+
       - name: Trigger Homebrew tap repository update
         uses: peter-evans/repository-dispatch@v3
         with:
-          token: ${{ secrets.GH_PKG_PAT }}
+          token: ${{ steps.tap-token.outputs.token }}
           repository: microsoft/homebrew-apm
           event-type: formula-update
           client-payload: |
