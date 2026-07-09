@@ -159,9 +159,10 @@ The workflow ensures quality gates at each step:
 3. **release-validation** job - Final shipped-binary validation
 4. **create-release** job - GitHub release creation
 5. **publish-pypi** job - PyPI package publication
-6. **update-homebrew** job - Homebrew formula update
 
 Each stage must succeed before proceeding to the next, ensuring only fully validated releases reach users.
+
+The Homebrew tap updates independently: `microsoft/homebrew-apm` polls the latest public APM release and commits formula updates with its own repository-scoped `GITHUB_TOKEN`. The release pipeline does not hold a cross-repository Homebrew credential.
 
 ### Test Matrix
 
