@@ -28,12 +28,15 @@ see [Primitive types](./primitive-types/).
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | kiro            | `.kiro/`               |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
-| intellij        | `.github/` + user MCP config |     [x]      |   [x]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
+| intellij        | user MCP config; files via Copilot |    [x] (*)   | [x] (*) | [x] (*) | [x] (*) |   [ ]    | [x] (*) | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, Antigravity, Codex, and Windsurf by default (see [Skills convergence](#skills-convergence)
 below). Claude and Kiro keep target-native skill directories.
+
+(*) For `intellij`, file primitives route through the Copilot profile under
+`.github/`; the IntelliJ-specific adapter configures MCP only.
 
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
 Copilot desktop App), `openclaw` (OpenClaw agent runtime), and `hermes` are
@@ -224,10 +227,11 @@ GitHub Copilot for JetBrains IDEs.
 
 - **Detection.** Global `github-copilot/intellij/` config directory.
 - **Deploy directory.** User-scope `mcp.json`; see the
-  [JetBrains integration guide](../integrations/ide-tool-integration/#jetbrains)
+  [JetBrains integration guide](../integrations/ide-tool-integration/#jetbrains-intellij-idea-pycharm-goland-and-others)
   for OS-specific paths.
-- **Supported primitives.** The IntelliJ-specific adapter supports mcp.
-  Package file primitives use the Copilot profile.
+- **Supported primitives.** The IntelliJ-specific adapter supports MCP.
+  Instructions, prompts, agents, skills, and hooks deploy through the Copilot
+  profile under `.github/`.
 - **Scope.** MCP configuration is user scope only. File primitives use the
   project or user scope selected for the Copilot profile. IntelliJ does not
   participate in plain `all` expansion.

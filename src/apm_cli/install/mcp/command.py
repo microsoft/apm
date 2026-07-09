@@ -115,9 +115,9 @@ def run_mcp_install(  # noqa: PLR0913
     # MCPServerOperations() (constructed deep inside MCPIntegrator.install)
     # picks up the override; prior env restored on exit.
     if APM_DEPS_AVAILABLE:
-        if registry_url and logger and verbose:
+        if registry_url and logger:
             logger.verbose_detail(f"Registry: {registry_url}")
-        if target is not None and logger and verbose:
+        if target is not None and logger:
             rendered_target = target if isinstance(target, str) else ", ".join(target)
             logger.verbose_detail(f"Target: {rendered_target}")
         with registry_env_override(registry_url):

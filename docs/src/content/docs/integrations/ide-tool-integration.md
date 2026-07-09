@@ -24,7 +24,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../reference/ta
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
 | Kiro                 | `.kiro/`                             | Steering + Skills + Hooks + MCP        |
-| JetBrains Copilot    | user-scope config dir (global)       | MCP only (user-scope path, `${env:VAR}` env substitution) |
+| JetBrains Copilot    | user-scope config dir (global)       | MCP (user-scope path, `${env:VAR}` substitution); file primitives use the Copilot profile |
 | Agent-Skills (cross) | `.agents/skills/`                    | Vendor-neutral skill sharing           |
 
 For exact per-target capabilities (which primitives are supported, transformer used, file layout), see [Targets matrix](../reference/targets-matrix/).
@@ -131,7 +131,7 @@ written to `.kiro/settings/mcp.json` or `~/.kiro/settings/mcp.json` for
 This target covers the documented Kiro IDE layout. Kiro CLI configuration
 differences are tracked separately; see [the targets matrix](../reference/targets-matrix/#kiro).
 
-### JetBrains
+### JetBrains (IntelliJ IDEA, PyCharm, GoLand, and others)
 
 GitHub Copilot for JetBrains reads MCP servers from a single user-scope
 `mcp.json` (the per-OS path above), so configuration is global rather than

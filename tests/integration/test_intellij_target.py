@@ -154,6 +154,7 @@ class TestIntelliJCliE2E:
         # but that is fine -- we only care about parser acceptance.
         assert "Unknown target" not in (result.output or "")
 
+    @pytest.mark.requires_apm_binary
     def test_mcp_install_writes_intellij_config(self, tmp_path: Path, apm_command: str) -> None:
         """The real CLI install flow writes JetBrains Copilot's MCP config."""
         project_dir = tmp_path / "project"
