@@ -52,6 +52,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
+      id-token: write
+      attestations: write
 
     steps:
       - uses: actions/checkout@v4
@@ -117,6 +119,13 @@ jobs:
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/windows/test-install-script.ps1
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            ./dist/${{ matrix.binary_name }}/**/*
+            ./dist/${{ matrix.binary_name }}.sha256
+
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -144,6 +153,8 @@ jobs:
     runs-on: macos-15-intel
     permissions:
       contents: read
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout code
@@ -183,6 +194,13 @@ jobs:
         run: |
           chmod +x scripts/build-binary.sh
           uv run ./scripts/build-binary.sh
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            ./dist/apm-darwin-x86_64/**/*
+            ./dist/apm-darwin-x86_64.sha256
 
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4
@@ -260,6 +278,8 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: read
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout code
@@ -294,6 +314,13 @@ jobs:
         run: |
           chmod +x scripts/build-binary.sh
           uv run ./scripts/build-binary.sh
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            ./dist/apm-darwin-arm64/**/*
+            ./dist/apm-darwin-arm64.sha256
 
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4
@@ -844,3 +871,59 @@ jobs:
                 "windows_x86_64": "${{ steps.checksums.outputs.windows-x86_64-sha }}"
               }
             }
+  
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: [build-and-test, build-and-validate-macos-intel, build-and-validate-macos-arm, integration-tests, release-validation, create-release]
+    if: github.ref_type == 'tag' && needs.create-release.outputs.is_private_repo != 'true' && needs.create-release.outputs.is_prerelease != 'true'
+    permissions:
+      contents: read
+      id-token: write  # Required for npm provenance (publishConfig.provenance: true)
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: apm-*
+          merge-multiple: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install test dependencies
+        run: uv sync --extra build
+
+      - name: Build npm packages
+        run: uv run scripts/npm_publish.py
+
+      # Publish platform packages first, then the main wrapper that lists
+      # them as optionalDependencies.
+      - name: Publish npm packages
+        run: |
+          for package in \
+            dist/npm/apm-cli-linux-x64 \
+            dist/npm/apm-cli-linux-arm64 \
+            dist/npm/apm-cli-darwin-x64 \
+            dist/npm/apm-cli-darwin-arm64 \
+            dist/npm/apm-cli-win32-x64 \
+            dist/npm/apm-cli; do
+            npm publish "$package" --tag latest --access public
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

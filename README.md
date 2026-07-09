@@ -98,6 +98,22 @@ apm-policy.yml governs what gets installed; your agent harness governs what runs
 
 ## Get Started
 
+#### Node.js projects
+
+```bash
+# Install globally
+npm install -g @microsoft/apm-cli
+# or: pnpm add -g @microsoft/apm-cli
+# or: yarn global add @microsoft/apm-cli
+
+# Or install as a project devDependency (recommended)
+npm install -D @microsoft/apm-cli
+# or: pnpm add -D @microsoft/apm-cli
+# or: yarn add -D @microsoft/apm-cli
+
+npx apm init
+```
+
 #### Linux / macOS
 
 ```bash
