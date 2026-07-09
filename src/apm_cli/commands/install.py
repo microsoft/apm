@@ -777,7 +777,7 @@ def _validate_and_add_packages_to_apm_yml(
 # ---------------------------------------------------------------------------
 
 
-def _handle_mcp_install(
+def _handle_mcp_install(  # noqa: PLR0913
     *,
     mcp_name,
     transport,
@@ -789,6 +789,7 @@ def _handle_mcp_install(
     dev,
     force,
     runtime,
+    target,
     exclude,
     verbose,
     logger,
@@ -878,6 +879,7 @@ def _handle_mcp_install(
         dev=dev,
         force=force,
         runtime=runtime,
+        target=target,
         exclude=exclude,
         logger=logger,
         apm_dir=mcp_apm_dir,
@@ -944,7 +946,7 @@ def _handle_mcp_install(
     "target",
     type=TargetParamType(),
     default=None,
-    help="Target harness(es) to deploy to. Comma-separated for multiple: --target claude,cursor. Repeating the flag (e.g. '-t a -t b') is NOT supported -- only the last value wins; use commas. Highest-priority entry in the resolution chain (--target > apm.yml targets: > apm config target > auto-detect). Values: copilot, claude, cursor, opencode, codex, gemini, antigravity, windsurf, kiro, intellij, agent-skills, all. 'intellij' is MCP-only -- it configures the JetBrains GitHub Copilot plugin MCP server list but does not deploy file-level primitives. 'agent-skills' deploys to .agents/skills/ (cross-client). 'antigravity' (alias 'agy') deploys to .agents/ (AGENTS.md + rules + skills + hooks.json + mcp_config.json) and is explicit-only -- not part of 'all' or auto-detection. 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro (excludes agent-skills, antigravity, and intellij); combine with 'agent-skills', 'antigravity', or 'intellij' to add them. 'copilot-cowork' is also accepted when the copilot-cowork experimental flag is enabled (run 'apm experimental enable copilot-cowork'). 'copilot-app' is also accepted when the copilot-app experimental flag is enabled (run 'apm experimental enable copilot-app'). Note: '--target all' on 'apm compile' is deprecated; use 'apm compile --all' instead.",
+    help="Target harness(es) to deploy to. Use commas for multiple targets; repeated flags are not supported. Values: copilot, claude, cursor, opencode, codex, gemini, antigravity, windsurf, kiro, intellij, agent-skills, all. 'intellij' is MCP-only and configures JetBrains Copilot without file-level primitive deployment. 'all' excludes agent-skills, antigravity, and intellij; combine them explicitly when needed. Experimental copilot-cowork and copilot-app values require their feature flags. Resolution order: --target > apm.yml targets: > apm config target > auto-detect.",
 )
 @click.option(
     "--allow-insecure",
@@ -1405,6 +1407,7 @@ def install(  # noqa: PLR0913
                 dev=dev,
                 force=force,
                 runtime=runtime,
+                target=target,
                 exclude=exclude,
                 verbose=verbose,
                 logger=logger,

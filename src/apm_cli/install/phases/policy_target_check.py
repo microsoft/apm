@@ -70,7 +70,13 @@ def run(ctx: InstallContext) -> None:
     from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
 
     if effective_target in MCP_ONLY_TARGETS:
-        effective_target = RUNTIME_TO_CANONICAL_TARGET.get(effective_target, effective_target)
+        canonical_target = RUNTIME_TO_CANONICAL_TARGET[effective_target]
+        if ctx.logger:
+            ctx.logger.verbose_detail(
+                f"Normalizing MCP-only target '{effective_target}' -> "
+                f"'{canonical_target}' for policy check"
+            )
+        effective_target = canonical_target
 
     # ------------------------------------------------------------------
     # 4. Run policy checks with effective_target populated

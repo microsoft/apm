@@ -35,7 +35,7 @@ except ImportError:
     pass
 
 
-def run_mcp_install(
+def run_mcp_install(  # noqa: PLR0913
     *,
     mcp_name: str,
     transport: str | None,
@@ -51,6 +51,7 @@ def run_mcp_install(
     logger,
     apm_dir: Path,
     scope: str | None,
+    target: str | list[str] | None = None,
     registry_url: str | None = None,
 ) -> None:
     """Execute the --mcp install path. ``registry_url`` is the validated
@@ -124,10 +125,11 @@ def run_mcp_install(
                 old_configs = dict(_existing_lock.mcp_configs) if _existing_lock else {}
                 MCPIntegrator.install(
                     [dep],
-                    runtime,
+                    target if isinstance(target, str) else runtime,
                     exclude,
                     verbose,
                     stored_mcp_configs=old_configs,
+                    explicit_target=target,
                     scope=scope,
                 )
                 new_names = MCPIntegrator.get_server_names([dep])

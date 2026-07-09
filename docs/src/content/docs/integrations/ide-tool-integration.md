@@ -141,7 +141,7 @@ that directory is the auto-detect signal.
 
 ```bash
 # Install an MCP server into the JetBrains user-scope config
-apm install --mcp --target intellij <package>
+apm install --mcp io.github.github/github-mcp-server --target intellij
 ```
 
 Notes and limits:

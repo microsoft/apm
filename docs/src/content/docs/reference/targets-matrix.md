@@ -28,6 +28,7 @@ see [Primitive types](./primitive-types/).
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | kiro            | `.kiro/`               |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
+| intellij        | OS-specific user config |     [ ]      |   [ ]   |  [ ]   |  [ ]   |   [ ]    |  [ ]  | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
@@ -64,6 +65,11 @@ list before `compile` or `install`.
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
 | kiro     | `.kiro/` directory                            |
+| intellij | Global `github-copilot/intellij/` config directory |
+
+`intellij` is an MCP-only target. It writes the JetBrains Copilot user-scope
+`mcp.json` and never participates in file-level primitive deployment or plain
+`all` expansion.
 
 `agent-skills` is a canonical target key; `antigravity` is explicit-only for
 auto-detection. Both are available with `--target` and can be listed in a

@@ -18,6 +18,11 @@ Ref: issue #1957, PR #2041.
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -35,6 +40,16 @@ from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
 
 _MINIMAL_APM_YML = "name: test\ndescription: test\nversion: 0.0.1\n"
 _BASE_ENV: dict[str, str] = {"APM_E2E_TESTS": "1"}
+
+
+@pytest.fixture()
+def apm_command() -> str:
+    """Return the APM executable used by the end-to-end test."""
+    apm_on_path = shutil.which("apm")
+    if apm_on_path:
+        return apm_on_path
+    venv_apm = Path(__file__).parents[2] / ".venv" / "bin" / "apm"
+    return str(venv_apm)
 
 
 @pytest.fixture()
@@ -125,6 +140,72 @@ class TestIntelliJCliE2E:
         # The command will fail for other reasons (no package specified)
         # but that is fine -- we only care about parser acceptance.
         assert "Unknown target" not in (result.output or "")
+
+    def test_mcp_install_writes_intellij_config(self, tmp_path: Path, apm_command: str) -> None:
+        """The real CLI install flow writes JetBrains Copilot's MCP config."""
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        (project_dir / "apm.yml").write_text(_MINIMAL_APM_YML, encoding="ascii")
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        xdg_data = fake_home / "xdg"
+        local_app_data = fake_home / "local-app-data"
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "HOME": str(fake_home),
+                "XDG_DATA_HOME": str(xdg_data),
+                "LOCALAPPDATA": str(local_app_data),
+                "GIT_TERMINAL_PROMPT": "0",
+                "APM_NON_INTERACTIVE": "1",
+            }
+        )
+
+        result = subprocess.run(
+            [
+                apm_command,
+                "install",
+                "--mcp",
+                "test-http-server",
+                "--target",
+                "intellij",
+                "--transport",
+                "http",
+                "--url",
+                "https://example.com/mcp",
+            ],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+
+        assert result.returncode == 0, (
+            f"apm install failed (rc={result.returncode}).\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+        if sys.platform == "win32":
+            config_path = local_app_data / "github-copilot" / "intellij" / "mcp.json"
+        elif sys.platform == "darwin":
+            config_path = (
+                fake_home
+                / "Library"
+                / "Application Support"
+                / "github-copilot"
+                / "intellij"
+                / "mcp.json"
+            )
+        else:
+            config_path = xdg_data / "github-copilot" / "intellij" / "mcp.json"
+
+        assert config_path.exists(), (
+            f"Expected IntelliJ MCP config at {config_path}.\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        assert config["servers"]["test-http-server"]["url"] == "https://example.com/mcp"
 
 
 # ===========================================================================

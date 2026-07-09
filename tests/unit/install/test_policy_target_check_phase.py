@@ -337,6 +337,22 @@ class TestTargetOverride:
 
         ctx.logger.policy_violation.assert_not_called()
 
+    @patch(_PATCH_CHECKS)
+    def test_intellij_override_is_normalized_to_copilot(self, mock_checks):
+        """MCP-only IntelliJ uses its canonical policy target."""
+        mock_checks.return_value = _target_passing_audit()
+        ctx = _make_ctx(
+            enforcement_active=True,
+            policy_fetch=_make_policy_fetch(enforcement="block", allow=("copilot",)),
+            target_override="intellij",
+        )
+
+        run(ctx)
+
+        mock_checks.assert_called_once()
+        assert mock_checks.call_args.kwargs["effective_target"] == "copilot"
+        ctx.logger.policy_violation.assert_not_called()
+
 
 # =====================================================================
 # Test: double-emit filtering
