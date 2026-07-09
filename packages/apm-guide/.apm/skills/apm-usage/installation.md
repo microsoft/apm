@@ -58,7 +58,7 @@ Uses the same variables as `install.sh` where applicable (`GITHUB_URL`, `APM_REP
 # Pin a version (skips releases/latest API). Requires .sha256 on the release unless APM_SKIP_CHECKSUM=1 (emergency).
 $env:VERSION = "v1.2.3"; irm https://aka.ms/apm-windows | iex
 
-# Custom shim directory (directory that will contain apm.cmd)
+# Custom shim directory (contains apm.cmd; sibling current contains apm.exe)
 $env:APM_INSTALL_DIR = "$env:LOCALAPPDATA\Programs\apm\bin"; irm https://aka.ms/apm-windows | iex
 
 $env:GITHUB_URL = "https://github.corp.com"
@@ -66,6 +66,10 @@ $env:APM_REPO = "my-org/apm"
 $env:VERSION = "v1.2.3"
 irm https://aka.ms/apm-windows | iex
 ```
+
+The Windows installer adds both the shim directory and the version-stable
+`current` directory to `PATH`. The latter contains `apm.exe`, so Git Bash and
+Python `subprocess.run(["apm", ...])` can resolve `apm` without `cmd.exe`.
 
 ## Enterprise bootstrap mirrors
 

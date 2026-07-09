@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Windows installer now exposes a version-stable `apm.exe` on `PATH`, so
+  Git Bash and bare process calls such as Python `subprocess.run(["apm", ...])`
+  resolve APM without relying on `cmd.exe` PATHEXT handling. (closes #2076)
 - `apm install host/org/repo/subpath#ref` on an unrecognised self-hosted FQDN
   no longer fails with a misleading "not accessible or doesn't exist" error;
   the failure reason now suggests setting `GITLAB_HOST` / `APM_GITLAB_HOSTS`

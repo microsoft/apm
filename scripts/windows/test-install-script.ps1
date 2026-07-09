@@ -7,8 +7,8 @@
 #      %LOCALAPPDATA%\Programs\apm\releases\...), NOT from %TEMP%, so it
 #      survives AppLocker / App Control for Business policies that block
 #      executable launch from user-writable temp paths.
-#   3. The shim written to APM_INSTALL_DIR points at the promoted release
-#      directory and the temp staging area is cleaned up.
+#   3. The launchers point at the promoted release directory, including a
+#      stable apm.exe that bare CreateProcess callers can resolve.
 #   4. Upgrading over an existing install exercises the "move releaseDir
 #      aside -> promote staging -> delete backup" path with no leftovers.
 #   5. The real `apm self-update` command launches install.ps1 successfully
@@ -318,6 +318,40 @@ function Test-EndToEndInstall {
             $ver = Get-ShimVersion -ShimPath $shim
             Assert-True ($ver.ExitCode -eq 0) "apm.cmd --version exits 0 (got $($ver.ExitCode); output: $($ver.Output))"
             Assert-True ($ver.Output -match $PinnedVersion.TrimStart("v")) "apm.cmd --version reports $PinnedVersion"
+        }
+
+        $currentDir = Join-Path $prefix.Root "current"
+        $stableExe = Join-Path $currentDir "apm.exe"
+        Assert-True (Test-Path $stableExe) "Stable apm.exe is available at $stableExe"
+
+        if (Test-Path $stableExe) {
+            $savedPath = $env:Path
+            try {
+                $env:Path = "$currentDir;$env:Path"
+                $pythonScript = @'
+import subprocess
+import sys
+
+result = subprocess.run(["apm", "--version"], capture_output=True, text=True)
+print(result.stdout, end="")
+print(result.stderr, end="", file=sys.stderr)
+sys.exit(result.returncode)
+'@
+                $pythonOutput = & python -c $pythonScript 2>&1
+                $pythonExit = $LASTEXITCODE
+                Assert-True ($pythonExit -eq 0) "Python subprocess resolves bare apm (got $pythonExit; output: $pythonOutput)"
+                Assert-True (($pythonOutput | Out-String) -match $PinnedVersion.TrimStart("v")) "Python subprocess reports $PinnedVersion"
+
+                $bash = Get-Command bash -ErrorAction SilentlyContinue
+                if ($bash) {
+                    $bashOutput = & bash -lc "command -v apm && apm --version" 2>&1
+                    $bashExit = $LASTEXITCODE
+                    Assert-True ($bashExit -eq 0) "Git Bash resolves bare apm (got $bashExit; output: $bashOutput)"
+                    Assert-True (($bashOutput | Out-String) -match $PinnedVersion.TrimStart("v")) "Git Bash reports $PinnedVersion"
+                }
+            } finally {
+                $env:Path = $savedPath
+            }
         }
 
         $leftover = Get-ChildItem -Path $prefix.TmpDir -Filter "apm-install-*" -Directory -ErrorAction SilentlyContinue

@@ -7,7 +7,7 @@
 #   $env:VERSION = 'v1.2.3'; irm https://aka.ms/apm-windows | iex
 #   .\install.ps1 v1.2.3
 #
-# Custom install location (directory that will contain apm.cmd):
+# Custom install location (contains apm.cmd; sibling current contains apm.exe):
 #   $env:APM_INSTALL_DIR = "$env:LOCALAPPDATA\Programs\apm\bin"; irm ... | iex
 #
 # Fork or private mirror:
@@ -908,6 +908,44 @@ try {
         Remove-Item -Recurse -Force $backupDir -ErrorAction SilentlyContinue
     }
 
+    # Expose the complete onedir bundle through a version-stable junction.
+    # Putting this directory on PATH lets CreateProcess callers resolve the
+    # real apm.exe while keeping its sibling PyInstaller runtime files intact.
+    $currentDir = Join-Path $installRoot "current"
+    $currentExe = Join-Path $currentDir "apm.exe"
+    $newCurrentDir = "$currentDir.new-" + [System.Guid]::NewGuid().ToString("N")
+    $oldCurrentDir = $null
+    try {
+        New-Item -ItemType Junction -Path $newCurrentDir -Target $releaseDir | Out-Null
+
+        if (Test-Path $currentDir) {
+            $currentItem = Get-Item -Force $currentDir
+            if (($currentItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) {
+                throw "Refusing to replace non-junction path: $currentDir"
+            }
+            $oldCurrentDir = "$currentDir.old-" + [System.Guid]::NewGuid().ToString("N")
+            Move-Item -Path $currentDir -Destination $oldCurrentDir -Force
+        }
+
+        Move-Item -Path $newCurrentDir -Destination $currentDir -Force
+    } catch {
+        Write-ErrorText "Failed to update stable executable path ${currentDir}: $_"
+        Remove-Item -Force $newCurrentDir -ErrorAction SilentlyContinue
+        if ($oldCurrentDir -and (Test-Path $oldCurrentDir) -and -not (Test-Path $currentDir)) {
+            Move-Item -Path $oldCurrentDir -Destination $currentDir -Force -ErrorAction SilentlyContinue
+        }
+        Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
+        exit 1
+    }
+    if ($oldCurrentDir -and (Test-Path $oldCurrentDir)) {
+        Remove-Item -Force $oldCurrentDir -ErrorAction SilentlyContinue
+    }
+    if (-not (Test-Path $currentExe)) {
+        Write-ErrorText "Stable executable path is missing apm.exe: $currentExe"
+        Write-ManualInstallHelp -GithubUrl $githubUrl -ApmRepo $apmRepo
+        exit 1
+    }
+
     $shimPath = Join-Path $binDir "apm.cmd"
     # Prefer the literal %LOCALAPPDATA% token over the expanded profile path
     # so cmd.exe resolves the shim target at runtime. This avoids "The
@@ -959,10 +997,12 @@ try {
     Set-Content -Path $shimPath -Value $shimContent -Encoding ASCII -NoNewline
 
     Add-ToUserPath -PathEntry $binDir
+    Add-ToUserPath -PathEntry $currentDir
 
     Write-Host ""
     Write-Success "APM $tagName installed successfully!"
     Write-Info "Command shim: $shimPath"
+    Write-Info "Stable executable: $currentExe"
     Write-Host ""
     Write-Info "Quick start:"
     Write-Host "  apm init my-app          # Create a new APM project"
