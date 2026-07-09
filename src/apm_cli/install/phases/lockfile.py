@@ -141,6 +141,7 @@ class LockfileBuilder:
             # overwriting it -- otherwise the uninstalled packages disappear.
             lockfile = self._maybe_merge_partial(lockfile, lockfile_path, _LF)
             self._preserve_existing_mcp_state(lockfile)
+            self._preserve_existing_lsp_state(lockfile)
             self._preserve_existing_local_state(lockfile)
             self._preserve_existing_revision_pin_tags(lockfile)
 
@@ -316,6 +317,18 @@ class LockfileBuilder:
                     "MCP state unchanged -- carrying forward "
                     f"{len(lockfile.mcp_servers)} server(s), "
                     f"{len(lockfile.mcp_configs)} config(s)"
+                )
+
+    def _preserve_existing_lsp_state(self, lockfile: LockFile) -> None:
+        """Keep LSP fields until LSP integration reconciles them later in install."""
+        if self.ctx.existing_lockfile:
+            lockfile.lsp_servers = list(self.ctx.existing_lockfile.lsp_servers)
+            lockfile.lsp_configs = copy.deepcopy(self.ctx.existing_lockfile.lsp_configs)
+            if self.ctx.logger:
+                self.ctx.logger.verbose_detail(
+                    "LSP state unchanged -- carrying forward "
+                    f"{len(lockfile.lsp_servers)} server(s), "
+                    f"{len(lockfile.lsp_configs)} config(s)"
                 )
 
     def _preserve_existing_local_state(self, lockfile: LockFile) -> None:
