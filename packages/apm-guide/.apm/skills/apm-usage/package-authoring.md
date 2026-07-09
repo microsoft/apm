@@ -129,7 +129,11 @@ APM automatically normalises event names per target (e.g. `postToolUse`
 becomes `PostToolUse` in Claude) and rewrites path variables
 (`${PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`) to
 the correct target-specific form. Kiro materializes one JSON document per
-hook action under `.kiro/hooks/`.
+hook action under `.kiro/hooks/` using the Kiro v1 shape: top-level
+`"version": "v1"`, an array-valued `"hooks"`, PascalCase `trigger`, optional
+`matcher`, and an `action` object. Kiro-targeted packages may author that
+native v1 shape directly when they need Kiro-only triggers such as
+`PreTaskExec` or `PostFileSave`.
 
 When a hook command references a script inside `hooks/` or `.apm/hooks/`,
 APM deploys that hook source bundle so sibling helper files resolve at

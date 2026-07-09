@@ -148,22 +148,28 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         "Stop": "SessionEnd",
     },
     "kiro": {
-        # Copilot / Claude -> Kiro camelCase events
-        "PreToolUse": "preToolUse",
-        "preToolUse": "preToolUse",
-        "PostToolUse": "postToolUse",
-        "postToolUse": "postToolUse",
-        "UserPromptSubmit": "promptSubmit",
-        "userPromptSubmit": "promptSubmit",
-        "promptSubmit": "promptSubmit",
-        "Stop": "agentStop",
-        "stop": "agentStop",
-        "AgentStop": "agentStop",
-        "agentStop": "agentStop",
-        "PreTaskExecution": "preTaskExecution",
-        "preTaskExecution": "preTaskExecution",
-        "PostTaskExecution": "postTaskExecution",
-        "postTaskExecution": "postTaskExecution",
+        # Copilot / Claude / legacy Kiro -> Kiro v1 PascalCase events
+        "PreToolUse": "PreToolUse",
+        "preToolUse": "PreToolUse",
+        "PostToolUse": "PostToolUse",
+        "postToolUse": "PostToolUse",
+        "UserPromptSubmit": "UserPromptSubmit",
+        "userPromptSubmit": "UserPromptSubmit",
+        "promptSubmit": "UserPromptSubmit",
+        "Stop": "Stop",
+        "stop": "Stop",
+        "AgentStop": "Stop",
+        "agentStop": "Stop",
+        "PreTaskExecution": "PreTaskExec",
+        "preTaskExecution": "PreTaskExec",
+        "PreTaskExec": "PreTaskExec",
+        "PostTaskExecution": "PostTaskExec",
+        "postTaskExecution": "PostTaskExec",
+        "PostTaskExec": "PostTaskExec",
+        "PostFileCreate": "PostFileCreate",
+        "PostFileSave": "PostFileSave",
+        "PostFileDelete": "PostFileDelete",
+        "SessionStart": "SessionStart",
     },
 }
 
@@ -179,7 +185,7 @@ _HOOK_EVENT_EXPECTED_CASING: dict[str, str] = {
     "gemini": "PascalCase",
     "antigravity": "PascalCase",
     "windsurf": "PascalCase",
-    "kiro": "camelCase",
+    "kiro": "PascalCase",
 }
 
 
@@ -627,7 +633,7 @@ class HookIntegrator(BaseIntegrator):
 
         return hook_files
 
-    def _parse_hook_json(self, hook_file: Path) -> dict | None:
+    def _parse_hook_json(self, hook_file: Path, *, allow_kiro_v1: bool = False) -> dict | None:
         """Parse a hook JSON file and return the data dict.
 
         Accepts both the wrapped format (``{"hooks": {EventName: [...]}}``)
@@ -639,9 +645,10 @@ class HookIntegrator(BaseIntegrator):
 
         Args:
             hook_file: Path to the hook JSON file
+            allow_kiro_v1: Accept Kiro's v1 array-valued ``hooks`` shape.
 
         Returns:
-            Optional[Dict]: Parsed JSON dict (always wrapped), or None if invalid
+            Parsed JSON dict, or None if invalid.
         """
         try:
             with open(hook_file, encoding="utf-8") as f:
@@ -661,6 +668,12 @@ class HookIntegrator(BaseIntegrator):
                     sorted(data.keys()),
                 )
                 data = {"hooks": data}
+            if (
+                allow_kiro_v1
+                and data.get("version") == "v1"
+                and isinstance(data.get("hooks"), list)
+            ):
+                return data
             # Fail closed on malformed shapes where "hooks" is present but not
             # a dict (e.g. {"hooks": []}).  Downstream code calls .items() on
             # this value and would otherwise raise AttributeError mid-merge.

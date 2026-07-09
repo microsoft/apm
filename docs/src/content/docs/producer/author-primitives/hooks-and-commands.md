@@ -78,6 +78,14 @@ key is present but not a JSON object fails closed with a warning; a file
 that parses cleanly but contributes zero entries also logs a warning so
 authors notice empty merges during development.
 
+Kiro-targeted packages may also use the native Kiro v1 shape. APM accepts
+`{"version": "v1", "hooks": [...]}` and deploys each array entry as a
+standalone v1 document. Portable Claude and Copilot events are translated to
+Kiro's PascalCase `trigger` names, matcher groups become `matcher`, and command
+actions become `action: {"type": "command", ...}`. Native-only triggers such
+as `PreTaskExec`, `PostTaskExec`, `PostFileCreate`, `PostFileSave`, and
+`PostFileDelete` pass through for Kiro.
+
 The `${PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, and `${KIRO_PLUGIN_ROOT}`
 tokens resolve to the installed package root and are rewritten per
 target. Plain `./script.sh` resolves relative to the hook file. If the hook
@@ -135,7 +143,7 @@ Supported targets and where the integrator writes:
 | gemini   | `.gemini/settings.json`               | merged               |
 | codex    | `.codex/hooks.json`                   | merged               |
 | windsurf | `.windsurf/hooks.json`                | merged               |
-| kiro     | `.kiro/hooks/<package-slug>-<hook-file-stem-slug>-<event-slug>-<n>.json` | one file per hook action |
+| kiro     | `.kiro/hooks/<package-slug>-<hook-file-stem-slug>-<event-slug>-<n>.json` | one Kiro v1 file per hook action |
 | opencode | -- not supported --                   | silently skipped     |
 
 Copilot hook files are namespaced with the source package name to avoid

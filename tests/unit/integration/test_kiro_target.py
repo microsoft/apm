@@ -10,7 +10,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.integration.hook_integrator import HookIntegrator
+from apm_cli.integration.hook_integrator import _HOOK_EVENT_MAP, HookIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.integration.targets import KNOWN_TARGETS
@@ -104,6 +104,37 @@ def test_kiro_target_profile_matches_ratified_layout() -> None:
     assert hooks.format_id == "kiro_hooks"
 
 
+def test_kiro_v1_event_map_uses_canonical_trigger_names() -> None:
+    event_map = _HOOK_EVENT_MAP["kiro"]
+
+    assert {
+        source: event_map[source]
+        for source in (
+            "preToolUse",
+            "PostToolUse",
+            "promptSubmit",
+            "agentStop",
+            "PreTaskExecution",
+            "PostTaskExecution",
+            "PostFileCreate",
+            "PostFileSave",
+            "PostFileDelete",
+            "SessionStart",
+        )
+    } == {
+        "preToolUse": "PreToolUse",
+        "PostToolUse": "PostToolUse",
+        "promptSubmit": "UserPromptSubmit",
+        "agentStop": "Stop",
+        "PreTaskExecution": "PreTaskExec",
+        "PostTaskExecution": "PostTaskExec",
+        "PostFileCreate": "PostFileCreate",
+        "PostFileSave": "PostFileSave",
+        "PostFileDelete": "PostFileDelete",
+        "SessionStart": "SessionStart",
+    }
+
+
 def test_kiro_steering_maps_apply_to_to_file_match(tmp_path: Path) -> None:
     (tmp_path / ".kiro").mkdir()
     package_dir = tmp_path / "pkg"
@@ -193,12 +224,14 @@ def test_kiro_hooks_expand_each_apm_hook_to_individual_json(tmp_path: Path) -> N
         "hooks": {
             "PreToolUse": [
                 {
+                    "matcher": "fs_write|str_replace",
                     "hooks": [
                         {
                             "type": "command",
                             "command": "python ${PLUGIN_ROOT}/hooks/check.py",
+                            "timeout": 10,
                         }
-                    ]
+                    ],
                 }
             ],
             "UserPromptSubmit": [
@@ -227,22 +260,43 @@ def test_kiro_hooks_expand_each_apm_hook_to_individual_json(tmp_path: Path) -> N
     assert result.scripts_copied == 2
 
     pre_tool = tmp_path / ".kiro" / "hooks" / "hookify-hooks-pretooluse-1.json"
-    prompt_submit = tmp_path / ".kiro" / "hooks" / "hookify-hooks-promptsubmit-1.json"
+    prompt_submit = tmp_path / ".kiro" / "hooks" / "hookify-hooks-userpromptsubmit-1.json"
     assert pre_tool.exists()
     assert prompt_submit.exists()
 
     pre_data = json.loads(pre_tool.read_text(encoding="utf-8"))
-    assert pre_data["when"] == {"type": "preToolUse"}
-    assert pre_data["then"]["type"] == "runCommand"
-    assert pre_data["then"]["command"] == "python .kiro/hooks/hookify/hooks/check.py"
-    assert pre_data["description"] == "Validate before tool use"
-    assert "hooks" not in pre_data
+    assert pre_data == {
+        "version": "v1",
+        "hooks": [
+            {
+                "name": "hookify PreToolUse 1",
+                "trigger": "PreToolUse",
+                "matcher": "fs_write|str_replace",
+                "action": {
+                    "type": "command",
+                    "command": "python .kiro/hooks/hookify/hooks/check.py",
+                    "timeout": 10,
+                },
+            }
+        ],
+    }
     if sys.platform != "win32":
         assert pre_tool.stat().st_mode & 0o777 == 0o600
 
     prompt_data = json.loads(prompt_submit.read_text(encoding="utf-8"))
-    assert prompt_data["when"] == {"type": "promptSubmit"}
-    assert prompt_data["then"]["command"] == "python .kiro/hooks/hookify/hooks/prompt.py"
+    assert prompt_data == {
+        "version": "v1",
+        "hooks": [
+            {
+                "name": "hookify UserPromptSubmit 1",
+                "trigger": "UserPromptSubmit",
+                "action": {
+                    "type": "command",
+                    "command": "python .kiro/hooks/hookify/hooks/prompt.py",
+                },
+            }
+        ],
+    }
     if sys.platform != "win32":
         assert prompt_submit.stat().st_mode & 0o777 == 0o600
 
@@ -336,13 +390,21 @@ def test_kiro_hooks_convert_prompt_actions_to_ask_agent(tmp_path: Path) -> None:
         tmp_path,
     )
 
-    target = tmp_path / ".kiro" / "hooks" / "prompt-hooks-hooks-promptsubmit-1.json"
+    target = tmp_path / ".kiro" / "hooks" / "prompt-hooks-hooks-userpromptsubmit-1.json"
     assert result.files_integrated == 1
     data = json.loads(target.read_text(encoding="utf-8"))
-    assert data["when"] == {"type": "promptSubmit"}
-    assert data["then"] == {
-        "type": "askAgent",
-        "prompt": "Review the submitted prompt for policy drift.",
+    assert data == {
+        "version": "v1",
+        "hooks": [
+            {
+                "name": "prompt-hooks UserPromptSubmit 1",
+                "trigger": "UserPromptSubmit",
+                "action": {
+                    "type": "agent",
+                    "prompt": "Review the submitted prompt for policy drift.",
+                },
+            }
+        ],
     }
     if sys.platform != "win32":
         assert target.stat().st_mode & 0o777 == 0o600
@@ -365,3 +427,56 @@ def test_kiro_hooks_skip_when_project_has_no_kiro_dir(tmp_path: Path) -> None:
 
     assert result.files_integrated == 0
     assert not (tmp_path / ".kiro").exists()
+
+
+def test_kiro_hooks_accept_native_v1_documents(tmp_path: Path) -> None:
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "native-hooks"
+    hooks_dir = package_dir / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "native.json").write_text(
+        json.dumps(
+            {
+                "version": "v1",
+                "hooks": [
+                    {
+                        "name": "check task",
+                        "trigger": "PreTaskExec",
+                        "matcher": "build",
+                        "action": {
+                            "type": "command",
+                            "command": "python ${PLUGIN_ROOT}/hooks/check.py",
+                            "timeout": 15,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (hooks_dir / "check.py").write_text("# check\n", encoding="utf-8")
+
+    result = HookIntegrator().integrate_hooks_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir, "native-hooks"),
+        tmp_path,
+    )
+
+    target = tmp_path / ".kiro" / "hooks" / "native-hooks-native-pretaskexec-1.json"
+    assert result.files_integrated == 1
+    assert result.scripts_copied == 1
+    assert json.loads(target.read_text(encoding="utf-8")) == {
+        "version": "v1",
+        "hooks": [
+            {
+                "name": "check task",
+                "trigger": "PreTaskExec",
+                "matcher": "build",
+                "action": {
+                    "type": "command",
+                    "command": "python .kiro/hooks/native-hooks/hooks/check.py",
+                    "timeout": 15,
+                },
+            }
+        ],
+    }

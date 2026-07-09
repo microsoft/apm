@@ -36,32 +36,37 @@ def _safe_hook_slug(value: str, fallback: str = "hook") -> str:
     return safe or fallback
 
 
-def _kiro_patterns_from_matcher(matcher: dict) -> list[str]:
-    """Extract Kiro file patterns from an APM hook matcher, if present."""
+def _kiro_matcher_from_matcher(matcher: dict) -> str | None:
+    """Extract a Kiro v1 matcher from an APM hook matcher, if present."""
     patterns = matcher.get("patterns")
     if isinstance(patterns, str) and patterns.strip():
-        return [patterns.strip()]
+        return patterns.strip()
     if isinstance(patterns, list):
-        return [str(item).strip() for item in patterns if str(item).strip()]
+        values = [str(item).strip() for item in patterns if str(item).strip()]
+        return "|".join(values) or None
     matcher_value = matcher.get("matcher")
     if isinstance(matcher_value, str) and matcher_value.strip():
-        return [matcher_value.strip()]
-    return []
+        return matcher_value.strip()
+    return None
 
 
-def _kiro_then_from_action(action: dict, command_keys: tuple[str, ...]) -> dict | None:
-    """Convert one APM hook action to Kiro's ``then`` object."""
+def _kiro_action_from_action(action: dict, command_keys: tuple[str, ...]) -> dict | None:
+    """Convert one APM hook action to a Kiro v1 action."""
     prompt = action.get("prompt")
-    if action.get("type") == "askAgent" or isinstance(prompt, str):
+    if action.get("type") in {"agent", "askAgent"} or isinstance(prompt, str):
         prompt_text = prompt if isinstance(prompt, str) else action.get("command")
         if isinstance(prompt_text, str) and prompt_text.strip():
-            return {"type": "askAgent", "prompt": prompt_text}
+            return {"type": "agent", "prompt": prompt_text}
         return None
 
     for key in command_keys:
         command = action.get(key)
         if isinstance(command, str) and command.strip():
-            return {"type": "runCommand", "command": command}
+            converted = {"type": "command", "command": command}
+            timeout = action.get("timeout", action.get("timeoutSec"))
+            if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
+                converted["timeout"] = timeout
+            return converted
     return None
 
 
@@ -81,24 +86,39 @@ def _kiro_actions_from_matcher(matcher: dict, command_keys: tuple[str, ...]) -> 
 def _kiro_hook_document(
     *,
     name: str,
-    description: str | None,
     event_name: str,
-    patterns: list[str],
-    then: dict,
+    matcher: str | None,
+    action: dict,
 ) -> dict:
-    """Build one Kiro hook JSON document."""
-    when: dict[str, object] = {"type": event_name}
-    if patterns:
-        when["patterns"] = patterns
-    doc = {
+    """Build one Kiro v1 hook JSON document."""
+    hook = {
         "name": name,
-        "version": "1.0.0",
-        "when": when,
-        "then": then,
+        "trigger": event_name,
+        "action": action,
     }
-    if description:
-        doc["description"] = description
-    return doc
+    if matcher:
+        hook["matcher"] = matcher
+    return {"version": "v1", "hooks": [hook]}
+
+
+def _normalize_kiro_v1(data: dict) -> dict:
+    """Convert a native Kiro v1 document to the internal event-map shape."""
+    events: dict[str, list[dict]] = {}
+    for hook in data.get("hooks", []):
+        if not isinstance(hook, dict):
+            continue
+        trigger = hook.get("trigger")
+        action = hook.get("action")
+        if not isinstance(trigger, str) or not isinstance(action, dict):
+            continue
+        native_action = dict(action)
+        if isinstance(hook.get("name"), str):
+            native_action["_kiro_name"] = hook["name"]
+        matcher: dict[str, object] = {"hooks": [native_action]}
+        if isinstance(hook.get("matcher"), str):
+            matcher["matcher"] = hook["matcher"]
+        events.setdefault(trigger, []).append(matcher)
+    return {"hooks": events}
 
 
 def _write_kiro_hook_docs(
@@ -120,10 +140,6 @@ def _write_kiro_hook_docs(
     files_adopted = 0
     hooks = rewritten.get("hooks", {})
     _emit_hook_event_diagnostics(list(hooks.keys()), "kiro", _KIRO_EVENT_MAP)
-    description = rewritten.get("description")
-    if not isinstance(description, str) or not description.strip():
-        description = None
-
     per_event_counts: dict[str, int] = {}
     for raw_event_name, matchers in hooks.items():
         if not isinstance(matchers, list):
@@ -133,19 +149,18 @@ def _write_kiro_hook_docs(
         for matcher in matchers:
             if not isinstance(matcher, dict):
                 continue
-            patterns = _kiro_patterns_from_matcher(matcher)
+            kiro_matcher = _kiro_matcher_from_matcher(matcher)
             for action in _kiro_actions_from_matcher(matcher, integrator.HOOK_COMMAND_KEYS):
-                then = _kiro_then_from_action(action, integrator.HOOK_COMMAND_KEYS)
-                if then is None:
+                kiro_action = _kiro_action_from_action(action, integrator.HOOK_COMMAND_KEYS)
+                if kiro_action is None:
                     continue
                 per_event_counts[event_name] = per_event_counts.get(event_name, 0) + 1
                 index = per_event_counts[event_name]
                 doc = _kiro_hook_document(
-                    name=f"{package_name} {event_name} {index}",
-                    description=description,
+                    name=action.get("_kiro_name", f"{package_name} {event_name} {index}"),
                     event_name=event_name,
-                    patterns=patterns,
-                    then=then,
+                    matcher=kiro_matcher,
+                    action=kiro_action,
                 )
                 target_filename = (
                     f"{_safe_hook_slug(package_name)}-{_safe_hook_slug(hook_file.stem)}-"
@@ -178,7 +193,12 @@ def _write_kiro_hook_docs(
                 target_paths.append(target_path)
                 display_payloads.append(
                     _display_payload(
-                        integrator, target_filename, hook_file, event_name, then, rendered
+                        integrator,
+                        target_filename,
+                        hook_file,
+                        event_name,
+                        kiro_action,
+                        rendered,
                     )
                 )
     return files_integrated, files_skipped, files_adopted
@@ -189,13 +209,13 @@ def _display_payload(
     target_filename: str,
     hook_file: Path,
     event_name: str,
-    then: dict,
+    action: dict,
     rendered: str,
 ) -> dict:
     """Build install-log metadata for one generated Kiro hook file."""
     summary = (
-        integrator._summarize_command({"command": then.get("command", "")})
-        if then.get("type") == "runCommand"
+        integrator._summarize_command({"command": action.get("command", "")})
+        if action.get("type") == "command"
         else "asks agent"
     )
     return {
@@ -279,9 +299,11 @@ def integrate_kiro_hooks(
     display_payloads: list = []
 
     for hook_file in hook_files:
-        data = integrator._parse_hook_json(hook_file)
+        data = integrator._parse_hook_json(hook_file, allow_kiro_v1=True)
         if data is None:
             continue
+        if isinstance(data.get("hooks"), list):
+            data = _normalize_kiro_v1(data)
 
         rewritten, scripts = integrator._rewrite_hooks_data(
             data,
