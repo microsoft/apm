@@ -109,8 +109,8 @@ UserTargetType = Literal[
 
 def detect_target(  # noqa: PLR0911
     project_root: Path,
-    explicit_target: str | None = None,
-    config_target: str | None = None,
+    explicit_target: str | list[str] | None = None,
+    config_target: str | list[str] | None = None,
 ) -> tuple[TargetType, str]:
     """Detect the appropriate target for compilation and integration.
 

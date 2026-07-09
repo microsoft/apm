@@ -117,14 +117,17 @@ def run_mcp_install(  # noqa: PLR0913
     if APM_DEPS_AVAILABLE:
         if registry_url and logger and verbose:
             logger.verbose_detail(f"Registry: {registry_url}")
-        if target is not None and logger:
-            logger.verbose_detail(f"Target: {target}")
+        if target is not None and logger and verbose:
+            rendered_target = target if isinstance(target, str) else ", ".join(target)
+            logger.verbose_detail(f"Target: {rendered_target}")
         with registry_env_override(registry_url):
             try:
                 _mcp_lock_path = get_lockfile_path(apm_dir)
                 _existing_lock = LockFile.read(_mcp_lock_path)
                 old_servers = set(_existing_lock.mcp_servers) if _existing_lock else set()
                 old_configs = dict(_existing_lock.mcp_configs) if _existing_lock else {}
+                # A scalar target selects the runtime directly; explicit_target
+                # also preserves the flag for downstream active-target gating.
                 MCPIntegrator.install(
                     [dep],
                     target if isinstance(target, str) else runtime,

@@ -131,7 +131,7 @@ written to `.kiro/settings/mcp.json` or `~/.kiro/settings/mcp.json` for
 This target covers the documented Kiro IDE layout. Kiro CLI configuration
 differences are tracked separately; see [the targets matrix](../reference/targets-matrix/#kiro).
 
-### JetBrains (IntelliJ IDEA, PyCharm, GoLand, and others)
+### JetBrains
 
 GitHub Copilot for JetBrains reads MCP servers from a single user-scope
 `mcp.json` (the per-OS path above), so configuration is global rather than

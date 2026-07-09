@@ -28,7 +28,7 @@ see [Primitive types](./primitive-types/).
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | kiro            | `.kiro/`               |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
-| intellij        | OS-specific user config |     [ ]      |   [ ]   |  [ ]   |  [ ]   |   [ ]    |  [ ]  | [x] |
+| intellij        | `.github/` + user MCP config |     [x]      |   [x]   |  [x]   |  [x]   |   [ ]    |  [x]  | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
@@ -67,9 +67,9 @@ list before `compile` or `install`.
 | kiro     | `.kiro/` directory                            |
 | intellij | Global `github-copilot/intellij/` config directory |
 
-`intellij` is an MCP-only target. It writes the JetBrains Copilot user-scope
-`mcp.json` and never participates in file-level primitive deployment or plain
-`all` expansion.
+IntelliJ-specific integration is MCP-only and writes JetBrains Copilot's
+user-scope `mcp.json`. Package file primitives use the Copilot profile.
+`intellij` does not participate in plain `all` expansion.
 
 `agent-skills` is a canonical target key; `antigravity` is explicit-only for
 auto-detection. Both are available with `--target` and can be listed in a
@@ -226,9 +226,11 @@ GitHub Copilot for JetBrains IDEs.
 - **Deploy directory.** User-scope `mcp.json`; see the
   [JetBrains integration guide](../integrations/ide-tool-integration/#jetbrains)
   for OS-specific paths.
-- **Supported primitives.** mcp only.
-- **Scope.** User scope only. IntelliJ never participates in file-level
-  primitive deployment or plain `all` expansion.
+- **Supported primitives.** The IntelliJ-specific adapter supports mcp.
+  Package file primitives use the Copilot profile.
+- **Scope.** MCP configuration is user scope only. File primitives use the
+  project or user scope selected for the Copilot profile. IntelliJ does not
+  participate in plain `all` expansion.
 
 ## agent-skills
 
