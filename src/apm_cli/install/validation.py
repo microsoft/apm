@@ -21,6 +21,9 @@ _local_path_failure_reason
     Return a human-readable reason when a local-path dep fails validation.
 _local_path_no_markers_hint
     Scan a local directory for nested installable packages and hint the user.
+_generic_host_ambiguous_subpath_hint
+    Return a GITLAB_HOST/APM_GITLAB_HOSTS hint when an unrecognised FQDN
+    swallowed a subpath into a single (non-existent) repo path.
 """
 
 import re
@@ -29,7 +32,12 @@ from pathlib import Path
 import requests
 
 from ..utils.console import _rich_echo, _rich_info, _rich_warning
-from ..utils.github_host import default_host, is_ado_auth_failure_signal
+from ..utils.github_host import (
+    default_host,
+    is_ado_auth_failure_signal,
+    is_github_hostname,
+    is_gitlab_hostname,
+)
 from .errors import AuthenticationError
 
 # ---------------------------------------------------------------------------
@@ -142,6 +150,38 @@ def _local_path_failure_reason(dep_ref):
         return "path is not a directory"
     # Directory exists but has no package markers
     return "no apm.yml, SKILL.md, or plugin.json found"
+
+
+def _generic_host_ambiguous_subpath_hint(dep_ref) -> str | None:
+    """Return an actionable hint when an unrecognised FQDN swallowed a subpath.
+
+    Mirrors GHES (``GITHUB_HOST``): a self-hosted GitLab instance is only
+    classified as GitLab-class -- which enables the repo/subpath boundary
+    probe for nested groups -- once the user points ``GITLAB_HOST`` or
+    ``APM_GITLAB_HOSTS`` at it (issue #2066). Without that, parse-time
+    detection has no way to know where the repo ends and the subpath
+    begins, so it folds the whole remaining path into ``repo_url``, which
+    then fails validation as a single (non-existent) repository. Surface
+    *why* instead of a bare "not accessible" so the user knows to
+    configure the host rather than suspect a permissions problem.
+    """
+    host = dep_ref.host
+    if not host or dep_ref.is_local or dep_ref.is_virtual:
+        return None
+    if is_github_hostname(host) or dep_ref.is_azure_devops() or is_gitlab_hostname(host):
+        return None
+    segments = [seg for seg in dep_ref.repo_url.split("/") if seg]
+    if len(segments) <= 2:
+        return None
+    return (
+        f"'{host}' was treated as a single repository path "
+        f"('{dep_ref.repo_url}') because it isn't recognised as GitHub, "
+        f"Azure DevOps, or GitLab. If this is a self-hosted GitLab instance, "
+        f"set GITLAB_HOST={host} (or add it to the comma-separated "
+        f"APM_GITLAB_HOSTS) and re-run to enable repo/subpath resolution for "
+        f"nested groups. Otherwise, use an explicit 'git:' + 'path:' entry "
+        f"in apm.yml."
+    )
 
 
 def _local_path_no_markers_hint(local_dir, logger=None):
