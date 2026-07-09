@@ -66,11 +66,17 @@ def run(ctx: InstallContext) -> None:
     #     Only MCP_ONLY_TARGETS need this -- canonical targets like
     #     'vscode' must pass through unchanged.
     # ------------------------------------------------------------------
+    # Keep these lazy: target_detection and integration.targets reference each
+    # other at runtime, so module-level imports would create an import cycle.
     from apm_cli.core.target_detection import MCP_ONLY_TARGETS
     from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
 
     if effective_target in MCP_ONLY_TARGETS:
-        canonical_target = RUNTIME_TO_CANONICAL_TARGET[effective_target]
+        canonical_target = RUNTIME_TO_CANONICAL_TARGET.get(effective_target)
+        if canonical_target is None:
+            raise RuntimeError(
+                f"MCP-only target '{effective_target}' has no canonical policy mapping"
+            )
         if ctx.logger:
             ctx.logger.verbose_detail(
                 f"Normalizing MCP-only target '{effective_target}' -> "

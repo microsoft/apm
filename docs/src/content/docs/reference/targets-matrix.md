@@ -218,6 +218,18 @@ Kiro IDE.
 - **MCP shape.** JSON `mcpServers` entries use `command`/`args`/`env` for stdio and `url`/`headers` for remote servers. Kiro resolves `${VAR}` placeholders at runtime, so APM preserves them rather than writing secrets to disk.
 - **Scope.** This is the documented Kiro IDE layout only. Kiro CLI differences are tracked separately and are not part of this target.
 
+## intellij
+
+GitHub Copilot for JetBrains IDEs.
+
+- **Detection.** Global `github-copilot/intellij/` config directory.
+- **Deploy directory.** User-scope `mcp.json`; see the
+  [JetBrains integration guide](../integrations/ide-tool-integration/#jetbrains)
+  for OS-specific paths.
+- **Supported primitives.** mcp only.
+- **Scope.** User scope only. IntelliJ never participates in file-level
+  primitive deployment or plain `all` expansion.
+
 ## agent-skills
 
 Cross-client shared skills directory.

@@ -125,6 +125,17 @@ class TestDetectTarget:
         assert target == "vscode"
         assert reason == "apm.yml target"
 
+    def test_config_target_intellij(self, tmp_path):
+        """Config target intellij maps to the Copilot deployment profile."""
+        target, reason = detect_target(
+            project_root=tmp_path,
+            explicit_target=None,
+            config_target="intellij",
+        )
+
+        assert target == "vscode"
+        assert reason == "apm.yml target"
+
     def test_config_target_claude(self, tmp_path):
         """Config target claude is used when no explicit target."""
         target, reason = detect_target(

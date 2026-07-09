@@ -154,6 +154,8 @@ Notes and limits:
 - **Runtime env substitution.** JetBrains Copilot resolves `${env:VAR}` in
   `mcp.json` at server start. APM preserves env-var placeholders as
   `${env:VAR}` instead of writing matching host secrets into the config.
+- **Policy evaluation.** APM maps `intellij` to `copilot` for organization
+  allow-lists, so a policy that allows `copilot` also covers IntelliJ installs.
 
 ## Per-tool reference pages
 

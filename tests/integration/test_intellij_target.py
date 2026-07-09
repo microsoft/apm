@@ -45,11 +45,19 @@ _BASE_ENV: dict[str, str] = {"APM_E2E_TESTS": "1"}
 @pytest.fixture()
 def apm_command() -> str:
     """Return the APM executable used by the end-to-end test."""
+    executable_name = "apm.exe" if sys.platform == "win32" else "apm"
+    venv_apm = (
+        Path(__file__).parents[2]
+        / ".venv"
+        / ("Scripts" if sys.platform == "win32" else "bin")
+        / executable_name
+    )
+    if venv_apm.exists():
+        return str(venv_apm)
     apm_on_path = shutil.which("apm")
     if apm_on_path:
         return apm_on_path
-    venv_apm = Path(__file__).parents[2] / ".venv" / "bin" / "apm"
-    return str(venv_apm)
+    pytest.fail("APM executable not found in the project virtualenv or PATH")
 
 
 @pytest.fixture()
@@ -94,6 +102,11 @@ class TestIntelliJConstants:
     def test_intellij_runtime_canonical_maps_to_copilot(self) -> None:
         """RUNTIME_TO_CANONICAL_TARGET must map intellij -> copilot."""
         assert RUNTIME_TO_CANONICAL_TARGET.get("intellij") == "copilot"
+
+    def test_all_mcp_only_targets_have_canonical_mapping(self) -> None:
+        """Every MCP-only target must have a fail-closed policy mapping."""
+        missing = MCP_ONLY_TARGETS - RUNTIME_TO_CANONICAL_TARGET.keys()
+        assert not missing, f"MCP-only targets lack canonical mappings: {missing}"
 
     def test_parser_accepts_single(self) -> None:
         """TargetParamType.convert accepts 'intellij' as a single token."""

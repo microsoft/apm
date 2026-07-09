@@ -1210,7 +1210,7 @@ class MCPIntegrator:
         stored_mcp_configs: dict = None,  # noqa: RUF013
         project_root=None,
         user_scope: bool = False,
-        explicit_target: str | None = None,
+        explicit_target: str | list[str] | None = None,
         logger=None,
         diagnostics=None,
         scope=None,

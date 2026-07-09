@@ -117,6 +117,8 @@ def run_mcp_install(  # noqa: PLR0913
     if APM_DEPS_AVAILABLE:
         if registry_url and logger and verbose:
             logger.verbose_detail(f"Registry: {registry_url}")
+        if target is not None and logger:
+            logger.verbose_detail(f"Target: {target}")
         with registry_env_override(registry_url):
             try:
                 _mcp_lock_path = get_lockfile_path(apm_dir)
