@@ -14,10 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the failure reason now suggests setting `GITLAB_HOST` / `APM_GITLAB_HOSTS`
   if the target is a self-hosted GitLab instance, or using an explicit
   `git:` + `path:` entry in `apm.yml` otherwise. (by @rrazvd; closes #2066) (#2074)
-- `apm prune`, `apm audit --ci` orphan detection, and the lockfile-exists
-  check now include `devDependencies.apm` entries, fixing false orphan
-  reports, spurious CI failures, and a misleading message for dev-only
-  projects. (#2042, closes #2033)
+- Dev dependencies are no longer removed by `apm prune`, reported as orphans
+  by `apm audit --ci`, or omitted from lockfile and MCP config checks. This
+  includes `devDependencies.apm` and applicable `devDependencies.mcp` entries.
+  (by @sergio-sisternes-epam; #2102, supersedes #2042, closes #2033)
 
 ## [0.24.0] - 2026-07-05
 
