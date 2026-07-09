@@ -111,6 +111,35 @@ class TestParsePluginManifest:
 
 
 class TestMapPluginArtifacts:
+    def test_map_repository_root_artifacts_for_nested_plugin(self, tmp_path):
+        repo_root = tmp_path / "repo"
+        plugin_dir = repo_root / "plugins" / "frontend-web-dev"
+        plugin_dir.mkdir(parents=True)
+        agent = repo_root / "agents" / "frontend.agent.md"
+        agent.parent.mkdir()
+        agent.write_text("# Frontend agent")
+        skill = repo_root / "skills" / "browser-testing"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# Browser testing")
+        manifest = {
+            "agents": ["./agents/frontend.agent.md"],
+            "skills": ["./skills/browser-testing/"],
+        }
+
+        apm_dir = plugin_dir / ".apm"
+        apm_dir.mkdir()
+        _map_plugin_artifacts(
+            plugin_dir,
+            apm_dir,
+            manifest,
+            repository_root=repo_root,
+        )
+
+        assert (apm_dir / "agents" / "frontend.agent.md").read_text() == "# Frontend agent"
+        assert (
+            apm_dir / "skills" / "browser-testing" / "SKILL.md"
+        ).read_text() == "# Browser testing"
+
     def test_map_agents_directory(self, tmp_path):
         plugin_dir = tmp_path / "plugin"
         plugin_dir.mkdir()

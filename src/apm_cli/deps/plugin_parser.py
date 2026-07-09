@@ -160,7 +160,12 @@ def parse_plugin_manifest(plugin_json_path: Path) -> dict[str, Any]:
     return manifest
 
 
-def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None = None) -> Path:
+def normalize_plugin_directory(
+    plugin_path: Path,
+    plugin_json_path: Path | None = None,
+    *,
+    repository_root: Path | None = None,
+) -> Path:
     """Normalize a Claude plugin directory into an APM package.
 
     Works with or without plugin.json.  When plugin.json is present it is
@@ -174,6 +179,8 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
     Args:
         plugin_path: Root of the plugin directory.
         plugin_json_path: Optional path to plugin.json (may be None).
+        repository_root: Optional checkout root for manifest paths shared by
+            nested plugins in a monorepo.
 
     Returns:
         Path: Path to the generated apm.yml.
@@ -190,10 +197,19 @@ def normalize_plugin_directory(plugin_path: Path, plugin_json_path: Path | None 
     if "name" not in manifest or not manifest["name"]:
         manifest["name"] = plugin_path.name
 
-    return synthesize_apm_yml_from_plugin(plugin_path, manifest)
+    return synthesize_apm_yml_from_plugin(
+        plugin_path,
+        manifest,
+        repository_root=repository_root,
+    )
 
 
-def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) -> Path:
+def synthesize_apm_yml_from_plugin(
+    plugin_path: Path,
+    manifest: dict[str, Any],
+    *,
+    repository_root: Path | None = None,
+) -> Path:
     """Synthesize apm.yml from plugin metadata.
 
     Maps the plugin's agents/, skills/, commands/, hooks/ directories and
@@ -210,6 +226,8 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
         plugin_path: Path to the plugin directory.
         manifest: Plugin metadata dict (only `name` is required; all other
                   fields are optional and default gracefully).
+        repository_root: Optional checkout root for manifest paths shared by
+            nested plugins in a monorepo.
 
     Returns:
         Path: Path to the generated apm.yml.
@@ -222,7 +240,12 @@ def synthesize_apm_yml_from_plugin(plugin_path: Path, manifest: dict[str, Any]) 
     apm_dir.mkdir(exist_ok=True)
 
     # Map plugin structure into .apm/ subdirectories
-    _map_plugin_artifacts(plugin_path, apm_dir, manifest)
+    _map_plugin_artifacts(
+        plugin_path,
+        apm_dir,
+        manifest,
+        repository_root=repository_root,
+    )
 
     # Extract MCP servers from plugin and convert to dependency format
     mcp_servers = _extract_mcp_servers(plugin_path, manifest)
@@ -630,7 +653,11 @@ def _lsp_servers_to_apm_deps(servers: dict[str, Any], plugin_path: Path) -> list
 
 
 def _map_plugin_artifacts(
-    plugin_path: Path, apm_dir: Path, manifest: dict[str, Any] | None = None
+    plugin_path: Path,
+    apm_dir: Path,
+    manifest: dict[str, Any] | None = None,
+    *,
+    repository_root: Path | None = None,
 ) -> None:
     """Map plugin artifacts to .apm/ subdirectories and copy pass-through files.
 
@@ -652,6 +679,8 @@ def _map_plugin_artifacts(
         plugin_path: Root of the plugin directory.
         apm_dir: Path to the .apm/ directory.
         manifest: Optional plugin.json metadata; used for custom component paths.
+        repository_root: Optional checkout root for manifest paths shared by
+            nested plugins in a monorepo.
     """
     if manifest is None:
         manifest = {}
@@ -661,33 +690,40 @@ def _map_plugin_artifacts(
     # Resolve source paths  -- use manifest arrays if present, else defaults.
     # Custom paths may be directories OR individual files.
     #
-    # Security: every manifest-controlled path is verified to resolve
-    # inside *plugin_path* before it is copied.  Without this guard, a
+    # Security: every manifest-controlled path is verified to resolve inside
+    # its trusted package or repository root before it is copied. Without this guard, a
     # malicious plugin could set ``"commands": "/etc/passwd"`` or
     # ``"agents": ["../../host"]`` and trick ``apm install`` into copying
     # arbitrary host files into the project's ``.apm/`` tree (and from
     # there into ``.github/prompts/`` via auto-integration).
     def _resolve_sources(component: str, default_dir: str):
         """Return list of existing source paths (dirs or files) for a component."""
+
+        def _resolve_custom_path(raw: str) -> tuple[Path, Path]:
+            local = plugin_path / raw
+            if local.exists() or repository_root is None:
+                return local, plugin_path
+            return repository_root / raw, repository_root
+
         custom = manifest.get(component)
         if isinstance(custom, list):
             paths = []
             for p in custom:
                 raw = str(p)
-                src = plugin_path / raw
+                src, source_root = _resolve_custom_path(raw)
                 if (
                     src.exists()
                     and not src.is_symlink()
-                    and _is_within_plugin(src, plugin_path, component=component)
+                    and _is_within_plugin(src, source_root, component=component)
                 ):
                     paths.append(src)
             return paths
         elif isinstance(custom, str):
-            src = plugin_path / custom
+            src, source_root = _resolve_custom_path(custom)
             if (
                 src.exists()
                 and not src.is_symlink()
-                and _is_within_plugin(src, plugin_path, component=component)
+                and _is_within_plugin(src, source_root, component=component)
             ):
                 return [src]
             return []

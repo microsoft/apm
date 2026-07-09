@@ -1258,6 +1258,73 @@ class TestDownloadSubdirectoryPackageWindowsCleanup:
         # owner/repo/skills/test-pkg → virtual subdirectory reference
         return DependencyReference.parse("owner/repo/skills/test-pkg")
 
+    def test_nested_plugin_copies_repository_root_agents_and_skills(self, tmp_path):
+        downloader = GitHubPackageDownloader()
+        dep = DependencyReference.parse("github/awesome-copilot/plugins/frontend-web-dev")
+        target = tmp_path / "out"
+
+        manifest = (
+            b'{"name":"frontend-web-dev",'
+            b'"agents":["./agents/frontend.agent.md"],'
+            b'"skills":["./skills/browser-testing/"]}'
+        )
+
+        def fake_download_raw(_dep, path, _ref):
+            if path.endswith(".github/plugin/plugin.json"):
+                return manifest
+            raise RuntimeError("not found")
+
+        def fake_sparse(
+            _dep,
+            clone_path,
+            _subdir,
+            _ref,
+            *,
+            additional_paths=None,
+        ):
+            plugin = clone_path / "plugins" / "frontend-web-dev"
+            manifest_dir = plugin / ".github" / "plugin"
+            manifest_dir.mkdir(parents=True)
+            (manifest_dir / "plugin.json").write_bytes(manifest)
+            if not additional_paths:
+                return True
+            agent = clone_path / "agents" / "frontend.agent.md"
+            agent.parent.mkdir()
+            agent.write_text("# Frontend agent")
+            skill = clone_path / "skills" / "browser-testing"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text("# Browser testing")
+            return True
+
+        def fake_clone(_url, clone_path, **_kwargs):
+            fake_sparse(dep, clone_path, dep.virtual_path, dep.reference)
+
+        fake_repo = MagicMock()
+        fake_repo.head.commit.hexsha = "abc1234"
+        validation = MagicMock(
+            is_valid=True,
+            errors=[],
+            package=APMPackage(name="frontend-web-dev", version="1.0.0"),
+        )
+
+        with (
+            patch.object(downloader, "download_raw_file", side_effect=fake_download_raw),
+            patch.object(downloader, "_try_sparse_checkout", side_effect=fake_sparse),
+            patch.object(downloader, "_clone_with_fallback", side_effect=fake_clone),
+            patch("apm_cli.deps.github_downloader.Repo", return_value=fake_repo),
+            patch("apm_cli.deps.github_downloader._close_repo"),
+            patch(
+                "apm_cli.deps.github_downloader.validate_apm_package",
+                return_value=validation,
+            ),
+        ):
+            downloader.download_subdirectory_package(dep, target)
+
+        assert (target / ".apm" / "agents" / "frontend.agent.md").read_text() == "# Frontend agent"
+        assert (
+            target / ".apm" / "skills" / "browser-testing" / "SKILL.md"
+        ).read_text() == "# Browser testing"
+
     def test_sparse_checkout_success_closes_sha_repo_before_rmtree(self, tmp_path):
         """When sparse checkout succeeds the SHA-capture Repo is closed before _rmtree."""
         from apm_cli.deps.github_downloader import _close_repo  # noqa

@@ -1,6 +1,7 @@
 """GitHub package downloader for APM dependencies."""
 
 import contextlib
+import json
 import os
 import re
 import subprocess
@@ -1044,6 +1045,8 @@ class GitHubPackageDownloader:
         temp_clone_path: Path,
         subdir_path: str,
         ref: str | None = None,
+        *,
+        additional_paths: list[str] | None = None,
     ) -> bool:
         """Attempt sparse-checkout to download only a subdirectory (git 2.25+).
 
@@ -1075,7 +1078,13 @@ class GitHubPackageDownloader:
                 ["git", "init"],
                 ["git", "remote", "add", "origin", auth_url],
                 ["git", "sparse-checkout", "init", "--cone"],
-                ["git", "sparse-checkout", "set", subdir_path],
+                [
+                    "git",
+                    "sparse-checkout",
+                    "set",
+                    subdir_path,
+                    *(additional_paths or []),
+                ],
             ]
             fetch_cmd = ["git", "fetch", "origin"]
             fetch_cmd.append(ref or "HEAD")
@@ -1103,6 +1112,63 @@ class GitHubPackageDownloader:
         except Exception as e:
             _debug(f"Sparse-checkout failed: {e}")
             return False
+
+    def _plugin_sparse_paths(
+        self,
+        dep_ref: DependencyReference,
+        subdir_path: str,
+        ref: str | None,
+    ) -> list[str]:
+        """Return checkout paths for repository-level plugin artifacts."""
+        from ..utils.path_security import PathTraversalError, validate_path_segments
+        from .plugin_parser import _MAX_PLUGIN_JSON_BYTES
+
+        manifest_bytes = None
+        for relative_manifest in (
+            "plugin.json",
+            ".github/plugin/plugin.json",
+            ".claude-plugin/plugin.json",
+        ):
+            manifest_path = f"{subdir_path.rstrip('/')}/{relative_manifest}"
+            try:
+                manifest_bytes = self.download_raw_file(
+                    dep_ref,
+                    manifest_path,
+                    ref or "main",
+                )
+                break
+            except RuntimeError:
+                continue
+        if manifest_bytes is None or len(manifest_bytes) > _MAX_PLUGIN_JSON_BYTES:
+            return [subdir_path]
+        try:
+            manifest = json.loads(manifest_bytes)
+        except (UnicodeDecodeError, ValueError, RecursionError, MemoryError):
+            return [subdir_path]
+        if not isinstance(manifest, dict):
+            return [subdir_path]
+
+        paths = [subdir_path]
+        for component in ("agents", "skills"):
+            declared = manifest.get(component)
+            entries = declared if isinstance(declared, list) else [declared]
+            for entry in entries:
+                if not isinstance(entry, str) or not entry.strip():
+                    continue
+                raw = entry.strip().replace("\\", "/")
+                while raw.startswith("./"):
+                    raw = raw[2:]
+                raw = raw.rstrip("/")
+                try:
+                    validate_path_segments(raw, context=f"plugin {component} path")
+                except PathTraversalError:
+                    continue
+                source = Path(raw)
+                checkout_path = source.parent if source.suffix else source
+                checkout = checkout_path.as_posix()
+                if checkout not in ("", "."):
+                    paths.extend((checkout, f"{subdir_path.rstrip('/')}/{checkout}"))
+        return list(dict.fromkeys(paths))
 
     def download_subdirectory_package(
         self,
@@ -1138,6 +1204,13 @@ class GitHubPackageDownloader:
         # Use user-specified ref, or None to use repo's default branch
         ref = dep_ref.reference  # None if not specified
         subdir_path = dep_ref.virtual_path
+        is_nested_plugin = subdir_path.split("/", 1)[0] == "plugins"
+        sparse_paths = (
+            self._plugin_sparse_paths(dep_ref, subdir_path, ref)
+            if is_nested_plugin
+            else [subdir_path]
+        )
+        needs_repository_root = len(sparse_paths) > 1
         _perf_logger = getattr(self, "install_logger", None)
         _dep_display = str(dep_ref)
 
@@ -1184,7 +1257,7 @@ class GitHubPackageDownloader:
                     _resolved_sha_for_cache or ref,
                     locked_sha=_resolved_sha_for_cache,
                     env=self._git_env_dict(),
-                    sparse_paths=[subdir_path],
+                    sparse_paths=sparse_paths,
                 )
             except Exception:
                 # Cache miss or failure -- fall through to normal clone path.
@@ -1215,7 +1288,7 @@ class GitHubPackageDownloader:
                         _dep_display,
                         cache_state="persistent-hit",
                         sha_short=_sha_short,
-                        sparse_paths=[subdir_path],
+                        sparse_paths=sparse_paths or [],
                     )
                     _perf_logger.materialize_result(
                         sparse_applied=True,
@@ -1304,7 +1377,7 @@ class GitHubPackageDownloader:
                         # (subdir-agnostic) so multiple consumers
                         # requesting different subdirs of the same
                         # repo+SHA still share the object DB.
-                        sparse_paths=[subdir_path],
+                        sparse_paths=sparse_paths,
                     )
                 except Exception as e:
                     raise RuntimeError(
@@ -1329,7 +1402,21 @@ class GitHubPackageDownloader:
                     progress_obj.update(progress_task_id, completed=20, total=100)
 
                 # Phase 4 (#171): Try sparse-checkout first (git 2.25+), fall back to full clone
-                sparse_ok = self._try_sparse_checkout(dep_ref, sparse_clone_path, subdir_path, ref)
+                if needs_repository_root:
+                    sparse_ok = self._try_sparse_checkout(
+                        dep_ref,
+                        sparse_clone_path,
+                        subdir_path,
+                        ref,
+                        additional_paths=sparse_paths[1:],
+                    )
+                else:
+                    sparse_ok = self._try_sparse_checkout(
+                        dep_ref,
+                        sparse_clone_path,
+                        subdir_path,
+                        ref,
+                    )
 
                 if not sparse_ok:
                     # Full clone into a fresh subdirectory so we don't have to touch
@@ -1397,6 +1484,18 @@ class GitHubPackageDownloader:
 
             if not source_subdir.is_dir():
                 raise RuntimeError(f"Path '{subdir_path}' is not a directory")
+
+            if needs_repository_root:
+                from ..utils.helpers import find_plugin_json
+                from .plugin_parser import normalize_plugin_directory
+
+                plugin_json_path = find_plugin_json(source_subdir)
+                if plugin_json_path is not None:
+                    normalize_plugin_directory(
+                        source_subdir,
+                        plugin_json_path,
+                        repository_root=temp_clone_path,
+                    )
 
             # Create target directory
             target_path.mkdir(parents=True, exist_ok=True)
