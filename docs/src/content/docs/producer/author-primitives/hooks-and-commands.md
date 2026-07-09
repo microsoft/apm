@@ -40,13 +40,28 @@ your-package/
 
 Each file is a JSON document keyed by lifecycle event. APM accepts the
 Claude (`PreToolUse`, `PostToolUse`) and Copilot (`preToolUse`,
-`postToolUse`) shapes; events are renamed per target during merge.
+`postToolUse`) shapes; events are renamed per target during merge. Flat
+Copilot command entries are also portable: when the target is Claude, APM
+wraps each one in Claude's required `matcher` and `hooks` group.
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {"type": "command", "command": "${PLUGIN_ROOT}/scripts/validate.sh", "timeout": 10}
+    ]
+  }
+}
+```
+
+For Claude, that entry is written as:
 
 ```json
 {
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "*",
         "hooks": [
           {"type": "command", "command": "${PLUGIN_ROOT}/scripts/validate.sh", "timeout": 10}
         ]
@@ -73,7 +88,7 @@ straight from there works as a standalone APM hook file:
 }
 ```
 
-Both shapes are normalized internally before merge. A file whose `"hooks"`
+Flat and nested shapes are normalized per target before merge. A file whose `"hooks"`
 key is present but not a JSON object fails closed with a warning; a file
 that parses cleanly but contributes zero entries also logs a warning so
 authors notice empty merges during development.

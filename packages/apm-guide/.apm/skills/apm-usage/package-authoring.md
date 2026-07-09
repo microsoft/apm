@@ -131,6 +131,23 @@ becomes `PostToolUse` in Claude) and rewrites path variables
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
 
+Authors may use flat Copilot command entries for portable manifests:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {"type": "command", "command": "${PLUGIN_ROOT}/hooks/check.sh", "timeout": 15}
+    ]
+  }
+}
+```
+
+When deploying to Claude, APM wraps each flat entry in the required
+`{"matcher": "*", "hooks": [...]}` group. Copilot keeps the flat entry, so
+one source manifest is valid for both targets. Already nested Claude entries
+remain nested.
+
 When a hook command references a script inside `hooks/` or `.apm/hooks/`,
 APM deploys that hook source bundle so sibling helper files resolve at
 runtime. Claude-family merged targets (Claude, Cursor, Codex, Gemini,

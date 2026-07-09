@@ -243,13 +243,14 @@ def _emit_hook_event_diagnostics(
         )
 
 
-def _to_nested_hook_entries(entries: list, key_fixer) -> list:
+def _to_nested_hook_entries(entries: list, key_fixer, default_matcher: str | None = None) -> list:
     """Wrap flat Copilot hook entries in the ``{"hooks": [...]}`` nesting.
 
     Shared by the Gemini and Antigravity transforms (both use the Claude
     nested matcher shape for tool events).  *key_fixer* renames the inner
-    command/timeout keys in place for the specific target.  Entries already
-    in nested form have only their inner keys fixed.
+    command/timeout keys in place for the specific target.  *default_matcher*
+    is added to newly wrapped entries when the target requires one. Entries
+    already in nested form have only their inner keys fixed.
     """
     result = []
     for entry in entries:
@@ -267,10 +268,17 @@ def _to_nested_hook_entries(entries: list, key_fixer) -> list:
         key_fixer(inner)
         apm_source = inner.pop("_apm_source", None)
         outer: dict = {"hooks": [inner]}
+        if default_matcher is not None:
+            outer["matcher"] = default_matcher
         if apm_source:
             outer["_apm_source"] = apm_source
         result.append(outer)
     return result
+
+
+def _to_claude_hook_entries(entries: list) -> list:
+    """Transform flat hook entries into Claude matcher groups."""
+    return _to_nested_hook_entries(entries, lambda _hook: None, default_matcher="*")
 
 
 def _to_gemini_hook_entries(entries: list) -> list:
@@ -1504,7 +1512,9 @@ class HookIntegrator(BaseIntegrator):
 
                 # Transform flat Copilot entries to the target's nested /
                 # native hook shape.
-                if config.target_key == "gemini":
+                if config.target_key == "claude":
+                    entries = _to_claude_hook_entries(entries)
+                elif config.target_key == "gemini":
                     entries = _to_gemini_hook_entries(entries)
                 elif config.target_key == "antigravity":
                     entries = _to_antigravity_hook_entries(entries, event_name)
