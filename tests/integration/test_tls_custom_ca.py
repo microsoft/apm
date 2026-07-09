@@ -158,6 +158,9 @@ def custom_ca_server(tmp_path_factory):
     ca_pem, srv_pem, srv_key = _mint_ca_and_leaf(dirpath)
 
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    # Pin a modern floor -- the default context still permits TLSv1/TLSv1.1
+    # (CodeQL py/insecure-protocol). Loopback test server, but keep it clean.
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(certfile=str(srv_pem), keyfile=str(srv_key))
 
     httpd = http.server.HTTPServer(("127.0.0.1", 0), _OkHandler)

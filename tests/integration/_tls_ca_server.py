@@ -41,6 +41,10 @@ def private_ca_https_server(dirpath: Path):
         pass
 
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    # Pin a modern floor -- the default context still permits TLSv1/TLSv1.1
+    # (CodeQL py/insecure-protocol). This is a loopback test server, but keep
+    # it correct so the scanner stays clean.
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(certfile=str(srv_pem), keyfile=str(srv_key))
 
     httpd = http.server.HTTPServer(("127.0.0.1", 0), _OkHandler)
