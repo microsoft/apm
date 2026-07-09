@@ -80,10 +80,10 @@ from apm_cli.install.services import (
 
 # Re-export validation leaf helpers so that existing test patches like
 # @patch("apm_cli.commands.install._validate_package_exists") keep working.
-# _validate_and_add_packages_to_apm_yml stays here (not moved) because it
-# calls _validate_package_exists and _local_path_failure_reason via module-
-# level name lookup -- keeping it co-located means @patch on this module
-# intercepts those calls without test changes.
+# _validate_and_add_packages_to_apm_yml stays co-located (module lookup keeps @patch working).
+from apm_cli.install.validation import (
+    _generic_host_ambiguous_subpath_hint as _ambiguous_subpath_hint,
+)
 from apm_cli.install.validation import (
     _local_path_failure_reason,
     _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
@@ -268,7 +268,9 @@ _APM_IMPORT_ERROR = None
 try:
     from ..deps.apm_resolver import APMDependencyResolver
     from ..deps.lockfile import LockFile, get_lockfile_path, migrate_lockfile_if_needed
-    from ..integration.mcp_integrator import MCPIntegrator
+    from ..integration.mcp_integrator import (
+        MCPIntegrator,  # noqa: F401 -- re-exported; tests patch commands.install.MCPIntegrator
+    )
     from ..models.apm_package import APMPackage, DependencyReference
 
     class _ScopedInstallDependencyResolver(APMDependencyResolver):
@@ -543,7 +545,7 @@ def _resolve_package_references(
             if marketplace_provenance:
                 _marketplace_provenance[identity] = marketplace_provenance
         else:
-            reason = _local_path_failure_reason(dep_ref)
+            reason = _local_path_failure_reason(dep_ref) or _ambiguous_subpath_hint(dep_ref)
             if not reason:
                 # Round-4 panel fix (devx-ux): name the four-step probe
                 # chain explicitly when the validator exhausted it
@@ -1845,122 +1847,44 @@ def _install_apm_packages(ctx, outcome):
 
         clear_apm_yml_cache()
 
-    # Collect transitive MCP dependencies from resolved APM packages
-    transitive_mcp = []
+    # -------------------------------------------------------------------------
+    # MCP integration (extracted to install/mcp/integration.py)
+    # -------------------------------------------------------------------------
+    from apm_cli.install.mcp import run_mcp_integration
+    from apm_cli.policy.install_preflight import PolicyBlockError
+
     from ..core.scope import get_modules_dir
 
     apm_modules_path = get_modules_dir(ctx.scope)
-    if should_install_mcp and apm_modules_path.exists():
-        lock_path = get_lockfile_path(ctx.apm_dir)
-        transitive_mcp = MCPIntegrator.collect_transitive(
-            apm_modules_path,
-            lock_path,
-            ctx.trust_transitive_mcp,
-            diagnostics=apm_diagnostics,
-        )
-        if transitive_mcp:
-            logger.verbose_detail(f"Collected {len(transitive_mcp)} transitive MCP dependency(ies)")
-            mcp_deps = MCPIntegrator.deduplicate(mcp_deps + transitive_mcp)
 
-    # allowExecutables MCP gate.
-    from ..security.executables import filter_mcp_by_allow_executables as _fmcp
-
-    mcp_deps = _fmcp(mcp_deps, getattr(apm_package, "allow_executables", None), logger)
-
-    # The pipeline gate phase (policy_gate.py) checks direct APM deps
-    # and direct MCP deps from apm.yml.  However, transitive MCP
-    # servers (discovered via collect_transitive above) are only known
-    # after APM packages are installed.  Run a second preflight
-    # against the *merged* MCP set (direct + transitive) BEFORE
-    # MCPIntegrator writes runtime configs.  On PolicyBlockError we
-    # abort the MCP write but leave already-installed APM packages
-    # in place (they were approved by the gate phase).
-    if should_install_mcp and mcp_deps:
-        from apm_cli.policy.install_preflight import (
-            PolicyBlockError as _TransitivePBE,
-        )
-        from apm_cli.policy.install_preflight import (
-            run_policy_preflight as _transitive_preflight,
-        )
-
-        try:
-            _transitive_preflight(
-                project_root=ctx.project_root,
-                mcp_deps=mcp_deps,
-                no_policy=ctx.no_policy,
-                logger=logger,
-                dry_run=False,
-            )
-        except _TransitivePBE:
-            logger.error(
-                "MCP server(s) blocked by org policy. "
-                "APM packages remain installed; MCP configs were NOT written."
-            )
-            logger.render_summary()
-            sys.exit(1)
-
-    mcp_count = 0
-    new_mcp_servers: builtins.set = builtins.set()
-    # Forward only the targets-key the user actually declared so parse_targets_field
-    # in the gate sees the same dict shape it sees from raw apm.yml. Including a
-    # `targets: None` placeholder when the user wrote `target:` (singular) would
-    # falsely trip the conflict-mutex check (see core.apm_yml.parse_targets_field).
-    # This restores parity with `apm install` for users on the modern `targets:`
-    # plural form -- without this, `targets:` was silently dropped at the call
-    # site and the gate fell back to permissive directory detection (#1335).
-    mcp_apm_config: dict = {"scripts": apm_package.scripts or {}}
-    if apm_package.targets is not None:
-        mcp_apm_config["targets"] = apm_package.targets
-    elif apm_package.target is not None:
-        mcp_apm_config["target"] = apm_package.target
-    if should_install_mcp and mcp_deps:
-        mcp_count = MCPIntegrator.install(
-            mcp_deps,
-            ctx.runtime,
-            ctx.exclude,
-            ctx.verbose,
-            stored_mcp_configs=old_mcp_configs,
-            apm_config=mcp_apm_config,
+    try:
+        mcp_count, mcp_apm_config = run_mcp_integration(
+            apm_package=apm_package,
+            mcp_deps=mcp_deps,
+            apm_modules_path=apm_modules_path,
+            lock_path=_lock_path,
+            old_mcp_servers=old_mcp_servers,
+            old_mcp_configs=old_mcp_configs,
             project_root=ctx.project_root,
             user_scope=(ctx.scope is InstallScope.USER),
-            explicit_target=ctx.target,
+            should_install=should_install_mcp,
+            logger=logger,
             diagnostics=apm_diagnostics,
+            runtime=ctx.runtime,
+            exclude=ctx.exclude,
+            trust_transitive_mcp=ctx.trust_transitive_mcp,
+            no_policy=ctx.no_policy,
+            verbose=ctx.verbose,
+            explicit_target=ctx.target,
             scope=ctx.scope,
         )
-        new_mcp_servers = MCPIntegrator.get_server_names(mcp_deps)
-        new_mcp_configs = MCPIntegrator.get_server_configs(mcp_deps)
-
-        # Remove stale MCP servers that are no longer needed
-        stale_servers = old_mcp_servers - new_mcp_servers
-        if stale_servers:
-            MCPIntegrator.remove_stale(
-                stale_servers,
-                ctx.runtime,
-                ctx.exclude,
-                project_root=ctx.project_root,
-                user_scope=(ctx.scope is InstallScope.USER),
-                scope=ctx.scope,
-            )
-
-        # Persist the new MCP server set and configs in the lockfile
-        MCPIntegrator.update_lockfile(new_mcp_servers, _lock_path, mcp_configs=new_mcp_configs)
-    elif should_install_mcp and not mcp_deps:
-        # No MCP deps at all -- remove any old APM-managed servers
-        if old_mcp_servers:
-            MCPIntegrator.remove_stale(
-                old_mcp_servers,
-                ctx.runtime,
-                ctx.exclude,
-                project_root=ctx.project_root,
-                user_scope=(ctx.scope is InstallScope.USER),
-                scope=ctx.scope,
-            )
-            MCPIntegrator.update_lockfile(builtins.set(), _lock_path, mcp_configs={})
-        logger.verbose_detail("No MCP dependencies found in apm.yml")
-    elif not should_install_mcp and old_mcp_servers:
-        # --only=apm: APM install regenerated the lockfile and dropped
-        # mcp_servers.  Restore the previous set so it is not lost.
-        MCPIntegrator.update_lockfile(old_mcp_servers, _lock_path, mcp_configs=old_mcp_configs)
+    except PolicyBlockError:
+        logger.error(
+            "MCP server(s) blocked by org policy. "
+            "APM packages remain installed; MCP configs were NOT written."
+        )
+        logger.render_summary()
+        sys.exit(1)
 
     # -------------------------------------------------------------------------
     # LSP integration (extracted to install/lsp/integration.py)
