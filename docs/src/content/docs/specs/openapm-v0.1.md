@@ -136,7 +136,7 @@ between the companion corpus and the implementation.
 
 ### 1.3 Document conventions
 
-- OpenAPM v0.1 carries **97 normative statements** indexed in
+- OpenAPM v0.1 carries **98 normative statements** indexed in
   [Appendix C](#appendix-c-index-of-normative-statements).
 - All on-disk files defined by this specification are **YAML 1.2**
   parsed under the safe subset defined in
@@ -2030,6 +2030,19 @@ treat only the Antigravity target's expected instruction rule filenames
 as deployed rules; unrelated `.md` files under `.agents/rules/` MUST NOT
 suppress instruction content in `AGENTS.md`.
 
+<a id="req-tg-006"></a>
+**[req-tg-006]** A conforming **consumer** implementation that deploys
+target-native hook documents for Kiro MUST use the Kiro v1 hook schema and
+MUST NOT emit a superseded schema. Each generated document MUST contain a
+top-level `"version": "v1"` field and an array-valued `"hooks"` field. Each
+hook entry MUST contain `name`, a PascalCase `trigger`, and an `action`; it MAY
+contain a `matcher`. A command `action` MAY contain a numeric `timeout` field.
+A Kiro consumer MUST NOT emit the superseded `when`/`then` hook shape. The
+consumer MUST accept native Kiro v1 hook documents for Kiro-targeted packages
+and preserve their supported names, triggers, matchers, action fields, and
+command timeouts while applying the same path rewriting and deployment
+constraints as portable hook inputs.
+
 ### 8.6 Per-target primitive support (informational)
 
 The matrix of which primitive types each target supports is
@@ -2042,7 +2055,8 @@ without a spec revision. The current matrix is in the companion
 - Consumer: [req-pr-001](#req-pr-001), [req-pr-002](#req-pr-002),
   [req-pr-003](#req-pr-003), [req-tg-001](#req-tg-001),
   [req-tg-002](#req-tg-002), [req-tg-003](#req-tg-003),
-  [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005).
+  [req-tg-004](#req-tg-004), [req-tg-005](#req-tg-005),
+  [req-tg-006](#req-tg-006).
 
 ---
 
@@ -2941,6 +2955,7 @@ renumbering of conformance classes.
 | [req-tg-003](#req-tg-003)                | MUST    | 8.5     | consumer    |
 | [req-tg-004](#req-tg-004)                | MUST    | 4.2.1   | consumer    |
 | [req-tg-005](#req-tg-005)                | MUST    | 8.5     | consumer    |
+| [req-tg-006](#req-tg-006)                | MUST    | 8.5     | consumer    |
 | [req-sc-001](#req-sc-001)                | MUST    | 10.4    | consumer    |
 | [req-sc-002](#req-sc-002)                | MUST    | 10.9    | consumer    |
 | [req-sc-003](#req-sc-003)                | MUST    | 10.3    | consumer    |
@@ -2957,7 +2972,7 @@ renumbering of conformance classes.
 | [req-cf-001](#req-cf-001)                | MUST    | 12.5    | consumer    |
 | [req-cf-002](#req-cf-002)                | MUST    | 12.3    | consumer    |
 
-**Total normative statements: 97** (92 MUST, 5 SHOULD).
+**Total normative statements: 98** (93 MUST, 5 SHOULD).
 
 ---
 
@@ -2977,6 +2992,7 @@ renumbering of conformance classes.
 | 0.1.8   | 2026-06-29 | Normative amendment (semver-zero `0.x` minor) to [req-lk-012]: redefined the `deployed_file_hashes` / `local_deployed_file_hashes` domain from "bytes as written to disk" to the *canonical content* -- UTF-8 text (decodable, no NUL byte) is hashed over its `\r\n` -> `\n` normalized form (a lone `\r` is preserved); binary is hashed raw. This makes the per-deployed-file hash platform-invariant so `apm audit --ci` no longer reports a false `content-integrity` drift when a file is checked out with `\r\n` on Windows (`core.autocrlf=true`) and `\n` on POSIX (apm#1952); it harmonizes `content-integrity` with the drift-replay normalizer. Preserving a bare `\r` keeps the carriage-return smuggling vector hash-visible. [req-lk-017] reworded to re-verify against the [req-lk-012] canonical domain rather than raw on-disk bytes (consistency, not a new obligation). Migration: lockfiles whose hashes were recorded on Windows before this amendment carry `\r\n`-domain hashes; one `apm install` re-records them in the canonical domain. No statement-count change (existing MUST modified, none added); 95 (90 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel + comment window. |
 | 0.1.9   | 2026-07-04 | Spec-citation fold for network-free lockfile replay (closes the srobroek Mode-B silent-extension gate on the lockfile-seeded resolver cache). Added [req-rs-015] (Section 7.5, consumer MUST): a non-update install (not `apm update` and not `--refresh`/re-resolution) MUST replay a lockfile entry that records a `resolved_commit` by reusing that recorded commit as the resolution result without issuing any network ref-resolution -- no commits-API query, no `git ls-remote`, no clone -- for that entry, PROVIDED drift detection against the manifest reference does not require re-resolution; on drift or under an explicit `apm update`/`--refresh` ([req-rs-011], [req-rs-012]) the consumer MUST re-resolve over the network as usual. The recorded `resolved_commit` is the lockfile's resolution anchor ([req-lk-003]); replaying it is scoped to entries recording a `resolved_commit` WITHOUT a `resolved_tag` (git-literal and untagged-branch entries per [req-rs-003]), leaves content integrity subject to `tree_sha256` ([req-lk-015]) and `resolved_hash` ([req-lk-013]), and defines drift locally as the manifest `ref` no longer being character-equal to the lockfile `resolved_ref`; this makes a warm install of an already-locked reference network-free at the resolution step, extending the reproducible-and-offline resolution guarantee to commit-pinned and branch-tracking entries not covered by the semver-range equivalence of [req-rs-004]. Section 7.11 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 95 -> 96 (91 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel + comment window. |
 | 0.1.10  | 2026-07-04 | Spec-citation fold for Antigravity native instruction rules (closes the #1984 Mode-B silent-extension gate). Added [req-tg-005] (Section 8.5, consumer MUST): Antigravity instruction rules are deployed under `.agents/rules/<name>.md`, `applyTo` is rendered as `trigger: glob` plus `globs` (scalar or sequence), and compile-time deduplication only treats expected Antigravity rule filenames as deployed rules so unrelated `.md` files cannot suppress `AGENTS.md` content. Added `antigravity` to the Section 4.2.1 canonical target set and clarified that `all` excludes explicit-only targets. Statement count: 96 -> 97 (92 MUST, 5 SHOULD). |
+| 0.1.11  | 2026-07-10 | Spec-citation fold for Kiro v1 hook documents (closes #2071). Added [req-tg-006] (Section 8.5, consumer MUST): Kiro output uses the Kiro v1 schema with top-level `version: "v1"` plus an array-valued `hooks`, PascalCase triggers, optional matchers, v1 actions, and optional numeric command-action timeouts; the superseded `when`/`then` shape is forbidden; and native Kiro v1 inputs are accepted through the same path-rewrite and deployment constraints. Statement count: 97 -> 98 (93 MUST, 5 SHOULD). |
 
 Errata (none at publication).
 
