@@ -9,6 +9,8 @@ without collapsing their distinct local-detection semantics.
 
 import re
 
+from ...utils.github_host import default_host, is_github_hostname
+
 # Allowed character set for a single repository path segment.
 #
 # ADO accepts spaces (project / repo names can contain them) but NOT tilde --
@@ -24,6 +26,34 @@ _ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._\- ]+$"
 _NON_ADO_PATH_SEGMENT_RE = r"^[a-zA-Z0-9._~-]+$"
 
 _RANGE_PREFIX_RE = re.compile(r"^(>=|<=|>|<|\^|~|=)")
+
+
+def normalize_package_repo_url(
+    repo_url: str,
+    *,
+    host: str | None = None,
+    source: str | None = None,
+    registry_prefix: str | None = None,
+    is_local: bool = False,
+    is_marketplace: bool = False,
+) -> str:
+    """Return the canonical repository path for package identity.
+
+    GitHub and package-registry identifiers are case-insensitive, so their
+    owner/repository path is lowercase at the model boundary. Unknown git
+    hosts retain their path casing because their repository semantics may be
+    case-sensitive.
+    """
+    if is_local or source == "local" or is_marketplace:
+        return repo_url
+
+    if source == "registry" or registry_prefix:
+        return repo_url.lower()
+
+    effective_host = host or default_host()
+    if effective_host.lower() == default_host().lower() or is_github_hostname(effective_host):
+        return repo_url.lower()
+    return repo_url
 
 
 def build_dependency_unique_key(

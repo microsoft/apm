@@ -161,7 +161,14 @@ def _resolve_package_id(package_id: str) -> tuple[str, str]:
     raw = re.sub(r"^https?://[^/]+/", "", package_id).strip("/")
     parts = [p for p in raw.split("/") if p]
     if len(parts) >= 2:
-        return parts[-2], parts[-1]
+        from ..models.dependency.identity import normalize_package_repo_url
+
+        canonical = normalize_package_repo_url(
+            "/".join(parts[-2:]),
+            source="registry",
+        )
+        owner, repo = canonical.split("/", 1)
+        return owner, repo
     raise click.UsageError(
         f"--package must be in owner/repo form (got {package_id!r}).\n"
         "Example: --package acme/my-skill"

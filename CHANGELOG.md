@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- GitHub and package-registry references now normalize owner/repository casing
+  before deriving identity, lock/cache keys, canonical strings, publish paths,
+  and install directories, while unknown git hosts retain case-sensitive paths.
+  (closes #2073)
 - `apm install host/org/repo/subpath#ref` on an unrecognised self-hosted FQDN
   no longer fails with a misleading "not accessible or doesn't exist" error;
   the failure reason now suggests setting `GITLAB_HOST` / `APM_GITLAB_HOSTS`
