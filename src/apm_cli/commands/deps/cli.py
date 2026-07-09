@@ -156,13 +156,14 @@ def _resolve_scope_deps(apm_dir, logger, insecure_only=False):
         if lockfile_path.exists():
             lockfile = LockFile.read(lockfile_path)
             for dep in lockfile.dependencies.values():
-                # Orphan / source matching is host-blind: it compares against
-                # the apm.yml-derived keys above and the host-blind apm_modules/
-                # filesystem layout. get_unique_key() is the host-qualified
-                # lockfile dedup key (#773) and must NOT be used here, or a
-                # non-default-host dep never matches its installed directory
-                # (it would be wrongly flagged orphaned and lose its Source).
-                dep_key = dep.get_canonical_dependency_string()
+                # Match the host-blind apm_modules/ layout. Local dependency
+                # identity retains its source-relative path, so derive its key
+                # from the canonical install path instead.
+                if dep.source == "local":
+                    install_path = dep.to_dependency_ref().get_install_path(apm_modules_path)
+                    dep_key = install_path.relative_to(apm_modules_path).as_posix()
+                else:
+                    dep_key = dep.get_canonical_dependency_string()
                 if dep_key and dep_key not in declared_sources:
                     declared_sources[dep_key] = _deps_list_source_label(
                         dep.host,
