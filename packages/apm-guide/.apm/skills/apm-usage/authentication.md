@@ -120,6 +120,11 @@ GitLab instances where the API returns 410 (disabled) no longer fail. Explicit
 `APM_GITLAB_HOSTS`) only when bare-host or shorthand forms should classify as
 GitLab.
 
+For marketplace plugins inside the registered repository, APM preserves the
+consumer-selected marketplace transport in the generated `git:` plus `path:`
+dependency. SSH registrations therefore continue to use SSH keys instead of
+being rewritten to HTTPS.
+
 If git transport is unavailable, `GITLAB_APM_PAT` is the fallback:
 
 ```bash

@@ -57,6 +57,10 @@ where the REST API is restricted or returns 410 -- if `git clone` works, so
 does `apm install`. For self-hosted hosts, explicit `git:` / SSH URLs carry
 the host in the dependency. Set `GITLAB_HOST` (or `APM_GITLAB_HOSTS`) only
 when you want bare-host or shorthand forms to classify as GitLab.
+Marketplace plugins inside a repository also keep the consumer-selected
+registration transport in their generated `git:` plus `path:` dependency.
+An SSH registration therefore continues to use existing SSH keys instead of
+being rewritten to HTTPS.
 
 If you need to fall back to the GitLab REST API (for environments where git
 transport is not available), set `GITLAB_APM_PAT`:
