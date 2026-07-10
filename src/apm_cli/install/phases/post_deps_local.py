@@ -113,6 +113,7 @@ def run(ctx: InstallContext) -> None:
     # on-disk stale cleanup, so a multi-target deploy keeps content-integrity
     # coverage for every committed deploy target (issue #1716).
     from apm_cli.install.manifest_reconcile import union_preserving as _union
+    from apm_cli.install.phases.targets import declared_target_profiles
 
     _current_files = sorted(ctx.local_deployed_files)
     _current_hashes = _hash_deployed(ctx.local_deployed_files, ctx.project_root)
@@ -122,6 +123,7 @@ def run(ctx: InstallContext) -> None:
         list(_persist_lock.local_deployed_files),
         dict(_persist_lock.local_deployed_file_hashes),
         ctx.targets,
+        declared_targets=declared_target_profiles(ctx),
     )
     _persist_lock.local_deployed_files = sorted(_files)
     _persist_lock.local_deployed_file_hashes = _hashes

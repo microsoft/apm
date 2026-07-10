@@ -87,6 +87,7 @@ def union_preserving(
     prior_files: list[str],
     prior_hashes: dict[str, str],
     targets: list[TargetProfile],
+    declared_targets: list[TargetProfile] | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     """Union the current install's manifest with preserved other-target entries.
 
@@ -96,8 +97,29 @@ def union_preserving(
     plus any prior entries that belong to OTHER targets (not governed by this
     install). Entries the current install governs are authoritative, so a
     same-target reinstall still drops files removed from the package.
+
+    ``declared_targets`` is the consumer's legitimate target universe --
+    apm.yml-declared canonical targets plus the always-legitimate gated/dynamic
+    targets -- independent of any ``--target`` narrowing (see
+    ``phases.targets.declared_target_profiles``). When provided, a prior entry
+    that belongs to NEITHER this install's targets NOR any of those targets is
+    an inactive-target *ghost* (e.g. a dependency's
+    package-declared ``windsurf`` paths the consumer never activates) and is
+    DROPPED -- it can never be written on disk, so re-preserving it fails
+    ``deployed-files-present`` forever on fresh checkouts (issue #2059). When
+    ``None`` (auto-detect or ``--target``-only consumers -- no declared
+    universe to check against) the legacy preserve-all behaviour is kept so a
+    genuine multi-target deploy is never clobbered (issue #1716).
     """
     file_roots, uri_schemes = install_governance(targets)
+    allowed_roots: set[str] | None = None
+    allowed_schemes: set[str] | None = None
+    if declared_targets is not None:
+        d_roots, d_schemes = install_governance(declared_targets)
+        # Active targets are always legitimate (this run selected them), so a
+        # ``--target`` that reaches outside the declared set is still honoured.
+        allowed_roots = file_roots | d_roots
+        allowed_schemes = uri_schemes | d_schemes
     current_set = set(current_files or ())
     merged_hashes = dict(current_hashes or {})
     preserved: list[str] = []
@@ -105,6 +127,11 @@ def union_preserving(
         if path in current_set:
             continue
         if is_governed_by_install(path, file_roots, uri_schemes):
+            continue
+        if allowed_roots is not None and not is_governed_by_install(
+            path, allowed_roots, allowed_schemes
+        ):
+            # Ghost: governed by no target the consumer declares. Drop it.
             continue
         preserved.append(path)
         if prior_hashes and path in prior_hashes:

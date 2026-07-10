@@ -217,9 +217,11 @@ class LockfileBuilder:
         #1716). See :mod:`apm_cli.install.manifest_reconcile`.
         """
         from apm_cli.install.manifest_reconcile import union_preserving
+        from apm_cli.install.phases.targets import declared_target_profiles
 
         self._reconcile_cross_package_deployed_files()
         existing = self.ctx.existing_lockfile
+        declared = declared_target_profiles(self.ctx)
         for dep_key, locked_dep in lockfile.dependencies.items():
             current = list(self.ctx.package_deployed_files.get(dep_key, []))
             current_hashes = compute_deployed_hashes(current, self.ctx.project_root)
@@ -227,7 +229,12 @@ class LockfileBuilder:
             prior_files = prev.deployed_files if prev is not None else []
             prior_hashes = prev.deployed_file_hashes if prev is not None else {}
             files, hashes = union_preserving(
-                current, current_hashes, prior_files, prior_hashes, self.ctx.targets
+                current,
+                current_hashes,
+                prior_files,
+                prior_hashes,
+                self.ctx.targets,
+                declared_targets=declared,
             )
             if not files:
                 # Nothing this install governs and nothing to carry forward;
