@@ -30,6 +30,7 @@ Coverage matrix:
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -113,10 +114,13 @@ class TestClaudeUserScopeSchemaFidelity:
             "apm_cli.adapters.client.claude.Path.home",
             return_value=self.fake_home,
         )
+        self._config_dir_patch = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": ""})
         self._home_patch.start()
+        self._config_dir_patch.start()
         self.adapter = ClaudeClientAdapter(project_root=str(self.root), user_scope=True)
 
     def teardown_method(self):
+        self._config_dir_patch.stop()
         self._home_patch.stop()
         self._tmp.cleanup()
 
