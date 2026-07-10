@@ -419,7 +419,7 @@ dependencies:
 
 At user scope, Claude MCP entries are written to
 `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
-non-whitespace value, or `~/.claude.json` otherwise.
+non-whitespace absolute path, or `~/.claude.json` otherwise.
 
 ## LSP dependency formats
 

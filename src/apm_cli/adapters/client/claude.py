@@ -20,12 +20,16 @@ See https://code.claude.com/docs/en/mcp
 """
 
 import json
+import logging
 import os
 from pathlib import Path
 
 from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_success, _rich_warning
+from ...utils.path_security import PathTraversalError
 from .copilot import CopilotClientAdapter
+
+_log = logging.getLogger(__name__)
 
 
 class ClaudeClientAdapter(CopilotClientAdapter):
@@ -144,7 +148,13 @@ class ClaudeClientAdapter(CopilotClientAdapter):
     def _user_claude_json_path(self) -> Path:
         config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
         if config_dir:
-            return Path(config_dir).expanduser() / ".claude.json"
+            config_path = Path(config_dir).expanduser()
+            if not config_path.is_absolute():
+                raise PathTraversalError(
+                    "CLAUDE_CONFIG_DIR is set to a non-absolute path; cannot locate "
+                    "the Claude Code configuration directory."
+                )
+            return config_path.resolve(strict=False) / ".claude.json"
         return Path.home() / ".claude.json"
 
     def _should_write_project(self) -> bool:
@@ -210,6 +220,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             payload = json.dumps(data, indent=2) + "\n"
             path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(path, payload, new_file_mode=0o600)
+            _log.debug("Claude user-scope MCP config written to %s", path)
             return True
         except OSError:
             return False

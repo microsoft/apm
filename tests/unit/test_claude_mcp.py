@@ -13,6 +13,7 @@ import pytest
 from apm_cli.adapters.client.claude import ClaudeClientAdapter
 from apm_cli.core.scope import InstallScope
 from apm_cli.factory import ClientFactory
+from apm_cli.utils.path_security import PathTraversalError
 
 
 class TestClaudeClientFactory(unittest.TestCase):
@@ -226,8 +227,13 @@ class TestClaudeClientAdapterUser(unittest.TestCase):
         with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(config_dir)}):
             self.assertEqual(
                 Path(self.adapter.get_config_path()),
-                config_dir / ".claude.json",
+                config_dir.resolve() / ".claude.json",
             )
+
+    def test_get_config_path_rejects_relative_claude_config_dir(self):
+        with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "../custom-claude"}):
+            with self.assertRaises(PathTraversalError):
+                self.adapter.get_config_path()
 
     def test_new_user_claude_json_created_with_0600_perms(self):
         """New ~/.claude.json must be created with 0o600 to avoid leaking OAuth state."""
