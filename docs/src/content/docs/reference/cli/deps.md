@@ -32,7 +32,10 @@ All subcommands operate on the project scope (`./apm_modules/`) by default. Pass
 
 ### `apm deps list`
 
-List installed dependencies and the primitive counts each one contributes.
+List every installed dependency recorded by the manifest or lockfile and the
+primitive counts each one contributes. Manifests embedded anywhere inside an
+installed package's source tree are parent-owned content, not separate
+dependencies, unless the lockfile resolves them as their own installed nodes.
 
 ```bash
 apm deps list [OPTIONS]
@@ -46,7 +49,10 @@ apm deps list [OPTIONS]
 
 ### `apm deps tree`
 
-Render the dependency graph as a hierarchical tree, using `apm.lock.yaml` when present and falling back to a scan of `apm_modules/`.
+Render the complete dependency graph as a hierarchical tree, following
+`resolved_by` relationships at every lockfile depth. When no lockfile is
+present, the command falls back to a scan of `apm_modules/` and ignores
+parent-owned manifests embedded inside an installed package.
 
 ```bash
 apm deps tree [OPTIONS]

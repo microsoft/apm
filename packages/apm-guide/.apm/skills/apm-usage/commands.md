@@ -14,8 +14,8 @@
 | `apm targets` | Show resolved deployment targets for the current project (Click group; reads filesystem signals; works with or without `apm.yml`) | `--all` also include the `agent-skills` meta-target (only meaningful with `--json`), `--json` machine-readable output. No provenance line is printed (the table is the provenance). |
 | `apm uninstall PKGS...` | Remove packages (accepts `owner/repo` or `name@marketplace`) | `--dry-run`, `-g` global |
 | `apm prune` | Remove orphaned packages | `--dry-run` |
-| `apm deps list` | List installed packages | `-g` global, `--all` both scopes, `--insecure` |
-| `apm deps tree` | Show dependency tree | -- |
+| `apm deps list` | List manifest- and lockfile-resolved packages; ignore parent-owned embedded manifests | `-g` global, `--all` both scopes, `--insecure` |
+| `apm deps tree` | Show the complete lockfile-resolved dependency tree at any depth | -- |
 | `apm deps why PKG` | Explain why a package is installed (walks lockfile bottom-up to direct deps; analogue of `npm why` / `yarn why`) | `-g` global, `--json` |
 | `apm find <PATH>` | Trace a deployed file back to the package(s) that contributed it (inverse of install; reads `apm.lock.yaml` only) | `--source` show OCI/git/local origin, `--path` show full why-chain (same as `apm deps why`) |
 | `apm view PKG [FIELD]` | View package details, git refs, or registry versions | `-g` global, `FIELD=versions`, `--registry [NAME]` forces registry path for versions |

@@ -70,6 +70,9 @@ For each orphaned package, `apm prune`:
 Notes:
 
 - Packages that share an install root with a still-declared sibling subdirectory dependency are not falsely protected by ancestor expansion. The check uses lockfile membership (with `apm.yml` fallback) to identify genuine standalone packages.
+- A manifest embedded at any depth inside an installed package is owned by that
+  package. It is not an independent orphan or prune candidate unless the
+  lockfile records it as a separately installed dependency.
 - Deploy paths are validated before deletion; entries that escape the project root are skipped.
 - The command does not network. It only inspects local state.
 

@@ -70,42 +70,54 @@ def _dep_display_name(dep) -> str:
     return f"{key}@{version}"
 
 
-def _add_tree_children(parent_branch, parent_key, children_map, has_rich, depth=0):
-    """Recursively add transitive deps as nested children of a tree node."""
+def _add_tree_children(
+    parent_branch,
+    parent_key: str,
+    children_map: dict[str, list],
+    has_rich: bool,
+    ancestors: frozenset[str] | None = None,
+) -> None:
+    """Recursively add every acyclic transitive dependency to a tree node."""
+    ancestors = ancestors or frozenset({parent_key})
     kids = children_map.get(parent_key, [])
     for child_dep in kids:
+        child_key = child_dep.get_unique_key()
+        if child_key in ancestors:
+            continue
         child_name = _dep_display_name(child_dep)
         child_branch = parent_branch.add(f"[dim]{child_name}[/dim]") if has_rich else child_name
-        if depth < 5:  # Prevent infinite recursion
-            _add_tree_children(
-                child_branch,
-                child_dep.get_unique_key(),
-                children_map,
-                has_rich,
-                depth + 1,
-            )
+        _add_tree_children(
+            child_branch,
+            child_key,
+            children_map,
+            has_rich,
+            ancestors | {child_key},
+        )
 
 
 def _echo_tree_children(
     parent_key: str,
     children_map: dict[str, list],
     prefix: str = "",
-    depth: int = 0,
+    ancestors: frozenset[str] | None = None,
 ) -> None:
-    """Render transitive dependencies recursively without Rich."""
+    """Render every acyclic transitive dependency recursively without Rich."""
+    ancestors = ancestors or frozenset({parent_key})
     kids = children_map.get(parent_key, [])
     for index, child_dep in enumerate(kids):
+        child_key = child_dep.get_unique_key()
+        if child_key in ancestors:
+            continue
         is_last = index == len(kids) - 1
         child_prefix = "+-- " if is_last else "|-- "
         click.echo(f"{prefix}{child_prefix}{_dep_display_name(child_dep)}")
-        if depth < 5:
-            continuation = "    " if is_last else "|   "
-            _echo_tree_children(
-                child_dep.get_unique_key(),
-                children_map,
-                prefix + continuation,
-                depth + 1,
-            )
+        continuation = "    " if is_last else "|   "
+        _echo_tree_children(
+            child_key,
+            children_map,
+            prefix + continuation,
+            ancestors | {child_key},
+        )
 
 
 # ---------------------------------------------------------------------------
