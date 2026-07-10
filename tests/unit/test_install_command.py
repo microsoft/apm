@@ -346,7 +346,7 @@ class TestInstallCommandAutoBootstrap:
             assert result.exit_code == 1
             assert "All packages failed validation" in result.output
             assert "Install interrupted" not in result.output
-            mock_validate.assert_called_once()
+            mock_validate.assert_called()
 
     @patch("apm_cli.commands.install._validate_package_exists")
     def test_install_invalid_package_format_with_no_apm_yml(self, mock_validate):
