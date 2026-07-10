@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from apm_cli.integration.hook_integrator import HookIntegrator
+from apm_cli.integration.hook_integrator import HookIntegrator, _to_claude_hook_entries
 from apm_cli.models.apm_package import APMPackage, PackageInfo
 
 
@@ -36,3 +36,13 @@ def test_claude_wraps_flat_hook_entries_in_settings_and_sidecar(tmp_path: Path) 
     assert result.files_integrated == 1
     assert settings["hooks"]["PreToolUse"] == [expected_entry]
     assert sidecar["PreToolUse"] == [{**expected_entry, "_apm_source": "package"}]
+
+
+def test_claude_preserves_already_nested_hook_entries() -> None:
+    """Claude-native matcher groups retain their authored matcher."""
+    nested = {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "echo nested"}],
+    }
+
+    assert _to_claude_hook_entries([nested]) == [nested]

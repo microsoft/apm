@@ -246,7 +246,7 @@ def _emit_hook_event_diagnostics(
 def _to_nested_hook_entries(entries: list, key_fixer, default_matcher: str | None = None) -> list:
     """Wrap flat Copilot hook entries in the ``{"hooks": [...]}`` nesting.
 
-    Shared by the Gemini and Antigravity transforms (both use the Claude
+    Shared by the Claude, Gemini, and Antigravity transforms (all use the
     nested matcher shape for tool events).  *key_fixer* renames the inner
     command/timeout keys in place for the specific target.  *default_matcher*
     is added to newly wrapped entries when the target requires one. Entries
@@ -276,9 +276,13 @@ def _to_nested_hook_entries(entries: list, key_fixer, default_matcher: str | Non
     return result
 
 
+def _preserve_claude_hook_keys(_hook: dict) -> None:
+    """Keep Claude hook handler keys unchanged."""
+
+
 def _to_claude_hook_entries(entries: list) -> list:
-    """Transform flat hook entries into Claude matcher groups."""
-    return _to_nested_hook_entries(entries, lambda _hook: None, default_matcher="*")
+    """Wrap globally scoped flat entries in Claude matcher groups."""
+    return _to_nested_hook_entries(entries, _preserve_claude_hook_keys, default_matcher="*")
 
 
 def _to_gemini_hook_entries(entries: list) -> list:

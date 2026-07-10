@@ -144,9 +144,10 @@ Authors may use flat Copilot command entries for portable manifests:
 ```
 
 When deploying to Claude, APM wraps each flat entry in the required
-`{"matcher": "*", "hooks": [...]}` group. Copilot keeps the flat entry, so
-one source manifest is valid for both targets. Already nested Claude entries
-remain nested.
+`{"matcher": "*", "hooks": [...]}` group, where `"*"` matches all tools and
+preserves the flat entry's global scope. Copilot keeps the flat entry, so one
+source manifest is valid for both targets. Already nested Claude entries remain
+nested.
 
 When a hook command references a script inside `hooks/` or `.apm/hooks/`,
 APM deploys that hook source bundle so sibling helper files resolve at

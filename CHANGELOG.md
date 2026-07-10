@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Flat hook manifests now work with Claude: `apm install --target claude`
+  generates the required `matcher` and `hooks` nesting while preserving other
+  settings, so one source manifest targets both Copilot and Claude. (#2097)
 - `apm install host/org/repo/subpath#ref` on an unrecognised self-hosted FQDN
   no longer fails with a misleading "not accessible or doesn't exist" error;
   the failure reason now suggests setting `GITLAB_HOST` / `APM_GITLAB_HOSTS`
