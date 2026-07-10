@@ -482,7 +482,9 @@ Section 7.5 is canonical for the full validation and override rules.
 The base may target any supported host -- GitHub.com, GitHub Enterprise,
 self-hosted GitLab, or Azure DevOps. For Azure DevOps, use a
 `https://dev.azure.com/{org}/{project}/_git` base; the `dev.azure.com` host is
-preserved through to the consumer and authenticated with `ADO_APM_PAT`:
+preserved through to the consumer. APM appends each repository name without a
+`.git` suffix. Authentication uses `ADO_APM_PAT` when set, or an Azure CLI
+bearer credential when the PAT is unset and `az` is signed in:
 
 ```yaml
 marketplace:

@@ -113,6 +113,70 @@ def _read_yaml_targets(ctx) -> list[str] | None:
     return result if result else None
 
 
+def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
+    """Return the scope-applied target profiles whose lockfile entries are legitimate.
+
+    Reads ``targets:``/``target:`` from the consumer's ``apm.yml``, maps the
+    canonical names to :class:`~apm_cli.integration.targets.TargetProfile`
+    instances scoped the same way ``ctx.targets`` is, and augments them with the
+    non-canonical gated/dynamic targets (see below). Returns ``None`` when the
+    manifest declares no targets (auto-detect or ``--target``-only consumers) --
+    the signal for lockfile reconciliation to fall back to legacy preserve-all.
+
+    Motivation (issue #2059): ``union_preserving`` must distinguish a target the
+    consumer legitimately uses but did not install in THIS run (e.g. a
+    ``--target``-narrowed sibling target -- preserve) from a target the consumer
+    NEVER declares (e.g. a dependency's package-declared ``windsurf`` paths the
+    consumer has not activated). The latter are inactive-target *ghosts*: they
+    can never be written on disk, yet a plain target-scoped union re-preserves
+    them on every install, so ``apm audit --ci`` fails ``deployed-files-present``
+    permanently on fresh checkouts. Knowing the declared universe lets the union
+    drop those ghosts while still honouring the #1716 multi-target contract.
+    """
+    from apm_cli.core.apm_yml import CANONICAL_TARGETS
+    from apm_cli.core.scope import InstallScope
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    try:
+        names = _read_yaml_targets(ctx)
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        # Any resolution error (missing apm_package, conflicting keys already
+        # surfaced by the targets phase) -> unknown universe, preserve-all.
+        return None
+    if not names:
+        return None
+    is_user = getattr(ctx, "scope", None) is InstallScope.USER
+
+    profiles: list[TargetProfile] = []
+    # Declared canonical targets: scope-applied, mirroring ``ctx.targets``. A
+    # scope that drops a target (``for_scope`` -> None) means it does not apply
+    # here, so it is skipped.
+    for name in dict.fromkeys(names):
+        profile = KNOWN_TARGETS.get(name)
+        if profile is None:
+            continue
+        scoped = profile.for_scope(user_scope=is_user)
+        if scoped is not None:
+            profiles.append(scoped)
+
+    # Gated / dynamic targets (``copilot-app``, ``copilot-cowork``, ``openclaw``,
+    # ``hermes`` -- KNOWN but NON-canonical) are activated by flag or detection
+    # and can NEVER be declared in apm.yml, so their entries (e.g.
+    # ``copilot-app-db://`` rows) must always count as legitimate, not ghosts --
+    # otherwise a run that does not activate them would wrongly drop their prior
+    # lockfile rows and regress the #1716 multi-target contract. Their
+    # governance is name/scheme based, so fall back to the raw profile when a
+    # dynamic target has no project-scope form (``copilot-app`` -> None).
+    for name in KNOWN_TARGETS:
+        if name in CANONICAL_TARGETS:
+            continue
+        profile = KNOWN_TARGETS[name]
+        scoped = profile.for_scope(user_scope=is_user)
+        profiles.append(scoped if scoped is not None else profile)
+
+    return profiles or None
+
+
 def _create_target_dirs(
     targets: Iterable[TargetProfile],
     project_root: Path,

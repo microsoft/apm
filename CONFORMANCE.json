@@ -266,6 +266,17 @@
       ]
     },
     {
+      "conformance_class": "consumer",
+      "id": "req-lk-020",
+      "keyword": "MUST",
+      "section": "5.2",
+      "status": "active",
+      "test_count": 1,
+      "tests": [
+        "tests/spec_conformance/test_lockfile_reqs.py::test_lockfile_reconciles_inactive_target_paths_fail_safe"
+      ]
+    },
+    {
       "conformance_class": "producer",
       "id": "req-mf-001",
       "keyword": "MUST",
@@ -1101,7 +1112,7 @@
   "spec_version": "v0.1.1",
   "summary_by_class": {
     "consumer": {
-      "active": 68,
+      "active": 69,
       "skipped": 1,
       "unbound": 0,
       "xfail": 0
@@ -1125,5 +1136,5 @@
       "xfail": 0
     }
   },
-  "total_requirements": 97
+  "total_requirements": 98
 }

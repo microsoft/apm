@@ -6,12 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-
+  
 ### Fixed
 
+- Fresh checkouts with declared consumer targets no longer remain
+  `apm audit --ci`-red for files those targets cannot restore: `apm install`
+  now removes stale `deployed_files` entries outside the legitimate target
+  set. The [OpenAPM v0.1 specification](docs/src/content/docs/specs/openapm-v0.1.md)
+  now defines the same fail-safe reconciliation contract. (by @edenfunf;
+  closes #2059) (#2114)
 - `apm install --target intellij` now configures JetBrains Copilot MCP support
   while routing package file primitives through the Copilot profile.
   (by @sergio-sisternes-epam; closes #1957) (#2041)
+
+### Fixed
+
+- Azure DevOps marketplace checks now preserve suffix-free `/_git/<repo>` URLs
+  and pass Azure CLI bearer authentication through to `git ls-remote`. (closes #2119)
 
 ## [0.24.1] - 2026-07-10
 
