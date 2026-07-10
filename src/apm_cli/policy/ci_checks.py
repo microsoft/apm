@@ -230,44 +230,70 @@ def _check_config_consistency(
     manifest: APMPackage,
     lock: LockFile,
 ) -> CheckResult:
-    """Verify MCP server configs match lockfile baseline."""
+    """Verify the complete current MCP declaration graph matches the lockfile."""
+    from ..constants import APM_MODULES_DIR
+    from ..deps.path_anchoring import LocalResolutionError, resolve_local_dep_dir
     from ..drift import detect_config_drift
     from ..integration.mcp_integrator import MCPIntegrator
+    from ..models.apm_package import APMPackage
 
-    mcp_deps = manifest.get_all_mcp_dependencies()
+    details: list[str] = []
+    mcp_deps = list(manifest.get_all_mcp_dependencies())
+    for locked_dep in lock.get_package_dependencies():
+        if locked_dep.source == "local":
+            try:
+                package_dir = resolve_local_dep_dir(locked_dep, lock, manifest.package_path)
+            except LocalResolutionError as exc:
+                details.append(
+                    f"{locked_dep.repo_url}: cannot resolve local package ({exc}) -- "
+                    "fix the resolved_by chain or re-run 'apm install'"
+                )
+                continue
+        else:
+            package_dir = locked_dep.to_dependency_ref().get_install_path(
+                manifest.package_path / APM_MODULES_DIR
+            )
+
+        package_manifest = package_dir / "apm.yml"
+        if not package_manifest.exists():
+            continue
+        try:
+            package = APMPackage.from_apm_yml(package_manifest)
+        except (OSError, ValueError) as exc:
+            details.append(
+                f"{locked_dep.repo_url}: cannot parse local package manifest ({exc}) -- "
+                "fix the manifest or re-run 'apm install'"
+            )
+            continue
+        mcp_deps.extend(package.get_mcp_dependencies())
+
+    mcp_deps = MCPIntegrator.deduplicate(mcp_deps)
     current_configs = MCPIntegrator.get_server_configs(mcp_deps)
     stored_configs = lock.mcp_configs or {}
 
     # No MCP deps at all -- nothing to check
-    if not current_configs and not stored_configs:
+    if not current_configs and not stored_configs and not details:
         return CheckResult(
             name="config-consistency",
             passed=True,
             message="No MCP configs to check",
         )
 
-    details: list[str] = []
-
     # Detect drift on servers that exist in both sets
     drifted = detect_config_drift(current_configs, stored_configs)
     for name in sorted(drifted):
         details.append(f"{name}: config differs from lockfile baseline")
 
-    # Servers in lockfile but not in manifest (orphaned MCP).
-    # Transitively-contributed servers (declared by a local-path sub-package,
-    # recorded with provenance in mcp_config_provenance) are exempted: the root
-    # manifest cannot declare them, so flagging them creates an unfixable CI
-    # failure. This mirrors the resolved_by-based exemption in _check_no_orphans
-    # (#2081; MCP-side sibling of #1846/#1855).
+    # Compare names symmetrically. Provenance classifies ownership for the
+    # diagnostic; it never exempts a removed declaration from drift detection.
     provenance = lock.mcp_config_provenance or {}
-    for name in sorted(stored_configs):
-        if name not in current_configs and name not in provenance:
-            details.append(f"{name}: in lockfile but not in manifest")
+    for name in sorted(stored_configs.keys() - current_configs.keys()):
+        owner = provenance.get(name)
+        owner_detail = f" (declared by {owner})" if owner else ""
+        details.append(f"{name}: in lockfile but not in current source{owner_detail}")
 
-    # Servers in manifest but not in lockfile (new, not installed)
-    for name in sorted(current_configs):
-        if name not in stored_configs:
-            details.append(f"{name}: in manifest but not in lockfile")
+    for name in sorted(current_configs.keys() - stored_configs.keys()):
+        details.append(f"{name}: in current source but not in lockfile")
 
     if not details:
         return CheckResult(

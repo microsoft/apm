@@ -124,7 +124,7 @@ local_deployed_file_hashes:
 | `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
 | `mcp_servers` | list of strings | no | Names of MCP servers managed as of the last install or update, including transitively contributed servers. |
 | `mcp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect MCP drift. |
-| `mcp_config_provenance` | map | no | `server_name -> declaring package` for transitively contributed MCP servers. Used by `config-consistency` to distinguish transitive entries from orphans. |
+| `mcp_config_provenance` | map | no | `server_name -> declaring package` for transitively contributed MCP servers. Used by `config-consistency` to identify the owner in drift diagnostics. |
 | `lsp_servers` | list of strings | no | Names of LSP servers declared in the manifest as of the last install or update. |
 | `lsp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect LSP drift. |
 | `local_deployed_files` | list | no | Files this project itself contributes (sources its own primitives). Reinstall reconciles these paths with the same target rules as per-dependency `deployed_files`. See [self entry](#self-entry). |

@@ -93,8 +93,8 @@ the [policy schema](./policy-schema/).
 
 ### `config-consistency`
 
-- **What it verifies.** That MCP server configs derived from both `dependencies.mcp` and `devDependencies.mcp` in `apm.yml` match the `mcp_configs` baseline stored in the lockfile.
-- **Fails when.** A server's resolved config differs from the lockfile, a server is in the lockfile but not the manifest, or a server is in the manifest but not the lockfile.
+- **What it verifies.** That the complete current MCP declaration graph -- the root manifest, current local-package sources, and lock-bounded installed package manifests -- matches the `mcp_configs` baseline stored in the lockfile.
+- **Fails when.** A server's resolved config differs from the lockfile, a source declaration was added, or a previously locked declaration was removed.
 - **Exception.** A lockfile-only server is expected when `mcp_config_provenance` identifies the sub-package that contributed it, so those transitive servers are not treated as orphans.
 - **Remediation.** Run `apm install` to reconcile the MCP configuration.
 
