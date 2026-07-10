@@ -30,6 +30,11 @@ and are not touched by `apm compile`. See
 [Primitives and targets](../../../concepts/primitives-and-targets/)
 for the full reach map.
 
+After a successful non-dry-run compile, APM also reconciles deployed-file
+ownership with the current `targets:` declaration. If the declared target set
+contracts, artifacts and lockfile entries owned by the removed target are
+cleaned up with the same hash and user-edit safeguards as `apm install`.
+
 **When you actually need it:** compile is **optional for the
 `copilot` target** -- GitHub Copilot natively reads
 `.github/instructions/*.instructions.md` (with their `applyTo:`

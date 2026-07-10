@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 import yaml
 from click.testing import CliRunner
 
@@ -154,3 +155,52 @@ def test_install_repairs_ghost_before_fresh_checkout_audit(tmp_path: Path, monke
         runner, checkout, monkeypatch, "audit", "--ci", "--no-policy", "--no-fail-fast"
     )
     assert clean_audit.exit_code == 0, clean_audit.output
+
+
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [
+        ("update", ("update", "--yes", "--target", "copilot")),
+        ("compile", ("compile", "--target", "copilot")),
+    ],
+)
+def test_materializing_command_reconciles_contracted_target(
+    tmp_path: Path,
+    monkeypatch,
+    command: str,
+    args: tuple[str, ...],
+) -> None:
+    """Update and compile remove artifacts owned by an undeclared target."""
+    project = _write_fixture(tmp_path / command)
+
+    from apm_cli.deps import github_downloader
+
+    downloader = _HermeticDownloader()
+    monkeypatch.setattr(
+        github_downloader.GitHubPackageDownloader,
+        "download_package",
+        downloader.download_package,
+    )
+    runner = CliRunner()
+
+    initial = _invoke(runner, project, monkeypatch, "install", "--target", "copilot,windsurf")
+    assert initial.exit_code == 0, initial.output
+    ghost_path = project / GHOST
+    assert ghost_path.is_file()
+    initial_lock = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    initial_dep = (initial_lock.get("dependencies") or [])[0]
+    assert GHOST in (initial_dep.get("deployed_files") or [])
+    assert GHOST in (initial_dep.get("deployed_file_hashes") or {})
+
+    (project / "apm.yml").write_text(
+        (project / "apm.yml").read_text(encoding="utf-8").replace("  - windsurf\n", ""),
+        encoding="utf-8",
+    )
+
+    result = _invoke(runner, project, monkeypatch, *args)
+    assert result.exit_code == 0, result.output
+    assert not ghost_path.exists()
+    reconciled_lock = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    reconciled_dep = (reconciled_lock.get("dependencies") or [])[0]
+    assert GHOST not in (reconciled_dep.get("deployed_files") or [])
+    assert GHOST not in (reconciled_dep.get("deployed_file_hashes") or {})
