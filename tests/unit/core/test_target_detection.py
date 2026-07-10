@@ -5,6 +5,7 @@ import contextlib
 import click
 import pytest
 
+from apm_cli.core import target_detection
 from apm_cli.core.target_detection import (
     ALL_CANONICAL_TARGETS,
     EXPERIMENTAL_TARGETS,
@@ -15,6 +16,7 @@ from apm_cli.core.target_detection import (
     detect_target,
     get_dedup_rules_dir,
     get_target_description,
+    normalize_policy_targets,
     normalize_target_list,
     should_compile_agents_md,
     should_compile_claude_md,
@@ -947,6 +949,38 @@ class TestIntelliJConstantGuards:
         # Verify all canonical targets ARE present
         for t in ALL_CANONICAL_TARGETS:
             assert t in result
+
+
+class TestNormalizePolicyTargets:
+    """Direct contract tests for MCP-only policy target normalization."""
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (None, None),
+            ("intellij", "copilot"),
+            (["intellij", "claude"], ["copilot", "claude"]),
+            (["intellij", "copilot"], ["copilot"]),
+        ],
+    )
+    def test_normalizes_shape_and_deduplicates(
+        self,
+        value: str | list[str] | None,
+        expected: str | list[str] | None,
+    ) -> None:
+        """Normalize MCP-only values while preserving scalar/list shape."""
+        assert normalize_policy_targets(value) == expected
+
+    def test_unmapped_mcp_only_target_fails_closed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Reject an MCP-only target without a canonical policy mapping."""
+        monkeypatch.setattr(
+            target_detection,
+            "MCP_ONLY_TARGETS",
+            frozenset({*MCP_ONLY_TARGETS, "unmapped-mcp"}),
+        )
+
+        with pytest.raises(RuntimeError, match="has no canonical policy mapping"):
+            normalize_policy_targets("unmapped-mcp")
 
 
 # ---------------------------------------------------------------------------
