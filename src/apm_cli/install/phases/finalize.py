@@ -28,6 +28,82 @@ _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS = frozenset(
 )
 
 
+def _has_dep_instruction_files(ctx: InstallContext) -> bool:
+    """Return True if any installed dep directory contains ``.instructions.md`` files.
+
+    Scans ``apm_modules/`` for ``*.instructions.md`` files under any
+    ``.apm/instructions/`` subdirectory.  Kept deliberately lightweight --
+    imports are lazy to avoid pulling the discovery package into the hot
+    install path.
+    """
+    apm_modules = (ctx.apm_modules_dir or (ctx.project_root / "apm_modules")).resolve()
+    if not apm_modules.is_dir():
+        return False
+
+    for candidate in apm_modules.rglob("*.instructions.md"):
+        # Only count files that live inside a ``.apm/instructions/`` subtree,
+        # which is where ``_copy_local_package`` and the bundle staging logic
+        # place compile-only instruction files.
+        parts = candidate.parts
+        try:
+            idx = parts.index(".apm")
+        except ValueError:
+            continue
+        if idx + 1 < len(parts) and parts[idx + 1] == "instructions":
+            return True
+
+    return False
+
+
+def _hint_project_compile_needed(ctx: InstallContext) -> None:
+    """Hint to run ``apm compile`` after installing packages with compile-only instructions.
+
+    Fires on project-scope installs (not global) when BOTH conditions hold:
+
+    1. At least one active target stores instructions via the compile pipeline
+       (``compile_family`` is in :data:`_ROOT_CONTEXT_ONLY_FAMILIES`, e.g. gemini,
+       agents, claude) -- i.e. instructions are NOT written to a per-file rules
+       directory during ``apm install``.
+    2. At least one installed dependency directory contains ``.instructions.md``
+       files under its ``.apm/instructions/`` subtree.
+
+    No file is written.  Compilation stays explicit: the user runs
+    ``apm compile`` to materialise AGENTS.md / GEMINI.md / CLAUDE.md.
+    """
+    if ctx.dry_run:
+        return
+    if ctx.installed_count == 0:
+        return
+
+    target_names: list[str] = []
+    seen: set[str] = set()
+    for target in ctx.targets:
+        scoped = target.for_scope(user_scope=False)
+        if scoped is None:
+            continue
+        if scoped.name.lower() in _ROOT_CONTEXT_HINT_EXCLUDED_TARGETS:
+            continue
+        if scoped.compile_family not in _ROOT_CONTEXT_ONLY_FAMILIES:
+            continue
+        if scoped.name not in seen:
+            seen.add(scoped.name)
+            target_names.append(scoped.name)
+
+    if not target_names:
+        return
+
+    if not _has_dep_instruction_files(ctx):
+        return
+
+    if ctx.logger:
+        targets = ", ".join(target_names)
+        message = (
+            f"Instructions installed for {targets}. "
+            "Run 'apm compile' to update AGENTS.md / GEMINI.md."
+        )
+        ctx.logger.info(message, symbol="info")
+
+
 def _hint_global_root_context(ctx: InstallContext) -> None:
     """Print a one-line hint pointing at ``apm compile -g`` after ``install -g``.
 
@@ -142,14 +218,15 @@ def run(ctx: InstallContext) -> InstallResult:
                 f"{ctx.unpinned_count} {noun} unpinned -- add #tag or #sha to prevent drift"
             )
 
-    # User-scope post-install: when global instructions land on a
-    # root-context-only target, print a one-line hint pointing at
-    # ``apm compile -g``.  No context file is written on install --
-    # compilation stays explicit.
+    # Post-install hints: remind the user to run ``apm compile`` when
+    # instructions land in deps but are not written to a per-file rules
+    # directory (compile-only targets such as gemini, agents, claude).
     from apm_cli.core.scope import InstallScope
 
     if ctx.scope is InstallScope.USER:
         _hint_global_root_context(ctx)
+    elif ctx.scope is InstallScope.PROJECT:
+        _hint_project_compile_needed(ctx)
 
     from apm_cli.install.outcome import result_from_install_context
 
