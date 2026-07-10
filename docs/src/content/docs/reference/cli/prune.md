@@ -21,11 +21,11 @@ apm prune [--dry-run]
 
 `apm prune` reconciles three states:
 
-1. Packages declared in `apm.yml`
+1. Packages declared in `apm.yml` (both `dependencies.apm` and `devDependencies.apm`)
 2. Packages installed under `apm_modules/`
 3. Packages recorded in `apm.lock.yaml` with their `deployed_files`
 
-Anything installed but no longer declared is **orphaned**. `apm prune` removes the orphan's directory under `apm_modules/`, deletes every file the orphan deployed into your harness directories (using the `deployed_files` manifest in the lockfile), removes the entry from `apm.lock.yaml`, and cleans up empty parent directories.
+Anything installed but not declared in either dependency list is **orphaned**. `apm prune` removes the orphan's directory under `apm_modules/`, deletes every file the orphan deployed into your harness directories (using the `deployed_files` manifest in the lockfile), removes the entry from `apm.lock.yaml`, and cleans up empty parent directories.
 
 If `apm_modules/` does not exist, the command exits cleanly with nothing to do. If `apm.yml` is missing, it exits with an error.
 

@@ -18,6 +18,13 @@ APM checks the active `gh` CLI account before invoking OS credential helpers. Th
 
 For multi-account Git Credential Manager setups, see the [Multi-account Git Credential Manager](https://microsoft.github.io/apm/getting-started/authentication/#multi-account-git-credential-manager) section in the main authentication guide.
 
+## Marketplace transport
+
+For in-repository plugins from GitLab and generic git marketplaces, an SSH
+registration stays SSH when APM generates the concrete `git:` and `path:`
+dependency. Existing SSH keys keep working instead of the dependency being
+rewritten to HTTPS.
+
 ## GitLab hosts
 
 `gitlab.com` is detected automatically. For self-managed GitLab, set
