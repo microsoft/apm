@@ -24,6 +24,9 @@
 | `apm deps clean` | Clean dependency cache | `--dry-run`, `-y` skip confirm |
 | `apm deps update [PKGS...]` | Deprecated -- use `apm update` instead (now a strict superset). Update specific packages | `--verbose`, `--force`, `--target` (comma-separated), `--parallel-downloads N`, `-g/--global`, `--legacy-skill-paths` |
 
+`apm publish --package OWNER/REPO` normalizes the owner and repository to
+lowercase before constructing the package-registry path.
+
 ### Install validation chain (virtual subdirectory packages)
 
 `apm install` validates subdirectory packages (`owner/repo/path#ref`) before writing to `apm.yml` using the same credential chain as the actual install. See [Authentication > Install validation chain](../authentication/) for the full probe sequence and troubleshooting.
