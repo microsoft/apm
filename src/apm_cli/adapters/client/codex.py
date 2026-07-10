@@ -97,7 +97,6 @@ class CodexClientAdapter(MCPClientAdapter):
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
         atomic_write_text(config_path, tomlkit.dumps(current_config), new_file_mode=0o600)
-        os.chmod(config_path, 0o600)
         _log.debug("Codex config written to %s", config_path)
         return True
 
@@ -121,7 +120,8 @@ class CodexClientAdapter(MCPClientAdapter):
             _log.debug("Failed to parse Codex config at %s", config_path, exc_info=True)
             _rich_warning(
                 f"Could not read or parse {config_path}: {exc} "
-                "-- skipping config write to avoid data loss",
+                "-- skipping config write to avoid data loss; inspect the file "
+                "or delete it to reset Codex configuration",
                 symbol="warning",
             )
             return None

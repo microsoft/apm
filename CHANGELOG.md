@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Codex MCP installs and stale-server cleanup now preserve literal-quoted
-  Windows path keys such as `C:\Users\me\Playground` in `config.toml` instead
-  of rejecting or corrupting unrelated project trust and desktop preferences.
+  Windows path keys such as `C:\Users\me\Documents\Playground` in `config.toml`
+  instead of rejecting or corrupting other projects and per-path preferences.
   (closes #2075) (#2100)
 - `apm install host/org/repo/subpath#ref` on an unrecognised self-hosted FQDN
   no longer fails with a misleading "not accessible or doesn't exist" error;

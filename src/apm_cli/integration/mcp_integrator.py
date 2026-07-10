@@ -27,7 +27,7 @@ from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
 from apm_cli.integration._shared import deduplicate_deps, resolve_locked_apm_yml_paths
 from apm_cli.runtime.utils import find_runtime_binary
-from apm_cli.utils.atomic_io import write_text_lf
+from apm_cli.utils.atomic_io import atomic_write_text, write_text_lf
 from apm_cli.utils.console import (
     _get_console,  # noqa: F401 -- re-exported; mcp_integrator_install imports this via lazy import
     _rich_error,
@@ -136,7 +136,7 @@ def _clean_toml_mcp_config(
         for name in removed:
             del servers[name]
         if removed:
-            write_text_lf(config_path, tomlkit.dumps(config))
+            atomic_write_text(config_path, tomlkit.dumps(config), new_file_mode=0o600)
             for name in removed:
                 msg = f"Removed stale MCP server '{name}' from {label}"
                 if use_rich:

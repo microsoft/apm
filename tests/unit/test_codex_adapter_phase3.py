@@ -150,9 +150,12 @@ class TestGetCurrentConfig:
         config_file = codex_dir / "config.toml"
         config_file.write_text("this is ::: not valid toml !!!", encoding="utf-8")
         adapter = _make_adapter(project_root=tmp_path)
-        with patch("apm_cli.adapters.client.codex._rich_warning"):
+        with patch("apm_cli.adapters.client.codex._rich_warning") as mock_warning:
             result = adapter.get_current_config()
         assert result is None
+        warning = mock_warning.call_args.args[0]
+        assert "read or parse" in warning
+        assert "inspect the file or delete it" in warning
 
     def test_returns_none_on_unicode_decode_error(self, tmp_path: Path) -> None:
         config_file = tmp_path / ".codex" / "config.toml"
@@ -160,10 +163,13 @@ class TestGetCurrentConfig:
         config_file.write_bytes(b"\xff")
         adapter = _make_adapter(project_root=tmp_path)
 
-        with patch("apm_cli.adapters.client.codex._rich_warning"):
+        with patch("apm_cli.adapters.client.codex._rich_warning") as mock_warning:
             result = adapter.get_current_config()
 
         assert result is None
+        warning = mock_warning.call_args.args[0]
+        assert "read or parse" in warning
+        assert "inspect the file or delete it" in warning
 
     def test_returns_none_on_os_error(self, tmp_path: Path) -> None:
         codex_dir = tmp_path / ".codex"
