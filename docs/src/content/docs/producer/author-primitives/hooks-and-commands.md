@@ -82,10 +82,11 @@ Kiro-targeted packages may also use the native Kiro v1 shape. APM accepts
 `{"version": "v1", "hooks": [...]}` and deploys each array entry as a
 standalone v1 document. Portable Claude and Copilot events are translated to
 Kiro's PascalCase `trigger` names, matcher groups become `matcher`, and command
-actions become `action: {"type": "command", ...}`. Kiro stores `timeout` beside
-`action`, not inside it. Native `description`, `timeout`, and `enabled` fields
-are preserved. Native-only triggers such as `PreTaskExec`, `PostTaskExec`,
-`PostFileCreate`, `PostFileSave`, and `PostFileDelete` pass through for Kiro:
+actions become `action: {"type": "command", ...}`. In Kiro v1, `timeout` is a
+hook-level field alongside `action`. Native `description`, `timeout`, and
+`enabled` fields are preserved. Native-only triggers such as `PreTaskExec`,
+`PostTaskExec`, `PostFileCreate`, `PostFileSave`, and `PostFileDelete` pass
+through for Kiro. For example, a Kiro-only linter hook is:
 
 ```json
 {

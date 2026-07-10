@@ -60,6 +60,7 @@ def _with_kiro_hook_fields(converted: dict, source: dict) -> dict:
     for field in ("description", "enabled"):
         if field in source:
             converted[f"_kiro_{field}"] = source[field]
+    # Native v1 normalization has already namespaced these hook-level fields.
     for field in ("_kiro_description", "_kiro_timeout", "_kiro_enabled"):
         if field in source:
             converted[field] = source[field]
@@ -182,6 +183,10 @@ def _write_kiro_hook_docs(
             for action in _kiro_actions_from_matcher(matcher, integrator.HOOK_COMMAND_KEYS):
                 kiro_action = _kiro_action_from_action(action, integrator.HOOK_COMMAND_KEYS)
                 if kiro_action is None:
+                    _log.debug(
+                        "Skipping unsupported Kiro hook action from %s",
+                        hook_file.name,
+                    )
                     continue
                 per_event_counts[event_name] = per_event_counts.get(event_name, 0) + 1
                 index = per_event_counts[event_name]
