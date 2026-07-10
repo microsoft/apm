@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Homebrew upgrades now pick up releases automatically through the tap's own
-  poller, improving reliability while removing a cross-repository credential.
+- Homebrew formula updates now track releases through the tap's own poller, so
+  `brew upgrade apm` remains current without a cross-repository credential.
   (#2088)
 
 ## [0.24.1] - 2026-07-10
