@@ -228,14 +228,21 @@ scripts:
 | **Default** | Undeclared (legacy implicit auto-publish; flagged by `apm audit`). |
 | **Allowed values** | `auto` or a list of paths relative to the project root. |
 
-Declares which local `.apm/` content the project consents to publish when packing or deploying. Three forms are supported:
+Declares which local content the project consents to publish when packing or
+deploying. This field does not select the source layout: `.apm/` presence makes
+the APM-native layout authoritative, while its absence preserves supported
+plugin-native root sources. Three forms are supported:
 
-1. **Undeclared** (field omitted). Legacy behaviour: all local `.apm/` content
-   is published and `apm pack` also discovers root plugin convention
-   directories. `apm audit` emits an `includes-consent` advisory whenever local
-   content is deployed under this form.
-2. **`includes: auto`**. Explicit consent to publish all local `.apm/` content via the file scanner. No path enumeration required. Default for newly initialised projects.
-3. **`includes: [<path>, ...]`**. Explicit allow-list of paths the project consents to publish. Strongest governance form; changes are reviewable in PR diffs.
+1. **Undeclared** (field omitted). Legacy implicit consent for content in the
+   selected source layout. `apm audit` emits an `includes-consent` advisory
+   whenever local content is deployed under this form.
+2. **`includes: auto`**. Explicit consent to publish all local content from the
+   selected source layout. No path enumeration required. Default for newly
+   initialised projects.
+3. **`includes: [<path>, ...]`**. Explicit, exhaustive allow-list of paths the
+   project consents to publish. Listed paths may be under `.apm/` or a
+   plugin-native root directory. Missing, unsafe, symlinked, or unpackable paths
+   stop `apm pack`; no implicit source fallback occurs.
 
 ```yaml
 # Form 1: undeclared (legacy; audit advisory)

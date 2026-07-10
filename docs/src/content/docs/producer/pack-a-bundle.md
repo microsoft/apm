@@ -1,6 +1,6 @@
 ---
 title: Pack a bundle
-description: Build a plugin-format bundle from your .apm/ source so others can deploy it with a single apm install command.
+description: Build a plugin-format bundle from APM-native or plugin-native source so others can deploy it with one apm install command.
 ---
 
 A bundle is the artifact you hand to a consumer when you do not want to publish
@@ -8,7 +8,7 @@ to a registry. It is a directory (or archive -- `.zip` by default, `.tar.gz` via
 `--archive-format tar.gz`) containing a
 `plugin.json`, your primitive folders, and an embedded `apm.lock.yaml` that
 pins every file by SHA-256. Build it with one command from a project that has
-`.apm/` and `apm.yml`:
+`apm.yml`:
 
 ```bash
 apm pack
@@ -127,10 +127,22 @@ For the consumer flags that apply (`--target`, `--global`, `--force`,
 
 ## Source layout and install-time discovery
 
-`apm pack` is intentionally liberal: it collects primitives from both
-`.apm/<type>/` subdirectories and from convention directories at the
-package root (`agents/`, `skills/`, `instructions/`, etc.). This lets
-you author in whichever layout feels natural during development.
+When `.apm/` exists, local primitive content is sourced from `.apm/`.
+Without `.apm/`, supported plugin-native root directories such as
+`agents/`, `skills/`, `commands/`, and `hooks/` remain pack sources.
+`includes: auto` grants publication consent but does not select either
+layout. An explicit `includes` list is exhaustive and may deliberately
+name an APM-native or root path.
+
+If both layouts exist, `.apm/` wins and packing succeeds. A warning names
+each skipped root source and tells you to move it under `.apm/` or remove
+it:
+
+```text
+[!] Skipping root-level skills/ because .apm/ is present.
+    Move publishable files to .apm/skills/ or remove skills/ to silence
+    this warning.
+```
 
 When packing git dependencies, `apm pack` emits **only** what the
 lockfile attests, in every format (`--format plugin` and the default
@@ -151,8 +163,10 @@ Dependency **hooks-config and MCP-config** (the `hooks.json` / `.mcp.json`
 entries `apm install` merges into shared host settings) are *not*
 attested in `deployed_files`, so they are not packed; `apm pack` warns
 loudly (`[!]`) and names the dependency when this happens. First-party
-root hooks/MCP authored by the packaging project itself **are** packed --
-only unattested dependency config is dropped. Hook *scripts* recorded in
+hooks/MCP authored by the packaging project itself **are** packed from the
+selected local layout. Root `hooks/` and `hooks.json` are skipped when
+`.apm/` is present, just like other root convention sources. Only
+unattested dependency config is dropped. Hook *scripts* recorded in
 `deployed_files` still pack normally.
 
 `apm install` is per-primitive and stricter. Each integrator has its own
@@ -180,12 +194,11 @@ Source: `src/apm_cli/integration/instruction_integrator.py`,
 ### Canonical layout for marketplace publishers
 
 :::caution[Silent install drops can remove intended guardrails]
-`apm pack` always accepts primitives from `.apm/<type>/`. It also accepts root
-convention directories (for example, an `instructions/` folder at the plugin
-root) only for legacy manifests that omit `includes:`. Declaring
-`includes: auto` or an explicit list scopes local package content to `.apm/`.
-See the [`includes` manifest field](../../reference/manifest-schema/#39-includes)
-for all three forms.
+When `.apm/` exists, it is the authoritative local source. Without `.apm/`,
+supported plugin-native root directories remain pack sources, including after
+`apm init` writes `includes: auto`. An explicit [`includes`
+list](../../reference/manifest-schema/#39-includes) is exhaustive regardless
+of layout.
 `apm install` does NOT discover instructions, commands, or prompts placed
 in root convention directories. Packages that rely on these primitives for
 security guardrails or policy enforcement will install silently incomplete,

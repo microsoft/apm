@@ -62,11 +62,13 @@ my-package/
 
 ## Install-time discovery rules
 
-`apm pack` collects declared local primitives from `.apm/<type>/`.
-When `apm.yml` sets `includes: auto` or an explicit `includes:` list,
-root convention directories (`agents/`, `skills/`, `instructions/`,
-etc.) are not package content. Manifests that omit `includes:` retain
-legacy root convention discovery for plugin-native projects. Prefer
+When `.apm/` exists, `apm pack` sources local primitives and hooks from
+`.apm/`. Without `.apm/`, supported plugin-native root directories
+(`agents/`, `skills/`, `commands/`, `instructions/`, `extensions/`, and
+hooks) remain pack sources, including after `apm init` writes
+`includes: auto`. Mixed layouts pack from `.apm/` and warn about skipped
+root sources. An explicit `includes:` list is exhaustive; invalid listed
+paths fail instead of falling back to implicit discovery. Prefer
 `.apm/<type>/` so pack and install use the same source layout.
 
 Per-primitive scan paths for `apm install`:

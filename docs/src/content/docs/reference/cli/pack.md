@@ -109,9 +109,10 @@ apm pack --archive --dry-run -v
 A Claude Code plugin directory under `--output`. Contains:
 
 - `plugin.json` -- schema-conformant manifest. Convention-dir keys are stripped because Claude Code auto-discovers them.
-- Plugin-native subdirs populated from your `.apm/` content and from installed dependencies: `agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`, `extensions/` (canvas extensions, when the `canvas` experimental flag is enabled).
-  - With [`includes: auto` or an explicit `includes:` list](../manifest-schema/#39-includes), root convention directories such as `skills/` are not package content; put publishable local primitives under `.apm/`.
-  - Manifests that omit `includes:` retain legacy root convention discovery for plugin-native projects.
+- Plugin-native subdirs populated from local source and installed dependencies: `agents/`, `skills/`, `commands/`, `instructions/`, `hooks/`, `extensions/` (canvas extensions, when the `canvas` experimental flag is enabled).
+  - When `.apm/` exists, local primitives and hooks are sourced from `.apm/`. Root convention sources are skipped with actionable warnings.
+  - Without `.apm/`, supported plugin-native root directories remain pack sources, including after `apm init` writes [`includes: auto`](../manifest-schema/#39-includes).
+  - An explicit `includes:` list is exhaustive. A missing or unpackable listed path stops packing instead of falling back to implicit discovery.
 - Installed dependencies are packed exclusively from lockfile-attested `deployed_files`; the `apm_modules` cache is never packed (it has no provenance or integrity guarantee). Each attested file is verified against its `deployed_file_hashes` SHA-256 before inclusion.
   - If the dependency declares `skills:`, only the named skills are included; the cache cannot add extras.
   - If a dependency has cached primitives but no `deployed_files`, `apm pack` fails and tells you to run `apm install`.
