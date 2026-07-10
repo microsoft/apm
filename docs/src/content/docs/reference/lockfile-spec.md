@@ -122,7 +122,7 @@ local_deployed_file_hashes:
 | `generated_at` | ISO 8601 string | yes | UTC timestamp of the last write. Ignored by equivalence checks. |
 | `apm_version` | string | no | APM CLI version that wrote the file. Diagnostic only. |
 | `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
-| `mcp_servers` | list of strings | no | Names of MCP servers declared in the manifest as of the last install or update. |
+| `mcp_servers` | list of strings | no | Names of MCP servers managed as of the last install or update, including transitively contributed servers. |
 | `mcp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect MCP drift. |
 | `mcp_config_provenance` | map | no | `server_name -> declaring package` for transitively contributed MCP servers. Used by `config-consistency` to distinguish transitive entries from orphans. |
 | `lsp_servers` | list of strings | no | Names of LSP servers declared in the manifest as of the last install or update. |

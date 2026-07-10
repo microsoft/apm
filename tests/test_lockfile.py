@@ -499,6 +499,11 @@ class TestLockFileSemanticEquivalence:
         b = self._make_lock(mcp_configs={"s": {"cmd": "b"}})
         assert not a.is_semantically_equivalent(b)
 
+    def test_changed_mcp_config_provenance_not_equivalent(self):
+        a = self._make_lock(mcp_config_provenance={"s": "package-a"})
+        b = self._make_lock(mcp_config_provenance={"s": "package-b"})
+        assert not a.is_semantically_equivalent(b)
+
     def test_changed_lsp_servers_not_equivalent(self):
         a = self._make_lock(lsp_servers=["server-a"])
         b = self._make_lock(lsp_servers=["server-b"])
