@@ -101,8 +101,8 @@ targets:
   - copilot
   - claude
 
-# Optional. "auto" auto-publishes every primitive under .apm/, or list
-# explicit repo paths to publish a subset.
+# Optional. "auto" publishes the authoritative local source layout, or list
+# explicit repo paths to define the complete publication set.
 includes: auto
 
 # Optional. Runtime dependencies, grouped by kind.

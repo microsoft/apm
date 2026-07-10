@@ -33,7 +33,7 @@ from ..utils.path_security import PathTraversalError, ensure_path_within, safe_r
 from ..utils.paths import portable_relpath
 from .attest import verify_attested_file
 from .packer import PackResult
-from .plugin_layout import find_plugin_root_sources
+from .plugin_layout import PLUGIN_ROOT_DIRS, find_plugin_root_sources
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -127,7 +127,9 @@ def _collect_root_plugin_components(project_root: Path) -> list[tuple[Path, str]
     ``skills/``, etc. at the repo root) have their files picked up here.
     """
     components: list[tuple[Path, str]] = []
-    for dir_name in ("agents", "skills", "commands", "instructions", "extensions"):
+    for dir_name in PLUGIN_ROOT_DIRS:
+        if dir_name == "hooks":
+            continue
         _collect_recursive(project_root / dir_name, dir_name, components)
     return components
 
@@ -216,7 +218,7 @@ def _collect_flat(
     rename=None,
 ) -> None:
     """Add every regular non-symlink file directly inside *src_dir*."""
-    if not src_dir.is_dir():
+    if src_dir.is_symlink() or not src_dir.is_dir():
         return
     for f in sorted(src_dir.iterdir()):
         if f.is_file() and not f.is_symlink():
@@ -232,7 +234,7 @@ def _collect_recursive(
     rename=None,
 ) -> None:
     """Add every regular non-symlink file under *src_dir*, preserving hierarchy."""
-    if not src_dir.is_dir():
+    if src_dir.is_symlink() or not src_dir.is_dir():
         return
     for f in sorted(src_dir.rglob("*")):
         if not f.is_file() or f.is_symlink():
@@ -532,7 +534,10 @@ def _collect_explicit_local_components(
         parts = _deployed_path_parts(declared_path)
         candidate = project_root.joinpath(*parts)
         if candidate.is_symlink():
-            raise ValueError(f"Explicit include path is a symlink: {declared_path}")
+            raise ValueError(
+                f"includes path {declared_path!r} is a symlink. "
+                "Replace it with a regular file or directory."
+            )
         try:
             source = ensure_path_within(candidate, project_root)
         except PathTraversalError as exc:
@@ -552,12 +557,16 @@ def _collect_explicit_local_components(
         )
         for file_path in files:
             if file_path.is_symlink():
-                raise ValueError(f"Explicit include path is a symlink: {file_path}")
+                raise ValueError(
+                    f"Symlink found inside includes path {declared_path!r}: "
+                    f"{file_path.name}. Remove the symlink or list a regular path."
+                )
             try:
                 file_path = ensure_path_within(file_path, project_root)
             except PathTraversalError as exc:
                 raise ValueError(
-                    f"Explicit include path escapes the project root: {file_path}"
+                    f"A file inside includes path {declared_path!r} escapes the "
+                    "project root. Remove the symlink or fix the path in apm.yml."
                 ) from exc
             repo_relative = portable_relpath(file_path, project_root)
             is_hook = (

@@ -18,17 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --target intellij` now configures JetBrains Copilot MCP support
   while routing package file primitives through the Copilot profile.
   (by @sergio-sisternes-epam; closes #1957) (#2041)
-
-### Fixed
-
 - Azure DevOps marketplace checks now preserve suffix-free `/_git/<repo>` URLs
   and pass Azure CLI bearer authentication through to `git ls-remote`. (closes #2119)
-
-### Fixed
-
-- `apm pack` now treats `.apm/` as the authoritative local source when present,
-  while native plugin convention directories remain packable before `.apm/`
-  adoption, including after `apm init`. (#2122)
+- Existing Claude plugin directories (`skills/`, `agents/`, and `commands/`)
+  now pack without migration to `.apm/`. When `.apm/` is present, it becomes
+  the authoritative source and mixed layouts warn with actionable next steps.
+  (#2122)
 
 ## [0.24.1] - 2026-07-10
 

@@ -162,10 +162,10 @@ pack` fails and tells you to run `apm install` to record provenance.
 Dependency **hooks-config and MCP-config** (the `hooks.json` / `.mcp.json`
 entries `apm install` merges into shared host settings) are *not*
 attested in `deployed_files`, so they are not packed; `apm pack` warns
-loudly (`[!]`) and names the dependency when this happens. First-party
-hooks/MCP authored by the packaging project itself **are** packed from the
-selected local layout. Root `hooks/` and `hooks.json` are skipped when
-`.apm/` is present, just like other root convention sources. Only
+loudly (`[!]`) and names the dependency when this happens. First-party hooks
+authored by the packaging project follow the selected local layout: root
+`hooks/` and `hooks.json` are skipped when `.apm/` is present. The packaging
+project's root `.mcp.json` is packed independently of source layout. Only
 unattested dependency config is dropped. Hook *scripts* recorded in
 `deployed_files` still pack normally.
 
@@ -197,7 +197,7 @@ Source: `src/apm_cli/integration/instruction_integrator.py`,
 When `.apm/` exists, it is the authoritative local source. Without `.apm/`,
 supported plugin-native root directories remain pack sources, including after
 `apm init` writes `includes: auto`. An explicit [`includes`
-list](../../reference/manifest-schema/#39-includes) is exhaustive regardless
+list](../reference/manifest-schema/#39-includes) is exhaustive regardless
 of layout.
 `apm install` does NOT discover instructions, commands, or prompts placed
 in root convention directories. Packages that rely on these primitives for

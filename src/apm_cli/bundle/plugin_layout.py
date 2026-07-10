@@ -14,7 +14,11 @@ PLUGIN_ROOT_DIRS = (
 
 def find_plugin_root_sources(project_root: Path) -> list[str]:
     """Return plugin-native root sources that exist."""
-    sources = [name for name in PLUGIN_ROOT_DIRS if (project_root / name).is_dir()]
+    sources = [
+        name
+        for name in PLUGIN_ROOT_DIRS
+        if (project_root / name).is_dir() and not (project_root / name).is_symlink()
+    ]
     if (project_root / "hooks.json").is_file():
         sources.append("hooks.json")
     return sources

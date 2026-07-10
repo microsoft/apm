@@ -104,6 +104,10 @@ $ apm init --yes --target copilot,claude,cursor
   pre-checks targets read from its existing `target:` field.
 - **Codex hint:** if `.codex/` is present, suggests
   `--target agent-skills` to also deploy skills to `.agents/skills/`.
+- **Existing plugin sources:** when plugin-native directories such as
+  `skills/`, `agents/`, or `commands/` exist at the project root and `.apm/`
+  does not, warns that they remain packable. `apm init` does not create
+  `.apm/` automatically.
 - **agentrc suggestion:** when no agent instruction files are found
   (`.github/copilot-instructions.md`, `AGENTS.md`, `.github/instructions/`),
   the Next Steps panel suggests generating agent instructions:

@@ -228,9 +228,8 @@ def _perform_init(
             logger.warning(
                 "Found plugin-native sources at the project root: "
                 f"{rendered_sources}. They remain included by apm pack. "
-                "Move publishable files under .apm/ when adopting the APM "
-                "source layout.",
-                symbol="warning",
+                "Move publishable files under .apm/ when you want apm pack "
+                "to source from that directory.",
             )
 
         # Create plugin.json for plugin mode

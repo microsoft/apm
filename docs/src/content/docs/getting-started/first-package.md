@@ -34,7 +34,9 @@ is yours to author.
 If `skills/`, `agents/`, or `commands/` already exists at the project root,
 `apm init` leaves that layout in place. It writes `includes: auto` without
 creating `.apm/`, and those plugin-native directories remain sources for
-`apm pack`. Create `.apm/` later when you are ready to switch source authority.
+`apm pack`. Create `.apm/` later when you want `apm pack` to source from that
+directory instead of the project root. See [source layout and install-time
+discovery](../../producer/pack-a-bundle/#source-layout-and-install-time-discovery).
 :::
 
 ```

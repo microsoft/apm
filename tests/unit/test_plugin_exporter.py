@@ -1295,6 +1295,96 @@ class TestExportPluginBundle:
         ):
             export_plugin_bundle(project, tmp_path / "build")
 
+    def test_explicit_include_rejects_symlink(self, tmp_path):
+        """An explicit path cannot publish through a symlink."""
+        project = _setup_plugin_project(tmp_path)
+        target = project / ".apm" / "agents" / "real.agent.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("real", encoding="utf-8")
+        link = project / "linked.agent.md"
+        try:
+            os.symlink(target, link)
+        except OSError:
+            pytest.skip("symlinks not supported")
+        _write_apm_yml(project, extra={"includes": ["linked.agent.md"]})
+
+        with pytest.raises(
+            ValueError,
+            match=r"includes path 'linked\.agent\.md' is a symlink",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_explicit_include_rejects_nested_symlink(self, tmp_path):
+        """A listed directory cannot publish a nested symlink."""
+        project = _setup_plugin_project(tmp_path)
+        agents = project / ".apm" / "agents"
+        agents.mkdir(parents=True, exist_ok=True)
+        target = agents / "real.agent.md"
+        target.write_text("real", encoding="utf-8")
+        link = agents / "linked.agent.md"
+        try:
+            os.symlink(target, link)
+        except OSError:
+            pytest.skip("symlinks not supported")
+        _write_apm_yml(project, extra={"includes": [".apm/agents"]})
+
+        with pytest.raises(
+            ValueError,
+            match=r"Symlink found inside includes path '\.apm/agents': "
+            r"linked\.agent\.md",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    @pytest.mark.parametrize(
+        ("content", "message"),
+        [
+            ("not-json", r"Explicit hook include is not valid JSON"),
+            ("[]", r"Explicit hook include must contain a JSON object"),
+        ],
+    )
+    def test_explicit_hook_include_rejects_invalid_content(
+        self,
+        tmp_path,
+        content,
+        message,
+    ):
+        """Explicit hook files must contain valid JSON objects."""
+        project = _setup_plugin_project(tmp_path)
+        hook = project / ".apm" / "hooks" / "invalid.json"
+        hook.parent.mkdir(parents=True)
+        hook.write_text(content, encoding="utf-8")
+        _write_apm_yml(project, extra={"includes": [".apm/hooks/invalid.json"]})
+
+        with pytest.raises(ValueError, match=message):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_explicit_include_rejects_non_packable_path(self, tmp_path):
+        """Explicit paths must map to a supported plugin primitive."""
+        project = _setup_plugin_project(tmp_path)
+        (project / "README.md").write_text("not a primitive", encoding="utf-8")
+        _write_apm_yml(project, extra={"includes": ["README.md"]})
+
+        with pytest.raises(ValueError, match=r"is not a packable primitive"):
+            export_plugin_bundle(project, tmp_path / "build")
+
+    def test_native_root_symlink_is_not_packed(self, tmp_path):
+        """Implicit root discovery does not follow convention-dir symlinks."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(project, extra={"includes": "auto"})
+        (project / ".apm").rmdir()
+        external = tmp_path / "external-skills"
+        skill = external / "outside"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# Outside\n", encoding="utf-8")
+        try:
+            os.symlink(external, project / "skills")
+        except OSError:
+            pytest.skip("symlinks not supported")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert not (result.bundle_path / "skills" / "outside").exists()
+
     def test_explicit_hook_includes_are_exhaustive(self, tmp_path):
         """Only explicitly listed hook configuration reaches the bundle."""
         project = _setup_plugin_project(tmp_path)
