@@ -151,8 +151,8 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             config_path = Path(config_dir).expanduser()
             if not config_path.is_absolute():
                 raise PathTraversalError(
-                    "CLAUDE_CONFIG_DIR is set to a non-absolute path; cannot locate "
-                    "the Claude Code configuration directory."
+                    "CLAUDE_CONFIG_DIR must be an absolute path for user-scope MCP "
+                    "config; set an absolute path or unset it to use ~/.claude.json."
                 )
             return config_path.resolve(strict=False) / ".claude.json"
         return Path.home() / ".claude.json"
