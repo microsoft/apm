@@ -476,7 +476,7 @@ class TestDepsTree:
 
         assert result.exit_code == 0, result.output
         assert result.output.count("example/child@1.0.0") == 1
-        assert "lockfile parent unavailable" in result.output
+        assert "could not place in tree" in result.output
         assert "run apm install" in result.output
 
     def test_tree_no_lockfile_with_modules(

@@ -659,7 +659,7 @@ def _build_dep_tree(apm_dir):
     return result
 
 
-@deps.command(help="Show the complete lockfile-resolved dependency tree")
+@deps.command(help="Show the full dependency tree")
 @click.option(
     "--global",
     "-g",
@@ -716,8 +716,8 @@ def tree(global_):
                     for dep in unresolved:
                         display = _dep_display_name(dep)
                         branch = root_tree.add(
-                            f"[yellow]{display} (lockfile parent unavailable; "
-                            "run apm install to rebuild graph)[/yellow]"
+                            f"[yellow]{display} (could not place in tree; "
+                            "run apm install to resolve)[/yellow]"
                         )
                         _add_tree_children(branch, dep.get_unique_key(), children_map)
                 console.print(root_tree)
@@ -738,8 +738,8 @@ def tree(global_):
                         prefix = "+-- " if is_last else "|-- "
                         click.echo(
                             f"{prefix}{_dep_display_name(dep)} "
-                            "(lockfile parent unavailable; "
-                            "run apm install to rebuild graph)"
+                            "(could not place in tree; "
+                            "run apm install to resolve)"
                         )
                         sub_prefix = "    " if is_last else "|   "
                         _echo_tree_children(dep.get_unique_key(), children_map, sub_prefix)
