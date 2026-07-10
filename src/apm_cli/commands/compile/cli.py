@@ -755,6 +755,9 @@ def _run_compilation(
                         "Compilation completed successfully!",
                         symbol="check",
                     )
+                elif clean and result.stats.get("claude_empty_due_to_no_primitives"):
+                    # The compiler already reported the expected cleanup outcome.
+                    pass
                 else:
                     # Zero-output compile is the silent-success failure
                     # mode #820 guards against.  Don't claim success;

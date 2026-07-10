@@ -309,14 +309,18 @@ class StaleClaudeDetection(NamedTuple):
 
 
 def _hand_authored_claude_skip_message(
-    rel: str, *, dry_run: bool = False, preview: bool = False
+    rel: str,
+    *,
+    dry_run: bool = False,
+    preview: bool = False,
+    duplicate_context: bool = True,
 ) -> str:
     """Build consistent skip guidance for hand-authored CLAUDE.md files."""
     prefix = "[dry-run] would skip removal" if preview or dry_run else "Skipped removal"
-    return (
-        f"{prefix} of {rel}: hand-authored file will not be deleted."
-        " Delete or rename it manually if duplicate context is unwanted."
-    )
+    message = f"{prefix} of {rel}: hand-authored file will not be deleted."
+    if duplicate_context:
+        message += " Delete or rename it manually if duplicate context is unwanted."
+    return message
 
 
 class AgentsCompiler:
@@ -872,9 +876,8 @@ class AgentsCompiler:
         all_warnings = self.warnings + claude_result.warnings
         all_errors = self.errors + claude_result.errors
 
-        # Used symmetrically in the dry-run preview block and the live-removal block so
-        # both paths share a single, precise emptiness signal. This also covers
-        # --clean after the final primitive is removed.
+        # Fires when content moved to .claude/rules/ or no source primitives remain.
+        # Dry-run preview, live removal, and formatter suppression share this signal.
         would_emit_no_claude_md = len(claude_result.content_map) == 0
         orphan_reason = (
             "instructions now live in .claude/rules/"
@@ -932,11 +935,17 @@ class AgentsCompiler:
                         # would skip deletion and warn. Surface the same intent in
                         # dry-run so users are not surprised by the live outcome.
                         hand_authored_preview = _hand_authored_claude_skip_message(
-                            det.rel, preview=True
+                            det.rel,
+                            preview=True,
+                            duplicate_context=skip_instructions,
                         )
                         preview_lines.append(f"  {hand_authored_preview}")
                         all_warnings.append(
-                            _hand_authored_claude_skip_message(det.rel, dry_run=True)
+                            _hand_authored_claude_skip_message(
+                                det.rel,
+                                dry_run=True,
+                                duplicate_context=skip_instructions,
+                            )
                         )
                         # Emit via logger so it surfaces on the distributed dry-run path
                         # (cli.py does `pass` on dry-run success and never prints
@@ -995,6 +1004,9 @@ class AgentsCompiler:
         # Update stats
         stats = claude_result.stats.copy()
         stats["claude_files_written"] = files_written
+        stats["claude_empty_due_to_no_primitives"] = (
+            would_emit_no_claude_md and not skip_instructions
+        )
 
         if would_emit_no_claude_md:
             if skip_instructions:
@@ -1033,7 +1045,10 @@ class AgentsCompiler:
                             all_warnings.append(warning)
                             self._log("warning", warning)
                     else:
-                        warning = _hand_authored_claude_skip_message(det.rel)
+                        warning = _hand_authored_claude_skip_message(
+                            det.rel,
+                            duplicate_context=skip_instructions,
+                        )
                         all_warnings.append(warning)
                         self._log("warning", warning)
         elif distributed_compiler is None and files_written > 0 and not config.dry_run:
