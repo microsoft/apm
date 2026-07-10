@@ -71,7 +71,7 @@ def run(ctx: InstallContext) -> None:
     from apm_cli.core.target_detection import MCP_ONLY_TARGETS
     from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
 
-    if effective_target in MCP_ONLY_TARGETS:
+    if isinstance(effective_target, str) and effective_target in MCP_ONLY_TARGETS:
         canonical_target = RUNTIME_TO_CANONICAL_TARGET.get(effective_target)
         if canonical_target is None:
             raise RuntimeError(
@@ -83,6 +83,11 @@ def run(ctx: InstallContext) -> None:
                 f"'{canonical_target}' for policy check"
             )
         effective_target = canonical_target
+    elif isinstance(effective_target, list):
+        effective_target = [
+            RUNTIME_TO_CANONICAL_TARGET.get(t, t) if t in MCP_ONLY_TARGETS else t
+            for t in effective_target
+        ]
 
     # ------------------------------------------------------------------
     # 4. Run policy checks with effective_target populated
