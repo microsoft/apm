@@ -682,7 +682,9 @@ def tree(global_):
                         _add_tree_children(branch, dep.get_unique_key(), children_map, has_rich)
                     for dep in unresolved:
                         display = _dep_display_name(dep)
-                        branch = root_tree.add(f"[yellow]{display} (parent unresolved)[/yellow]")
+                        branch = root_tree.add(
+                            f"[yellow]{display} (could not determine parent)[/yellow]"
+                        )
                         _add_tree_children(branch, dep.get_unique_key(), children_map, has_rich)
                 console.print(root_tree)
             else:
@@ -691,15 +693,18 @@ def tree(global_):
                     click.echo("+-- No dependencies installed")
                 else:
                     for i, dep in enumerate(direct):
-                        is_last = i == len(direct) - 1
+                        is_last = i == len(direct) - 1 and not unresolved
                         prefix = "+-- " if is_last else "|-- "
                         display = _dep_display_name(dep)
                         click.echo(f"{prefix}{display}")
                         sub_prefix = "    " if is_last else "|   "
                         _echo_tree_children(dep.get_unique_key(), children_map, sub_prefix)
-                    for dep in unresolved:
-                        click.echo(f"+-- {_dep_display_name(dep)} (parent unresolved)")
-                        _echo_tree_children(dep.get_unique_key(), children_map, "    ")
+                    for i, dep in enumerate(unresolved):
+                        is_last = i == len(unresolved) - 1
+                        prefix = "+-- " if is_last else "|-- "
+                        click.echo(f"{prefix}{_dep_display_name(dep)} (could not determine parent)")
+                        sub_prefix = "    " if is_last else "|   "
+                        _echo_tree_children(dep.get_unique_key(), children_map, sub_prefix)
         # Fallback: scan apm_modules directory (no lockfile)
         elif has_rich:
             root_tree = Tree(f"[bold cyan]{project_name}[/bold cyan] (local)")

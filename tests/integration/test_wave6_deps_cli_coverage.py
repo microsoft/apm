@@ -476,7 +476,7 @@ class TestDepsTree:
 
         assert result.exit_code == 0, result.output
         assert result.output.count("example/child@1.0.0") == 1
-        assert "parent unresolved" in result.output
+        assert "could not determine parent" in result.output
 
     def test_tree_no_lockfile_with_modules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
