@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import tomlkit
-from tomlkit.exceptions import ParseError
+from tomlkit.exceptions import TOMLKitError
 
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
@@ -144,7 +144,7 @@ def _clean_toml_mcp_config(
                 elif logger is not None:
                     logger.progress(msg)
         return len(removed)
-    except (OSError, ParseError, UnicodeDecodeError):
+    except (OSError, TOMLKitError, UnicodeDecodeError):
         _log.debug("Failed to clean stale MCP servers from %s", label, exc_info=True)
         return 0
 
