@@ -11,6 +11,7 @@ import click
 from ...constants import APM_MODULES_DIR, APM_YML_FILENAME, SKILL_MD_FILENAME
 from ...core.command_logger import CommandLogger
 from ...core.target_detection import TargetParamType
+from ...deps.lockfile import LockedDependency
 from ...models.apm_package import APMPackage
 from .._helpers import (
     UnknownPackageError,
@@ -73,12 +74,12 @@ def _dep_display_name(dep) -> str:
 
 def _walk_tree_children(
     parent_key: str,
-    children_map: dict[str, list],
-) -> Iterator[tuple[APMPackage, tuple[int, ...], tuple[bool, ...], bool]]:
+    children_map: dict[str, list[LockedDependency]],
+) -> Iterator[tuple[LockedDependency, tuple[int, ...], tuple[bool, ...], bool]]:
     """Yield dependency-tree descendants depth-first without Python recursion."""
     ancestors = frozenset({parent_key})
     children = children_map.get(parent_key, [])
-    stack: list[tuple[APMPackage, tuple[int, ...], tuple[bool, ...], frozenset[str]]] = []
+    stack: list[tuple[LockedDependency, tuple[int, ...], tuple[bool, ...], frozenset[str]]] = []
     for index in range(len(children) - 1, -1, -1):
         stack.append(
             (
@@ -113,7 +114,7 @@ def _walk_tree_children(
 def _add_tree_children(
     parent_branch,
     parent_key: str,
-    children_map: dict[str, list],
+    children_map: dict[str, list[LockedDependency]],
 ) -> None:
     """Add every transitive dependency to a Rich tree without a depth limit."""
     branches = {(): parent_branch}
@@ -127,7 +128,7 @@ def _add_tree_children(
 
 def _echo_tree_children(
     parent_key: str,
-    children_map: dict[str, list],
+    children_map: dict[str, list[LockedDependency]],
     prefix: str = "",
 ) -> None:
     """Render every transitive dependency without Rich or a depth limit."""
@@ -393,7 +394,10 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
         # (no raw `[!]` literal that Rich would parse as markup) and so
         # behaviour is consistent with prune.py.
         if orphaned_packages:
-            logger.warning(f"{len(orphaned_packages)} orphaned package(s) found (not in apm.yml):")
+            logger.warning(
+                f"{len(orphaned_packages)} orphaned package(s) found "
+                "(not in resolved dependency graph):"
+            )
             for pkg in orphaned_packages:
                 logger.warning(f"  - {pkg}")
             logger.info("Run 'apm prune' to remove orphaned packages")
@@ -437,13 +441,16 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
         # Show orphaned packages warning -- route through CommandLogger
         # for consistency with the rich branch above and with prune.py.
         if orphaned_packages:
-            logger.warning(f"{len(orphaned_packages)} orphaned package(s) found (not in apm.yml):")
+            logger.warning(
+                f"{len(orphaned_packages)} orphaned package(s) found "
+                "(not in resolved dependency graph):"
+            )
             for pkg in orphaned_packages:
                 logger.warning(f"  - {pkg}")
             logger.info("Run 'apm prune' to remove orphaned packages")
 
 
-@deps.command(name="list", help="List manifest- and lockfile-resolved APM dependencies")
+@deps.command(name="list", help="List installed APM dependencies and their primitives")
 @click.option(
     "--global",
     "-g",
@@ -586,10 +593,10 @@ def _build_dep_tree(apm_dir):
                     result["source"] = "lockfile"
                     result["direct"] = [d for d in lockfile_deps if d.depth <= 1]
                     transitive = [d for d in lockfile_deps if d.depth > 1]
-                    children_map: dict[str, list] = {}
+                    children_map: dict[str, list[LockedDependency]] = {}
                     unresolved = []
-                    parents_by_unique_key: dict[tuple[int, str], list] = {}
-                    parents_by_repo_url: dict[tuple[int, str], list] = {}
+                    parents_by_unique_key: dict[tuple[int, str], list[LockedDependency]] = {}
+                    parents_by_repo_url: dict[tuple[int, str], list[LockedDependency]] = {}
                     for candidate in lockfile_deps:
                         parents_by_unique_key.setdefault(
                             (candidate.depth, candidate.get_unique_key()), []

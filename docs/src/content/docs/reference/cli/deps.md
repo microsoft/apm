@@ -35,7 +35,8 @@ All subcommands operate on the project scope (`./apm_modules/`) by default. Pass
 List every installed dependency recorded by the manifest or lockfile and the
 primitive counts each one contributes. Manifests embedded anywhere inside an
 installed package's source tree are parent-owned content, not separate
-dependencies, unless the lockfile resolves them as their own installed nodes.
+dependencies. Real lockfile-resolved dependencies install at their own package
+roots and remain visible regardless of graph depth.
 
 ```bash
 apm deps list [OPTIONS]
