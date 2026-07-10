@@ -74,7 +74,9 @@ the [policy schema](./policy-schema/).
 
 - **What it verifies.** That every path in each lockfile entry's `deployed_files` exists on disk under the project root.
 - **Fails when.** One or more deployed files are missing (e.g. a developer ran `apm install` then deleted integrated files, or skipped install entirely).
-- **Remediation.** Run `apm install` to restore the integrated files.
+- **Remediation.** Run `apm install` to restore integrated files and remove
+  stale lockfile entries for targets no longer declared in `apm.yml`, then
+  commit `apm.lock.yaml`.
 
 ### `no-orphaned-packages`
 

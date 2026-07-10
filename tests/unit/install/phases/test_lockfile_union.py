@@ -210,7 +210,7 @@ class TestInactiveTargetGhostDrop:
         files, hashes = union_preserving(
             current_files=current,
             current_hashes={p: "sha256:new" for p in current},
-            prior_files=current + [ghost],
+            prior_files=[*current, ghost],
             prior_hashes={ghost: "sha256:ghost"},
             targets=declared,
             declared_targets=declared,
@@ -289,9 +289,7 @@ class TestInactiveTargetGhostDrop:
         from apm_cli.install.phases.targets import declared_target_profiles
 
         (tmp_path / "apm.yml").write_text("targets:\n  - copilot\n", encoding="utf-8")
-        ctx = SimpleNamespace(
-            apm_package=SimpleNamespace(package_path=tmp_path), scope=None
-        )
+        ctx = SimpleNamespace(apm_package=SimpleNamespace(package_path=tmp_path), scope=None)
         declared = declared_target_profiles(ctx)
         uri = "copilot-app-db://workflows/old"
         ghost = ".windsurf/rules/ghost.md"
@@ -310,9 +308,7 @@ class TestInactiveTargetGhostDrop:
         """End-to-end wiring: ``_attach_deployed_files`` reads the consumer's
         declared targets from apm.yml and drops the windsurf ghost while keeping
         the active-target file."""
-        (tmp_path / "apm.yml").write_text(
-            "targets:\n  - claude\n  - copilot\n", encoding="utf-8"
-        )
+        (tmp_path / "apm.yml").write_text("targets:\n  - claude\n  - copilot\n", encoding="utf-8")
         key = "owner/pkg"
         ghost = ".windsurf/skills/demo/SKILL.md"
         active_file = ".agents/skills/demo/SKILL.md"

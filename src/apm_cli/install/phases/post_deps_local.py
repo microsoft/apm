@@ -117,6 +117,11 @@ def run(ctx: InstallContext) -> None:
 
     _current_files = sorted(ctx.local_deployed_files)
     _current_hashes = _hash_deployed(ctx.local_deployed_files, ctx.project_root)
+
+    def _log_local_ghost_drop(path: str) -> None:
+        if logger:
+            logger.verbose_detail(f"Dropped inactive-target local lockfile entry {path}")
+
     _files, _hashes = _union(
         _current_files,
         _current_hashes,
@@ -124,6 +129,7 @@ def run(ctx: InstallContext) -> None:
         dict(_persist_lock.local_deployed_file_hashes),
         ctx.targets,
         declared_targets=declared_target_profiles(ctx),
+        on_ghost_drop=_log_local_ghost_drop,
     )
     _persist_lock.local_deployed_files = sorted(_files)
     _persist_lock.local_deployed_file_hashes = _hashes

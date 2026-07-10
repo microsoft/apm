@@ -228,6 +228,14 @@ class LockfileBuilder:
             prev = existing.get_dependency(dep_key) if existing is not None else None
             prior_files = prev.deployed_files if prev is not None else []
             prior_hashes = prev.deployed_file_hashes if prev is not None else {}
+
+            def _log_ghost_drop(path: str, package_key: str = dep_key) -> None:
+                logger = getattr(self.ctx, "logger", None)
+                if logger:
+                    logger.verbose_detail(
+                        f"Dropped inactive-target lockfile entry {path} for {package_key}"
+                    )
+
             files, hashes = union_preserving(
                 current,
                 current_hashes,
@@ -235,6 +243,7 @@ class LockfileBuilder:
                 prior_hashes,
                 self.ctx.targets,
                 declared_targets=declared,
+                on_ghost_drop=_log_ghost_drop,
             )
             if not files:
                 # Nothing this install governs and nothing to carry forward;

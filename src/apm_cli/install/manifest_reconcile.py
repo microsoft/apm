@@ -25,6 +25,7 @@ Both import :func:`union_preserving` so the behaviour stays identical.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -88,6 +89,7 @@ def union_preserving(
     prior_hashes: dict[str, str],
     targets: list[TargetProfile],
     declared_targets: list[TargetProfile] | None = None,
+    on_ghost_drop: Callable[[str], None] | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     """Union the current install's manifest with preserved other-target entries.
 
@@ -134,6 +136,8 @@ def union_preserving(
             and not is_governed_by_install(path, allowed_roots, allowed_schemes)
         ):
             # Ghost: governed by no target the consumer declares. Drop it.
+            if on_ghost_drop is not None:
+                on_ghost_drop(path)
             continue
         preserved.append(path)
         if prior_hashes and path in prior_hashes:

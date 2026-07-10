@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install` now removes stale `deployed_files` entries for targets absent
+  from the consumer manifest, so fresh checkouts no longer remain
+  `apm audit --ci`-red for files the active targets cannot restore. (by
+  @edenfunf; closes #2059) (#2114)
+
 ## [0.24.1] - 2026-07-10
 
 ### Fixed

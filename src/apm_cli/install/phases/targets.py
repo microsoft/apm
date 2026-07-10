@@ -139,7 +139,7 @@ def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
 
     try:
         names = _read_yaml_targets(ctx)
-    except Exception:
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
         # Any resolution error (missing apm_package, conflicting keys already
         # surfaced by the targets phase) -> unknown universe, preserve-all.
         return None
