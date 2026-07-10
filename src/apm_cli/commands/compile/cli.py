@@ -431,12 +431,19 @@ def _display_user_path(path: Path) -> str:
     return f"~/{rel.as_posix()}"
 
 
-def _validate_project(logger: CommandLogger, dry_run: bool, source_root: Path) -> None:
+def _validate_project(
+    logger: CommandLogger,
+    dry_run: bool,
+    source_root: Path,
+    *,
+    allow_empty: bool = False,
+) -> None:
     """Check APM project exists and has content.
 
     Calls ``sys.exit(1)`` on fatal errors.  In dry-run mode the function
     emits diagnostic messages but does *not* exit so callers can test the
-    full compile path even without real content.
+    full compile path even without real content.  ``allow_empty`` lets
+    ``compile --clean`` reach the compiler's APM-owned orphan cleanup.
     """
     from ...compilation.constitution import find_constitution
 
@@ -458,6 +465,9 @@ def _validate_project(logger: CommandLogger, dry_run: bool, source_root: Path) -
 
     # If no primitive sources exist, check deeper to provide better feedback
     if not apm_modules_exists and not local_apm_has_content and not constitution_exists:
+        if allow_empty:
+            return
+
         # Check if .apm directories exist but are empty
         has_empty_apm = (
             apm_dir.exists()
@@ -1127,7 +1137,12 @@ def compile(  # noqa: PLR0913 -- Click handler
         # from. Equals $PWD unless --root redirects writes elsewhere.
         source_root = get_source_root(InstallScope.PROJECT)
 
-        _validate_project(logger, dry_run, source_root)
+        _validate_project(
+            logger,
+            dry_run,
+            source_root,
+            allow_empty=clean and not validate and not watch,
+        )
 
         if validate:
             _run_validation_mode(logger, verbose, source_root)

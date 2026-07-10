@@ -872,11 +872,15 @@ class AgentsCompiler:
         all_warnings = self.warnings + claude_result.warnings
         all_errors = self.errors + claude_result.errors
 
-        # would_emit_no_claude_md is True when the formatter produced no CLAUDE.md
-        # files because skip_instructions fired (all content already in .claude/rules/).
         # Used symmetrically in the dry-run preview block and the live-removal block so
-        # both paths share a single, precise emptiness signal.
-        would_emit_no_claude_md = len(claude_result.content_map) == 0 and skip_instructions
+        # both paths share a single, precise emptiness signal. This also covers
+        # --clean after the final primitive is removed.
+        would_emit_no_claude_md = len(claude_result.content_map) == 0
+        orphan_reason = (
+            "instructions now live in .claude/rules/"
+            if skip_instructions
+            else "no source primitives remain"
+        )
 
         # Handle dry-run mode
         if config.dry_run:
@@ -913,10 +917,7 @@ class AgentsCompiler:
                         # result.content -- issue #1729 fix).
                         self._log("warning", det.read_error)
                     elif det.is_apm_managed:
-                        removal_msg = (
-                            f"[dry-run] would remove stale {det.rel} -- instructions now"
-                            " live in .claude/rules/"
-                        )
+                        removal_msg = f"[dry-run] would remove stale {det.rel} -- {orphan_reason}"
                         preview_lines.append(f"  {removal_msg}")
                         # Emit the preview through the logger so it reaches the terminal
                         # on the distributed dry-run path (cli.py does `pass` on dry-run
@@ -1023,7 +1024,7 @@ class AgentsCompiler:
                             # needed (unlike the progress() calls elsewhere here).
                             self._log(
                                 "success",
-                                f"Removed stale {det.rel} -- instructions now live in .claude/rules/",
+                                f"Removed stale {det.rel} -- {orphan_reason}",
                             )
                         except (OSError, PathTraversalError) as exc:
                             warning = f"Could not remove {det.rel}: {exc!s}"
