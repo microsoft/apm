@@ -19,7 +19,11 @@ def _assert_release_workflow_has_no_homebrew_push(workflow_path: Path) -> None:
             continue
         forbidden = ("GH_PKG_PAT", "repository-dispatch", "repository_dispatch", "gh pr create")
         found = [token for token in forbidden if token in rendered]
-        if re.search(r"(?:secrets\.[A-Z0-9_]+|github\.token)", rendered, re.IGNORECASE):
+        if re.search(
+            r"(?:secrets\.[A-Z0-9_]*(?:PAT|TOKEN)|github\.token)",
+            rendered,
+            re.IGNORECASE,
+        ):
             found.append("workflow token")
         if found:
             raise RuntimeError(

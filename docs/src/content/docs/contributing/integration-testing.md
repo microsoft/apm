@@ -161,7 +161,7 @@ The workflow ensures quality gates at each step:
 
 Each stage must succeed before proceeding to the next, ensuring only fully validated releases reach users.
 
-The Homebrew tap updates independently: `microsoft/homebrew-apm` polls the latest public APM release and commits formula updates with its own repository-scoped `GITHUB_TOKEN`. The release pipeline does not hold a cross-repository Homebrew credential.
+The [`microsoft/homebrew-apm`](https://github.com/microsoft/homebrew-apm) tap updates independently: it polls the latest public APM release and commits formula updates with its own repository-scoped `GITHUB_TOKEN`. The release pipeline does not hold a cross-repository Homebrew credential.
 
 ### Test Matrix
 
