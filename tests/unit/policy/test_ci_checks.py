@@ -468,6 +468,94 @@ class TestConfigConsistency:
         assert not result.passed
         assert result.details == ["shadcn: config differs from lockfile baseline"]
 
+    def test_local_resolution_error_fails_gracefully(self, tmp_path):
+        """A corrupt local dependency graph must fail without crashing audit."""
+        _write_apm_yml(tmp_path, deps=["./packages/agent-config"])
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: _local/agent-config
+                    source: local
+                    local_path: ../agent-config
+                    resolved_by: _local/missing-parent
+                    depth: 2
+                    deployed_files: []
+            """),
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
+
+        manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_config_consistency(manifest, lock)
+
+        assert not result.passed
+        assert len(result.details) == 1
+        assert "_local/agent-config: cannot resolve local package" in result.details[0]
+        assert "re-run 'apm install'" in result.details[0]
+
+    def test_invalid_local_package_manifest_fails_gracefully(self, tmp_path):
+        """An invalid local package manifest must fail without crashing audit."""
+        package = tmp_path / "packages" / "agent-config"
+        package.mkdir(parents=True)
+        _write_apm_yml(tmp_path, deps=["./packages/agent-config"])
+        (package / "apm.yml").write_text("version: 1.0.0\n", encoding="utf-8")
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: _local/agent-config
+                    source: local
+                    local_path: ./packages/agent-config
+                    depth: 1
+                    deployed_files: []
+            """),
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
+
+        manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_config_consistency(manifest, lock)
+
+        assert not result.passed
+        assert len(result.details) == 1
+        assert "_local/agent-config: cannot parse local package manifest" in result.details[0]
+        assert "Missing required field 'name'" in result.details[0]
+
+    def test_missing_local_package_manifest_fails_gracefully(self, tmp_path):
+        """A missing local package manifest must fail without a false pass."""
+        _write_apm_yml(tmp_path, deps=["./packages/agent-config"])
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: _local/agent-config
+                    source: local
+                    local_path: ./packages/agent-config
+                    depth: 1
+                    deployed_files: []
+            """),
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
+
+        manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_config_consistency(manifest, lock)
+
+        assert not result.passed
+        assert len(result.details) == 1
+        assert "_local/agent-config: local package manifest not found" in result.details[0]
+        assert "re-run 'apm install'" in result.details[0]
+
     def test_transitive_mcp_server_not_flagged_as_orphan(self, tmp_path):
         """A server declared by a local-path sub-package is exempt from orphan.
 

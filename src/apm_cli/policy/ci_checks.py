@@ -231,34 +231,51 @@ def _check_config_consistency(
     lock: LockFile,
 ) -> CheckResult:
     """Verify MCP server configs match lockfile baseline."""
-    from ..deps.path_anchoring import resolve_local_dep_dir
+    from ..deps.path_anchoring import LocalResolutionError, resolve_local_dep_dir
     from ..drift import detect_config_drift
     from ..integration.mcp_integrator import MCPIntegrator
     from ..models.apm_package import APMPackage
 
+    details: list[str] = []
     mcp_deps = manifest.get_all_mcp_dependencies()
     for locked_dep in lock.get_package_dependencies():
         if locked_dep.source != "local":
             continue
-        package_manifest = (
-            resolve_local_dep_dir(locked_dep, lock, manifest.package_path) / "apm.yml"
-        )
-        if package_manifest.exists():
+        try:
+            package_dir = resolve_local_dep_dir(locked_dep, lock, manifest.package_path)
+        except LocalResolutionError as exc:
+            details.append(
+                f"{locked_dep.repo_url}: cannot resolve local package ({exc}) -- "
+                "fix the resolved_by chain or re-run 'apm install'"
+            )
+            continue
+        package_manifest = package_dir / "apm.yml"
+        if not package_manifest.exists():
+            details.append(
+                f"{locked_dep.repo_url}: local package manifest not found at "
+                f"{package_manifest} -- restore the source or re-run 'apm install'"
+            )
+            continue
+        try:
             package = APMPackage.from_apm_yml(package_manifest)
-            mcp_deps.extend(package.get_mcp_dependencies())
+        except (OSError, ValueError) as exc:
+            details.append(
+                f"{locked_dep.repo_url}: cannot parse local package manifest ({exc}) -- "
+                "fix the manifest or re-run 'apm install'"
+            )
+            continue
+        mcp_deps.extend(package.get_mcp_dependencies())
     mcp_deps = MCPIntegrator.deduplicate(mcp_deps)
     current_configs = MCPIntegrator.get_server_configs(mcp_deps)
     stored_configs = lock.mcp_configs or {}
 
     # No MCP deps at all -- nothing to check
-    if not current_configs and not stored_configs:
+    if not current_configs and not stored_configs and not details:
         return CheckResult(
             name="config-consistency",
             passed=True,
             message="No MCP configs to check",
         )
-
-    details: list[str] = []
 
     # Detect drift on servers that exist in both sets
     drifted = detect_config_drift(current_configs, stored_configs)
