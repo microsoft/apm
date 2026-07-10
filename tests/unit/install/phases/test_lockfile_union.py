@@ -148,6 +148,21 @@ class TestCurrentInstallGovernance:
         assert ".agents/skills/" in file_prefixes
         assert ".agents/" not in file_prefixes
 
+    def test_shared_root_filename_governance_requires_exact_match(self):
+        from apm_cli.install.manifest_reconcile import union_preserving
+
+        lookalike = ".agents/hooks.json.bak"
+        files, _ = union_preserving(
+            current_files=[],
+            current_hashes={},
+            prior_files=[lookalike],
+            prior_hashes={},
+            targets=[_known("antigravity")],
+            declared_targets=None,
+        )
+
+        assert lookalike in files
+
     def test_copilot_app_target_uses_uri_scheme(self, tmp_path):
         from apm_cli.install.manifest_reconcile import install_governance
 

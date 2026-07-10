@@ -92,7 +92,10 @@ def is_governed_by_install(path: str, file_prefixes: set[str], uri_schemes: set[
     if "://" in path:
         scheme = path.split("://", 1)[0] + "://"
         return scheme in uri_schemes
-    return any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in file_prefixes)
+    return any(
+        path.startswith(prefix) if prefix.endswith("/") else path == prefix
+        for prefix in file_prefixes
+    )
 
 
 def union_preserving(
