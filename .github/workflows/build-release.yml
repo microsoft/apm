@@ -75,9 +75,10 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         env:
+          APM_E2E_TESTS: "1"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/windows/test-install-script.ps1
+          uv run pytest tests/integration/test_windows_installer_launchers.py -q
 
       # Unit tests run on every push for fast platform-regression signal.
       # Smoke is intentionally NOT included here: it duplicates ci-integration.yml's

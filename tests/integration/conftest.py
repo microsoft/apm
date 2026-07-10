@@ -195,6 +195,10 @@ def _is_inference_mode() -> bool:
     return os.environ.get("APM_RUN_INFERENCE_TESTS") == "1"
 
 
+def _is_windows() -> bool:
+    return _platform.system() == "Windows"
+
+
 def _has_apm_binary() -> bool:
     return _resolve_apm_binary() is not None
 
@@ -221,6 +225,7 @@ _MARKER_CHECKS: dict[str, tuple[Callable[[], bool], str]] = {
         _is_network_integration,
         "APM_RUN_INTEGRATION_TESTS=1 not set",
     ),
+    "requires_windows": (_is_windows, "Windows required"),
     "requires_apm_binary": (
         _has_apm_binary,
         "apm binary not found on PATH (set APM_BINARY_PATH or build via scripts/build-binary.sh)",
