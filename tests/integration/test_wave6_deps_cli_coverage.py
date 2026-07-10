@@ -679,6 +679,33 @@ class TestResolveScopeDepsEdgeCases:
         assert result.exit_code == 0
         assert "local-pkg" in result.output
 
+    def test_local_transitive_dependency_matches_installed_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A locked local transitive package matches its installed path."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(_APM_YML_SIMPLE)
+        lockfile_content = dedent("""\
+            lockfile_version: "1"
+            dependencies:
+              - repo_url: _local/sub-package
+                name: sub-package
+                source: local
+                local_path: ../sub-package
+                depth: 2
+                resolved_by: _local/parent-package
+        """)
+        (tmp_path / "apm.lock.yaml").write_text(lockfile_content)
+        modules = tmp_path / "apm_modules"
+        _make_pkg(modules, "_local", "sub-package")
+
+        result = CliRunner().invoke(cli, ["deps", "list"])
+
+        assert result.exit_code == 0, result.output
+        assert "_local/sub-package" in result.output
+        assert "local" in result.output
+        assert "orphaned package(s) found" not in result.output
+
     def test_modules_dir_with_dotfile_dirs_skipped(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

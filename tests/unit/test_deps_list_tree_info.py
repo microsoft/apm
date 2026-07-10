@@ -185,6 +185,31 @@ class TestDepsListCommand(_DepsCmdBase):
         # match against unrelated 'orphan' substrings in future output).
         assert "orphaned package(s) found" in result.output
 
+    def test_list_does_not_orphan_local_transitive_dependency(self):
+        """A locked local transitive dep is keyed by its canonical install path."""
+        with self._chdir_tmp() as tmp:
+            self._make_package(tmp, "_local", "sub-package")
+            (tmp / "apm.lock.yaml").write_text(
+                'lockfile_version: "1"\n'
+                "generated_at: '2026-01-01T00:00:00+00:00'\n"
+                "dependencies:\n"
+                "  - repo_url: _local/sub-package\n"
+                "    name: sub-package\n"
+                "    source: local\n"
+                "    local_path: ../sub-package\n"
+                "    depth: 2\n"
+                "    resolved_by: _local/package\n",
+                encoding="utf-8",
+            )
+
+            with patch("apm_cli.core.scope.get_apm_dir", return_value=tmp), _force_rich_fallback():
+                result = self.runner.invoke(cli, ["deps", "list"])
+
+        assert result.exit_code == 0, result.output
+        assert "_local/sub-package" in result.output
+        assert "local" in result.output
+        assert "orphaned package(s) found" not in result.output
+
     def test_list_version_shown(self):
         """Version from apm.yml should appear in fallback text output."""
         with self._chdir_tmp() as tmp:
