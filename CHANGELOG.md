@@ -12,11 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In-repository plugins from SSH-registered GitLab and generic git
   marketplaces no longer rewrite to HTTPS; generated `git:` and `path:`
   dependencies keep using existing SSH keys. (#2091)
+- Installing the same GitHub or package-registry dependency with different
+  owner/repository casing no longer creates duplicate identities, lock/cache
+  keys, or install paths. Publish uses the same lowercase identity, while
+  unknown git hosts retain case-sensitive paths. (closes #2073) (#2098)
+- `apm deps tree` no longer repeats same-repository virtual packages, keeping
+  large monorepo dependency trees accurate and scannable. (#2093)
 - `apm install host/org/repo/subpath#ref` on an unrecognised self-hosted FQDN
   no longer fails with a misleading "not accessible or doesn't exist" error;
   the failure reason now suggests setting `GITLAB_HOST` / `APM_GITLAB_HOSTS`
   if the target is a self-hosted GitLab instance, or using an explicit
   `git:` + `path:` entry in `apm.yml` otherwise. (by @rrazvd; closes #2066) (#2074)
+- Dev dependencies are no longer removed by `apm prune`, reported as orphans
+  by `apm audit --ci`, or omitted from lockfile and MCP config checks. This
+  includes `devDependencies.apm` and applicable `devDependencies.mcp` entries.
+  (by @sergio-sisternes-epam; #2102, supersedes #2042, closes #2033)
 
 ## [0.24.0] - 2026-07-05
 

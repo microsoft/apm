@@ -32,6 +32,16 @@ class TestLockedDependency:
         dep = LockedDependency(repo_url="owner/repo", host="github.com")
         assert dep.get_unique_key() == "owner/repo"
 
+    def test_github_owner_repo_casing_migrates_to_one_lock_key(self):
+        mixed = LockedDependency.from_dict(
+            {"repo_url": "Owner/Example-Package", "host": "github.com"}
+        )
+        lower = LockedDependency(repo_url="owner/example-package", host="github.com")
+
+        assert mixed.repo_url == "owner/example-package"
+        assert mixed.get_unique_key() == lower.get_unique_key()
+        assert mixed.to_dict()["repo_url"] == "owner/example-package"
+
     def test_get_unique_key_includes_non_default_host(self):
         dep = LockedDependency(repo_url="team/skills", host="gitea.myorg.com")
         assert dep.get_unique_key() == "gitea.myorg.com/team/skills"

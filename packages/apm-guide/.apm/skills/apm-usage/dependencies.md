@@ -43,6 +43,12 @@ dependencies:
     - ../sibling-repo/my-package
 ```
 
+GitHub and package-registry owner/repository identifiers are normalized to
+lowercase before APM derives lock keys, cache identity, canonical strings, or
+`apm_modules/` paths. `Owner/Repo` and `owner/repo` therefore identify one
+package. Repository path casing is preserved for unknown git hosts because a
+self-hosted backend may be case-sensitive.
+
 **Local-path anchor rule:** a `local_path` declared INSIDE another local
 package is resolved relative to THAT package's own directory (npm/pip/cargo
 parity). Sibling layouts that resolve outside the consuming project root
@@ -419,6 +425,11 @@ dependencies:
         clientId: "<pre-registered-client-id>"
         callbackPort: 3118
 ```
+
+At user scope, Claude MCP entries are written to
+`$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
+non-whitespace absolute path. Unset or blank values use `~/.claude.json`;
+relative values are rejected.
 
 ## LSP dependency formats
 

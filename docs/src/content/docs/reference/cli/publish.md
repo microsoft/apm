@@ -30,7 +30,7 @@ The project's `apm.yml` must declare a `registries:` block with at least one reg
 | Flag | Default | Description |
 |---|---|---|
 | `--registry NAME` | _(required when multiple registries configured)_ | Registry name from the `registries:` block. |
-| `--package OWNER/REPO` | _(required)_ | Package identity to publish as (e.g. `acme/my-skill`). |
+| `--package OWNER/REPO` | _(required)_ | Package identity to publish as (e.g. `acme/my-skill`). Owner and repository are normalized to lowercase. |
 | `--zip PATH` | auto-pack | Path to a pre-built `.zip`. Skips auto-pack. (renamed from `--tarball` in v0.20.0) |
 | `--dry-run` | off | Print what would be uploaded; do not call the registry. |
 | `--verbose`, `-v` | off | Show auto-pack details (archive path). |

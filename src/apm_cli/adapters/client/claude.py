@@ -4,11 +4,11 @@ Project scope: ``.mcp.json`` at the project root with top-level ``mcpServers``
 (``--scope project`` in Claude Code). Writes are opt-in when ``.claude/`` exists,
 mirroring the Cursor/OpenCode directory-presence convention.
 
-User scope: top-level ``mcpServers`` in ``~/.claude.json`` (``--scope user``).
-Writes are atomic and create the file with ``0o600`` permissions on first
-write so the shared Claude Code config is not silently truncated by a
-concurrent writer and cannot leak any embedded OAuth state to other users
-on a multi-user host.
+User scope: top-level ``mcpServers`` in ``$CLAUDE_CONFIG_DIR/.claude.json``
+when configured, otherwise ``~/.claude.json`` (``--scope user``). Writes are
+atomic and create the file with ``0o600`` permissions on first write so the
+shared Claude Code config is not silently truncated by a concurrent writer
+and cannot leak any embedded OAuth state to other users on a multi-user host.
 
 Local scope (Claude Code's third scope -- the default for ``claude mcp add``,
 storing per-project private config under ``~/.claude.json -> projects.<abs_path>
@@ -20,11 +20,16 @@ See https://code.claude.com/docs/en/mcp
 """
 
 import json
+import logging
+import os
 from pathlib import Path
 
 from ...utils.atomic_io import atomic_write_text
 from ...utils.console import _rich_error, _rich_success, _rich_warning
+from ...utils.path_security import PathTraversalError
 from .copilot import CopilotClientAdapter
+
+_log = logging.getLogger(__name__)
 
 
 class ClaudeClientAdapter(CopilotClientAdapter):
@@ -141,6 +146,15 @@ class ClaudeClientAdapter(CopilotClientAdapter):
         return self.project_root / ".mcp.json"
 
     def _user_claude_json_path(self) -> Path:
+        config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+        if config_dir:
+            config_path = Path(config_dir).expanduser()
+            if not config_path.is_absolute():
+                raise PathTraversalError(
+                    "CLAUDE_CONFIG_DIR must be an absolute path for user-scope MCP "
+                    "config; set an absolute path or unset it to use ~/.claude.json."
+                )
+            return config_path.resolve(strict=False) / ".claude.json"
         return Path.home() / ".claude.json"
 
     def _should_write_project(self) -> bool:
@@ -206,6 +220,7 @@ class ClaudeClientAdapter(CopilotClientAdapter):
             payload = json.dumps(data, indent=2) + "\n"
             path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(path, payload, new_file_mode=0o600)
+            _log.debug("Claude user-scope MCP config written to %s", path)
             return True
         except OSError:
             return False

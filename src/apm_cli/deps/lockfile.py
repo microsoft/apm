@@ -14,6 +14,7 @@ from typing import Any
 import yaml
 
 from ..models.apm_package import DependencyReference
+from ..models.dependency.identity import normalize_package_repo_url
 from ..models.dependency.reference import (
     build_canonical_dependency_string,
     build_dependency_unique_key,
@@ -137,6 +138,15 @@ class LockedDependency:
     # reading a lockfile written by a newer build doesn't silently drop
     # fields when it re-emits.
     _unknown_fields: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Normalize case-insensitive package identity when loading or creating locks."""
+        self.repo_url = normalize_package_repo_url(
+            self.repo_url,
+            host=self.host,
+            source=self.source,
+            registry_prefix=self.registry_prefix,
+        )
 
     def get_unique_key(self) -> str:
         """Returns unique key for this dependency."""
