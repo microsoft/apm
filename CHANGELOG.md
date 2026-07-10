@@ -27,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `apm pack` with a declared `includes:` value no longer publishes local
-  root-level plugin convention directories such as `skills/`. (closes #2054)
+  root-level plugin convention directories such as `skills/`. (closes #2054,
+  #2122)
 
 ## [0.24.1] - 2026-07-10
 
