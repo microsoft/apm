@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 
+from ..bundle.plugin_layout import find_plugin_root_sources
 from ..constants import APM_YML_FILENAME
 from ..core.command_logger import CommandLogger
 from ..core.target_detection import (
@@ -219,6 +220,18 @@ def _perform_init(
 
         # Create apm.yml (with devDependencies for plugin mode)
         _create_minimal_apm_yml(config, plugin=plugin)
+        native_sources = find_plugin_root_sources(project_root)
+        if native_sources and not (project_root / ".apm").is_dir():
+            rendered_sources = ", ".join(
+                source if source.endswith(".json") else f"{source}/" for source in native_sources
+            )
+            logger.warning(
+                "Found plugin-native sources at the project root: "
+                f"{rendered_sources}. They remain included by apm pack. "
+                "Move publishable files under .apm/ when adopting the APM "
+                "source layout.",
+                symbol="warning",
+            )
 
         # Create plugin.json for plugin mode
         if plugin:
