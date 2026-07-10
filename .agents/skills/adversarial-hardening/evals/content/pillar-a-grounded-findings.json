@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "id": "pillar-a-grounded-findings",
+  "summary": "Pillar A. After a run with three findings, the PR body must carry a 'Hardening findings and resolution' table rendered from the ledger row-for-row (id, severity, verdict, fix commit, trap path), plus a decline roll-up. Without the skill, the body is a generic or hallucinated summary with no grounded findings.",
+  "scenario": {
+    "target": "manifest loader",
+    "ledger_rows": ["F-001 high accept fixed", "F-002 medium accept fixed", "F-003 low decline OOS-2"]
+  },
+  "rubric": [
+    {"id": "findings-heading", "pattern": "(?im)^\\s*##\\s*Hardening findings and resolution\\b", "weight": 2, "description": "Verbatim grounded findings heading"},
+    {"id": "ledger-row-ids", "pattern": "(?s)F-001.*F-002", "weight": 2, "description": "Ledger finding ids present in order"},
+    {"id": "fix-commit", "pattern": "(?im)\\b[0-9a-f]{7,40}\\b", "weight": 1, "description": "Fix commit sha shown per accepted finding"},
+    {"id": "trap-path", "pattern": "(?im)tests/.*\\.py", "weight": 1, "description": "Regression-trap test path shown"},
+    {"id": "decline-rollup", "pattern": "(?i)declined|decline roll-?up", "weight": 1, "description": "Decline roll-up present"},
+    {"id": "hallucinated-summary", "pattern": "(?i)various improvements|general hardening was performed|made it more robust", "weight": -2, "description": "PENALTY: ungrounded recall summary"}
+  ],
+  "fixtures": {
+    "with_skill": "../fixtures/pillar-a-grounded-findings__with_skill.md",
+    "without_skill": "../fixtures/pillar-a-grounded-findings__without_skill.md"
+  }
+}

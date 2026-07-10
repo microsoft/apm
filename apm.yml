@@ -12,21 +12,26 @@ license: MIT
 # issue triage, or an orchestrator entrypoint which transitively
 # pulls its engine + panels).
 #
-# Only the two USER-FACING ORCHESTRATOR ENTRYPOINTS are declared
+# Only the USER-FACING ORCHESTRATOR ENTRYPOINTS are declared
 # here. Everything else arrives transitively, so declaring it again
 # would be a redundant edge (apm 0.16 flags the double-deploy as
 # "skill replaced -- remove one"):
 #  - batch-bug-shepherd  -> shepherd-driver -> apm-review-panel
 #  - apm-issue-autopilot -> shepherd-driver -> apm-review-panel
-#                        -> apm-triage-panel
-# Net transitive closure deployed = all 5 first-party skills
-# (both orchestrators + shepherd-driver + both panels). shepherd-
+#                        -> apm-triage-panel -> pr-description-skill
+#  - adversarial-hardening -> shepherd-driver -> apm-review-panel
+#                          -> pr-description-skill (all 3 transitive
+#                            deps already in the closure above; only
+#                            adversarial-hardening itself is new)
+# Net transitive closure deployed = the first-party orchestrators +
+# shepherd-driver + the panels + pr-description-skill. shepherd-
 # driver stays transitive-only by design ("used only by a parent
 # orchestrator, never user-facing").
 dependencies:
   apm:
     - ./packages/apm-issue-autopilot
     - ./packages/batch-bug-shepherd
+    - ./packages/adversarial-hardening
   mcp: []
 
 scripts: {}

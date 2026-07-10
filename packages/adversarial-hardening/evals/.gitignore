@@ -1,0 +1,2 @@
+# Ignore generated result files; track only the .gitkeep sentinel.
+results/*.json

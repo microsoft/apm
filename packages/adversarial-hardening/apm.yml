@@ -1,0 +1,44 @@
+name: adversarial-hardening
+version: 0.1.0
+description: Systematically harden ONE bounded surface (a CLI command, a module, a PR diff) against security and resilience defects by looping a red-team plus chaos-engineering panel until a full adversarial sweep finds zero new in-scope defects, gating every finding against an operator-ratified scope charter and folding each accepted fix via shepherd-driver. Invoke MANUALLY on a named surface.
+author: Microsoft
+license: MIT
+type: skill
+
+# Manually-invoked orchestrator entrypoint (sibling of
+# apm-issue-autopilot / batch-bug-shepherd). It is the GENERATIVE
+# adversarial-discovery layer; it COMPOSES three first-party APM
+# skills and re-implements none of them:
+#  - shepherd-driver     : drives each accepted finding to a folded
+#                          fix + regression trap + CI-green (per-PR
+#                          convergence loop; transitively pulls
+#                          apm-review-panel).
+#  - apm-review-panel    : the terminal advisory review of this
+#                          skill's own hardened PR, run until ship_now.
+#  - pr-description-skill : authors the PR body and embeds the
+#                          deterministically-rendered hardening
+#                          dossier (Pillar A) verbatim.
+#
+# Belt + suspenders (genesis step 3.5 declaration mechanism = BOTH):
+#  - Belt: the manifest deps below declare the edges so the resolver
+#    deploys all three alongside this orchestrator. The local-path
+#    keys resolve relative to THIS package's directory (apm-usage
+#    dependencies.md anchor rule), hence the `../` prefixes.
+#  - Suspenders: the SKILL.md body keeps a runtime activate-by-name
+#    PROBE for each at its use-site (avoids PHANTOM DEPENDENCY even
+#    if a consumer wired the deploy differently).
+#
+# All three are DIRECT edges, not transitive: this orchestrator
+# invokes each itself (shepherd-driver per accepted finding,
+# apm-review-panel at the terminal gate, pr-description-skill at the
+# PR-open site). The <= 0.14.1 orphaned-lockfile bug that forced
+# batch-bug-shepherd to comment out analogous edges is fixed from
+# 0.16 onward, so the real edges are declared here.
+dependencies:
+  apm:
+    - ../shepherd-driver
+    - ../apm-review-panel
+    - ../pr-description-skill
+  mcp: []
+
+scripts: {}

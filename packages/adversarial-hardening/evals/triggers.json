@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "id": "fire-01",
+      "query": "red-team the install path and fold every fix",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Verbatim primary trigger from SKILL.md description."
+    },
+    {
+      "id": "fire-02",
+      "query": "chaos-engineer the lifecycle-scripts runner",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Verbatim primary trigger (chaos-engineer)."
+    },
+    {
+      "id": "fire-03",
+      "query": "try to break the dependency parser and fold the fixes",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Primary phrase 'try to break' on a named surface."
+    },
+    {
+      "id": "fire-04",
+      "query": "battle-test this CLI surface until it stops breaking",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Primary phrase 'battle-test'."
+    },
+    {
+      "id": "fire-05",
+      "query": "harden the auth token resolution against attack",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Primary verb 'harden' on a named module."
+    },
+    {
+      "id": "fire-06",
+      "query": "fuzz the manifest loader and trap regressions",
+      "expected": "fire",
+      "split": "train",
+      "notes": "Primary verb 'fuzz'."
+    },
+    {
+      "id": "fire-07",
+      "query": "stress-test the runner and fold the fixes back in",
+      "expected": "fire",
+      "split": "val",
+      "notes": "Primary phrase 'stress-test'."
+    },
+    {
+      "id": "fire-08",
+      "query": "run an adversarial pass on the hooks framework",
+      "expected": "fire",
+      "split": "val",
+      "notes": "Primary token 'adversarial'."
+    },
+    {
+      "id": "fire-09",
+      "query": "loop until the parser surfaces no new exploit vector",
+      "expected": "fire",
+      "split": "val",
+      "notes": "No primary phrase; exercises the secondary-threshold + anchor (exploit) path."
+    },
+    {
+      "id": "fire-10",
+      "query": "harden how the installer uses the corporate proxy",
+      "expected": "fire",
+      "split": "val",
+      "notes": "Primary verb 'harden'; invariant-preserving framing."
+    },
+    {
+      "id": "nofire-01",
+      "query": "triage the issue backlog",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "apm-issue-autopilot territory; stop_list 'triage'."
+    },
+    {
+      "id": "nofire-02",
+      "query": "open PRs for these 5 issues",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Batch PR opening; stop_list 'open prs'."
+    },
+    {
+      "id": "nofire-03",
+      "query": "write a secret scanner for leaked tokens",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "Out of scope by design (OOS-1); stop_list 'secret scanner'."
+    },
+    {
+      "id": "nofire-04",
+      "query": "review this PR with the panel",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "apm-review-panel only; stop_list 'review this pr'."
+    },
+    {
+      "id": "nofire-05",
+      "query": "shepherd this PR to merge",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "shepherd-driver territory; stop_list 'shepherd'."
+    },
+    {
+      "id": "nofire-06",
+      "query": "sweep the weekly bug queue",
+      "expected": "no_fire",
+      "split": "train",
+      "notes": "batch-bug-shepherd territory; stop_list 'sweep'."
+    },
+    {
+      "id": "nofire-07",
+      "query": "scan the dependencies for CVEs",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Domain detector; stop_list 'scan '."
+    },
+    {
+      "id": "nofire-08",
+      "query": "refactor the auth module for clarity",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Plain refactor; no adversarial verb, natural no_fire."
+    },
+    {
+      "id": "nofire-09",
+      "query": "write unit tests for the parser",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "Plain test authoring; natural no_fire."
+    },
+    {
+      "id": "nofire-10",
+      "query": "audit the docs corpus for drift",
+      "expected": "no_fire",
+      "split": "val",
+      "notes": "docs-corpus-audit territory; stop_list 'audit the docs'."
+    }
+  ]
+}
