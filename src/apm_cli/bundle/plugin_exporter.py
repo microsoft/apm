@@ -768,7 +768,10 @@ def export_plugin_bundle(
     # 6. Collect own components (.apm/ and root-level)
     own_apm_dir = project_root / ".apm"
     own_components = _collect_apm_components(own_apm_dir)
-    own_components.extend(_collect_root_plugin_components(project_root))
+    # An includes declaration scopes local publication to .apm/. Preserve
+    # root convention discovery only for legacy plugin-native manifests.
+    if package.includes is None:
+        own_components.extend(_collect_root_plugin_components(project_root))
     _merge_file_map(file_map, own_components, pkg_name, force, collisions)
 
     # Hooks -- root package wins on key collision

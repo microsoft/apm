@@ -62,12 +62,12 @@ my-package/
 
 ## Install-time discovery rules
 
-`apm pack` (export) is liberal: it collects primitives from both
-`.apm/<type>/` and root convention directories (`agents/`, `skills/`,
-`instructions/`, etc.). `apm install` (integration) is per-primitive
-and stricter. Authors who rely on root convention directories for
-instructions or prompts will produce bundles that pack but install
-silently incomplete.
+`apm pack` collects declared local primitives from `.apm/<type>/`.
+When `apm.yml` sets `includes: auto` or an explicit `includes:` list,
+root convention directories (`agents/`, `skills/`, `instructions/`,
+etc.) are not package content. Manifests that omit `includes:` retain
+legacy root convention discovery for plugin-native projects. Prefer
+`.apm/<type>/` so pack and install use the same source layout.
 
 Per-primitive scan paths for `apm install`:
 
@@ -81,9 +81,7 @@ Per-primitive scan paths for `apm install`:
 
 **Recommendation for marketplace publishers:** use `.apm/<type>/` for
 every primitive. This is the only layout that is symmetric between
-`apm pack` and `apm install`. Authoring `instructions/` at the plugin
-root will pack cleanly but instructions will be silently dropped when
-consumers run `apm install`.
+`apm pack` and `apm install`.
 
 ## Hook files
 
