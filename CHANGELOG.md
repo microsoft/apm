@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Homebrew formula updates now run independently in the tap repository, removing
+  its cross-repository credential from the release pipeline. (#2088)
+
 ### Fixed
 
 - `apm install host/org/repo/subpath#ref` on an unrecognised self-hosted FQDN

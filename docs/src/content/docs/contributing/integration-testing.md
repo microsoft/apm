@@ -129,7 +129,6 @@ environment end-to-end; for local iteration prefer the direct
 3. **E2E golden scenario tests** (using built binaries)
 4. Create GitHub Release
 5. Publish to PyPI 
-6. Update Homebrew Formula
 
 **Manual workflow dispatch:**
 - Test builds (uploads as workflow artifacts)
@@ -197,7 +196,7 @@ Promotion integration tests run on:
 - ✅ Parameter substitution works correctly
 - ✅ MCP integration functions (GitHub tools)
 - ✅ Binary artifacts work across platforms
-- ✅ Release pipeline integrity (GitHub Release → PyPI → Homebrew)
+- ✅ Release pipeline integrity (GitHub Release → PyPI)
 
 ## Benefits
 
@@ -220,7 +219,7 @@ Promotion integration tests run on:
 - Guarantees shipped releases work end-to-end
 - Users can trust the README golden scenario
 - Cross-platform binary verification
-- Automatic Homebrew formula updates
+- Independent Homebrew formula updates through tap polling
 
 ## Debugging Test Failures
 
