@@ -149,6 +149,70 @@ def _make_local_prompt_package(tmp_path, name, prompts):
     return pkg
 
 
+def _make_local_nested_package(tmp_path, name):
+    """Create a local package whose source includes a nested package manifest."""
+    pkg = tmp_path / name
+    nested = pkg / "sub-package"
+    nested.mkdir(parents=True)
+    (pkg / "apm.yml").write_text(
+        yaml.dump({"name": name, "version": "0.0.1"}, default_flow_style=False),
+        encoding="utf-8",
+    )
+    (nested / "apm.yml").write_text(
+        yaml.dump({"name": "sub-package", "version": "0.0.1"}, default_flow_style=False),
+        encoding="utf-8",
+    )
+    (nested / "payload.txt").write_text("nested package content\n", encoding="utf-8")
+    return pkg
+
+
+class TestNestedPackagePrune:
+    """End-to-end regression coverage for nested package ownership."""
+
+    def test_prune_preserves_nested_content_then_removes_whole_parent(
+        self, temp_project, apm_command, tmp_path
+    ):
+        """Prune protects a declared parent, then removes all of it once orphaned."""
+        parent = _make_local_nested_package(tmp_path, "parent-pkg")
+        unrelated = _make_local_nested_package(tmp_path, "unrelated-pkg")
+        _write_apm_yml_local_packages(temp_project, [parent, unrelated])
+
+        installed = _run_apm(apm_command, ["install"], temp_project)
+        assert installed.returncode == 0, (
+            f"Install failed:\nSTDOUT: {installed.stdout}\nSTDERR: {installed.stderr}"
+        )
+
+        parent_install = temp_project / "apm_modules" / "_local" / "parent-pkg"
+        unrelated_install = temp_project / "apm_modules" / "_local" / "unrelated-pkg"
+        nested_payload = parent_install / "sub-package" / "payload.txt"
+        unrelated_payload = unrelated_install / "sub-package" / "payload.txt"
+        assert nested_payload.is_file()
+        assert unrelated_payload.is_file()
+
+        updated = _run_apm(apm_command, ["update", "--yes"], temp_project)
+        assert updated.returncode == 0, (
+            f"Update failed:\nSTDOUT: {updated.stdout}\nSTDERR: {updated.stderr}"
+        )
+        assert nested_payload.is_file(), "Update removed nested package content"
+        assert unrelated_payload.is_file(), "Update removed unrelated package content"
+
+        kept = _run_apm(apm_command, ["prune"], temp_project)
+        assert kept.returncode == 0, (
+            f"Initial prune failed:\nSTDOUT: {kept.stdout}\nSTDERR: {kept.stderr}"
+        )
+        assert nested_payload.is_file(), "Nested package content was pruned from its parent"
+        assert unrelated_payload.is_file(), "Unrelated package content was pruned"
+
+        _write_apm_yml_local_packages(temp_project, [unrelated])
+        removed = _run_apm(apm_command, ["prune"], temp_project)
+        assert removed.returncode == 0, (
+            f"Orphan prune failed:\nSTDOUT: {removed.stdout}\nSTDERR: {removed.stderr}"
+        )
+
+        assert not parent_install.exists(), "Orphaned parent package was only partially pruned"
+        assert unrelated_payload.is_file(), "Pruning the parent deleted unrelated material"
+
+
 class TestFileRenamedWithinPackage:
     """Regression tests for issue #666: renaming a file inside a still-present
     package must delete the stale deployed artifacts on the next apm install."""

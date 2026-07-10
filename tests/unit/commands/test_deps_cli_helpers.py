@@ -160,8 +160,8 @@ class TestResolveScopeDepsWithPackages:
         assert installed is not None
         assert any(pkg["name"].endswith("skill-repo") for pkg in installed)
 
-    def test_nested_package_manifest_is_not_an_orphan(self, tmp_path):
-        """A nested subpackage belongs to its installed parent package."""
+    def test_nested_package_manifest_is_not_listed_independently(self, tmp_path):
+        """A nested manifest is omitted while its undeclared parent is orphaned."""
         modules_dir = tmp_path / APM_MODULES_DIR
         parent = modules_dir / "_local" / "package"
         nested = parent / "sub-package"
