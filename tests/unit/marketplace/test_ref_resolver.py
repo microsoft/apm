@@ -599,3 +599,17 @@ class TestRefResolverTokenInjection:
             assert parsed.hostname == "corp.ghe.com"
             assert parsed.username == "x-access-token"
             assert parsed.path.endswith(".git")
+
+    def test_bearer_auth_rejects_non_ado_host(self) -> None:
+        """Bearer credentials never silently downgrade on unsupported hosts."""
+        resolver = RefResolver(
+            host="gitlab.example.com",
+            token="bearer_token",
+            auth_scheme="bearer",
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"Bearer authentication is not supported for host gitlab\.example\.com",
+        ):
+            resolver.list_remote_refs("owner/repo")

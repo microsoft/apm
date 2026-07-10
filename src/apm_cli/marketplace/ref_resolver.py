@@ -184,9 +184,12 @@ class RefResolver:
     def _git_url_and_env(self, owner_repo: str) -> tuple[str, dict[str, str]]:
         """Build the remote URL and auth environment for one git operation."""
         requested_bearer = self._auth_scheme == "bearer"
-        bearer = requested_bearer and is_azure_devops_hostname(self._host)
+        ado_host = is_azure_devops_hostname(self._host)
+        if requested_bearer and not ado_host:
+            raise ValueError(f"Bearer authentication is not supported for host {self._host}")
+        bearer = requested_bearer and ado_host
         token = None if requested_bearer else self._token
-        if is_azure_devops_hostname(self._host):
+        if ado_host:
             credentials = f"x-access-token:{token}@" if token else ""
             url = f"https://{credentials}{self._host}/{owner_repo}"
         else:

@@ -193,7 +193,8 @@ Fold a legacy `marketplace.yml` into the `marketplace:` block of
 Validate the schema of the authoring config and verify that every
 package entry resolves to a reachable git ref. For an Azure DevOps `sourceBase`
 ending in `/_git`, package names are appended without a `.git` suffix. The check
-uses `ADO_APM_PAT`, then the Azure CLI bearer fallback, just like installation.
+uses `ADO_APM_PAT` when it is set. Otherwise, it uses the Azure CLI bearer
+credential when `az` is installed and signed in.
 
 | Flag | Description |
 |---|---|

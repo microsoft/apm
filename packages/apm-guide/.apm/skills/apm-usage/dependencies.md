@@ -43,11 +43,6 @@ dependencies:
     - ../sibling-repo/my-package
 ```
 
-For an Azure DevOps marketplace, use
-`sourceBase: https://dev.azure.com/org/project/_git` and a relative package
-`source`. APM appends the repository name without adding `.git`, matching the
-ADO clone URL contract.
-
 GitHub and package-registry owner/repository identifiers are normalized to
 lowercase before APM derives lock keys, cache identity, canonical strings, or
 `apm_modules/` paths. `Owner/Repo` and `owner/repo` therefore identify one
