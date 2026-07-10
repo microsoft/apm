@@ -275,11 +275,6 @@ class APMPackage:
     # to boolean (e.g. ``{"owner/repo#v1.0": {"hooks": true}}``).
     allow_executables: dict[str, dict[str, bool]] | None = None
 
-    @property
-    def has_declared_includes(self) -> bool:
-        """Return whether the manifest explicitly declares ``includes``."""
-        return self.includes is not None
-
     @classmethod
     def _parse_dependency_dict(cls, raw_deps: dict, label: str = "") -> dict:
         """Parse a dependencies or devDependencies dict from apm.yml.

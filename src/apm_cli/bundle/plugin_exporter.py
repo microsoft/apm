@@ -30,8 +30,10 @@ from ..utils.archive import (
 )
 from ..utils.console import _rich_warning
 from ..utils.path_security import PathTraversalError, ensure_path_within, safe_rmtree
+from ..utils.paths import portable_relpath
 from .attest import verify_attested_file
 from .packer import PackResult
+from .plugin_layout import find_plugin_root_sources
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -128,6 +130,42 @@ def _collect_root_plugin_components(project_root: Path) -> list[tuple[Path, str]
     for dir_name in ("agents", "skills", "commands", "instructions", "extensions"):
         _collect_recursive(project_root / dir_name, dir_name, components)
     return components
+
+
+def _emit_pack_warning(message: str, logger=None) -> None:
+    """Send a pack warning through the command logger when available."""
+    if logger:
+        logger.warning(message)
+    else:
+        _rich_warning(message, symbol="warning")
+
+
+def _warn_skipped_root_components(project_root: Path, logger=None) -> None:
+    """Explain why plugin-native root sources are not packed."""
+    for source in find_plugin_root_sources(project_root):
+        if source == "hooks.json":
+            message = (
+                "Skipping root-level hooks.json because .apm/ is present. "
+                "Move publishable hook configuration to .apm/hooks/ or remove "
+                "hooks.json to silence this warning."
+            )
+        else:
+            message = (
+                f"Skipping root-level {source}/ because .apm/ is present. "
+                f"Move publishable files to .apm/{source}/ or remove {source}/ "
+                "to silence this warning."
+            )
+        _emit_pack_warning(message, logger)
+
+
+def _warn_no_local_primitives(logger=None) -> None:
+    """Explain how to recover from an empty APM-native source layout."""
+    _emit_pack_warning(
+        "No local primitives found. Expected content under .apm/. "
+        "Move plugin-native content into .apm/, or remove .apm/ to restore "
+        "root convention discovery.",
+        logger,
+    )
 
 
 def _collect_bare_skill(
@@ -483,6 +521,72 @@ def _plugin_rel_for_deployed_path(
     return PurePosixPath(*plugin_parts).as_posix()
 
 
+def _collect_explicit_local_components(
+    project_root: Path,
+    includes: list[str],
+) -> tuple[list[tuple[Path, str]], dict]:
+    """Collect only explicitly listed local paths and validate each path."""
+    components: list[tuple[Path, str]] = []
+    hooks: dict = {}
+    for declared_path in includes:
+        parts = _deployed_path_parts(declared_path)
+        candidate = project_root.joinpath(*parts)
+        if candidate.is_symlink():
+            raise ValueError(f"Explicit include path is a symlink: {declared_path}")
+        try:
+            source = ensure_path_within(candidate, project_root)
+        except PathTraversalError as exc:
+            raise ValueError(
+                f"includes path {declared_path!r} escapes the project root. "
+                "Fix the path in apm.yml."
+            ) from exc
+        if not source.exists():
+            raise ValueError(
+                f"includes path {declared_path!r} does not exist. "
+                "Fix the path in apm.yml or create it."
+            )
+        files = (
+            [source]
+            if source.is_file()
+            else sorted(path for path in source.rglob("*") if path.is_file())
+        )
+        for file_path in files:
+            if file_path.is_symlink():
+                raise ValueError(f"Explicit include path is a symlink: {file_path}")
+            try:
+                file_path = ensure_path_within(file_path, project_root)
+            except PathTraversalError as exc:
+                raise ValueError(
+                    f"Explicit include path escapes the project root: {file_path}"
+                ) from exc
+            repo_relative = portable_relpath(file_path, project_root)
+            is_hook = (
+                repo_relative == "hooks.json"
+                or repo_relative.startswith("hooks/")
+                or repo_relative.startswith(".apm/hooks/")
+            )
+            if is_hook:
+                try:
+                    hook_data = json.loads(file_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError, RecursionError) as exc:
+                    raise ValueError(
+                        f"Explicit hook include is not valid JSON: {repo_relative}"
+                    ) from exc
+                if not isinstance(hook_data, dict):
+                    raise ValueError(
+                        f"Explicit hook include must contain a JSON object: {repo_relative}"
+                    )
+                _deep_merge(hooks, hook_data, overwrite=False)
+                continue
+            plugin_relative = _plugin_rel_for_deployed_path(repo_relative, None)
+            if plugin_relative is None:
+                raise ValueError(
+                    f"Explicit include path is not a packable primitive: {repo_relative}"
+                )
+            components.append((file_path, plugin_relative))
+    return components, hooks
+
+
 def _verify_attested_hash(
     source: Path,
     project_root: Path,
@@ -765,19 +869,34 @@ def export_plugin_bundle(
 
             _merge_file_map(file_map, dep_components, dep_name, force, collisions)
 
-    # 6. Collect own components (.apm/ and root-level)
+    # 6. Collect own components according to the local source authority.
     own_apm_dir = project_root / ".apm"
-    own_components = _collect_apm_components(own_apm_dir)
-    # An includes declaration scopes local publication to .apm/. Preserve
-    # root convention discovery only for legacy plugin-native manifests.
-    if not package.has_declared_includes:
-        own_components.extend(_collect_root_plugin_components(project_root))
+    if isinstance(package.includes, list):
+        own_components, root_hooks = _collect_explicit_local_components(
+            project_root,
+            package.includes,
+        )
+    else:
+        own_components = _collect_apm_components(own_apm_dir)
+        root_hooks = _collect_hooks_from_apm(own_apm_dir)
+        if own_apm_dir.is_dir():
+            _warn_skipped_root_components(project_root, logger)
+        else:
+            own_components.extend(_collect_root_plugin_components(project_root))
+            root_hooks_top = _collect_hooks_from_root(project_root)
+            _deep_merge(root_hooks, root_hooks_top, overwrite=False)
+
+    if (
+        not isinstance(package.includes, list)
+        and own_apm_dir.is_dir()
+        and not own_components
+        and not root_hooks
+    ):
+        _warn_no_local_primitives(logger)
+
     _merge_file_map(file_map, own_components, pkg_name, force, collisions)
 
     # Hooks -- root package wins on key collision
-    root_hooks = _collect_hooks_from_apm(own_apm_dir)
-    root_hooks_top = _collect_hooks_from_root(project_root)
-    _deep_merge(root_hooks, root_hooks_top, overwrite=False)
     _deep_merge(merged_hooks, root_hooks, overwrite=True)
 
     # MCP -- root package wins on server-name collision
