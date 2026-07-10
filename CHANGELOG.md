@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Sub-skill and native-skill ownership tracking now keys on the full
+  dependency identity (`owner/repo`) instead of the last path segment.
+  Two different packages that happen to share a repo/leaf name (e.g. two
+  orgs each publishing a `shared-skill` or `utils` repo) were previously
+  treated as the same owner, silently suppressing the cross-package
+  collision warning exactly when it mattered -- an unrelated package
+  could overwrite another's skill with no signal. `apm install --force`
+  now correctly reports the collision regardless of dependency source
+  (registry or git), and the lockfile no longer records both packages as
+  owning the same deployed file after a collision. (by @nadav-y) (#2052)
+- Codex MCP installs and stale-server cleanup now preserve literal-quoted
+  Windows path keys such as `C:\Users\me\Documents\Playground` in `config.toml`
+  instead of rejecting or corrupting other projects and per-path preferences.
+  (closes #2075) (#2100)
+- `apm audit --ci` no longer raises false `config-consistency` failures in
+  monorepos whose local-path sub-packages contribute MCP servers. Transitively
+  contributed servers now carry lockfile provenance and are exempt from the
+  orphan check. (#2084)
 - In-repository plugins from SSH-registered GitLab and generic git
   marketplaces no longer rewrite to HTTPS; generated `git:` and `path:`
   dependencies keep using existing SSH keys. (#2091)

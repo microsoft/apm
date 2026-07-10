@@ -58,6 +58,7 @@ def _base_kwargs(**overrides):
         lock_path=Path("/nonexistent/apm.lock.yaml"),
         old_mcp_servers=set(),
         old_mcp_configs={},
+        old_mcp_provenance={},
         project_root=Path("/fake/project"),
         user_scope=False,
         should_install=True,
@@ -77,6 +78,9 @@ class TestRunMcpIntegrationInstallBranch:
         mock_mcp.install.return_value = 1
         mock_mcp.get_server_names.return_value = {"io.github.acme/server"}
         mock_mcp.get_server_configs.return_value = {"io.github.acme/server": {"name": "x"}}
+        mock_mcp.get_server_provenance.return_value = {
+            "io.github.acme/server": "io.github.acme/package"
+        }
 
         count, apm_config = run_mcp_integration(**_base_kwargs(mcp_deps=[dep]))
 
@@ -89,6 +93,7 @@ class TestRunMcpIntegrationInstallBranch:
             {"io.github.acme/server"},
             Path("/nonexistent/apm.lock.yaml"),
             mcp_configs={"io.github.acme/server": {"name": "x"}},
+            mcp_config_provenance={"io.github.acme/server": "io.github.acme/package"},
         )
         mock_mcp.remove_stale.assert_not_called()
 
@@ -99,6 +104,7 @@ class TestRunMcpIntegrationInstallBranch:
         mock_mcp.install.return_value = 1
         mock_mcp.get_server_names.return_value = {"io.github.acme/new-server"}
         mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
 
         run_mcp_integration(
             **_base_kwargs(
@@ -121,6 +127,7 @@ class TestRunMcpIntegrationInstallBranch:
         mock_mcp.install.return_value = 1
         mock_mcp.get_server_names.return_value = {"io.github.acme/server"}
         mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
 
         pkg = _make_apm_package(scripts={"build": "echo hi"}, targets=["claude", "copilot"])
         _count, apm_config = run_mcp_integration(**_base_kwargs(apm_package=pkg, mcp_deps=[dep]))
@@ -136,6 +143,7 @@ class TestRunMcpIntegrationInstallBranch:
         mock_mcp.install.return_value = 1
         mock_mcp.get_server_names.return_value = {"io.github.acme/server"}
         mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
 
         pkg = _make_apm_package(target="claude")
         _count, apm_config = run_mcp_integration(**_base_kwargs(apm_package=pkg, mcp_deps=[dep]))
@@ -171,7 +179,10 @@ class TestRunMcpIntegrationEmptyDepsBranch:
         mock_mcp.remove_stale.assert_called_once()
         assert mock_mcp.remove_stale.call_args.args[0] == {"io.github.acme/orphan"}
         mock_mcp.update_lockfile.assert_called_once_with(
-            set(), Path("/nonexistent/apm.lock.yaml"), mcp_configs={}
+            set(),
+            Path("/nonexistent/apm.lock.yaml"),
+            mcp_configs={},
+            mcp_config_provenance={},
         )
 
 
@@ -186,6 +197,7 @@ class TestRunMcpIntegrationRestoreBranch:
                 should_install=False,
                 old_mcp_servers={"io.github.acme/kept"},
                 old_mcp_configs={"io.github.acme/kept": {"name": "kept"}},
+                old_mcp_provenance={"io.github.acme/kept": "io.github.acme/pkg"},
             )
         )
 
@@ -193,6 +205,7 @@ class TestRunMcpIntegrationRestoreBranch:
             {"io.github.acme/kept"},
             Path("/nonexistent/apm.lock.yaml"),
             mcp_configs={"io.github.acme/kept": {"name": "kept"}},
+            mcp_config_provenance={"io.github.acme/kept": "io.github.acme/pkg"},
         )
         mock_mcp.install.assert_not_called()
         mock_mcp.remove_stale.assert_not_called()
@@ -235,6 +248,7 @@ class TestRunMcpIntegrationPolicyBlock:
         mock_mcp.install.return_value = 1
         mock_mcp.get_server_names.return_value = {"io.github.untrusted/evil-transitive"}
         mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
         evil_dep = MCPDependency(name="io.github.untrusted/evil-transitive", transport="stdio")
 
         with patch(

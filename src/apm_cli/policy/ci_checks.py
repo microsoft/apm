@@ -253,9 +253,15 @@ def _check_config_consistency(
     for name in sorted(drifted):
         details.append(f"{name}: config differs from lockfile baseline")
 
-    # Servers in lockfile but not in manifest (orphaned MCP)
+    # Servers in lockfile but not in manifest (orphaned MCP).
+    # Transitively-contributed servers (declared by a local-path sub-package,
+    # recorded with provenance in mcp_config_provenance) are exempted: the root
+    # manifest cannot declare them, so flagging them creates an unfixable CI
+    # failure. This mirrors the resolved_by-based exemption in _check_no_orphans
+    # (#2081; MCP-side sibling of #1846/#1855).
+    provenance = lock.mcp_config_provenance or {}
     for name in sorted(stored_configs):
-        if name not in current_configs:
+        if name not in current_configs and name not in provenance:
             details.append(f"{name}: in lockfile but not in manifest")
 
     # Servers in manifest but not in lockfile (new, not installed)
