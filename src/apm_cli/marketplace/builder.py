@@ -29,14 +29,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..core.auth import HostInfo
+    from ..core.auth import AuthContext, HostInfo
 
 from ..utils.github_host import default_host
 from ..utils.path_security import ensure_path_within
 from ..utils.yaml_io import load_yaml_str
 from ._io import atomic_write
 from ._shared import iter_semver_tags
-from .auth_helpers import resolve_token_for_host
+from .auth_helpers import resolve_auth_for_host, resolve_token_for_host
 from .diagnostics import BuildDiagnostic
 from .errors import (
     BuildError,
@@ -452,21 +452,39 @@ class MarketplaceBuilder:
             cached = self._host_resolvers.get(key)
             if cached is not None:
                 return cached
-            token = self._resolve_token_for_host(resolved_host, org=org)
+            auth = self._resolve_auth_for_host(resolved_host, org=org)
             logger.debug(
                 "Creating per-host RefResolver for %s (org=%s, token=%s)",
                 resolved_host,
                 org or "none",
-                "set" if token else "unset",
+                "set" if auth else "unset",
             )
             resolver = RefResolver(
                 timeout_seconds=self._options.timeout_seconds,
                 offline=self._options.offline,
                 host=resolved_host,
-                token=token,
+                token=auth.token if auth else None,
+                auth_scheme=auth.auth_scheme if auth else "basic",
             )
             self._host_resolvers[key] = resolver
             return resolver
+
+    def _resolve_auth_for_host(self, host: str, *, org: str | None = None) -> AuthContext | None:
+        """Resolve the complete auth context for marketplace git operations."""
+        if self._options.offline:
+            return None
+        from ..core.auth import AuthResolver  # lazy import
+
+        resolver = self._auth_resolver
+        if resolver is None:
+            resolver = AuthResolver()
+            self._auth_resolver = resolver
+        return resolve_auth_for_host(
+            host,
+            offline=self._options.offline,
+            org=org,
+            auth_resolver=resolver,
+        )
 
     def _resolve_token_for_host(self, host: str, *, org: str | None = None) -> str | None:
         """Resolve an auth token for *host* via the shared marketplace helper."""
