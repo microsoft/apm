@@ -141,8 +141,8 @@ my-monorepo/
 > discovers instructions, commands, and prompts under `.apm/<type>/`. Authoring
 > `packages/plugin-a/instructions/style.instructions.md`
 > instead of `packages/plugin-a/.apm/instructions/style.instructions.md`
-> will produce a bundle that packs correctly but installs silently
-> incomplete. See [Pack a bundle -- source layout and install-time
+> can produce a bundle only under the legacy omitted-`includes` behavior, and
+> then installs silently incomplete. See [Pack a bundle -- source layout and install-time
 > discovery](./pack-a-bundle/#source-layout-and-install-time-discovery)
 > for the full per-primitive scan-path reference.
 

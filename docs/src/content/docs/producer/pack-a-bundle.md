@@ -184,6 +184,8 @@ Source: `src/apm_cli/integration/instruction_integrator.py`,
 convention directories (for example, an `instructions/` folder at the plugin
 root) only for legacy manifests that omit `includes:`. Declaring
 `includes: auto` or an explicit list scopes local package content to `.apm/`.
+See the [`includes` manifest field](../../reference/manifest-schema/#39-includes)
+for all three forms.
 `apm install` does NOT discover instructions, commands, or prompts placed
 in root convention directories. Packages that rely on these primitives for
 security guardrails or policy enforcement will install silently incomplete,
