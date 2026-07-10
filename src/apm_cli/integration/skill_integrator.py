@@ -893,6 +893,20 @@ class SkillIntegrator(BaseIntegrator):
                 count = n
             all_deployed.extend(deployed)
 
+        if name_filter is not None and count == 0:
+            from apm_cli.utils.console import _rich_warning
+
+            available = sorted(
+                d.name for d in sub_skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").exists()
+            )
+            available_str = ", ".join(available) if available else "(none)"
+            requested_str = ", ".join(sorted(name_filter))
+            _rich_warning(
+                f"--skill filter matched no skills in this package. "
+                f"Requested: {requested_str}. "
+                f"Available: {available_str}."
+            )
+
         return count, all_deployed
 
     def _integrate_native_skill(
@@ -1231,6 +1245,20 @@ class SkillIntegrator(BaseIntegrator):
                 if n > 0:
                     any_created = True
             all_deployed.extend(deployed)
+
+        if _name_filter is not None and total_promoted == 0:
+            from apm_cli.utils.console import _rich_warning
+
+            available = sorted(
+                d.name for d in skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").exists()
+            )
+            available_str = ", ".join(available) if available else "(none)"
+            requested_str = ", ".join(sorted(_name_filter))
+            _rich_warning(
+                f"--skill filter matched no skills in this package. "
+                f"Requested: {requested_str}. "
+                f"Available: {available_str}."
+            )
 
         return SkillIntegrationResult(
             skill_created=any_created,
