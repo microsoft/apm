@@ -104,11 +104,11 @@ For non-interactive environments (CI, devcontainers), set the credential through
 
 ## Marketplace transport
 
-If you registered a git-backed marketplace with an SSH URL, plugins
-installed from that repository keep using SSH. APM preserves the
-registration transport in the generated `git:` and `path:` dependency
-instead of rewriting it to HTTPS. See
-[Installing from marketplaces](../installing-from-marketplaces/#supported-marketplace-sources).
+For in-repository plugins from GitLab and generic git marketplaces, an SSH
+registration stays SSH when APM generates the concrete `git:` and `path:`
+dependency. Existing SSH keys keep working instead of the dependency being
+rewritten to HTTPS. See
+[Installing from marketplaces](../installing-from-marketplaces/#local-and-self-hosted-marketplaces).
 
 ## Going further
 

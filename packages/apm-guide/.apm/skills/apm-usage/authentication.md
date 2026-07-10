@@ -20,10 +20,10 @@ For multi-account Git Credential Manager setups, see the [Multi-account Git Cred
 
 ## Marketplace transport
 
-If a git-backed marketplace was registered with an SSH URL, plugins installed
-from that repository keep using SSH. APM preserves the registration transport
-in the generated `git:` and `path:` dependency instead of rewriting it to
-HTTPS.
+For in-repository plugins from GitLab and generic git marketplaces, an SSH
+registration stays SSH when APM generates the concrete `git:` and `path:`
+dependency. Existing SSH keys keep working instead of the dependency being
+rewritten to HTTPS.
 
 ## GitLab hosts
 

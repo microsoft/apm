@@ -92,9 +92,10 @@ browse / install / update workflow works against:
   Gitea, Bitbucket Server, and self-hosted git servers.
 - **SSH URLs** -- `git@gitea.example.com:org/repo.git`. The host
   is extracted, classified, and routed through the matching fetcher.
-  In-repository plugins keep this consumer-selected SSH transport when
-  APM writes their concrete `git:` and `path:` entry to `apm.yml`.
-  HTTPS registrations likewise remain HTTPS.
+  For in-repository plugins from GitLab and generic git marketplaces, APM
+  keeps this consumer-selected SSH transport when it writes their concrete
+  `git:` and `path:` entry to `apm.yml`. HTTPS registrations likewise remain
+  HTTPS.
 
 :::note[Hosted JSON is public HTTPS]
 Hosted `marketplace.json` URLs are public HTTPS sources: APM does not
