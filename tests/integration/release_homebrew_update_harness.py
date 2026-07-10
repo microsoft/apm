@@ -29,7 +29,7 @@ def _assert_release_workflow_has_no_homebrew_push(workflow_path: Path) -> None:
 
 def _replace_assignment(formula: str, key: str, value: str) -> str:
     updated, count = re.subn(
-        rf'(?m)^  {key} "[^"]*"$',
+        rf'(?m)^  {re.escape(key)} "[^"]*"$',
         f'  {key} "{value}"',
         formula,
     )
