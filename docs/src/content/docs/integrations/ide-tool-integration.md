@@ -129,7 +129,8 @@ action in `.kiro/hooks/`, and MCP servers are written to
 `.kiro/settings/mcp.json` or `~/.kiro/settings/mcp.json` for `--global`.
 APM maps portable events to Kiro's PascalCase triggers and also accepts native
 Kiro v1 hook documents for target-specific triggers. Native hook-level
-`description`, `timeout`, and `enabled` fields are preserved.
+`description`, `timeout`, and `enabled` fields are preserved. Portable
+`askAgent` actions become Kiro v1 `agent` actions.
 
 This target covers the documented Kiro IDE layout. Kiro CLI configuration
 differences are tracked separately; see [the targets matrix](../reference/targets-matrix/#kiro).

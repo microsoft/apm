@@ -42,7 +42,11 @@ def test_install_transforms_kiro_v1_hook_and_preserves_unrelated_config(
                                     "type": "command",
                                     "command": "python ${PLUGIN_ROOT}/hooks/check.py",
                                     "timeout": 12,
-                                }
+                                },
+                                {
+                                    "type": "askAgent",
+                                    "prompt": "Check this write for policy drift.",
+                                },
                             ],
                         }
                     ]
@@ -85,4 +89,19 @@ def test_install_transforms_kiro_v1_hook_and_preserves_unrelated_config(
     }
     deployed_script = consumer_hooks / "kiro-hooks" / "hooks" / "check.py"
     assert deployed_script.read_text(encoding="utf-8") == "print('checked')\n"
+    generated_agent = consumer_hooks / "kiro-hooks-hooks-pretooluse-2.json"
+    assert json.loads(generated_agent.read_text(encoding="utf-8")) == {
+        "version": "v1",
+        "hooks": [
+            {
+                "name": "kiro-hooks PreToolUse 2",
+                "trigger": "PreToolUse",
+                "matcher": "write",
+                "action": {
+                    "type": "agent",
+                    "prompt": "Check this write for policy drift.",
+                },
+            }
+        ],
+    }
     assert json.loads(unrelated_path.read_text(encoding="utf-8")) == unrelated

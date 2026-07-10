@@ -207,7 +207,9 @@ Kiro IDE.
 - **File conventions.**
   - instructions: `.kiro/steering/<name>.md` with `inclusion: always` or `inclusion: fileMatch` frontmatter
   - skills: `.kiro/skills/<name>/SKILL.md`
-  - hooks: one JSON file per hook action under `.kiro/hooks/`
+  - hooks: one Kiro v1 document per hook action under `.kiro/hooks/`, with
+    top-level `version: "v1"` and a `hooks` array; see
+    [Hooks and commands](../producer/author-primitives/hooks-and-commands/)
   - mcp: `.kiro/settings/mcp.json` (project) or `~/.kiro/settings/mcp.json` (user)
 - **MCP shape.** JSON `mcpServers` entries use `command`/`args`/`env` for stdio and `url`/`headers` for remote servers. Kiro resolves `${VAR}` placeholders at runtime, so APM preserves them rather than writing secrets to disk.
 - **Scope.** This is the documented Kiro IDE layout only. Kiro CLI differences are tracked separately and are not part of this target.

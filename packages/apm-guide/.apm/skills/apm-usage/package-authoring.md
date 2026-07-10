@@ -132,9 +132,10 @@ the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/` using the Kiro v1 shape: top-level
 `"version": "v1"`, an array-valued `"hooks"`, PascalCase `trigger`, optional
 `matcher`, an `action` object, and optional hook-level `description`, `timeout`,
-and `enabled` fields. Kiro-targeted packages may author that native v1 shape
-directly when they need Kiro-only triggers such as `PreTaskExec` or
-`PostFileSave`; APM preserves those supported hook-level fields.
+and `enabled` fields. Portable `askAgent` actions become Kiro v1 `agent`
+actions. Kiro-targeted packages may author that native v1 shape directly when
+they need Kiro-only triggers such as `PreTaskExec` or `PostFileSave`; APM
+preserves those supported hook-level fields.
 
 When a hook command references a script inside `hooks/` or `.apm/hooks/`,
 APM deploys that hook source bundle so sibling helper files resolve at

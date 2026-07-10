@@ -9,10 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Kiro hooks now install in the official v1 runtime shape with matcher and
-  hook-level timeout support, while native v1 files preserve descriptions,
-  timeout values, and `enabled` toggles. The contract is recorded in the
-  OpenAPM v0.1 specification. (#2095)
+- Kiro hooks now support matchers, hook-level timeouts, and `enabled` toggles
+  through the official v1 runtime shape, while native v1 files preserve their
+  supported fields. The contract is recorded in the OpenAPM v0.1
+  specification. (#2095)
 
 ## [0.24.1] - 2026-07-10
 

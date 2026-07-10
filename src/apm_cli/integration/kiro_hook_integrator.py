@@ -31,6 +31,9 @@ if TYPE_CHECKING:
 _KIRO_EVENT_MAP = _HOOK_EVENT_MAP["kiro"]
 _log = logging.getLogger(__name__)
 
+# Internal _kiro_* transport keys are injected during normalization and
+# consumed by _kiro_hook_document before serialization.
+
 
 def _safe_hook_slug(value: str, fallback: str = "hook") -> str:
     """Return a stable lowercase slug for generated Kiro hook filenames."""
@@ -372,7 +375,7 @@ def integrate_kiro_hooks(
         if written + skipped + adopted == 0:
             _log.warning(
                 "Kiro hook file %s contributed no supported command or agent actions",
-                hook_file,
+                hook_file.name,
             )
         copied, adopted_scripts = _copy_scripts(
             integrator,
