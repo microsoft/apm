@@ -280,8 +280,8 @@ class TestCrossPackageSharedFileCleanup:
             for dep in local_deps_before
             if ".github/prompts/shared.prompt.md" in (dep.get("deployed_files") or [])
         ]
-        assert len(shared_claims) == 2, (
-            "Both local packages must claim the shared prompt before testing cleanup"
+        assert {dep["name"] for dep in shared_claims} == {"pkg-b"}, (
+            "Only the last writer may claim the shared prompt before testing cleanup"
         )
 
         shared_target = temp_project / ".github" / "prompts" / "shared.prompt.md"

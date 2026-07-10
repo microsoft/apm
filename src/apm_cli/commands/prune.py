@@ -52,7 +52,7 @@ def prune(ctx, dry_run):
         # Build expected vs installed using shared helpers
         try:
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
-            declared_deps = apm_package.get_apm_dependencies()
+            declared_deps = apm_package.get_all_apm_dependencies()
             lockfile = LockFile.read(get_lockfile_path(Path.cwd()))
             expected_installed = _build_expected_install_paths(
                 declared_deps, lockfile, apm_modules_dir

@@ -6,17 +6,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+  
+### Fixed
+
+- Fresh checkouts with declared consumer targets no longer remain
+  `apm audit --ci`-red for files those targets cannot restore: `apm install`
+  now removes stale `deployed_files` entries outside the legitimate target
+  set. The [OpenAPM v0.1 specification](docs/src/content/docs/specs/openapm-v0.1.md)
+  now defines the same fail-safe reconciliation contract. (by @edenfunf;
+  closes #2059) (#2114)
+- `apm install --target intellij` now configures JetBrains Copilot MCP support
+  while routing package file primitives through the Copilot profile.
+  (by @sergio-sisternes-epam; closes #1957) (#2041)
+
+## [0.24.1] - 2026-07-10
 
 ### Fixed
 
-- The Windows installer now exposes a version-stable `apm.exe` on `PATH`, so
-  Git Bash and bare process calls such as Python `subprocess.run(["apm", ...])`
-  resolve APM without relying on `cmd.exe` PATHEXT handling. (closes #2076, #2094)
-- `apm install host/org/repo/subpath#ref` on an unrecognised self-hosted FQDN
-  no longer fails with a misleading "not accessible or doesn't exist" error;
-  the failure reason now suggests setting `GITLAB_HOST` / `APM_GITLAB_HOSTS`
-  if the target is a self-hosted GitLab instance, or using an explicit
-  `git:` + `path:` entry in `apm.yml` otherwise. (by @rrazvd; closes #2066) (#2074)
+- Skill ownership tracking now keys on the full `owner/repo` identity, so
+  packages with the same leaf name no longer suppress collision warnings or
+  claim the same deployed files. (by @nadav-y, #2052)
+- Repeated `apm install` runs now preserve existing LSP server and config state
+  before lockfile comparison, avoiding no-op rewrites caused only by
+  `generated_at`. (by @paul-ww, closes #2078, #2079)
+- OpenAPM v0.1 now defines deterministic Antigravity glob frontmatter and
+  limits `AGENTS.md` deduplication to resolved instruction files, preventing
+  unrelated rule files from suppressing instructions. (#2087)
+- Codex MCP installs and stale-server cleanup now preserve literal Windows
+  path keys in `config.toml` instead of rejecting or corrupting per-project
+  preferences. (closes #2075, #2100)
+- `apm audit --ci` no longer reports transitive MCP servers from local-path
+  sub-packages as orphaned configs. (by @edenfunf, closes #2081, #2084)
+- In-repository plugins from SSH-registered GitLab and generic git
+  marketplaces now preserve SSH transport in generated `git:` and `path:`
+  dependencies. (#2091)
+- GitHub and package-registry dependency identities are now case-insensitive,
+  preventing duplicate lock, cache, and install paths while preserving
+  case-sensitive paths for unknown git hosts. (closes #2073, #2098)
+- `apm deps tree` no longer repeats same-repository virtual packages, keeping
+  large monorepo dependency trees accurate and scannable. (#2093)
+- Claude user-scope MCP installs now honor `CLAUDE_CONFIG_DIR`, with
+  `~/.claude.json` retained as the fallback. (closes #2060, #2096)
+- Dev dependencies now survive `apm prune`, pass `apm audit --ci`, and remain
+  represented in lockfile and MCP config checks. (by @sergio-sisternes-epam,
+  closes #2033, #2102; supersedes #2042)
+- `apm deps list` now matches local transitive dependencies by their canonical
+  install path instead of incorrectly reporting valid packages as orphaned.
+  (closes #2068, #2099)
+- Failed installs from unrecognized self-hosted GitLab hosts now suggest
+  `GITLAB_HOST`, `APM_GITLAB_HOSTS`, or an explicit `git:` plus `path:` entry.
+  (by @rrazvd, closes #2066, #2074)
+- `apm update` now reconciles MCP and LSP servers after an accepted plan,
+  removing stale runtime config and recording newly declared servers.
+  (by @cffnpwr, closes #2077, #2085)
 
 ## [0.24.0] - 2026-07-05
 
