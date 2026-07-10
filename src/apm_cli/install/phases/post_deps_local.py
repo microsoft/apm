@@ -117,10 +117,15 @@ def run(ctx: InstallContext) -> None:
 
     _current_files = sorted(ctx.local_deployed_files)
     _current_hashes = _hash_deployed(ctx.local_deployed_files, ctx.project_root)
+    _ghost_count = 0
 
     def _log_local_ghost_drop(path: str) -> None:
+        nonlocal _ghost_count
+        _ghost_count += 1
         if logger:
-            logger.verbose_detail(f"Dropped inactive-target local lockfile entry {path}")
+            logger.verbose_detail(
+                f"Removed stale local lockfile path {path} (target not declared in apm.yml)"
+            )
 
     _files, _hashes = _union(
         _current_files,
@@ -133,6 +138,9 @@ def run(ctx: InstallContext) -> None:
     )
     _persist_lock.local_deployed_files = sorted(_files)
     _persist_lock.local_deployed_file_hashes = _hashes
+    if logger and _ghost_count:
+        noun = "entry" if _ghost_count == 1 else "entries"
+        logger.info(f"Repaired {_ghost_count} inactive-target local lockfile {noun}")
     # Only write if changed.
     _existing_for_cmp = _LF.read(_lock_path)
     if not _existing_for_cmp or not _persist_lock.is_semantically_equivalent(_existing_for_cmp):

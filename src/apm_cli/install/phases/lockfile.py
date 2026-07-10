@@ -222,6 +222,7 @@ class LockfileBuilder:
         self._reconcile_cross_package_deployed_files()
         existing = self.ctx.existing_lockfile
         declared = declared_target_profiles(self.ctx)
+        ghost_count = 0
         for dep_key, locked_dep in lockfile.dependencies.items():
             current = list(self.ctx.package_deployed_files.get(dep_key, []))
             current_hashes = compute_deployed_hashes(current, self.ctx.project_root)
@@ -230,10 +231,13 @@ class LockfileBuilder:
             prior_hashes = prev.deployed_file_hashes if prev is not None else {}
 
             def _log_ghost_drop(path: str, package_key: str = dep_key) -> None:
+                nonlocal ghost_count
+                ghost_count += 1
                 logger = getattr(self.ctx, "logger", None)
                 if logger:
                     logger.verbose_detail(
-                        f"Dropped inactive-target lockfile entry {path} for {package_key}"
+                        f"Removed stale lockfile path {path} "
+                        f"(target not declared in apm.yml) for {package_key}"
                     )
 
             files, hashes = union_preserving(
@@ -252,6 +256,10 @@ class LockfileBuilder:
                 continue
             locked_dep.deployed_files = files
             locked_dep.deployed_file_hashes = hashes
+        logger = getattr(self.ctx, "logger", None)
+        if logger and ghost_count:
+            noun = "entry" if ghost_count == 1 else "entries"
+            logger.info(f"Repaired {ghost_count} inactive-target lockfile {noun}")
 
     def _attach_package_types(self, lockfile: LockFile) -> None:
         for dep_key, pkg_type in self.ctx.package_types.items():
