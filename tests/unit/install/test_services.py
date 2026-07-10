@@ -155,6 +155,23 @@ class TestDeployedPathEntry:
         with pytest.raises(RuntimeError, match="This is a bug"):
             _deployed_path_entry(target_path, project_root, targets=[])
 
+    def test_absolute_static_root_rejects_symlink_escape(self, tmp_path: Path) -> None:
+        from apm_cli.utils.path_security import PathTraversalError
+
+        project_root = tmp_path / "home"
+        project_root.mkdir()
+        config_root = tmp_path / "claude-config"
+        config_root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (config_root / "rules").symlink_to(outside, target_is_directory=True)
+        target_path = config_root / "rules" / "managed.md"
+        target_path.write_text("managed\n", encoding="utf-8")
+        claude_target = replace(KNOWN_TARGETS["claude"], root_dir=str(config_root))
+
+        with pytest.raises(PathTraversalError):
+            _deployed_path_entry(target_path, project_root, targets=[claude_target])
+
     def test_path_traversal_error_propagates_from_cowork_translation(self, tmp_path: Path) -> None:
         """PathTraversalError from to_lockfile_path must propagate, never be swallowed."""
         from apm_cli.utils.path_security import PathTraversalError

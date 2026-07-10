@@ -190,6 +190,23 @@ class TestValidateDeployPath:
     def test_valid_claude_rules_path(self):
         assert BaseIntegrator.validate_deploy_path(".claude/rules/foo.mdc", self.root) is True
 
+    def test_absolute_claude_config_path_is_valid_only_under_config_root(
+        self, tmp_path, monkeypatch
+    ):
+        home = tmp_path / "home"
+        config_root = tmp_path / "outside-home" / "claude"
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_root))
+
+        assert BaseIntegrator.validate_deploy_path(str(config_root / "rules" / "managed.md"), home)
+        assert not BaseIntegrator.validate_deploy_path(str(config_root), home)
+        assert not BaseIntegrator.validate_deploy_path(
+            str(config_root / "unmanaged" / "other.md"), home
+        )
+        assert not BaseIntegrator.validate_deploy_path(
+            str(tmp_path / "unmanaged" / "rules" / "other.md"), home
+        )
+
     def test_traversal_rejected(self):
         assert BaseIntegrator.validate_deploy_path("../evil.md", self.root) is False
 
@@ -397,6 +414,32 @@ class TestCleanupEmptyParents:
         BaseIntegrator.cleanup_empty_parents(deleted, self.root)
         assert not dir1.exists()
         assert not dir2.exists()
+
+    def test_external_claude_cleanup_stops_at_config_root(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        home.mkdir()
+        config_root = tmp_path / "outside-home" / "claude"
+        rules_dir = config_root / "rules"
+        rules_dir.mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_root))
+
+        original_resolve = Path.resolve
+        resolve_calls = 0
+
+        def bounded_resolve(path, *args, **kwargs):
+            nonlocal resolve_calls
+            resolve_calls += 1
+            if resolve_calls > 50:
+                raise RuntimeError("parent walk escaped its cleanup boundary")
+            return original_resolve(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", bounded_resolve)
+        BaseIntegrator.cleanup_empty_parents([rules_dir / "deleted.md"], home)
+
+        assert not rules_dir.exists()
+        assert config_root.exists()
+        assert config_root.parent.exists()
 
 
 # ---------------------------------------------------------------------------

@@ -5,11 +5,45 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.primitives.discovery import discover_primitives
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_warning
+
+
+def _managed_absolute_target_root(candidate: Path, targets: Any) -> Path | None:
+    """Return the configured static target root governing an absolute path."""
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    source = targets
+    if source is None:
+        source = [KNOWN_TARGETS[name].for_scope(user_scope=True) for name in ("claude", "hermes")]
+    try:
+        resolved = candidate.resolve()
+        for target_profile in source:
+            if target_profile is None:
+                continue
+            deploy_root = target_profile.resolved_deploy_root
+            if deploy_root is None and Path(target_profile.root_dir).is_absolute():
+                deploy_root = Path(target_profile.root_dir)
+            if deploy_root is None:
+                continue
+            resolved_root = deploy_root.resolve()
+            for mapping in target_profile.primitives.values():
+                if not mapping.subdir:
+                    continue
+                primitive_root = (resolved_root / mapping.subdir).resolve()
+                if resolved != primitive_root and resolved.is_relative_to(primitive_root):
+                    return resolved_root
+            if target_profile.hooks_config_display:
+                hooks_file = resolved_root / Path(target_profile.hooks_config_display).name
+                if resolved == hooks_file.resolve():
+                    return resolved_root
+    except (ValueError, OSError):
+        return None
+    return None
 
 
 class _SymlinkRaceError(OSError):
@@ -411,15 +445,20 @@ class BaseIntegrator:
         Checks:
         1. No path-traversal components (``..``)
         2. Starts with an allowed integration prefix
-        3. Resolves within *project_root* (or within the cowork root
-           for ``cowork://`` paths)
+        3. Resolves within *project_root*, a configured absolute target root,
+           or the cowork root for ``cowork://`` paths
         """
         from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
 
-        if allowed_prefixes is None:
-            allowed_prefixes = BaseIntegrator._get_integration_prefixes(targets=targets)
         if ".." in rel_path:
             return False
+
+        candidate = Path(rel_path)
+        if candidate.is_absolute():
+            return _managed_absolute_target_root(candidate, targets) is not None
+
+        if allowed_prefixes is None:
+            allowed_prefixes = BaseIntegrator._get_integration_prefixes(targets=targets)
 
         # --- cowork:// paths: validate against cowork root ---
         if rel_path.startswith(COWORK_URI_SCHEME):
@@ -615,8 +654,16 @@ class BaseIntegrator:
         # Collect unique parents (skip stop_at itself)
         candidates: set = set()
         for p in deleted_paths:
+            cleanup_boundary = stop_resolved
+            try:
+                if not p.resolve().is_relative_to(stop_resolved):
+                    cleanup_boundary = _managed_absolute_target_root(p, targets=None)
+                    if cleanup_boundary is None:
+                        cleanup_boundary = p.parent.resolve()
+            except (ValueError, OSError):
+                cleanup_boundary = p.parent.resolve()
             parent = p.parent
-            while parent != stop_at and parent.resolve() != stop_resolved:
+            while parent not in (parent.parent, stop_at) and parent.resolve() != cleanup_boundary:
                 candidates.add(parent)
                 parent = parent.parent
         # Sort deepest-first for safe bottom-up removal

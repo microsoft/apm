@@ -5,6 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from apm_cli.utils.path_security import ensure_path_within
+from apm_cli.utils.paths import portable_relpath
+
 
 def deployed_path_entry(
     target_path: Path,
@@ -15,20 +18,27 @@ def deployed_path_entry(
 
     def _try_dynamic_root(tgts, *, strict: bool = False) -> str | None:
         for _t in tgts:
-            if _t.resolved_deploy_root is None:
+            deploy_root = _t.resolved_deploy_root
+            absolute_static_root = deploy_root is None and Path(_t.root_dir).is_absolute()
+            if absolute_static_root:
+                deploy_root = Path(_t.root_dir)
+            if deploy_root is None:
                 continue
-            if not strict:
+            if not strict or absolute_static_root:
                 try:
-                    target_path.relative_to(_t.resolved_deploy_root)
+                    target_path.relative_to(deploy_root)
                 except ValueError:
                     continue
+            if absolute_static_root:
+                resolved_target = ensure_path_within(target_path, deploy_root)
+                return portable_relpath(resolved_target, project_root)
             if _t.name == "copilot-app":
                 from apm_cli.integration.copilot_app_db import to_lockfile_uri
 
                 return to_lockfile_uri(target_path.name)
             from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
 
-            return to_lockfile_path(target_path, _t.resolved_deploy_root)
+            return to_lockfile_path(target_path, deploy_root)
         return None
 
     if targets:
