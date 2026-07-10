@@ -62,6 +62,15 @@ class TestIsNestedUnderPackage:
         child.mkdir(parents=True)
         assert _is_nested_under_package(child, modules) is True
 
+    def test_child_of_manifestless_package(self, tmp_path):
+        """A subdirectory under a package with only .apm is nested."""
+        modules = tmp_path / "apm_modules"
+        pkg = modules / "org" / "repo"
+        _make_apm_dir(pkg)
+        child = pkg / "sub" / "deep"
+        child.mkdir(parents=True)
+        assert _is_nested_under_package(child, modules) is True
+
     def test_not_nested_when_no_parent_yml(self, tmp_path):
         """Candidate directly under apm_modules is not nested."""
         modules = tmp_path / "apm_modules"

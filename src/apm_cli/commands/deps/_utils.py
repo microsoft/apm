@@ -46,7 +46,7 @@ def _is_nested_under_package(candidate: Path, apm_modules_path: Path) -> bool:
     """
     parent = candidate.parent
     while parent != apm_modules_path and parent != parent.parent:  # noqa: PLR1714
-        if (parent / APM_YML_FILENAME).exists():
+        if (parent / APM_YML_FILENAME).exists() or (parent / APM_DIR).exists():
             return True
         parent = parent.parent
     return False
