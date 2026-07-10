@@ -36,7 +36,7 @@ from ..utils.path_security import ensure_path_within
 from ..utils.yaml_io import load_yaml_str
 from ._io import atomic_write
 from ._shared import iter_semver_tags
-from .auth_helpers import resolve_auth_for_host, resolve_token_for_host
+from .auth_helpers import resolve_auth_for_host
 from .diagnostics import BuildDiagnostic
 from .errors import (
     BuildError,
@@ -488,20 +488,8 @@ class MarketplaceBuilder:
 
     def _resolve_token_for_host(self, host: str, *, org: str | None = None) -> str | None:
         """Resolve an auth token for *host* via the shared marketplace helper."""
-        if self._options.offline:
-            return None
-        from ..core.auth import AuthResolver  # lazy import
-
-        resolver = self._auth_resolver
-        if resolver is None:
-            resolver = AuthResolver()
-            self._auth_resolver = resolver
-        return resolve_token_for_host(
-            host,
-            offline=self._options.offline,
-            org=org,
-            auth_resolver=resolver,
-        )
+        auth = self._resolve_auth_for_host(host, org=org)
+        return auth.token if auth else None
 
     def _ensure_auth(self) -> None:
         """Lazily resolve host classification and GitHub token.

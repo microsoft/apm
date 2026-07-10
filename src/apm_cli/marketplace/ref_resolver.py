@@ -16,6 +16,7 @@ Security notes
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import subprocess
@@ -25,6 +26,7 @@ from dataclasses import dataclass
 
 from ..utils.github_host import (
     build_ado_bearer_git_env,
+    build_authorization_header_git_env,
     build_https_clone_url,
     default_host,
     is_azure_devops_hostname,
@@ -186,18 +188,24 @@ class RefResolver:
         requested_bearer = self._auth_scheme == "bearer"
         ado_host = is_azure_devops_hostname(self._host)
         if requested_bearer and not ado_host:
-            raise ValueError(f"Bearer authentication is not supported for host {self._host}")
+            raise GitLsRemoteError(
+                package="",
+                summary=f"Bearer authentication is not supported for host '{self._host}'.",
+                hint="Use bearer authentication only with an Azure DevOps host.",
+            )
         bearer = requested_bearer and ado_host
         token = None if requested_bearer else self._token
         if ado_host:
-            credentials = f"x-access-token:{token}@" if token else ""
-            url = f"https://{credentials}{self._host}/{owner_repo}"
+            url = f"https://{self._host}/{owner_repo}"
         else:
             url = build_https_clone_url(self._host, owner_repo, token=token)
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
         if bearer and self._token:
             env.pop("GIT_TOKEN", None)
             env.update(build_ado_bearer_git_env(self._token))
+        elif ado_host and token:
+            credential = base64.b64encode(f":{token}".encode()).decode()
+            env.update(build_authorization_header_git_env("Basic", credential))
         return url, env
 
     def list_remote_refs(self, owner_repo: str) -> list[RemoteRef]:
