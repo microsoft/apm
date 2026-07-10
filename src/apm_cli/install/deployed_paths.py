@@ -18,10 +18,8 @@ def deployed_path_entry(
 
     def _try_dynamic_root(tgts, *, strict: bool = False) -> str | None:
         for _t in tgts:
-            deploy_root = _t.resolved_deploy_root
-            absolute_static_root = deploy_root is None and Path(_t.root_dir).is_absolute()
-            if absolute_static_root:
-                deploy_root = Path(_t.root_dir)
+            deploy_root = _t.managed_deploy_root
+            absolute_static_root = _t.resolved_deploy_root is None and deploy_root is not None
             if deploy_root is None:
                 continue
             if not strict or absolute_static_root:

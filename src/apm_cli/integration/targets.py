@@ -20,10 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from pathlib import Path
 
 RULE_FORMATS: frozenset[str] = frozenset(
     {"cursor_rules", "claude_rules", "windsurf_rules", "kiro_steering", "antigravity_rules"}
@@ -294,6 +291,14 @@ class TargetProfile:
         if user_scope and self.user_root_dir:
             return self.user_root_dir
         return self.root_dir
+
+    @property
+    def managed_deploy_root(self) -> Path | None:
+        """Return the resolved or absolute static deployment root."""
+        if self.resolved_deploy_root is not None:
+            return self.resolved_deploy_root
+        root = Path(self.root_dir)
+        return root if root.is_absolute() else None
 
     def supports_at_user_scope(self, primitive: str) -> bool:
         """Return ``True`` if *primitive* can be deployed at user scope."""

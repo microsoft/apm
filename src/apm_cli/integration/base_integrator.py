@@ -11,23 +11,28 @@ from apm_cli.compilation.link_resolver import UnifiedLinkResolver
 from apm_cli.primitives.discovery import discover_primitives
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_warning
+from apm_cli.utils.path_security import PathTraversalError, ensure_path_within
 
 
 def _managed_absolute_target_root(candidate: Path, targets: Any) -> Path | None:
-    """Return the configured static target root governing an absolute path."""
+    """Return the managed root for *candidate*, or ``None`` if unmanaged."""
     from apm_cli.integration.targets import KNOWN_TARGETS
 
     source = targets
     if source is None:
-        source = [KNOWN_TARGETS[name].for_scope(user_scope=True) for name in ("claude", "hermes")]
+        source = []
+        for profile in KNOWN_TARGETS.values():
+            if not profile.user_supported or profile.user_root_resolver is not None:
+                continue
+            scoped = profile.for_scope(user_scope=True)
+            if scoped is not None:
+                source.append(scoped)
     try:
         resolved = candidate.resolve()
         for target_profile in source:
             if target_profile is None:
                 continue
-            deploy_root = target_profile.resolved_deploy_root
-            if deploy_root is None and Path(target_profile.root_dir).is_absolute():
-                deploy_root = Path(target_profile.root_dir)
+            deploy_root = target_profile.managed_deploy_root
             if deploy_root is None:
                 continue
             resolved_root = deploy_root.resolve()
@@ -35,7 +40,11 @@ def _managed_absolute_target_root(candidate: Path, targets: Any) -> Path | None:
                 if not mapping.subdir:
                     continue
                 primitive_root = (resolved_root / mapping.subdir).resolve()
-                if resolved != primitive_root and resolved.is_relative_to(primitive_root):
+                try:
+                    contained = ensure_path_within(resolved, primitive_root)
+                except PathTraversalError:
+                    continue
+                if contained != primitive_root:
                     return resolved_root
             if target_profile.hooks_config_display:
                 hooks_file = resolved_root / Path(target_profile.hooks_config_display).name
