@@ -90,11 +90,17 @@ dependencies:
     package_type: apm_package
 mcp_servers:
   - github
+  - transitive-server
 mcp_configs:
   github:
     type: stdio
     command: docker
     args: ["run", "-i", "--rm", "ghcr.io/github/github-mcp-server"]
+  transitive-server:
+    type: stdio
+    command: local-server
+mcp_config_provenance:
+  transitive-server: local-package
 lsp_servers:
   - pyright
 lsp_configs:
@@ -116,9 +122,10 @@ local_deployed_file_hashes:
 | `generated_at` | ISO 8601 string | yes | UTC timestamp of the last write. Ignored by equivalence checks. |
 | `apm_version` | string | no | APM CLI version that wrote the file. Diagnostic only. |
 | `dependencies` | list | yes | Resolved APM packages. See [per-entry fields](#per-entry-fields). |
-| `mcp_servers` | list of strings | no | Names of MCP servers declared in the manifest at install time. |
+| `mcp_servers` | list of strings | no | Names of MCP servers declared in the manifest as of the last install or update. |
 | `mcp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect MCP drift. |
-| `lsp_servers` | list of strings | no | Names of LSP servers declared in the manifest at install time. |
+| `mcp_config_provenance` | map | no | `server_name -> declaring package` for transitively contributed MCP servers. Used by `config-consistency` to distinguish transitive entries from orphans. |
+| `lsp_servers` | list of strings | no | Names of LSP servers declared in the manifest as of the last install or update. |
 | `lsp_configs` | map | no | `server_name -> resolved config dict` baseline used to detect LSP drift. |
 | `local_deployed_files` | list | no | Files this project itself contributes (sources its own primitives). See [self entry](#self-entry). |
 | `local_deployed_file_hashes` | map | no | `path -> sha256` for `local_deployed_files`. |
@@ -271,7 +278,7 @@ check maps to specific lockfile fields:
 | `deployed-files-present` | `deployed_files` per entry (and self entry) |
 | `content-integrity` | `deployed_file_hashes` (and `local_deployed_file_hashes`) |
 | `skill-subset-consistency` | `skill_subset` per `skill_bundle` entry |
-| `config-consistency` | `mcp_servers` and `mcp_configs` |
+| `config-consistency` | `mcp_servers`, `mcp_configs`, and `mcp_config_provenance` |
 | `no-orphaned-packages` | `dependencies` keys vs. `apm.yml` |
 
 Files listed in `deployed_files` without a corresponding hash entry (typically

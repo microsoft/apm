@@ -9,11 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `apm audit --ci` no longer raises a false `config-consistency` failure for an
-  MCP server declared by a local-path sub-package. Such transitively-contributed
-  servers are now recorded in the lockfile with a new `mcp_config_provenance`
-  map and exempted from the orphaned-MCP branch, mirroring the `resolved_by`
-  exemption already applied to package dependencies. (#2084)
+- Projects with local-path sub-packages that contribute MCP servers no longer
+  see false `config-consistency` failures from `apm audit --ci`. Transitively
+  contributed servers now carry lockfile provenance and are exempt from the
+  orphan check. (#2084)
+- `apm install host/org/repo/subpath#ref` on an unrecognised self-hosted FQDN
+  no longer fails with a misleading "not accessible or doesn't exist" error;
+  the failure reason now suggests setting `GITLAB_HOST` / `APM_GITLAB_HOSTS`
+  if the target is a self-hosted GitLab instance, or using an explicit
+  `git:` + `path:` entry in `apm.yml` otherwise. (by @rrazvd; closes #2066) (#2074)
 
 ## [0.24.0] - 2026-07-05
 
