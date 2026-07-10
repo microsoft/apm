@@ -292,6 +292,21 @@ class TestVSCodeIntegration:
         config = json.loads(hooks_path.read_text())
         assert config["version"] == 1
 
+    def test_copilot_existing_source_version_preserved(self, temp_project):
+        """An explicit source version must not be overwritten."""
+        pkg_info = self._setup_hookify_package(temp_project)
+        source_path = pkg_info.install_path / "hooks" / "hooks.json"
+        source_config = json.loads(source_path.read_text())
+        source_config["version"] = 3
+        source_path.write_text(json.dumps(source_config))
+
+        integrator = HookIntegrator()
+        integrator.integrate_package_hooks(pkg_info, temp_project)
+
+        hooks_path = temp_project / ".github" / "hooks" / "hookify-hooks.json"
+        config = json.loads(hooks_path.read_text())
+        assert config["version"] == 3
+
     def test_integrate_learning_output_style_vscode(self, temp_project):
         """Test VSCode integration of learning-output-style plugin (different script dir)."""
         pkg_dir = temp_project / "apm_modules" / "anthropics" / "learning-output-style"
