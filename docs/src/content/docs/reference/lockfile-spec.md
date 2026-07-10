@@ -186,6 +186,11 @@ host (`host/owner/repo`), so `github.com/team/skills` and
 host casing cannot create duplicate keys. Registry-proxy entries keep the bare
 logical key because the proxy host is transport, not package identity.
 
+GitHub and package-registry owner/repository paths are lowercased before APM
+derives the key. Older mixed-case GitHub entries therefore serialize with the
+same key as new lowercase references. Repository path casing remains unchanged
+for unknown git hosts because those backends may be case-sensitive.
+
 ## Self entry
 
 A project that ships its own primitives (skills, agents, prompts under
