@@ -653,64 +653,75 @@ class MarketplaceBuilder:
 
         refs = resolver.list_remote_refs(owner_repo)
 
-        # Try as tag first (only check tag refs)
+        # Single-pass index for O(1) lookup by tag name, full refname, and branch
+        tags_by_name: dict[str, Any] = {}
+        refs_by_name: dict[str, Any] = {}
+        branches_by_name: dict[str, Any] = {}
         for remote_ref in refs:
-            if not remote_ref.name.startswith("refs/tags/"):
-                continue
+            refs_by_name[remote_ref.name] = remote_ref
+            if remote_ref.name.startswith("refs/tags/"):
+                tag_name = _strip_ref_prefix(remote_ref.name)
+                tags_by_name[tag_name] = remote_ref
+            elif remote_ref.name.startswith("refs/heads/"):
+                branch_name = remote_ref.name[len("refs/heads/") :]
+                branches_by_name[branch_name] = remote_ref
+
+        # Try as tag first
+        if ref_text in tags_by_name:
+            remote_ref = tags_by_name[ref_text]
             tag_name = _strip_ref_prefix(remote_ref.name)
-            if tag_name == ref_text:
-                sv = parse_semver(tag_name.lstrip("vV"))
-                return ResolvedPackage(
-                    name=entry.name,
-                    source_repo=owner_repo,
-                    subdir=entry.subdir,
-                    ref=tag_name,
-                    sha=remote_ref.sha,
-                    requested_version=entry.version,
-                    tags=entry.tags,
-                    is_prerelease=sv.is_prerelease if sv else False,
-                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
-                    source_url=source_url,
-                )
+            sv = parse_semver(tag_name.lstrip("vV"))
+            return ResolvedPackage(
+                name=entry.name,
+                source_repo=owner_repo,
+                subdir=entry.subdir,
+                ref=tag_name,
+                sha=remote_ref.sha,
+                requested_version=entry.version,
+                tags=entry.tags,
+                is_prerelease=sv.is_prerelease if sv else False,
+                host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                source_url=source_url,
+            )
 
         # Try as full refname
-        for remote_ref in refs:
-            if remote_ref.name == ref_text:
-                short = _strip_ref_prefix(remote_ref.name)
-                is_branch = remote_ref.name.startswith("refs/heads/")
-                if is_branch and not self._options.allow_head:
-                    raise HeadNotAllowedError(entry.name, short)
-                sv = parse_semver(short.lstrip("vV"))
-                return ResolvedPackage(
-                    name=entry.name,
-                    source_repo=owner_repo,
-                    subdir=entry.subdir,
-                    ref=short,
-                    sha=remote_ref.sha,
-                    requested_version=entry.version,
-                    tags=entry.tags,
-                    is_prerelease=sv.is_prerelease if sv else False,
-                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
-                    source_url=source_url,
-                )
+        if ref_text in refs_by_name:
+            remote_ref = refs_by_name[ref_text]
+            short = _strip_ref_prefix(remote_ref.name)
+            is_branch = remote_ref.name.startswith("refs/heads/")
+            if is_branch and not self._options.allow_head:
+                raise HeadNotAllowedError(entry.name, short)
+            sv = parse_semver(short.lstrip("vV"))
+            return ResolvedPackage(
+                name=entry.name,
+                source_repo=owner_repo,
+                subdir=entry.subdir,
+                ref=short,
+                sha=remote_ref.sha,
+                requested_version=entry.version,
+                tags=entry.tags,
+                is_prerelease=sv.is_prerelease if sv else False,
+                host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                source_url=source_url,
+            )
 
         # Try as branch name
-        for remote_ref in refs:
-            if remote_ref.name == f"refs/heads/{ref_text}":
-                if not self._options.allow_head:
-                    raise HeadNotAllowedError(entry.name, ref_text)
-                return ResolvedPackage(
-                    name=entry.name,
-                    source_repo=owner_repo,
-                    subdir=entry.subdir,
-                    ref=ref_text,
-                    sha=remote_ref.sha,
-                    requested_version=entry.version,
-                    tags=entry.tags,
-                    is_prerelease=False,
-                    host=self._resolved_output_host(source_host=source_host, source_url=source_url),
-                    source_url=source_url,
-                )
+        if ref_text in branches_by_name:
+            remote_ref = branches_by_name[ref_text]
+            if not self._options.allow_head:
+                raise HeadNotAllowedError(entry.name, ref_text)
+            return ResolvedPackage(
+                name=entry.name,
+                source_repo=owner_repo,
+                subdir=entry.subdir,
+                ref=ref_text,
+                sha=remote_ref.sha,
+                requested_version=entry.version,
+                tags=entry.tags,
+                is_prerelease=False,
+                host=self._resolved_output_host(source_host=source_host, source_url=source_url),
+                source_url=source_url,
+            )
 
         # HEAD special case
         if ref_text.upper() == "HEAD":

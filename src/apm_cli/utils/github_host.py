@@ -5,6 +5,22 @@ import re
 import urllib.parse
 
 
+def _get_ghes_host() -> str:
+    """Return the normalised GITHUB_HOST env value (cached per process)."""
+    return os.environ.get("GITHUB_HOST", "").strip().lower().split("/")[0]
+
+
+def _get_gitlab_single_host() -> str:
+    """Return the normalised GITLAB_HOST env value."""
+    return os.environ.get("GITLAB_HOST", "").strip().lower().split("/")[0]
+
+
+def _get_gitlab_hosts_list() -> list[str]:
+    """Return normalised APM_GITLAB_HOSTS entries."""
+    raw = os.environ.get("APM_GITLAB_HOSTS", "")
+    return [part.strip().lower().split("/")[0] for part in raw.split(",") if part.strip()]
+
+
 def default_host() -> str:
     """Return the default Git host (can be overridden via GITHUB_HOST env var)."""
     return os.environ.get("GITHUB_HOST", "github.com")
@@ -47,8 +63,8 @@ def is_gitlab_hostname(hostname: str | None) -> bool:
     Matches, in order of what this function checks (not full ``classify_host`` order):
 
     - ``gitlab.com`` (case-insensitive)
-    - ``GITLAB_HOST`` — single self-managed host (same pattern as ``GITHUB_HOST`` for GHES)
-    - ``APM_GITLAB_HOSTS`` — comma-separated list of self-managed hosts
+    - ``GITLAB_HOST`` -- single self-managed host (same pattern as ``GITHUB_HOST`` for GHES)
+    - ``APM_GITLAB_HOSTS`` -- comma-separated list of self-managed hosts
 
     **GHES precedence:** If ``GITHUB_HOST`` matches *hostname* under the same
     rules as ``AuthResolver.classify_host`` (GHES, not ``gitlab.com`` SaaS),
@@ -62,7 +78,7 @@ def is_gitlab_hostname(hostname: str | None) -> bool:
     # GHES precedence: GITHUB_HOST match is enterprise GitHub, not GitLab, even if
     # the same host appears in GitLab env vars (GHES takes priority over any
     # GitLab environment hint).
-    ghes_host = os.environ.get("GITHUB_HOST", "").strip().lower().split("/")[0]
+    ghes_host = _get_ghes_host()
     if (
         ghes_host
         and ghes_host == h
@@ -74,15 +90,10 @@ def is_gitlab_hostname(hostname: str | None) -> bool:
 
     if h == "gitlab.com":
         return True
-    gitlab_single = os.environ.get("GITLAB_HOST", "").strip().lower().split("/")[0]
+    gitlab_single = _get_gitlab_single_host()
     if gitlab_single and gitlab_single == h:
         return is_valid_fqdn(h)
-    raw_list = os.environ.get("APM_GITLAB_HOSTS", "")
-    for part in raw_list.split(","):
-        entry = part.strip().lower().split("/")[0]
-        if entry and entry == h and is_valid_fqdn(entry):
-            return True
-    return False
+    return any(entry and entry == h and is_valid_fqdn(entry) for entry in _get_gitlab_hosts_list())
 
 
 def has_github_gitlab_host_env_conflict(hostname: str | None) -> bool:
@@ -101,7 +112,7 @@ def has_github_gitlab_host_env_conflict(hostname: str | None) -> bool:
     if not is_valid_fqdn(h):
         return False
 
-    ghes_host = os.environ.get("GITHUB_HOST", "").strip().lower().split("/")[0]
+    ghes_host = _get_ghes_host()
     github_claims_as_ghes = (
         ghes_host
         and ghes_host == h
@@ -112,17 +123,11 @@ def has_github_gitlab_host_env_conflict(hostname: str | None) -> bool:
     if not github_claims_as_ghes:
         return False
 
-    gitlab_single = os.environ.get("GITLAB_HOST", "").strip().lower().split("/")[0]
+    gitlab_single = _get_gitlab_single_host()
     if gitlab_single and gitlab_single == h and is_valid_fqdn(h):
         return True
 
-    raw_list = os.environ.get("APM_GITLAB_HOSTS", "")
-    for part in raw_list.split(","):
-        entry = part.strip().lower().split("/")[0]
-        if entry and entry == h and is_valid_fqdn(entry):
-            return True
-
-    return False
+    return any(entry and entry == h and is_valid_fqdn(entry) for entry in _get_gitlab_hosts_list())
 
 
 def format_github_gitlab_host_conflict_error(hostname: str) -> str:
