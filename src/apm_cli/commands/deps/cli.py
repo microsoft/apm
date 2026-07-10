@@ -86,6 +86,28 @@ def _add_tree_children(parent_branch, parent_key, children_map, has_rich, depth=
             )
 
 
+def _echo_tree_children(
+    parent_key: str,
+    children_map: dict[str, list],
+    prefix: str = "",
+    depth: int = 0,
+) -> None:
+    """Render transitive dependencies recursively without Rich."""
+    kids = children_map.get(parent_key, [])
+    for index, child_dep in enumerate(kids):
+        is_last = index == len(kids) - 1
+        child_prefix = "+-- " if is_last else "|-- "
+        click.echo(f"{prefix}{child_prefix}{_dep_display_name(child_dep)}")
+        if depth < 5:
+            continuation = "    " if is_last else "|   "
+            _echo_tree_children(
+                child_dep.get_unique_key(),
+                children_map,
+                prefix + continuation,
+                depth + 1,
+            )
+
+
 # ---------------------------------------------------------------------------
 # Data resolution — deps list
 # ---------------------------------------------------------------------------
@@ -496,7 +518,8 @@ def _build_dep_tree(apm_dir):
             'apm_modules_path': Path,
             'source': 'lockfile' | 'directory',
             'direct': [dep, ...],           # lockfile mode only
-            'children_map': {key: [dep]},   # lockfile mode only
+            'children_map': {unique_key: [dep]},  # lockfile mode only
+            'unresolved': [dep, ...],       # lockfile mode only
             'scanned_packages': [{...}],    # directory fallback only
             'has_modules': bool,
         }
@@ -519,6 +542,7 @@ def _build_dep_tree(apm_dir):
         "source": "directory",
         "direct": [],
         "children_map": {},
+        "unresolved": [],
         "scanned_packages": [],
         "has_modules": apm_modules_path.exists(),
     }
@@ -537,27 +561,36 @@ def _build_dep_tree(apm_dir):
                     result["direct"] = [d for d in lockfile_deps if d.depth <= 1]
                     transitive = [d for d in lockfile_deps if d.depth > 1]
                     children_map: dict[str, list] = {}
+                    unresolved = []
+                    parents_by_unique_key: dict[tuple[int, str], list] = {}
+                    parents_by_repo_url: dict[tuple[int, str], list] = {}
+                    for candidate in lockfile_deps:
+                        parents_by_unique_key.setdefault(
+                            (candidate.depth, candidate.get_unique_key()), []
+                        ).append(candidate)
+                        parents_by_repo_url.setdefault(
+                            (candidate.depth, candidate.repo_url), []
+                        ).append(candidate)
                     for dep in transitive:
                         parent_key = dep.resolved_by or ""
-                        parent_candidates = [
-                            candidate
-                            for candidate in lockfile_deps
-                            if candidate.depth == dep.depth - 1
-                            and candidate.get_unique_key() == parent_key
-                        ]
+                        parent_depth = dep.depth - 1
+                        parent_candidates = parents_by_unique_key.get(
+                            (parent_depth, parent_key), []
+                        )
                         if not parent_candidates:
-                            parent_candidates = [
-                                candidate
-                                for candidate in lockfile_deps
-                                if candidate.depth == dep.depth - 1
-                                and candidate.repo_url == parent_key
-                            ]
+                            parent_candidates = parents_by_repo_url.get(
+                                (parent_depth, parent_key), []
+                            )
                         if len(parent_candidates) == 1:
                             parent_key = parent_candidates[0].get_unique_key()
+                        else:
+                            unresolved.append(dep)
+                            continue
                         if parent_key not in children_map:
                             children_map[parent_key] = []
                         children_map[parent_key].append(dep)
                     result["children_map"] = children_map
+                    result["unresolved"] = unresolved
                     return result
     except Exception:
         pass
@@ -630,6 +663,7 @@ def tree(global_):
         if tree_data["source"] == "lockfile":
             direct = tree_data["direct"]
             children_map = tree_data["children_map"]
+            unresolved = tree_data["unresolved"]
 
             if has_rich:
                 root_tree = Tree(f"[bold cyan]{project_name}[/bold cyan] (local)")
@@ -646,6 +680,10 @@ def tree(global_):
                             if prim_summary:
                                 branch.add(f"[dim]{prim_summary}[/dim]")
                         _add_tree_children(branch, dep.get_unique_key(), children_map, has_rich)
+                    for dep in unresolved:
+                        display = _dep_display_name(dep)
+                        branch = root_tree.add(f"[yellow]{display} (parent unresolved)[/yellow]")
+                        _add_tree_children(branch, dep.get_unique_key(), children_map, has_rich)
                 console.print(root_tree)
             else:
                 click.echo(f"{project_name} (local)")
@@ -657,13 +695,11 @@ def tree(global_):
                         prefix = "+-- " if is_last else "|-- "
                         display = _dep_display_name(dep)
                         click.echo(f"{prefix}{display}")
-                        # Show transitive deps
-                        kids = children_map.get(dep.get_unique_key(), [])
                         sub_prefix = "    " if is_last else "|   "
-                        for j, child in enumerate(kids):
-                            child_is_last = j == len(kids) - 1
-                            child_prefix = "+-- " if child_is_last else "|-- "
-                            click.echo(f"{sub_prefix}{child_prefix}{_dep_display_name(child)}")
+                        _echo_tree_children(dep.get_unique_key(), children_map, sub_prefix)
+                    for dep in unresolved:
+                        click.echo(f"+-- {_dep_display_name(dep)} (parent unresolved)")
+                        _echo_tree_children(dep.get_unique_key(), children_map, "    ")
         # Fallback: scan apm_modules directory (no lockfile)
         elif has_rich:
             root_tree = Tree(f"[bold cyan]{project_name}[/bold cyan] (local)")

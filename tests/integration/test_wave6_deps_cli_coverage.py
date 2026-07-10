@@ -396,6 +396,88 @@ class TestDepsTree:
         assert result.exit_code == 0
         assert "parent-pkg" in result.output
 
+    def test_tree_retains_identity_for_colliding_package_names(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CLI tree renders each canonical identity despite colliding names."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text(
+            dedent("""\
+                name: consumer
+                version: 0.1.0
+                dependencies:
+                  apm:
+                    - example/monorepo
+            """)
+        )
+        (tmp_path / "apm.lock.yaml").write_text(
+            dedent("""\
+                lockfile_version: "1"
+                dependencies:
+                  - repo_url: example/monorepo
+                    name: shared-display-name
+                    depth: 1
+                    version: "1.0.0"
+                  - repo_url: example/monorepo
+                    name: shared-display-name
+                    virtual_path: packages/inner
+                    is_virtual: true
+                    depth: 2
+                    resolved_by: example/monorepo
+                    version: "1.0.0"
+                  - repo_url: example/monorepo
+                    name: shared-display-name
+                    virtual_path: packages/leaf
+                    is_virtual: true
+                    depth: 3
+                    resolved_by: example/monorepo
+                    version: "1.0.0"
+            """)
+        )
+
+        result = CliRunner().invoke(cli, ["deps", "tree"])
+
+        assert result.exit_code == 0, result.output
+        identities = [
+            "example/monorepo@1.0.0",
+            "example/monorepo/packages/inner@1.0.0",
+            "example/monorepo/packages/leaf@1.0.0",
+        ]
+        positions = [result.output.index(identity) for identity in identities]
+        assert positions == sorted(positions)
+        assert all(result.output.count(identity) == 1 for identity in identities)
+
+    def test_tree_surfaces_dependency_with_ambiguous_legacy_parent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Legacy parent ambiguity remains visible instead of dropping a child."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "apm.yml").write_text("name: consumer\nversion: 0.1.0\n")
+        (tmp_path / "apm.lock.yaml").write_text(
+            dedent("""\
+                lockfile_version: "1"
+                dependencies:
+                  - repo_url: example/shared
+                    host: git.example-one.test
+                    depth: 1
+                    version: "1.0.0"
+                  - repo_url: example/shared
+                    host: git.example-two.test
+                    depth: 1
+                    version: "1.0.0"
+                  - repo_url: example/child
+                    depth: 2
+                    resolved_by: example/shared
+                    version: "1.0.0"
+            """)
+        )
+
+        result = CliRunner().invoke(cli, ["deps", "tree"])
+
+        assert result.exit_code == 0, result.output
+        assert result.output.count("example/child@1.0.0") == 1
+        assert "parent unresolved" in result.output
+
     def test_tree_no_lockfile_with_modules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
