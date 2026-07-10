@@ -354,7 +354,8 @@ def _resolve_target_runtimes(
         target_runtimes = (
             [explicit_target] if isinstance(explicit_target, str) else list(explicit_target)
         )
-        logger.progress(f"Targeting specific runtimes: {', '.join(target_runtimes)}")
+        runtime_label = "runtime" if len(target_runtimes) == 1 else "runtimes"
+        logger.progress(f"Targeting specific {runtime_label}: {', '.join(target_runtimes)}")
     else:
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
 
