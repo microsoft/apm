@@ -1,6 +1,7 @@
 """Tests for GitHub package downloader."""
 
 import contextlib
+import json
 import os
 import shutil
 import stat
@@ -1324,6 +1325,59 @@ class TestDownloadSubdirectoryPackageWindowsCleanup:
         assert (
             target / ".apm" / "skills" / "browser-testing" / "SKILL.md"
         ).read_text() == "# Browser testing"
+
+    def test_plugin_sparse_paths_rejects_unsafe_manifest_paths(self):
+        downloader = GitHubPackageDownloader()
+        dep = DependencyReference.parse("github/awesome-copilot/plugins/frontend-web-dev")
+        manifest = json.dumps(
+            {
+                "agents": [
+                    "../../outside.agent.md",
+                    "/etc/passwd",
+                    r"C:\Windows\secret.agent.md",
+                    "--stdin",
+                ],
+                "skills": ["./skills/browser-testing/"],
+            }
+        ).encode()
+
+        with patch.object(downloader, "download_raw_file", return_value=manifest):
+            paths = downloader._plugin_sparse_paths(
+                dep,
+                "plugins/frontend-web-dev",
+                "main",
+            )
+
+        assert paths == [
+            "plugins/frontend-web-dev",
+            "skills/browser-testing",
+            "plugins/frontend-web-dev/skills/browser-testing",
+        ]
+
+    def test_plugin_sparse_paths_uses_remote_head_when_ref_is_unset(self):
+        downloader = GitHubPackageDownloader()
+        dep = DependencyReference.parse("github/awesome-copilot/plugins/frontend-web-dev")
+        refs = []
+
+        def fake_download_raw(_dep, path, ref):
+            refs.append(ref)
+            if path.endswith(".github/plugin/plugin.json"):
+                return b'{"agents":["./agents/frontend.agent.md"]}'
+            raise RuntimeError("not found")
+
+        with patch.object(downloader, "download_raw_file", side_effect=fake_download_raw):
+            paths = downloader._plugin_sparse_paths(
+                dep,
+                "plugins/frontend-web-dev",
+                None,
+            )
+
+        assert refs == ["HEAD", "HEAD"]
+        assert paths == [
+            "plugins/frontend-web-dev",
+            "agents",
+            "plugins/frontend-web-dev/agents",
+        ]
 
     def test_sparse_checkout_success_closes_sha_repo_before_rmtree(self, tmp_path):
         """When sparse checkout succeeds the SHA-capture Repo is closed before _rmtree."""

@@ -11,7 +11,7 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Union
 
 import git  # noqa: F401  -- re-exported; tests patch apm_cli.deps.github_downloader.git
@@ -1082,6 +1082,7 @@ class GitHubPackageDownloader:
                     "git",
                     "sparse-checkout",
                     "set",
+                    "--",
                     subdir_path,
                     *(additional_paths or []),
                 ],
@@ -1130,20 +1131,27 @@ class GitHubPackageDownloader:
             ".claude-plugin/plugin.json",
         ):
             manifest_path = f"{subdir_path.rstrip('/')}/{relative_manifest}"
+            _debug(f"Plugin manifest probe: {manifest_path}")
             try:
                 manifest_bytes = self.download_raw_file(
                     dep_ref,
                     manifest_path,
-                    ref or "main",
+                    ref or "HEAD",
                 )
+                _debug(f"Plugin manifest found: {manifest_path}")
                 break
             except RuntimeError:
                 continue
-        if manifest_bytes is None or len(manifest_bytes) > _MAX_PLUGIN_JSON_BYTES:
+        if manifest_bytes is None:
+            _debug(f"No plugin manifest found for {subdir_path}")
+            return [subdir_path]
+        if len(manifest_bytes) > _MAX_PLUGIN_JSON_BYTES:
+            _debug(f"Plugin manifest exceeds size limit for {subdir_path}")
             return [subdir_path]
         try:
             manifest = json.loads(manifest_bytes)
-        except (UnicodeDecodeError, ValueError, RecursionError, MemoryError):
+        except (UnicodeDecodeError, ValueError, RecursionError, MemoryError) as error:
+            _debug(f"Plugin manifest parse failed: {type(error).__name__}")
             return [subdir_path]
         if not isinstance(manifest, dict):
             return [subdir_path]
@@ -1159,6 +1167,12 @@ class GitHubPackageDownloader:
                 while raw.startswith("./"):
                     raw = raw[2:]
                 raw = raw.rstrip("/")
+                if (
+                    raw.startswith("-")
+                    or PurePosixPath(raw).is_absolute()
+                    or PureWindowsPath(raw).is_absolute()
+                ):
+                    continue
                 try:
                     validate_path_segments(raw, context=f"plugin {component} path")
                 except PathTraversalError:
@@ -1168,7 +1182,9 @@ class GitHubPackageDownloader:
                 checkout = checkout_path.as_posix()
                 if checkout not in ("", "."):
                     paths.extend((checkout, f"{subdir_path.rstrip('/')}/{checkout}"))
-        return list(dict.fromkeys(paths))
+        resolved_paths = list(dict.fromkeys(paths))
+        _debug(f"Plugin sparse paths: {resolved_paths}")
+        return resolved_paths
 
     def download_subdirectory_package(
         self,

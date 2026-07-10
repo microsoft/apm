@@ -16,12 +16,14 @@ from pathlib import Path
 
 import pytest
 
+from apm_cli.deps.github_downloader import GitHubPackageDownloader
 from apm_cli.integration.agent_integrator import AgentIntegrator
 from apm_cli.integration.command_integrator import CommandIntegrator
 from apm_cli.integration.prompt_integrator import PromptIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
 from apm_cli.models.apm_package import (
     APMPackage,
+    DependencyReference,
     GitReferenceType,
     PackageInfo,
     PackageType,
@@ -114,6 +116,45 @@ def _write_local_skill_package(skill_dir: Path) -> None:
     (skill_content / "SKILL.md").write_text("# Review and Refactor\n")
 
 
+class _LocalGitPackageDownloader(GitHubPackageDownloader):
+    """Exercise the production downloader against a real local git remote."""
+
+    def __init__(self, origin: Path) -> None:
+        super().__init__()
+        self._local_origin = origin
+
+    def _build_repo_url(
+        self,
+        repo_ref: str,
+        use_ssh: bool = False,
+        dep_ref: DependencyReference | None = None,
+        token: str | None = None,
+        auth_scheme: str = "basic",
+    ) -> str:
+        """Return the local fixture remote instead of a hosted forge URL."""
+        del repo_ref, use_ssh, dep_ref, token, auth_scheme
+        return self._local_origin.as_uri()
+
+    def download_raw_file(
+        self,
+        dep_ref: DependencyReference,
+        file_path: str,
+        ref: str = "main",
+        verbose_callback=None,
+    ) -> bytes:
+        """Read a manifest from the same real git ref used by sparse checkout."""
+        del dep_ref, verbose_callback
+        result = subprocess.run(
+            ["git", "show", f"{ref}:{file_path}"],
+            cwd=self._local_origin,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.decode(errors="replace"))
+        return result.stdout
+
+
 # ===========================================================================
 # Class 1 — LOCAL tests (no network, uses mock fixture)
 # ===========================================================================
@@ -121,6 +162,70 @@ def _write_local_skill_package(skill_dir: Path) -> None:
 
 class TestPluginHeroScenarios:
     """Local hero-scenario tests using the mock-marketplace-plugin fixture."""
+
+    def test_nested_plugin_installs_and_deploys_repository_root_primitives(self, tmp_path):
+        """Install an awesome-copilot-style plugin from a real local git remote."""
+        origin = tmp_path / "awesome-copilot"
+        origin.mkdir()
+        subprocess.run(["git", "init", "-b", "trunk"], cwd=origin, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "apm-tests@example.invalid"],
+            cwd=origin,
+            check=True,
+        )
+        subprocess.run(["git", "config", "user.name", "APM Tests"], cwd=origin, check=True)
+
+        plugin = origin / "plugins" / "frontend-web-dev"
+        manifest_dir = plugin / ".github" / "plugin"
+        manifest_dir.mkdir(parents=True)
+        (manifest_dir / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "frontend-web-dev",
+                    "version": "1.0.0",
+                    "description": "Awesome Copilot style fixture",
+                    "agents": ["./agents/frontend.agent.md"],
+                    "skills": ["./skills/browser-testing/"],
+                }
+            )
+        )
+        agent = origin / "agents" / "frontend.agent.md"
+        agent.parent.mkdir()
+        agent.write_text("# Frontend Agent\n")
+        skill = origin / "skills" / "browser-testing"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# Browser Testing\n")
+        subprocess.run(["git", "add", "."], cwd=origin, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "Add awesome-copilot fixture"],
+            cwd=origin,
+            check=True,
+            capture_output=True,
+        )
+
+        downloader = _LocalGitPackageDownloader(origin)
+        dependency = DependencyReference.parse("github/awesome-copilot/plugins/frontend-web-dev")
+        installed = tmp_path / "apm_modules" / "github" / "awesome-copilot"
+        package_info = downloader.download_subdirectory_package(dependency, installed)
+
+        assert (installed / ".apm" / "agents" / "frontend.agent.md").read_text() == (
+            "# Frontend Agent\n"
+        )
+        assert (
+            installed / ".apm" / "skills" / "browser-testing" / "SKILL.md"
+        ).read_text() == "# Browser Testing\n"
+
+        project = tmp_path / "project"
+        project.mkdir()
+        AgentIntegrator().integrate_package_agents(package_info, project)
+        SkillIntegrator().integrate_package_skill(package_info, project)
+
+        assert (project / ".github" / "agents" / "frontend.agent.md").read_text() == (
+            "# Frontend Agent\n"
+        )
+        assert (
+            project / ".agents" / "skills" / "browser-testing" / "SKILL.md"
+        ).read_text() == "# Browser Testing\n"
 
     # ---- Test 1: Full lifecycle -----------------------------------------
 
