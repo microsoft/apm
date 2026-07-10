@@ -13,12 +13,15 @@ def test_windows_installer_exposes_stable_executable_on_path() -> None:
     current_exe = '$currentExe = Join-Path $currentDir "apm.exe"'
     create_junction = "New-Item -ItemType Junction"
     add_current_to_path = "Add-ToUserPath -PathEntry $currentDir"
+    remove_old_junction = "[System.IO.Directory]::Delete($oldCurrentDir)"
 
     assert current_dir in installer
     assert current_exe in installer
     assert create_junction in installer
     assert add_current_to_path in installer
     assert "Refusing to replace non-junction path" in installer
+    assert remove_old_junction in installer
+    assert "Remove-Item -Force $oldCurrentDir" not in installer
     assert installer.index(create_junction) < installer.index(add_current_to_path)
 
 

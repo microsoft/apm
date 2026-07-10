@@ -930,7 +930,9 @@ try {
         Move-Item -Path $newCurrentDir -Destination $currentDir -Force
     } catch {
         Write-ErrorText "Failed to update stable executable path ${currentDir}: $_"
-        Remove-Item -Force $newCurrentDir -ErrorAction SilentlyContinue
+        if (Test-Path $newCurrentDir) {
+            [System.IO.Directory]::Delete($newCurrentDir)
+        }
         if ($oldCurrentDir -and (Test-Path $oldCurrentDir) -and -not (Test-Path $currentDir)) {
             Move-Item -Path $oldCurrentDir -Destination $currentDir -Force -ErrorAction SilentlyContinue
         }
@@ -938,7 +940,9 @@ try {
         exit 1
     }
     if ($oldCurrentDir -and (Test-Path $oldCurrentDir)) {
-        Remove-Item -Force $oldCurrentDir -ErrorAction SilentlyContinue
+        # Directory.Delete removes only the junction. Windows PowerShell 5.1
+        # Remove-Item prompts for its non-empty target in NonInteractive mode.
+        [System.IO.Directory]::Delete($oldCurrentDir)
     }
     if (-not (Test-Path $currentExe)) {
         Write-ErrorText "Stable executable path is missing apm.exe: $currentExe"
