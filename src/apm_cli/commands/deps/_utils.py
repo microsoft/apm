@@ -39,10 +39,10 @@ def _is_nested_under_package(candidate: Path, apm_modules_path: Path) -> bool:
 
     When a package ships nested package or skill manifests, the ``rglob`` scan
     would otherwise treat each sub-directory as an independent package. This
-    helper walks up from *candidate* towards
-    *apm_modules_path* and returns ``True`` if any intermediate parent already
-    contains ``apm.yml``  -- meaning the candidate is a deployment artifact, not
-    a standalone package.
+    helper walks up from *candidate* towards *apm_modules_path* and returns
+    ``True`` if any intermediate parent already contains ``apm.yml`` or
+    ``.apm`` -- meaning the candidate is a deployment artifact, not a standalone
+    package.
     """
     parent = candidate.parent
     while parent != apm_modules_path and parent != parent.parent:  # noqa: PLR1714

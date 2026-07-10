@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unknown git hosts retain case-sensitive paths. (closes #2073) (#2098)
 - `apm deps tree` no longer repeats same-repository virtual packages, keeping
   large monorepo dependency trees accurate and scannable. (#2093)
+- `apm deps list`, `apm deps tree`, and `apm prune` no longer treat nested
+  package manifests as independent orphan packages, preventing valid nested
+  content from being removed. (#2092)
 - `apm install host/org/repo/subpath#ref` on an unrecognised self-hosted FQDN
   no longer fails with a misleading "not accessible or doesn't exist" error;
   the failure reason now suggests setting `GITLAB_HOST` / `APM_GITLAB_HOSTS`
