@@ -294,6 +294,31 @@ class TestInactiveTargetGhostDrop:
 
         assert ghost not in files
 
+    def test_exact_shared_root_filename_tracks_declared_sibling(self):
+        from apm_cli.install.manifest_reconcile import union_preserving
+
+        hooks = ".agents/hooks.json"
+        active = [_known("copilot")]
+        preserved, _ = union_preserving(
+            current_files=[],
+            current_hashes={},
+            prior_files=[hooks],
+            prior_hashes={},
+            targets=active,
+            declared_targets=[*active, _known("antigravity")],
+        )
+        dropped, _ = union_preserving(
+            current_files=[],
+            current_hashes={},
+            prior_files=[hooks],
+            prior_hashes={},
+            targets=active,
+            declared_targets=active,
+        )
+
+        assert preserved == [hooks]
+        assert dropped == []
+
     def test_union_declared_none_preserves_all_legacy(self):
         """No declared universe (auto-detect / --target-only consumer) keeps the
         legacy preserve-all behaviour so a genuine multi-target deploy is never
