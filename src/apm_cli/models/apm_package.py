@@ -550,6 +550,14 @@ class APMPackage:
             if isinstance(dep, MCPDependency)
         ]
 
+    def get_all_apm_dependencies(self) -> list[DependencyReference]:
+        """Get production and dev APM dependencies in manifest order."""
+        return self.get_apm_dependencies() + self.get_dev_apm_dependencies()
+
+    def has_any_apm_dependencies(self) -> bool:
+        """Check if this package has any APM dependencies (prod or dev)."""
+        return bool(self.get_apm_dependencies() or self.get_dev_apm_dependencies())
+
     def get_all_mcp_dependencies(self) -> list["MCPDependency"]:
         """Get production and dev MCP dependencies in manifest order."""
         return self.get_mcp_dependencies() + self.get_dev_mcp_dependencies()

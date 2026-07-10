@@ -358,8 +358,13 @@ manifest; it is reserved for the auto-detection fallback described in
 [Section 8.4](#84-target-detection-signals-normative). In an
 auto-detect context, `minimal` denotes the no-target-detected profile
 that emits `AGENTS.md` only; `all` denotes the union of every
-registered auto-detectable target and excludes explicit-only targets
-such as `agent-skills` and `antigravity`.
+registered **auto-detectable** target (see
+[Section 8.4](#84-target-detection-signals-normative)). A target is
+**auto-detectable** when the OpenAPM Target Registry publishes at
+least one detection predicate for it; a target registered without a
+detection predicate is **explicit-only** and MUST be selected
+explicitly. At v0.1 the explicit-only targets are `agent-skills` and
+`antigravity`, so `all` excludes them.
 
 Concrete per-target detection signals and deploy roots are documented
 in the non-normative companion **"OpenAPM Target Registry v0.1"**
@@ -1983,10 +1988,13 @@ identifier and for every vendor-registered identifier
 ([req-tg-004](#req-tg-004)). Auto-detection MUST activate a target
 **only** when its registered predicate fires; no other filesystem
 signal MAY substitute for, or augment, the registered predicate.
-`agent-skills` MUST NOT be auto-detected; it MUST be selected
-explicitly via `--target agent-skills` or via the manifest's
-`target:` field. When no detection signal fires, the consumer MAY
-fall back to a `minimal` profile that emits `AGENTS.md` only.
+A target registered without a detection predicate
+MUST NOT be auto-detected and MUST be excluded from the expansion of
+`all`; such an **explicit-only** target MUST be selected explicitly
+via `--target <name>` or via the manifest's `target:` field. At v0.1
+the explicit-only targets are `agent-skills` and `antigravity`. When
+no detection signal fires, the consumer MAY fall back to a `minimal`
+profile that emits `AGENTS.md` only.
 
 ### 8.5 Deploy directory contract (normative)
 
@@ -2005,7 +2013,8 @@ defect, not a runtime warning. When two targets register the same
 deploy root (for example two targets that both share `.agents/`),
 each target OWNS only the file-name patterns documented for that
 target in the Registry; `.agents/` is partitioned by subdirectory
-(`.agents/skills/`, `.agents/commands/`, `.agents/prompts/`, ...)
+(`.agents/skills/`, `.agents/commands/`, `.agents/prompts/`,
+`.agents/rules/`, ...)
 so that distinct targets do not contend for the same on-disk
 patterns.
 
@@ -2021,14 +2030,38 @@ bundle serves every harness without per-target duplication.
 **[req-tg-005]** A conforming **consumer** implementation that deploys
 target-native per-file instruction rules MUST honour the registered
 rule filename pattern and frontmatter mapping for the active target.
-For the Antigravity target, instruction rules MUST be written under
+For the `antigravity` target, instruction rules MUST be written under
 `.agents/rules/<name>.md`; when the source instruction declares
 `applyTo`, the emitted frontmatter MUST represent it as
-`trigger: glob` plus a `globs` field whose value is either a scalar
-glob or a YAML sequence of glob strings. Compile-time deduplication MUST
-treat only the Antigravity target's expected instruction rule filenames
-as deployed rules; unrelated `.md` files under `.agents/rules/` MUST NOT
+`trigger: glob` plus a `globs` field. To reduce sources of divergence
+in deployed-file content hashes across conforming implementations
+(contributing to the canonical-content equivalence check of
+[req-lk-012](#req-lk-012)), `globs` MUST be
+emitted as a YAML scalar when `applyTo` resolves to exactly one glob
+pattern and as a YAML block sequence when it resolves to two or more
+patterns; when `applyTo` is absent or empty the emitted rule file MUST
+NOT carry a frontmatter block. Compile-time deduplication MUST treat
+only those files whose names derive from the currently-resolved
+instruction primitives (specifically, for each resolved instruction
+primitive of name N the derived filename is `.agents/rules/N.md`; the
+authoritative set is the lockfile `deployed_files` list when a
+lockfile is present, falling back to manifest instruction entries on
+first install) as deployed rules; any other `.md` file under
+`.agents/rules/` MUST NOT be treated as a deployed rule and MUST NOT
 suppress instruction content in `AGENTS.md`.
+
+> **Editorial note.** [req-tg-005](#req-tg-005) names the `antigravity` deploy path
+> and frontmatter keys in the normative text rather than delegating
+> them to the non-normative Target Registry companion (contrast
+> [req-tg-002](#req-tg-002)). This is a deliberate, scoped exception:
+> the `antigravity` rules directory shares the `.agents/` root that
+> [req-tg-002](#req-tg-002) partitions, so the deduplication and
+> non-suppression guarantees above require normative precision about
+> the filename derivation. A future revision MAY relocate the concrete
+> `antigravity` filename pattern and frontmatter mapping to the
+> Registry companion once a cross-target instruction-rule schema is
+> registered, retaining only the target-agnostic honour and dedup
+> MUSTs here.
 
 ### 8.6 Per-target primitive support (informational)
 
@@ -2977,6 +3010,7 @@ renumbering of conformance classes.
 | 0.1.8   | 2026-06-29 | Normative amendment (semver-zero `0.x` minor) to [req-lk-012]: redefined the `deployed_file_hashes` / `local_deployed_file_hashes` domain from "bytes as written to disk" to the *canonical content* -- UTF-8 text (decodable, no NUL byte) is hashed over its `\r\n` -> `\n` normalized form (a lone `\r` is preserved); binary is hashed raw. This makes the per-deployed-file hash platform-invariant so `apm audit --ci` no longer reports a false `content-integrity` drift when a file is checked out with `\r\n` on Windows (`core.autocrlf=true`) and `\n` on POSIX (apm#1952); it harmonizes `content-integrity` with the drift-replay normalizer. Preserving a bare `\r` keeps the carriage-return smuggling vector hash-visible. [req-lk-017] reworded to re-verify against the [req-lk-012] canonical domain rather than raw on-disk bytes (consistency, not a new obligation). Migration: lockfiles whose hashes were recorded on Windows before this amendment carry `\r\n`-domain hashes; one `apm install` re-records them in the canonical domain. No statement-count change (existing MUST modified, none added); 95 (90 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel + comment window. |
 | 0.1.9   | 2026-07-04 | Spec-citation fold for network-free lockfile replay (closes the srobroek Mode-B silent-extension gate on the lockfile-seeded resolver cache). Added [req-rs-015] (Section 7.5, consumer MUST): a non-update install (not `apm update` and not `--refresh`/re-resolution) MUST replay a lockfile entry that records a `resolved_commit` by reusing that recorded commit as the resolution result without issuing any network ref-resolution -- no commits-API query, no `git ls-remote`, no clone -- for that entry, PROVIDED drift detection against the manifest reference does not require re-resolution; on drift or under an explicit `apm update`/`--refresh` ([req-rs-011], [req-rs-012]) the consumer MUST re-resolve over the network as usual. The recorded `resolved_commit` is the lockfile's resolution anchor ([req-lk-003]); replaying it is scoped to entries recording a `resolved_commit` WITHOUT a `resolved_tag` (git-literal and untagged-branch entries per [req-rs-003]), leaves content integrity subject to `tree_sha256` ([req-lk-015]) and `resolved_hash` ([req-lk-013]), and defines drift locally as the manifest `ref` no longer being character-equal to the lockfile `resolved_ref`; this makes a warm install of an already-locked reference network-free at the resolution step, extending the reproducible-and-offline resolution guarantee to commit-pinned and branch-tracking entries not covered by the semver-range equivalence of [req-rs-004]. Section 7.11 and Section 11.3.2 Consumer enumerations and Appendix C updated. Statement count: 95 -> 96 (91 MUST, 5 SHOULD). Subject to the Section 9.3 amendment panel + comment window. |
 | 0.1.10  | 2026-07-04 | Spec-citation fold for Antigravity native instruction rules (closes the #1984 Mode-B silent-extension gate). Added [req-tg-005] (Section 8.5, consumer MUST): Antigravity instruction rules are deployed under `.agents/rules/<name>.md`, `applyTo` is rendered as `trigger: glob` plus `globs` (scalar or sequence), and compile-time deduplication only treats expected Antigravity rule filenames as deployed rules so unrelated `.md` files cannot suppress `AGENTS.md` content. Added `antigravity` to the Section 4.2.1 canonical target set and clarified that `all` excludes explicit-only targets. Statement count: 96 -> 97 (92 MUST, 5 SHOULD). |
+| 0.1.11  | 2026-07-09 | Spec-guardian editorial+defensive fold on the Antigravity instruction-rule contract (no new normative statements; statement count remains 97 (92 MUST, 5 SHOULD)). Section 4.2.1: defined the **auto-detectable** vs **explicit-only** target taxonomy deterministically (a target is auto-detectable when the OpenAPM Target Registry publishes at least one detection predicate) and rewrote the `all` expansion to key off it, naming `agent-skills` and `antigravity` as the v0.1 explicit-only set (with a Section 8.4 cross-reference). [req-tg-001] extended: a target registered without a detection predicate MUST NOT be auto-detected and MUST be excluded from `all`, generalising the prior `agent-skills`-only clause to cover `antigravity`. [req-tg-005] extended: pinned a canonical `globs` representation (YAML scalar for exactly one glob, YAML block sequence for two or more, no frontmatter block when `applyTo` is absent) so deployed-file content hashes are reproducible across implementations; redefined the deduplication scope from "expected Antigravity rule filenames" to filenames derived from the currently-resolved instruction primitives recorded in `apm.lock.yaml` and the manifest, closing a fail-open interpretation where an unrelated `.agents/rules/*.md` file could suppress `AGENTS.md` content; lowercased the `antigravity` identifier and added an editorial note scoping the normative citation of the concrete deploy path. [req-tg-002] subdirectory-partition list updated to include `.agents/rules/`. No normative count change. |
 
 Errata (none at publication).
 

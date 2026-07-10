@@ -308,7 +308,7 @@ def _check_orphaned_packages():
             from ..models.apm_package import APMPackage
 
             apm_package = APMPackage.from_apm_yml(Path(APM_YML_FILENAME))
-            declared_deps = apm_package.get_apm_dependencies()
+            declared_deps = apm_package.get_all_apm_dependencies()
             lockfile = LockFile.read(get_lockfile_path(Path.cwd()))
             expected = _build_expected_install_paths(declared_deps, lockfile, apm_modules_dir)
         except Exception:

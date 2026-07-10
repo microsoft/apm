@@ -141,6 +141,7 @@ class LockfileBuilder:
             # overwriting it -- otherwise the uninstalled packages disappear.
             lockfile = self._maybe_merge_partial(lockfile, lockfile_path, _LF)
             self._preserve_existing_mcp_state(lockfile)
+            self._preserve_existing_lsp_state(lockfile)
             self._preserve_existing_local_state(lockfile)
             self._preserve_existing_revision_pin_tags(lockfile)
 
@@ -177,6 +178,34 @@ class LockfileBuilder:
         intended = self.ctx.intended_dep_keys or set()
         return any(key != _SELF_KEY and key not in intended for key in existing.dependencies)
 
+    def _reconcile_cross_package_deployed_files(self) -> None:
+        """Strip a stale ownership claim when two dep_keys report the same path.
+
+        ``ctx.package_deployed_files`` is populated once per dep_key,
+        independently, by that dep's own integration call (see
+        ``install/template.py``). When two different packages' primitives
+        resolve to the same on-disk path -- a name collision, e.g. two repos
+        both shipping a skill called ``shared-topic`` -- each package's own
+        integration call correctly and independently reports "I wrote this
+        path" at the moment it ran. Under sequential integration
+        (``install_order``), a later dep_key's write physically overwrites an
+        earlier one's at the same path, so only the last dep_key to claim a
+        given path is telling the truth by the time the lockfile is written.
+
+        Without this pass, every dep_key that ever claimed a colliding path
+        keeps it in the final lockfile, even though only one of them actually
+        owns it on disk -- a lockfile integrity bug: a future
+        ``apm uninstall``/``apm audit`` on a "losing" dep would act on a file
+        it does not control.
+        """
+        package_deployed_files = self.ctx.package_deployed_files
+        last_owner: dict[str, str] = {}
+        for dep_key, files in package_deployed_files.items():
+            for f in files:
+                last_owner[f] = dep_key  # dict iteration is insertion order -> last write wins
+        for dep_key, files in package_deployed_files.items():
+            package_deployed_files[dep_key] = [f for f in files if last_owner[f] == dep_key]
+
     def _attach_deployed_files(self, lockfile: LockFile) -> None:
         """Attach per-dependency deployed-file manifests, unioning targets.
 
@@ -189,6 +218,7 @@ class LockfileBuilder:
         """
         from apm_cli.install.manifest_reconcile import union_preserving
 
+        self._reconcile_cross_package_deployed_files()
         existing = self.ctx.existing_lockfile
         for dep_key, locked_dep in lockfile.dependencies.items():
             current = list(self.ctx.package_deployed_files.get(dep_key, []))
@@ -311,11 +341,26 @@ class LockfileBuilder:
             # these carried-forward fields against the current manifest.
             lockfile.mcp_servers = list(self.ctx.existing_lockfile.mcp_servers)
             lockfile.mcp_configs = copy.deepcopy(self.ctx.existing_lockfile.mcp_configs)
+            lockfile.mcp_config_provenance = copy.deepcopy(
+                self.ctx.existing_lockfile.mcp_config_provenance
+            )
             if self.ctx.logger:
                 self.ctx.logger.verbose_detail(
                     "MCP state unchanged -- carrying forward "
                     f"{len(lockfile.mcp_servers)} server(s), "
                     f"{len(lockfile.mcp_configs)} config(s)"
+                )
+
+    def _preserve_existing_lsp_state(self, lockfile: LockFile) -> None:
+        """Keep LSP fields until LSP integration reconciles them later in install."""
+        if self.ctx.existing_lockfile:
+            lockfile.lsp_servers = list(self.ctx.existing_lockfile.lsp_servers)
+            lockfile.lsp_configs = copy.deepcopy(self.ctx.existing_lockfile.lsp_configs)
+            if self.ctx.logger:
+                self.ctx.logger.verbose_detail(
+                    "LSP state unchanged -- carrying forward "
+                    f"{len(lockfile.lsp_servers)} server(s), "
+                    f"{len(lockfile.lsp_configs)} config(s)"
                 )
 
     def _preserve_existing_local_state(self, lockfile: LockFile) -> None:
