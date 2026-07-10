@@ -6,7 +6,7 @@ import urllib.parse
 
 
 def _get_ghes_host() -> str:
-    """Return the normalised GITHUB_HOST env value (cached per process)."""
+    """Return the normalised GITHUB_HOST env value."""
     return os.environ.get("GITHUB_HOST", "").strip().lower().split("/")[0]
 
 

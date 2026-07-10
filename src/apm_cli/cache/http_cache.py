@@ -234,9 +234,12 @@ class HttpCache:
         with contextlib.suppress(OSError):
             os.utime(str(entry_path), None)
 
-        # Update tracked size estimate for fast-path in _enforce_size_cap
+        # Update tracked size with an upper-bound estimate. Over-counting is
+        # intentional: it triggers a real scan sooner, correcting the estimate,
+        # rather than delaying eviction. The scan in _enforce_size_cap resets
+        # _tracked_size to the real total once it runs.
         if self._tracked_size is not None:
-            self._tracked_size += len(body) + 256  # body + metadata overhead estimate
+            self._tracked_size += len(body) + 512  # body + metadata upper-bound estimate
 
         # Enforce size cap
         self._enforce_size_cap()

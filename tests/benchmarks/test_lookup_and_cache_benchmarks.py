@@ -64,9 +64,9 @@ class TestHasDependencyScaling:
         small_tree = _build_tree(50)
         large_tree = _build_tree(5000)
 
-        # Look up a URL that exists (last added)
-        small_url = "https://github.com/org/pkg-49"
-        large_url = "https://github.com/org/pkg-4999"
+        # Look up by repo identity (owner/repo) -- the format DependencyReference uses
+        small_url = "org/pkg-49"
+        large_url = "org/pkg-4999"
 
         t_small = _median_time(lambda: small_tree.has_dependency(small_url), repeats=1000)
         t_large = _median_time(lambda: large_tree.has_dependency(large_url), repeats=1000)
@@ -87,10 +87,10 @@ class TestHasDependencyScaling:
     def test_miss_is_also_constant(self):
         """Negative lookups (URL not in tree) must also be O(1)."""
         tree = _build_tree(5000)
-        missing_url = "https://github.com/org/does-not-exist"
+        missing_url = "org/does-not-exist"
 
         t = _median_time(lambda: tree.has_dependency(missing_url), repeats=1000)
-        # Must be essentially free (< 1 microsecond median)
+        # Must be essentially free (< 100 microseconds median)
         assert t < 1e-4, f"Negative lookup took {t:.6f}s"
 
     def test_index_consistency(self):
@@ -100,7 +100,7 @@ class TestHasDependencyScaling:
             url = node.dependency_ref.repo_url
             if url:
                 assert tree.has_dependency(url)
-        assert not tree.has_dependency("https://github.com/no/such-repo")
+        assert not tree.has_dependency("no/such-repo")
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +128,7 @@ class TestHttpCacheSizeCapFastPath:
             cache.store(url, body, headers={"Cache-Control": "max-age=300"})
 
         t = _median_time(_store_one, repeats=20)
-        # Fast-path store (no directory walk) should be < 5ms
+        # Fast-path store (no directory walk) should be < 50ms
         assert t < 0.05, f"Store with fast-path took {t:.4f}s (expected < 50ms)"
 
     def test_many_stores_scale_linearly(self, tmp_path: Path):
