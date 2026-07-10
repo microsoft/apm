@@ -526,8 +526,8 @@ def run(ctx: InstallContext) -> None:
     # the pre-refactor mega-function.
     detect_target(
         project_root=ctx.project_root,
-        explicit_target=_explicit,
-        config_target=config_target,
+        explicit_target=_explicit if isinstance(_explicit, str) else None,
+        config_target=config_target if isinstance(config_target, str) else None,
     )
 
     # ------------------------------------------------------------------
