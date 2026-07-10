@@ -114,17 +114,14 @@ def _add_tree_children(
     parent_branch,
     parent_key: str,
     children_map: dict[str, list],
-    has_rich: bool,
 ) -> None:
     """Add every transitive dependency to a Rich tree without a depth limit."""
     branches = {(): parent_branch}
     for child_dep, path, _, is_circular in _walk_tree_children(parent_key, children_map):
         child_name = _dep_display_name(child_dep)
         suffix = " (circular)" if is_circular else ""
-        child_branch = (
-            branches[path[:-1]].add(f"[dim]{child_name}{suffix}[/dim]") if has_rich else child_name
-        )
-        if has_rich and not is_circular:
+        child_branch = branches[path[:-1]].add(f"[dim]{child_name}{suffix}[/dim]")
+        if not is_circular:
             branches[path] = child_branch
 
 
@@ -446,7 +443,7 @@ def _show_scope_deps(scope_label, apm_dir, logger, console, has_rich, insecure_o
             logger.info("Run 'apm prune' to remove orphaned packages")
 
 
-@deps.command(name="list", help="List installed APM dependencies")
+@deps.command(name="list", help="List manifest- and lockfile-resolved APM dependencies")
 @click.option(
     "--global",
     "-g",
@@ -655,7 +652,7 @@ def _build_dep_tree(apm_dir):
     return result
 
 
-@deps.command(help="Show dependency tree structure")
+@deps.command(help="Show the complete lockfile-resolved dependency tree")
 @click.option(
     "--global",
     "-g",
@@ -708,14 +705,14 @@ def tree(global_):
                             prim_summary = _format_primitive_counts(_count_primitives(install_path))
                             if prim_summary:
                                 branch.add(f"[dim]{prim_summary}[/dim]")
-                        _add_tree_children(branch, dep.get_unique_key(), children_map, has_rich)
+                        _add_tree_children(branch, dep.get_unique_key(), children_map)
                     for dep in unresolved:
                         display = _dep_display_name(dep)
                         branch = root_tree.add(
                             f"[yellow]{display} (lockfile parent unavailable; "
                             "run apm install to rebuild graph)[/yellow]"
                         )
-                        _add_tree_children(branch, dep.get_unique_key(), children_map, has_rich)
+                        _add_tree_children(branch, dep.get_unique_key(), children_map)
                 console.print(root_tree)
             else:
                 click.echo(f"{project_name} (local)")

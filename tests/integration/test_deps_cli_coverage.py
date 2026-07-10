@@ -189,13 +189,13 @@ class TestDepDisplayName:
 class TestAddTreeChildren:
     """Tests for _add_tree_children helper."""
 
-    def test_add_children_no_rich(self):
-        """Add children without Rich console."""
+    def test_add_children_empty_map(self):
+        """An empty child map leaves the Rich branch unchanged."""
         parent_branch = MagicMock()
         parent_repo_url = "https://github.com/owner/parent"
         children_map = {}
 
-        _add_tree_children(parent_branch, parent_repo_url, children_map, False)
+        _add_tree_children(parent_branch, parent_repo_url, children_map)
 
         # No children, so parent_branch.add should not be called
         parent_branch.add.assert_not_called()
@@ -217,7 +217,7 @@ class TestAddTreeChildren:
 
         children_map = {parent_repo_url: [mock_child]}
 
-        _add_tree_children(parent_branch, parent_repo_url, children_map, True)
+        _add_tree_children(parent_branch, parent_repo_url, children_map)
 
         # Parent should have added child
         parent_branch.add.assert_called_once()
@@ -247,7 +247,7 @@ class TestAddTreeChildren:
 
         children_map = {parent_repo_url: [mock_child1, mock_child2]}
 
-        _add_tree_children(parent_branch, parent_repo_url, children_map, True)
+        _add_tree_children(parent_branch, parent_repo_url, children_map)
 
         # Parent should have added both children
         assert parent_branch.add.call_count == 2
@@ -277,10 +277,11 @@ class TestAddTreeChildren:
             "owner/child": [repeated_parent],
         }
 
-        _add_tree_children(parent_branch, parent_repo_url, children_map, True)
+        _add_tree_children(parent_branch, parent_repo_url, children_map)
 
         parent_branch.add.assert_called_once()
-        child_branch.add.assert_not_called()
+        child_branch.add.assert_called_once()
+        assert "(circular)" in child_branch.add.call_args.args[0]
 
     def test_add_children_with_no_children_map_entry(self):
         """No children for parent means nothing is added."""
@@ -288,7 +289,7 @@ class TestAddTreeChildren:
         parent_repo_url = "https://github.com/owner/parent"
         children_map = {}
 
-        _add_tree_children(parent_branch, parent_repo_url, children_map, True)
+        _add_tree_children(parent_branch, parent_repo_url, children_map)
 
         parent_branch.add.assert_not_called()
 

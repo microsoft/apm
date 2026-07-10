@@ -133,26 +133,17 @@ class TestDepsListSourceLabel:
 class TestAddTreeChildren:
     def test_no_children_does_nothing(self) -> None:
         parent = MagicMock()
-        _add_tree_children(parent, "owner/repo", {}, has_rich=False)
+        _add_tree_children(parent, "owner/repo", {})
         parent.add.assert_not_called()
 
-    def test_adds_child_dep_names_no_rich(self) -> None:
-        """With has_rich=False the parent branch add is not called (strings are used)."""
-        child = _make_dep("child/repo", version="1.0.0", repo_url="child/repo")
-        parent = MagicMock()
-        children_map = {"owner/repo": [child]}
-        # has_rich=False: child_branch is a string, parent.add is NOT called
-        _add_tree_children(parent, "owner/repo", children_map, has_rich=False)
-        parent.add.assert_not_called()
-
-    def test_adds_child_dep_names_with_rich(self) -> None:
-        """With has_rich=True the parent branch .add() is called."""
+    def test_adds_child_dep_names(self) -> None:
+        """The Rich parent branch receives each child."""
         child = _make_dep("child/repo", version="1.0.0", repo_url="child/repo")
         parent = MagicMock()
         child_branch = MagicMock()
         parent.add.return_value = child_branch
         children_map = {"owner/repo": [child]}
-        _add_tree_children(parent, "owner/repo", children_map, has_rich=True)
+        _add_tree_children(parent, "owner/repo", children_map)
         parent.add.assert_called_once()
 
     def test_cycle_guard_marks_repeated_ancestor(self) -> None:
@@ -167,7 +158,7 @@ class TestAddTreeChildren:
         child_branch = MagicMock()
         parent.add.return_value = child_branch
 
-        _add_tree_children(parent, "owner/repo", children_map, has_rich=True)
+        _add_tree_children(parent, "owner/repo", children_map)
 
         parent.add.assert_called_once()
         child_branch.add.assert_called_once()
@@ -179,8 +170,7 @@ class TestAddTreeChildren:
         child_branch = MagicMock()
         parent.add.return_value = child_branch
         children_map = {"owner/repo": [child]}
-        _add_tree_children(parent, "owner/repo", children_map, has_rich=True)
-        # With has_rich=True the child name is wrapped in [dim] markup
+        _add_tree_children(parent, "owner/repo", children_map)
         call_args = parent.add.call_args[0][0]
         assert "[dim]" in call_args
 
