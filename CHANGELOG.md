@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Positional `apm install <url>` now exits non-zero when all packages fail
+  validation, matching manifest installs for reliable CI scripting. (#2131)
+
 ## [0.24.1] - 2026-07-10
 
 ### Fixed
