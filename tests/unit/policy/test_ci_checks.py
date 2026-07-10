@@ -417,6 +417,57 @@ class TestConfigConsistency:
         assert not result.passed
         assert any("my-server" in d and "differs" in d for d in result.details)
 
+    def test_fail_local_path_subpackage_mcp_config_drift(self, tmp_path):
+        """A local sub-package MCP source change must differ from its lock baseline."""
+        package = tmp_path / "packages" / "agent-config"
+        package.mkdir(parents=True)
+        _write_apm_yml(tmp_path, deps=["./packages/agent-config"])
+        (package / "apm.yml").write_text(
+            textwrap.dedent("""\
+                name: agent-config
+                version: 1.0.0
+                dependencies:
+                  mcp:
+                    - name: shadcn
+                      registry: false
+                      transport: stdio
+                      command: echo
+                      args: [changed]
+            """),
+            encoding="utf-8",
+        )
+        _write_lockfile(
+            tmp_path,
+            textwrap.dedent("""\
+                lockfile_version: '1'
+                generated_at: '2025-01-01T00:00:00Z'
+                dependencies:
+                  - repo_url: _local/agent-config
+                    source: local
+                    local_path: ./packages/agent-config
+                    depth: 1
+                    deployed_files: []
+                mcp_configs:
+                  shadcn:
+                    name: shadcn
+                    registry: false
+                    transport: stdio
+                    command: echo
+                    args: [ready]
+                mcp_config_provenance:
+                  shadcn: agent-config
+            """),
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
+
+        manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_config_consistency(manifest, lock)
+
+        assert not result.passed
+        assert result.details == ["shadcn: config differs from lockfile baseline"]
+
     def test_transitive_mcp_server_not_flagged_as_orphan(self, tmp_path):
         """A server declared by a local-path sub-package is exempt from orphan.
 

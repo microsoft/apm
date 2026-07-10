@@ -231,10 +231,22 @@ def _check_config_consistency(
     lock: LockFile,
 ) -> CheckResult:
     """Verify MCP server configs match lockfile baseline."""
+    from ..deps.path_anchoring import resolve_local_dep_dir
     from ..drift import detect_config_drift
     from ..integration.mcp_integrator import MCPIntegrator
+    from ..models.apm_package import APMPackage
 
     mcp_deps = manifest.get_all_mcp_dependencies()
+    for locked_dep in lock.get_package_dependencies():
+        if locked_dep.source != "local":
+            continue
+        package_manifest = (
+            resolve_local_dep_dir(locked_dep, lock, manifest.package_path) / "apm.yml"
+        )
+        if package_manifest.exists():
+            package = APMPackage.from_apm_yml(package_manifest)
+            mcp_deps.extend(package.get_mcp_dependencies())
+    mcp_deps = MCPIntegrator.deduplicate(mcp_deps)
     current_configs = MCPIntegrator.get_server_configs(mcp_deps)
     stored_configs = lock.mcp_configs or {}
 
