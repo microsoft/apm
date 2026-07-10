@@ -135,10 +135,18 @@ class TestCurrentInstallGovernance:
         from apm_cli.install.manifest_reconcile import install_governance
 
         targets = [_target("copilot", root_dir=".github", deploy_roots=[".agents"])]
-        file_roots, uri_schemes = install_governance(targets)
-        assert ".github" in file_roots
-        assert ".agents" in file_roots
+        file_prefixes, uri_schemes = install_governance(targets)
+        assert ".github/" in file_prefixes
+        assert ".agents/" in file_prefixes
         assert uri_schemes == set()
+
+    def test_shared_agents_root_is_partitioned_by_primitive_subdirectory(self):
+        from apm_cli.install.manifest_reconcile import install_governance
+
+        file_prefixes, _ = install_governance([_known("copilot")])
+
+        assert ".agents/skills/" in file_prefixes
+        assert ".agents/" not in file_prefixes
 
     def test_copilot_app_target_uses_uri_scheme(self, tmp_path):
         from apm_cli.install.manifest_reconcile import install_governance
@@ -238,6 +246,23 @@ class TestInactiveTargetGhostDrop:
         )
         assert claude_file in files
         assert ghost not in files
+
+    def test_union_preserves_declared_sibling_under_shared_agents_root(self):
+        """Copilot owns .agents/skills, not Antigravity's .agents/rules."""
+        from apm_cli.install.manifest_reconcile import union_preserving
+
+        rule = ".agents/rules/keep.md"
+        files, hashes = union_preserving(
+            current_files=[".agents/skills/demo/SKILL.md"],
+            current_hashes={},
+            prior_files=[rule],
+            prior_hashes={rule: "sha256:rule"},
+            targets=[_known("copilot")],
+            declared_targets=[_known("copilot"), _known("antigravity")],
+        )
+
+        assert rule in files
+        assert hashes[rule] == "sha256:rule"
 
     def test_union_declared_none_preserves_all_legacy(self):
         """No declared universe (auto-detect / --target-only consumer) keeps the

@@ -33,12 +33,12 @@ if TYPE_CHECKING:
 
 
 def install_governance(targets: list[TargetProfile]) -> tuple[set[str], set[str]]:
-    """Return ``(file_roots, uri_schemes)`` governed by *targets*.
+    """Return ``(file_prefixes, uri_schemes)`` governed by *targets*.
 
-    ``file_roots`` is the set of top-level managed directory names -- each
-    target's ``root_dir`` plus every primitive ``deploy_root`` override (the
-    ``copilot`` target routes its ``skills`` primitive to ``.agents`` via
-    ``deploy_root`` even though ``root_dir`` is ``.github``).
+    Dedicated target roots govern their full subtree. The shared ``.agents``
+    root is partitioned by primitive subdirectory so one active target cannot
+    claim a declared sibling's files (for example, Copilot's
+    ``.agents/skills`` versus Antigravity's ``.agents/rules``).
 
     ``uri_schemes`` is the set of lockfile URI schemes used by dynamic /
     user-machine targets (``copilot-app`` -> ``copilot-app-db://``,
@@ -47,7 +47,7 @@ def install_governance(targets: list[TargetProfile]) -> tuple[set[str], set[str]
     from apm_cli.integration.copilot_app_db import COPILOT_APP_URI_SCHEME
     from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
 
-    file_roots: set[str] = set()
+    file_prefixes: set[str] = set()
     uri_schemes: set[str] = set()
     for target in targets or []:
         name = getattr(target, "name", None)
@@ -58,18 +58,32 @@ def install_governance(targets: list[TargetProfile]) -> tuple[set[str], set[str]
             uri_schemes.add(COWORK_URI_SCHEME)
             continue
         root = getattr(target, "root_dir", None)
-        if root:
-            file_roots.add(str(root).split("/", 1)[0])
+        if root and str(root).rstrip("/") != ".agents":
+            file_prefixes.add(str(root).rstrip("/") + "/")
         primitives = getattr(target, "primitives", None)
         if isinstance(primitives, dict):
             for mapping in primitives.values():
                 deploy_root = getattr(mapping, "deploy_root", None)
-                if deploy_root:
-                    file_roots.add(str(deploy_root).split("/", 1)[0])
-    return file_roots, uri_schemes
+                base = str(deploy_root or root or "").rstrip("/")
+                if base != ".agents":
+                    continue
+                subdir = getattr(mapping, "subdir", None)
+                if subdir:
+                    file_prefixes.add(f"{base}/{str(subdir).strip('/')}/")
+                    continue
+                extension = getattr(mapping, "extension", None)
+                if extension:
+                    file_prefixes.add(f"{base}/{str(extension).strip('/')}")
+                else:
+                    # Compatibility for minimal TargetProfile stand-ins.
+                    file_prefixes.add(f"{base}/")
+        if str(root or "").rstrip("/") == ".agents":
+            for generated in getattr(target, "generated_files", ()) or ():
+                file_prefixes.add(f".agents/{str(generated).lstrip('/')}")
+    return file_prefixes, uri_schemes
 
 
-def is_governed_by_install(path: str, file_roots: set[str], uri_schemes: set[str]) -> bool:
+def is_governed_by_install(path: str, file_prefixes: set[str], uri_schemes: set[str]) -> bool:
     """Return ``True`` if *path* is owned by the current install's targets.
 
     File paths are matched by top-level directory; scheme URIs (e.g.
@@ -78,8 +92,7 @@ def is_governed_by_install(path: str, file_roots: set[str], uri_schemes: set[str
     if "://" in path:
         scheme = path.split("://", 1)[0] + "://"
         return scheme in uri_schemes
-    top = path.split("/", 1)[0]
-    return top in file_roots
+    return any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in file_prefixes)
 
 
 def union_preserving(
@@ -113,14 +126,14 @@ def union_preserving(
     universe to check against) the legacy preserve-all behaviour is kept so a
     genuine multi-target deploy is never clobbered (issue #1716).
     """
-    file_roots, uri_schemes = install_governance(targets)
-    allowed_roots: set[str] | None = None
+    file_prefixes, uri_schemes = install_governance(targets)
+    allowed_prefixes: set[str] | None = None
     allowed_schemes: set[str] | None = None
     if declared_targets is not None:
-        d_roots, d_schemes = install_governance(declared_targets)
+        declared_prefixes, d_schemes = install_governance(declared_targets)
         # Active targets are always legitimate (this run selected them), so a
         # ``--target`` that reaches outside the declared set is still honoured.
-        allowed_roots = file_roots | d_roots
+        allowed_prefixes = file_prefixes | declared_prefixes
         allowed_schemes = uri_schemes | d_schemes
     current_set = set(current_files or ())
     merged_hashes = dict(current_hashes or {})
@@ -128,12 +141,12 @@ def union_preserving(
     for path in prior_files or ():
         if path in current_set:
             continue
-        if is_governed_by_install(path, file_roots, uri_schemes):
+        if is_governed_by_install(path, file_prefixes, uri_schemes):
             continue
         if (
-            allowed_roots is not None
+            allowed_prefixes is not None
             and allowed_schemes is not None
-            and not is_governed_by_install(path, allowed_roots, allowed_schemes)
+            and not is_governed_by_install(path, allowed_prefixes, allowed_schemes)
         ):
             # Ghost: governed by no target the consumer declares. Drop it.
             if on_ghost_drop is not None:

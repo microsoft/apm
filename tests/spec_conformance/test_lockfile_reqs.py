@@ -266,6 +266,7 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe():
     from types import SimpleNamespace
 
     from apm_cli.install.manifest_reconcile import union_preserving
+    from apm_cli.integration.targets import KNOWN_TARGETS
 
     def target(name: str, root_dir: str | None = None):
         return SimpleNamespace(name=name, root_dir=root_dir, primitives={})
@@ -298,6 +299,19 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe():
     )
     assert indeterminate == prior
     assert indeterminate_hashes == prior_hashes
+
+    shared_rule = ".agents/rules/keep.md"
+    shared_files, shared_hashes = union_preserving(
+        current_files=[".agents/skills/demo/SKILL.md"],
+        current_hashes={},
+        prior_files=[shared_rule],
+        prior_hashes={shared_rule: "sha256:" + "c" * 64},
+        targets=[KNOWN_TARGETS["copilot"]],
+        declared_targets=[KNOWN_TARGETS["copilot"], KNOWN_TARGETS["antigravity"]],
+    )
+    assert shared_rule in shared_files
+    assert shared_rule in shared_hashes
+
     assert_spec_contains(
         "MUST remove a prior path attributable",
         "MUST preserve that path and its corresponding hash entry",
