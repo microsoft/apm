@@ -47,6 +47,7 @@ Claude (`PreToolUse`, `PostToolUse`) and Copilot (`preToolUse`,
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "**/*.py",
         "hooks": [
           {"type": "command", "command": "${PLUGIN_ROOT}/scripts/validate.sh", "timeout": 10}
         ]
