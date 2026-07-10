@@ -180,8 +180,10 @@ Source: `src/apm_cli/integration/instruction_integrator.py`,
 ### Canonical layout for marketplace publishers
 
 :::caution[Silent install drops can remove intended guardrails]
-`apm pack` accepts primitives from both `.apm/<type>/` and root convention
-directories (for example, an `instructions/` folder at the plugin root).
+`apm pack` always accepts primitives from `.apm/<type>/`. It also accepts root
+convention directories (for example, an `instructions/` folder at the plugin
+root) only for legacy manifests that omit `includes:`. Declaring
+`includes: auto` or an explicit list scopes local package content to `.apm/`.
 `apm install` does NOT discover instructions, commands, or prompts placed
 in root convention directories. Packages that rely on these primitives for
 security guardrails or policy enforcement will install silently incomplete,

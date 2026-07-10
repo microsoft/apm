@@ -134,10 +134,12 @@ my-monorepo/
 ```
 
 > **Important -- use `.apm/<type>/` for every primitive in each plugin.**
-> `apm pack` accepts primitives from both `.apm/<type>/` and root
-> convention directories (e.g. `instructions/` at the plugin root), but
-> `apm install` only discovers instructions, commands, and prompts under
-> `.apm/<type>/`. Authoring `packages/plugin-a/instructions/style.instructions.md`
+> `apm pack` always accepts primitives from `.apm/<type>/`. Root convention
+> directories (e.g. `instructions/` at the plugin root) are also accepted only
+> for legacy manifests that omit `includes:`; declaring `includes: auto` or an
+> explicit list scopes local package content to `.apm/`. `apm install` only
+> discovers instructions, commands, and prompts under `.apm/<type>/`. Authoring
+> `packages/plugin-a/instructions/style.instructions.md`
 > instead of `packages/plugin-a/.apm/instructions/style.instructions.md`
 > will produce a bundle that packs correctly but installs silently
 > incomplete. See [Pack a bundle -- source layout and install-time

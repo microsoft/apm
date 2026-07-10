@@ -1212,6 +1212,18 @@ class TestExportPluginBundle:
         result = export_plugin_bundle(project, out)
         assert (result.bundle_path / "agents" / "root-bot.agent.md").exists()
 
+    def test_declared_includes_excludes_root_level_plugin_dirs(self, tmp_path):
+        """Declared includes scopes plugin content to the .apm directory."""
+        project = _setup_plugin_project(tmp_path)
+        _write_apm_yml(project, extra={"includes": "auto"})
+        root_agents = project / "agents"
+        root_agents.mkdir()
+        (root_agents / "root-bot.agent.md").write_text("root bot")
+
+        result = export_plugin_bundle(project, tmp_path / "build")
+
+        assert not (result.bundle_path / "agents" / "root-bot.agent.md").exists()
+
 
 class TestExportPluginBundleViaPackBundle:
     """Verify pack_bundle(fmt='plugin') delegates correctly."""
