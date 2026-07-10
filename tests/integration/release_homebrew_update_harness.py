@@ -28,11 +28,8 @@ def _assert_release_workflow_has_no_homebrew_push(workflow_path: Path) -> None:
 
 
 def _replace_assignment(formula: str, key: str, value: str) -> str:
-    updated, count = re.subn(
-        rf'(?m)^  {re.escape(key)} "[^"]*"$',
-        f'  {key} "{value}"',
-        formula,
-    )
+    assignment = re.compile(rf'(?m)^  {re.escape(key)} "[^"]*"$')
+    updated, count = assignment.subn(f'  {key} "{value}"', formula)
     if count != 1:
         raise RuntimeError(f"formula must contain exactly one {key} assignment")
     return updated
