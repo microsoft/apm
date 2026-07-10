@@ -67,7 +67,10 @@ The `<ref>` accepts:
 | `executables`      | object              | see section      | no       | Org ceiling for executable-primitive trust (hooks, bin, self-defined MCP, canvas). See [executables](#executables). |
 | `bin_deploy`       | object              | see section      | no       | DEPRECATED alias folded into `executables.deny` (bin-scoped). See [bin_deploy](#bin_deploy). |
 
-Unknown top-level keys produce a warning, never an error -- so newer policy files load on older clients.
+Unknown top-level keys produce a warning, never an error -- so newer policy
+files load on older clients. `apm policy status --json` returns these in the
+`warnings` array. Known fields with the wrong native YAML type are rejected
+instead of being silently replaced by defaults.
 
 ## Enforcement modes
 

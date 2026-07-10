@@ -196,7 +196,7 @@ def _verify_hash_pin(
 POLICY_CACHE_DIR = ".policy-cache"
 DEFAULT_CACHE_TTL = 3600  # 1 hour
 MAX_STALE_TTL = 7 * 24 * 3600  # 7 days -- stale cache usable on refresh failure
-CACHE_SCHEMA_VERSION = "3"  # Bump when cache format changes to auto-invalidate
+CACHE_SCHEMA_VERSION = "4"  # Bump when cache format changes to auto-invalidate
 
 
 @dataclass
@@ -229,6 +229,7 @@ class PolicyFetchResult:
     cache_stale: bool = False  # True if cache was served past TTL
     fetch_error: str | None = None  # Network/parse error on refresh attempt
     outcome: str = ""  # See docstring for valid values
+    warnings: list[str] = field(default_factory=list)
 
     # -- Hash-pin fields (#827 supply-chain hardening) --
     # raw_bytes_hash is the digest of the leaf policy bytes off the wire,
@@ -502,6 +503,7 @@ def _resolve_and_persist_chain(
             policy_override=next_ref,
             no_cache=False,
         )
+        fetch_result.warnings.extend(parent_result.warnings)
 
         if parent_result.policy is None:
             # Parent fetch failed -- merge what we have so far and warn.
@@ -541,7 +543,13 @@ def _resolve_and_persist_chain(
 
     cache_key = _strip_source_prefix(leaf_source) if leaf_source else ""
     if cache_key:
-        _write_cache(cache_key, merged, project_root, chain_refs=chain_refs)
+        _write_cache(
+            cache_key,
+            merged,
+            project_root,
+            chain_refs=chain_refs,
+            warnings=fetch_result.warnings,
+        )
 
     fetch_result.policy = merged
 
@@ -628,7 +636,7 @@ def _load_from_file(path: Path, *, expected_hash: str | None = None) -> PolicyFe
         return mismatch
 
     try:
-        policy, _warnings = load_policy(content)
+        policy, warnings = load_policy(content)
         outcome = "empty" if _is_policy_empty(policy) else "found"
         actual_hash = (
             _compute_hash_normalized(content, expected_hash) if expected_hash is not None else None
@@ -639,9 +647,14 @@ def _load_from_file(path: Path, *, expected_hash: str | None = None) -> PolicyFe
             outcome=outcome,
             raw_bytes_hash=actual_hash,
             expected_hash=expected_hash,
+            warnings=warnings,
         )
     except PolicyValidationError as e:
-        return PolicyFetchResult(error=f"Invalid policy file {path}: {e}", outcome="malformed")
+        return PolicyFetchResult(
+            error=f"Invalid policy file {path}: {e}",
+            outcome="malformed",
+            warnings=e.warnings,
+        )
 
 
 def _auto_discover(
@@ -811,6 +824,7 @@ def _fetch_from_url(
                 outcome=outcome,
                 raw_bytes_hash=cache_entry.raw_bytes_hash or None,
                 expected_hash=expected_hash,
+                warnings=cache_entry.warnings,
             )
 
     fetch_error: str | None = None
@@ -860,12 +874,13 @@ def _fetch_from_url(
         return mismatch
 
     try:
-        policy, _warnings = load_policy(content)
+        policy, warnings = load_policy(content)
     except PolicyValidationError as e:
         return PolicyFetchResult(
             error=f"Invalid policy from {url}: {e}",
             source=source_label,
             outcome="malformed",
+            warnings=e.warnings,
         )
 
     chain_refs = [url]
@@ -876,6 +891,7 @@ def _fetch_from_url(
         project_root,
         chain_refs=chain_refs,
         raw_bytes_hash=actual_hash,
+        warnings=warnings,
     )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
@@ -884,6 +900,7 @@ def _fetch_from_url(
         outcome=outcome,
         raw_bytes_hash=actual_hash,
         expected_hash=expected_hash,
+        warnings=warnings,
     )
 
 
@@ -913,6 +930,7 @@ def _fetch_from_repo(
                 outcome=outcome,
                 raw_bytes_hash=cache_entry.raw_bytes_hash or None,
                 expected_hash=expected_hash,
+                warnings=cache_entry.warnings,
             )
 
     content, error = _fetch_github_contents(repo_ref, "apm-policy.yml")
@@ -938,12 +956,13 @@ def _fetch_from_repo(
         return mismatch
 
     try:
-        policy, _warnings = load_policy(content)
+        policy, warnings = load_policy(content)
     except PolicyValidationError as e:
         return PolicyFetchResult(
             error=f"Invalid policy in {repo_ref}: {e}",
             source=source_label,
             outcome="malformed",
+            warnings=e.warnings,
         )
 
     chain_refs = [repo_ref]
@@ -954,6 +973,7 @@ def _fetch_from_repo(
         project_root,
         chain_refs=chain_refs,
         raw_bytes_hash=actual_hash,
+        warnings=warnings,
     )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
@@ -962,6 +982,7 @@ def _fetch_from_repo(
         outcome=outcome,
         raw_bytes_hash=actual_hash,
         expected_hash=expected_hash,
+        warnings=warnings,
     )
 
 
@@ -1063,6 +1084,7 @@ def _fetch_from_ado_repo(
                 outcome=outcome,
                 raw_bytes_hash=cache_entry.raw_bytes_hash or None,
                 expected_hash=expected_hash,
+                warnings=cache_entry.warnings,
             )
 
     content, error = _fetch_ado_contents(org, project, repo, "apm-policy.yml", host=host)
@@ -1084,12 +1106,13 @@ def _fetch_from_ado_repo(
         return mismatch
 
     try:
-        policy, _warnings = load_policy(content)
+        policy, warnings = load_policy(content)
     except PolicyValidationError as e:
         return PolicyFetchResult(
             error=f"Invalid policy in {repo_ref}: {e}",
             source=source_label,
             outcome="malformed",
+            warnings=e.warnings,
         )
 
     chain_refs = [repo_ref]
@@ -1100,6 +1123,7 @@ def _fetch_from_ado_repo(
         project_root,
         chain_refs=chain_refs,
         raw_bytes_hash=actual_hash,
+        warnings=warnings,
     )
     outcome = "empty" if _is_policy_empty(policy) else "found"
     return PolicyFetchResult(
@@ -1108,6 +1132,7 @@ def _fetch_from_ado_repo(
         outcome=outcome,
         raw_bytes_hash=actual_hash,
         expected_hash=expected_hash,
+        warnings=warnings,
     )
 
 
@@ -1211,6 +1236,7 @@ class _CacheEntry:
     age_seconds: int
     stale: bool  # True if past TTL (but within MAX_STALE_TTL)
     chain_refs: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     fingerprint: str = ""
     raw_bytes_hash: str = ""  # "<algo>:<hex>" of leaf bytes off wire (#827)
 
@@ -1350,6 +1376,7 @@ def _stale_fallback_or_error(
             cache_age_seconds=cache_entry.age_seconds,
             fetch_error=fetch_error_msg,
             outcome="cached_stale",
+            warnings=cache_entry.warnings,
         )
     return PolicyFetchResult(
         error=fetch_error_msg,
@@ -1386,6 +1413,7 @@ def _detect_garbage(
                 cache_age_seconds=cache_entry.age_seconds,
                 fetch_error=msg,
                 outcome="cached_stale",
+                warnings=cache_entry.warnings,
             )
         return PolicyFetchResult(
             error=msg + " (possible captive portal or redirect)",
@@ -1405,6 +1433,7 @@ def _detect_garbage(
                 cache_age_seconds=cache_entry.age_seconds,
                 fetch_error=msg,
                 outcome="cached_stale",
+                warnings=cache_entry.warnings,
             )
         return PolicyFetchResult(
             error=msg,
@@ -1486,6 +1515,7 @@ def _read_cache_entry(
             age_seconds=age,
             stale=age > ttl,
             chain_refs=meta.get("chain_refs", [repo_ref]),
+            warnings=meta.get("warnings", []),
             fingerprint=meta.get("fingerprint", ""),
             raw_bytes_hash=raw_bytes_hash,
         )
@@ -1513,6 +1543,7 @@ def _read_cache(
         cached=True,
         cache_age_seconds=entry.age_seconds,
         outcome=outcome,
+        warnings=entry.warnings,
     )
 
 
@@ -1523,6 +1554,7 @@ def _write_cache(
     *,
     chain_refs: list[str] | None = None,
     raw_bytes_hash: str | None = None,
+    warnings: list[str] | None = None,
 ) -> None:
     """Write merged effective policy and metadata to cache atomically.
 
@@ -1566,6 +1598,7 @@ def _write_cache(
         "repo_ref": repo_ref,
         "cached_at": time.time(),
         "chain_refs": chain_refs if chain_refs is not None else [repo_ref],
+        "warnings": warnings or [],
         "schema_version": CACHE_SCHEMA_VERSION,
         "fingerprint": fingerprint,
         "raw_bytes_hash": raw_bytes_hash or "",

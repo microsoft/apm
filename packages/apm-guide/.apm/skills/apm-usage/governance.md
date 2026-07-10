@@ -22,6 +22,10 @@ environment-only so redirecting binary downloads remains invocation-scoped.
 
 ## Policy schema overview
 
+Unknown top-level keys are reported as warnings. Known fields with the wrong
+native YAML type are rejected; for example, `cache` must be a mapping and
+`dependencies.allow` must be a list.
+
 ```yaml
 name: "Contoso Engineering Policy"
 version: "1.0.0"

@@ -212,6 +212,18 @@ class TestCacheReadWrite(unittest.TestCase):
             self.assertTrue(result.cached)
             self.assertEqual(result.source, f"org:{repo_ref}")
 
+    def test_policy_warnings_survive_cache_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_ref = "contoso/.github"
+            warnings = ["Unknown top-level policy key: 'enforcment'"]
+
+            _write_cache(repo_ref, _make_test_policy(), root, warnings=warnings)
+
+            result = _read_cache(repo_ref, root)
+            self.assertIsNotNone(result)
+            self.assertEqual(result.warnings, warnings)
+
     def test_expired_cache(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
