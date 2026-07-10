@@ -69,6 +69,16 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev --extra build
 
+      # Keep the installer gate ahead of the broad unit suite so an unrelated
+      # platform test failure cannot hide installer-specific Windows evidence.
+      - name: Test install.ps1 end-to-end (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/windows/test-install-script.ps1
+
       # Unit tests run on every push for fast platform-regression signal.
       # Smoke is intentionally NOT included here: it duplicates ci-integration.yml's
       # merge-time smoke gate and burns a real codex binary download per platform
@@ -108,14 +118,6 @@ jobs:
         shell: pwsh
         run: |
           uv run pwsh scripts/windows/build-binary.ps1
-
-      - name: Test install.ps1 end-to-end (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/windows/test-install-script.ps1
 
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4
