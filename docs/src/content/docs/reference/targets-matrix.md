@@ -68,11 +68,12 @@ list before `compile` or `install`.
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
 | kiro     | `.kiro/` directory                            |
-| intellij | Global `github-copilot/intellij/` config directory |
+| intellij | Global `github-copilot/intellij/` config directory (MCP runtime discovery only) |
 
 IntelliJ-specific integration is MCP-only and writes JetBrains Copilot's
-user-scope `mcp.json`. Package file primitives use the Copilot profile.
-`intellij` does not participate in plain `all` expansion.
+user-scope `mcp.json`. That global signal does not auto-select file-primitive
+deployment. When `intellij` is selected explicitly, package file primitives use
+the Copilot profile. `intellij` does not participate in plain `all` expansion.
 
 `agent-skills` is a canonical target key; `antigravity` is explicit-only for
 auto-detection. Both are available with `--target` and can be listed in a
@@ -225,7 +226,9 @@ Kiro IDE.
 
 GitHub Copilot for JetBrains IDEs.
 
-- **Detection.** Global `github-copilot/intellij/` config directory.
+- **Detection.** MCP runtime discovery uses the global
+  `github-copilot/intellij/` config directory. It does not auto-select a
+  file-primitive target.
 - **Deploy directory.** User-scope `mcp.json`; see the
   [JetBrains integration guide](../integrations/ide-tool-integration/#jetbrains-intellij-idea-pycharm-goland-and-others)
   for OS-specific paths.

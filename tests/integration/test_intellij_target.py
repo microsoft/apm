@@ -155,10 +155,25 @@ class TestIntelliJCliE2E:
         assert "Unknown target" not in (result.output or "")
 
     @pytest.mark.requires_apm_binary
-    def test_mcp_install_writes_intellij_config(self, tmp_path: Path, apm_command: str) -> None:
-        """The real CLI install flow writes JetBrains Copilot's MCP config."""
+    @pytest.mark.parametrize(
+        ("target", "expect_claude"),
+        [
+            ("intellij", False),
+            ("intellij,claude", True),
+            ("all,intellij", True),
+        ],
+    )
+    def test_mcp_install_respects_composed_target_set(
+        self,
+        tmp_path: Path,
+        apm_command: str,
+        target: str,
+        expect_claude: bool,
+    ) -> None:
+        """The real CLI writes only configs selected by the target set."""
         project_dir = tmp_path / "project"
         project_dir.mkdir()
+        (project_dir / ".claude").mkdir()
         (project_dir / "apm.yml").write_text(_MINIMAL_APM_YML, encoding="ascii")
         fake_home = tmp_path / "home"
         fake_home.mkdir()
@@ -183,7 +198,7 @@ class TestIntelliJCliE2E:
                 "--mcp",
                 "test-http-server",
                 "--target",
-                "intellij",
+                target,
                 "--transport",
                 "http",
                 "--url",
@@ -220,6 +235,15 @@ class TestIntelliJCliE2E:
         )
         config = json.loads(config_path.read_text(encoding="utf-8"))
         assert config["servers"]["test-http-server"]["url"] == "https://example.com/mcp"
+
+        claude_config = project_dir / ".mcp.json"
+        assert claude_config.exists() is expect_claude
+        if expect_claude:
+            claude = json.loads(claude_config.read_text(encoding="utf-8"))
+            assert claude["mcpServers"]["test-http-server"]["url"] == "https://example.com/mcp"
+
+        if target == "intellij":
+            assert not (project_dir / ".vscode" / "mcp.json").exists()
 
 
 # ===========================================================================

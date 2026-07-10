@@ -840,6 +840,9 @@ def _handle_mcp_install(  # noqa: PLR0913
         registry=False if _is_self_defined else None,
         url=url,
     )
+    from ..core.target_detection import normalize_policy_targets
+
+    policy_targets = normalize_policy_targets(target or runtime)
 
     try:
         _pf_result, _pf_active = run_policy_preflight(
@@ -848,6 +851,7 @@ def _handle_mcp_install(  # noqa: PLR0913
             no_policy=no_policy,
             logger=logger,
             dry_run=logger.dry_run,
+            effective_target=policy_targets,
         )
     except PolicyBlockError:
         # Diagnostics already emitted by the helper + logger.

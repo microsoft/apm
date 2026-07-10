@@ -347,6 +347,14 @@ def _resolve_target_runtimes(
         # Single runtime mode - skip auto-discovery entirely.
         logger.progress(f"Targeting specific runtime: {runtime}")
         target_runtimes: list[str] = [runtime]
+    elif explicit_target is not None:
+        # A plural --target value is already parser-normalized. Use that exact
+        # runtime set instead of broad discovery so selecting IntelliJ does not
+        # also select adjacent runtimes that share its Copilot policy profile.
+        target_runtimes = (
+            [explicit_target] if isinstance(explicit_target, str) else list(explicit_target)
+        )
+        logger.progress(f"Targeting specific runtimes: {', '.join(target_runtimes)}")
     else:
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
 
