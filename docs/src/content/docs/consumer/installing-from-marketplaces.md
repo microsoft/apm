@@ -93,7 +93,7 @@ browse / install / update workflow works against:
 - **SSH URLs** -- `git@gitea.example.com:org/repo.git`. The host
   is extracted, classified, and routed through the matching fetcher.
   In-repository plugins keep this consumer-selected SSH transport when
-  APM writes their concrete `git:` plus `path:` entry to `apm.yml`.
+  APM writes their concrete `git:` and `path:` entry to `apm.yml`.
   HTTPS registrations likewise remain HTTPS.
 
 :::note[Hosted JSON is public HTTPS]

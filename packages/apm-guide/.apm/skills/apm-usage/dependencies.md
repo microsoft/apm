@@ -95,7 +95,7 @@ across protocols.
 A failed clone fails loudly, naming the URL and the protocol attempted.
 Explicit URL schemes are honored exactly.
 This includes marketplace installs: an in-repository plugin resolved from a
-consumer-registered SSH marketplace is persisted as SSH `git:` plus `path:`;
+consumer-registered SSH marketplace is persisted as SSH `git:` and `path:`;
 an HTTPS registration remains HTTPS.
 
 Force the initial protocol for shorthand:

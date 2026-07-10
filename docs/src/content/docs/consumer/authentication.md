@@ -57,11 +57,6 @@ where the REST API is restricted or returns 410 -- if `git clone` works, so
 does `apm install`. For self-hosted hosts, explicit `git:` / SSH URLs carry
 the host in the dependency. Set `GITLAB_HOST` (or `APM_GITLAB_HOSTS`) only
 when you want bare-host or shorthand forms to classify as GitLab.
-Marketplace plugins inside a repository also keep the consumer-selected
-registration transport in their generated `git:` plus `path:` dependency.
-An SSH registration therefore continues to use existing SSH keys instead of
-being rewritten to HTTPS.
-
 If you need to fall back to the GitLab REST API (for environments where git
 transport is not available), set `GITLAB_APM_PAT`:
 
@@ -106,6 +101,14 @@ apm install                                             # APM picks up the cache
 There is no APM-specific env var for these hosts by design: if you can `git clone`, APM can install. Configure your credential helper once (`git credential-manager`, Keychain, libsecret, plain-text store -- whatever your shell uses) and `apm install` follows the same path git already trusts.
 
 For non-interactive environments (CI, devcontainers), set the credential through your CI's secret store and configure `git config --global credential.helper store` against a runtime-injected `~/.git-credentials` file.
+
+## Marketplace transport
+
+If you registered a git-backed marketplace with an SSH URL, plugins
+installed from that repository keep using SSH. APM preserves the
+registration transport in the generated `git:` and `path:` dependency
+instead of rewriting it to HTTPS. See
+[Installing from marketplaces](../installing-from-marketplaces/#supported-marketplace-sources).
 
 ## Going further
 
