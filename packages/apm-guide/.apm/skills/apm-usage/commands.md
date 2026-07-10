@@ -40,7 +40,12 @@ When a default registry is configured, plain shorthand deps (`owner/repo#<ref>`)
 1. `--target` flag (highest; CSV form: `--target claude,cursor`).
 2. `apm.yml` `targets:` list (or singular `target:` sugar).
 3. `apm config set target <value>` default.
-4. Auto-detect from filesystem signals (`.claude/` or `CLAUDE.md` -> claude, `.cursor/` -> cursor, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` -> copilot, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.opencode/` -> opencode, `.windsurf/` -> windsurf, `.kiro/` -> kiro, the user-scope JetBrains Copilot MCP config directory `github-copilot/intellij/` -- `%LOCALAPPDATA%\github-copilot\intellij\` on Windows, `~/Library/Application Support/github-copilot/intellij/` on macOS, `~/.local/share/github-copilot/intellij/` on Linux -> intellij). All signals except JetBrains are project-scoped repo markers; the JetBrains signal is a machine-global user-scope directory, so once the Copilot plugin is installed it is detected for every project on that machine.
+4. Auto-detect file-primitive targets from project signals (`.claude/` or `CLAUDE.md` -> claude, `.cursor/` -> cursor, `.github/copilot-instructions.md` or any of `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` -> copilot, `.codex/` -> codex, `.gemini/` or `GEMINI.md` -> gemini, `.opencode/` -> opencode, `.windsurf/` -> windsurf, `.kiro/` -> kiro).
+
+MCP runtime discovery separately recognizes the user-scope JetBrains Copilot
+config directory (`github-copilot/intellij/`). That machine-global signal can
+select IntelliJ for MCP configuration in every project, but it never
+auto-selects a file-primitive target.
 
 `apm install` prints a one-line provenance summary before any mutation:
 

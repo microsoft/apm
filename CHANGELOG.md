@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install --target intellij` no longer rejected as "Unknown target" -- IntelliJ is now a valid MCP-only pseudo-target that configures the JetBrains Copilot plugin without deploying file-level primitives.
+  (by @sergio-sisternes-epam; closes #1957) (#2041)
+
 ## [0.24.1] - 2026-07-10
 
 ### Fixed
