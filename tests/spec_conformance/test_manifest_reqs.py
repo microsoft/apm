@@ -394,7 +394,7 @@ def test_consumer_deploys_kiro_v1_hook_schema():
     assert_spec_contains(
         "target-native hook documents for Kiro MUST use the Kiro v1 hook schema",
         'top-level `"version": "v1"` field and an array-valued `"hooks"` field',
-        "command `action` MAY contain a numeric `timeout` field",
+        "numeric `timeout`, and boolean `enabled`",
         "MUST NOT emit the superseded `when`/`then` hook shape",
         "MUST accept native Kiro v1 hook documents",
     )

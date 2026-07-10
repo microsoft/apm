@@ -82,9 +82,24 @@ Kiro-targeted packages may also use the native Kiro v1 shape. APM accepts
 `{"version": "v1", "hooks": [...]}` and deploys each array entry as a
 standalone v1 document. Portable Claude and Copilot events are translated to
 Kiro's PascalCase `trigger` names, matcher groups become `matcher`, and command
-actions become `action: {"type": "command", ...}`. Native-only triggers such
-as `PreTaskExec`, `PostTaskExec`, `PostFileCreate`, `PostFileSave`, and
-`PostFileDelete` pass through for Kiro.
+actions become `action: {"type": "command", ...}`. Kiro stores `timeout` beside
+`action`, not inside it. Native `description`, `timeout`, and `enabled` fields
+are preserved. Native-only triggers such as `PreTaskExec`, `PostTaskExec`,
+`PostFileCreate`, `PostFileSave`, and `PostFileDelete` pass through for Kiro:
+
+```json
+{
+  "version": "v1",
+  "hooks": [{
+    "name": "lint on save",
+    "trigger": "PostFileSave",
+    "matcher": "\\.py$",
+    "action": {"type": "command", "command": "ruff check ."},
+    "timeout": 30,
+    "enabled": true
+  }]
+}
+```
 
 The `${PLUGIN_ROOT}`, `${CLAUDE_PLUGIN_ROOT}`, `${CURSOR_PLUGIN_ROOT}`, and `${KIRO_PLUGIN_ROOT}`
 tokens resolve to the installed package root and are rewritten per

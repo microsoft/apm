@@ -128,7 +128,8 @@ become one Kiro v1 JSON file (`version: "v1"` with a `hooks` array) per hook
 action in `.kiro/hooks/`, and MCP servers are written to
 `.kiro/settings/mcp.json` or `~/.kiro/settings/mcp.json` for `--global`.
 APM maps portable events to Kiro's PascalCase triggers and also accepts native
-Kiro v1 hook documents for target-specific triggers.
+Kiro v1 hook documents for target-specific triggers. Native hook-level
+`description`, `timeout`, and `enabled` fields are preserved.
 
 This target covers the documented Kiro IDE layout. Kiro CLI configuration
 differences are tracked separately; see [the targets matrix](../reference/targets-matrix/#kiro).

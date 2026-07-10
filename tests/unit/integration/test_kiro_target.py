@@ -275,8 +275,8 @@ def test_kiro_hooks_expand_each_apm_hook_to_individual_json(tmp_path: Path) -> N
                 "action": {
                     "type": "command",
                     "command": "python .kiro/hooks/hookify/hooks/check.py",
-                    "timeout": 10,
                 },
+                "timeout": 10,
             }
         ],
     }
@@ -441,12 +441,14 @@ def test_kiro_hooks_accept_native_v1_documents(tmp_path: Path) -> None:
                 "hooks": [
                     {
                         "name": "check task",
+                        "description": "Validate the task before execution",
                         "trigger": "PreTaskExec",
                         "matcher": "build",
+                        "timeout": 15,
+                        "enabled": False,
                         "action": {
                             "type": "command",
                             "command": "python ${PLUGIN_ROOT}/hooks/check.py",
-                            "timeout": 15,
                         },
                     }
                 ],
@@ -470,12 +472,14 @@ def test_kiro_hooks_accept_native_v1_documents(tmp_path: Path) -> None:
         "hooks": [
             {
                 "name": "check task",
+                "description": "Validate the task before execution",
                 "trigger": "PreTaskExec",
                 "matcher": "build",
+                "timeout": 15,
+                "enabled": False,
                 "action": {
                     "type": "command",
                     "command": "python .kiro/hooks/native-hooks/hooks/check.py",
-                    "timeout": 15,
                 },
             }
         ],

@@ -8,6 +8,7 @@ so the shared integrator stays under the source-length guardrail.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from apm_cli.integration.hook_integrator import HookIntegrator
 
 _KIRO_EVENT_MAP = _HOOK_EVENT_MAP["kiro"]
+_log = logging.getLogger(__name__)
 
 
 def _safe_hook_slug(value: str, fallback: str = "hook") -> str:
@@ -50,23 +52,37 @@ def _kiro_matcher_from_matcher(matcher: dict) -> str | None:
     return None
 
 
+def _with_kiro_hook_fields(converted: dict, source: dict) -> dict:
+    """Carry hook-level Kiro fields beside an internal action."""
+    timeout = source.get("timeout", source.get("timeoutSec"))
+    if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
+        converted["_kiro_timeout"] = timeout
+    for field in ("description", "enabled"):
+        if field in source:
+            converted[f"_kiro_{field}"] = source[field]
+    for field in ("_kiro_description", "_kiro_timeout", "_kiro_enabled"):
+        if field in source:
+            converted[field] = source[field]
+    return converted
+
+
 def _kiro_action_from_action(action: dict, command_keys: tuple[str, ...]) -> dict | None:
     """Convert one APM hook action to a Kiro v1 action."""
     prompt = action.get("prompt")
     if action.get("type") in {"agent", "askAgent"} or isinstance(prompt, str):
         prompt_text = prompt if isinstance(prompt, str) else action.get("command")
         if isinstance(prompt_text, str) and prompt_text.strip():
-            return {"type": "agent", "prompt": prompt_text}
+            return _with_kiro_hook_fields(
+                {"type": "agent", "prompt": prompt_text},
+                action,
+            )
         return None
 
     for key in command_keys:
         command = action.get(key)
         if isinstance(command, str) and command.strip():
             converted = {"type": "command", "command": command}
-            timeout = action.get("timeout", action.get("timeoutSec"))
-            if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
-                converted["timeout"] = timeout
-            return converted
+            return _with_kiro_hook_fields(converted, action)
     return None
 
 
@@ -91,11 +107,16 @@ def _kiro_hook_document(
     action: dict,
 ) -> dict:
     """Build one Kiro v1 hook JSON document."""
+    action = dict(action)
     hook = {
         "name": name,
         "trigger": event_name,
         "action": action,
     }
+    for field in ("description", "timeout", "enabled"):
+        value = action.pop(f"_kiro_{field}", None)
+        if value is not None:
+            hook[field] = value
     if matcher:
         hook["matcher"] = matcher
     return {"version": "v1", "hooks": [hook]}
@@ -114,10 +135,18 @@ def _normalize_kiro_v1(data: dict) -> dict:
         native_action = dict(action)
         if isinstance(hook.get("name"), str):
             native_action["_kiro_name"] = hook["name"]
+        if isinstance(hook.get("description"), str):
+            native_action["_kiro_description"] = hook["description"]
+        timeout = hook.get("timeout")
+        if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
+            native_action["_kiro_timeout"] = timeout
+        if isinstance(hook.get("enabled"), bool):
+            native_action["_kiro_enabled"] = hook["enabled"]
         matcher: dict[str, object] = {"hooks": [native_action]}
         if isinstance(hook.get("matcher"), str):
             matcher["matcher"] = hook["matcher"]
-        events.setdefault(trigger, []).append(matcher)
+        canonical_trigger = _KIRO_EVENT_MAP.get(trigger, trigger)
+        events.setdefault(canonical_trigger, []).append(matcher)
     return {"hooks": events}
 
 
@@ -303,6 +332,11 @@ def integrate_kiro_hooks(
         if data is None:
             continue
         if isinstance(data.get("hooks"), list):
+            _log.debug(
+                "Normalizing %d native Kiro v1 hook(s) from %s",
+                len(data["hooks"]),
+                hook_file.name,
+            )
             data = _normalize_kiro_v1(data)
 
         rewritten, scripts = integrator._rewrite_hooks_data(
