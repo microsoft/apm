@@ -126,7 +126,10 @@ def detect_target(  # noqa: PLR0911
     """
     # Priority 1: Explicit --target flag
     if explicit_target:
-        if explicit_target in ("copilot", "vscode", "agents"):
+        if (
+            explicit_target in ("copilot", "vscode", "agents")
+            or explicit_target in MCP_ONLY_TARGETS
+        ):
             return "vscode", "explicit --target flag"
         elif explicit_target == "claude":
             return "claude", "explicit --target flag"
@@ -151,7 +154,7 @@ def detect_target(  # noqa: PLR0911
 
     # Priority 2: apm.yml target setting
     if config_target:
-        if config_target in ("copilot", "vscode", "agents"):
+        if config_target in ("copilot", "vscode", "agents") or config_target in MCP_ONLY_TARGETS:
             return "vscode", "apm.yml target"
         elif config_target == "claude":
             return "claude", "apm.yml target"
@@ -416,6 +419,13 @@ EXPERIMENTAL_TARGETS: frozenset[str] = frozenset(
 #: so there is no Antigravity-unique signal to auto-detect on.
 EXPLICIT_ONLY_TARGETS: frozenset[str] = frozenset({"agent-skills", "antigravity"})
 
+#: MCP-only pseudo-targets that have a client adapter but no
+#: ``KNOWN_TARGETS`` entry (they map to a canonical target for primitive
+#: deployment via ``RUNTIME_TO_CANONICAL_TARGET``).  They must be accepted
+#: by ``--target`` so the CLI validates them, but they are excluded from
+#: ``"all"`` expansion and do not participate in target-profile machinery.
+MCP_ONLY_TARGETS: frozenset[str] = frozenset({"intellij"})
+
 #: Alias mapping: user-facing name -> canonical internal name.
 TARGET_ALIASES: dict[str, str] = {
     "copilot": "vscode",
@@ -486,6 +496,31 @@ def normalize_target_list(
     return result
 
 
+def normalize_policy_targets(value: str | list[str] | None) -> str | list[str] | None:
+    """Normalize MCP-only selectors for compilation-target policy checks.
+
+    The return shape matches the input shape so scalar callers remain
+    backward-compatible while plural target sets are evaluated together.
+    """
+    if value is None:
+        return None
+
+    from apm_cli.integration.targets import RUNTIME_TO_CANONICAL_TARGET
+
+    values = [value] if isinstance(value, str) else list(value)
+    normalized: list[str] = []
+    for target in values:
+        if target in MCP_ONLY_TARGETS:
+            canonical = RUNTIME_TO_CANONICAL_TARGET.get(target)
+            if canonical is None:
+                raise RuntimeError(f"MCP-only target '{target}' has no canonical policy mapping")
+            target = canonical
+        if target not in normalized:
+            normalized.append(target)
+
+    return normalized[0] if isinstance(value, str) else normalized
+
+
 # ---------------------------------------------------------------------------
 # Click parameter type for --target (comma-separated multi-target support)
 # ---------------------------------------------------------------------------
@@ -496,6 +531,7 @@ VALID_TARGET_VALUES: frozenset[str] = (
     ALL_CANONICAL_TARGETS
     | EXPERIMENTAL_TARGETS
     | EXPLICIT_ONLY_TARGETS
+    | MCP_ONLY_TARGETS
     | frozenset(TARGET_ALIASES)
     | frozenset({"all"})
 )
@@ -610,7 +646,7 @@ def parse_target_field(
     # ---- "all" handling ----
     if "all" in raw_parts:
         non_all_tokens = {t for t in raw_parts if t != "all"}
-        if non_all_tokens - EXPLICIT_ONLY_TARGETS:
+        if non_all_tokens - EXPLICIT_ONLY_TARGETS - MCP_ONLY_TARGETS:
             raise ValueError(
                 _target_error(
                     "'all' cannot be combined with other targets",

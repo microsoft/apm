@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   set. The [OpenAPM v0.1 specification](docs/src/content/docs/specs/openapm-v0.1.md)
   now defines the same fail-safe reconciliation contract. (by @edenfunf;
   closes #2059) (#2114)
+- `apm install --target intellij` now configures JetBrains Copilot MCP support
+  while routing package file primitives through the Copilot profile.
+  (by @sergio-sisternes-epam; closes #1957) (#2041)
 
 ## [0.24.1] - 2026-07-10
 
