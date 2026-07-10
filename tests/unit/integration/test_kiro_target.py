@@ -484,3 +484,37 @@ def test_kiro_hooks_accept_native_v1_documents(tmp_path: Path) -> None:
             }
         ],
     }
+
+
+def test_kiro_native_v1_warns_when_no_actions_are_supported(
+    tmp_path: Path,
+    caplog,
+) -> None:
+    (tmp_path / ".kiro").mkdir()
+    package_dir = tmp_path / "unsupported-hooks"
+    hooks_dir = package_dir / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "native.json").write_text(
+        json.dumps(
+            {
+                "version": "v1",
+                "hooks": [
+                    {
+                        "name": "unsupported",
+                        "trigger": "PostFileSave",
+                        "action": {"type": "future-action"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = HookIntegrator().integrate_hooks_for_target(
+        KNOWN_TARGETS["kiro"],
+        _make_package_info(package_dir, "unsupported-hooks"),
+        tmp_path,
+    )
+
+    assert result.files_integrated == 0
+    assert "contributed no supported command or agent actions" in caplog.text

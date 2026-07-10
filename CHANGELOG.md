@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Kiro hooks now install in the official v1 runtime shape with matcher and
-  hook-level timeout support, while native v1 files preserve supported
-  configuration. The contract is recorded in the OpenAPM v0.1 specification.
-  (#2095)
+  hook-level timeout support, while native v1 files preserve descriptions,
+  timeout values, and `enabled` toggles. The contract is recorded in the
+  OpenAPM v0.1 specification. (#2095)
 - `apm install host/org/repo/subpath#ref` on an unrecognised self-hosted FQDN
   no longer fails with a misleading "not accessible or doesn't exist" error;
   the failure reason now suggests setting `GITLAB_HOST` / `APM_GITLAB_HOSTS`

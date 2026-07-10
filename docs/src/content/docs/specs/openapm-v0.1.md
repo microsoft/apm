@@ -2039,9 +2039,9 @@ hook entry MUST contain `name`, a PascalCase `trigger`, and an `action`; it MAY
 contain a `matcher`, `description`, numeric `timeout`, and boolean `enabled`.
 A Kiro consumer MUST NOT emit the superseded `when`/`then` hook shape. The
 consumer MUST accept native Kiro v1 hook documents for Kiro-targeted packages
-and preserve their supported names, descriptions, triggers, matchers, actions,
-timeouts, and enabled state while applying the same path rewriting and deployment
-constraints as portable hook inputs.
+and preserve their supported names, descriptions, triggers, matchers, command or
+agent actions, timeouts, and enabled state while applying the same path rewriting
+and deployment constraints as portable hook inputs.
 
 ### 8.6 Per-target primitive support (informational)
 

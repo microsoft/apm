@@ -86,7 +86,9 @@ actions become `action: {"type": "command", ...}`. In Kiro v1, `timeout` is a
 hook-level field alongside `action`. Native `description`, `timeout`, and
 `enabled` fields are preserved. Native-only triggers such as `PreTaskExec`,
 `PostTaskExec`, `PostFileCreate`, `PostFileSave`, and `PostFileDelete` pass
-through for Kiro. For example, a Kiro-only linter hook is:
+through for Kiro. Native v1 inputs support Kiro's `command` and `agent` action
+types; files with no supported actions emit a warning. For example, this
+Kiro-only hook runs the Ruff Python linter after a file is saved:
 
 ```json
 {

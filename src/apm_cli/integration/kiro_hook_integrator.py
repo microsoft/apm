@@ -369,6 +369,11 @@ def integrate_kiro_hooks(
         files_integrated += written
         files_skipped += skipped
         files_adopted += adopted
+        if written + skipped + adopted == 0:
+            _log.warning(
+                "Kiro hook file %s contributed no supported command or agent actions",
+                hook_file,
+            )
         copied, adopted_scripts = _copy_scripts(
             integrator,
             scripts,
