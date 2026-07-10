@@ -269,7 +269,8 @@ function Get-ShimVersion {
 }
 
 function New-IsolatedPrefix {
-    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("apm-install-test-" + [System.Guid]::NewGuid().ToString("N"))
+    # Spaces and a cmd metacharacter exercise launcher/path quoting end to end.
+    $root = Join-Path ([System.IO.Path]::GetTempPath()) ("APM Install Test & Edge " + [System.Guid]::NewGuid().ToString("N"))
     $binDir = Join-Path $root "bin"
     $tmpDir = Join-Path $root "tmp"
     New-Item -ItemType Directory -Force -Path $binDir | Out-Null
@@ -286,6 +287,7 @@ function Test-EndToEndInstall {
 
     $prefix = New-IsolatedPrefix
     try {
+        Assert-True ($prefix.Root -match [regex]::Escape(" & ")) "Test prefix exercises spaces and a cmd metacharacter"
         Write-Info "Running install.ps1 (VERSION=$PinnedVersion, APM_INSTALL_DIR=$($prefix.BinDir), APM_TEMP_DIR=$($prefix.TmpDir))"
         $exitCode = Invoke-InstallScript -Version $PinnedVersion -BinDir $prefix.BinDir -TmpDir $prefix.TmpDir
         Assert-True ($exitCode -eq 0) "install.ps1 exits 0 (got $exitCode)"
@@ -329,27 +331,37 @@ function Test-EndToEndInstall {
             try {
                 $env:Path = "$currentDir;$env:Path"
                 $pythonScript = @'
+import os
 import subprocess
 import sys
 
-result = subprocess.run(["apm", "--version"], capture_output=True, text=True)
+result = subprocess.run(
+    ["apm", "--version"],
+    capture_output=True,
+    cwd=os.environ["APM_LAUNCH_TEST_CWD"],
+    text=True,
+)
 print(result.stdout, end="")
 print(result.stderr, end="", file=sys.stderr)
 sys.exit(result.returncode)
 '@
+                $env:APM_LAUNCH_TEST_CWD = $prefix.Root
                 $pythonOutput = & python -c $pythonScript 2>&1
                 $pythonExit = $LASTEXITCODE
                 Assert-True ($pythonExit -eq 0) "Python subprocess resolves bare apm (got $pythonExit; output: $pythonOutput)"
-                Assert-True (($pythonOutput | Out-String) -match $PinnedVersion.TrimStart("v")) "Python subprocess reports $PinnedVersion"
+                Assert-True (($pythonOutput | Out-String) -match [regex]::Escape($PinnedVersion.TrimStart("v"))) "Python subprocess reports $PinnedVersion"
 
                 $bash = Get-Command bash -ErrorAction SilentlyContinue
                 if ($bash) {
-                    $bashOutput = & bash -lc "command -v apm && apm --version" 2>&1
+                    $bashCurrentDir = (& $bash.Source -lc 'cygpath -u "$1"' bash $currentDir).Trim()
+                    $bashTestDir = (& $bash.Source -lc 'cygpath -u "$1"' bash $prefix.Root).Trim()
+                    $bashOutput = & $bash.Source -lc 'cd "$1" && PATH="$2:$PATH" && command -v apm && apm --version' bash $bashTestDir $bashCurrentDir 2>&1
                     $bashExit = $LASTEXITCODE
                     Assert-True ($bashExit -eq 0) "Git Bash resolves bare apm (got $bashExit; output: $bashOutput)"
-                    Assert-True (($bashOutput | Out-String) -match $PinnedVersion.TrimStart("v")) "Git Bash reports $PinnedVersion"
+                    Assert-True (($bashOutput | Out-String) -match [regex]::Escape($PinnedVersion.TrimStart("v"))) "Git Bash reports $PinnedVersion"
                 }
             } finally {
+                Remove-Item Env:APM_LAUNCH_TEST_CWD -ErrorAction SilentlyContinue
                 $env:Path = $savedPath
             }
         }

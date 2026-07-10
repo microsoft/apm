@@ -921,7 +921,7 @@ try {
         if (Test-Path $currentDir) {
             $currentItem = Get-Item -Force $currentDir
             if (($currentItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) {
-                throw "Refusing to replace non-junction path: $currentDir"
+                throw "Refusing to replace non-junction path: $currentDir. Move or remove it if safe, then rerun the installer."
             }
             $oldCurrentDir = "$currentDir.old-" + [System.Guid]::NewGuid().ToString("N")
             Move-Item -Path $currentDir -Destination $oldCurrentDir -Force
@@ -997,6 +997,8 @@ try {
     Set-Content -Path $shimPath -Value $shimContent -Encoding ASCII -NoNewline
 
     Add-ToUserPath -PathEntry $binDir
+    # The onedir bundle must stay intact beside apm.exe. Add its stable
+    # junction after bin so bare executable lookup wins where PATHEXT is absent.
     Add-ToUserPath -PathEntry $currentDir
 
     Write-Host ""
