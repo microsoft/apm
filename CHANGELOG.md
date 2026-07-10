@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Projects with local-path sub-packages that contribute MCP servers no longer
-  see false `config-consistency` failures from `apm audit --ci`. Transitively
+- `apm audit --ci` no longer raises false `config-consistency` failures in
+  monorepos whose local-path sub-packages contribute MCP servers. Transitively
   contributed servers now carry lockfile provenance and are exempt from the
   orphan check. (#2084)
 - `apm install host/org/repo/subpath#ref` on an unrecognised self-hosted FQDN

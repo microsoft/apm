@@ -278,7 +278,7 @@ check maps to specific lockfile fields:
 | `deployed-files-present` | `deployed_files` per entry (and self entry) |
 | `content-integrity` | `deployed_file_hashes` (and `local_deployed_file_hashes`) |
 | `skill-subset-consistency` | `skill_subset` per `skill_bundle` entry |
-| `config-consistency` | `mcp_servers`, `mcp_configs`, and `mcp_config_provenance` |
+| `config-consistency` | `mcp_configs` and `mcp_config_provenance` |
 | `no-orphaned-packages` | `dependencies` keys vs. `apm.yml` |
 
 Files listed in `deployed_files` without a corresponding hash entry (typically
