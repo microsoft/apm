@@ -17,6 +17,7 @@ import click
 
 from ..core.command_logger import CommandLogger
 from ..deps.registry.feature_gate import require_package_registry_enabled
+from ..models.dependency.identity import normalize_package_repo_url
 from ..utils.paths import portable_relpath
 
 _PUBLISH_HELP = """\
@@ -161,8 +162,6 @@ def _resolve_package_id(package_id: str) -> tuple[str, str]:
     raw = re.sub(r"^https?://[^/]+/", "", package_id).strip("/")
     parts = [p for p in raw.split("/") if p]
     if len(parts) >= 2:
-        from ..models.dependency.identity import normalize_package_repo_url
-
         canonical = normalize_package_repo_url(
             "/".join(parts[-2:]),
             source="registry",

@@ -5,6 +5,9 @@ file-length guardrail. These are pure, stateless helpers with no dependency on
 ``DependencyReference`` internals; both ``DependencyReference`` and
 ``LockedDependency`` reuse them so the two identity models share one body shape
 without collapsing their distinct local-detection semantics.
+
+``normalize_package_repo_url`` is the single casing-normalization boundary for
+package identity. Callers must not lowercase repository paths independently.
 """
 
 import re
@@ -50,8 +53,11 @@ def normalize_package_repo_url(
     if source == "registry" or registry_prefix:
         return repo_url.lower()
 
-    effective_host = host or default_host()
-    if effective_host.lower() == default_host().lower() or is_github_hostname(effective_host):
+    configured_default_host = default_host()
+    effective_host = host or configured_default_host
+    if effective_host.lower() == configured_default_host.lower() or is_github_hostname(
+        effective_host
+    ):
         return repo_url.lower()
     return repo_url
 
