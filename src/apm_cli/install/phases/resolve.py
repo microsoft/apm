@@ -24,11 +24,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
+from apm_cli.install.resolution_staging import transactional_resolution
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.utils.short_sha import format_short_sha
 
 if TYPE_CHECKING:
     from apm_cli.install.context import InstallContext
+    from apm_cli.install.resolution_staging import ResolutionStagingSession
     from apm_cli.models.dependency.reference import DependencyReference
 
 _logger = logging.getLogger(__name__)
@@ -374,13 +376,9 @@ def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
     raise RuntimeError(f"Dependency resolution failed: {joined_errors}")
 
 
-def _resolve_dependencies(ctx: InstallContext) -> None:
-    """Run ``APMDependencyResolver``, handle errors; populate ``ctx.deps_to_install`` and ``ctx.dependency_graph``.
-
-    Also wires the download callback (which handles transitive package fetching),
-    builds ``ctx.dep_base_dirs``, writes ancillary state to ``ctx``, and cleans up
-    the shared clone cache.
-    """
+@transactional_resolution
+def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagingSession) -> None:
+    """Resolve dependencies and populate the resolution fields on ``ctx``."""
     import threading as _threading
 
     from apm_cli.core.scope import InstallScope
@@ -499,6 +497,7 @@ def _resolve_dependencies(ctx: InstallContext) -> None:
             )
             if not _force_semver_resolve:
                 return install_path
+        staging_session.prepare_path(install_path)
         # F1 (#1116): surface a heartbeat BEFORE the network/copy work so
         # users see the install advancing past silent transitive lookups.
         # Under F7's parallel BFS this callback may run on a worker
