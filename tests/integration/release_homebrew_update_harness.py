@@ -11,15 +11,16 @@ from pathlib import Path
 import yaml
 
 
-def _assert_release_workflow_has_no_homebrew_push(workflow_path: Path) -> None:
+def _assert_release_workflow_has_no_package_manager_push(workflow_path: Path) -> None:
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     for job_name, job in workflow.get("jobs", {}).items():
         rendered = json.dumps(job)
-        if "homebrew" not in f"{job_name} {rendered}".lower():
-            continue
         forbidden = ("GH_PKG_PAT", "repository-dispatch", "repository_dispatch", "gh pr create")
         found = [token for token in forbidden if token in rendered]
-        if re.search(
+        package_manager_job = any(
+            name in f"{job_name} {rendered}".lower() for name in ("homebrew", "scoop")
+        )
+        if package_manager_job and re.search(
             r"(?:secrets\.[A-Z0-9_]*(?:PAT|TOKEN)|github\.token)",
             rendered,
             re.IGNORECASE,
@@ -27,7 +28,8 @@ def _assert_release_workflow_has_no_homebrew_push(workflow_path: Path) -> None:
             found.append("workflow token")
         if found:
             raise RuntimeError(
-                f"release workflow restores a Homebrew push/auth path: {', '.join(found)}"
+                f"release workflow job {job_name} restores a package-manager "
+                f"push/auth path: {', '.join(found)}"
             )
 
 
@@ -41,7 +43,7 @@ def _replace_assignment(formula: str, key: str, value: str) -> str:
 
 def update_tap(workflow_path: Path, release_path: Path, tap_repo: Path) -> None:
     """Model the tap's repository-local formula commit from release metadata."""
-    _assert_release_workflow_has_no_homebrew_push(workflow_path)
+    _assert_release_workflow_has_no_package_manager_push(workflow_path)
 
     release = json.loads(release_path.read_text(encoding="utf-8"))
     formula_path = tap_repo / "Formula" / "apm.rb"

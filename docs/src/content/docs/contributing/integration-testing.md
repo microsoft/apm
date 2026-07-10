@@ -161,7 +161,7 @@ The workflow ensures quality gates at each step:
 
 Each stage must succeed before proceeding to the next, ensuring only fully validated releases reach users.
 
-The [`microsoft/homebrew-apm`](https://github.com/microsoft/homebrew-apm) tap updates independently: it polls the latest public APM release and commits formula updates with its own repository-scoped `GITHUB_TOKEN`. The release pipeline does not hold a cross-repository Homebrew credential.
+The [`microsoft/homebrew-apm`](https://github.com/microsoft/homebrew-apm) tap updates independently: it polls the latest APM release and commits formula updates with its own repository-scoped `GITHUB_TOKEN`. The release pipeline does not hold a cross-repository Homebrew credential.
 
 ### Test Matrix
 
@@ -219,7 +219,6 @@ Promotion integration tests run on:
 - Guarantees shipped releases work end-to-end
 - Users can trust the README golden scenario
 - Cross-platform binary verification
-- Independent Homebrew formula updates through tap polling
 
 ## Debugging Test Failures
 
@@ -258,7 +257,3 @@ Promotion integration tests run on:
    so contributors without those credentials still get a clean
    `SKIPPED` rather than a hard failure.
 3. Keep tests focused and fast.
-
----
-
-This testing strategy ensures we ship with confidence while maintaining fast development cycles.
