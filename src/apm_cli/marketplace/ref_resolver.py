@@ -194,17 +194,17 @@ class RefResolver:
                 hint="Use bearer authentication only with an Azure DevOps host.",
             )
         bearer = requested_bearer and ado_host
-        token = None if requested_bearer else self._token
+        url_token = None if requested_bearer else self._token
         if ado_host:
             url = f"https://{self._host}/{owner_repo}"
         else:
-            url = build_https_clone_url(self._host, owner_repo, token=token)
+            url = build_https_clone_url(self._host, owner_repo, token=url_token)
         env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
         if bearer and self._token:
             env.pop("GIT_TOKEN", None)
             env.update(build_ado_bearer_git_env(self._token))
-        elif ado_host and token:
-            credential = base64.b64encode(f":{token}".encode()).decode()
+        elif ado_host and url_token:
+            credential = base64.b64encode(f":{url_token}".encode()).decode()
             env.update(build_authorization_header_git_env("Basic", credential))
         return url, env
 

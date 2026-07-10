@@ -88,9 +88,9 @@ apm install dev.azure.com/org/project/_git/repo
 ```
 
 ADO paths use the 3-segment format: `org/project/repo`. Auth is always required.
-`apm marketplace check` preserves this auth mode for ADO `sourceBase` entries:
-Azure CLI tokens are injected into `git ls-remote` as bearer headers and are not
-embedded in clone URLs.
+`apm marketplace check` uses this same credential chain. See
+[Marketplace source bases](package-authoring.md#marketplace-source-bases) for
+ADO marketplace URL authoring.
 
 **Finding your tenant ID:** visit `https://dev.azure.com/{org}/_settings/organizationAad`,
 or run `az login` and inspect `az account show --query tenantId -o tsv`.
