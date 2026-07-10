@@ -1830,7 +1830,7 @@ Use this skill for comprehensive guidance.
         assert all(e.package != "humanizer" for e in entries), (
             "diagnostics.overwrite() was called with package=skill_name instead of package=current_key"
         )
-        assert any(e.package == "Serendeep/humanizer" for e in entries)
+        assert any(e.package == "serendeep/humanizer" for e in entries)
 
 
 # =============================================================================

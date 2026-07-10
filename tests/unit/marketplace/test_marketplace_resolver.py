@@ -1,9 +1,12 @@
 """Tests for marketplace resolver -- regex and source type resolution."""
 
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 import pytest
 
+from apm_cli.cache.url_normalize import normalize_repo_url
+from apm_cli.install.package_resolution import dependency_reference_to_yaml_entry
 from apm_cli.marketplace.models import (
     MarketplaceManifest,
     MarketplacePlugin,
@@ -543,6 +546,29 @@ class TestResolveMarketplacePluginGitLabMonorepo:
         assert dep.virtual_path == "registry/optimize-prompt"
         assert dep.is_virtual is True
         assert dep.to_canonical() == canonical
+
+    @patch("apm_cli.marketplace.resolver.fetch_or_cache")
+    @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")
+    def test_ssh_registration_is_preserved_in_serialized_dependency(self, mock_get, mock_fetch):
+        source = MarketplaceSource(
+            name="apm-reg",
+            url="git@gitlab.mycompany.com:team/packages/toolkit.git",
+        )
+        plugin = MarketplacePlugin(name="some-skill", source="skills/some-skill")
+        mock_get.return_value = source
+        mock_fetch.return_value = self._manifest_with_plugin(plugin)
+
+        resolution = resolve_marketplace_plugin("some-skill", "apm-reg")
+        dep = resolution.dependency_reference
+        assert dep is not None
+
+        entry = dependency_reference_to_yaml_entry(dep)
+        parsed = urlparse(normalize_repo_url(entry["git"]))
+        assert parsed.scheme == "ssh"
+        assert parsed.username == "git"
+        assert parsed.hostname == "gitlab.mycompany.com"
+        assert parsed.path == "/team/packages/toolkit"
+        assert entry["path"] == "skills/some-skill"
 
     @patch("apm_cli.marketplace.resolver.fetch_or_cache")
     @patch("apm_cli.marketplace.resolver.get_marketplace_by_name")

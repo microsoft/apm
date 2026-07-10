@@ -470,6 +470,28 @@ class TestValidationFailureReasonMessages:
             # user is already in verbose mode.
             assert "run with --verbose for the full probe log" not in output
 
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    def test_selfhosted_gitlab_like_host_hints_gitlab_host_env(self, mock_validate, monkeypatch):
+        """Issue #2066: an unrecognised self-hosted FQDN with a multi-segment
+        path is folded into a single (non-existent) repo path at parse time.
+        The failure reason should point at GITLAB_HOST/APM_GITLAB_HOSTS
+        instead of the generic "not accessible" message.
+        """
+        monkeypatch.delenv("GITLAB_HOST", raising=False)
+        monkeypatch.delenv("APM_GITLAB_HOSTS", raising=False)
+        with self._chdir_tmp():
+            Path("apm.yml").write_text("name: test\ndependencies:\n  apm: []\n  mcp: []\n")
+            result = self.runner.invoke(
+                cli,
+                [
+                    "install",
+                    "gitlab.company.com/my-org/my-monorepo/primitives/skills/my-skill#v1.0.0",
+                ],
+            )
+            output = " ".join(result.output.split())
+            assert "GITLAB_HOST=gitlab.company.com" in output
+            assert "APM_GITLAB_HOSTS" in output
+
     @patch(
         "apm_cli.core.token_manager.GitHubTokenManager.resolve_credential_from_git",
         return_value=None,

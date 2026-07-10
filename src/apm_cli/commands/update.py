@@ -82,6 +82,8 @@ from ._helpers import UnknownPackageError, _find_apm_yml, resolve_requested_pack
 
 if TYPE_CHECKING:
     from ..core.command_logger import CommandLogger
+    from ..core.scope import InstallScope
+    from ..deps.lockfile import LockFile
     from ..models.dependency.reference import DependencyReference
 
 
@@ -188,6 +190,86 @@ def _annotate_lockfile_revision_tags(project_root: Path, updates: list[RevisionP
             changed = True
     if changed:
         lockfile.save(lockfile_path)
+
+
+def _run_mcp_lsp_integration(
+    *,
+    scope: InstallScope,
+    project_root: Path,
+    existing_lock: LockFile | None,
+    lock_path: Path,
+    target: str | list[str] | None,
+    diagnostics: Any,
+    logger: InstallLogger,
+    verbose: bool,
+) -> None:
+    """Reconcile MCP and LSP servers against the current apm.yml.
+
+    ``apm update`` calls ``_install_apm_dependencies`` directly rather than
+    going through ``_install_apm_packages`` (see ``commands/install.py``),
+    so it must separately run the same MCP/LSP integration that helper
+    performs. Mirrors ``_install_apm_packages``'s ordering: clear the
+    apm.yml parse cache, re-parse the on-disk manifest (revision pins are
+    already applied by this point), then reconcile MCP and LSP servers.
+    """
+    from apm_cli.core.scope import InstallScope, get_modules_dir
+    from apm_cli.install.lsp import run_lsp_integration
+    from apm_cli.install.mcp import run_mcp_integration
+    from apm_cli.models.apm_package import APMPackage, clear_apm_yml_cache
+    from apm_cli.policy.install_preflight import PolicyBlockError
+
+    clear_apm_yml_cache()
+    apm_package = APMPackage.from_apm_yml(Path("apm.yml"))
+
+    old_mcp_servers: set = set()
+    old_mcp_configs: dict = {}
+    old_mcp_provenance: dict = {}
+    if existing_lock:
+        old_mcp_servers = set(existing_lock.mcp_servers)
+        old_mcp_configs = dict(existing_lock.mcp_configs)
+        old_mcp_provenance = dict(existing_lock.mcp_config_provenance)
+
+    apm_modules_path = get_modules_dir(scope)
+    user_scope = scope is InstallScope.USER
+
+    try:
+        _mcp_count, mcp_apm_config = run_mcp_integration(
+            apm_package=apm_package,
+            mcp_deps=apm_package.get_all_mcp_dependencies(),
+            apm_modules_path=apm_modules_path,
+            lock_path=lock_path,
+            old_mcp_servers=old_mcp_servers,
+            old_mcp_configs=old_mcp_configs,
+            old_mcp_provenance=old_mcp_provenance,
+            project_root=project_root,
+            user_scope=user_scope,
+            should_install=True,
+            logger=logger,
+            diagnostics=diagnostics,
+            verbose=verbose,
+            explicit_target=target,
+            scope=scope,
+        )
+    except PolicyBlockError:
+        _rich_error(
+            "MCP server(s) blocked by org policy. "
+            "APM packages remain installed; MCP configs were NOT written."
+        )
+        logger.render_summary()
+        sys.exit(1)
+
+    run_lsp_integration(
+        apm_package=apm_package,
+        apm_modules_path=apm_modules_path,
+        lock_path=lock_path,
+        existing_lock=existing_lock,
+        project_root=project_root,
+        user_scope=user_scope,
+        should_install=True,
+        logger=logger,
+        diagnostics=diagnostics,
+        target_context=(mcp_apm_config, target, scope),
+    )
 
 
 @click.command(
@@ -527,6 +609,20 @@ def _run_dep_update(
 
         return _confirm_plan_application()
 
+    # Snapshot the pre-update lockfile's MCP/LSP state before
+    # ``_install_apm_dependencies`` regenerates it. The lockfile phase
+    # carries ``mcp_servers``/``mcp_configs`` forward unreconciled (see
+    # ``install/phases/lockfile.py::_preserve_existing_mcp_state``), so this
+    # is the correct "old" baseline for stale-server detection below. LSP
+    # fields have no such carry-forward, so they must be captured here too.
+    from apm_cli.core.scope import get_apm_dir, get_deploy_root
+    from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+
+    _apm_dir = get_apm_dir(scope)
+    _mcp_lsp_project_root = get_deploy_root(scope)
+    _lock_path = get_lockfile_path(_apm_dir)
+    _existing_lock = LockFile.read(_lock_path)
+
     try:
         # Fire pre-update lifecycle scripts
         _fire_update_scripts(
@@ -586,6 +682,24 @@ def _run_dep_update(
             except Exception as e:
                 _rich_error(f"Failed to record revision-pin tags in apm.lock.yaml: {e}")
                 sys.exit(1)
+
+        try:
+            _run_mcp_lsp_integration(
+                scope=scope,
+                project_root=_mcp_lsp_project_root,
+                existing_lock=_existing_lock,
+                lock_path=_lock_path,
+                target=target,
+                diagnostics=getattr(result, "diagnostics", None),
+                logger=logger,
+                verbose=verbose,
+            )
+        except Exception as e:
+            _rich_error(f"Error reconciling MCP/LSP servers: {e}")
+            if not verbose:
+                _rich_info("Run with --verbose for detailed diagnostics.")
+            sys.exit(1)
+
         # Report the number of dependencies that actually changed (per the
         # plan), not the total tree re-materialized (result.installed_count).
         # The latter counts unchanged deps that were re-integrated, which
