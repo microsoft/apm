@@ -158,7 +158,7 @@ class TestCurrentInstallGovernance:
             prior_files=[lookalike],
             prior_hashes={},
             targets=[_known("antigravity")],
-            declared_targets=None,
+            declared_targets=[_known("antigravity")],
         )
 
         assert lookalike in files
@@ -278,6 +278,21 @@ class TestInactiveTargetGhostDrop:
 
         assert rule in files
         assert hashes[rule] == "sha256:rule"
+
+    def test_union_drops_undeclared_target_under_shared_agents_root(self):
+        from apm_cli.install.manifest_reconcile import union_preserving
+
+        ghost = ".agents/rules/ghost.md"
+        files, _ = union_preserving(
+            current_files=[".agents/skills/demo/SKILL.md"],
+            current_hashes={},
+            prior_files=[ghost],
+            prior_hashes={},
+            targets=[_known("copilot")],
+            declared_targets=[_known("copilot")],
+        )
+
+        assert ghost not in files
 
     def test_union_declared_none_preserves_all_legacy(self):
         """No declared universe (auto-detect / --target-only consumer) keeps the

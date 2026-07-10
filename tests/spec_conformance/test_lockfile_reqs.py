@@ -312,6 +312,17 @@ def test_lockfile_reconciles_inactive_target_paths_fail_safe():
     assert shared_rule in shared_files
     assert shared_rule in shared_hashes
 
+    indeterminate_path = ".agents/hooks.json.bak"
+    declared_indeterminate, _ = union_preserving(
+        current_files=[],
+        current_hashes={},
+        prior_files=[indeterminate_path],
+        prior_hashes={},
+        targets=[KNOWN_TARGETS["antigravity"]],
+        declared_targets=[KNOWN_TARGETS["antigravity"]],
+    )
+    assert declared_indeterminate == [indeterminate_path]
+
     assert_spec_contains(
         "MUST remove a prior path attributable",
         "MUST preserve that path and its corresponding hash entry",

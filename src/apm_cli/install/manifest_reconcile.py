@@ -125,15 +125,22 @@ def union_preserving(
     package-declared ``windsurf`` paths the consumer never activates) and is
     DROPPED -- it can never be written on disk, so re-preserving it fails
     ``deployed-files-present`` forever on fresh checkouts (issue #2059). When
-    ``None`` (auto-detect or ``--target``-only consumers -- no declared
-    universe to check against) the legacy preserve-all behaviour is kept so a
-    genuine multi-target deploy is never clobbered (issue #1716).
+    An entry matching no registered target pattern is indeterminate and is
+    preserved. When ``declared_targets`` is ``None`` (auto-detect or
+    ``--target``-only consumers -- no declared universe to check against), the
+    legacy preserve-all behaviour is kept so a genuine multi-target deploy is
+    never clobbered (issue #1716).
     """
     file_prefixes, uri_schemes = install_governance(targets)
     allowed_prefixes: set[str] | None = None
     allowed_schemes: set[str] | None = None
+    known_prefixes: set[str] | None = None
+    known_schemes: set[str] | None = None
     if declared_targets is not None:
+        from apm_cli.integration.targets import KNOWN_TARGETS
+
         declared_prefixes, d_schemes = install_governance(declared_targets)
+        known_prefixes, known_schemes = install_governance(list(KNOWN_TARGETS.values()))
         # Active targets are always legitimate (this run selected them), so a
         # ``--target`` that reaches outside the declared set is still honoured.
         allowed_prefixes = file_prefixes | declared_prefixes
@@ -150,8 +157,12 @@ def union_preserving(
             allowed_prefixes is not None
             and allowed_schemes is not None
             and not is_governed_by_install(path, allowed_prefixes, allowed_schemes)
+            and known_prefixes is not None
+            and known_schemes is not None
+            and is_governed_by_install(path, known_prefixes, known_schemes)
         ):
-            # Ghost: governed by no target the consumer declares. Drop it.
+            # Ghost: attributable to a known target the consumer does not
+            # declare. Unknown patterns are indeterminate and stay preserved.
             if on_ghost_drop is not None:
                 on_ghost_drop(path)
             continue
