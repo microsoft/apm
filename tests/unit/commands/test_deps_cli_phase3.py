@@ -155,8 +155,8 @@ class TestAddTreeChildren:
         _add_tree_children(parent, "owner/repo", children_map, has_rich=True)
         parent.add.assert_called_once()
 
-    def test_cycle_guard_prevents_infinite_recursion(self) -> None:
-        """A dependency cycle stops at the first repeated ancestor."""
+    def test_cycle_guard_marks_repeated_ancestor(self) -> None:
+        """A dependency cycle is marked at the first repeated ancestor."""
         child = _make_dep("child/repo", version="1.0.0", repo_url="child/repo")
         repeated_parent = _make_dep("owner/repo", version="1.0.0", repo_url="owner/repo")
         children_map = {
@@ -170,7 +170,8 @@ class TestAddTreeChildren:
         _add_tree_children(parent, "owner/repo", children_map, has_rich=True)
 
         parent.add.assert_called_once()
-        child_branch.add.assert_not_called()
+        child_branch.add.assert_called_once()
+        assert "(circular)" in child_branch.add.call_args.args[0]
 
     def test_has_rich_uses_rich_markup(self) -> None:
         child = _make_dep("child/repo", version="1.0.0", repo_url="child/repo")

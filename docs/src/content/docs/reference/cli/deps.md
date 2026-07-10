@@ -52,7 +52,9 @@ apm deps list [OPTIONS]
 Render the complete dependency graph as a hierarchical tree, following
 `resolved_by` relationships at every lockfile depth. When no lockfile is
 present, the command falls back to a scan of `apm_modules/` and ignores
-parent-owned manifests embedded inside an installed package.
+parent-owned manifests embedded inside an installed package. Circular
+relationships are marked `(circular)` at the repeated ancestor and do not
+prevent other branches from rendering.
 
 ```bash
 apm deps tree [OPTIONS]

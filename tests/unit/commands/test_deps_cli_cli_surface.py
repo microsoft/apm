@@ -22,6 +22,7 @@ from apm_cli.commands.deps.cli import (
     _add_tree_children,
     _build_dep_tree,
     _deps_list_source_label,
+    _echo_tree_children,
     _resolve_scope_deps,
     _show_scope_deps,
 )
@@ -66,6 +67,15 @@ def _make_dep(
     dep.is_azure_devops = MagicMock(return_value=False)
     dep.is_insecure = False
     return dep
+
+
+class _RecordingBranch:
+    def __init__(self, labels: list[str]) -> None:
+        self.labels = labels
+
+    def add(self, label: str) -> _RecordingBranch:
+        self.labels.append(label)
+        return _RecordingBranch(self.labels)
 
 
 def _make_pkg_dict(
@@ -155,8 +165,8 @@ class TestAddTreeChildren:
         _add_tree_children(parent, "owner/repo", children_map, has_rich=True)
         parent.add.assert_called_once()
 
-    def test_cycle_guard_prevents_infinite_recursion(self) -> None:
-        """A dependency cycle stops at the first repeated ancestor."""
+    def test_cycle_guard_marks_repeated_ancestor(self) -> None:
+        """A dependency cycle is marked at the first repeated ancestor."""
         child = _make_dep("child/repo", version="1.0.0", repo_url="child/repo")
         repeated_parent = _make_dep("owner/repo", version="1.0.0", repo_url="owner/repo")
         children_map = {
@@ -170,7 +180,27 @@ class TestAddTreeChildren:
         _add_tree_children(parent, "owner/repo", children_map, has_rich=True)
 
         parent.add.assert_called_once()
-        child_branch.add.assert_not_called()
+        child_branch.add.assert_called_once()
+        assert "(circular)" in child_branch.add.call_args.args[0]
+
+    def test_renders_chain_beyond_python_recursion_limit(self) -> None:
+        """A valid lock graph is rendered without a call-stack depth limit."""
+        chain_length = 1100
+        children_map = {
+            f"pkg-{index}": [_make_dep(f"pkg-{index + 1}", version="1.0.0")]
+            for index in range(chain_length)
+        }
+        labels: list[str] = []
+
+        _add_tree_children(
+            _RecordingBranch(labels),
+            "pkg-0",
+            children_map,
+            has_rich=True,
+        )
+
+        assert len(labels) == chain_length
+        assert "pkg-1100@1.0.0" in labels[-1]
 
     def test_has_rich_uses_rich_markup(self) -> None:
         child = _make_dep("child/repo", version="1.0.0", repo_url="child/repo")
@@ -182,6 +212,23 @@ class TestAddTreeChildren:
         # With has_rich=True the child name is wrapped in [dim] markup
         call_args = parent.add.call_args[0][0]
         assert "[dim]" in call_args
+
+
+class TestEchoTreeChildren:
+    def test_cycle_is_visible_and_stops_traversal(self) -> None:
+        """The text fallback marks a repeated ancestor without looping."""
+        child = _make_dep("child/repo", version="1.0.0")
+        repeated_parent = _make_dep("owner/repo", version="1.0.0")
+        children_map = {
+            "owner/repo": [child],
+            "child/repo": [repeated_parent],
+        }
+
+        with patch("apm_cli.commands.deps.cli.click.echo") as echo:
+            _echo_tree_children("owner/repo", children_map)
+
+        assert echo.call_count == 2
+        assert "(circular)" in echo.call_args_list[-1].args[0]
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 
 import shutil
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import click
@@ -70,54 +71,74 @@ def _dep_display_name(dep) -> str:
     return f"{key}@{version}"
 
 
+def _walk_tree_children(
+    parent_key: str,
+    children_map: dict[str, list],
+) -> Iterator[tuple[APMPackage, tuple[int, ...], tuple[bool, ...], bool]]:
+    """Yield dependency-tree descendants depth-first without Python recursion."""
+    ancestors = frozenset({parent_key})
+    children = children_map.get(parent_key, [])
+    stack: list[tuple[APMPackage, tuple[int, ...], tuple[bool, ...], frozenset[str]]] = []
+    for index in range(len(children) - 1, -1, -1):
+        stack.append(
+            (
+                children[index],
+                (index,),
+                (index == len(children) - 1,),
+                ancestors,
+            )
+        )
+
+    while stack:
+        child_dep, path, last_flags, parent_ancestors = stack.pop()
+        child_key = child_dep.get_unique_key()
+        is_circular = child_key in parent_ancestors
+        yield child_dep, path, last_flags, is_circular
+        if is_circular:
+            continue
+
+        child_ancestors = parent_ancestors | {child_key}
+        grandchildren = children_map.get(child_key, [])
+        for index in range(len(grandchildren) - 1, -1, -1):
+            stack.append(
+                (
+                    grandchildren[index],
+                    (*path, index),
+                    (*last_flags, index == len(grandchildren) - 1),
+                    child_ancestors,
+                )
+            )
+
+
 def _add_tree_children(
     parent_branch,
     parent_key: str,
     children_map: dict[str, list],
     has_rich: bool,
-    ancestors: frozenset[str] | None = None,
 ) -> None:
-    """Recursively add every acyclic transitive dependency to a tree node."""
-    ancestors = ancestors or frozenset({parent_key})
-    kids = children_map.get(parent_key, [])
-    for child_dep in kids:
-        child_key = child_dep.get_unique_key()
-        if child_key in ancestors:
-            continue
+    """Add every transitive dependency to a Rich tree without a depth limit."""
+    branches = {(): parent_branch}
+    for child_dep, path, _, is_circular in _walk_tree_children(parent_key, children_map):
         child_name = _dep_display_name(child_dep)
-        child_branch = parent_branch.add(f"[dim]{child_name}[/dim]") if has_rich else child_name
-        _add_tree_children(
-            child_branch,
-            child_key,
-            children_map,
-            has_rich,
-            ancestors | {child_key},
+        suffix = " (circular)" if is_circular else ""
+        child_branch = (
+            branches[path[:-1]].add(f"[dim]{child_name}{suffix}[/dim]") if has_rich else child_name
         )
+        if has_rich and not is_circular:
+            branches[path] = child_branch
 
 
 def _echo_tree_children(
     parent_key: str,
     children_map: dict[str, list],
     prefix: str = "",
-    ancestors: frozenset[str] | None = None,
 ) -> None:
-    """Render every acyclic transitive dependency recursively without Rich."""
-    ancestors = ancestors or frozenset({parent_key})
-    kids = children_map.get(parent_key, [])
-    for index, child_dep in enumerate(kids):
-        child_key = child_dep.get_unique_key()
-        if child_key in ancestors:
-            continue
-        is_last = index == len(kids) - 1
-        child_prefix = "+-- " if is_last else "|-- "
-        click.echo(f"{prefix}{child_prefix}{_dep_display_name(child_dep)}")
-        continuation = "    " if is_last else "|   "
-        _echo_tree_children(
-            child_key,
-            children_map,
-            prefix + continuation,
-            ancestors | {child_key},
-        )
+    """Render every transitive dependency without Rich or a depth limit."""
+    for child_dep, _, last_flags, is_circular in _walk_tree_children(parent_key, children_map):
+        indentation = "".join("    " if is_last else "|   " for is_last in last_flags[:-1])
+        child_prefix = "+-- " if last_flags[-1] else "|-- "
+        suffix = " (circular)" if is_circular else ""
+        click.echo(f"{prefix}{indentation}{child_prefix}{_dep_display_name(child_dep)}{suffix}")
 
 
 # ---------------------------------------------------------------------------
@@ -691,7 +712,8 @@ def tree(global_):
                     for dep in unresolved:
                         display = _dep_display_name(dep)
                         branch = root_tree.add(
-                            f"[yellow]{display} (could not determine parent)[/yellow]"
+                            f"[yellow]{display} (lockfile parent unavailable; "
+                            "run apm install to rebuild graph)[/yellow]"
                         )
                         _add_tree_children(branch, dep.get_unique_key(), children_map, has_rich)
                 console.print(root_tree)
@@ -710,7 +732,11 @@ def tree(global_):
                     for i, dep in enumerate(unresolved):
                         is_last = i == len(unresolved) - 1
                         prefix = "+-- " if is_last else "|-- "
-                        click.echo(f"{prefix}{_dep_display_name(dep)} (could not determine parent)")
+                        click.echo(
+                            f"{prefix}{_dep_display_name(dep)} "
+                            "(lockfile parent unavailable; "
+                            "run apm install to rebuild graph)"
+                        )
                         sub_prefix = "    " if is_last else "|   "
                         _echo_tree_children(dep.get_unique_key(), children_map, sub_prefix)
         # Fallback: scan apm_modules directory (no lockfile)
