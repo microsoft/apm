@@ -663,7 +663,7 @@ def tree(global_):
         if tree_data["source"] == "lockfile":
             direct = tree_data["direct"]
             children_map = tree_data["children_map"]
-            unresolved = tree_data["unresolved"]
+            unresolved = tree_data.get("unresolved", [])
 
             if has_rich:
                 root_tree = Tree(f"[bold cyan]{project_name}[/bold cyan] (local)")
