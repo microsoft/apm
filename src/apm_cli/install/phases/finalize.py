@@ -99,7 +99,7 @@ def _hint_project_compile_needed(ctx: InstallContext) -> None:
         targets = ", ".join(target_names)
         message = (
             f"Instructions installed for {targets}. "
-            "Run 'apm compile' to update AGENTS.md / GEMINI.md."
+            "Run 'apm compile' to update root context files."
         )
         ctx.logger.info(message, symbol="info")
 
