@@ -337,6 +337,16 @@ class TestInstallCommandAutoBootstrap:
                 assert "description" in config
                 assert "APM project" in config["description"]
 
+    @patch("apm_cli.commands.install._validate_package_exists", return_value=False)
+    def test_install_positional_url_total_validation_failure_exits_one(self, mock_validate):
+        """A positional URL that cannot be validated must fail the command."""
+        with self._chdir_tmp():
+            result = self.runner.invoke(cli, ["install", "https://127.0.0.1:1/org/repo.git"])
+
+            assert result.exit_code == 1
+            assert "All packages failed validation" in result.output
+            mock_validate.assert_called_once()
+
     @patch("apm_cli.commands.install._validate_package_exists")
     def test_install_invalid_package_format_with_no_apm_yml(self, mock_validate):
         """Test that invalid package format fails gracefully even with auto-bootstrap."""
