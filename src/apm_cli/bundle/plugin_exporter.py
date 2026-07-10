@@ -550,17 +550,14 @@ def _collect_explicit_local_components(
                 f"includes path {declared_path!r} does not exist. "
                 "Fix the path in apm.yml or create it."
             )
-        files = (
-            [source]
-            if source.is_file()
-            else sorted(path for path in source.rglob("*") if path.is_file())
-        )
-        for file_path in files:
-            if file_path.is_symlink():
+        entries = [source] if source.is_file() else sorted(source.rglob("*"))
+        for entry in entries:
+            if entry.is_symlink():
                 raise ValueError(
                     f"Symlink found inside includes path {declared_path!r}: "
-                    f"{file_path.name}. Remove the symlink or list a regular path."
+                    f"{entry.name}. Remove the symlink or list a regular path."
                 )
+        for file_path in (entry for entry in entries if entry.is_file()):
             try:
                 file_path = ensure_path_within(file_path, project_root)
             except PathTraversalError as exc:

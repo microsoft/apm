@@ -1335,6 +1335,26 @@ class TestExportPluginBundle:
         ):
             export_plugin_bundle(project, tmp_path / "build")
 
+    def test_explicit_include_rejects_nested_directory_symlink(self, tmp_path):
+        """A listed directory cannot publish through a symlinked directory."""
+        project = _setup_plugin_project(tmp_path)
+        skills = project / ".apm" / "skills"
+        skills.mkdir(parents=True, exist_ok=True)
+        external = tmp_path / "external-skill"
+        external.mkdir()
+        (external / "SKILL.md").write_text("# External\n", encoding="utf-8")
+        try:
+            os.symlink(external, skills / "linked")
+        except OSError:
+            pytest.skip("symlinks not supported")
+        _write_apm_yml(project, extra={"includes": [".apm/skills"]})
+
+        with pytest.raises(
+            ValueError,
+            match=r"Symlink found inside includes path '\.apm/skills': linked",
+        ):
+            export_plugin_bundle(project, tmp_path / "build")
+
     @pytest.mark.parametrize(
         ("content", "message"),
         [

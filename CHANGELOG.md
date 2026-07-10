@@ -20,9 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (by @sergio-sisternes-epam; closes #1957) (#2041)
 - Azure DevOps marketplace checks now preserve suffix-free `/_git/<repo>` URLs
   and pass Azure CLI bearer authentication through to `git ls-remote`. (closes #2119)
-- Existing Claude plugin directories (`skills/`, `agents/`, and `commands/`)
-  now pack without migration to `.apm/`. When `.apm/` is present, it becomes
-  the authoritative source and mixed layouts warn with actionable next steps.
+- `apm pack` now treats `.apm/` as the authoritative local source, warns on
+  mixed layouts, and enforces explicit `includes:` lists exhaustively while
+  preserving root-only Claude plugin directories, including after `apm init`.
   (#2122)
 
 ## [0.24.1] - 2026-07-10

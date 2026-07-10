@@ -228,10 +228,11 @@ scripts:
 | **Default** | Undeclared (legacy implicit auto-publish; flagged by `apm audit`). |
 | **Allowed values** | `auto` or a list of paths relative to the project root. |
 
-Declares which local content the project consents to publish when packing or
-deploying. This field does not select the source layout: `.apm/` presence makes
-the APM-native layout authoritative, while its absence preserves supported
-plugin-native root sources. Three forms are supported:
+Records consent to publish local content during deployment and controls local
+content selection when producing plugin bundles with `apm pack`. This field
+does not select the source layout: `.apm/` presence makes the APM-native layout
+authoritative, while its absence preserves supported plugin-native root
+sources. Three forms are supported:
 
 1. **Undeclared** (field omitted). Legacy implicit consent for content in the
    selected source layout. `apm audit` emits an `includes-consent` advisory
@@ -239,10 +240,12 @@ plugin-native root sources. Three forms are supported:
 2. **`includes: auto`**. Explicit consent to publish all local content from the
    selected source layout. No path enumeration required. Default for newly
    initialised projects.
-3. **`includes: [<path>, ...]`**. Explicit, exhaustive allow-list of paths the
-   project consents to publish. Listed paths may be under `.apm/` or a
-   plugin-native root directory. Missing, unsafe, symlinked, or unpackable paths
-   stop `apm pack`; no implicit source fallback occurs.
+3. **`includes: [<path>, ...]`**. Explicit consent list for deployment and the
+   exhaustive allow-list for plugin packing. Listed paths may be under `.apm/`
+   or a plugin-native root directory. Missing, unsafe, symlinked, or unpackable
+   paths stop `apm pack`; no implicit source fallback occurs. During
+   `apm install`, the list satisfies explicit-consent policy but does not filter
+   integrator discovery.
 
 ```yaml
 # Form 1: undeclared (legacy; audit advisory)
@@ -257,7 +260,10 @@ includes: auto
 #   - .apm/skills/my-skill/
 ```
 
-`includes:` is allow-list only. There is no `exclude:` form. To keep maintainer-only primitives out of shipped artifacts, author them OUTSIDE `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../concepts/primitives-and-targets/#dev-only-primitives).
+For plugin packing, `includes:` is allow-list only. There is no `exclude:`
+form. To keep maintainer-only primitives out of shipped artifacts, author them
+outside the selected source layout and reference them via a local-path
+devDependency. See [Dev-only Primitives](../concepts/primitives-and-targets/#dev-only-primitives).
 
 When `policy.manifest.require_explicit_includes` is `true` (see [Policy reference](../enterprise/policy-reference/)), only form 3 passes; `auto` and undeclared are rejected at install/audit time by the `explicit-includes` check (not at YAML parse time).
 
@@ -723,7 +729,14 @@ Created automatically by [`apm plugin init`](./cli/plugin/). Use [`apm install -
 apm install --dev owner/test-helpers
 ```
 
-Plain `apm install` (no flag) deploys both `dependencies` and `devDependencies`. There is no `--omit=dev` flag today; the dev/prod separation kicks in at `apm pack` (plugin format, the default). The local-content scanner that builds plugin bundles operates on `.apm/` only and does not consult the devDep marker. To keep maintainer-only primitives out of shipped artifacts, author them outside `.apm/` and reference them via a local-path devDependency. See [Dev-only Primitives](../concepts/primitives-and-targets/#dev-only-primitives).
+Plain `apm install` (no flag) deploys both `dependencies` and
+`devDependencies`. There is no `--omit=dev` flag today; the dev/prod separation
+kicks in at `apm pack` (plugin format, the default). The local-content scanner
+uses `.apm/` when present, otherwise supported plugin-native root directories;
+it does not consult the devDep marker. To keep maintainer-only primitives out
+of shipped artifacts, author them outside the selected source layout and
+reference them via a local-path devDependency. See [Dev-only
+Primitives](../concepts/primitives-and-targets/#dev-only-primitives).
 
 Local-path devDependency example:
 
