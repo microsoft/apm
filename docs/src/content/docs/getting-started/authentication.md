@@ -223,6 +223,10 @@ apm install dev.azure.com/myorg/myproject/myrepo
 2. AAD bearer via `az account get-access-token` if `az` is installed and signed in
 3. Otherwise: auth-failed error with guidance for both paths
 
+`apm marketplace check` uses this same chain for an ADO `marketplace.sourceBase`.
+Azure CLI credentials are passed to `git ls-remote` as a bearer Authorization
+header, never embedded in the repository URL.
+
 **Stale-PAT fallback:** if `ADO_APM_PAT` is set but rejected (HTTP 401), APM silently retries with the `az` bearer and emits:
 
 ```

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import textwrap
 from pathlib import Path  # noqa: F401
+from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -549,7 +550,10 @@ class TestCheckRefHeadsPrefix:
 
 
 class TestCheckPerHostResolution:
-    @patch("apm_cli.commands.marketplace.check.resolve_token_for_host", return_value="glpat-xyz")
+    @patch(
+        "apm_cli.commands.marketplace.check.resolve_auth_for_host",
+        return_value=SimpleNamespace(token="glpat-xyz", auth_scheme="basic"),
+    )
     @patch("apm_cli.commands.marketplace.check.RefResolver")
     @patch("apm_cli.commands.marketplace.check._load_config_or_exit")
     def test_sourcebase_entry_composes_and_uses_host_token(
@@ -588,12 +592,18 @@ class TestCheckPerHostResolution:
         )
         # resolver bound to that host with that token
         MockResolver.assert_called_once_with(
-            offline=False, host="gitlab.example.com", token="glpat-xyz"
+            offline=False,
+            host="gitlab.example.com",
+            token="glpat-xyz",
+            auth_scheme="basic",
         )
         # ls-remote runs against the composed nested path
         mock_inst.list_remote_refs.assert_called_once_with("group/sub/team/project/my-package")
 
-    @patch("apm_cli.commands.marketplace.check.resolve_token_for_host", return_value="ghp-tok")
+    @patch(
+        "apm_cli.commands.marketplace.check.resolve_auth_for_host",
+        return_value=SimpleNamespace(token="ghp-tok", auth_scheme="basic"),
+    )
     @patch("apm_cli.commands.marketplace.check.RefResolver")
     @patch("apm_cli.commands.marketplace.check._load_config_or_exit")
     def test_host_prefixed_override_uses_that_host(
@@ -629,10 +639,12 @@ class TestCheckPerHostResolution:
         # host-prefixed override carries no sourceBase org hint (org=None),
         # matching the builder's _remote_source_coordinates
         mock_token.assert_called_once_with("github.com", offline=False, org=None, auth_resolver=ANY)
-        MockResolver.assert_called_once_with(offline=False, host="github.com", token="ghp-tok")
+        MockResolver.assert_called_once_with(
+            offline=False, host="github.com", token="ghp-tok", auth_scheme="basic"
+        )
         mock_inst.list_remote_refs.assert_called_once_with("owner/repo")
 
-    @patch("apm_cli.commands.marketplace.check.resolve_token_for_host")
+    @patch("apm_cli.commands.marketplace.check.resolve_auth_for_host")
     @patch("apm_cli.commands.marketplace.check.RefResolver")
     @patch("apm_cli.commands.marketplace.check._load_config_or_exit")
     def test_local_entry_makes_zero_ls_remote_calls(

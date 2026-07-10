@@ -60,7 +60,7 @@ class _RecordingAuthResolver:
 
     def resolve(self, host: str, org: str | None = None):
         self.calls.append((host, org))
-        return SimpleNamespace(token="ado-secret-token", source="ADO_APM_PAT")
+        return SimpleNamespace(token="ado-secret-token", source="ADO_APM_PAT", auth_scheme="basic")
 
 
 def _write_ado_marketplace(tmp_path: Path) -> Path:
