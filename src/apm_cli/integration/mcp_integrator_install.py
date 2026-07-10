@@ -330,7 +330,7 @@ def _resolve_target_runtimes(
     apm_config: dict | None,
     project_root,
     user_scope: bool,
-    explicit_target: str | None,
+    explicit_target: str | list[str] | None,
     scope: InstallScope | None,
     logger,
     console,
@@ -347,6 +347,15 @@ def _resolve_target_runtimes(
         # Single runtime mode - skip auto-discovery entirely.
         logger.progress(f"Targeting specific runtime: {runtime}")
         target_runtimes: list[str] = [runtime]
+    elif explicit_target is not None:
+        # A plural --target value is already parser-normalized. Use that exact
+        # runtime set instead of broad discovery so selecting IntelliJ does not
+        # also select adjacent runtimes that share its Copilot policy profile.
+        target_runtimes = (
+            [explicit_target] if isinstance(explicit_target, str) else list(explicit_target)
+        )
+        runtime_label = "runtime" if len(target_runtimes) == 1 else "runtimes"
+        logger.progress(f"Targeting specific {runtime_label}: {', '.join(target_runtimes)}")
     else:
         project_root_path = Path(project_root) if project_root is not None else Path.cwd()
 
@@ -631,7 +640,7 @@ def run_mcp_install(
     stored_mcp_configs: dict | None = None,
     project_root=None,
     user_scope: bool = False,
-    explicit_target: str | None = None,
+    explicit_target: str | list[str] | None = None,
     logger=None,
     diagnostics=None,
     scope: InstallScope | None = None,
