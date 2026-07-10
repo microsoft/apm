@@ -97,7 +97,11 @@ from ..constants import (
 )
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger, _ValidationOutcome
-from ..core.target_detection import TargetParamType, manifest_targets_from_target_option
+from ..core.target_detection import (
+    TARGET_VALUES_HELP,
+    TargetParamType,
+    manifest_targets_from_target_option,
+)
 
 # MCP --mcp helpers (module-level re-exports for test patches); must stay at
 # import time per comments in the original mid-file block.
@@ -950,7 +954,14 @@ def _handle_mcp_install(  # noqa: PLR0913
     "target",
     type=TargetParamType(),
     default=None,
-    help="Target harness(es) to deploy to. Use commas for multiple targets; repeating the flag keeps only the last value (use commas instead). Values: copilot, claude, cursor, opencode, codex, gemini, antigravity (agy), windsurf, kiro, intellij, agent-skills, all. IntelliJ-specific integration is MCP-only; file primitives use the Copilot profile. 'all' = copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro; combine agent-skills, antigravity, or intellij explicitly when needed. Experimental copilot-cowork and copilot-app values require their feature flags. Resolution order: --target > apm.yml targets: > apm config target > auto-detect. With nothing to detect, install exits 2 with a teaching message. For 'apm compile', use '--all'; '--target all' is deprecated.",
+    help=f"Target harness(es) to deploy to. Use commas for multiple targets; repeating the flag "
+    f"keeps only the last value (use commas instead). Values: {TARGET_VALUES_HELP}. "
+    "IntelliJ-specific integration is MCP-only; file primitives use the Copilot profile. "
+    "'all' excludes agent-skills, antigravity, experimental targets, and intellij; combine "
+    "explicit-only targets when needed. Experimental targets require their feature flags. "
+    "Resolution order: --target > apm.yml targets: > apm config target > auto-detect. "
+    "With nothing to detect, install exits 2 with a teaching message. For 'apm compile', "
+    "use '--all'; '--target all' is deprecated.",
 )
 @click.option(
     "--allow-insecure",

@@ -59,7 +59,7 @@ written. Critical findings cause the command to exit non-zero. See
 
 | Flag | Description |
 |------|-------------|
-| `-t, --target VALUE` | Target(s) to compile. Comma-separated. Values: `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `all`. |
+| `-t, --target VALUE` | Target(s) to compile. Comma-separated. The help text derives its values from the same catalog used for validation, including `intellij`. |
 | `--all` | Compile for all canonical targets. Equivalent to `--target all` and mutually exclusive with `--target`. Preferred form. |
 
 `vscode` and `agents` are accepted as deprecated aliases for `copilot`
@@ -67,8 +67,10 @@ and emit a one-line warning. `--target all` also emits a deprecation
 warning -- prefer `--all`.
 
 `agent-skills` is a no-op for `compile` (skills-only deployment target);
-`antigravity` is explicit-only and is not included in `all`. Use `apm install`
-or `apm deps update` when you want shared `.agents/skills/` output.
+`antigravity` and `intellij` are explicit-only and are not included in `all`.
+For `intellij`, file primitives use the Copilot profile and produce `AGENTS.md`;
+IntelliJ-specific integration remains MCP-only. Use `apm install` or
+`apm deps update` when you want shared `.agents/skills/` output.
 
 ### Output control
 

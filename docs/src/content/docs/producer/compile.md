@@ -90,10 +90,12 @@ apm compile --all                            # every canonical target
 ```
 
 Accepted values: `copilot`, `claude`, `cursor`, `opencode`, `codex`,
-`gemini`, `antigravity`, `windsurf`, `kiro`, `agent-skills`, `all`. The `agent-skills` slug
-is a no-op for compile (skills are deployed by `apm install`); it is
-accepted in target lists for symmetry only. Unknown slugs are
-rejected before any work runs.
+`gemini`, `antigravity`, `windsurf`, `kiro`, `intellij`, `agent-skills`,
+and `all`. The `agent-skills` slug is a no-op for compile (skills are
+deployed by `apm install`); it is accepted in target lists for symmetry
+only. `intellij` uses the Copilot profile for file primitives and produces
+`AGENTS.md`; IntelliJ-specific integration remains MCP-only. Unknown slugs
+are rejected before any work runs.
 
 Experimental targets (`hermes`, `openclaw`, `copilot-cowork`,
 `copilot-app`) are deployment targets for `apm install --target <flag>`
