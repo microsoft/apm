@@ -443,7 +443,8 @@ def _validate_project(
     Calls ``sys.exit(1)`` on fatal errors.  In dry-run mode the function
     emits diagnostic messages but does *not* exit so callers can test the
     full compile path even without real content.  ``allow_empty`` lets
-    ``compile --clean`` reach the compiler's APM-owned orphan cleanup.
+    ``compile --clean`` reach the compiler's APM-owned orphan cleanup;
+    callers must keep validation and watch modes on the content-required path.
     """
     from ...compilation.constitution import find_constitution
 

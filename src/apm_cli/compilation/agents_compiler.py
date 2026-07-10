@@ -1059,7 +1059,7 @@ class AgentsCompiler:
             if distributed_compiler is not None
             else None
         )
-        if compilation_results and not (skip_instructions and files_written == 0):
+        if compilation_results and not would_emit_no_claude_md:
             # Update target name for CLAUDE.md output
             formatter_results = CompilationResults(
                 project_analysis=compilation_results.project_analysis,
