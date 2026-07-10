@@ -281,6 +281,17 @@ class TestVSCodeIntegration:
         assert (scripts_dir / "stop.py").exists()
         assert (scripts_dir / "userpromptsubmit.py").exists()
 
+    def test_copilot_version_emitted_on_fresh_install(self, temp_project):
+        """Fresh Copilot hook JSON must contain top-level "version": 1."""
+        pkg_info = self._setup_hookify_package(temp_project)
+        integrator = HookIntegrator()
+
+        integrator.integrate_package_hooks(pkg_info, temp_project)
+
+        hooks_path = temp_project / ".github" / "hooks" / "hookify-hooks.json"
+        config = json.loads(hooks_path.read_text())
+        assert config["version"] == 1
+
     def test_integrate_learning_output_style_vscode(self, temp_project):
         """Test VSCode integration of learning-output-style plugin (different script dir)."""
         pkg_dir = temp_project / "apm_modules" / "anthropics" / "learning-output-style"
