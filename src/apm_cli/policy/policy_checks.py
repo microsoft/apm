@@ -1101,7 +1101,7 @@ def run_dependency_policy_checks(
     lockfile=None,
     policy: ApmPolicy,
     mcp_deps=None,
-    effective_target: str | None = None,
+    effective_target: str | list[str] | None = None,
     fetch_outcome: str | None = None,
     fail_fast: bool = True,
     manifest_includes=_INCLUDES_NOT_PROVIDED,
