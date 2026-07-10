@@ -113,7 +113,7 @@ def _read_yaml_targets(ctx) -> list[str] | None:
     return result if result else None
 
 
-def declared_target_profiles(ctx) -> list | None:
+def declared_target_profiles(ctx: InstallContext) -> list[TargetProfile] | None:
     """Return the scope-applied target profiles whose lockfile entries are legitimate.
 
     Reads ``targets:``/``target:`` from the consumer's ``apm.yml``, maps the
@@ -147,7 +147,7 @@ def declared_target_profiles(ctx) -> list | None:
         return None
     is_user = getattr(ctx, "scope", None) is InstallScope.USER
 
-    profiles: list = []
+    profiles: list[TargetProfile] = []
     # Declared canonical targets: scope-applied, mirroring ``ctx.targets``. A
     # scope that drops a target (``for_scope`` -> None) means it does not apply
     # here, so it is skipped.

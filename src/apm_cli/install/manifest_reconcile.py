@@ -128,8 +128,10 @@ def union_preserving(
             continue
         if is_governed_by_install(path, file_roots, uri_schemes):
             continue
-        if allowed_roots is not None and not is_governed_by_install(
-            path, allowed_roots, allowed_schemes
+        if (
+            allowed_roots is not None
+            and allowed_schemes is not None
+            and not is_governed_by_install(path, allowed_roots, allowed_schemes)
         ):
             # Ghost: governed by no target the consumer declares. Drop it.
             continue
