@@ -1523,6 +1523,7 @@ def install(  # noqa: PLR0913
             )
             # Short-circuit: all packages failed validation -- nothing to install
             if outcome.all_failed:
+                summary_rendered = True
                 sys.exit(1)
             # Note: Empty validated_packages is OK if packages are already in apm.yml;
             # only_packages is derived from validation outcomes below.
