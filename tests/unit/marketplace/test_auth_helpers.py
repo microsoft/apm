@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from apm_cli.marketplace.auth_helpers import resolve_token_for_host
+from apm_cli.marketplace.auth_helpers import resolve_auth_for_host, resolve_token_for_host
 
 
 def test_resolve_token_for_host_offline_returns_none_without_resolver() -> None:
@@ -29,6 +29,27 @@ def test_resolve_token_for_host_returns_token_from_supplied_resolver() -> None:
 
     assert token == "glpat-token"
     resolver.resolve.assert_called_once_with("gitlab.example.com", org="group")
+
+
+def test_resolve_auth_for_host_preserves_bearer_scheme() -> None:
+    """The context-preserving helper returns the resolver result unchanged."""
+    resolver = MagicMock()
+    context = SimpleNamespace(
+        token="ado-bearer",
+        source="AAD_BEARER_AZ_CLI",
+        auth_scheme="bearer",
+    )
+    resolver.resolve.return_value = context
+
+    resolved = resolve_auth_for_host(
+        "dev.azure.com",
+        org="contoso",
+        auth_resolver=resolver,
+    )
+
+    assert resolved is context
+    assert resolved.auth_scheme == "bearer"
+    resolver.resolve.assert_called_once_with("dev.azure.com", org="contoso")
 
 
 def test_resolve_token_for_host_returns_none_when_resolver_raises() -> None:

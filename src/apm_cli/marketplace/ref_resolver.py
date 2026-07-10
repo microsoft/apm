@@ -16,6 +16,7 @@ Security notes
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import subprocess
@@ -23,7 +24,13 @@ import threading
 import time
 from dataclasses import dataclass
 
-from ..utils.github_host import build_https_clone_url, default_host
+from ..utils.github_host import (
+    build_ado_bearer_git_env,
+    build_authorization_header_git_env,
+    build_https_clone_url,
+    default_host,
+    is_azure_devops_hostname,
+)
 from ._git_utils import redact_token as _redact_token
 from .errors import GitLsRemoteError, OfflineMissError
 from .git_stderr import translate_git_stderr
@@ -137,9 +144,10 @@ class RefResolver:
         When ``True`` (default), stderr from failed ``git`` calls is
         classified via ``translate_git_stderr``.
     token:
-        Optional GitHub PAT to embed in the ``https://`` URL.  When set
-        the URL uses ``x-access-token`` authentication; when ``None``
-        (default) git runs unauthenticated.
+        Optional PAT or bearer credential. Basic credentials are embedded in
+        the URL; ADO bearer credentials are sent through ``http.extraheader``.
+    auth_scheme:
+        ``"basic"`` (default) or ``"bearer"`` from ``AuthContext``.
     """
 
     def __init__(
@@ -150,12 +158,14 @@ class RefResolver:
         stderr_translator_enabled: bool = True,
         host: str | None = None,
         token: str | None = None,
+        auth_scheme: str = "basic",
     ) -> None:
         self._timeout = timeout_seconds
         self._offline = offline
         self._stderr_translator = stderr_translator_enabled
         self._host: str = host or default_host() or "github.com"
         self._token: str | None = token
+        self._auth_scheme = auth_scheme
         self._cache = RefCache()
         self._lock = threading.Lock()
         # Per-remote locks to serialise calls to the same remote while
@@ -172,6 +182,31 @@ class RefResolver:
             if owner_repo not in self._remote_locks:
                 self._remote_locks[owner_repo] = threading.Lock()
             return self._remote_locks[owner_repo]
+
+    def _git_url_and_env(self, owner_repo: str) -> tuple[str, dict[str, str]]:
+        """Build the remote URL and auth environment for one git operation."""
+        requested_bearer = self._auth_scheme == "bearer"
+        ado_host = is_azure_devops_hostname(self._host)
+        if requested_bearer and not ado_host:
+            raise GitLsRemoteError(
+                package="",
+                summary=f"Bearer authentication is not supported for host '{self._host}'.",
+                hint="Use bearer authentication only with an Azure DevOps host.",
+            )
+        bearer = requested_bearer and ado_host
+        url_token = None if requested_bearer else self._token
+        if ado_host:
+            url = f"https://{self._host}/{owner_repo}"
+        else:
+            url = build_https_clone_url(self._host, owner_repo, token=url_token)
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
+        if bearer and self._token:
+            env.pop("GIT_TOKEN", None)
+            env.update(build_ado_bearer_git_env(self._token))
+        elif ado_host and url_token:
+            credential = base64.b64encode(f":{url_token}".encode()).decode()
+            env.update(build_authorization_header_git_env("Basic", credential))
+        return url, env
 
     def list_remote_refs(self, owner_repo: str) -> list[RemoteRef]:
         """Fetch all tags and heads from the configured Git host.
@@ -206,8 +241,7 @@ class RefResolver:
             if self._offline:
                 raise OfflineMissError(package="", remote=owner_repo)
 
-            url = build_https_clone_url(self._host, owner_repo, token=self._token)
-            env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
+            url, env = self._git_url_and_env(owner_repo)
             try:
                 result = subprocess.run(
                     ["git", "ls-remote", "--tags", "--heads", url],
@@ -281,8 +315,7 @@ class RefResolver:
         GitLsRemoteError
             When the ref does not exist or the subprocess fails.
         """
-        url = build_https_clone_url(self._host, owner_repo, token=self._token)
-        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
+        url, env = self._git_url_and_env(owner_repo)
         try:
             result = subprocess.run(
                 ["git", "ls-remote", url, ref],
