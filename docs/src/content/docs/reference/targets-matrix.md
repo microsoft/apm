@@ -35,8 +35,9 @@ Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, Antigravity, Codex, and Windsurf by default (see [Skills convergence](#skills-convergence)
 below). Claude and Kiro keep target-native skill directories.
 
-(*) For `intellij`, file primitives route through the Copilot profile under
-`.github/`; the IntelliJ-specific adapter configures MCP only.
+(*) For `intellij`, file primitives route through the Copilot profile:
+instructions, prompts, agents, and hooks use `.github/`, while skills use
+`.agents/skills/`. The IntelliJ-specific adapter configures MCP only.
 
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
 Copilot desktop App), `openclaw` (OpenClaw agent runtime), and `hermes` are
@@ -233,8 +234,8 @@ GitHub Copilot for JetBrains IDEs.
   [JetBrains integration guide](../integrations/ide-tool-integration/#jetbrains-intellij-idea-pycharm-goland-and-others)
   for OS-specific paths.
 - **Supported primitives.** The IntelliJ-specific adapter supports MCP.
-  Instructions, prompts, agents, skills, and hooks deploy through the Copilot
-  profile under `.github/`.
+  Instructions, prompts, agents, and hooks deploy through the Copilot profile
+  under `.github/`; skills deploy under `.agents/skills/`.
 - **Scope.** MCP configuration is user scope only. File primitives use the
   project or user scope selected for the Copilot profile. IntelliJ does not
   participate in plain `all` expansion.
