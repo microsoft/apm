@@ -997,12 +997,14 @@ class AgentsCompiler:
         stats["claude_files_written"] = files_written
 
         if would_emit_no_claude_md:
-            self._log(
-                "progress",
-                "CLAUDE.md not generated -- Claude Code reads .claude/rules/ directly,"
-                " no further action needed",
-                symbol="info",
-            )
+            if skip_instructions:
+                no_output_message = (
+                    "CLAUDE.md not generated -- Claude Code reads .claude/rules/"
+                    " directly, no further action needed"
+                )
+            else:
+                no_output_message = "CLAUDE.md not generated -- no source primitives remain"
+            self._log("progress", no_output_message, symbol="info")
             # Remove a stale APM-generated CLAUDE.md when --clean is set.
             # A hand-authored file (no CLAUDE_HEADER marker) is never deleted;
             # a warning is emitted instead to match the Copilot-root convention.

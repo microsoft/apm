@@ -2,13 +2,14 @@
 
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
 
 
 def test_clean_removes_claude_md_after_last_primitive_is_removed(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """--clean reaches orphan removal when the project has no primitives left."""
     monkeypatch.chdir(tmp_path)
@@ -35,3 +36,20 @@ def test_clean_removes_claude_md_after_last_primitive_is_removed(
 
     assert cleaned.exit_code == 0, cleaned.output
     assert not claude_md.exists()
+
+
+def test_clean_validate_still_rejects_project_without_primitives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--validate keeps requiring project content when combined with --clean."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "apm.yml").write_text(
+        "name: clean-validate-empty\nversion: 1.0.0\ntargets:\n  - claude\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".apm" / "instructions").mkdir(parents=True)
+
+    result = CliRunner().invoke(cli, ["compile", "--target", "claude", "--clean", "--validate"])
+
+    assert result.exit_code == 1
+    assert "No instruction files found in .apm/ directory" in result.output
