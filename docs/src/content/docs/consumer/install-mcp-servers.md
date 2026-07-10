@@ -100,7 +100,7 @@ for the full required-vs-optional runtime config rule.
 
 | Harness | File | Scope | Format |
 |---|---|---|---|
-| GitHub Copilot CLI | `~/.copilot/mcp-config.json` | global | JSON `mcpServers` |
+| GitHub Copilot CLI | `.mcp.json` (project) or `~/.copilot/mcp-config.json` (`-g`) | both | JSON `mcpServers` |
 | VS Code (Copilot) | `.vscode/mcp.json` | project | JSON `servers` |
 | Claude Code | `.mcp.json` (project) or `$CLAUDE_CONFIG_DIR/.claude.json` (`-g`; unset/blank: `~/.claude.json`) | both | JSON `mcpServers` |
 | Cursor | `.cursor/mcp.json` | project (only if `.cursor/` exists) | JSON `mcpServers` |
@@ -111,6 +111,12 @@ for the full required-vs-optional runtime config rule.
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | global | JSON `mcpServers` |
 | Kiro IDE | `.kiro/settings/mcp.json` (project, only if `.kiro/` exists) or `~/.kiro/settings/mcp.json` (`-g`) | both | JSON `mcpServers` |
 | JetBrains Copilot | OS-specific `mcp.json` under the GitHub Copilot user config directory | global | JSON `servers` |
+
+For Copilot CLI project scope, APM writes `.mcp.json` directly with the
+same `mcpServers` key Copilot CLI reads. If you are moving a hand-written
+VS Code MCP file to Copilot CLI, GitHub's migration guidance is to copy
+`.vscode/mcp.json` into `.mcp.json` while remapping the top-level
+`servers` key to `mcpServers`.
 
 ## How `targets:` gates which configs get written
 

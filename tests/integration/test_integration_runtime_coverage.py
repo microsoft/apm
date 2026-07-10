@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import urllib.parse
 from pathlib import Path
 from typing import Any
@@ -705,6 +706,8 @@ class TestCopilotAppWsHelpers:
 
     def test_token_file_mode_ok_missing_file_returns_false(self, tmp_path: Path) -> None:
         """Missing file returns False."""
+        if os.name == "nt":
+            pytest.skip("POSIX-only test")
         from apm_cli.integration.copilot_app_ws import _token_file_mode_ok
 
         assert _token_file_mode_ok(tmp_path / "nonexistent") is False
@@ -1373,7 +1376,7 @@ class TestStreamSubprocessOutput:
         """Normal command returns lines and zero exit code."""
         from apm_cli.runtime.base import _stream_subprocess_output
 
-        output, rc = _stream_subprocess_output(["echo", "hello"])
+        output, rc = _stream_subprocess_output([sys.executable, "-c", "print('hello')"])
         assert rc == 0
         assert any("hello" in line for line in output)
 
@@ -1381,7 +1384,7 @@ class TestStreamSubprocessOutput:
         """Failing command returns non-zero return code."""
         from apm_cli.runtime.base import _stream_subprocess_output
 
-        _, rc = _stream_subprocess_output(["false"])
+        _, rc = _stream_subprocess_output([sys.executable, "-c", "import sys; sys.exit(1)"])
         assert rc != 0
 
     def test_timeout_kills_process(self) -> None:

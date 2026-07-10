@@ -118,8 +118,16 @@ class CopilotRuntime(RuntimeAdapter):
             version = version_result.stdout.strip() if version_result.returncode == 0 else "unknown"
 
             # Check for MCP configuration
-            mcp_config_path = Path.home() / ".copilot" / "mcp-config.json"
+            mcp_config_path = self.get_mcp_config_path()
             mcp_configured = mcp_config_path.exists()
+
+            if mcp_config_path.name in (".mcp.json", "mcp.json"):
+                if mcp_config_path.parent.name == ".github":
+                    config_label = ".github/mcp.json"
+                else:
+                    config_label = ".mcp.json"
+            else:
+                config_label = "~/.copilot/mcp-config.json"
 
             return {
                 "name": "copilot",
@@ -128,7 +136,7 @@ class CopilotRuntime(RuntimeAdapter):
                 "capabilities": {
                     "model_execution": True,
                     "mcp_servers": "native_support" if mcp_configured else "manual_setup_required",
-                    "configuration": "~/.copilot/mcp-config.json",
+                    "configuration": config_label,
                     "interactive_mode": True,
                     "background_processes": True,
                     "file_operations": True,
@@ -163,8 +171,17 @@ class CopilotRuntime(RuntimeAdapter):
         """Get the path to the MCP configuration file.
 
         Returns:
-            Path: Path to the MCP configuration file
+            Path: Path to the MCP configuration file (prioritizes workspace config)
         """
+        cwd = Path.cwd()
+        cwd_mcp = cwd / ".mcp.json"
+        if cwd_mcp.is_file():
+            return cwd_mcp
+
+        cwd_github_mcp = cwd / ".github" / "mcp.json"
+        if cwd_github_mcp.is_file():
+            return cwd_github_mcp
+
         return Path.home() / ".copilot" / "mcp-config.json"
 
     def is_mcp_configured(self) -> bool:
@@ -188,7 +205,10 @@ class CopilotRuntime(RuntimeAdapter):
         try:
             with open(mcp_config_path, encoding="utf-8") as f:
                 config = json.load(f)
-                return config.get("servers", {})
+                if not isinstance(config, dict):
+                    return {}
+                val = config.get("mcpServers", config.get("servers", {}))
+                return val if isinstance(val, dict) else {}
         except Exception as e:
             return {"error": f"Failed to read MCP configuration: {e}"}
 

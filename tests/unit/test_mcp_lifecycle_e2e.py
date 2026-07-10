@@ -761,7 +761,7 @@ class TestStaleCleanupKeyNormalization:
         )
 
         stale = {"io.github.github/github-mcp-server"}
-        MCPIntegrator.remove_stale(stale, runtime="copilot")
+        MCPIntegrator.remove_stale(stale, runtime="copilot", user_scope=True)
 
         result = json.loads(copilot_config.read_text())
         assert "github-mcp-server" not in result["mcpServers"]
@@ -796,7 +796,7 @@ class TestStaleCleanupKeyNormalization:
         )
 
         stale = {"acme-kb"}
-        MCPIntegrator.remove_stale(stale, runtime="copilot")
+        MCPIntegrator.remove_stale(stale, runtime="copilot", user_scope=True)
 
         result = json.loads(copilot_config.read_text())
         assert "acme-kb" not in result["mcpServers"]

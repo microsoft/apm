@@ -610,6 +610,7 @@ class MCPIntegrator:
         from apm_cli.core.scope import InstallScope
 
         if scope is InstallScope.USER:
+            user_scope = True
             from apm_cli.factory import ClientFactory as _CF
 
             supported = builtins.set()
@@ -620,6 +621,8 @@ class MCPIntegrator:
                 except ValueError:
                     pass
             target_runtimes = supported
+        elif scope is InstallScope.PROJECT:
+            user_scope = False
 
         # Claude Code: when scope is unspecified, fail safely toward the project
         # config only -- never touch ~/.claude.json on the user's behalf without
@@ -654,11 +657,21 @@ class MCPIntegrator:
             )
 
         if "copilot" in target_runtimes:
+            from apm_cli.factory import ClientFactory
+
+            copilot_cfg = Path(
+                ClientFactory.create_client(
+                    "copilot",
+                    project_root=project_root_path,
+                    user_scope=user_scope,
+                ).get_config_path()
+            )
+            copilot_label = "Copilot CLI user config" if user_scope else ".mcp.json"
             _clean_json_mcp_config(
-                Path.home() / ".copilot" / "mcp-config.json",
+                copilot_cfg,
                 expanded_stale,
                 logger,
-                "Copilot CLI config",
+                copilot_label,
                 use_rich=True,
             )
 
@@ -711,7 +724,7 @@ class MCPIntegrator:
                 ClientFactory.create_client(
                     "kiro",
                     project_root=project_root_path,
-                    user_scope=user_scope or scope is InstallScope.USER,
+                    user_scope=user_scope,
                 ).get_config_path()
             )
             _clean_json_mcp_config(

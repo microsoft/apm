@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `apm install --mcp NAME --target copilot` now writes project-scoped Copilot
+  CLI MCP configuration to `.mcp.json`; use `-g` / `--global` to keep writing
+  `~/.copilot/mcp-config.json`. Stale MCP cleanup now follows the same scope. (#2048)
+
 ## [0.24.1] - 2026-07-10
 
 ### Fixed
@@ -91,6 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   universal instructions. (by @WilliamK112, #1993)
 
 ### Fixed
+
 
 - `apm install` no longer aborts with a false "package not accessible" error
   when GitHub's API rate limit (primary 60/hr or secondary concurrency) throttles

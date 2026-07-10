@@ -1,5 +1,6 @@
 """Test Copilot Runtime."""
 
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -51,7 +52,21 @@ class TestCopilotRuntime:
             mock_subprocess.return_value = mock_result
 
             runtime = CopilotRuntime()
-            info = runtime.get_runtime_info()
+
+            # Test case 1: Local .mcp.json config path
+            with patch.object(runtime, "get_mcp_config_path", return_value=Path("/workspace/.mcp.json")):
+                info = runtime.get_runtime_info()
+                assert info["capabilities"]["configuration"] == ".mcp.json"
+
+            # Test case 2: Local .github/mcp.json config path
+            with patch.object(runtime, "get_mcp_config_path", return_value=Path("/workspace/.github/mcp.json")):
+                info = runtime.get_runtime_info()
+                assert info["capabilities"]["configuration"] == ".github/mcp.json"
+
+            # Test case 3: Global fallback config path
+            with patch.object(runtime, "get_mcp_config_path", return_value=Path("/home/user/.copilot/mcp-config.json")):
+                info = runtime.get_runtime_info()
+                assert info["capabilities"]["configuration"] == "~/.copilot/mcp-config.json"
 
             assert info["name"] == "copilot"
             assert info["type"] == "copilot_cli"
@@ -68,13 +83,40 @@ class TestCopilotRuntime:
             assert "copilot-default" in models
             assert models["copilot-default"]["provider"] == "github-copilot"
 
-    def test_get_mcp_config_path(self):
+    def test_get_mcp_config_path(self, tmp_path):
         """Test getting MCP configuration path."""
         with patch.object(CopilotRuntime, "is_available", return_value=True):
             runtime = CopilotRuntime()
-            config_path = runtime.get_mcp_config_path()
 
-            assert config_path.as_posix().endswith(".copilot/mcp-config.json")
+            # Setup mock directories
+            mock_cwd = tmp_path / "workspace"
+            mock_cwd.mkdir()
+            mock_home = tmp_path / "home"
+            mock_home.mkdir()
+            mock_copilot = mock_home / ".copilot"
+            mock_copilot.mkdir()
+
+            with (
+                patch("pathlib.Path.cwd", return_value=mock_cwd),
+                patch("pathlib.Path.home", return_value=mock_home),
+            ):
+                # 1. Global fallback (no workspace config)
+                config_path = runtime.get_mcp_config_path()
+                assert config_path.as_posix().endswith(".copilot/mcp-config.json")
+
+                # 2. .github/mcp.json exists
+                mock_github = mock_cwd / ".github"
+                mock_github.mkdir()
+                (mock_github / "mcp.json").touch()
+                config_path = runtime.get_mcp_config_path()
+                assert config_path.name == "mcp.json"
+                assert ".github" in config_path.parts
+
+                # 3. .mcp.json exists (highest priority)
+                (mock_cwd / ".mcp.json").touch()
+                config_path = runtime.get_mcp_config_path()
+                assert config_path.name == ".mcp.json"
+                assert ".github" not in config_path.parts
 
     def test_execute_prompt_basic(self):
         """Test basic prompt execution."""
@@ -181,3 +223,54 @@ class TestMcpConfigUtf8RoundTrip:
 
         assert "demo-cafe" in got
         assert got["demo-cafe"]["description"] == "\u4e2d\u6587 description -- cafe"
+
+    def test_get_mcp_servers_reads_mcp_servers_key(self, tmp_path):
+        """Test reading MCP config supports the mcpServers key used in .mcp.json."""
+        import json as _json
+
+        mcp_path = tmp_path / "mcp.json"
+        servers = {
+            "mcpServers": {
+                "workspace-server": {
+                    "command": "node",
+                    "args": ["server.js"],
+                }
+            }
+        }
+        mcp_path.write_bytes(_json.dumps(servers).encode("utf-8"))
+
+        with patch.object(CopilotRuntime, "is_available", return_value=True):
+            runtime = CopilotRuntime()
+            with patch.object(CopilotRuntime, "get_mcp_config_path", return_value=mcp_path):
+                got = runtime.get_mcp_servers()
+
+        assert "workspace-server" in got
+
+    def test_get_mcp_servers_handles_non_dict(self, tmp_path):
+        """Test that get_mcp_servers returns an empty dict if servers is a list or non-dict."""
+        import json as _json
+
+        mcp_path = tmp_path / "mcp.json"
+        servers = {"mcpServers": ["not", "a", "dict"]}
+        mcp_path.write_bytes(_json.dumps(servers).encode("utf-8"))
+
+        with patch.object(CopilotRuntime, "is_available", return_value=True):
+            runtime = CopilotRuntime()
+            with patch.object(CopilotRuntime, "get_mcp_config_path", return_value=mcp_path):
+                got = runtime.get_mcp_servers()
+
+        assert got == {}
+
+    def test_get_mcp_servers_handles_malformed_config_root(self, tmp_path):
+        """Test that get_mcp_servers returns an empty dict if the root is not a dict."""
+        import json as _json
+
+        mcp_path = tmp_path / "mcp.json"
+        mcp_path.write_bytes(_json.dumps(["root", "is", "list"]).encode("utf-8"))
+
+        with patch.object(CopilotRuntime, "is_available", return_value=True):
+            runtime = CopilotRuntime()
+            with patch.object(CopilotRuntime, "get_mcp_config_path", return_value=mcp_path):
+                got = runtime.get_mcp_servers()
+
+        assert got == {}

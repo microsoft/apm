@@ -27,6 +27,7 @@ import json
 import os
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from apm_cli.adapters.client.copilot import (
@@ -100,11 +101,20 @@ class TestModuleLevelHelpers(unittest.TestCase):
 
 
 class TestGetConfigPath(unittest.TestCase):
-    def test_returns_path_under_home_copilot(self) -> None:
-        adapter = _make_adapter()
-        config_path = adapter.get_config_path()
-        self.assertIn(".copilot", config_path)
-        self.assertTrue(config_path.endswith("mcp-config.json"))
+    def test_project_scope_returns_project_mcp_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = _make_adapter(project_root=tmp)
+            config_path = Path(adapter.get_config_path())
+
+        self.assertEqual(config_path, Path(tmp) / ".mcp.json")
+
+    def test_user_scope_returns_home_copilot_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = _make_adapter(project_root=tmp, user_scope=True)
+            with patch.object(Path, "home", return_value=Path(tmp) / "home"):
+                config_path = Path(adapter.get_config_path())
+
+        self.assertEqual(config_path, Path(tmp) / "home" / ".copilot" / "mcp-config.json")
 
 
 # ---------------------------------------------------------------------------
