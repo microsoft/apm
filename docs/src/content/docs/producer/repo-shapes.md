@@ -217,6 +217,10 @@ Claude Code skills target. Authoring rules:
   `executables.deny` policy (the legacy `bin_deploy` rule remains a
   deprecated alias) -- see the
   [policy schema](../../reference/policy-schema/#executables).
+- Consumers can pass `--trust-bin` on `apm install` to explicitly
+  consent (suppresses the trust-posture warning) or `--no-trust-bin`
+  to skip bin/ deployment for a single invocation. Without either
+  flag, bin/ deploys with a prominent warning.
 
 ## What to read next
 
