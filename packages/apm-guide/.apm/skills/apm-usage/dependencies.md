@@ -423,6 +423,11 @@ dependencies:
         callbackPort: 3118
 ```
 
+At user scope, Claude MCP entries are written to
+`$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` is set to a
+non-whitespace absolute path. Unset or blank values use `~/.claude.json`;
+relative values are rejected.
+
 ## LSP dependency formats
 
 LSP (Language Server Protocol) servers give supported runtimes real-time

@@ -445,6 +445,8 @@ class TestSkillSubsetConsistencyCheck:
         """Create a manifest mock with given dep_refs."""
         manifest = Mock()
         manifest.get_apm_dependencies.return_value = deps
+        manifest.get_dev_apm_dependencies.return_value = []
+        manifest.get_all_apm_dependencies.return_value = deps
         return manifest
 
     def _make_lock_mock(self, locked_deps):
