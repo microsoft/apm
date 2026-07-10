@@ -466,3 +466,31 @@ dependencies:
             result = self.runner.invoke(cli, ["prune"])
             assert result.exit_code == 0
             assert not orphan_dir.exists()
+
+    # ------------------------------------------------------------------
+    # Regression: devDependencies must not be pruned (#2033)
+    # ------------------------------------------------------------------
+
+    def test_prune_keeps_dev_dependency_packages(self):
+        """Regression #2033: prune must not remove devDependencies.apm packages."""
+        apm_yml_with_dev_dep = (
+            "name: test-project\n"
+            "version: 1.0.0\n"
+            "dependencies:\n"
+            "  apm:\n"
+            "    - declared-org/prod-pkg\n"
+            "  mcp: []\n"
+            "devDependencies:\n"
+            "  apm:\n"
+            "    - dev-org/dev-pkg\n"
+        )
+        with self._chdir_tmp() as tmp:
+            (tmp / "apm.yml").write_text(apm_yml_with_dev_dep)
+            prod_dir = _make_package_dir(tmp, "declared-org", "prod-pkg")
+            dev_dir = _make_package_dir(tmp, "dev-org", "dev-pkg")
+            orphan_dir = _make_package_dir(tmp, "orphan-org", "orphan-repo")
+            result = self.runner.invoke(cli, ["prune"])
+            assert result.exit_code == 0
+            assert prod_dir.exists(), "Prod dependency must remain"
+            assert dev_dir.exists(), "Dev dependency must remain"
+            assert not orphan_dir.exists(), "Orphaned package must be removed"
