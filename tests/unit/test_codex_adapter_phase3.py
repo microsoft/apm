@@ -154,6 +154,17 @@ class TestGetCurrentConfig:
             result = adapter.get_current_config()
         assert result is None
 
+    def test_returns_none_on_unicode_decode_error(self, tmp_path: Path) -> None:
+        config_file = tmp_path / ".codex" / "config.toml"
+        config_file.parent.mkdir()
+        config_file.write_bytes(b"\xff")
+        adapter = _make_adapter(project_root=tmp_path)
+
+        with patch("apm_cli.adapters.client.codex._rich_warning"):
+            result = adapter.get_current_config()
+
+        assert result is None
+
     def test_returns_none_on_os_error(self, tmp_path: Path) -> None:
         codex_dir = tmp_path / ".codex"
         codex_dir.mkdir()

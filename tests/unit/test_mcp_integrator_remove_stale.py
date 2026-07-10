@@ -146,6 +146,23 @@ class TestCleanCodexToml:
         assert removed == 0
         assert config_path.read_text(encoding="utf-8") == original
 
+    def test_skips_non_utf8_config_without_rewriting(self, tmp_path):
+        from apm_cli.integration.mcp_integrator import _clean_toml_mcp_config
+
+        config_path = tmp_path / "config.toml"
+        original = b"\xff"
+        config_path.write_bytes(original)
+
+        removed = _clean_toml_mcp_config(
+            config_path,
+            {"stale-server"},
+            "Codex CLI config",
+            use_rich=False,
+        )
+
+        assert removed == 0
+        assert config_path.read_bytes() == original
+
 
 class TestRemoveStaleIntelliJ:
     """Fixture-backed coverage for the JetBrains (intellij) stale-cleanup block."""

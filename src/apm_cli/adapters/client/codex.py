@@ -10,6 +10,7 @@ from tomlkit.exceptions import ParseError
 
 from ...registry.client import SimpleRegistryClient
 from ...registry.integration import RegistryIntegration
+from ...utils.atomic_io import write_text_lf
 from ...utils.console import _rich_success, _rich_warning
 from ...utils.path_security import PathTraversalError
 from ._mcp_runtime_args import process_v01_value_hint_arg
@@ -95,7 +96,7 @@ class CodexClientAdapter(MCPClientAdapter):
         # Ensure directory exists
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
-        config_path.write_text(tomlkit.dumps(current_config), encoding="utf-8")
+        write_text_lf(config_path, tomlkit.dumps(current_config))
         os.chmod(config_path, 0o600)
         _log.debug("Codex config written to %s", config_path)
         return True
@@ -104,8 +105,9 @@ class CodexClientAdapter(MCPClientAdapter):
         """Get the current Codex CLI MCP configuration.
 
         Returns:
-            dict | None: Current configuration, empty dict if file doesn't
-                exist, or None when an existing config cannot be parsed safely.
+            tomlkit.TOMLDocument | dict | None: Round-trip-preserving document
+                when the file exists, empty dict if it does not exist, or None
+                when an existing config cannot be parsed safely.
         """
         config_path = self.get_config_path()
 
@@ -115,7 +117,7 @@ class CodexClientAdapter(MCPClientAdapter):
         try:
             with open(config_path, encoding="utf-8") as config_file:
                 return tomlkit.load(config_file)
-        except ParseError as exc:
+        except (ParseError, UnicodeDecodeError) as exc:
             _log.debug("Failed to parse Codex config at %s", config_path, exc_info=True)
             _rich_warning(
                 f"Could not parse {config_path}: {exc} -- skipping config write to avoid data loss",

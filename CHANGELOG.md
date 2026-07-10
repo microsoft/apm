@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Codex MCP installs and stale-server cleanup now preserve literal-quoted
+  Windows path keys in `config.toml` instead of rejecting or corrupting
+  unrelated project trust and desktop preferences. (closes #2075) (#2100)
 - `apm install host/org/repo/subpath#ref` on an unrecognised self-hosted FQDN
   no longer fails with a misleading "not accessible or doesn't exist" error;
   the failure reason now suggests setting `GITLAB_HOST` / `APM_GITLAB_HOSTS`
