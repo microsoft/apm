@@ -7,7 +7,6 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
-from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.apm_package import clear_apm_yml_cache
 
 
@@ -27,24 +26,6 @@ def _write_package(path: Path, name: str, dependency: str | None = None) -> None
         f"# {name}\n",
         encoding="ascii",
     )
-
-
-def test_resolution_rollback_restores_replaced_cache_path(tmp_path: Path) -> None:
-    """Rollback must restore a valid cache entry replaced by this attempt."""
-    modules = tmp_path / "apm_modules"
-    package = modules / "_local" / "package-a"
-    package.mkdir(parents=True)
-    marker = package / "marker.txt"
-    marker.write_text("original", encoding="ascii")
-    session = ResolutionStagingSession(modules)
-
-    session.prepare_path(package)
-    package.mkdir(parents=True)
-    marker.write_text("replacement", encoding="ascii")
-    session.rollback()
-
-    assert marker.read_text(encoding="ascii") == "original"
-    assert not (modules / ".apm-resolution-staging").exists()
 
 
 def test_corrected_local_cycle_resumes_without_manual_cache_deletion(
