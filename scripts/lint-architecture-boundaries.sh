@@ -152,6 +152,24 @@ if ! grep -q 'does not run aggregate' docs/src/content/docs/concepts/lifecycle.m
     violations=$((violations + 1))
 fi
 
+echo "[*] AC7: concurrency and deadline safety"
+check_pattern \
+    "Runtime adapters must reuse the deadline-aware base streamer" \
+    'subprocess\.Popen' \
+    $(find src/apm_cli/runtime -name '*_runtime.py')
+if ! grep -q 'time.monotonic' src/apm_cli/runtime/base.py \
+    || ! grep -q '_terminate_and_reap' src/apm_cli/runtime/base.py; then
+    echo "[x] Runtime streaming must enforce and reap on a wall-clock deadline"
+    violations=$((violations + 1))
+fi
+if ! grep -A8 'def add_marketplace' src/apm_cli/marketplace/registry.py \
+    | grep -q '_marketplace_mutation' \
+    || ! grep -A12 'def remove_marketplace' src/apm_cli/marketplace/registry.py \
+    | grep -q '_marketplace_mutation'; then
+    echo "[x] Marketplace mutations must lock the full load-modify-save transaction"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

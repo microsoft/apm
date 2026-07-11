@@ -23,6 +23,10 @@ It does not install APM packages and does not deploy primitives. For that, see [
 
 A runtime here is the AI CLI itself (`copilot`, `codex`, `llm`, `gemini`) -- the program that consumes the prompts and skills APM deploys. For the broader concept of harness targets that receive primitives, see [Primitives and targets](../../../concepts/primitives-and-targets/).
 
+Programmatic runtime execution enforces its wall-clock deadline while output
+is still streaming. On expiry, APM terminates and reaps the runtime process
+instead of waiting for stdout to close first.
+
 ## Subcommands
 
 | Command | Purpose |
