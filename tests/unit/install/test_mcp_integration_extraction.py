@@ -63,6 +63,7 @@ def _base_kwargs(**overrides):
         old_mcp_servers=set(),
         old_mcp_configs={},
         old_mcp_provenance={},
+        old_mcp_target_servers={},
         project_root=Path("/fake/project"),
         user_scope=False,
         should_install=True,
@@ -100,6 +101,7 @@ class TestRunMcpIntegrationInstallBranch:
             {"io.github.acme/server"},
             Path("/nonexistent/apm.lock.yaml"),
             mcp_configs={"io.github.acme/server": dep.to_dict()},
+            mcp_target_servers={},
             mcp_config_provenance={"io.github.acme/server": "io.github.acme/package"},
         )
         mock_mcp.remove_stale.assert_not_called()
@@ -194,6 +196,7 @@ class TestRunMcpIntegrationEmptyDepsBranch:
             set(),
             Path("/nonexistent/apm.lock.yaml"),
             mcp_configs={},
+            mcp_target_servers={},
             mcp_config_provenance={},
         )
 
@@ -210,6 +213,7 @@ class TestRunMcpIntegrationRestoreBranch:
                 old_mcp_servers={"io.github.acme/kept"},
                 old_mcp_configs={"io.github.acme/kept": {"name": "kept"}},
                 old_mcp_provenance={"io.github.acme/kept": "io.github.acme/pkg"},
+                old_mcp_target_servers={"copilot": ["io.github.acme/kept"]},
             )
         )
 
@@ -217,6 +221,7 @@ class TestRunMcpIntegrationRestoreBranch:
             {"io.github.acme/kept"},
             Path("/nonexistent/apm.lock.yaml"),
             mcp_configs={"io.github.acme/kept": {"name": "kept"}},
+            mcp_target_servers={"copilot": ["io.github.acme/kept"]},
             mcp_config_provenance={"io.github.acme/kept": "io.github.acme/pkg"},
         )
         mock_mcp.install.assert_not_called()

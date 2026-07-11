@@ -547,6 +547,7 @@ class LockFile:
     dependencies: dict[str, LockedDependency] = field(default_factory=dict)
     mcp_servers: list[str] = field(default_factory=list)
     mcp_configs: dict[str, dict] = field(default_factory=dict)
+    mcp_target_servers: dict[str, list[str]] = field(default_factory=dict)
     # Provenance for transitively-contributed MCP servers: name -> declaring
     # package identity. Only servers NOT declared in the root manifest's mcp:
     # block appear here (absent == direct, mirroring the dependency-side
@@ -634,6 +635,11 @@ class LockFile:
                 data["mcp_servers"] = sorted(self.mcp_servers)
             if self.mcp_configs:
                 data["mcp_configs"] = dict(sorted(self.mcp_configs.items()))
+            if self.mcp_target_servers:
+                data["mcp_target_servers"] = {
+                    target: sorted(servers)
+                    for target, servers in sorted(self.mcp_target_servers.items())
+                }
             if self.mcp_config_provenance:
                 data["mcp_config_provenance"] = dict(sorted(self.mcp_config_provenance.items()))
             if self.lsp_servers:
@@ -676,6 +682,10 @@ class LockFile:
             lock.add_dependency(LockedDependency.from_dict(dep_data))
         lock.mcp_servers = list(data.get("mcp_servers", []))
         lock.mcp_configs = dict(data.get("mcp_configs") or {})
+        lock.mcp_target_servers = {
+            target: list(servers)
+            for target, servers in (data.get("mcp_target_servers") or {}).items()
+        }
         lock.mcp_config_provenance = dict(data.get("mcp_config_provenance") or {})
         lock.lsp_servers = list(data.get("lsp_servers", []))
         lock.lsp_configs = dict(data.get("lsp_configs") or {})
@@ -831,6 +841,8 @@ class LockFile:
         if sorted(self.mcp_servers) != sorted(other.mcp_servers):
             return False
         if self.mcp_configs != other.mcp_configs:
+            return False
+        if self.mcp_target_servers != other.mcp_target_servers:
             return False
         if self.mcp_config_provenance != other.mcp_config_provenance:
             return False
