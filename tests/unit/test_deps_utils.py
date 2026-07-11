@@ -398,6 +398,25 @@ class TestGetDetailedPackageInfo:
         assert info["version"] == "unknown"
         assert info["description"] == "No apm.yml found"
 
+    def test_empty_version_renders_unknown_symmetric_with_list(self, tmp_path):
+        """A readable manifest with empty version renders '@unknown', not 'error'.
+
+        The strict identity authority (APMPackage.from_apm_yml) rejects the
+        empty version, but the tolerant display path must stay symmetric with
+        `deps list` and surface 'unknown' rather than masking the package.
+        """
+        _make_apm_yml(tmp_path, "nover", version="")
+        info = _get_detailed_package_info(tmp_path)
+        assert info["name"] == "nover"
+        assert info["version"] == "unknown"
+        assert info["version"] != "error"
+
+    def test_malformed_apm_yml_reports_error(self, tmp_path):
+        """Genuinely unparsable apm.yml still reports 'error' for the version."""
+        (tmp_path / APM_YML_FILENAME).write_text(_MALFORMED_YML)
+        info = _get_detailed_package_info(tmp_path)
+        assert info["version"] == "error"
+
     def test_hooks_counted(self, tmp_path):
         """Hook .json files are reflected in the result."""
         _make_apm_yml(tmp_path, "hookpkg", version="1.0.0")
