@@ -28,7 +28,10 @@ def _token_fingerprint(token: str | None) -> str | None:
     return "sha256:" + hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
 
 
-def resolve_dep_auth(dep_ref: Any, auth_resolver: Any) -> tuple[str | None, str]:
+def resolve_dep_auth(
+    dep_ref: Any,
+    auth_resolver: Any,
+) -> tuple[str | None, str, dict[str, str] | None]:
     """Resolve per-dependency authentication for use by ``git ls-remote``.
 
     Uses the same token and scheme the downstream clone will use. Best-effort:
@@ -38,14 +41,14 @@ def resolve_dep_auth(dep_ref: Any, auth_resolver: Any) -> tuple[str | None, str]
     non-empty token, so a token-less context never triggers a bearer request.
     """
     if auth_resolver is None:
-        return None, "basic"
+        return None, "basic", None
     try:
         auth_ctx = auth_resolver.resolve_for_dep(dep_ref)
         if auth_ctx is None or not auth_ctx.token:
-            return None, "basic"
-        return auth_ctx.token, auth_ctx.auth_scheme
+            return None, "basic", getattr(auth_ctx, "git_env", None)
+        return auth_ctx.token, auth_ctx.auth_scheme, getattr(auth_ctx, "git_env", None)
     except Exception:
-        return None, "basic"
+        return None, "basic", None
 
 
 def get_shared_ref_resolver(
@@ -55,6 +58,7 @@ def get_shared_ref_resolver(
     lock: Any = None,
     *,
     auth_scheme: str = "basic",
+    git_env: dict[str, str] | None = None,
     auth_resolver: Any = None,
     auth_target: Any = None,
 ) -> Any:
@@ -88,6 +92,8 @@ def get_shared_ref_resolver(
         "token": token,
         "auth_scheme": auth_scheme,
     }
+    if git_env is not None:
+        resolver_kwargs["git_env"] = git_env
     if auth_resolver is not None:
         resolver_kwargs.update(
             auth_resolver=auth_resolver,

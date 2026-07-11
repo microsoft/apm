@@ -118,7 +118,6 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
     Raises :class:`AuthenticationError` (with ``build_error_context``
     payload) on the first auth failure that survives the fallback.
     """
-    import os
     import subprocess as _sp
 
     from ..utils.github_host import (
@@ -176,7 +175,13 @@ def _preflight_auth_check(ctx, auth_resolver, verbose: bool) -> None:
             auth_scheme=_auth_scheme,
         )
         _ctx_env = getattr(dep_ctx, "git_env", {}) or {}
-        probe_env = {**os.environ, **_dl.git_env, **_ctx_env}
+        safe_overlay_keys = (
+            "GIT_SSH_COMMAND",
+            "GIT_CONFIG_GLOBAL",
+            "GIT_CONFIG_NOSYSTEM",
+        )
+        _dl_overlay = {key: value for key, value in _dl.git_env.items() if key in safe_overlay_keys}
+        probe_env = {**_ctx_env, **_dl_overlay}
         # GIT_CONFIG_GLOBAL / GIT_CONFIG_NOSYSTEM carve-out: GitAuthEnvBuilder
         # forces an empty global gitconfig for ALL hosts to prevent a user's
         # ~/.gitconfig insteadOf rewrites or credential helpers from leaking

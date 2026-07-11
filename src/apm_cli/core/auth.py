@@ -136,6 +136,7 @@ class HostInfo:
     has_public_repos: bool
     api_base: str
     port: int | None = None  # Non-standard git port (e.g. 7999 for Bitbucket DC)
+    credential_purpose: str | None = None
 
     @property
     def display_name(self) -> str:
@@ -269,6 +270,7 @@ class AuthResolver:
             has_public_repos=provider.has_public_repos,
             api_base=provider.api_base(host.lower()),
             port=port,
+            credential_purpose=provider.credential_purpose,
         )
 
     # -- token type detection -----------------------------------------------
@@ -916,7 +918,7 @@ class AuthResolver:
 
     @staticmethod
     def _purpose_for_host(host_info: HostInfo) -> str:
-        return HOST_PROVIDERS[host_info.kind].credential_purpose
+        return host_info.credential_purpose or HOST_PROVIDERS[host_info.kind].credential_purpose
 
     def _identify_env_source(self, purpose: str) -> str:
         """Return the name of the first env var that matched for *purpose*."""

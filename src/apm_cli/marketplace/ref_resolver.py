@@ -17,7 +17,6 @@ Security notes
 from __future__ import annotations
 
 import base64
-import os
 import re
 import subprocess
 import threading
@@ -160,6 +159,7 @@ class RefResolver:
         host: str | None = None,
         token: str | None = None,
         auth_scheme: str = "basic",
+        git_env: dict[str, str] | None = None,
         auth_resolver=None,
         auth_target=None,
     ) -> None:
@@ -169,6 +169,7 @@ class RefResolver:
         self._host: str = host or default_host() or "github.com"
         self._token: str | None = token
         self._auth_scheme = auth_scheme
+        self._git_env = dict(git_env) if git_env is not None else None
         self._auth_resolver = auth_resolver
         self._auth_target = auth_target
         self._cache = RefCache()
@@ -204,7 +205,19 @@ class RefResolver:
             url = f"https://{self._host}/{owner_repo}"
         else:
             url = build_https_clone_url(self._host, owner_repo, token=url_token)
-        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
+        if self._git_env is not None:
+            env = dict(self._git_env)
+        else:
+            from apm_cli.core.auth import AuthResolver
+
+            host_kind = "ado" if ado_host else "github"
+            env = AuthResolver._build_git_env(
+                self._token,
+                scheme=self._auth_scheme,
+                host_kind=host_kind,
+            )
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_ASKPASS"] = "echo"
         if bearer and self._token:
             env.pop("GIT_TOKEN", None)
             env.update(build_ado_bearer_git_env(self._token))
@@ -315,6 +328,15 @@ class RefResolver:
             return None
 
         def _bearer_op(bearer: str) -> list[RemoteRef]:
+            from apm_cli.core.auth import AuthResolver
+
+            bearer_env = (
+                dict(self._git_env) if self._git_env is not None else AuthResolver._build_git_env()
+            )
+            AuthResolver._clear_git_auth_env(bearer_env)
+            bearer_env.update(build_ado_bearer_git_env(bearer))
+            bearer_env["GIT_TERMINAL_PROMPT"] = "0"
+            bearer_env["GIT_ASKPASS"] = "echo"
             resolver = RefResolver(
                 timeout_seconds=self._timeout,
                 offline=self._offline,
@@ -322,6 +344,7 @@ class RefResolver:
                 host=self._host,
                 token=bearer,
                 auth_scheme="bearer",
+                git_env=bearer_env,
             )
             try:
                 return resolver.list_remote_refs(owner_repo)

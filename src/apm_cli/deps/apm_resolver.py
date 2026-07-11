@@ -562,6 +562,7 @@ class APMDependencyResolver:
         # refs for one package must survive until the flattening phase reports
         # the conflict.
         queued_keys: set[str] = set()
+        download_winners: dict[str, str] = {}
 
         # Add root dependencies to queue
         root_deps = root_package.get_apm_dependencies()
@@ -678,6 +679,25 @@ class APMDependencyResolver:
                     parent_node.children.append(node)
 
                 work_items.append((node, dep_ref, parent_node, is_dev))
+
+            # Conflicting refs share one physical install path. Pick the same
+            # deterministic first-wins ref used by flatten_dependencies before
+            # any worker can write that path; loser nodes remain for reporting.
+            level_winners: dict[str, str] = {}
+            for node, dep_ref, _parent_node, _is_dev in work_items:
+                unique_key = dep_ref.get_unique_key()
+                if unique_key in download_winners:
+                    continue
+                node_id = node.get_id()
+                previous = level_winners.get(unique_key)
+                if previous is None or node_id < previous:
+                    level_winners[unique_key] = node_id
+            download_winners.update(level_winners)
+            work_items = [
+                item
+                for item in work_items
+                if download_winners[item[1].get_unique_key()] == item[0].get_id()
+            ]
 
             # --- Phase B (workers): load packages ---
             if not work_items:
@@ -1150,7 +1170,8 @@ class APMDependencyResolver:
         Includes the parent's source_path so two parents anchoring the same
         local dep at different absolute locations don't collide on the first
         one's resolved path. For non-local deps, the parent anchor doesn't
-        affect resolution, so the bare unique key suffices.
+        affect resolution, so the package identity suffices. Conflicting refs
+        are reduced to one winner before worker dispatch.
         """
         base = dep_ref.get_unique_key()
         if dep_ref.is_local and parent_pkg is not None and parent_pkg.source_path:

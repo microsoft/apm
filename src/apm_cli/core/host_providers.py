@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any
 
@@ -165,6 +165,9 @@ def classify_host_provider(
     if normalized_type:
         for provider in _HOST_PROVIDERS:
             if normalized_type in provider.manifest_types:
+                if not provider.matcher(normalized_host):
+                    # Manifest type controls API routing, not credential trust.
+                    return replace(provider, credential_purpose="generic_modules")
                 return provider
         supported = ", ".join(accepted_host_types()) or "(none)"
         raise ValueError(

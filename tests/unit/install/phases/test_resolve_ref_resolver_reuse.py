@@ -296,7 +296,7 @@ def test_resolve_dep_auth_falls_back_to_basic_when_token_missing():
     Forwarding ``auth_scheme="bearer"`` with an empty token would make
     RefResolver attempt a bearer request on what is effectively the
     unauthenticated public-repo path. The resolver must degrade to
-    ``(None, "basic")`` so the legacy best-effort behaviour is preserved.
+    ``(None, "basic", None)`` so the legacy best-effort behaviour is preserved.
     """
 
     class _NoTokenBearerResolver:
@@ -315,9 +315,31 @@ def test_resolve_dep_auth_falls_back_to_basic_when_token_missing():
         explicit_scheme="https",
     )
 
-    assert resolve_dep_auth(dep, _NoTokenBearerResolver()) == (None, "basic")
-    assert resolve_dep_auth(dep, _EmptyTokenBearerResolver()) == (None, "basic")
-    assert resolve_dep_auth(dep, None) == (None, "basic")
+    assert resolve_dep_auth(dep, _NoTokenBearerResolver()) == (None, "basic", None)
+    assert resolve_dep_auth(dep, _EmptyTokenBearerResolver()) == (None, "basic", None)
+    assert resolve_dep_auth(dep, None) == (None, "basic", None)
+
+
+def test_resolve_dep_auth_preserves_sanitized_git_environment():
+    sanitized = {"PATH": "/usr/bin", "GIT_TERMINAL_PROMPT": "0"}
+
+    class _Resolver:
+        def resolve_for_dep(self, dep_ref):
+            return SimpleNamespace(
+                token="pat",
+                auth_scheme="basic",
+                git_env=sanitized,
+            )
+
+    dep = DependencyReference(
+        host="dev.azure.com",
+        repo_url="example/project/_git/package",
+        reference="^1.0.0",
+        source="git",
+        explicit_scheme="https",
+    )
+
+    assert resolve_dep_auth(dep, _Resolver()) == ("pat", "basic", sanitized)
 
 
 def test_semver_ref_resolution_retries_rejected_ado_pat_with_bearer():

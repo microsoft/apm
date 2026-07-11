@@ -574,6 +574,7 @@ def backend_for(
             has_public_repos=provider.has_public_repos,
             api_base=provider.api_base(host.lower()),
             port=port,
+            credential_purpose=provider.credential_purpose,
         )
     cls = host_backend_factory(info.kind)
     return cls(host_info=info)

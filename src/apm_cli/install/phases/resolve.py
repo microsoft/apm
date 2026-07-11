@@ -158,15 +158,15 @@ def _maybe_resolve_git_semver(
         resolve_dep_auth,
     )
 
-    # Reuse one RefResolver per (host, token, scheme) so same-repo deps share a
-    # single ls-remote tag listing (see helpers.ref_reuse for rationale).
-    token, auth_scheme = resolve_dep_auth(dep_ref, auth_resolver)
+    # Reuse one resolver per auth context so same-repo deps share tag listing.
+    token, auth_scheme, git_env = resolve_dep_auth(dep_ref, auth_resolver)
     ref_resolver = get_shared_ref_resolver(
         dep_ref.host,
         token,
         ref_resolver_cache,
         ref_resolver_cache_lock,
         auth_scheme=auth_scheme,
+        git_env=git_env,
         auth_resolver=auth_resolver,
         auth_target=dep_ref.host,
     )

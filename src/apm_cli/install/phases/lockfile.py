@@ -228,6 +228,11 @@ class LockfileBuilder:
         from apm_cli.install.phases.targets import declared_target_profiles
 
         self._reconcile_cross_package_deployed_files()
+
+        all_current_deployed: set[str] = set()
+        for _dep_files in self.ctx.package_deployed_files.values():
+            all_current_deployed.update(_dep_files)
+
         existing = self.ctx.existing_lockfile
         declared = declared_target_profiles(self.ctx)
         diagnostics = getattr(self.ctx, "diagnostics", None)
@@ -242,6 +247,12 @@ class LockfileBuilder:
             prev = existing.get_dependency(dep_key) if existing is not None else None
             prior_files = prev.deployed_files if prev is not None else []
             prior_hashes = prev.deployed_file_hashes if prev is not None else {}
+
+            # Ownership transfer is not a stale-file deletion.
+            other_current = all_current_deployed - set(current)
+            if other_current:
+                prior_files = [p for p in prior_files if p not in other_current]
+                prior_hashes = {k: v for k, v in prior_hashes.items() if k not in other_current}
 
             def _log_ghost_drop(path: str, package_key: str = dep_key) -> None:
                 nonlocal ghost_count
