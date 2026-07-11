@@ -29,7 +29,7 @@ irm https://aka.ms/apm-windows | iex
 
 The installer automatically detects your platform (macOS/Linux/Windows, Intel/ARM), downloads the latest binary, and adds `apm` to your `PATH`.
 
-On Windows, both `bin\apm.cmd` and a stable `current\apm.exe` are available. This lets Git Bash and process APIs such as Python `subprocess.run(["apm", ...])` resolve the command.
+On Windows, the installer provides both `bin\apm.cmd` and a stable `current\apm.exe`, so Git Bash and process APIs such as Python `subprocess.run(["apm", ...])` can resolve the command.
 
 ### Installer options
 

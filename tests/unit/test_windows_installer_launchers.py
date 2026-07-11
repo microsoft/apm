@@ -1,5 +1,7 @@
 """Regression coverage for Windows installer launcher resolution."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -35,3 +37,16 @@ def test_windows_installer_e2e_covers_bare_subprocess_resolution() -> None:
     assert 'cwd=os.environ["APM_LAUNCH_TEST_CWD"]' in test_script
     assert 'PATH="$2:$PATH"' in test_script
     assert "command -v apm && apm --version" in test_script
+
+
+def test_windows_e2e_verifies_junction_resolution_after_upgrade() -> None:
+    """Upgrade/reinstall gates must confirm the junction re-points at the new release."""
+    test_script = (ROOT / "scripts/windows/test-install-script.ps1").read_text(encoding="utf-8")
+
+    # A wrong-target junction survives the installer's own Test-Path guard, so
+    # the upgrade and reinstall gates must resolve current\apm.exe and assert
+    # its reported version, not merely that the file exists.
+    assert "$stableExe --version" in test_script
+    assert "junction temps at install root" in test_script
+    assert "current.new-*" in test_script
+    assert "current.old-*" in test_script

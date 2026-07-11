@@ -921,7 +921,7 @@ try {
         if (Test-Path $currentDir) {
             $currentItem = Get-Item -Force $currentDir
             if (($currentItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) {
-                throw "Refusing to replace non-junction path: $currentDir. Move or remove it if safe, then rerun the installer."
+                throw "Refusing to replace non-junction path. Move or remove it if safe, then rerun the installer."
             }
             $oldCurrentDir = "$currentDir.old-" + [System.Guid]::NewGuid().ToString("N")
             Move-Item -Path $currentDir -Destination $oldCurrentDir -Force
@@ -931,7 +931,7 @@ try {
     } catch {
         Write-ErrorText "Failed to update stable executable path ${currentDir}: $_"
         if (Test-Path $newCurrentDir) {
-            [System.IO.Directory]::Delete($newCurrentDir)
+            try { [System.IO.Directory]::Delete($newCurrentDir) } catch { Write-ErrorText "Could not remove temp junction ${newCurrentDir}: $_" }
         }
         if ($oldCurrentDir -and (Test-Path $oldCurrentDir) -and -not (Test-Path $currentDir)) {
             Move-Item -Path $oldCurrentDir -Destination $currentDir -Force -ErrorAction SilentlyContinue
@@ -1002,7 +1002,9 @@ try {
 
     Add-ToUserPath -PathEntry $binDir
     # The onedir bundle must stay intact beside apm.exe. Add its stable
-    # junction after bin so bare executable lookup wins where PATHEXT is absent.
+    # junction so bare executable lookup finds apm.exe where PATHEXT is absent
+    # (CreateProcess, Git Bash). Add-ToUserPath prepends, so this entry
+    # precedes bin in PATH.
     Add-ToUserPath -PathEntry $currentDir
 
     Write-Host ""

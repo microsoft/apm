@@ -402,6 +402,20 @@ function Test-CrossVersionUpgrade {
         $shimText = Get-Content $shim -Raw
         Assert-True ($shimText -match [regex]::Escape($PinnedVersion)) "Step 2: shim references $PinnedVersion path"
 
+        # The version-stable junction must re-point at the new release so bare
+        # CreateProcess / Git Bash callers resolve the upgraded apm.exe, not the
+        # previous release still on disk. A wrong-target junction survives the
+        # installer's own Test-Path guard, so assert the resolved version too.
+        $stableExe = Join-Path $prefix.Root "current\apm.exe"
+        Assert-True (Test-Path $stableExe) "Stable current\apm.exe exists after upgrade"
+        if (Test-Path $stableExe) {
+            $stableVer = & $stableExe --version 2>&1
+            Assert-True (($stableVer | Out-String) -match [regex]::Escape($PinnedVersion.TrimStart("v"))) "current\apm.exe reports $PinnedVersion after upgrade"
+        }
+        $junctionLeftover = Get-ChildItem -Path $prefix.Root -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "current.new-*" -or $_.Name -like "current.old-*" }
+        Assert-True (-not $junctionLeftover) "No leftover current.new-* / current.old-* junction temps at install root"
+
         # Both release dirs may coexist (we only replace the matching tag),
         # but the staging/backup helper dirs from the second install MUST be
         # cleaned up.
@@ -452,6 +466,19 @@ function Test-SameVersionReinstall {
         $ver = Get-ShimVersion -ShimPath (Join-Path $prefix.BinDir "apm.cmd")
         Assert-True ($ver.ExitCode -eq 0) "apm.cmd --version exits 0 after reinstall (got $($ver.ExitCode))"
         Assert-True ($ver.Output -match $PinnedVersion.TrimStart("v")) "apm.cmd --version reports $PinnedVersion after reinstall"
+
+        # The junction is rebuilt on every install; after a same-version
+        # reinstall it must still resolve the freshly promoted apm.exe for bare
+        # CreateProcess / Git Bash callers.
+        $stableExe = Join-Path $prefix.Root "current\apm.exe"
+        Assert-True (Test-Path $stableExe) "Stable current\apm.exe exists after reinstall"
+        if (Test-Path $stableExe) {
+            $stableVer = & $stableExe --version 2>&1
+            Assert-True (($stableVer | Out-String) -match [regex]::Escape($PinnedVersion.TrimStart("v"))) "current\apm.exe reports $PinnedVersion after reinstall"
+        }
+        $junctionLeftover = Get-ChildItem -Path $prefix.Root -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "current.new-*" -or $_.Name -like "current.old-*" }
+        Assert-True (-not $junctionLeftover) "No leftover current.new-* / current.old-* junction temps at install root after reinstall"
 
         $leftoverStaging = Get-ChildItem -Path $releasesDir -Directory -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -like "*.new-*" -or $_.Name -like "*.old-*" }

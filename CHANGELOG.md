@@ -22,9 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PATH` (via a junction to the active release bundle) alongside the existing
   `bin\apm.cmd` shim, so Git Bash and Python `subprocess.run(["apm", ...])`
   resolve `apm` without `cmd.exe` PATHEXT expansion. (closes #2076) (#2094)
-
-### Fixed
-
 - Azure DevOps marketplace checks now preserve suffix-free `/_git/<repo>` URLs
   and pass Azure CLI bearer authentication through to `git ls-remote`. (closes #2119)
 
