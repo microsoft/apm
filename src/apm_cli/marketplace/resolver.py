@@ -728,7 +728,7 @@ def _extract_auth(
         return None, "basic"
     try:
         ctx = auth_resolver.resolve(host, org=org)  # type: ignore[union-attr]
-        if ctx is None:
+        if ctx is None or not ctx.token:
             return None, "basic"
         return ctx.token, ctx.auth_scheme
     except Exception as exc:

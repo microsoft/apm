@@ -32,14 +32,16 @@ def resolve_dep_auth(dep_ref: Any, auth_resolver: Any) -> tuple[str | None, str]
     """Resolve per-dependency authentication for use by ``git ls-remote``.
 
     Uses the same token and scheme the downstream clone will use. Best-effort:
-    on any failure the unauthenticated basic path remains and the downstream
-    clone surfaces the real auth error with its own diagnostic.
+    when no real token is resolved (or on any failure) the unauthenticated
+    basic path remains and the downstream clone surfaces the real auth error
+    with its own diagnostic. A ``bearer`` scheme is only forwarded alongside a
+    non-empty token, so a token-less context never triggers a bearer request.
     """
     if auth_resolver is None:
         return None, "basic"
     try:
         auth_ctx = auth_resolver.resolve_for_dep(dep_ref)
-        if auth_ctx is None:
+        if auth_ctx is None or not auth_ctx.token:
             return None, "basic"
         return auth_ctx.token, auth_ctx.auth_scheme
     except Exception:

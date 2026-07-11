@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
 
+from apm_cli.install.helpers.ref_reuse import resolve_dep_auth
 from apm_cli.install.phases.resolve import _maybe_resolve_git_semver
 from apm_cli.models.dependency.reference import DependencyReference
 
@@ -287,3 +288,33 @@ def test_semver_resolution_preserves_bearer_and_basic_auth_schemes():
         for key, value in github_kwargs["env"].items()
         if key.startswith("GIT_CONFIG_VALUE_") and value.startswith("Authorization:")
     }
+
+
+def test_resolve_dep_auth_falls_back_to_basic_when_token_missing():
+    """A token-less context must not forward a bearer scheme.
+
+    Forwarding ``auth_scheme="bearer"`` with an empty token would make
+    RefResolver attempt a bearer request on what is effectively the
+    unauthenticated public-repo path. The resolver must degrade to
+    ``(None, "basic")`` so the legacy best-effort behaviour is preserved.
+    """
+
+    class _NoTokenBearerResolver:
+        def resolve_for_dep(self, dep_ref):
+            return SimpleNamespace(token=None, auth_scheme="bearer")
+
+    class _EmptyTokenBearerResolver:
+        def resolve_for_dep(self, dep_ref):
+            return SimpleNamespace(token="", auth_scheme="bearer")
+
+    dep = DependencyReference(
+        host="dev.azure.com",
+        repo_url="example/project/_git/package",
+        reference="^1.0.0",
+        source="git",
+        explicit_scheme="https",
+    )
+
+    assert resolve_dep_auth(dep, _NoTokenBearerResolver()) == (None, "basic")
+    assert resolve_dep_auth(dep, _EmptyTokenBearerResolver()) == (None, "basic")
+    assert resolve_dep_auth(dep, None) == (None, "basic")
