@@ -104,14 +104,12 @@ def _maybe_resolve_git_semver(
     ----
     When ``auth_resolver`` is supplied, the per-dep ``AuthContext`` is
     resolved before constructing :class:`RefResolver`; its token and
-    authentication scheme are forwarded to ``git ls-remote``. This mirrors
-    the auth path used by the clone step downstream, so a
-    private-repo semver dep that clones successfully also enumerates
-    its tags successfully in CI environments where ``GITHUB_APM_PAT`` /
-    ``ADO_APM_PAT`` are the only credential source (no system
-    credential helper available). Passing ``auth_resolver=None`` (the
-    legacy path) preserves the previous unauthenticated behaviour for
-    public repos and for callers that intentionally skip auth.
+    authentication scheme are forwarded to ``git ls-remote``, mirroring
+    the clone step downstream. A private-repo semver dep that clones
+    successfully then also enumerates its tags in CI environments where
+    ``GITHUB_APM_PAT`` / ``ADO_APM_PAT`` are the only credential source.
+    Passing ``auth_resolver=None`` preserves the previous unauthenticated
+    behaviour for public repos and callers that intentionally skip auth.
     """
     # Only git-source deps with a semver-range reference are eligible.
     if dep_ref.is_local:
