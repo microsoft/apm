@@ -138,6 +138,20 @@ if ! grep -q '_clear_git_auth_env(env)' src/apm_cli/core/auth.py; then
     violations=$((violations + 1))
 fi
 
+echo "[*] AC6: neutral IR and schema contracts"
+check_pattern \
+    "Neutral hook IR must not contain native harness vocabulary" \
+    'copilot|gemini|antigravity|timeoutSec|powershell|_apm_source|["'\'']hooks["'\'']' \
+    src/apm_cli/integration/hook_ir.py
+check_pattern \
+    "Manifest schema negotiation belongs in manifest_contract.py" \
+    'get\\(["'\'']\\$schema["'\'']\\)' \
+    $(find src/apm_cli -name '*.py' ! -path 'src/apm_cli/models/manifest_contract.py')
+if ! grep -q 'does not run aggregate' docs/src/content/docs/concepts/lifecycle.md; then
+    echo "[x] Lifecycle docs must keep aggregate compilation explicit"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

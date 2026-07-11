@@ -68,6 +68,14 @@ marketplace:   <MarketplaceConfig>       # OPTIONAL; marketplace authoring
 
 Two fields are REQUIRED at parse time: `name` and `version`. All other fields are OPTIONAL. Unknown top-level keys MUST be preserved by writers but MAY be ignored by resolvers.
 
+The standard `$schema` key negotiates the manifest contract. Omit it for the
+current APM working draft. Set it to
+`https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json` for
+the normative OpenAPM v0.1 shape. Unknown schema identities fail closed; APM
+does not interpret a working-draft manifest as v0.1. Under explicit v0.1,
+`registries` follows the normative string-or-object registry map rather than
+the working draft's named map plus `default` selector.
+
 The `marketplace:` block is the source for `apm pack`'s marketplace output. Repositories that do not publish a marketplace omit it entirely. See [Section 7](#7-marketplace-authoring-block).
 
 Newly initialised projects (`apm init`) are scaffolded by the CLI; see [`apm init`](./cli/init/) for the templates.

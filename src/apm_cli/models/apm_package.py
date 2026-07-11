@@ -71,7 +71,36 @@ def clear_apm_yml_cache() -> None:
     _apm_yml_cache.clear()
 
 
-def _parse_registries_block(data: dict, apm_yml_path: Path):
+def _parse_v01_registries_block(
+    data: dict,
+    apm_yml_path: Path,
+) -> tuple[dict[str, str] | None, None]:
+    """Parse the normative OpenAPM v0.1 registry map."""
+    raw = data.get("registries")
+    if raw is None:
+        return None, None
+    if not isinstance(raw, dict):
+        raise ValueError(f"OpenAPM v0.1 'registries:' in {apm_yml_path} must be a mapping")
+    registries: dict[str, str] = {}
+    for name, value in raw.items():
+        body = {"url": value} if isinstance(value, str) else value
+        if not isinstance(name, str) or not isinstance(body, dict):
+            raise ValueError("OpenAPM v0.1 registry entries must be named strings or objects")
+        url = body.get("url")
+        if not isinstance(url, str) or not url.startswith(("https://", "http://")):
+            raise ValueError(f"OpenAPM v0.1 registry {name!r} requires an HTTP(S) url")
+        registries[name] = url
+        aliases = body.get("aliases", [])
+        if aliases is not None and not isinstance(aliases, list):
+            raise ValueError(f"OpenAPM v0.1 registry {name!r} aliases must be a list")
+        for alias in aliases or []:
+            if not isinstance(alias, str) or not alias:
+                raise ValueError(f"OpenAPM v0.1 registry {name!r} has an invalid alias")
+            registries[alias] = url
+    return registries or None, None
+
+
+def _parse_registries_block(data: dict, apm_yml_path: Path, manifest_contract):
     """Parse the top-level ``registries:`` block per design §3.1.
 
     Schema::
@@ -87,6 +116,11 @@ def _parse_registries_block(data: dict, apm_yml_path: Path):
     ``{name: url}`` and *default_name* is the value of ``default:`` (or
     ``None``). Absent block returns ``(None, None)``.
     """
+    from .manifest_contract import ManifestContract
+
+    if manifest_contract is ManifestContract.OPENAPM_V01:
+        return _parse_v01_registries_block(data, apm_yml_path)
+
     raw = data.get("registries")
     if raw is None:
         return None, None
@@ -275,6 +309,7 @@ class APMPackage:
     registries: dict[str, str] | None = None
     # Value of ``registries.default:`` -- routes unscoped deps to this registry.
     default_registry: str | None = None
+    manifest_contract: str = "working-draft"
 
     # Top-level ``allowExecutables:`` block -- per-package approval for
     # executable primitives (hooks, MCP servers, bin/ executables).
@@ -406,6 +441,10 @@ class APMPackage:
         if not isinstance(data, dict):
             raise ValueError(f"apm.yml must contain a YAML object, got {type(data)}")
 
+        from .manifest_contract import negotiate_manifest_contract
+
+        manifest_contract = negotiate_manifest_contract(data)
+
         # Required fields
         if "name" not in data:
             raise ValueError("Missing required field 'name' in apm.yml")
@@ -417,7 +456,11 @@ class APMPackage:
             raise ValueError("Invalid apm.yml identity: 'version' must be a non-empty string")
 
         # Top-level ``registries:`` block per design §3.1.
-        registries, default_registry = _parse_registries_block(data, apm_yml_path)
+        registries, default_registry = _parse_registries_block(
+            data,
+            apm_yml_path,
+            manifest_contract,
+        )
 
         # Parse dependencies
         dependencies = None
@@ -552,6 +595,7 @@ class APMPackage:
             includes=includes,
             registries=registries,
             default_registry=default_registry,
+            manifest_contract=manifest_contract.value,
             allow_executables=allow_executables,
         )
         _apm_yml_cache[cache_key] = result

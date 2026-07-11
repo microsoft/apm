@@ -34,6 +34,11 @@ backfills one from the other:
 - `name` and `version` must be non-empty strings. Quote numeric versions so
   YAML does not parse them as numbers.
 
+Use the standard `$schema` key when authoring against normative OpenAPM v0.1:
+`https://microsoft.github.io/apm/specs/schemas/manifest-v0.1.schema.json`.
+Omitting `$schema` selects APM's current working draft. Unknown schema
+identities fail closed rather than being interpreted as the working draft.
+
 Populate both descriptions when you ship a HYBRID package. `apm pack`
 warns when `apm.yml.description` is missing so listings do not
 degrade silently while the agent runtime keeps working.
