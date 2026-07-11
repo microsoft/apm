@@ -1502,6 +1502,11 @@ def _read_cache_entry(
                 return None
 
         policy, _warnings = load_policy(policy_file)
+        cached_warnings = meta.get("warnings", [])
+        if not isinstance(cached_warnings, list):
+            cached_warnings = []
+        else:
+            cached_warnings = [str(warning) for warning in cached_warnings]
 
         # Determine source label
         if repo_ref.startswith("http://") or repo_ref.startswith("https://"):
@@ -1515,7 +1520,7 @@ def _read_cache_entry(
             age_seconds=age,
             stale=age > ttl,
             chain_refs=meta.get("chain_refs", [repo_ref]),
-            warnings=meta.get("warnings", []),
+            warnings=cached_warnings,
             fingerprint=meta.get("fingerprint", ""),
             raw_bytes_hash=raw_bytes_hash,
         )
