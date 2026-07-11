@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-empty string identities, and use mappings/lists for policy blocks. (closes #2137) (#2143)
 - `apm uninstall` now transfers shared deployed-file ownership to a surviving
   package, preserving lockfile content-integrity coverage. (#2148)
+- Semver resolution now preserves each dependency's authentication scheme, so
+  Azure DevOps bearer credentials are used consistently for tag listing. (#2150)
 - Fresh checkouts with declared consumer targets no longer remain
   `apm audit --ci`-red for files those targets cannot restore: `apm install`
   now removes stale `deployed_files` entries outside the legitimate target

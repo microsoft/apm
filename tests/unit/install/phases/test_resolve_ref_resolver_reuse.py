@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import os
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
 
+from apm_cli.install.helpers.ref_reuse import resolve_dep_auth
 from apm_cli.install.phases.resolve import _maybe_resolve_git_semver
 from apm_cli.models.dependency.reference import DependencyReference
 
@@ -32,8 +35,8 @@ def _patched_resolver_env():
     made = []
 
     class _FakeRefResolver:
-        def __init__(self, *, host=None, token=None):
-            made.append((host, token))
+        def __init__(self, *, host=None, token=None, auth_scheme="basic"):
+            made.append((host, token, auth_scheme))
 
     fake_semver = MagicMock()
     fake_semver.return_value.resolve.return_value = "RESOLUTION"
@@ -102,12 +105,12 @@ def test_concurrent_same_repo_deps_share_one_resolver_under_lock():
     errors_lock = threading.Lock()
 
     class _SlowFakeRefResolver:
-        def __init__(self, *, host=None, token=None):
+        def __init__(self, *, host=None, token=None, auth_scheme="basic"):
             # Small delay to widen the construction window. With a working
             # lock only one thread ever reaches here; without it, several
             # would slip in during this sleep and append multiple entries.
             time.sleep(0.02)
-            made.append((host, token))
+            made.append((host, token, auth_scheme))
 
     fake_semver = MagicMock()
     fake_semver.return_value.resolve.return_value = "R"
@@ -187,8 +190,9 @@ def test_cache_key_does_not_contain_raw_token():
     cache: dict = {}
 
     class _FakeRefResolver:
-        def __init__(self, *, host=None, token=None):
+        def __init__(self, *, host=None, token=None, auth_scheme="basic"):
             self.token = token
+            self.auth_scheme = auth_scheme
 
     with patch("apm_cli.marketplace.ref_resolver.RefResolver", _FakeRefResolver):
         resolver = get_shared_ref_resolver("github.com", secret, cache)
@@ -202,3 +206,115 @@ def test_cache_key_does_not_contain_raw_token():
     with patch("apm_cli.marketplace.ref_resolver.RefResolver", _FakeRefResolver):
         get_shared_ref_resolver("github.com", "ghp_a_different_token_000000", cache)
     assert len(cache) == 2
+
+
+def test_cache_separates_basic_and_bearer_for_same_host_and_token():
+    """The scheme is part of resolver identity even when credentials match."""
+    from apm_cli.install.helpers.ref_reuse import get_shared_ref_resolver
+
+    class _FakeRefResolver:
+        def __init__(self, *, host=None, token=None, auth_scheme="basic"):
+            self.auth_scheme = auth_scheme
+
+    cache: dict = {}
+    with patch("apm_cli.marketplace.ref_resolver.RefResolver", _FakeRefResolver):
+        basic = get_shared_ref_resolver("dev.azure.com", "dummy", cache)
+        bearer = get_shared_ref_resolver("dev.azure.com", "dummy", cache, auth_scheme="bearer")
+
+    assert basic is not bearer
+    assert {basic.auth_scheme, bearer.auth_scheme} == {"basic", "bearer"}
+    assert len(cache) == 2
+
+
+def test_semver_resolution_preserves_bearer_and_basic_auth_schemes():
+    """Semver tag listing must use the complete per-dependency auth context."""
+    bearer_token = "dummy-ado-bearer"
+    basic_token = "dummy-github-basic"
+    calls = []
+
+    class _AuthResolver:
+        def resolve_for_dep(self, dep_ref):
+            if dep_ref.host == "dev.azure.com":
+                return SimpleNamespace(token=bearer_token, auth_scheme="bearer")
+            return SimpleNamespace(token=basic_token, auth_scheme="basic")
+
+    def _run(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=f"{'a' * 40}\trefs/tags/v1.0.0\n",
+            stderr="",
+        )
+
+    deps = [
+        DependencyReference(
+            host="dev.azure.com",
+            repo_url="example/project/_git/package",
+            reference="^1.0.0",
+            source="git",
+            explicit_scheme="https",
+        ),
+        DependencyReference(
+            host="github.com",
+            repo_url="example/package",
+            reference="^1.0.0",
+            source="git",
+            explicit_scheme="https",
+        ),
+    ]
+
+    cache = {}
+    with patch("apm_cli.marketplace.ref_resolver.subprocess.run", side_effect=_run):
+        for dep in deps:
+            _maybe_resolve_git_semver(
+                dep_ref=dep,
+                existing_lockfile=None,
+                update_refs=True,
+                auth_resolver=_AuthResolver(),
+                ref_resolver_cache=cache,
+            )
+
+    assert {resolver._auth_scheme for resolver in cache.values()} == {"basic", "bearer"}
+    ado_args, ado_kwargs = calls[0]
+    github_args, github_kwargs = calls[1]
+    ado_auth_values = {
+        value for key, value in ado_kwargs["env"].items() if key.startswith("GIT_CONFIG_VALUE_")
+    }
+    assert ado_auth_values == {f"Authorization: Bearer {bearer_token}"}
+    assert urlparse(ado_args[-1]).username is None
+    assert urlparse(github_args[-1]).password == basic_token
+    assert not {
+        value
+        for key, value in github_kwargs["env"].items()
+        if key.startswith("GIT_CONFIG_VALUE_") and value.startswith("Authorization:")
+    }
+
+
+def test_resolve_dep_auth_falls_back_to_basic_when_token_missing():
+    """A token-less context must not forward a bearer scheme.
+
+    Forwarding ``auth_scheme="bearer"`` with an empty token would make
+    RefResolver attempt a bearer request on what is effectively the
+    unauthenticated public-repo path. The resolver must degrade to
+    ``(None, "basic")`` so the legacy best-effort behaviour is preserved.
+    """
+
+    class _NoTokenBearerResolver:
+        def resolve_for_dep(self, dep_ref):
+            return SimpleNamespace(token=None, auth_scheme="bearer")
+
+    class _EmptyTokenBearerResolver:
+        def resolve_for_dep(self, dep_ref):
+            return SimpleNamespace(token="", auth_scheme="bearer")
+
+    dep = DependencyReference(
+        host="dev.azure.com",
+        repo_url="example/project/_git/package",
+        reference="^1.0.0",
+        source="git",
+        explicit_scheme="https",
+    )
+
+    assert resolve_dep_auth(dep, _NoTokenBearerResolver()) == (None, "basic")
+    assert resolve_dep_auth(dep, _EmptyTokenBearerResolver()) == (None, "basic")
+    assert resolve_dep_auth(dep, None) == (None, "basic")

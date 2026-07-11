@@ -105,15 +105,13 @@ def _maybe_resolve_git_semver(
     Auth
     ----
     When ``auth_resolver`` is supplied, the per-dep ``AuthContext`` is
-    resolved before constructing :class:`RefResolver` and its token is
-    embedded in the ``https://`` URL used by ``git ls-remote``. This
-    mirrors the auth path used by the clone step downstream, so a
-    private-repo semver dep that clones successfully also enumerates
-    its tags successfully in CI environments where ``GITHUB_APM_PAT`` /
-    ``ADO_APM_PAT`` are the only credential source (no system
-    credential helper available). Passing ``auth_resolver=None`` (the
-    legacy path) preserves the previous unauthenticated behaviour for
-    public repos and for callers that intentionally skip auth.
+    resolved before constructing :class:`RefResolver`; its token and
+    authentication scheme are forwarded to ``git ls-remote``, mirroring
+    the clone step downstream. A private-repo semver dep that clones
+    successfully then also enumerates its tags in CI environments where
+    ``GITHUB_APM_PAT`` / ``ADO_APM_PAT`` are the only credential source.
+    Passing ``auth_resolver=None`` preserves the previous unauthenticated
+    behaviour for public repos and callers that intentionally skip auth.
     """
     # Only git-source deps with a semver-range reference are eligible.
     if dep_ref.is_local:
@@ -159,14 +157,18 @@ def _maybe_resolve_git_semver(
     from apm_cli.deps.git_semver_resolver import GitSemverResolver
     from apm_cli.install.helpers.ref_reuse import (
         get_shared_ref_resolver,
-        resolve_dep_token,
+        resolve_dep_auth,
     )
 
-    # Reuse one RefResolver per (host, token) so same-repo deps share a
+    # Reuse one RefResolver per (host, token, scheme) so same-repo deps share a
     # single ls-remote tag listing (see helpers.ref_reuse for rationale).
-    token = resolve_dep_token(dep_ref, auth_resolver)
+    token, auth_scheme = resolve_dep_auth(dep_ref, auth_resolver)
     ref_resolver = get_shared_ref_resolver(
-        dep_ref.host, token, ref_resolver_cache, ref_resolver_cache_lock
+        dep_ref.host,
+        token,
+        ref_resolver_cache,
+        ref_resolver_cache_lock,
+        auth_scheme=auth_scheme,
     )
     resolver = GitSemverResolver(ref_resolver)
     return resolver.resolve(
