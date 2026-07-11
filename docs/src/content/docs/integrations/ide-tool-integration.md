@@ -24,7 +24,7 @@ The full slot-by-slot capability table lives in [Targets matrix](../reference/ta
 | OpenCode             | `.opencode/`                         | Skills, MCP                            |
 | Windsurf             | `.windsurf/`                         | Rules + Skills + Workflows + MCP       |
 | Kiro                 | `.kiro/`                             | Steering + Skills + Hooks + MCP        |
-| JetBrains Copilot    | user-scope config dir (global)       | MCP only (user-scope path, `${env:VAR}` env substitution) |
+| JetBrains Copilot    | user-scope config dir (global)       | MCP (user-scope path, `${env:VAR}` substitution); file primitives use the Copilot profile |
 | Agent-Skills (cross) | `.agents/skills/`                    | Vendor-neutral skill sharing           |
 
 For exact per-target capabilities (which primitives are supported, transformer used, file layout), see [Targets matrix](../reference/targets-matrix/).
@@ -145,19 +145,24 @@ that directory is the auto-detect signal.
 
 ```bash
 # Install an MCP server into the JetBrains user-scope config
-apm install --mcp --runtime intellij <package>
+apm install --mcp io.github.github/github-mcp-server --target intellij
 ```
 
 Notes and limits:
 
-- **Auto-detect is user-scope only.** Unlike project markers such as `.cursor/`
-  or `.windsurf/`, JetBrains is detected from the global config directory, not a
-  file in your repo. It is therefore detected for every project on the machine
-  once the plugin directory exists. Use `--runtime intellij` to target it
-  explicitly regardless of auto-detect.
+- **MCP auto-detect is user-scope only.** Unlike project markers such as
+  `.cursor/` or `.windsurf/`, MCP runtime discovery detects JetBrains from the
+  global config directory. It is therefore considered for MCP configuration in
+  every project once the plugin directory exists. This signal does not select a
+  file-primitive profile; use `--target intellij` explicitly.
+- **Composed targets stay exact.** `--target intellij,claude` writes the
+  JetBrains and Claude MCP configs. `--target all,intellij` adds JetBrains to
+  the normal `all` target set; plain `all` excludes it.
 - **Runtime env substitution.** JetBrains Copilot resolves `${env:VAR}` in
   `mcp.json` at server start. APM preserves env-var placeholders as
   `${env:VAR}` instead of writing matching host secrets into the config.
+- **Policy evaluation.** APM maps `intellij` to `copilot` for organization
+  allow-lists, so a policy that allows `copilot` also covers IntelliJ installs.
 
 ## Per-tool reference pages
 

@@ -28,11 +28,16 @@ see [Primitive types](./primitive-types/).
 | opencode        | `.opencode/`           |     [ ]      |   [ ]   |  [x]   |  [x]   |   [x]    |  [ ]  | [x] |
 | windsurf        | `.windsurf/` + `.agents/` |     [x]      |   [ ]   |  [ ]   |  [x]   |   [x]    |  [x]  | [x] |
 | kiro            | `.kiro/`               |     [x]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [x]  | [x] |
+| intellij        | user MCP config; files via Copilot |    [x] (*)   | [x] (*) | [x] (*) | [x] (*) |   [ ]    | [x] (*) | [x] |
 | agent-skills    | `.agents/`             |     [ ]      |   [ ]   |  [ ]   |  [x]   |   [ ]    |  [ ]  | [ ] |
 
 Skills deploy to `.agents/skills/` for Copilot, Cursor, OpenCode,
 Gemini, Antigravity, Codex, and Windsurf by default (see [Skills convergence](#skills-convergence)
 below). Claude and Kiro keep target-native skill directories.
+
+(*) For `intellij`, file primitives route through the Copilot profile:
+instructions, prompts, agents, and hooks use `.github/`, while skills use
+`.agents/skills/`. The IntelliJ-specific adapter configures MCP only.
 
 `copilot-cowork` (Microsoft 365 Copilot), `copilot-app` (GitHub
 Copilot desktop App), `openclaw` (OpenClaw agent runtime), and `hermes` are
@@ -64,6 +69,12 @@ list before `compile` or `install`.
 | opencode | `.opencode/` directory                        |
 | windsurf | `.windsurf/` directory                        |
 | kiro     | `.kiro/` directory                            |
+| intellij | Global `github-copilot/intellij/` config directory (MCP runtime discovery only) |
+
+IntelliJ-specific integration is MCP-only and writes JetBrains Copilot's
+user-scope `mcp.json`. That global signal does not auto-select file-primitive
+deployment. When `intellij` is selected explicitly, package file primitives use
+the Copilot profile. `intellij` does not participate in plain `all` expansion.
 
 `agent-skills` is a canonical target key; `antigravity` is explicit-only for
 auto-detection. Both are available with `--target` and can be listed in a
@@ -213,6 +224,23 @@ Kiro IDE.
   - mcp: `.kiro/settings/mcp.json` (project) or `~/.kiro/settings/mcp.json` (user)
 - **MCP shape.** JSON `mcpServers` entries use `command`/`args`/`env` for stdio and `url`/`headers` for remote servers. Kiro resolves `${VAR}` placeholders at runtime, so APM preserves them rather than writing secrets to disk.
 - **Scope.** This is the documented Kiro IDE layout only. Kiro CLI differences are tracked separately and are not part of this target.
+
+## intellij
+
+GitHub Copilot for JetBrains IDEs.
+
+- **Detection.** MCP runtime discovery uses the global
+  `github-copilot/intellij/` config directory. It does not auto-select a
+  file-primitive target.
+- **Deploy directory.** User-scope `mcp.json`; see the
+  [JetBrains integration guide](../integrations/ide-tool-integration/#jetbrains-intellij-idea-pycharm-goland-and-others)
+  for OS-specific paths.
+- **Supported primitives.** The IntelliJ-specific adapter supports MCP.
+  Instructions, prompts, agents, and hooks deploy through the Copilot profile
+  under `.github/`; skills deploy under `.agents/skills/`.
+- **Scope.** MCP configuration is user scope only. File primitives use the
+  project or user scope selected for the Copilot profile. IntelliJ does not
+  participate in plain `all` expansion.
 
 ## agent-skills
 

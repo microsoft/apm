@@ -192,6 +192,11 @@ requirements:
     section: "5.2"
     conformance_class: consumer
     notes: "name and dependency-apm.yml-derived version are self-asserted inventory metadata, never trust anchors"
+  - id: req-lk-020
+    keyword: MUST
+    section: "5.2"
+    conformance_class: consumer
+    notes: "target-scoped deployed-file reconciliation preserves legitimate and indeterminate paths while dropping inactive-target ghosts"
   - id: req-pl-001
     keyword: MUST
     section: "6.1"
