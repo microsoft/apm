@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 
 def test_plural_targets_drive_bundle_filtering(tmp_path: Path) -> None:
     """The canonical manifest target list must control bundle packing."""
@@ -47,6 +49,43 @@ def test_target_catalog_matches_native_profiles() -> None:
         if capability.primitive_profile is not None and not capability.mcp_only
     }
     assert set(KNOWN_TARGETS) == expected
+
+
+@pytest.mark.parametrize(
+    ("target_flag", "expected_targets"),
+    (
+        ("claude,copilot", ["claude", "copilot"]),
+        ("agents", ["copilot"]),
+    ),
+)
+def test_init_persists_only_install_accepted_catalog_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    target_flag: str,
+    expected_targets: list[str],
+) -> None:
+    """Every target accepted by init must produce an installable manifest."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.utils.yaml_io import load_yaml
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+    runner = CliRunner()
+
+    initialized = runner.invoke(cli, ["init", "--yes", "--target", target_flag])
+
+    assert initialized.exit_code == 0, initialized.output
+    manifest = load_yaml(tmp_path / "apm.yml")
+    assert manifest["targets"] == expected_targets
+    assert APMPackage.from_apm_yml(tmp_path / "apm.yml").canonical_targets == tuple(
+        expected_targets
+    )
+
+    installed = runner.invoke(cli, ["install"])
+    assert installed.exit_code == 0, installed.output
 
 
 def test_host_provider_registry_drives_auth_and_backends() -> None:

@@ -827,6 +827,12 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
                 "One or more direct dependencies failed validation. Run with --verbose for details."
             )
 
+        from .outcome import result_from_install_context
+
+        precommit_result = result_from_install_context(ctx)
+        if precommit_result.disposition is InstallDisposition.FAILED:
+            return precommit_result
+
         # Update .gitignore only for project-scoped installs, not in lockfile_only mode.
         if scope == InstallScope.PROJECT and not lockfile_only:
             from apm_cli.commands._helpers import _update_gitignore_for_apm_modules

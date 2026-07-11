@@ -138,6 +138,13 @@ Supported targets and where the integrator writes:
 | kiro     | `.kiro/hooks/<package-slug>-<hook-file-stem-slug>-<event-slug>-<n>.json` | one file per hook action |
 | opencode | -- not supported --                   | silently skipped     |
 
+APM parses the source into vendor-neutral hook intent, then each target
+integrator renders its native schema. Flat command entries become Claude's
+required `{ "matcher": "*", "hooks": [...] }` entries in
+`.claude/settings.json`. Kiro receives its current v1 standalone schema:
+`{ "version": "v1", "hooks": [{ "name", "trigger", "matcher", "action" }] }`.
+Kiro trigger names are PascalCase and command timeouts remain in seconds.
+
 Copilot hook files are namespaced with the source package name to avoid
 collisions across installed deps; bundled scripts land alongside under
 `.github/hooks/scripts/<pkg>/`.

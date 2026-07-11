@@ -20,14 +20,10 @@ from apm_cli.core.errors import (
     render_conflicting_schema_error,
     render_unknown_target_error,
 )
-from apm_cli.core.target_catalog import TARGET_CAPABILITIES
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES, manifest_target_names
 
 # Canonical target names accepted by APM.
-CANONICAL_TARGETS: frozenset[str] = frozenset(
-    capability.name
-    for capability in TARGET_CAPABILITIES.values()
-    if capability.experimental_flag is None and not capability.mcp_only
-)
+CANONICAL_TARGETS: frozenset[str] = manifest_target_names()
 
 
 def _validate_canonical(tokens: list[str]) -> None:

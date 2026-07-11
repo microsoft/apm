@@ -73,7 +73,9 @@ def _entries_to_ir(entries: list, event: str = "") -> HookDocument:
         bindings.append(
             HookBinding(
                 event=event,
-                handlers=(_handler_to_ir(entry, None),),
+                handlers=(_handler_to_ir(data, provenance),),
+                matcher=matcher,
+                provenance=provenance,
             )
         )
     return HookDocument(bindings=tuple(bindings))
@@ -93,29 +95,24 @@ def _handler_from_ir(handler: HookHandler, *, timeout_milliseconds: bool) -> dic
     return result
 
 
-def _copilot_keys_to_gemini(hook: dict) -> None:
-    """Compatibility edge helper backed by the neutral handler model."""
-    rendered = _handler_from_ir(
-        _handler_to_ir(hook, None),
-        timeout_milliseconds=True,
-    )
-    hook.clear()
-    hook.update(rendered)
-
-
-def _to_gemini_hook_entries(entries: list) -> list:
-    """Render portable bindings in Gemini's nested millisecond schema."""
-    document = _entries_to_ir(entries)
-    result: list[dict[str, Any]] = []
+def _render_nested_document(
+    document: HookDocument,
+    *,
+    timeout_milliseconds: bool,
+    default_matcher: str | None = None,
+) -> list:
+    """Render neutral bindings into a matcher plus nested-handlers schema."""
+    result: list = []
     for binding in document.bindings:
         if "raw_entry" in binding.metadata:
             result.append(binding.metadata["raw_entry"])
             continue
         outer = dict(binding.metadata)
-        if binding.matcher is not None:
-            outer["matcher"] = binding.matcher
+        if binding.matcher is not None or default_matcher is not None:
+            outer["matcher"] = binding.matcher or default_matcher
         outer["hooks"] = [
-            _handler_from_ir(handler, timeout_milliseconds=True) for handler in binding.handlers
+            _handler_from_ir(handler, timeout_milliseconds=timeout_milliseconds)
+            for handler in binding.handlers
         ]
         provenance = binding.provenance or next(
             (handler.provenance for handler in binding.handlers if handler.provenance is not None),
@@ -129,27 +126,42 @@ def _to_gemini_hook_entries(entries: list) -> list:
     return result
 
 
+def _copilot_keys_to_gemini(hook: dict) -> None:
+    """Compatibility edge helper backed by the neutral handler model."""
+    rendered = _handler_from_ir(
+        _handler_to_ir(hook, None),
+        timeout_milliseconds=True,
+    )
+    hook.clear()
+    hook.update(rendered)
+
+
+def _to_gemini_hook_entries(entries: list) -> list:
+    """Render portable bindings in Gemini's nested millisecond schema."""
+    return _render_nested_document(
+        _entries_to_ir(entries),
+        timeout_milliseconds=True,
+    )
+
+
+def _to_claude_hook_entries(entries: list) -> list:
+    """Render portable bindings in Claude's nested matcher schema."""
+    return _render_nested_document(
+        _entries_to_ir(entries),
+        timeout_milliseconds=False,
+        default_matcher="*",
+    )
+
+
 def _to_antigravity_hook_entries(entries: list, event_name: str) -> list:
     """Render portable bindings in Antigravity's event-dependent schema."""
     document = _entries_to_ir(entries, event_name)
     if event_name in _ANTIGRAVITY_NESTED_EVENTS:
-        result: list[dict[str, Any]] = []
-        for binding in document.bindings:
-            if "raw_entry" in binding.metadata:
-                result.append(binding.metadata["raw_entry"])
-                continue
-            outer = dict(binding.metadata)
-            outer["matcher"] = binding.matcher or "*"
-            outer["hooks"] = [
-                _handler_from_ir(handler, timeout_milliseconds=False)
-                for handler in binding.handlers
-            ]
-            if binding.provenance:
-                outer["_apm_source"] = binding.provenance
-                for handler in outer["hooks"]:
-                    handler.pop("_apm_source", None)
-            result.append(outer)
-        return result
+        return _render_nested_document(
+            document,
+            timeout_milliseconds=False,
+            default_matcher="*",
+        )
 
     flat: list[dict[str, Any]] = []
     for binding in document.bindings:

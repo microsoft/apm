@@ -620,6 +620,34 @@ class SkillIntegrator(BaseIntegrator):
         return name_filter or None
 
     @staticmethod
+    def available_skill_names(package_info) -> frozenset[str] | None:
+        """Return names selectable through ``--skill`` for one package."""
+        package_path = package_info.install_path
+        if (package_path / "SKILL.md").is_file():
+            return None
+
+        from apm_cli.models.validation import PackageType
+
+        normalized = package_path / ".apm" / "skills"
+        root_bundle = package_path / "skills"
+        if package_info.package_type is PackageType.MARKETPLACE_PLUGIN:
+            skills_dir = normalized
+        elif root_bundle.is_dir() and any(
+            (child / "SKILL.md").is_file() for child in root_bundle.iterdir() if child.is_dir()
+        ):
+            skills_dir = root_bundle
+        else:
+            skills_dir = normalized
+
+        if not skills_dir.is_dir():
+            return frozenset()
+        return frozenset(
+            child.name
+            for child in skills_dir.iterdir()
+            if child.is_dir() and (child / "SKILL.md").is_file()
+        )
+
+    @staticmethod
     def _promote_sub_skills(
         sub_skills_dir: Path,
         target_skills_root: Path,

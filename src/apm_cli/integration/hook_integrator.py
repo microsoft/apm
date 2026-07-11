@@ -65,6 +65,7 @@ from apm_cli.integration.hook_bundle import copy_deployed_hook_bundle
 from apm_cli.integration.hook_file_routing import filter_hook_files_for_target
 from apm_cli.integration.hook_native_formats import (
     _to_antigravity_hook_entries,
+    _to_claude_hook_entries,
     _to_gemini_hook_entries,
 )
 from apm_cli.utils.atomic_io import atomic_write_text
@@ -160,22 +161,29 @@ _HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         "Stop": "SessionEnd",
     },
     "kiro": {
-        # Copilot / Claude -> Kiro camelCase events
-        "PreToolUse": "preToolUse",
-        "preToolUse": "preToolUse",
-        "PostToolUse": "postToolUse",
-        "postToolUse": "postToolUse",
-        "UserPromptSubmit": "promptSubmit",
-        "userPromptSubmit": "promptSubmit",
-        "promptSubmit": "promptSubmit",
-        "Stop": "agentStop",
-        "stop": "agentStop",
-        "AgentStop": "agentStop",
-        "agentStop": "agentStop",
-        "PreTaskExecution": "preTaskExecution",
-        "preTaskExecution": "preTaskExecution",
-        "PostTaskExecution": "postTaskExecution",
-        "postTaskExecution": "postTaskExecution",
+        # Portable and legacy spellings -> Kiro v1 PascalCase triggers.
+        "PreToolUse": "PreToolUse",
+        "preToolUse": "PreToolUse",
+        "PostToolUse": "PostToolUse",
+        "postToolUse": "PostToolUse",
+        "UserPromptSubmit": "UserPromptSubmit",
+        "userPromptSubmit": "UserPromptSubmit",
+        "promptSubmit": "UserPromptSubmit",
+        "Stop": "Stop",
+        "stop": "Stop",
+        "AgentStop": "Stop",
+        "agentStop": "Stop",
+        "SessionStart": "SessionStart",
+        "sessionStart": "SessionStart",
+        "PreTaskExecution": "PreTaskExec",
+        "preTaskExecution": "PreTaskExec",
+        "PreTaskExec": "PreTaskExec",
+        "PostTaskExecution": "PostTaskExec",
+        "postTaskExecution": "PostTaskExec",
+        "PostTaskExec": "PostTaskExec",
+        "PostFileCreate": "PostFileCreate",
+        "PostFileSave": "PostFileSave",
+        "PostFileDelete": "PostFileDelete",
     },
 }
 
@@ -191,7 +199,7 @@ _HOOK_EVENT_EXPECTED_CASING: dict[str, str] = {
     "gemini": "PascalCase",
     "antigravity": "PascalCase",
     "windsurf": "PascalCase",
-    "kiro": "camelCase",
+    "kiro": "PascalCase",
 }
 
 
@@ -1486,7 +1494,9 @@ class HookIntegrator(BaseIntegrator):
 
                 # Transform flat Copilot entries to the target's nested /
                 # native hook shape.
-                if config.target_key == "gemini":
+                if config.target_key == "claude":
+                    entries = _to_claude_hook_entries(entries)
+                elif config.target_key == "gemini":
                     entries = _to_gemini_hook_entries(entries)
                 elif config.target_key == "antigravity":
                     entries = _to_antigravity_hook_entries(entries, event_name)

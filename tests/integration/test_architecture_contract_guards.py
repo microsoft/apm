@@ -2,9 +2,40 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
+
+
+def _write_portable_hook_package(tmp_path: Path) -> object:
+    """Create one package carrying the flat portable hook shape."""
+    from apm_cli.models.apm_package import APMPackage, PackageInfo
+
+    package_root = tmp_path / "apm_modules" / "owner" / "portable-hooks"
+    hooks_dir = package_root / ".apm" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "check.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "type": "command",
+                            "command": "echo check",
+                            "timeout": 10,
+                            "matcher": "fs_write|str_replace",
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return PackageInfo(
+        package=APMPackage(name="portable-hooks", version="1.0.0"),
+        install_path=package_root,
+    )
 
 
 def test_neutral_hook_intent_translates_at_native_edges() -> None:
@@ -21,6 +52,68 @@ def test_neutral_hook_intent_translates_at_native_edges() -> None:
 
     assert gemini[0]["hooks"][0]["timeout"] == 3000
     assert antigravity[0]["timeout"] == 3
+
+
+def test_claude_edge_nests_flat_portable_hook_entries(tmp_path: Path) -> None:
+    """Claude output must wrap portable handlers in matcher/hooks entries."""
+    from apm_cli.integration.hook_integrator import HookIntegrator
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    (tmp_path / ".claude").mkdir()
+    package_info = _write_portable_hook_package(tmp_path)
+
+    HookIntegrator().integrate_hooks_for_target(
+        KNOWN_TARGETS["claude"],
+        package_info,
+        tmp_path,
+    )
+
+    settings = json.loads((tmp_path / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert settings["hooks"]["PreToolUse"] == [
+        {
+            "matcher": "fs_write|str_replace",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "echo check",
+                    "timeout": 10,
+                }
+            ],
+        }
+    ]
+
+
+def test_kiro_edge_emits_current_v1_hook_schema(tmp_path: Path) -> None:
+    """Kiro output must use v1 trigger/matcher/action documents."""
+    from apm_cli.integration.hook_integrator import HookIntegrator
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    (tmp_path / ".kiro").mkdir()
+    package_info = _write_portable_hook_package(tmp_path)
+
+    result = HookIntegrator().integrate_hooks_for_target(
+        KNOWN_TARGETS["kiro"],
+        package_info,
+        tmp_path,
+    )
+
+    assert len(result.target_paths) == 1
+    payload = json.loads(result.target_paths[0].read_text(encoding="utf-8"))
+    assert payload == {
+        "version": "v1",
+        "hooks": [
+            {
+                "name": "portable-hooks PreToolUse 1",
+                "trigger": "PreToolUse",
+                "matcher": "fs_write|str_replace",
+                "action": {
+                    "type": "command",
+                    "command": "echo check",
+                    "timeout": 10,
+                },
+            }
+        ],
+    }
 
 
 def test_neutral_hook_ir_snapshots_metadata() -> None:

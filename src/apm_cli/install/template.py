@@ -84,7 +84,13 @@ def run_integration_template(
     Returns a counter-delta dict for accumulation by the caller, or
     ``None`` if the source declined to acquire (skipped, failed).
     """
-    materialization = source.acquire()
+    from apm_cli.deps.plugin_parser import DeclaredPluginComponentError
+
+    try:
+        materialization = source.acquire()
+    except DeclaredPluginComponentError as exc:
+        source.ctx.diagnostics.error(str(exc), package=source.dep_key)
+        return {}
     if materialization is None:
         return None
 
@@ -109,6 +115,22 @@ def _integrate_materialization(
     dep_key = m.dep_key
     diagnostics = ctx.diagnostics
     logger = ctx.logger
+
+    if ctx.skill_subset_from_cli and ctx.skill_subset:
+        from apm_cli.install.outcome import require_requested_components
+        from apm_cli.integration.skill_integrator import SkillIntegrator
+
+        available_skills = SkillIntegrator.available_skill_names(m.package_info)
+        if available_skills is not None and not require_requested_components(
+            diagnostics,
+            option="--skill",
+            component="skill",
+            requested=ctx.skill_subset,
+            available=available_skills,
+            package=dep_key,
+        ):
+            ctx.package_deployed_files[dep_key] = []
+            return deltas
 
     # No-op when targets are empty or acquire decided to skip integration
     # (signalled by package_info=None).  Still record an empty deployed

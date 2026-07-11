@@ -41,6 +41,12 @@ and [`apm marketplace init`](../marketplace/) instead.
 Target precedence: `--target` flag > interactive prompt > auto-detect at
 compile time (used with `--yes` or in non-TTY shells).
 
+`init` resolves CLI aliases before writing `targets:`. For example,
+`--target agents` and `--target vscode` both persist the canonical
+`copilot` identifier, while `--target all` expands to canonical manifest
+targets. The generated manifest is therefore accepted unchanged by
+`apm install`.
+
 ## Examples
 
 Initialize in the current directory with prompts:

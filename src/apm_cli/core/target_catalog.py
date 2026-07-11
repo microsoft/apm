@@ -241,6 +241,15 @@ def accepted_target_values(command: str | None = None) -> frozenset[str]:
     return frozenset(values)
 
 
+def manifest_target_names() -> frozenset[str]:
+    """Return canonical target identifiers accepted in ``apm.yml``."""
+    return frozenset(
+        capability.name
+        for capability in TARGET_CAPABILITIES.values()
+        if capability.experimental_flag is None and not capability.mcp_only
+    )
+
+
 def normalize_target_name(name_or_alias: str) -> str:
     """Normalize a target spelling to its native capability name."""
     if name_or_alias == "all":

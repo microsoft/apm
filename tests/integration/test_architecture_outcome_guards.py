@@ -8,6 +8,32 @@ from unittest.mock import MagicMock
 import pytest
 
 
+def _write_plugin_consumer(tmp_path: Path, plugin_manifest: dict) -> tuple[Path, Path]:
+    """Create a local plugin and a consumer that installs it."""
+    import json
+
+    plugin = tmp_path / "plugin"
+    manifest_dir = plugin / ".claude-plugin"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "plugin.json").write_text(
+        json.dumps(plugin_manifest),
+        encoding="utf-8",
+    )
+    consumer = tmp_path / "consumer"
+    consumer.mkdir()
+    (consumer / ".claude").mkdir()
+    (consumer / "apm.yml").write_text(
+        "name: consumer\n"
+        "version: 1.0.0\n"
+        "targets: [claude]\n"
+        "dependencies:\n"
+        "  apm:\n"
+        "    - path: ../plugin\n",
+        encoding="utf-8",
+    )
+    return plugin, consumer
+
+
 def test_install_result_disposition_owns_cli_exit_code() -> None:
     """Service classification and adapter exit translation must agree."""
     from apm_cli.install.outcome import finalize_install_result
@@ -21,6 +47,79 @@ def test_install_result_disposition_owns_cli_exit_code() -> None:
 
     assert result.disposition is InstallDisposition.FAILED
     assert result.exit_code == 1
+
+
+def test_missing_declared_plugin_component_fails_before_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit missing plugin path is an unsatisfied install requirement."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    plugin, consumer = _write_plugin_consumer(
+        tmp_path,
+        {
+            "name": "missing-components",
+            "version": "1.0.0",
+            "agents": ["./agents/does-not-exist.agent.md"],
+            "skills": ["./skills/does-not-exist"],
+        },
+    )
+    monkeypatch.chdir(consumer)
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+
+    result = CliRunner().invoke(cli, ["install"])
+
+    assert result.exit_code != 0, result.output
+    assert "missing-components" in result.output
+    assert "agents" in result.output
+    assert "./agents/does-not-exist.agent.md" in result.output
+    assert "plugin root" in result.output
+    assert "remove the declaration" in result.output
+    assert not (consumer / "apm.lock.yaml").exists()
+    assert not (consumer / ".claude" / "agents").exists()
+    assert plugin.is_dir()
+
+
+def test_requested_plugin_skill_with_no_match_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A named --skill miss must not become a successful no-op."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    plugin, consumer = _write_plugin_consumer(
+        tmp_path,
+        {
+            "name": "selective-skills",
+            "version": "1.0.0",
+            "skills": ["./skills/engineering/tdd"],
+        },
+    )
+    for name in ("tdd", "resolving-merge-conflicts"):
+        skill = plugin / "skills" / "engineering" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+    monkeypatch.chdir(consumer)
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+
+    result = CliRunner().invoke(
+        cli,
+        ["install", "--skill", "engineering/resolving-merge-conflicts"],
+    )
+
+    assert result.exit_code != 0, result.output
+    assert "engineering/resolving-merge-conflicts" in result.output
+    assert "matched no declared skills" in result.output
+    assert "tdd" in result.output
+    assert "update the package manifest" in result.output
+    assert "then reinstall" in result.output
+    assert not (consumer / "apm.lock.yaml").exists()
+    assert not (consumer / ".claude" / "skills" / "resolving-merge-conflicts").exists()
 
 
 def test_pipeline_diagnostics_make_install_exit_one(
