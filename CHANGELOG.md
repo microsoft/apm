@@ -12,11 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP audit, install, and uninstall now share one lockfile-bounded current-source
   view, so `config-consistency` detects changed or removed transitive declarations
   and fails on unreadable package manifests. (#2155)
+- `apm compile --target <target>` now fails with an actionable error when the
+  requested target cannot produce compiled output, instead of silently falling
+  back to auto-detection. (#2155)
 
 ### Fixed
 
 - Positional `apm install <url>` now exits non-zero when all packages fail
   validation, matching manifest installs for reliable CI scripting. (#2131)
+- A failed first `apm install` no longer leaves behind an `apm.yml` it created,
+  and the final completion summary now reflects the committed outcome instead of
+  rendering before commit or rollback. (#2155)
 - Manifest and policy parsers now reject wrong-typed native schema values and
   report unknown policy keys. Migration: quote numeric `apm.yml` versions, use
   non-empty string identities, and use mappings/lists for policy blocks. (closes #2137) (#2143)
