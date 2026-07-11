@@ -1,7 +1,22 @@
 """Characterization tests for target capability metadata."""
 
+from contextlib import nullcontext
 from dataclasses import astuple
+from types import MappingProxyType
 
+import pytest
+
+from apm_cli.core.target_catalog import (
+    TARGET_CAPABILITIES,
+    TargetCapability,
+    _build_target_catalog,
+    accepted_target_values,
+    expand_all,
+    get_target_capability,
+    normalize_target_name,
+    target_error_values,
+    target_help_fragment,
+)
 from apm_cli.core.target_detection import (
     ALL_CANONICAL_TARGETS,
     EXPERIMENTAL_TARGETS,
@@ -9,8 +24,11 @@ from apm_cli.core.target_detection import (
     MCP_ONLY_TARGETS,
     TARGET_ALIASES,
     VALID_TARGET_VALUES,
+    parse_target_field,
 )
 from apm_cli.integration.targets import KNOWN_TARGETS, RUNTIME_TO_CANONICAL_TARGET
+
+COMMANDS = ("compile", "install", "update")
 
 
 def test_current_target_sets_and_aliases_are_characterized() -> None:
@@ -214,3 +232,106 @@ def test_current_native_profiles_are_characterized() -> None:
             "copilot_app",
         ),
     }
+
+
+def test_catalog_is_immutable_and_projects_accepted_values() -> None:
+    """The catalog owns every accepted target value."""
+    assert isinstance(TARGET_CAPABILITIES, MappingProxyType)
+    assert accepted_target_values() == VALID_TARGET_VALUES
+    for command in COMMANDS:
+        assert accepted_target_values(command) == VALID_TARGET_VALUES
+
+
+def test_every_accepted_value_is_advertised_and_parses() -> None:
+    """Help and error advertising cannot drift from parser acceptance."""
+    for command in COMMANDS:
+        help_fragment = target_help_fragment(command)
+        error_values = target_error_values(command)
+        assert frozenset(error_values) == accepted_target_values(command)
+        for value in accepted_target_values(command):
+            assert value in help_fragment
+            with pytest.warns(Warning) if value == "agents" else nullcontext():
+                assert parse_target_field(value) is not None
+
+
+def test_alias_runtime_profile_and_compile_projections_match_catalog() -> None:
+    """Catalog metadata reproduces every legacy projection."""
+    assert normalize_target_name("vscode") == "copilot"
+    assert normalize_target_name("agents") == "copilot"
+    assert normalize_target_name("agy") == "antigravity"
+    assert get_target_capability("vscode") is TARGET_CAPABILITIES["copilot"]
+
+    catalog_runtime_map = {
+        runtime: capability.primitive_profile
+        for capability in TARGET_CAPABILITIES.values()
+        for runtime in capability.runtimes
+    }
+    assert catalog_runtime_map == RUNTIME_TO_CANONICAL_TARGET
+    for name, profile in KNOWN_TARGETS.items():
+        capability = TARGET_CAPABILITIES[name]
+        assert capability.primitive_profile == name
+        assert capability.compile_family == profile.compile_family
+
+
+def test_all_excludes_explicit_experimental_and_mcp_only_targets() -> None:
+    """The all expansion preserves the stable implicit target set."""
+    for command in COMMANDS:
+        expanded = frozenset(expand_all(command))
+        assert expanded == ALL_CANONICAL_TARGETS
+        assert not expanded & EXPERIMENTAL_TARGETS
+        assert not expanded & EXPLICIT_ONLY_TARGETS
+        assert not expanded & MCP_ONLY_TARGETS
+
+
+def test_catalog_validation_rejects_duplicate_aliases() -> None:
+    """No accepted value may resolve to multiple capabilities."""
+    first = _capability("one", aliases=("shared",))
+    second = _capability("two", aliases=("shared",))
+    with pytest.raises(ValueError, match=r"Duplicate target value 'shared'"):
+        _build_target_catalog((first, second))
+
+
+def test_catalog_validation_rejects_missing_mcp_primitive_profile() -> None:
+    """MCP-only capabilities must name their native primitive profile."""
+    invalid = _capability("mcp-only", mcp_only=True, primitive_profile=None)
+    with pytest.raises(ValueError, match=r"MCP-only target 'mcp-only'.*primitive_profile"):
+        _build_target_catalog((invalid,))
+
+
+def test_catalog_validation_rejects_duplicate_runtime_and_invalid_all_membership() -> None:
+    """Runtimes are unique and gated targets cannot participate in all."""
+    with pytest.raises(ValueError, match=r"Runtime 'same'.*multiple targets"):
+        _build_target_catalog(
+            (
+                _capability("one", runtimes=("same",)),
+                _capability("two", runtimes=("same",)),
+            )
+        )
+    with pytest.raises(ValueError, match=r"Target 'gated'.*in_all"):
+        _build_target_catalog((_capability("gated", in_all=True, experimental_flag="flag"),))
+
+
+def _capability(
+    name: str,
+    *,
+    aliases: tuple[str, ...] = (),
+    in_all: bool = False,
+    experimental_flag: str | None = None,
+    mcp_only: bool = False,
+    primitive_profile: str | None = "profile",
+    runtimes: tuple[str, ...] = (),
+) -> TargetCapability:
+    """Build compact validation fixtures with otherwise valid metadata."""
+    return TargetCapability(
+        name=name,
+        aliases=aliases,
+        description=f"{name} target",
+        in_all=in_all,
+        explicit_only=False,
+        experimental_flag=experimental_flag,
+        mcp_only=mcp_only,
+        primitive_profile=primitive_profile,
+        compile_family=None,
+        runtimes=runtimes,
+        commands=frozenset(COMMANDS),
+    )
