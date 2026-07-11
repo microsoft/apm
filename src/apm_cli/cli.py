@@ -26,6 +26,7 @@ from apm_cli.commands.config import config
 from apm_cli.commands.deps import deps
 from apm_cli.commands.doctor import doctor
 from apm_cli.commands.experimental import experimental
+from apm_cli.commands.export_patch import export_patch
 from apm_cli.commands.find import find as find_cmd
 from apm_cli.commands.init import init
 from apm_cli.commands.install import install
@@ -177,6 +178,7 @@ cli.add_command(install)
 cli.add_command(lock)
 cli.add_command(uninstall)
 cli.add_command(prune)
+cli.add_command(export_patch, name="export-patch")
 cli.add_command(update)
 cli.add_command(self_update)
 cli.add_command(plugin_cmd, name="plugin")
