@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while routing package file primitives through the Copilot profile.
   (by @sergio-sisternes-epam; closes #1957) (#2041)
 
+### Added
+
+- `apm install` now supports target-native MCP config generation for the `antigravity` target, writing to `.agents/mcp_config.json` (project scope) or `~/.gemini/config/mcp_config.json` (user scope). Remote SSE and HTTP servers are correctly formatted to use the `serverUrl` field required by Google Antigravity. (by @okamiconcept, #2039)
+
 ### Fixed
 
 - Azure DevOps marketplace checks now preserve suffix-free `/_git/<repo>` URLs

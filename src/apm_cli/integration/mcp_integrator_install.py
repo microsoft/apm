@@ -240,6 +240,7 @@ def _discover_installed_runtimes(project_root_path, *, user_scope: bool) -> list
             "claude",
             "intellij",
             "hermes",
+            "antigravity",
         ]:
             try:
                 if not _runtime_is_present(
@@ -283,6 +284,10 @@ def _runtime_is_present(
         from apm_cli.adapters.client.intellij import _intellij_config_dir
 
         return _intellij_config_dir().is_dir()
+    if runtime_name == "antigravity":
+        if user_scope:
+            return find_runtime_binary("agy") is not None
+        return (project_root_path / ".agents").is_dir()
     if runtime_name == "hermes":
         return _hermes_runtime_opted_in()
     return manager.is_runtime_available(runtime_name)
@@ -307,6 +312,12 @@ def _discover_installed_runtimes_fallback(
     # Claude Code: directory-presence OR binary-on-PATH
     if (project_root_path / ".claude").is_dir() or find_runtime_binary("claude") is not None:
         installed_runtimes.append("claude")
+    # Antigravity: directory-presence (project-scope) OR binary-on-PATH (user-scope)
+    if user_scope:
+        if find_runtime_binary("agy") is not None:
+            installed_runtimes.append("antigravity")
+    elif (project_root_path / ".agents").is_dir():
+        installed_runtimes.append("antigravity")
     # JetBrains Copilot: user-scope config directory presence
     try:
         from apm_cli.adapters.client.intellij import _intellij_config_dir
