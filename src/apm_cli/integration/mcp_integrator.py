@@ -25,7 +25,12 @@ from tomlkit.exceptions import TOMLKitError
 
 from apm_cli.core.null_logger import NullCommandLogger
 from apm_cli.deps.lockfile import LockFile, get_lockfile_path
-from apm_cli.integration._shared import deduplicate_deps, resolve_locked_apm_yml_paths
+from apm_cli.integration.mcp_config_view import (
+    _collect_transitive_compat,
+    _deduplicate,
+    _get_server_configs,
+    _get_server_provenance,
+)
 from apm_cli.runtime.utils import find_runtime_binary
 from apm_cli.utils.atomic_io import atomic_write_text, write_text_lf
 from apm_cli.utils.console import (
@@ -214,73 +219,14 @@ class MCPIntegrator:
         logger=None,
         diagnostics=None,
     ) -> list:
-        """Collect MCP dependencies from resolved APM packages listed in apm.lock.
-
-        Only scans apm.yml files for packages present in apm.lock to avoid
-        picking up stale/orphaned packages from previous installs.
-        Falls back to scanning all apm.yml files if no lock file is available.
-
-        Self-defined servers (registry: false) from direct dependencies
-        (depth == 1) are auto-trusted.  Self-defined servers from transitive
-        dependencies (depth > 1) are skipped with a warning unless
-        *trust_private* is True.
-        """
-        if logger is None:
-            logger = NullCommandLogger()
-        if not apm_modules_dir.exists():
-            return []
-
-        from apm_cli.models.apm_package import APMPackage
-
-        # Build set of expected apm.yml paths from apm.lock
-        resolved, direct_paths = resolve_locked_apm_yml_paths(apm_modules_dir, lock_path)
-        apm_yml_paths = resolved if resolved is not None else apm_modules_dir.rglob("apm.yml")
-
-        collected = []
-        for apm_yml_path in apm_yml_paths:
-            try:
-                pkg = APMPackage.from_apm_yml(apm_yml_path)
-                mcp = pkg.get_mcp_dependencies()
-                if mcp:
-                    is_direct = apm_yml_path.resolve() in direct_paths
-                    for dep in mcp:
-                        if hasattr(dep, "is_self_defined") and dep.is_self_defined:
-                            if is_direct:
-                                logger.progress(
-                                    f"Trusting direct dependency MCP '{dep.name}' from '{pkg.name}'"
-                                )
-                            elif trust_private:
-                                logger.progress(
-                                    f"Trusting self-defined MCP server '{dep.name}' "
-                                    f"from transitive package '{pkg.name}' (--trust-transitive-mcp)"
-                                )
-                            else:
-                                _trust_msg = (
-                                    f"Transitive package '{pkg.name}' declares self-defined "
-                                    f"MCP server '{dep.name}' (registry: false). "
-                                    f"Re-declare it in your apm.yml or use --trust-transitive-mcp."
-                                )
-                                if diagnostics:
-                                    diagnostics.warn(_trust_msg)
-                                else:
-                                    logger.warning(_trust_msg)
-                                continue
-                        # Record provenance: every server collected here is
-                        # contributed by a sub-package's apm.yml, so it is
-                        # transitive w.r.t. the ROOT manifest even when the
-                        # declaring package is itself a direct dependency. The
-                        # audit's config-consistency check uses this to exempt
-                        # such servers from the orphaned-MCP branch (#2081).
-                        dep.resolved_by = pkg.name or apm_yml_path.parent.name
-                        collected.append(dep)
-            except Exception:
-                _log.debug(
-                    "Skipping package at %s: failed to parse apm.yml",
-                    apm_yml_path,
-                    exc_info=True,
-                )
-                continue
-        return collected
+        """Compatibility delegate for canonical MCP source traversal."""
+        return _collect_transitive_compat(
+            apm_modules_dir,
+            lock_path,
+            trust_private,
+            logger=logger,
+            diagnostics=diagnostics,
+        )
 
     # ------------------------------------------------------------------
     # Deduplication
@@ -293,7 +239,7 @@ class MCPIntegrator:
         Root deps are listed before transitive, so root overlays take
         precedence.
         """
-        return deduplicate_deps(deps)
+        return _deduplicate(deps)
 
     # ------------------------------------------------------------------
     # Server info helpers
@@ -453,13 +399,7 @@ class MCPIntegrator:
     @staticmethod
     def get_server_configs(mcp_deps: list) -> builtins.dict:
         """Extract server configs as {name: config_dict} from MCP dependencies."""
-        configs: builtins.dict = {}
-        for dep in mcp_deps:
-            if hasattr(dep, "to_dict") and hasattr(dep, "name"):
-                configs[dep.name] = dep.to_dict()
-            elif isinstance(dep, str):
-                configs[dep] = {"name": dep}
-        return configs
+        return _get_server_configs(mcp_deps)
 
     @staticmethod
     def get_server_provenance(mcp_deps: list) -> builtins.dict:
@@ -474,12 +414,7 @@ class MCPIntegrator:
         server declared both in the root and transitively resolves to the
         root entry and is correctly treated as direct here (#2081).
         """
-        provenance: builtins.dict = {}
-        for dep in mcp_deps:
-            resolved_by = getattr(dep, "resolved_by", None)
-            if resolved_by and hasattr(dep, "name"):
-                provenance[dep.name] = resolved_by
-        return provenance
+        return _get_server_provenance(mcp_deps)
 
     @staticmethod
     def _append_drifted_to_install_list(

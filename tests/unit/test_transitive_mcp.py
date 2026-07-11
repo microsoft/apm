@@ -309,6 +309,7 @@ class TestCollectTransitiveMCPDeps:
                             "repo_url": "org/monorepo",
                             "host": "github.com",
                             "virtual_path": "skills/azure",
+                            "is_virtual": True,
                         },
                     ],
                 }

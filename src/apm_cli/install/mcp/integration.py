@@ -79,20 +79,26 @@ def run_mcp_integration(  # noqa: PLR0913
             report the violation, and exit non-zero; already-installed APM
             packages are left in place.
     """
+    from apm_cli.deps.lockfile import LockFile
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
     from apm_cli.integration.mcp_integrator import MCPIntegrator
     from apm_cli.policy.install_preflight import run_policy_preflight
 
-    # Collect transitive MCP deps from installed packages
-    if should_install and apm_modules_path.exists():
-        transitive_mcp = MCPIntegrator.collect_transitive(
+    current_view = None
+    if should_install:
+        lockfile = LockFile.read(lock_path) if lock_path.exists() else None
+        current_view = CurrentMcpConfigView.derive(
+            apm_package,
+            lockfile,
             apm_modules_path,
-            lock_path,
-            trust_transitive_mcp,
+            trust_transitive_self_defined=trust_transitive_mcp,
             diagnostics=diagnostics,
         )
-        if transitive_mcp:
-            logger.verbose_detail(f"Collected {len(transitive_mcp)} transitive MCP dependency(ies)")
-            mcp_deps = MCPIntegrator.deduplicate(mcp_deps + transitive_mcp)
+        root_count = len(apm_package.get_all_mcp_dependencies())
+        transitive_count = max(0, len(current_view.dependencies) - root_count)
+        if transitive_count:
+            logger.verbose_detail(f"Collected {transitive_count} transitive MCP dependency(ies)")
+        mcp_deps = list(current_view.dependencies)
 
     # allowExecutables MCP gate.
     from apm_cli.security.executables import filter_mcp_by_allow_executables
@@ -148,8 +154,8 @@ def run_mcp_integration(  # noqa: PLR0913
             scope=scope,
         )
         new_mcp_servers = MCPIntegrator.get_server_names(mcp_deps)
-        new_mcp_configs = MCPIntegrator.get_server_configs(mcp_deps)
-        new_mcp_provenance = MCPIntegrator.get_server_provenance(mcp_deps)
+        new_mcp_configs = dict(current_view.configs) if current_view is not None else {}
+        new_mcp_provenance = dict(current_view.provenance) if current_view is not None else {}
 
         # Remove stale MCP servers that are no longer needed
         stale_servers = old_mcp_servers - new_mcp_servers

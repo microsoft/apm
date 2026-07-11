@@ -231,43 +231,42 @@ def _check_config_consistency(
     lock: LockFile,
 ) -> CheckResult:
     """Verify MCP server configs match lockfile baseline."""
-    from ..drift import detect_config_drift
-    from ..integration.mcp_integrator import MCPIntegrator
+    from ..constants import APM_MODULES_DIR
+    from ..integration.mcp_config_view import CurrentMcpConfigView
 
-    mcp_deps = manifest.get_all_mcp_dependencies()
-    current_configs = MCPIntegrator.get_server_configs(mcp_deps)
+    project_root = manifest.package_path or Path.cwd()
+    view = CurrentMcpConfigView.derive(
+        manifest,
+        lock,
+        project_root / APM_MODULES_DIR,
+        trust_transitive_self_defined=True,
+    )
     stored_configs = lock.mcp_configs or {}
+    diff = view.diff(stored_configs)
 
     # No MCP deps at all -- nothing to check
-    if not current_configs and not stored_configs:
+    if not view.configs and not stored_configs and not view.problems:
         return CheckResult(
             name="config-consistency",
             passed=True,
             message="No MCP configs to check",
         )
 
-    details: list[str] = []
+    details = [f"{problem.package_key}: {problem.message}" for problem in view.problems]
 
-    # Detect drift on servers that exist in both sets
-    drifted = detect_config_drift(current_configs, stored_configs)
-    for name in sorted(drifted):
+    # Preserve the established diagnostics while sourcing every partition from
+    # the canonical symmetric diff.
+    for name in sorted(diff.changed):
         details.append(f"{name}: config differs from lockfile baseline")
 
-    # Servers in lockfile but not in manifest (orphaned MCP).
-    # Transitively-contributed servers (declared by a local-path sub-package,
-    # recorded with provenance in mcp_config_provenance) are exempted: the root
-    # manifest cannot declare them, so flagging them creates an unfixable CI
-    # failure. This mirrors the resolved_by-based exemption in _check_no_orphans
-    # (#2081; MCP-side sibling of #1846/#1855).
     provenance = lock.mcp_config_provenance or {}
-    for name in sorted(stored_configs):
-        if name not in current_configs and name not in provenance:
-            details.append(f"{name}: in lockfile but not in manifest")
+    for name in sorted(diff.lock_only):
+        owner = provenance.get(name)
+        suffix = f" (declared by {owner})" if owner else ""
+        details.append(f"{name}: in lockfile but not in manifest{suffix}")
 
-    # Servers in manifest but not in lockfile (new, not installed)
-    for name in sorted(current_configs):
-        if name not in stored_configs:
-            details.append(f"{name}: in manifest but not in lockfile")
+    for name in sorted(diff.source_only):
+        details.append(f"{name}: in manifest but not in lockfile")
 
     if not details:
         return CheckResult(

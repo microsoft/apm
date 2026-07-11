@@ -703,16 +703,16 @@ def _cleanup_stale_mcp(
     """Remove MCP servers that are no longer needed after uninstall."""
     if not old_mcp_servers:
         return
+    from apm_cli.integration.mcp_config_view import CurrentMcpConfigView
+
     apm_modules_path = modules_dir if modules_dir is not None else Path.cwd() / APM_MODULES_DIR
-    remaining_mcp = MCPIntegrator.collect_transitive(
-        apm_modules_path, lockfile_path, trust_private=True
+    view = CurrentMcpConfigView.derive(
+        apm_package,
+        lockfile,
+        apm_modules_path,
+        trust_transitive_self_defined=True,
     )
-    try:
-        remaining_root_mcp = apm_package.get_mcp_dependencies()
-    except Exception:
-        remaining_root_mcp = []
-    all_remaining_mcp = MCPIntegrator.deduplicate(remaining_root_mcp + remaining_mcp)
-    new_mcp_servers = MCPIntegrator.get_server_names(all_remaining_mcp)
+    new_mcp_servers = MCPIntegrator.get_server_names(view.dependencies)
     stale_servers = old_mcp_servers - new_mcp_servers
     if stale_servers:
         MCPIntegrator.remove_stale(
@@ -721,4 +721,9 @@ def _cleanup_stale_mcp(
             user_scope=user_scope,
             scope=scope,
         )
-    MCPIntegrator.update_lockfile(new_mcp_servers, lockfile_path)
+    MCPIntegrator.update_lockfile(
+        new_mcp_servers,
+        lockfile_path,
+        mcp_configs=dict(view.configs),
+        mcp_config_provenance=dict(view.provenance),
+    )

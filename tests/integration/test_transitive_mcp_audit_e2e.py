@@ -62,8 +62,8 @@ dependencies:
     return project
 
 
-def test_force_install_then_ci_audit_accepts_transitive_mcp(tmp_path: Path) -> None:
-    """A clean forced install must not report the transitive server as orphaned."""
+def test_ci_audit_tracks_current_transitive_mcp_source(tmp_path: Path) -> None:
+    """Audit accepts installed transitive MCP, then rejects its removal."""
     project = _write_workspace(tmp_path)
 
     install = _run(
@@ -88,3 +88,30 @@ def test_force_install_then_ci_audit_accepts_transitive_mcp(tmp_path: Path) -> N
         check for check in payload["checks"] if check["name"] == "config-consistency"
     )
     assert config_check["passed"] is True, config_check
+
+    package_manifest = project / "packages" / "agent-config" / "apm.yml"
+    package_manifest.write_text(
+        "name: agent-config\nversion: 1.0.0\n",
+        encoding="utf-8",
+    )
+
+    changed_audit = _run(
+        project,
+        "audit",
+        "--ci",
+        "--no-policy",
+        "--no-fail-fast",
+        "-f",
+        "json",
+    )
+    assert changed_audit.returncode == 1, (
+        f"audit stdout:\n{changed_audit.stdout}\naudit stderr:\n{changed_audit.stderr}"
+    )
+    changed_payload = json.loads(changed_audit.stdout)
+    changed_check = next(
+        check for check in changed_payload["checks"] if check["name"] == "config-consistency"
+    )
+    assert changed_check["passed"] is False
+    assert changed_check["details"] == [
+        "shadcn: in lockfile but not in manifest (declared by agent-config)"
+    ]

@@ -551,9 +551,8 @@ class LockFile:
     # package identity. Only servers NOT declared in the root manifest's mcp:
     # block appear here (absent == direct, mirroring the dependency-side
     # ``resolved_by is None`` convention). Kept OUT of ``mcp_configs`` values so
-    # it never pollutes ``detect_config_drift`` byte comparisons. Consumed by
-    # ``_check_config_consistency`` to exempt transitive servers from the
-    # orphaned-MCP branch (#2081; MCP-side sibling of #1846/#1855).
+    # it never pollutes config comparisons. Consistency diagnostics use this as
+    # ownership context only; provenance never exempts a lock-only server.
     mcp_config_provenance: dict[str, str] = field(default_factory=dict)
     lsp_servers: list[str] = field(default_factory=list)
     lsp_configs: dict[str, dict] = field(default_factory=dict)
