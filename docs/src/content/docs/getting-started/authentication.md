@@ -234,7 +234,10 @@ header, never embedded in the repository URL.
 [!]     Consider unsetting the stale variable.
 ```
 
-This fallback applies to all ADO operations including `apm install --update`. If you have a stale `ADO_APM_PAT` but an active `az login` session, `apm install --update` will succeed transparently via the bearer retry.
+This fallback applies to all ADO operations, including semver tag enumeration,
+marketplace version resolution, and `apm install --update`. If you have a stale
+`ADO_APM_PAT` but an active `az login` session, the ref lookup succeeds
+transparently via the bearer retry.
 
 If both `ADO_APM_PAT` and the `az` bearer fail, APM emits:
 

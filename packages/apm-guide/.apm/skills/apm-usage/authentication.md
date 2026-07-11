@@ -95,7 +95,8 @@ ADO marketplace URL authoring.
 **Finding your tenant ID:** visit `https://dev.azure.com/{org}/_settings/organizationAad`,
 or run `az login` and inspect `az account show --query tenantId -o tsv`.
 
-If `ADO_APM_PAT` is set but ADO returns 401, APM silently retries with the `az` bearer and warns:
+If `ADO_APM_PAT` is set but ADO returns 401, APM silently retries with the `az`
+bearer for clone, preflight, semver tag, and marketplace ref resolution, then warns:
 `[!] ADO_APM_PAT was rejected for {host} (HTTP 401); fell back to az cli bearer.`
 
 When auth fails entirely, APM prints a targeted diagnostic (not a generic "not accessible"

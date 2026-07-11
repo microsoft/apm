@@ -206,9 +206,10 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             BaseIntegrator.normalize_managed_files(all_deployed_files) or builtins.set()
         )
 
-        # Step 8: Update lockfile
+        # Step 8: Mutate dependency state in memory. Persistence happens once
+        # after survivor ownership, hashes, ledger, and MCP state agree.
+        lockfile_updated = False
         if lockfile:
-            lockfile_updated = False
             for pkg in packages_to_remove:
                 try:
                     ref = _parse_dependency_entry(pkg)
@@ -222,16 +223,6 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 if orphan_key in lockfile.dependencies:
                     del lockfile.dependencies[orphan_key]
                     lockfile_updated = True
-            if lockfile_updated:
-                try:
-                    if lockfile.dependencies:
-                        lockfile.write(lockfile_path)
-                    else:
-                        lockfile_path.unlink(missing_ok=True)
-                except Exception:
-                    logger.warning(
-                        "Failed to update lockfile -- it may be out of sync with uninstalled packages."
-                    )
 
         # Step 9: Sync integrations
         cleaned = {
@@ -242,6 +233,8 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             "hooks": 0,
             "instructions": 0,
         }
+        surviving_deployed_files = {}
+        lockfile_ready = True
         try:
             apm_package = APMPackage.from_apm_yml(manifest_path)
             cleaned, surviving_deployed_files = _sync_integrations_after_uninstall(
@@ -251,64 +244,6 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 logger,
                 user_scope=scope is InstallScope.USER,
             )
-            if lockfile and surviving_deployed_files:
-                from ...core.deployment_ledger import DeploymentLedgerCodec
-                from ...core.deployment_state import (
-                    DeploymentIntent,
-                    DeploymentReconciler,
-                    MaterializationResult,
-                    MaterializationStatus,
-                    NativePayloadValidation,
-                )
-                from ...install.phases.lockfile import compute_deployed_hashes
-                from ...integration.targets import KNOWN_TARGETS
-                from ...utils.diagnostics import DiagnosticCollector
-
-                previous_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
-                materializations: list[MaterializationResult] = []
-                for dep_key, deployed_files in surviving_deployed_files.items():
-                    transferred = sorted(all_deployed_files.intersection(deployed_files))
-                    hashes = compute_deployed_hashes(transferred, deploy_root)
-                    for path in transferred:
-                        prior = next(
-                            (
-                                record
-                                for record in previous_ledger.records.values()
-                                if record.locator.value == path
-                            ),
-                            None,
-                        )
-                        if prior is None:
-                            continue
-                        materializations.append(
-                            MaterializationResult(
-                                locator=prior.locator,
-                                owners=frozenset({dep_key}),
-                                status=MaterializationStatus.UNCHANGED,
-                                content_hash=hashes.get(path),
-                                validation=NativePayloadValidation(
-                                    valid=True,
-                                    contract="uninstall-survivor",
-                                ),
-                            )
-                        )
-                reconciled = DeploymentReconciler(
-                    deploy_root,
-                    KNOWN_TARGETS,
-                    diagnostics=DiagnosticCollector(),
-                ).reconcile(
-                    previous_ledger,
-                    materializations,
-                    DeploymentIntent(
-                        active_targets=frozenset(),
-                        declared_targets=None,
-                        desired_owners=frozenset({".", *lockfile.dependencies}),
-                        authoritative_targets=False,
-                    ),
-                )
-                if reconciled.changed:
-                    DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
-                    lockfile.write(lockfile_path)
         except Exception as _sync_err:
             # Surface why integration cleanup failed instead of swallowing
             # silently. Previously a bare `except: pass` here masked
@@ -321,6 +256,27 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
             logger.verbose_detail(
                 "Some integrated files may remain. Run `apm install --force` to resync."
             )
+
+        if lockfile:
+            try:
+                from .lockfile_state import reconcile_uninstall_deployment_state
+
+                lockfile_updated = (
+                    reconcile_uninstall_deployment_state(
+                        lockfile,
+                        deploy_root=deploy_root,
+                        all_deployed_files=all_deployed_files,
+                        surviving_deployed_files=surviving_deployed_files,
+                    )
+                    or lockfile_updated
+                )
+            except Exception as state_err:
+                lockfile_ready = False
+                logger.warning(
+                    "Lockfile state could not be reconciled. "
+                    "Run 'apm install --force' to resync before retrying."
+                )
+                logger.verbose_detail(f"Lockfile reconciliation error: {state_err}")
 
         for label, count in cleaned.items():
             if count > 0:
@@ -339,9 +295,23 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 project_root=deploy_root,
                 user_scope=scope is InstallScope.USER,
                 scope=scope,
+                persist=False,
             )
         except Exception:
             logger.warning("MCP cleanup during uninstall failed")
+
+        if lockfile and lockfile_updated and lockfile_ready:
+            try:
+                from .lockfile_state import lockfile_has_persisted_state
+
+                if lockfile_has_persisted_state(lockfile):
+                    lockfile.write(lockfile_path)
+                else:
+                    lockfile_path.unlink(missing_ok=True)
+            except Exception:
+                logger.warning(
+                    "Failed to update lockfile -- it may be out of sync with uninstalled packages."
+                )
 
         # Final summary
         summary_lines = [f"Removed {len(packages_to_remove)} package(s) from apm.yml"]

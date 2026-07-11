@@ -55,6 +55,8 @@ def get_shared_ref_resolver(
     lock: Any = None,
     *,
     auth_scheme: str = "basic",
+    auth_resolver: Any = None,
+    auth_target: Any = None,
 ) -> Any:
     """Return a ``RefResolver`` for ``(host, token, auth_scheme)``, reused across a run.
 
@@ -81,20 +83,31 @@ def get_shared_ref_resolver(
     _DEFAULT_HOST = "github.com"
     canonical_host = host if host and host != _DEFAULT_HOST else None
 
+    resolver_kwargs = {
+        "host": host,
+        "token": token,
+        "auth_scheme": auth_scheme,
+    }
+    if auth_resolver is not None:
+        resolver_kwargs.update(
+            auth_resolver=auth_resolver,
+            auth_target=auth_target,
+        )
+
     if cache is None:
-        return RefResolver(host=host, token=token, auth_scheme=auth_scheme)
+        return RefResolver(**resolver_kwargs)
 
     key = (canonical_host, _token_fingerprint(token), auth_scheme)
     if lock is not None:
         with lock:
             resolver = cache.get(key)
             if resolver is None:
-                resolver = RefResolver(host=host, token=token, auth_scheme=auth_scheme)
+                resolver = RefResolver(**resolver_kwargs)
                 cache[key] = resolver
             return resolver
 
     resolver = cache.get(key)
     if resolver is None:
-        resolver = RefResolver(host=host, token=token, auth_scheme=auth_scheme)
+        resolver = RefResolver(**resolver_kwargs)
         cache[key] = resolver
     return resolver

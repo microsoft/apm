@@ -4,7 +4,7 @@ Focuses on:
 - CompilationConfig.__post_init__ (single_agents=True triggers strategy="single-file")
 - AgentsCompiler.compile() unknown frozenset target families
 - AgentsCompiler.compile() unknown string target
-- AgentsCompiler.compile() no-results (cursor, agent-skills, windsurf)
+- AgentsCompiler.compile() no-results (agent-skills, windsurf)
 - AgentsCompiler.compile() top-level exception handler
 - AgentsCompiler._compile_gemini_md() dry_run + non-dry_run
 - AgentsCompiler._maybe_emit_copilot_root_instructions() all branches:
@@ -176,13 +176,13 @@ class TestAgentsCompilerNoResults(unittest.TestCase):
 
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_cursor_target_returns_empty_success(self) -> None:
+    def test_cursor_target_routes_through_agents_compiler(self) -> None:
         compiler = AgentsCompiler(self.tmp)
         config = CompilationConfig(target="cursor")
         primitives = _make_primitives()
         result = compiler.compile(config, primitives)
         self.assertTrue(result.success)
-        self.assertEqual(result.output_path, "")
+        self.assertTrue(result.output_path.startswith("Distributed:"))
 
     def test_agent_skills_target_logs_skip(self) -> None:
         compiler = AgentsCompiler(self.tmp)

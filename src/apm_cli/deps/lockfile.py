@@ -564,6 +564,7 @@ class LockFile:
         default_factory=lambda: DeploymentLedger(records={})
     )
     _deployments_present: bool = field(default=False, repr=False, compare=False)
+    _mcp_target_servers_present: bool = field(default=False, repr=False, compare=False)
 
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file.
@@ -715,6 +716,7 @@ class LockFile:
             target: list(servers)
             for target, servers in (data.get("mcp_target_servers") or {}).items()
         }
+        lock._mcp_target_servers_present = "mcp_target_servers" in data
         lock.mcp_config_provenance = dict(data.get("mcp_config_provenance") or {})
         lock.lsp_servers = list(data.get("lsp_servers", []))
         lock.lsp_configs = dict(data.get("lsp_configs") or {})

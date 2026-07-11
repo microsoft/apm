@@ -55,6 +55,7 @@ def resolve_version_constraint(
     host: str | None = None,
     token: str | None = None,
     auth_scheme: str = "basic",
+    auth_resolver=None,
 ) -> tuple[str, str]:
     """Resolve a semver range to the highest matching git tag.
 
@@ -82,7 +83,17 @@ def resolve_version_constraint(
     pinned_pattern = tag_pattern.replace("{name}", plugin_name)
     tag_rx = build_tag_regex(pinned_pattern)
 
-    resolver = RefResolver(host=host, token=token, auth_scheme=auth_scheme)
+    resolver_kwargs = {
+        "host": host,
+        "token": token,
+        "auth_scheme": auth_scheme,
+    }
+    if auth_resolver is not None:
+        resolver_kwargs.update(
+            auth_resolver=auth_resolver,
+            auth_target=host,
+        )
+    resolver = RefResolver(**resolver_kwargs)
     try:
         refs = resolver.list_remote_refs(owner_repo)
     finally:

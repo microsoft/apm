@@ -942,6 +942,7 @@ def resolve_marketplace_plugin(
                     host=source.host,
                     token=token,
                     auth_scheme=auth_scheme,
+                    auth_resolver=auth_resolver,
                 )
                 canonical = f"{base}#{tag_name}"
                 logger.debug(

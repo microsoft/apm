@@ -158,6 +158,7 @@ class DeploymentLedgerCodec:
         lockfile.mcp_target_servers = {
             runtime: list(servers) for runtime, servers in target_servers.items()
         }
+        lockfile._mcp_target_servers_present = True
         lockfile.deployment_ledger = DeploymentLedger(records={})
         lockfile._deployments_present = False
         lockfile.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)

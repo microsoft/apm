@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.deps.lockfile import LockFile
 
 
 def _write_local_package(root: Path, name: str) -> None:
@@ -49,8 +51,17 @@ def test_uninstall_transfers_shared_deployed_path_ownership(tmp_path: Path, monk
     install = runner.invoke(cli, ["install", "--target", "copilot"])
     assert install.exit_code == 0, install.output
 
-    uninstall = runner.invoke(cli, ["uninstall", "../b"])
+    lockfile_writes = []
+    original_write = LockFile.write
+
+    def _record_write(lockfile: LockFile, path: Path) -> None:
+        lockfile_writes.append(path)
+        original_write(lockfile, path)
+
+    with patch.object(LockFile, "write", _record_write):
+        uninstall = runner.invoke(cli, ["uninstall", "../b"])
     assert uninstall.exit_code == 0, uninstall.output
+    assert lockfile_writes == [project / "apm.lock.yaml"]
 
     deployed_path = ".github/instructions/shared.instructions.md"
     deployed_file = project / deployed_path

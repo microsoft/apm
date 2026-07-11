@@ -160,6 +160,58 @@ def test_install_target_contraction_removes_only_apm_managed_mcp_servers(tmp_pat
     assert contracted_lock.mcp_target_servers == {"copilot": ["apm-managed"]}
 
 
+def test_legacy_lockfile_adopts_exact_mcp_baseline_before_target_contraction(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """A pre-ownership lock adopts exact native entries, then removes dropped targets."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    LockFile().write(tmp_path / "apm.lock.yaml")
+    manifest = {
+        "name": "legacy-mcp-target-contraction",
+        "version": "0.0.1",
+        "targets": ["copilot", "codex"],
+        "dependencies": {
+            "mcp": [
+                {
+                    "name": "apm-managed",
+                    "registry": False,
+                    "transport": "stdio",
+                    "command": "echo",
+                    "args": ["managed"],
+                }
+            ]
+        },
+    }
+    (tmp_path / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    broad = CliRunner().invoke(
+        cli,
+        ["install", "--target", "copilot,codex", "--no-policy"],
+    )
+    assert broad.exit_code == 0, broad.output
+
+    lock_path = tmp_path / "apm.lock.yaml"
+    legacy_data = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    legacy_data.pop("mcp_target_servers", None)
+    legacy_data.pop("deployments", None)
+    lock_path.write_text(yaml.safe_dump(legacy_data), encoding="utf-8")
+
+    manifest["targets"] = ["copilot"]
+    (tmp_path / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    contracted = CliRunner().invoke(
+        cli,
+        ["install", "--target", "copilot", "--no-policy"],
+    )
+
+    assert contracted.exit_code == 0, contracted.output
+    codex_config = tomlkit.parse((tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8"))
+    assert "apm-managed" not in codex_config.get("mcp_servers", {})
+    migrated = LockFile.read(lock_path)
+    assert migrated is not None
+    assert migrated.mcp_target_servers == {"copilot": ["apm-managed"]}
+
+
 # ---------------------------------------------------------------------------
 # Early-return and no-deps branches -- line 70
 # ---------------------------------------------------------------------------

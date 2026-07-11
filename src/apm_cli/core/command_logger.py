@@ -129,6 +129,16 @@ class CommandLogger:
         """Log an error."""
         _rich_error(message, symbol=symbol)
 
+    def error_detail(self, message: str):
+        """Log supporting error context that must remain visible by default."""
+        _rich_echo(message)
+
+    def exception(self, message: str):
+        """Log an unexpected error and own the verbose recovery hint."""
+        self.error(message)
+        if not self.verbose:
+            self.info("Run with --verbose for detailed diagnostics")
+
     def verbose_detail(self, message: str):
         """Log a detail only when verbose mode is enabled."""
         if self.verbose:

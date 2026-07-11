@@ -22,6 +22,7 @@ def run_mcp_integration(  # noqa: PLR0913
     old_mcp_configs: builtins.dict,
     old_mcp_provenance: builtins.dict,
     old_mcp_target_servers: builtins.dict | None = None,
+    old_mcp_target_servers_present: bool = True,
     project_root: Path,
     user_scope: bool,
     should_install: bool,
@@ -143,6 +144,15 @@ def run_mcp_integration(  # noqa: PLR0913
 
     if should_install and mcp_deps:
         old_mcp_target_servers = old_mcp_target_servers or {}
+        if not old_mcp_target_servers_present and old_mcp_servers and old_mcp_configs:
+            from apm_cli.install.mcp.ownership import adopt_legacy_mcp_target_servers
+
+            old_mcp_target_servers = adopt_legacy_mcp_target_servers(
+                server_names=builtins.set(old_mcp_servers),
+                stored_configs=old_mcp_configs,
+                project_root=project_root,
+                user_scope=user_scope,
+            )
         managed_target_servers = {
             target: builtins.set(servers) for target, servers in old_mcp_target_servers.items()
         }

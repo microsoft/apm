@@ -12,9 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP audit, install, and uninstall now share one lockfile-bounded current-source
   view, so `config-consistency` detects changed or removed transitive declarations
   and fails on unreadable package manifests. (#2155)
-- `apm compile --target <target>` now fails with an actionable error when the
-  requested target cannot produce compiled output, instead of silently falling
-  back to auto-detection. (#2155)
+- `apm compile --target <target>` now accepts every project target from the
+  canonical catalog, emits its native context artifact when applicable, and
+  treats targets without compile output as successful no-ops. (#2155)
+- Merged hook configs now contain only each target's native upstream fields;
+  APM keeps reconciliation ownership in an external `apm-hooks.json` sidecar.
+  (#2155)
 
 ### Fixed
 
@@ -22,17 +25,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validation, matching manifest installs for reliable CI scripting. (#2131)
 - A failed first `apm install` no longer leaves behind an `apm.yml` it created,
   and the final completion summary now reflects the committed outcome instead of
-  rendering before commit or rollback. (#2155)
+  rendering before commit or rollback. Successful dry-run bootstrap keeps the
+  generated manifest and explicit targets for the next run. (#2155)
 - Manifest and policy parsers now reject wrong-typed native schema values and
   report unknown policy keys. Migration: quote numeric `apm.yml` versions, use
   non-empty string identities, and use mappings/lists for policy blocks. (closes #2137) (#2143)
 - `apm uninstall` now transfers shared deployed-file ownership to a surviving
   package, preserving lockfile content-integrity coverage. (#2148)
 - Semver resolution now preserves each dependency's authentication scheme, so
-  Azure DevOps bearer credentials are used consistently for tag listing. (#2150)
+  Azure DevOps bearer credentials are used consistently for tag listing, and a
+  rejected `ADO_APM_PAT` retries ref resolution with the Azure CLI bearer. (#2155)
 - Contracting the active target set now removes APM-managed MCP server
   entries from dropped targets while preserving user-authored servers and
-  unrelated native config. (#2149)
+  unrelated native config, including safe adoption of self-defined servers from
+  legacy lockfiles when the native entry exactly matches its stored baseline.
+  (#2155)
+- `apm uninstall` now reconciles dependency removal, survivor ownership, hashes,
+  MCP state, and the deployment ledger before one atomic lockfile write. (#2155)
+- `apm install` exception and rollback diagnostics now render through the
+  `CommandLogger` owner, keeping recovery hints and warning severity consistent.
+  (#2155)
 - Fresh checkouts with declared consumer targets no longer remain
   `apm audit --ci`-red for files those targets cannot restore: `apm install`
   now removes stale `deployed_files` entries outside the legitimate target
@@ -46,6 +58,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HOME` without leaving a partial deployment. (closes #2129) (#2135)
 - Azure DevOps marketplace checks now preserve suffix-free `/_git/<repo>` URLs
   and pass Azure CLI bearer authentication through to `git ls-remote`. (closes #2119)
+
+### Performance
+
+- Deployment manifest reconciliation and uninstall ownership handoff now use
+  precomputed path indexes, avoiding quadratic scans on large deployment
+  ledgers. (#2155)
 
 ## [0.24.1] - 2026-07-10
 

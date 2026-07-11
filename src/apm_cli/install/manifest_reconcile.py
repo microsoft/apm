@@ -216,15 +216,13 @@ def union_preserving(
         ),
     )
     retained_values = {record.locator.value for record in reconciled.ledger.records.values()}
+    current_set = set(current_files or ())
     if on_ghost_drop is not None:
-        current_set = set(current_files or ())
         for locator in reconciled.removed:
             if locator.value not in current_set and locator.target not in active_by_name:
                 on_ghost_drop(locator.value)
     preserved = [
-        path
-        for path in prior_files or ()
-        if path not in set(current_files or ()) and path in retained_values
+        path for path in prior_files or () if path not in current_set and path in retained_values
     ]
     merged_hashes = dict(current_hashes or {})
     for path in preserved:

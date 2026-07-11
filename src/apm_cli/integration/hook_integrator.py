@@ -67,6 +67,7 @@ from apm_cli.integration.hook_native_formats import (
     _to_antigravity_hook_entries,
     _to_gemini_hook_entries,
 )
+from apm_cli.utils.atomic_io import atomic_write_text
 from apm_cli.utils.console import _rich_warning
 from apm_cli.utils.path_security import (
     PathTraversalError,
@@ -109,7 +110,7 @@ class _MergeHookConfig:
     config_filename: str  # e.g. "settings.json" or "hooks.json"
     target_key: str  # target name passed to _rewrite_hooks_data
     require_dir: bool  # True = skip if target dir doesn't exist
-    schema_strict: bool = False  # True = strip _apm_source before writing to disk
+    schema_strict: bool = True  # Ownership always lives outside native files.
     # Top-level JSON key the merged event map lives under.  Defaults to
     # "hooks" (Claude/Cursor/Codex/Gemini/Windsurf).  Antigravity's native
     # schema keys hooks by an arbitrary hook *name*, so APM reserves the
@@ -1299,6 +1300,7 @@ class HookIntegrator(BaseIntegrator):
 
         root_dir = target.root_dir if target else f".{config.target_key}"
         target_dir = project_root / root_dir
+        container = config.event_container_key
 
         # Opt-in check: some targets only deploy when their dir exists
         if config.require_dir and not target_dir.exists():
@@ -1361,7 +1363,7 @@ class HookIntegrator(BaseIntegrator):
             except (json.JSONDecodeError, OSError):
                 json_config = {}
 
-        # Load sidecar ownership metadata (schema-strict targets)
+        # Load external ownership metadata before reconciling native entries.
         sidecar_path = target_dir / _APM_HOOKS_SIDECAR
         sidecar_data: dict = {}
         if config.schema_strict and sidecar_path.exists():
@@ -1381,15 +1383,14 @@ class HookIntegrator(BaseIntegrator):
                 sidecar_data = {}
 
             # Re-inject _apm_source from sidecar into matching in-memory entries
-            if sidecar_data and "hooks" in json_config:
-                _reinject_apm_source_from_sidecar(json_config["hooks"], sidecar_data)
+            if sidecar_data and container in json_config:
+                _reinject_apm_source_from_sidecar(json_config[container], sidecar_data)
 
         # Top-level container key for the merged event map.  Most targets
         # use "hooks"; Antigravity nests its events under the reserved
         # hook-name "apm" so sibling user hook-names are preserved.  Only
         # the container key is created so non-"hooks" targets never gain a
         # stray empty "hooks" object in their native file.
-        container = config.event_container_key
         if container not in json_config:
             json_config[container] = {}
             _log.debug("Seeded hook container '%s' in %s", container, config.config_filename)
@@ -1613,7 +1614,7 @@ class HookIntegrator(BaseIntegrator):
         if config.schema_strict:
             # Build sidecar from entries that have _apm_source
             sidecar_out: dict = {}
-            for event_name, entries_list in json_config.get("hooks", {}).items():
+            for event_name, entries_list in json_config.get(container, {}).items():
                 if not isinstance(entries_list, list):
                     continue
                 owned = [e for e in entries_list if isinstance(e, dict) and "_apm_source" in e]
@@ -1621,7 +1622,7 @@ class HookIntegrator(BaseIntegrator):
                     sidecar_out[event_name] = [dict(e) for e in owned]
 
             # Strip _apm_source from entries before writing to disk
-            for entries_list in json_config.get("hooks", {}).values():
+            for entries_list in json_config.get(container, {}).values():
                 if isinstance(entries_list, list):
                     for entry in entries_list:
                         if isinstance(entry, dict):
@@ -1630,12 +1631,10 @@ class HookIntegrator(BaseIntegrator):
             # Write sidecar
             sidecar_path = target_dir / _APM_HOOKS_SIDECAR
             if sidecar_out:
-                try:
-                    with open(sidecar_path, "w", encoding="utf-8") as f:
-                        json.dump(sidecar_out, f, indent=2)
-                        f.write("\n")
-                except OSError as exc:
-                    _log.warning("Failed to write sidecar %s: %s", sidecar_path, exc)
+                atomic_write_text(
+                    sidecar_path,
+                    json.dumps(sidecar_out, indent=2) + "\n",
+                )
             elif sidecar_path.exists():
                 sidecar_path.unlink()
 
@@ -1882,91 +1881,28 @@ class HookIntegrator(BaseIntegrator):
                     except Exception:
                         stats["errors"] += 1
 
-        # Clean APM entries from merged-hook JSON configs (uses _apm_source marker)
+        # Clean APM entries from merged-hook JSON configs using external ownership.
         for t in source:
             config = _MERGE_HOOK_TARGETS.get(t.name)
             if config is not None:
                 json_path = project_root / t.root_dir / config.config_filename
-                if t.name == "claude":
-                    # Claude uses settings.json with special structure
-                    if json_path.exists():
-                        try:
-                            with open(json_path, encoding="utf-8") as f:
-                                settings = json.load(f)
-
-                            # Load sidecar to restore _apm_source markers
-                            sidecar_path = json_path.parent / _APM_HOOKS_SIDECAR
-                            sidecar_data: dict = {}
-                            if sidecar_path.exists():
-                                try:
-                                    with open(sidecar_path, encoding="utf-8") as sf:
-                                        _raw = json.load(sf)
-                                    if isinstance(_raw, dict):
-                                        sidecar_data = _raw
-                                    else:
-                                        _log.warning(
-                                            "Sidecar file %s contains non-dict JSON; treating as empty.",
-                                            sidecar_path,
-                                        )
-                                        sidecar_data = {}
-                                except (json.JSONDecodeError, OSError) as exc:
-                                    _log.warning(
-                                        "Failed to read sidecar %s: %s; treating as empty.",
-                                        sidecar_path,
-                                        exc,
-                                    )
-                                    sidecar_data = {}
-
-                            # Re-inject _apm_source from sidecar
-                            if sidecar_data and "hooks" in settings:
-                                _reinject_apm_source_from_sidecar(settings["hooks"], sidecar_data)
-
-                            if "hooks" in settings:
-                                modified = False
-                                for event_name in list(settings["hooks"].keys()):
-                                    matchers = settings["hooks"][event_name]
-                                    if isinstance(matchers, list):
-                                        filtered = [
-                                            m
-                                            for m in matchers
-                                            if not (isinstance(m, dict) and "_apm_source" in m)
-                                        ]
-                                        if len(filtered) != len(matchers):
-                                            modified = True
-                                        settings["hooks"][event_name] = filtered
-                                        if not filtered:
-                                            del settings["hooks"][event_name]
-
-                                if not settings["hooks"]:
-                                    del settings["hooks"]
-
-                                if modified:
-                                    with open(json_path, "w", encoding="utf-8") as f:
-                                        json.dump(settings, f, indent=2)
-                                        f.write("\n")
-                                    stats["files_removed"] += 1
-
-                                    # Clean up sidecar
-                                    if sidecar_path.exists():
-                                        sidecar_path.unlink()
-
-                                # Remove stale sidecar when no hooks section remains
-                                if sidecar_path.exists() and "hooks" not in settings:
-                                    sidecar_path.unlink()
-                        except (json.JSONDecodeError, OSError):
-                            stats["errors"] += 1
-                else:
-                    self._clean_apm_entries_from_json(
-                        json_path, stats, container=config.event_container_key
-                    )
+                self._clean_apm_entries_from_json(
+                    json_path,
+                    stats,
+                    container=config.event_container_key,
+                    sidecar_path=json_path.parent / _APM_HOOKS_SIDECAR,
+                )
 
         return stats
 
     @staticmethod
     def _clean_apm_entries_from_json(
-        json_path: Path, stats: dict[str, int], container: str = "hooks"
+        json_path: Path,
+        stats: dict[str, int],
+        container: str = "hooks",
+        sidecar_path: Path | None = None,
     ) -> None:
-        """Remove APM-tagged entries from a hooks JSON file.
+        """Remove externally-owned entries from a native hooks JSON file.
 
         Filters out entries with ``_apm_source`` markers and cleans up
         empty event arrays and the *container* key itself.  *container*
@@ -1980,7 +1916,15 @@ class HookIntegrator(BaseIntegrator):
                 data = json.load(f)
 
             if container not in data:
+                if sidecar_path is not None and sidecar_path.exists():
+                    sidecar_path.unlink()
                 return
+
+            if sidecar_path is not None and sidecar_path.exists():
+                with open(sidecar_path, encoding="utf-8") as f:
+                    sidecar_data = json.load(f)
+                if isinstance(sidecar_data, dict):
+                    _reinject_apm_source_from_sidecar(data[container], sidecar_data)
 
             modified = False
             for event_name in list(data[container].keys()):
@@ -2003,5 +1947,7 @@ class HookIntegrator(BaseIntegrator):
                     json.dump(data, f, indent=2)
                     f.write("\n")
                 stats["files_removed"] += 1
+            if sidecar_path is not None and sidecar_path.exists():
+                sidecar_path.unlink()
         except (json.JSONDecodeError, OSError):
             stats["errors"] += 1

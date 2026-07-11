@@ -238,7 +238,7 @@ def detect_target(  # noqa: PLR0911
 def should_compile_agents_md(target: CompileTargetType) -> bool:
     """Check if AGENTS.md should be compiled.
 
-    AGENTS.md is generated for vscode, codex, gemini, all, and minimal
+    AGENTS.md is generated for vscode, cursor, codex, gemini, all, and minimal
     targets.  Gemini needs it because GEMINI.md imports AGENTS.md.
 
     Args:
@@ -252,6 +252,7 @@ def should_compile_agents_md(target: CompileTargetType) -> bool:
         return "agents" in target or "gemini" in target
     return target in (
         "vscode",
+        "cursor",
         "opencode",
         "codex",
         "gemini",

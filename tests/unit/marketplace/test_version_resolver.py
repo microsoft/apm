@@ -131,6 +131,29 @@ class TestResolveVersionConstraint(unittest.TestCase):
             auth_scheme="bearer",
         )
 
+    def test_passes_auth_owner_for_ado_retry(self, MockResolver):
+        refs = _make_refs("1.0.0", plugin_name="my-plugin")
+        MockResolver.return_value.list_remote_refs.return_value = refs
+        auth_resolver = object()
+
+        resolve_version_constraint(
+            "my-plugin",
+            "owner/repo",
+            "^1.0.0",
+            host="dev.azure.com",
+            token="stale-pat",
+            auth_scheme="basic",
+            auth_resolver=auth_resolver,
+        )
+
+        MockResolver.assert_called_once_with(
+            host="dev.azure.com",
+            token="stale-pat",
+            auth_scheme="basic",
+            auth_resolver=auth_resolver,
+            auth_target="dev.azure.com",
+        )
+
     def test_resolver_closed_after_use(self, MockResolver):
         refs = _make_refs("1.0.0", plugin_name="my-plugin")
         MockResolver.return_value.list_remote_refs.return_value = refs

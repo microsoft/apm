@@ -1150,7 +1150,12 @@ class AuthResolver:
             raises (exceptions from ``bearer_op`` are swallowed).
         """
         primary = primary_op()
-        if dep_ref is None or not getattr(dep_ref, "is_azure_devops", lambda: False)():
+        is_ado = (
+            is_azure_devops_hostname(dep_ref)
+            if isinstance(dep_ref, str)
+            else dep_ref is not None and getattr(dep_ref, "is_azure_devops", lambda: False)()
+        )
+        if not is_ado:
             return BearerFallbackOutcome(primary, False)
         if not is_auth_failure(primary):
             return BearerFallbackOutcome(primary, False)
@@ -1182,7 +1187,8 @@ class AuthResolver:
             return BearerFallbackOutcome(primary, True)
         if fallback is None or is_auth_failure(fallback):
             return BearerFallbackOutcome(primary, True)
-        host_display = getattr(dep_ref, "host", None) or "dev.azure.com"
+        host_display = dep_ref if isinstance(dep_ref, str) else getattr(dep_ref, "host", None)
+        host_display = host_display or "dev.azure.com"
         self.emit_stale_pat_diagnostic(host_display)
         return BearerFallbackOutcome(fallback, True)
 

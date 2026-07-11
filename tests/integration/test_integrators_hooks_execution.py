@@ -1049,6 +1049,67 @@ class TestIntegratePackageHooksCodex:
         result = integrator.integrate_package_hooks_codex(pkg_info, project_root)
         assert result.hooks_integrated >= 1
 
+    def test_native_config_stays_pure_while_sidecar_owns_reconciliation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Reinstall and cleanup use external ownership without native fields."""
+        project_root = _make_copilot_project(tmp_path)
+        codex_dir = project_root / ".codex"
+        codex_dir.mkdir()
+        native_path = codex_dir / "hooks.json"
+        native_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {"type": "command", "command": "echo user"},
+                        ]
+                    }
+                }
+            ),
+            encoding="ascii",
+        )
+        pkg_path = project_root / "apm_modules" / "codex-hooks-pkg"
+        hooks_dir = pkg_path / ".apm" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "codex-hooks.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {"type": "command", "command": "echo apm"},
+                        ]
+                    }
+                }
+            ),
+            encoding="ascii",
+        )
+        pkg_info = _make_package_info(pkg_path, "codex-hooks-pkg")
+        integrator = HookIntegrator()
+
+        integrator.integrate_package_hooks_codex(pkg_info, project_root)
+        integrator.integrate_package_hooks_codex(pkg_info, project_root)
+
+        native = json.loads(native_path.read_text(encoding="ascii"))
+        entries = native["hooks"]["PreToolUse"]
+        assert [entry["command"] for entry in entries] == ["echo user", "echo apm"]
+        assert "_apm_source" not in json.dumps(native)
+        sidecar_path = codex_dir / "apm-hooks.json"
+        assert sidecar_path.exists()
+
+        integrator.sync_integration(
+            _make_apm_package(),
+            project_root,
+            managed_files=set(),
+        )
+
+        cleaned = json.loads(native_path.read_text(encoding="ascii"))
+        assert cleaned["hooks"]["PreToolUse"] == [
+            {"type": "command", "command": "echo user"},
+        ]
+        assert not sidecar_path.exists()
+
 
 class TestIntegrateHooksForTarget:
     """integrate_hooks_for_target: dispatch to copilot vs. merge targets."""

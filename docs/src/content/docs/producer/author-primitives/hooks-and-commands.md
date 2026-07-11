@@ -142,13 +142,11 @@ Copilot hook files are namespaced with the source package name to avoid
 collisions across installed deps; bundled scripts land alongside under
 `.github/hooks/scripts/<pkg>/`.
 
-Claude's `settings.json` uses `additionalProperties: false` in its JSON
-schema, which rejects any unknown keys (including APM's internal
-`_apm_source` ownership marker).  APM therefore writes a companion sidecar
-file `.claude/apm-hooks.json` that stores the ownership metadata separately.
-This sidecar is created and cleaned up automatically alongside
-`settings.json`; it is an APM implementation detail and should not be edited
-by hand.
+Merged hook files contain only each target's native upstream fields. APM writes
+ownership metadata to a sibling `apm-hooks.json` sidecar for Claude, Cursor,
+Gemini, Codex, Windsurf, and Antigravity. The sidecar is created and cleaned up
+automatically alongside the native config; it is an APM implementation detail
+and should not be edited by hand.
 
 Verified against `src/apm_cli/integration/targets.py` and
 `src/apm_cli/integration/hook_integrator.py`.

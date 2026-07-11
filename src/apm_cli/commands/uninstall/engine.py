@@ -710,6 +710,7 @@ def _cleanup_stale_mcp(
     project_root=None,
     user_scope: bool = False,
     scope=None,
+    persist: bool = True,
 ):
     """Remove MCP servers that are no longer needed after uninstall."""
     if not old_mcp_servers:
@@ -732,9 +733,25 @@ def _cleanup_stale_mcp(
             user_scope=user_scope,
             scope=scope,
         )
-    MCPIntegrator.update_lockfile(
-        new_mcp_servers,
-        lockfile_path,
-        mcp_configs=dict(view.configs),
-        mcp_config_provenance=dict(view.provenance),
+    if persist:
+        MCPIntegrator.update_lockfile(
+            new_mcp_servers,
+            lockfile_path,
+            mcp_configs=dict(view.configs),
+            mcp_config_provenance=dict(view.provenance),
+        )
+        return
+
+    lockfile.mcp_servers = sorted(new_mcp_servers)
+    lockfile.mcp_configs = dict(view.configs)
+    lockfile.mcp_config_provenance = dict(view.provenance)
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    DeploymentLedgerCodec.replace_mcp_target_servers(
+        lockfile,
+        {
+            runtime: sorted(set(servers).intersection(new_mcp_servers))
+            for runtime, servers in lockfile.mcp_target_servers.items()
+            if set(servers).intersection(new_mcp_servers)
+        },
     )

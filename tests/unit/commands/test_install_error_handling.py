@@ -123,11 +123,11 @@ class TestScopedInstallDependencyResolver:
 class TestValidateAndAddPackagesReadError:
     """read apm.yml fails (no logger) -> _rich_error + sys.exit."""
 
-    def test_read_error_no_logger_calls_rich_error_and_exits(self, tmp_path: Path) -> None:
+    def test_read_error_no_logger_uses_command_logger_and_exits(self, tmp_path: Path) -> None:
         from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
 
         with (
-            patch("apm_cli.commands.install._rich_error") as mock_err,
+            patch("apm_cli.core.command_logger._rich_error") as mock_err,
             patch("apm_cli.utils.yaml_io.load_yaml", side_effect=OSError("disk full")),
         ):
             with pytest.raises(SystemExit) as exc_info:
@@ -163,13 +163,13 @@ class TestValidateAndAddPackagesWriteError:
         p.write_text("name: test\ndependencies:\n  apm: []\n", encoding="utf-8")
         return p
 
-    def test_write_error_no_logger_calls_rich_error(self, tmp_path: Path) -> None:
+    def test_write_error_no_logger_uses_command_logger(self, tmp_path: Path) -> None:
         from apm_cli.commands.install import _validate_and_add_packages_to_apm_yml
 
         manifest = self._make_valid_apm_yml(tmp_path)
 
         with (
-            patch("apm_cli.commands.install._rich_error") as mock_err,
+            patch("apm_cli.core.command_logger._rich_error") as mock_err,
             patch(
                 "apm_cli.commands.install._resolve_package_references",
                 return_value=(

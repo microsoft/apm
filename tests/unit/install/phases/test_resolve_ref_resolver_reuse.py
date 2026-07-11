@@ -318,3 +318,73 @@ def test_resolve_dep_auth_falls_back_to_basic_when_token_missing():
     assert resolve_dep_auth(dep, _NoTokenBearerResolver()) == (None, "basic")
     assert resolve_dep_auth(dep, _EmptyTokenBearerResolver()) == (None, "basic")
     assert resolve_dep_auth(dep, None) == (None, "basic")
+
+
+def test_semver_ref_resolution_retries_rejected_ado_pat_with_bearer():
+    """A stale ADO PAT retries tag listing with the canonical bearer scheme."""
+    from apm_cli.core.auth import BearerFallbackOutcome
+
+    calls = []
+
+    class _AuthResolver:
+        def resolve_for_dep(self, dep_ref):
+            return SimpleNamespace(token="stale-pat", auth_scheme="basic")
+
+        def execute_with_bearer_fallback(
+            self,
+            dep_ref,
+            primary_op,
+            bearer_op,
+            is_auth_failure,
+        ):
+            primary = primary_op()
+            assert is_auth_failure(primary)
+            fallback = bearer_op("fresh-bearer")
+            return BearerFallbackOutcome(fallback, True)
+
+    def _run(args, **kwargs):
+        calls.append((args, kwargs))
+        auth_values = {
+            value for key, value in kwargs["env"].items() if key.startswith("GIT_CONFIG_VALUE_")
+        }
+        if any("Bearer " in value for value in auth_values):
+            return SimpleNamespace(
+                returncode=0,
+                stdout=f"{'a' * 40}\trefs/tags/v1.2.0\n",
+                stderr="",
+            )
+        return SimpleNamespace(
+            returncode=128,
+            stdout="",
+            stderr="fatal: The requested URL returned error: 401",
+        )
+
+    dep = DependencyReference(
+        host="dev.azure.com",
+        repo_url="example/project/_git/package",
+        reference="^1.0.0",
+        source="git",
+        explicit_scheme="https",
+    )
+
+    with patch("apm_cli.marketplace.ref_resolver.subprocess.run", side_effect=_run):
+        resolution = _maybe_resolve_git_semver(
+            dep_ref=dep,
+            existing_lockfile=None,
+            update_refs=True,
+            auth_resolver=_AuthResolver(),
+        )
+
+    assert resolution.resolved_tag == "v1.2.0"
+    assert len(calls) == 2
+    auth_headers = [
+        {value for key, value in call_kwargs["env"].items() if key.startswith("GIT_CONFIG_VALUE_")}
+        for _call_args, call_kwargs in calls
+    ]
+    assert len(auth_headers[0]) == 1
+    assert next(iter(auth_headers[0])).startswith("Authorization: Basic ")
+    assert len(auth_headers[1]) == 1
+    assert next(iter(auth_headers[1])).split(maxsplit=2)[:2] == [
+        "Authorization:",
+        "Bearer",
+    ]

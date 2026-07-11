@@ -442,8 +442,8 @@ class AgentsCompiler:
             if should_compile_gemini_md(routing_target):
                 results.append(self._compile_gemini_md(config, primitives))
 
-            # Some targets (e.g. cursor, agent-skills) use the data-driven
-            # integration layer and don't need compilation.
+            # Some targets (e.g. agent-skills) use only the data-driven
+            # integration layer and have no root-context compilation output.
             if not results:
                 if logger and config.target == "agent-skills":
                     logger.progress(

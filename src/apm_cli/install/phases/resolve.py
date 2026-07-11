@@ -110,8 +110,7 @@ def _maybe_resolve_git_semver(
     the clone step downstream. A private-repo semver dep that clones
     successfully then also enumerates its tags in CI environments where
     ``GITHUB_APM_PAT`` / ``ADO_APM_PAT`` are the only credential source.
-    Passing ``auth_resolver=None`` preserves the previous unauthenticated
-    behaviour for public repos and callers that intentionally skip auth.
+    ``auth_resolver=None`` preserves unauthenticated public-repo behavior.
     """
     # Only git-source deps with a semver-range reference are eligible.
     if dep_ref.is_local:
@@ -153,7 +152,6 @@ def _maybe_resolve_git_semver(
                 resolved_at=locked.resolved_at or "",
             )
 
-    # Fresh resolution: call git ls-remote and pick the highest matching tag.
     from apm_cli.deps.git_semver_resolver import GitSemverResolver
     from apm_cli.install.helpers.ref_reuse import (
         get_shared_ref_resolver,
@@ -169,6 +167,8 @@ def _maybe_resolve_git_semver(
         ref_resolver_cache,
         ref_resolver_cache_lock,
         auth_scheme=auth_scheme,
+        auth_resolver=auth_resolver,
+        auth_target=dep_ref.host,
     )
     resolver = GitSemverResolver(ref_resolver)
     return resolver.resolve(

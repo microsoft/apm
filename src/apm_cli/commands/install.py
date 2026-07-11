@@ -570,10 +570,7 @@ def _merge_packages_into_yml(
                 f"Updated {APM_YML_FILENAME} with {len(validated_packages)} new package(s)"
             )
     except Exception as e:
-        if logger:
-            logger.error(f"Failed to write {APM_YML_FILENAME}: {e}")
-        else:
-            _rich_error(f"Failed to write {APM_YML_FILENAME}: {e}")
+        (logger or InstallLogger()).error(f"Failed to write {APM_YML_FILENAME}: {e}")
         sys.exit(1)
 
 
@@ -617,10 +614,7 @@ def _validate_and_add_packages_to_apm_yml(
 
         data = load_yaml_roundtrip(apm_yml_path) or {}
     except Exception as e:
-        if logger:
-            logger.error(f"Failed to read {APM_YML_FILENAME}: {e}")
-        else:
-            _rich_error(f"Failed to read {APM_YML_FILENAME}: {e}")
+        (logger or InstallLogger()).error(f"Failed to read {APM_YML_FILENAME}: {e}")
         sys.exit(1)
 
     from ..install.registry_wiring import get_effective_default_registry
@@ -1541,7 +1535,7 @@ def install(  # noqa: PLR0913
 
             if frozen and apm_count > 0:
                 # --frozen verifies lockfile structure, not content integrity.
-                _rich_info(
+                logger.info(
                     "Lockfile presence verified. Run 'apm audit' for on-disk content integrity.",
                     symbol="info",
                 )
@@ -1559,23 +1553,20 @@ def install(  # noqa: PLR0913
             else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
         )
     except AuthenticationError as e:
-        _rich_error(str(e))
+        logger.error(str(e))
         if e.diagnostic_context:
-            _rich_echo(e.diagnostic_context)
-        _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
+            logger.error_detail(e.diagnostic_context)
+        logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
         command_result = (
             transaction.fail(e)
             if transaction is not None
             else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
         )
     except FrozenInstallError as e:
-        _rich_error(str(e))
+        logger.error(str(e))
         for reason in e.reasons:
-            _rich_echo(reason)
-        _rich_info(
-            "Tip: run 'apm outdated' to see what changed, then 'apm update'.",
-            symbol="info",
-        )
+            logger.error_detail(reason)
+        logger.info("Tip: run 'apm outdated' to see what changed, then 'apm update'.")
         command_result = (
             transaction.fail(e)
             if transaction is not None
@@ -1593,12 +1584,9 @@ def install(  # noqa: PLR0913
         # render with exit code 2 and the standard "Usage: ..." prefix.
         raise
     except Exception as e:
-        if logger:
-            logger.error(f"Error installing dependencies: {e}")
-            if not verbose:
-                logger.progress("Run with --verbose for detailed diagnostics")
-        else:
-            _rich_error(f"Error installing dependencies: {e}")
+        (logger or InstallLogger(verbose=verbose, dry_run=dry_run)).exception(
+            f"Error installing dependencies: {e}"
+        )
         command_result = (
             transaction.fail(e)
             if transaction is not None
@@ -1733,6 +1721,7 @@ def _install_apm_packages(ctx, outcome):
     old_mcp_configs: builtins.dict = {}
     old_mcp_provenance: builtins.dict = {}
     old_mcp_target_servers: builtins.dict = {}
+    old_mcp_target_servers_present = True
     _lock_path = get_lockfile_path(ctx.apm_dir)
     _existing_lock = LockFile.read(_lock_path)
     if _existing_lock:
@@ -1740,6 +1729,7 @@ def _install_apm_packages(ctx, outcome):
         old_mcp_configs = builtins.dict(_existing_lock.mcp_configs)
         old_mcp_provenance = builtins.dict(_existing_lock.mcp_config_provenance)
         old_mcp_target_servers = builtins.dict(_existing_lock.mcp_target_servers)
+        old_mcp_target_servers_present = _existing_lock._mcp_target_servers_present
 
     # Enter the APM install path when there are deps, local .apm/ primitives
     # (#714), OR orphan deps in the lockfile to clean up (manifest emptied).
@@ -1803,19 +1793,16 @@ def _install_apm_packages(ctx, outcome):
             raise
         except AuthenticationError as e:
             # #1015: render auth diagnostics on the DEFAULT path (not --verbose).
-            _rich_error(str(e))
+            logger.error(str(e))
             if e.diagnostic_context:
-                _rich_echo(e.diagnostic_context)
-            _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
+                logger.error_detail(e.diagnostic_context)
+            logger.info("Tip: run 'apm doctor' to diagnose auth and connectivity.")
             raise InstallFailureAlreadyRendered(str(e)) from e
         except FrozenInstallError as e:
-            _rich_error(str(e))
+            logger.error(str(e))
             for reason in e.reasons:
-                _rich_echo(reason)
-            _rich_info(
-                "Tip: run 'apm outdated' to see what changed, then 'apm update'.",
-                symbol="info",
-            )
+                logger.error_detail(reason)
+            logger.info("Tip: run 'apm outdated' to see what changed, then 'apm update'.")
             raise InstallFailureAlreadyRendered(str(e)) from e
         except InstallFailureAlreadyRendered:
             raise
@@ -1860,6 +1847,7 @@ def _install_apm_packages(ctx, outcome):
             old_mcp_configs=old_mcp_configs,
             old_mcp_provenance=old_mcp_provenance,
             old_mcp_target_servers=old_mcp_target_servers,
+            old_mcp_target_servers_present=old_mcp_target_servers_present,
             project_root=ctx.project_root,
             user_scope=(ctx.scope is InstallScope.USER),
             should_install=should_install_mcp,
