@@ -22,7 +22,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from apm_cli.core.target_catalog import TARGET_CAPABILITIES, TargetCapability
+from apm_cli.core.target_catalog import (
+    TARGET_CAPABILITIES,
+    TargetCapability,
+    expand_all,
+    normalize_target_name,
+)
 
 RULE_FORMATS: frozenset[str] = frozenset(
     {"cursor_rules", "claude_rules", "windsurf_rules", "kiro_steering", "antigravity_rules"}
@@ -1034,14 +1039,24 @@ def active_targets_user_scope(
         profiles: list = []
         seen: set = set()
         for t in raw:
-            canonical = RUNTIME_TO_CANONICAL_TARGET.get(t, t)
+            try:
+                canonical = normalize_target_name(t)
+            except KeyError:
+                continue
             if canonical == "all":
-                from apm_cli.core.target_detection import EXPLICIT_ONLY_TARGETS
-
+                all_targets = {normalize_target_name(target) for target in expand_all("install")}
+                all_targets.update(
+                    capability.name
+                    for capability in TARGET_CAPABILITIES.values()
+                    if capability.experimental_flag is not None
+                )
                 return [
                     p
                     for p in KNOWN_TARGETS.values()
-                    if p.user_supported and _flag_gated(p) and p.name not in EXPLICIT_ONLY_TARGETS
+                    if p.name in all_targets
+                    and not p.capability.explicit_only
+                    and p.user_supported
+                    and _flag_gated(p)
                 ]
             profile = KNOWN_TARGETS.get(canonical)
             if (
@@ -1107,7 +1122,10 @@ def active_targets(
         profiles: list = []
         seen: set = set()
         for t in raw:
-            canonical = RUNTIME_TO_CANONICAL_TARGET.get(t, t)
+            try:
+                canonical = normalize_target_name(t)
+            except KeyError:
+                continue
             if canonical == "all":
                 # Exclude explicit-only targets (agent-skills) -- they must
                 # be requested individually.
@@ -1117,16 +1135,8 @@ def active_targets(
                 # core/target_detection.py. Including cowork in `all` for
                 # project scope hits the unconditional project-scope gate in
                 # phases/targets.py and aborts the entire install (#1185 b).
-                from apm_cli.core.target_detection import (
-                    EXPERIMENTAL_TARGETS,
-                    EXPLICIT_ONLY_TARGETS,
-                )
-
-                return [
-                    p
-                    for p in KNOWN_TARGETS.values()
-                    if p.name not in EXPLICIT_ONLY_TARGETS and p.name not in EXPERIMENTAL_TARGETS
-                ]
+                all_targets = {normalize_target_name(target) for target in expand_all("install")}
+                return [p for p in KNOWN_TARGETS.values() if p.name in all_targets]
             profile = KNOWN_TARGETS.get(canonical)
             if profile and _flag_gated(profile) and profile.name not in seen:
                 seen.add(profile.name)

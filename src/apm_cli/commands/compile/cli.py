@@ -15,7 +15,12 @@ if TYPE_CHECKING:
 from ...compilation import AgentsCompiler, CompilationConfig
 from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_FILENAME
 from ...core.command_logger import CommandLogger
-from ...core.target_detection import TARGET_VALUES_HELP, TargetParamType
+from ...core.target_catalog import (
+    TARGET_CAPABILITIES,
+    get_target_capability,
+    target_help_fragment,
+)
+from ...core.target_detection import TargetParamType
 from ...primitives.discovery import clear_discovery_cache, discover_primitives
 from ...utils import perf_stats
 from ...utils.console import (
@@ -183,10 +188,9 @@ def _resolve_compile_target(target):
     collapsing to ``"all"`` (which would incorrectly generate files
     for every family).
 
-    Family resolution reads ``TargetProfile.compile_family`` from
-    ``KNOWN_TARGETS`` so adding a new compile-eligible target only
-    requires populating that field.  The CLI alias ``"vscode"`` is
-    treated as ``"copilot"`` for this purpose.
+    Family resolution reads ``TargetCapability.compile_family`` from
+    ``TARGET_CAPABILITIES`` so adding a new compile-eligible target only
+    requires populating that field.
 
     Args:
         target: A single target string, a list of target strings, or ``None``.
@@ -194,8 +198,6 @@ def _resolve_compile_target(target):
     Returns:
         A single string, a ``frozenset`` of compiler families, or ``None``.
     """
-    from ...integration.targets import KNOWN_TARGETS
-
     if target is None:
         return None  # will trigger detect_target() auto-detection
     if isinstance(target, list):
@@ -203,7 +205,11 @@ def _resolve_compile_target(target):
         # Strip targets with no compile output (compile_family is None);
         # they would silently fall through the family resolution otherwise.
         # ``vscode`` is a CLI alias for ``copilot`` and shares its profile.
-        skip = {name for name, profile in KNOWN_TARGETS.items() if profile.compile_family is None}
+        skip = {
+            capability.name
+            for capability in TARGET_CAPABILITIES.values()
+            if capability.compile_family is None and capability.primitive_profile == capability.name
+        }
         target_set -= skip
         if not target_set:
             # Solo agent-skills (or another no-compile target) in a list --
@@ -220,8 +226,10 @@ def _resolve_compile_target(target):
         def _family_of(name: str) -> str | None:
             if name == "vscode":
                 return "vscode"
-            profile = KNOWN_TARGETS.get(name)
-            return profile.compile_family if profile else None
+            try:
+                return get_target_capability(name).compile_family
+            except KeyError:
+                return None
 
         families: set[str] = set()
         for name in target_set:
@@ -244,8 +252,10 @@ def _resolve_compile_target(target):
                 _vscode_names = {"copilot", "vscode", "agents"}
                 has_non_vscode_agents = any(
                     name in target_set
-                    for name, profile in KNOWN_TARGETS.items()
-                    if profile.compile_family == "agents" and name not in _vscode_names
+                    for name, capability in TARGET_CAPABILITIES.items()
+                    if capability.compile_family == "agents"
+                    and capability.primitive_profile == name
+                    and name not in _vscode_names
                 )
                 if not has_non_vscode_agents:
                     return "vscode"
@@ -264,13 +274,17 @@ def _resolve_compile_target(target):
         # Bare agents-family target: preserve the original target name so
         # single-element list routing matches single-string semantics
         # (-t cursor and -t [cursor] both end up as "cursor").  Iterate
-        # KNOWN_TARGETS in insertion order so priority ties (e.g.
+        # TARGET_CAPABILITIES in insertion order so priority ties (e.g.
         # ["opencode","codex"]) resolve deterministically to the
         # earliest-registered target.  Adding a new agents-family
         # target (e.g. zed, cline) costs zero edits here -- it inherits
         # whatever priority position it occupies in the registry.
-        for name, profile in KNOWN_TARGETS.items():
-            if profile.compile_family == "agents" and name in target_set:
+        for name, capability in TARGET_CAPABILITIES.items():
+            if (
+                capability.compile_family == "agents"
+                and capability.primitive_profile == name
+                and name in target_set
+            ):
                 return name
         return "vscode"  # defensive fallback (unreachable)
     return target  # single string pass-through
@@ -920,7 +934,7 @@ def _run_compilation(
     "-t",
     type=TargetParamType(),
     default=None,
-    help=f"Target platform (comma-separated). Values: {TARGET_VALUES_HELP}. "
+    help=f"Target platform (comma-separated). {target_help_fragment('compile')} "
     "'agent-skills' deploys to .agents/skills/ (cross-client). "
     "'antigravity' (alias 'agy') deploys to .agents/ and is explicit-only -- not part of 'all'. "
     "'intellij' is MCP-only; file primitives use the Copilot profile. "

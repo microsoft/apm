@@ -24,7 +24,6 @@ from apm_cli.compilation.agents_compiler import (
     CompilationConfig,
     CompilationResult,
 )
-from apm_cli.core.target_detection import CANONICAL_TARGETS_ORDERED, MCP_ONLY_TARGETS
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
 
@@ -997,18 +996,14 @@ Use type hints in Python code.
         assert result.exit_code == 0
         assert "intellij" in result.output.lower()
 
-    def test_invalid_target_error_advertises_supported_catalog(self, runner):
-        """Unknown-target guidance lists stable and MCP-only targets."""
+    def test_invalid_target_error_uses_structured_rendering(self, runner):
+        """Unknown-target guidance keeps the three-section rendering."""
         result = runner.invoke(cli, ["compile", "--target", "definitely-bogus"])
 
         assert result.exit_code == 2
-        valid_line = next(
-            line for line in result.output.splitlines() if line.startswith("Valid targets:")
-        )
-        advertised = {target.strip() for target in valid_line.partition(":")[2].split(",")}
-        assert advertised == set(CANONICAL_TARGETS_ORDERED) | MCP_ONLY_TARGETS | {"all"}
-        assert "intellij" in advertised
-        assert "agents" not in advertised
+        assert "[x] Unknown target 'definitely-bogus'" in result.output
+        assert "Valid targets:" in result.output
+        assert "Fix with one of:" in result.output
 
     def test_target_flag_accepts_intellij(self, runner, temp_project):
         """Compile accepts IntelliJ and generates the Copilot-profile AGENTS.md."""

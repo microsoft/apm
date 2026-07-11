@@ -5,7 +5,10 @@ from dataclasses import FrozenInstanceError, astuple
 from types import MappingProxyType
 
 import pytest
+from click.testing import CliRunner
 
+from apm_cli.cli import cli
+from apm_cli.core.apm_yml import CANONICAL_TARGETS
 from apm_cli.core.target_catalog import (
     TARGET_CAPABILITIES,
     TargetCapability,
@@ -254,6 +257,28 @@ def test_every_accepted_value_is_advertised_and_parses() -> None:
                 assert parse_target_field(value) is not None
 
 
+@pytest.mark.parametrize("command", COMMANDS)
+def test_command_help_and_errors_advertise_every_accepted_value(command: str) -> None:
+    """Real Click surfaces advertise the same values accepted by parsing."""
+    runner = CliRunner()
+    help_result = runner.invoke(cli, [command, "--help"], terminal_width=1000)
+    error_result = runner.invoke(
+        cli,
+        [command, "--target", "definitely-bogus"],
+        terminal_width=1000,
+    )
+
+    assert help_result.exit_code == 0
+    assert error_result.exit_code == 2
+    valid_line = next(
+        line for line in error_result.output.splitlines() if line.startswith("Valid targets:")
+    )
+    error_values = {target.strip() for target in valid_line.partition(":")[2].split(",")}
+    assert error_values == set(accepted_target_values(command))
+    for value in accepted_target_values(command):
+        assert value in help_result.output
+
+
 def test_alias_runtime_profile_and_compile_projections_match_catalog() -> None:
     """Catalog metadata reproduces every legacy projection."""
     assert normalize_target_name("vscode") == "copilot"
@@ -286,6 +311,18 @@ def test_all_excludes_explicit_experimental_and_mcp_only_targets() -> None:
         assert not expanded & EXPERIMENTAL_TARGETS
         assert not expanded & EXPLICIT_ONLY_TARGETS
         assert not expanded & MCP_ONLY_TARGETS
+
+
+def test_apm_yml_canonical_targets_project_catalog_profiles() -> None:
+    """Manifest validation accepts stable native deployment profiles."""
+    assert (
+        frozenset(
+            capability.name
+            for capability in TARGET_CAPABILITIES.values()
+            if capability.experimental_flag is None and not capability.mcp_only
+        )
+        == CANONICAL_TARGETS
+    )
 
 
 def test_catalog_validation_rejects_duplicate_aliases() -> None:

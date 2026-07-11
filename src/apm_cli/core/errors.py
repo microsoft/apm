@@ -118,26 +118,12 @@ def render_ambiguous_error(project_root: Path | None, detected: list[str]) -> st
 
 def render_unknown_target_error(value: str, valid: list[str]) -> str:
     """Render the 3-section error for unknown target token."""
-    # Hide ``agent-skills`` from the user-facing suggestion surface (#1208).
-    # ``agent-skills`` is a meta-target (multi-harness fan-out to
-    # ``.agents/skills/``) and is intentionally excluded from the
-    # ``apm targets`` table -- it has no single ``deploy_dir`` and is not
-    # what a beginner who mistyped a harness name should be steered toward.
-    # The canonical set still accepts it so power users who pass it
-    # explicitly via ``--target agent-skills`` (or list it in apm.yml)
-    # continue to work; we just don't advertise it here.
-    visible = [t for t in valid if t != "agent-skills"]
-    visible_sorted = sorted(visible)
+    visible_sorted = sorted(valid)
     suggestion = (
         "copilot"
         if "copilot" in visible_sorted
         else (visible_sorted[0] if visible_sorted else "claude")
     )
-    # When the caller passes only the hidden meta-target (or an empty
-    # list), fall back to the safety-net suggestion so the "Valid
-    # targets:" line never renders as a bare colon. In practice all
-    # production call sites pass the full canonical set, so this is a
-    # defense-in-depth path for tests and future callers.
     valid_csv = ", ".join(visible_sorted) if visible_sorted else suggestion
     # Strip bracket/quote noise that can leak in from misparsed tokens
     # (e.g. "['copilot'"). Defense-in-depth: callers should pass clean

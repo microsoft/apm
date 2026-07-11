@@ -100,11 +100,8 @@ from ..constants import (
 )
 from ..core.auth import AuthResolver
 from ..core.command_logger import InstallLogger, _ValidationOutcome
-from ..core.target_detection import (
-    TARGET_VALUES_HELP,
-    TargetParamType,
-    manifest_targets_from_target_option,
-)
+from ..core.target_catalog import target_help_fragment
+from ..core.target_detection import TargetParamType, manifest_targets_from_target_option
 
 # MCP --mcp helpers (module-level re-exports for test patches); must stay at
 # import time per comments in the original mid-file block.
@@ -853,7 +850,7 @@ def _handle_mcp_install(  # noqa: PLR0913
 @click.option(
     "--runtime",
     help=(
-        "Target specific runtime only (copilot, claude, codex, cursor, gemini, antigravity, intellij, kiro, opencode, windsurf) "
+        f"Target a specific runtime only. {target_help_fragment('install')} "
         "(legacy alias for --target, single value only; prefer --target)"
     ),
 )
@@ -905,7 +902,7 @@ def _handle_mcp_install(  # noqa: PLR0913
     type=TargetParamType(),
     default=None,
     help=f"Target harness(es) to deploy to. Use commas for multiple targets; repeating the flag "
-    f"keeps only the last value (use commas instead). Values: {TARGET_VALUES_HELP}. "
+    f"keeps only the last value (use commas instead). {target_help_fragment('install')} "
     "IntelliJ-specific integration is MCP-only; file primitives use the Copilot profile. "
     "'all' excludes agent-skills, antigravity, experimental targets, and intellij; combine "
     "explicit-only targets when needed. Experimental targets require their feature flags. "
