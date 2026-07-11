@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.requires_apm_binary
+
 TIMEOUT = 180
 DEEP_CHAIN_LENGTH = 8
 

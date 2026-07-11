@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (by @sergio-sisternes-epam; closes #1957) (#2041)
 - Azure DevOps marketplace checks now preserve suffix-free `/_git/<repo>` URLs
   and pass Azure CLI bearer authentication through to `git ls-remote`. (closes #2119)
+- Nested manifests inside an installed dependency are no longer falsely
+  reported or pruned as independent orphans. (closes #2067) (#2092)
+- `apm deps tree` now renders every lockfile-resolved depth and marks circular
+  relationships with a `(circular)` suffix. (#2092)
 
 ## [0.24.1] - 2026-07-10
 
@@ -47,18 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case-sensitive paths for unknown git hosts. (closes #2073, #2098)
 - `apm deps tree` no longer repeats same-repository virtual packages, keeping
   large monorepo dependency trees accurate and scannable. (#2093)
-- Nested manifests inside an installed dependency are no longer falsely
-  reported or pruned as independent orphans, while `apm deps tree` now renders
-  every lockfile-resolved depth and marks circular relationships. (#2092)
-- `apm install host/org/repo/subpath#ref` on an unrecognised self-hosted FQDN
-  no longer fails with a misleading "not accessible or doesn't exist" error;
-  the failure reason now suggests setting `GITLAB_HOST` / `APM_GITLAB_HOSTS`
-  if the target is a self-hosted GitLab instance, or using an explicit
-  `git:` + `path:` entry in `apm.yml` otherwise. (by @rrazvd; closes #2066) (#2074)
-- Dev dependencies are no longer removed by `apm prune`, reported as orphans
-  by `apm audit --ci`, or omitted from lockfile and MCP config checks. This
-  includes `devDependencies.apm` and applicable `devDependencies.mcp` entries.
-  (by @sergio-sisternes-epam; #2102, supersedes #2042, closes #2033)
 - Claude user-scope MCP installs now honor `CLAUDE_CONFIG_DIR`, with
   `~/.claude.json` retained as the fallback. (closes #2060, #2096)
 - Dev dependencies now survive `apm prune`, pass `apm audit --ci`, and remain
