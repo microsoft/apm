@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --target intellij` now configures JetBrains Copilot MCP support
   while routing package file primitives through the Copilot profile.
   (by @sergio-sisternes-epam; closes #1957) (#2041)
+- The Windows installer now exposes a version-stable `current\apm.exe` on
+  `PATH` (via a junction to the active release bundle) alongside the existing
+  `bin\apm.cmd` shim, so Git Bash and Python `subprocess.run(["apm", ...])`
+  resolve `apm` without `cmd.exe` PATHEXT expansion. (closes #2076) (#2094)
 
 ### Fixed
 
