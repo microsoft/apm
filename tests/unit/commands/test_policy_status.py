@@ -316,6 +316,41 @@ class TestStatusPolicySourceOverride:
         assert data["source"].startswith("file:")
         assert str(policy_file) in data["source"]
 
+    def test_json_surfaces_unknown_top_level_key_warning(self, runner, tmp_path):
+        policy_file = tmp_path / "apm-policy.yml"
+        policy_file.write_text(
+            ("version: '1.0'\nenforcment: true\ndependencies:\n  deny: [blocked/package]\n"),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            policy_group,
+            ["status", "--check", "--policy-source", str(policy_file), "--json"],
+        )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["warnings"] == ["Unknown top-level policy key: 'enforcment'"]
+
+    def test_json_preserves_warning_when_policy_has_schema_errors(self, runner, tmp_path):
+        policy_file = tmp_path / "apm-policy.yml"
+        policy_file.write_text(
+            ("version: '1.0'\nenforcment: true\ncache: []\ndependencies:\n  allow: ''\n"),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            policy_group,
+            ["status", "--check", "--policy-source", str(policy_file), "--json"],
+        )
+
+        assert result.exit_code == 1, result.output
+        data = json.loads(result.output)
+        assert data["error"] is not None
+        assert "cache must be a YAML mapping" in data["error"]
+        assert "dependencies.allow must be a YAML list" in data["error"]
+        assert data["warnings"] == ["Unknown top-level policy key: 'enforcment'"]
+
     def test_policy_source_routes_through_discover_policy(self, runner):
         result_obj = PolicyFetchResult(
             policy=_rich_policy(),

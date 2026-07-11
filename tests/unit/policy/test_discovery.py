@@ -212,6 +212,43 @@ class TestCacheReadWrite(unittest.TestCase):
             self.assertTrue(result.cached)
             self.assertEqual(result.source, f"org:{repo_ref}")
 
+    def test_policy_warnings_survive_cache_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo_ref = "contoso/.github"
+            warnings = ["Unknown top-level policy key: 'enforcment'"]
+
+            _write_cache(repo_ref, _make_test_policy(), root, warnings=warnings)
+
+            result = _read_cache(repo_ref, root)
+            self.assertIsNotNone(result)
+            self.assertEqual(result.warnings, warnings)
+
+    def test_corrupt_cached_warnings_render_gracefully(self):
+        cases = (
+            ("not-a-list", [], "none"),
+            (["unknown key", 7, None], ["unknown key", "7", "None"], "unknown key; 7; None"),
+        )
+
+        for corrupt_warnings, expected_warnings, expected_rendering in cases:
+            with self.subTest(warnings=corrupt_warnings):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    repo_ref = "contoso/.github"
+                    _write_cache(repo_ref, _make_test_policy(), root)
+
+                    meta_file = _get_cache_dir(root) / f"{_cache_key(repo_ref)}.meta.json"
+                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                    meta["warnings"] = corrupt_warnings
+                    meta_file.write_text(json.dumps(meta), encoding="utf-8")
+
+                    result = _read_cache(repo_ref, root)
+
+                    self.assertIsNotNone(result)
+                    self.assertEqual(result.warnings, expected_warnings)
+                    rendered = "; ".join(result.warnings) if result.warnings else "none"
+                    self.assertEqual(rendered, expected_rendering)
+
     def test_expired_cache(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

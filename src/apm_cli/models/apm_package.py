@@ -388,6 +388,10 @@ class APMPackage:
             raise ValueError("Missing required field 'name' in apm.yml")
         if "version" not in data:
             raise ValueError("Missing required field 'version' in apm.yml")
+        if not isinstance(data["name"], str) or not data["name"].strip():
+            raise ValueError("Invalid apm.yml identity: 'name' must be a non-empty string")
+        if not isinstance(data["version"], str) or not data["version"].strip():
+            raise ValueError("Invalid apm.yml identity: 'version' must be a non-empty string")
 
         # Top-level ``registries:`` block per design §3.1.
         registries, default_registry = _parse_registries_block(data, apm_yml_path)

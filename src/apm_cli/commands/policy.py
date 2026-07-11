@@ -199,6 +199,7 @@ def _build_report(
         "cached": bool(result.cached),
         "fetch_error": result.fetch_error,
         "error": result.error,
+        "warnings": result.warnings,
         "extends_chain": chain,
         "rule_counts": counts,
         "rule_summary": _summarize_rules(counts),
@@ -227,6 +228,10 @@ def _render_table(report: dict[str, Any]) -> None:
         (
             "Effective rules",
             "; ".join(report["rule_summary"]) if report["rule_summary"] else "none",
+        ),
+        (
+            "Warnings",
+            "; ".join(report["warnings"]) if report["warnings"] else "none",
         ),
     ]
 

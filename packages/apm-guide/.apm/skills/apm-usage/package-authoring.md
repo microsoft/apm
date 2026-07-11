@@ -31,6 +31,8 @@ backfills one from the other:
   is no apm.yml-side equivalent.
 - `name`, `version`, `license`, `dependencies`, `scripts` live
   exclusively in `apm.yml`.
+- `name` and `version` must be non-empty strings. Quote numeric versions so
+  YAML does not parse them as numbers.
 
 Populate both descriptions when you ship a HYBRID package. `apm pack`
 warns when `apm.yml.description` is missing so listings do not
