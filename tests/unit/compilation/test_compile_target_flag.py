@@ -24,6 +24,7 @@ from apm_cli.compilation.agents_compiler import (
     CompilationConfig,
     CompilationResult,
 )
+from apm_cli.core.target_detection import CANONICAL_TARGETS_ORDERED, MCP_ONLY_TARGETS
 from apm_cli.primitives.models import Instruction, PrimitiveCollection
 
 
@@ -988,6 +989,38 @@ Use type hints in Python code.
 
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_help_advertises_intellij_target(self, runner):
+        """Compile help lists every accepted target, including IntelliJ."""
+        result = runner.invoke(cli, ["compile", "--help"])
+
+        assert result.exit_code == 0
+        assert "intellij" in result.output.lower()
+
+    def test_invalid_target_error_advertises_supported_catalog(self, runner):
+        """Unknown-target guidance lists stable and MCP-only targets."""
+        result = runner.invoke(cli, ["compile", "--target", "definitely-bogus"])
+
+        assert result.exit_code == 2
+        valid_line = next(
+            line for line in result.output.splitlines() if line.startswith("Valid targets:")
+        )
+        advertised = {target.strip() for target in valid_line.partition(":")[2].split(",")}
+        assert advertised == set(CANONICAL_TARGETS_ORDERED) | MCP_ONLY_TARGETS | {"all"}
+        assert "intellij" in advertised
+        assert "agents" not in advertised
+
+    def test_target_flag_accepts_intellij(self, runner, temp_project):
+        """Compile accepts IntelliJ and generates the Copilot-profile AGENTS.md."""
+        original_dir = os.getcwd()
+        try:
+            os.chdir(temp_project)
+            result = runner.invoke(cli, ["compile", "--target", "intellij"])
+
+            assert result.exit_code == 0, result.output
+            assert (temp_project / "AGENTS.md").is_file()
+        finally:
+            os.chdir(original_dir)
 
     def test_target_flag_accepts_vscode(self, runner, temp_project):
         """Test that --target vscode is accepted."""

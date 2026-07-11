@@ -10,6 +10,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from apm_cli.cli import cli
+from apm_cli.core.target_detection import CANONICAL_TARGETS_ORDERED, MCP_ONLY_TARGETS
 from apm_cli.integration.hook_integrator import HookIntegrator
 from apm_cli.integration.instruction_integrator import InstructionIntegrator
 from apm_cli.integration.skill_integrator import SkillIntegrator
@@ -55,16 +56,34 @@ def test_kiro_is_discoverable_in_target_help() -> None:
     install = runner.invoke(cli, ["install", "--help"])
     compile_result = runner.invoke(cli, ["compile", "--help"])
 
-    expected_all_targets = "copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro"
     install_help = "".join(install.output.split())
     compile_help = "".join(compile_result.output.split())
 
     assert install.exit_code == 0
     assert compile_result.exit_code == 0
-    assert expected_all_targets in install_help
-    assert expected_all_targets in compile_help
+    # The accepted-target catalog (VALID_TARGET_VALUES) is the single source of
+    # truth for the help Values list, so every advertised target -- including
+    # the MCP-only 'intellij' target -- must be discoverable in both help texts.
+    for target in ("kiro", "intellij", "copilot", "claude", "windsurf"):
+        assert target in install_help
+        assert target in compile_help
     assert "ClaudeCode" in install_help
     assert "Windsurf" in install_help
+
+
+def test_unknown_target_error_advertises_stable_and_mcp_targets() -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["compile", "--target", "definitely-bogus"])
+
+    assert result.exit_code == 2
+    valid_line = next(
+        line for line in result.output.splitlines() if line.startswith("Valid targets:")
+    )
+    advertised = {target.strip() for target in valid_line.partition(":")[2].split(",")}
+    assert advertised == set(CANONICAL_TARGETS_ORDERED) | MCP_ONLY_TARGETS | {"all"}
+    assert "intellij" in advertised
+    assert "agents" not in advertised
 
 
 def test_kiro_runtime_discovered_in_user_scope_without_project_dir(tmp_path: Path) -> None:

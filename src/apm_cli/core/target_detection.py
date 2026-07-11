@@ -536,6 +536,9 @@ VALID_TARGET_VALUES: frozenset[str] = (
     | frozenset({"all"})
 )
 
+#: Stable user-facing projection of every value accepted by ``--target``.
+TARGET_VALUES_HELP = ", ".join(sorted(VALID_TARGET_VALUES))
+
 
 def parse_target_field(
     value: str | list[str] | None,
@@ -723,13 +726,13 @@ class TargetParamType(click.ParamType):
             # Use the v2 three-section error renderer for unknown targets
             # so that CLI, apm.yml, and auto-detect all share the same
             # error format (#1154).
-            from apm_cli.core.apm_yml import CANONICAL_TARGETS
             from apm_cli.core.errors import UnknownTargetError, render_unknown_target_error
 
             err_msg = str(e)
             if "is not a valid target" in err_msg:
                 target_name = value if isinstance(value, str) else ",".join(value or [])
-                rendered = render_unknown_target_error(target_name, sorted(CANONICAL_TARGETS))
+                advertised = set(CANONICAL_TARGETS_ORDERED) | MCP_ONLY_TARGETS | {"all"}
+                rendered = render_unknown_target_error(target_name, sorted(advertised))
                 raise UnknownTargetError(rendered) from None
             # Click idiom: route validation errors through self.fail so the
             # user sees a clean "Invalid value for '--target': ..." message
