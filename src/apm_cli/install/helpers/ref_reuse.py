@@ -28,22 +28,22 @@ def _token_fingerprint(token: str | None) -> str | None:
     return "sha256:" + hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
 
 
-def resolve_dep_token(dep_ref: Any, auth_resolver: Any) -> str | None:
-    """Resolve the per-dep token via AuthResolver for use by ``git ls-remote``.
+def resolve_dep_auth(dep_ref: Any, auth_resolver: Any) -> tuple[str | None, str]:
+    """Resolve per-dependency authentication for use by ``git ls-remote``.
 
-    Uses the same credential source the downstream clone will use. Without
-    this threading, ls-remote on a private repo would rely on the host's git
-    credential helper (present on dev laptops, absent in CI). Best-effort:
-    on any failure the unauth path remains and the downstream clone surfaces
-    the real auth error with its own diagnostic.
+    Uses the same token and scheme the downstream clone will use. Best-effort:
+    on any failure the unauthenticated basic path remains and the downstream
+    clone surfaces the real auth error with its own diagnostic.
     """
     if auth_resolver is None:
-        return None
+        return None, "basic"
     try:
         auth_ctx = auth_resolver.resolve_for_dep(dep_ref)
-        return auth_ctx.token if auth_ctx is not None else None
+        if auth_ctx is None:
+            return None, "basic"
+        return auth_ctx.token, auth_ctx.auth_scheme
     except Exception:
-        return None
+        return None, "basic"
 
 
 def get_shared_ref_resolver(
@@ -51,13 +51,15 @@ def get_shared_ref_resolver(
     token: str | None,
     cache: dict[Any, Any] | None,
     lock: Any = None,
+    *,
+    auth_scheme: str = "basic",
 ) -> Any:
-    """Return a ``RefResolver`` for ``(host, token)``, reused across a run.
+    """Return a ``RefResolver`` for ``(host, token, auth_scheme)``, reused across a run.
 
     When ``cache`` is provided, resolvers are memoized so the second and
     later deps from a repo reuse the instance (and its ref cache). The cache
-    key is ``(normalized_host, fingerprint(token))`` -- a non-reversible token
-    fingerprint, never the raw PAT, so the credential is not exposed via the
+    key includes ``(normalized_host, fingerprint(token), auth_scheme)``. The
+    fingerprint is non-reversible and never stores the raw credential in the
     context object this cache lives on. ``host`` is normalized to ``None``
     meaning "use RefResolver default (github.com)", so a dep written with an
     explicit ``host='github.com'`` and one with no host collapse to the same
@@ -78,19 +80,19 @@ def get_shared_ref_resolver(
     canonical_host = host if host and host != _DEFAULT_HOST else None
 
     if cache is None:
-        return RefResolver(host=host, token=token)
+        return RefResolver(host=host, token=token, auth_scheme=auth_scheme)
 
-    key = (canonical_host, _token_fingerprint(token))
+    key = (canonical_host, _token_fingerprint(token), auth_scheme)
     if lock is not None:
         with lock:
             resolver = cache.get(key)
             if resolver is None:
-                resolver = RefResolver(host=host, token=token)
+                resolver = RefResolver(host=host, token=token, auth_scheme=auth_scheme)
                 cache[key] = resolver
             return resolver
 
     resolver = cache.get(key)
     if resolver is None:
-        resolver = RefResolver(host=host, token=token)
+        resolver = RefResolver(host=host, token=token, auth_scheme=auth_scheme)
         cache[key] = resolver
     return resolver

@@ -720,16 +720,20 @@ def resolve_plugin_source(
         raise ValueError(f"Plugin '{plugin.name}' has unsupported source type: '{source_type}'")
 
 
-def _extract_token(auth_resolver: object | None, host: str, org: str | None = None) -> str | None:
-    """Extract a token from the auth resolver for the given host."""
+def _extract_auth(
+    auth_resolver: object | None, host: str, org: str | None = None
+) -> tuple[str | None, str]:
+    """Extract the token and scheme from the auth resolver for the given host."""
     if auth_resolver is None:
-        return None
+        return None, "basic"
     try:
         ctx = auth_resolver.resolve(host, org=org)  # type: ignore[union-attr]
-        return ctx.token if ctx and ctx.token else None
+        if ctx is None:
+            return None, "basic"
+        return ctx.token, ctx.auth_scheme
     except Exception as exc:
-        logger.debug("Could not extract token for host '%s': %s", host, type(exc).__name__)
-        return None
+        logger.debug("Could not extract auth for host '%s': %s", host, type(exc).__name__)
+        return None, "basic"
 
 
 def resolve_marketplace_plugin(
@@ -929,7 +933,7 @@ def resolve_marketplace_plugin(
             from .version_resolver import resolve_version_constraint
 
             owner_repo = f"{source.owner}/{source.repo}"
-            token = _extract_token(auth_resolver, source.host, org=source.owner)
+            token, auth_scheme = _extract_auth(auth_resolver, source.host, org=source.owner)
             try:
                 tag_name, _sha = resolve_version_constraint(
                     plugin_name,
@@ -937,6 +941,7 @@ def resolve_marketplace_plugin(
                     version_spec,
                     host=source.host,
                     token=token,
+                    auth_scheme=auth_scheme,
                 )
                 canonical = f"{base}#{tag_name}"
                 logger.debug(
