@@ -182,13 +182,19 @@ def declared_target_profiles(
 ) -> list[TargetProfile] | None:
     """Resolve the target universe declared by a project manifest."""
     from apm_cli.core.apm_yml import CANONICAL_TARGETS, parse_targets_field
+    from apm_cli.core.errors import TargetResolutionError
     from apm_cli.integration.targets import KNOWN_TARGETS
     from apm_cli.utils.yaml_io import load_yaml
 
     try:
         data = load_yaml(project_root / "apm.yml")
-        names = parse_targets_field(data) if isinstance(data, dict) else None
     except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        names = parse_targets_field(data)
+    except TargetResolutionError:
         return None
     if not names:
         return None

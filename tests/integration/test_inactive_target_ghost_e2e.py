@@ -204,3 +204,39 @@ def test_materializing_command_reconciles_contracted_target(
     reconciled_dep = (reconciled_lock.get("dependencies") or [])[0]
     assert GHOST not in (reconciled_dep.get("deployed_files") or [])
     assert GHOST not in (reconciled_dep.get("deployed_file_hashes") or {})
+
+
+def test_compile_preserves_sibling_when_declared_targets_conflict(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Post-compile reconciliation falls back safely for malformed targets."""
+    project = _write_fixture(tmp_path / "compile-conflicting-targets")
+
+    from apm_cli.deps import github_downloader
+
+    downloader = _HermeticDownloader()
+    monkeypatch.setattr(
+        github_downloader.GitHubPackageDownloader,
+        "download_package",
+        downloader.download_package,
+    )
+    runner = CliRunner()
+
+    initial = _invoke(runner, project, monkeypatch, "install", "--target", "copilot,windsurf")
+    assert initial.exit_code == 0, initial.output
+    sibling_path = project / GHOST
+    assert sibling_path.is_file()
+
+    with (project / "apm.yml").open("a", encoding="utf-8") as manifest:
+        manifest.write("target: copilot\n")
+
+    monkeypatch.chdir(project)
+    with patch(_PATCH_UPDATES, return_value=None):
+        result = runner.invoke(cli, ["compile", "--target", "copilot"])
+
+    assert result.exit_code == 0, result.output
+    assert sibling_path.is_file()
+    lockfile = yaml.safe_load((project / "apm.lock.yaml").read_text(encoding="utf-8"))
+    dependency = (lockfile.get("dependencies") or [])[0]
+    assert GHOST in (dependency.get("deployed_files") or [])
