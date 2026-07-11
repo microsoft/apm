@@ -129,18 +129,10 @@ def run_mcp_integration(  # noqa: PLR0913
 
     mcp_count = 0
     new_mcp_servers: builtins.set = builtins.set()
-    # Forward only the targets-key the user actually declared so parse_targets_field
-    # in the gate sees the same dict shape it sees from raw apm.yml. Including a
-    # `targets: None` placeholder when the user wrote `target:` (singular) would
-    # falsely trip the conflict-mutex check (see core.apm_yml.parse_targets_field).
-    # This restores parity with `apm install` for users on the modern `targets:`
-    # plural form -- without this, `targets:` was silently dropped at the call
-    # site and the gate fell back to permissive directory detection (#1335).
     mcp_apm_config: dict = {"scripts": apm_package.scripts or {}}
-    if apm_package.targets is not None:
-        mcp_apm_config["targets"] = apm_package.targets
-    elif apm_package.target is not None:
-        mcp_apm_config["target"] = apm_package.target
+    from apm_cli.models.apm_package import canonical_package_target_config
+
+    mcp_apm_config.update(canonical_package_target_config(apm_package))
 
     if should_install and mcp_deps:
         old_mcp_target_servers = old_mcp_target_servers or {}

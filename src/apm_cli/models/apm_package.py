@@ -13,6 +13,8 @@ from typing import Any
 
 import yaml
 
+from ..core.apm_yml import parse_targets_field
+from ..core.target_catalog import normalize_target_name
 from ..core.target_detection import parse_target_field
 from .dependency import (
     DependencyReference,
@@ -257,6 +259,12 @@ class APMPackage:
         # re-validate via parse_targets_field with the same dict shape it sees from
         # raw apm.yml. None means the user did not declare 'targets:' at all.
     )
+    canonical_targets: tuple[str, ...] = ()
+    """Validated target names consumed by compile, install, and pack.
+
+    ``target`` and ``targets`` remain compatibility projections of the
+    author-facing spellings. Runtime consumers must use this tuple.
+    """
     type: PackageContentType | None = (
         None  # Package content type: instructions, skill, hybrid, or prompts
     )
@@ -274,6 +282,21 @@ class APMPackage:
     # Keys are package handles with pinned version; values map exec type
     # to boolean (e.g. ``{"owner/repo#v1.0": {"hooks": true}}``).
     allow_executables: dict[str, dict[str, bool]] | None = None
+
+    def __post_init__(self) -> None:
+        """Derive the canonical target projection for compatibility callers."""
+        if self.canonical_targets:
+            return
+        raw_targets: list[str] = []
+        if self.targets is not None:
+            raw_targets.extend(self.targets)
+        elif isinstance(self.target, list):
+            raw_targets.extend(self.target)
+        elif isinstance(self.target, str):
+            raw_targets.append(self.target)
+        self.canonical_targets = tuple(
+            name if name == "all" else normalize_target_name(name) for name in raw_targets
+        )
 
     @classmethod
     def _parse_dependency_dict(cls, raw_deps: dict, label: str = "") -> dict:
@@ -477,25 +500,39 @@ class APMPackage:
         # string like ``target: "claude,copilot"`` resolves identically to
         # ``--target claude,copilot`` and unknown tokens fail at parse time
         # (see apm_cli.core.target_detection.parse_target_field).
-        target_value = parse_target_field(
-            data.get("target"),
-            source_path=apm_yml_path,
-        )
-
-        # Plural 'targets:' field is stored raw (no canonical validation here)
-        # so the MCP install gate at mcp_integrator._gate_project_scoped_runtimes
-        # can re-run parse_targets_field on a dict that mirrors apm.yml shape
-        # and surface the same conflict / empty-list errors uniformly. Without
-        # this passthrough, the call site at commands/install.py would silently
-        # bypass the targets whitelist for any user on the modern plural form
-        # (#1335 regression caught in PR #1336 audit).
+        target_value = None
         targets_value: list[str] | None = None
-        if "targets" in data and data["targets"] is not None:
-            raw_targets = data["targets"]
-            if isinstance(raw_targets, list):
-                targets_value = [str(t).strip() for t in raw_targets if str(t).strip()]
-            else:
-                targets_value = [str(raw_targets).strip()]
+        if "targets" in data and "target" in data:
+            target_value = parse_target_field(
+                data.get("target"),
+                source_path=apm_yml_path,
+            )
+            raw_targets = data.get("targets")
+            targets_value = (
+                [str(item).strip() for item in raw_targets if str(item).strip()]
+                if isinstance(raw_targets, list)
+                else [str(raw_targets).strip()]
+            )
+            canonical_targets = ()
+        elif "targets" in data:
+            targets_value = parse_targets_field(data)
+            canonical_targets = tuple(targets_value)
+        else:
+            target_value = parse_target_field(
+                data.get("target"),
+                source_path=apm_yml_path,
+            )
+            parsed_target_values = (
+                target_value
+                if isinstance(target_value, list)
+                else [target_value]
+                if isinstance(target_value, str)
+                else []
+            )
+            canonical_targets = tuple(
+                name if name == "all" else normalize_target_name(name)
+                for name in parsed_target_values
+            )
 
         result = cls(
             name=data["name"],
@@ -510,6 +547,7 @@ class APMPackage:
             source_path=resolved_source,
             target=target_value,
             targets=targets_value,
+            canonical_targets=canonical_targets,
             type=pkg_type,
             includes=includes,
             registries=registries,
@@ -583,6 +621,48 @@ class APMPackage:
             for dep in (self.dev_dependencies.get("lsp") or [])
             if isinstance(dep, LSPDependency)
         ]
+
+
+def canonical_package_targets(package: object) -> tuple[str, ...]:
+    """Return canonical targets for packages and compatibility stand-ins."""
+    canonical = getattr(package, "canonical_targets", ())
+    if isinstance(canonical, (tuple, list)) and canonical:
+        return tuple(canonical)
+    plural = getattr(package, "targets", None)
+    if isinstance(plural, list) and plural:
+        return tuple(name if name == "all" else normalize_target_name(name) for name in plural)
+    singular = getattr(package, "target", None)
+    values = singular if isinstance(singular, list) else [singular]
+    return tuple(
+        name if name == "all" else normalize_target_name(name)
+        for name in values
+        if isinstance(name, str) and name
+    )
+
+
+def canonical_package_target_config(package: object) -> dict[str, object]:
+    """Project canonical targets into the compatibility config shape."""
+    canonical = canonical_package_targets(package)
+    if not canonical:
+        return {}
+    if isinstance(package, APMPackage):
+        return {"targets": list(canonical)}
+    plural = getattr(package, "targets", None)
+    if isinstance(plural, list):
+        return {"targets": list(canonical)}
+    singular = getattr(package, "target", None)
+    if isinstance(singular, str) and len(canonical) == 1:
+        return {"target": singular}
+    return {"targets": list(canonical)}
+
+
+def package_target_selection(package: APMPackage) -> str | list[str] | None:
+    """Return pack-compatible selection from the canonical package owner."""
+    if package.targets is not None:
+        return list(package.canonical_targets)
+    if package.target is not None:
+        return package.target
+    return list(package.canonical_targets) or None
 
 
 @dataclass

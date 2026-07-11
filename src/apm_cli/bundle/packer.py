@@ -93,7 +93,9 @@ def pack_bundle(
         package = APMPackage.from_apm_yml(apm_yml_path)
         pkg_name = package.name
         pkg_version = package.version or "0.0.0"
-        config_target = package.target
+        from apm_cli.models.apm_package import package_target_selection
+
+        config_target = package_target_selection(package)
 
         # HYBRID author guard: apm.yml.description and SKILL.md
         # description serve different consumers (human-facing CLI/search
@@ -141,7 +143,7 @@ def pack_bundle(
         # List from CLI (e.g. --target claude,copilot) passes through directly
         effective_target = target
     elif isinstance(config_target, list) and target is None:
-        # List from apm.yml target: [claude, copilot]
+        # Canonical list from either apm.yml target spelling.
         effective_target = config_target
     else:
         effective_target, _reason = detect_target(

@@ -415,6 +415,13 @@ def _resolve_targets_by_scope(
             parts = [t.strip() for t in raw_override.split(",") if t.strip()]
         else:
             parts = list(raw_override)
+        from apm_cli.core.target_catalog import expand_all
+
+        parts = [
+            expanded
+            for part in parts
+            for expanded in (expand_all("install") if part == "all" else (part,))
+        ]
         # Multi-token CLI parsing returns runtime aliases; convert them before filtering.
         parts = _normalize_runtime_target_aliases(parts)
         parts = [p for p in parts if p in _CANONICAL]
@@ -521,6 +528,10 @@ def run(ctx: InstallContext) -> None:
     # Resolve effective explicit target: CLI --target wins, then apm.yml,
     # then user-scoped config default target.
     _explicit = ctx.target_override or config_target or None
+    if _explicit == "all":
+        from apm_cli.core.target_catalog import expand_all
+
+        _explicit = list(expand_all("install"))
 
     # ------------------------------------------------------------------
     # Deprecation warning for legacy '--target agents' alias (cli-review §1)

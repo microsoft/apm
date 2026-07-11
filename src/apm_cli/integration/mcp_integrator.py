@@ -1103,6 +1103,15 @@ class MCPIntegrator:
             return out
 
         # --- step 3 (project scope): delegate to the v2 resolver -------
+        if flag is not None:
+            project_tokens = flag if isinstance(flag, list) else [flag]
+            if "all" in project_tokens:
+                from apm_cli.core.target_catalog import expand_all
+
+                flag = [
+                    RUNTIME_TO_CANONICAL_TARGET.get(target, target)
+                    for target in expand_all("install")
+                ]
         from apm_cli.core.errors import (
             AmbiguousHarnessError,
             NoHarnessError,

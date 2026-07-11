@@ -47,18 +47,14 @@ def install_governance(targets: list[TargetProfile]) -> tuple[set[str], set[str]
     user-machine targets (``copilot-app`` -> ``copilot-app-db://``,
     ``copilot-cowork`` -> ``cowork://``).
     """
-    from apm_cli.integration.copilot_app_db import COPILOT_APP_URI_SCHEME
-    from apm_cli.integration.copilot_cowork_paths import COWORK_URI_SCHEME
-
     file_prefixes: set[str] = set()
     uri_schemes: set[str] = set()
+    from apm_cli.integration.targets import target_lockfile_uri_schemes
+
     for target in targets or []:
-        name = getattr(target, "name", None)
-        if name == "copilot-app":
-            uri_schemes.add(COPILOT_APP_URI_SCHEME)
-            continue
-        if name == "copilot-cowork":
-            uri_schemes.add(COWORK_URI_SCHEME)
+        target_schemes = target_lockfile_uri_schemes(target)
+        if target_schemes:
+            uri_schemes.update(target_schemes)
             continue
         root = getattr(target, "root_dir", None)
         if root and str(root).rstrip("/") != ".agents":

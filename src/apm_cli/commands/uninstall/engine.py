@@ -498,7 +498,7 @@ def _sync_integrations_after_uninstall(
     _integrators = {name: entry.integrator_class() for name, entry in _dispatch.items()}
 
     # Resolve targets once -- used for both Phase 1 removal and Phase 2 re-integration.
-    config_target = apm_package.target
+    config_target = list(apm_package.canonical_targets)
     _explicit = config_target or None
     _resolved_targets = resolve_targets(
         project_root, user_scope=user_scope, explicit_target=_explicit
@@ -607,7 +607,7 @@ def _sync_integrations_after_uninstall(
     # Scan sync_managed DIRECTLY for copilot-app-db:// entries.
     # The copilot-app target is opt-in: resolve_targets() excludes it from the
     # default user-scope set unless --target copilot-app was passed at install
-    # time and recorded on apm_package.target.  Without this scan, prompts
+    # time and recorded on the package's canonical target list. Without this scan, prompts
     # deployed to ~/.copilot/data.db would never be deleted on uninstall
     # because the per-target loop above does not iterate copilot-app.
     if sync_managed:

@@ -246,6 +246,15 @@ class TargetProfile:
     install log falls back to the generic ``"{root}/{subdir}/"`` formula.
     """
 
+    external_locator_encoder: Callable[[Path, Path], str] | None = None
+    """Encode managed-root paths that require a native lockfile URI."""
+
+    lockfile_uri_schemes: tuple[str, ...] = ()
+    """URI prefixes governed by this target during reconciliation."""
+
+    warn_unsupported_primitives: bool = False
+    """Warn when a package contains primitives omitted by this profile."""
+
     @property
     def name(self) -> str:
         """Return the canonical native target name."""
@@ -325,6 +334,13 @@ class TargetProfile:
             )
         base = project_root / self.root_dir
         return base.joinpath(*parts) if parts else base
+
+    def encode_external_locator(self, path: Path) -> str | None:
+        """Encode a managed-root path through the target adapter."""
+        deploy_root = self.managed_deploy_root
+        if self.external_locator_encoder is None or deploy_root is None:
+            return None
+        return self.external_locator_encoder(path, deploy_root)
 
     def for_scope(self, user_scope: bool = False) -> TargetProfile | None:
         """Return a scope-resolved copy of this profile.
@@ -431,6 +447,20 @@ class TargetProfile:
             filtered = merged
 
         return replace(self, root_dir=new_root, primitives=filtered)
+
+
+def _encode_cowork_locator(path: Path, deploy_root: Path) -> str:
+    """Translate a Cowork path through its native target adapter."""
+    from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
+
+    return to_lockfile_path(path, deploy_root)
+
+
+def _encode_copilot_app_locator(path: Path) -> str:
+    """Translate an app workflow row through its native target adapter."""
+    from apm_cli.integration.copilot_app_db import to_lockfile_uri
+
+    return to_lockfile_uri(path.name)
 
 
 # ------------------------------------------------------------------
@@ -834,6 +864,11 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=False,
         user_supported=True,
         user_root_resolver=lambda: _resolve_copilot_cowork_root(),
+        external_locator_encoder=lambda path, deploy_root: _encode_cowork_locator(
+            path, deploy_root
+        ),
+        lockfile_uri_schemes=("cowork://",),
+        warn_unsupported_primitives=True,
     ),
     # GitHub Copilot desktop App -- experimental, user-scope only.
     # Prompts whose frontmatter carries workflow-shape keys (``interval``,
@@ -860,8 +895,66 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported=True,
         user_root_resolver=lambda: _resolve_copilot_app_root(),
         scope_invariant_resolver=True,
+        external_locator_encoder=lambda path, _deploy_root: _encode_copilot_app_locator(path),
+        lockfile_uri_schemes=("copilot-app-db://",),
     ),
 }
+
+
+def encode_external_target_locator(target: object, path: Path) -> str | None:
+    """Encode an external path using profile metadata.
+
+    Lightweight target stand-ins used by compatibility callers inherit the
+    canonical profile's adapter while supplying their own managed root.
+    """
+    if isinstance(target, TargetProfile):
+        return target.encode_external_locator(path)
+    name = getattr(target, "name", None)
+    profile = KNOWN_TARGETS.get(name) if isinstance(name, str) else None
+    deploy_root = getattr(target, "managed_deploy_root", None)
+    if (
+        profile is None
+        or profile.external_locator_encoder is None
+        or not isinstance(deploy_root, Path)
+    ):
+        return None
+    return profile.external_locator_encoder(path, deploy_root)
+
+
+def target_lockfile_uri_schemes(target: object) -> tuple[str, ...]:
+    """Return governed URI schemes from canonical target metadata."""
+    if isinstance(target, TargetProfile):
+        return target.lockfile_uri_schemes
+    name = getattr(target, "name", None)
+    profile = KNOWN_TARGETS.get(name) if isinstance(name, str) else None
+    return profile.lockfile_uri_schemes if profile is not None else ()
+
+
+def target_warns_unsupported_primitives(target: object) -> bool:
+    """Return the unsupported-primitive warning capability."""
+    if isinstance(target, TargetProfile):
+        return target.warn_unsupported_primitives
+    name = getattr(target, "name", None)
+    profile = KNOWN_TARGETS.get(name) if isinstance(name, str) else None
+    return bool(profile and profile.warn_unsupported_primitives)
+
+
+def target_supports_primitive(target: object, primitive: str) -> bool:
+    """Read primitive support from a concrete or lightweight profile."""
+    primitives = getattr(target, "primitives", None)
+    if isinstance(primitives, dict):
+        return primitive in primitives
+    name = getattr(target, "name", None)
+    profile = KNOWN_TARGETS.get(name) if isinstance(name, str) else None
+    return bool(profile and profile.supports(primitive))
+
+
+def target_name_for_locator(locator: str) -> str | None:
+    """Resolve a native target name from a registered locator URI."""
+    for profile in KNOWN_TARGETS.values():
+        if any(locator.startswith(scheme) for scheme in profile.lockfile_uri_schemes):
+            return profile.name
+    return None
 
 
 def apply_legacy_skill_paths(profiles: list[TargetProfile]) -> list[TargetProfile]:

@@ -82,6 +82,9 @@ jobs:
     - name: Lint - auth-protocol boundary (#1212 anti-regression)
       run: bash scripts/lint-auth-signals.sh
 
+    - name: Lint - architecture authority boundaries
+      run: bash scripts/lint-architecture-boundaries.sh
+
   # Linux-only for PR feedback. Full platform matrix (incl. macOS + Windows) runs post-merge in build-release.yml.
   #
   # Two-way sharded with pytest-split, mirroring the pattern proven in
@@ -308,4 +311,3 @@ jobs:
       # .agents/skills/ content could silently diverge from source (#1716).
       - name: apm audit --ci
         run: uv run apm audit --ci
-

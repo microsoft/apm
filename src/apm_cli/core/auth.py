@@ -37,12 +37,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple, TypeVar
 
+from apm_cli.core.host_providers import (
+    HOST_PROVIDERS,
+    classify_host_provider,
+)
 from apm_cli.core.token_manager import GitHubTokenManager
 from apm_cli.utils.github_host import (
     default_host,
     is_azure_devops_hostname,
     is_gitlab_hostname,
-    is_valid_fqdn,
 )
 
 if TYPE_CHECKING:
@@ -254,84 +257,12 @@ class AuthResolver:
         ``host_type`` is an explicit manifest hint for hosts whose names do
         not reveal the backing service.
         """
-        h = host.lower()
-        host_type_value = (host_type or "").strip().lower()
-
-        if h == "github.com":
-            return HostInfo(
-                host=host,
-                kind="github",
-                has_public_repos=True,
-                api_base="https://api.github.com",
-                port=port,
-            )
-
-        if h.endswith(".ghe.com"):
-            return HostInfo(
-                host=host,
-                kind="ghe_cloud",
-                has_public_repos=False,
-                api_base=f"https://{host}/api/v3",
-                port=port,
-            )
-
-        if is_azure_devops_hostname(host):
-            return HostInfo(
-                host=host,
-                kind="ado",
-                has_public_repos=True,
-                api_base="https://dev.azure.com",
-                port=port,
-            )
-
-        if host_type_value == "gitlab":
-            api_base = "https://gitlab.com/api/v4" if h == "gitlab.com" else f"https://{h}/api/v4"
-            return HostInfo(
-                host=host,
-                kind="gitlab",
-                has_public_repos=True,
-                api_base=api_base,
-                port=port,
-            )
-        if host_type_value:
-            raise ValueError(
-                f"Unsupported dependency host type: {host_type_value}. Supported values: gitlab"
-            )
-
-        # GHES: GITHUB_HOST is set to a non-github.com, non-ghe.com FQDN
-        ghes_host = os.environ.get("GITHUB_HOST", "").lower()
-        if (
-            ghes_host
-            and ghes_host == h
-            and ghes_host not in {"github.com", "gitlab.com"}
-            and not ghes_host.endswith(".ghe.com")
-        ):
-            if is_valid_fqdn(ghes_host):
-                return HostInfo(
-                    host=host,
-                    kind="ghes",
-                    has_public_repos=True,
-                    api_base=f"https://{host}/api/v3",
-                    port=port,
-                )
-
-        # GitLab (SaaS + env-configured self-managed) -- after GHES per spec (no silent GHES -> GitLab)
-        if is_gitlab_hostname(host):
-            api_base = "https://gitlab.com/api/v4" if h == "gitlab.com" else f"https://{h}/api/v4"
-            return HostInfo(
-                host=host,
-                kind="gitlab",
-                has_public_repos=True,
-                api_base=api_base,
-                port=port,
-            )
-
-        # Generic FQDN (Bitbucket, self-hosted non-GitLab, etc.)
+        provider = classify_host_provider(host, host_type=host_type)
         return HostInfo(
             host=host,
-            kind="generic",
-            has_public_repos=True,
-            api_base=f"https://{host}/api/v3",
+            kind=provider.kind,
+            has_public_repos=provider.has_public_repos,
+            api_base=provider.api_base(host.lower()),
             port=port,
         )
 
@@ -979,13 +910,7 @@ class AuthResolver:
 
     @staticmethod
     def _purpose_for_host(host_info: HostInfo) -> str:
-        if host_info.kind == "ado":
-            return "ado_modules"
-        if host_info.kind == "gitlab":
-            return "gitlab_modules"
-        if host_info.kind == "generic":
-            return "generic_modules"
-        return "modules"
+        return HOST_PROVIDERS[host_info.kind].credential_purpose
 
     def _identify_env_source(self, purpose: str) -> str:
         """Return the name of the first env var that matched for *purpose*."""

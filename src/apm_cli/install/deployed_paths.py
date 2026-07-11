@@ -17,25 +17,20 @@ def deployed_path_entry(
     """Return the compatibility path view produced by the canonical codec."""
     from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
     from apm_cli.core.scope import InstallScope
+    from apm_cli.integration.targets import encode_external_target_locator
 
     def _try_target(tgts) -> str | None:
         for _t in tgts:
             deploy_root = _t.managed_deploy_root
-            if deploy_root is not None and _t.name in {
-                "copilot-app",
-                "copilot-cowork",
-            }:
-                if _t.name == "copilot-app":
-                    from apm_cli.integration.copilot_app_db import to_lockfile_uri
-
-                    try:
-                        return to_lockfile_uri(target_path.name)
-                    except ValueError:
-                        pass
-                from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
-
-                if _t.name == "copilot-cowork":
-                    return to_lockfile_path(target_path, deploy_root)
+            if deploy_root is not None:
+                try:
+                    encoded = encode_external_target_locator(_t, target_path)
+                except PathTraversalError:
+                    raise
+                except ValueError:
+                    encoded = None
+                if encoded is not None:
+                    return encoded
             absolute_static_root = _t.resolved_deploy_root is None and deploy_root is not None
             if absolute_static_root:
                 try:

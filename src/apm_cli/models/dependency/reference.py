@@ -920,21 +920,19 @@ class DependencyReference:
     def _parse_host_type(raw: object) -> str | None:
         """Parse the optional object-form ``type`` host-kind hint.
 
-        Currently only ``gitlab`` is accepted; any other value fails closed with
-        a ``ValueError``. This is a deliberate gate, not an oversight: future
-        host kinds (e.g. ``gitea``, ``bitbucket``) would extend the accepted set
-        here and thread a matching branch through ``AuthResolver.classify_host``
-        and ``host_backends.backend_for``. Until those backends exist, rejecting
-        unknown hints keeps classification explicit rather than silently
-        mis-routing a bespoke host to the GitHub path.
+        Values come from the canonical host-provider registry. Unknown hints
+        fail closed rather than silently selecting a generic transport.
         """
         if raw is None:
             return None
         if not isinstance(raw, str) or not raw.strip():
             raise ValueError("'type' field must be a non-empty string")
         value = raw.strip().lower()
-        if value != "gitlab":
-            raise ValueError(f"'type' field only supports 'gitlab'; got {raw!r}")
+        from apm_cli.core.host_providers import accepted_host_types
+
+        supported = accepted_host_types()
+        if value not in supported:
+            raise ValueError(f"'type' field supports {', '.join(supported)}; got {raw!r}")
         return value
 
     @classmethod
