@@ -90,6 +90,80 @@ class TestRemoveStaleCharacterisation:
         assert result is None
 
 
+class TestCleanCodexToml:
+    def test_preserves_windows_literal_keys_while_removing_stale_server(self, tmp_path):
+        import tomlkit
+
+        from apm_cli.integration.mcp_integrator import _clean_toml_mcp_config
+
+        config_path = tmp_path / "config.toml"
+        unrelated = (
+            "[projects.'c:\\src\\projectdir\\subdir']\n"
+            'trust_level = "trusted"\n'
+            "\n"
+            "[desktop.open-in-target-preferences.perPath]\n"
+            "'C:\\Users\\me\\Documents\\Playground' = \"fileManager\"\n"
+        )
+        config_path.write_text(
+            unrelated
+            + "\n"
+            + "[mcp_servers.stale-server]\n"
+            + 'command = "old"\n'
+            + "\n"
+            + "[mcp_servers.keep-server]\n"
+            + 'command = "keep"\n',
+            encoding="utf-8",
+        )
+
+        removed = _clean_toml_mcp_config(
+            config_path,
+            {"stale-server"},
+            "Codex CLI config",
+            use_rich=False,
+        )
+
+        updated = config_path.read_text(encoding="utf-8")
+        assert removed == 1
+        assert unrelated in updated
+        parsed = tomlkit.parse(updated)
+        assert "stale-server" not in parsed["mcp_servers"]
+        assert parsed["mcp_servers"]["keep-server"]["command"] == "keep"
+
+    def test_skips_non_table_mcp_servers_without_rewriting(self, tmp_path):
+        from apm_cli.integration.mcp_integrator import _clean_toml_mcp_config
+
+        config_path = tmp_path / "config.toml"
+        original = 'mcp_servers = ["stale-server"]\n'
+        config_path.write_text(original, encoding="utf-8")
+
+        removed = _clean_toml_mcp_config(
+            config_path,
+            {"stale-server"},
+            "Codex CLI config",
+            use_rich=False,
+        )
+
+        assert removed == 0
+        assert config_path.read_text(encoding="utf-8") == original
+
+    def test_skips_non_utf8_config_without_rewriting(self, tmp_path):
+        from apm_cli.integration.mcp_integrator import _clean_toml_mcp_config
+
+        config_path = tmp_path / "config.toml"
+        original = b"\xff"
+        config_path.write_bytes(original)
+
+        removed = _clean_toml_mcp_config(
+            config_path,
+            {"stale-server"},
+            "Codex CLI config",
+            use_rich=False,
+        )
+
+        assert removed == 0
+        assert config_path.read_bytes() == original
+
+
 class TestRemoveStaleIntelliJ:
     """Fixture-backed coverage for the JetBrains (intellij) stale-cleanup block."""
 

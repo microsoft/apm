@@ -447,3 +447,123 @@ class TestValidateAndAddDevDeps:
             data = yaml.safe_load(f)
         assert "org/prod-pkg" in data["dependencies"]["apm"]
         assert "devDependencies" not in data
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for #2033: devDependencies visible to orphan detection
+# ---------------------------------------------------------------------------
+
+
+class TestGetAllApmDependencies:
+    """Tests for APMPackage.get_all_apm_dependencies() and has_any_apm_dependencies()."""
+
+    def test_returns_union_of_prod_and_dev(self) -> None:
+        """get_all_apm_dependencies returns both prod and dev deps."""
+        pkg = MagicMock(spec=APMPackage)
+        prod_dep = DependencyReference(repo_url="owner/prod-pkg")
+        dev_dep = DependencyReference(repo_url="owner/dev-pkg")
+        pkg.get_apm_dependencies.return_value = [prod_dep]
+        pkg.get_dev_apm_dependencies.return_value = [dev_dep]
+        # Call the real method on the mock
+        result = APMPackage.get_all_apm_dependencies(pkg)
+        assert result == [prod_dep, dev_dep]
+
+    def test_returns_only_prod_when_no_dev(self) -> None:
+        """get_all_apm_dependencies returns prod-only when no dev deps exist."""
+        pkg = MagicMock(spec=APMPackage)
+        prod_dep = DependencyReference(repo_url="owner/prod-pkg")
+        pkg.get_apm_dependencies.return_value = [prod_dep]
+        pkg.get_dev_apm_dependencies.return_value = []
+        result = APMPackage.get_all_apm_dependencies(pkg)
+        assert result == [prod_dep]
+
+    def test_returns_only_dev_when_no_prod(self) -> None:
+        """get_all_apm_dependencies returns dev-only when no prod deps exist."""
+        pkg = MagicMock(spec=APMPackage)
+        dev_dep = DependencyReference(repo_url="owner/dev-pkg")
+        pkg.get_apm_dependencies.return_value = []
+        pkg.get_dev_apm_dependencies.return_value = [dev_dep]
+        result = APMPackage.get_all_apm_dependencies(pkg)
+        assert result == [dev_dep]
+
+    def test_has_any_true_for_dev_only(self) -> None:
+        """has_any_apm_dependencies returns True when only dev deps exist."""
+        pkg = MagicMock(spec=APMPackage)
+        pkg.get_apm_dependencies.return_value = []
+        pkg.get_dev_apm_dependencies.return_value = [DependencyReference(repo_url="owner/dev-pkg")]
+        result = APMPackage.has_any_apm_dependencies(pkg)
+        assert result is True
+
+    def test_has_any_false_when_empty(self) -> None:
+        """has_any_apm_dependencies returns False when no deps at all."""
+        pkg = MagicMock(spec=APMPackage)
+        pkg.get_apm_dependencies.return_value = []
+        pkg.get_dev_apm_dependencies.return_value = []
+        result = APMPackage.has_any_apm_dependencies(pkg)
+        assert result is False
+
+
+class TestOrphanDetectionIncludesDevDeps:
+    """Regression tests for #2033: orphan detection must include devDependencies."""
+
+    def test_check_no_orphans_passes_for_dev_dep(self) -> None:
+        """_check_no_orphans should not flag a dev dependency as orphaned."""
+        from apm_cli.policy.ci_checks import _check_no_orphans
+
+        manifest = MagicMock(spec=APMPackage)
+        manifest.get_apm_dependencies.return_value = []
+        manifest.get_dev_apm_dependencies.return_value = [
+            DependencyReference(repo_url="owner/dev-pkg")
+        ]
+        manifest.get_all_apm_dependencies.return_value = APMPackage.get_all_apm_dependencies(
+            manifest
+        )
+
+        lock = MagicMock(spec=LockFile)
+        lock.dependencies = {
+            "owner/dev-pkg": LockedDependency(
+                repo_url="owner/dev-pkg", is_dev=True, resolved_by=None
+            ),
+        }
+
+        result = _check_no_orphans(manifest, lock)
+        assert result.passed is True
+
+    def test_check_lockfile_exists_recognises_dev_only_deps(self, tmp_path) -> None:
+        """_check_lockfile_exists should not say 'no dependencies' for dev-only projects."""
+        from apm_cli.policy.ci_checks import _check_lockfile_exists
+
+        manifest = MagicMock(spec=APMPackage)
+        manifest.has_apm_dependencies.return_value = False
+        manifest.has_any_apm_dependencies.return_value = True
+        manifest.get_mcp_dependencies.return_value = []
+        manifest.get_all_mcp_dependencies.return_value = []
+
+        # No lockfile on disk -- should say "lockfile missing", not "no deps"
+        result = _check_lockfile_exists(tmp_path, manifest)
+        assert result.passed is False
+        assert "missing" in result.message.lower()
+
+    def test_check_ref_consistency_detects_dev_dep_mismatch(self) -> None:
+        """_check_ref_consistency should detect ref mismatches in dev deps."""
+        from apm_cli.policy.ci_checks import _check_ref_consistency
+
+        dev_dep = DependencyReference(repo_url="owner/dev-pkg", reference="v2.0")
+        manifest = MagicMock(spec=APMPackage)
+        manifest.get_apm_dependencies.return_value = []
+        manifest.get_dev_apm_dependencies.return_value = [dev_dep]
+        manifest.get_all_apm_dependencies.return_value = APMPackage.get_all_apm_dependencies(
+            manifest
+        )
+
+        lock = MagicMock(spec=LockFile)
+        lock.get_dependency.return_value = LockedDependency(
+            repo_url="owner/dev-pkg",
+            is_dev=True,
+            resolved_ref="v1.0",
+            resolved_by=None,
+        )
+
+        result = _check_ref_consistency(manifest, lock)
+        assert result.passed is False
+        assert "ref mismatch" in result.message.lower()

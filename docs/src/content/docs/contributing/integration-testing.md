@@ -129,7 +129,6 @@ environment end-to-end; for local iteration prefer the direct
 3. **E2E golden scenario tests** (using built binaries)
 4. Create GitHub Release
 5. Publish to PyPI 
-6. Update Homebrew Formula
 
 **Manual workflow dispatch:**
 - Test builds (uploads as workflow artifacts)
@@ -159,9 +158,10 @@ The workflow ensures quality gates at each step:
 3. **release-validation** job - Final shipped-binary validation
 4. **create-release** job - GitHub release creation
 5. **publish-pypi** job - PyPI package publication
-6. **update-homebrew** job - Homebrew formula update
 
 Each stage must succeed before proceeding to the next, ensuring only fully validated releases reach users.
+
+The [`microsoft/homebrew-apm`](https://github.com/microsoft/homebrew-apm) tap updates independently: it polls the latest APM release and commits formula updates with its own repository-scoped `GITHUB_TOKEN`. The release pipeline does not hold a cross-repository Homebrew credential.
 
 ### Test Matrix
 
@@ -196,7 +196,7 @@ Promotion integration tests run on:
 - ✅ Parameter substitution works correctly
 - ✅ MCP integration functions (GitHub tools)
 - ✅ Binary artifacts work across platforms
-- ✅ Release pipeline integrity (GitHub Release → PyPI → Homebrew)
+- ✅ Release pipeline integrity (GitHub Release → PyPI)
 
 ## Benefits
 
@@ -219,7 +219,6 @@ Promotion integration tests run on:
 - Guarantees shipped releases work end-to-end
 - Users can trust the README golden scenario
 - Cross-platform binary verification
-- Automatic Homebrew formula updates
 
 ## Debugging Test Failures
 
@@ -258,7 +257,3 @@ Promotion integration tests run on:
    so contributors without those credentials still get a clean
    `SKIPPED` rather than a hard failure.
 3. Keep tests focused and fast.
-
----
-
-This testing strategy ensures we ship with confidence while maintaining fast development cycles.

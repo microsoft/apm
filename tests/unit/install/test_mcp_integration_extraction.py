@@ -58,6 +58,7 @@ def _base_kwargs(**overrides):
         lock_path=Path("/nonexistent/apm.lock.yaml"),
         old_mcp_servers=set(),
         old_mcp_configs={},
+        old_mcp_provenance={},
         project_root=Path("/fake/project"),
         user_scope=False,
         should_install=True,
@@ -71,14 +72,19 @@ class TestRunMcpIntegrationInstallBranch:
     """``should_install=True`` and ``mcp_deps`` non-empty."""
 
     @patch(_PATCH_TARGET)
-    def test_installs_and_updates_lockfile(self, mock_mcp):
+    def test_installs_and_updates_lockfile(self, mock_mcp, tmp_path: Path):
         dep = MCPDependency(name="io.github.acme/server", transport="stdio")
         mock_mcp.deduplicate.side_effect = lambda x: x
         mock_mcp.install.return_value = 1
         mock_mcp.get_server_names.return_value = {"io.github.acme/server"}
         mock_mcp.get_server_configs.return_value = {"io.github.acme/server": {"name": "x"}}
+        mock_mcp.get_server_provenance.return_value = {
+            "io.github.acme/server": "io.github.acme/package"
+        }
 
-        count, apm_config = run_mcp_integration(**_base_kwargs(mcp_deps=[dep]))
+        count, apm_config = run_mcp_integration(
+            **_base_kwargs(mcp_deps=[dep], project_root=tmp_path)
+        )
 
         assert count == 1
         assert apm_config == {"scripts": {}}
@@ -89,22 +95,25 @@ class TestRunMcpIntegrationInstallBranch:
             {"io.github.acme/server"},
             Path("/nonexistent/apm.lock.yaml"),
             mcp_configs={"io.github.acme/server": {"name": "x"}},
+            mcp_config_provenance={"io.github.acme/server": "io.github.acme/package"},
         )
         mock_mcp.remove_stale.assert_not_called()
 
     @patch(_PATCH_TARGET)
-    def test_removes_stale_servers_no_longer_declared(self, mock_mcp):
+    def test_removes_stale_servers_no_longer_declared(self, mock_mcp, tmp_path: Path):
         dep = MCPDependency(name="io.github.acme/new-server", transport="stdio")
         mock_mcp.deduplicate.side_effect = lambda x: x
         mock_mcp.install.return_value = 1
         mock_mcp.get_server_names.return_value = {"io.github.acme/new-server"}
         mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
 
         run_mcp_integration(
             **_base_kwargs(
                 mcp_deps=[dep],
                 old_mcp_servers={"io.github.acme/orphan-server"},
                 old_mcp_configs={"io.github.acme/orphan-server": {"name": "orphan"}},
+                project_root=tmp_path,
             )
         )
 
@@ -113,7 +122,7 @@ class TestRunMcpIntegrationInstallBranch:
         assert stale_arg == {"io.github.acme/orphan-server"}
 
     @patch(_PATCH_TARGET)
-    def test_forwards_apm_config_targets_key_when_declared(self, mock_mcp):
+    def test_forwards_apm_config_targets_key_when_declared(self, mock_mcp, tmp_path: Path):
         """#1335: only the targets-key the user actually declared is
         forwarded, matching the original inline block's behaviour."""
         dep = MCPDependency(name="io.github.acme/server", transport="stdio")
@@ -121,24 +130,30 @@ class TestRunMcpIntegrationInstallBranch:
         mock_mcp.install.return_value = 1
         mock_mcp.get_server_names.return_value = {"io.github.acme/server"}
         mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
 
         pkg = _make_apm_package(scripts={"build": "echo hi"}, targets=["claude", "copilot"])
-        _count, apm_config = run_mcp_integration(**_base_kwargs(apm_package=pkg, mcp_deps=[dep]))
+        _count, apm_config = run_mcp_integration(
+            **_base_kwargs(apm_package=pkg, mcp_deps=[dep], project_root=tmp_path)
+        )
 
         assert apm_config == {"scripts": {"build": "echo hi"}, "targets": ["claude", "copilot"]}
         install_kwargs = mock_mcp.install.call_args.kwargs
         assert install_kwargs["apm_config"] == apm_config
 
     @patch(_PATCH_TARGET)
-    def test_forwards_singular_target_key_when_declared(self, mock_mcp):
+    def test_forwards_singular_target_key_when_declared(self, mock_mcp, tmp_path: Path):
         dep = MCPDependency(name="io.github.acme/server", transport="stdio")
         mock_mcp.deduplicate.side_effect = lambda x: x
         mock_mcp.install.return_value = 1
         mock_mcp.get_server_names.return_value = {"io.github.acme/server"}
         mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
 
         pkg = _make_apm_package(target="claude")
-        _count, apm_config = run_mcp_integration(**_base_kwargs(apm_package=pkg, mcp_deps=[dep]))
+        _count, apm_config = run_mcp_integration(
+            **_base_kwargs(apm_package=pkg, mcp_deps=[dep], project_root=tmp_path)
+        )
 
         assert apm_config == {"scripts": {}, "target": "claude"}
         assert "targets" not in apm_config
@@ -171,7 +186,10 @@ class TestRunMcpIntegrationEmptyDepsBranch:
         mock_mcp.remove_stale.assert_called_once()
         assert mock_mcp.remove_stale.call_args.args[0] == {"io.github.acme/orphan"}
         mock_mcp.update_lockfile.assert_called_once_with(
-            set(), Path("/nonexistent/apm.lock.yaml"), mcp_configs={}
+            set(),
+            Path("/nonexistent/apm.lock.yaml"),
+            mcp_configs={},
+            mcp_config_provenance={},
         )
 
 
@@ -186,6 +204,7 @@ class TestRunMcpIntegrationRestoreBranch:
                 should_install=False,
                 old_mcp_servers={"io.github.acme/kept"},
                 old_mcp_configs={"io.github.acme/kept": {"name": "kept"}},
+                old_mcp_provenance={"io.github.acme/kept": "io.github.acme/pkg"},
             )
         )
 
@@ -193,6 +212,7 @@ class TestRunMcpIntegrationRestoreBranch:
             {"io.github.acme/kept"},
             Path("/nonexistent/apm.lock.yaml"),
             mcp_configs={"io.github.acme/kept": {"name": "kept"}},
+            mcp_config_provenance={"io.github.acme/kept": "io.github.acme/pkg"},
         )
         mock_mcp.install.assert_not_called()
         mock_mcp.remove_stale.assert_not_called()
@@ -235,6 +255,7 @@ class TestRunMcpIntegrationPolicyBlock:
         mock_mcp.install.return_value = 1
         mock_mcp.get_server_names.return_value = {"io.github.untrusted/evil-transitive"}
         mock_mcp.get_server_configs.return_value = {}
+        mock_mcp.get_server_provenance.return_value = {}
         evil_dep = MCPDependency(name="io.github.untrusted/evil-transitive", transport="stdio")
 
         with patch(

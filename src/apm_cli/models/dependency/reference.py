@@ -33,6 +33,7 @@ from .identity import (
     _path_segment_pattern,
     build_canonical_dependency_string,
     build_dependency_unique_key,
+    normalize_package_repo_url,
 )
 from .object_fields import (
     apply_optional_dependency_fields,
@@ -116,6 +117,17 @@ class DependencyReference:
     marketplace_name: str | None = None
     marketplace_plugin_name: str | None = None
     marketplace_version_spec: str | None = None
+
+    def __post_init__(self) -> None:
+        """Normalize case-insensitive package identity at the model boundary."""
+        self.repo_url = normalize_package_repo_url(
+            self.repo_url,
+            host=self.host,
+            source=self.source,
+            registry_prefix=self.artifactory_prefix,
+            is_local=self.is_local,
+            is_marketplace=self.is_marketplace,
+        )
 
     @property
     def ref_kind(self) -> str | None:

@@ -20,6 +20,7 @@ def run_mcp_integration(  # noqa: PLR0913
     lock_path: Path,
     old_mcp_servers: builtins.set,
     old_mcp_configs: builtins.dict,
+    old_mcp_provenance: builtins.dict,
     project_root: Path,
     user_scope: bool,
     should_install: bool,
@@ -51,6 +52,8 @@ def run_mcp_integration(  # noqa: PLR0913
         lock_path: Path to apm.lock.yaml.
         old_mcp_servers: MCP server names from the lockfile before this run.
         old_mcp_configs: MCP server configs from the lockfile before this run.
+        old_mcp_provenance: Transitive MCP provenance from the lockfile before
+            this run.
         project_root: Project root directory.
         user_scope: If True, write to user-scope runtime config paths.
         should_install: Whether MCP integration should run.
@@ -146,6 +149,7 @@ def run_mcp_integration(  # noqa: PLR0913
         )
         new_mcp_servers = MCPIntegrator.get_server_names(mcp_deps)
         new_mcp_configs = MCPIntegrator.get_server_configs(mcp_deps)
+        new_mcp_provenance = MCPIntegrator.get_server_provenance(mcp_deps)
 
         # Remove stale MCP servers that are no longer needed
         stale_servers = old_mcp_servers - new_mcp_servers
@@ -159,8 +163,13 @@ def run_mcp_integration(  # noqa: PLR0913
                 scope=scope,
             )
 
-        # Persist the new MCP server set and configs in the lockfile
-        MCPIntegrator.update_lockfile(new_mcp_servers, lock_path, mcp_configs=new_mcp_configs)
+        # Persist the new MCP server set, configs, and transitive provenance.
+        MCPIntegrator.update_lockfile(
+            new_mcp_servers,
+            lock_path,
+            mcp_configs=new_mcp_configs,
+            mcp_config_provenance=new_mcp_provenance,
+        )
     elif should_install and not mcp_deps:
         # No MCP deps at all -- remove any old APM-managed servers
         if old_mcp_servers:
@@ -172,11 +181,18 @@ def run_mcp_integration(  # noqa: PLR0913
                 user_scope=user_scope,
                 scope=scope,
             )
-            MCPIntegrator.update_lockfile(builtins.set(), lock_path, mcp_configs={})
+            MCPIntegrator.update_lockfile(
+                builtins.set(), lock_path, mcp_configs={}, mcp_config_provenance={}
+            )
         logger.verbose_detail("No MCP dependencies found in apm.yml")
     elif not should_install and old_mcp_servers:
         # --only=apm: APM install regenerated the lockfile and dropped
         # mcp_servers.  Restore the previous set so it is not lost.
-        MCPIntegrator.update_lockfile(old_mcp_servers, lock_path, mcp_configs=old_mcp_configs)
+        MCPIntegrator.update_lockfile(
+            old_mcp_servers,
+            lock_path,
+            mcp_configs=old_mcp_configs,
+            mcp_config_provenance=old_mcp_provenance,
+        )
 
     return mcp_count, mcp_apm_config
