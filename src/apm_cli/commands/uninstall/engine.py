@@ -480,6 +480,7 @@ def _sync_integrations_after_uninstall(
     When *user_scope* is ``True``, targets are resolved for user-level
     deployment so cleanup and re-integration use the correct paths.
     """
+    from ...install.services import _deployed_path_entry, _skill_bundle_file_entries
     from ...integration.base_integrator import BaseIntegrator
     from ...integration.dispatch import get_dispatch_table
     from ...integration.targets import resolve_targets
@@ -524,6 +525,7 @@ def _sync_integrations_after_uninstall(
         _buckets = None
 
     counts = {entry.counter_key: 0 for entry in _dispatch.values()}
+    package_deployed_files: dict[str, list[str]] = {}
 
     # Phase 1: Remove all APM-deployed files
     # Per-target sync for primitives with sync_for_target
@@ -666,6 +668,8 @@ def _sync_integrations_after_uninstall(
             dependency_ref=dep_ref,
             package_type=result.package_type if result else None,
         )
+        dep_key = dep_ref.get_unique_key()
+        deployed_files = package_deployed_files.setdefault(dep_key, [])
 
         try:
             for _target in _targets:
@@ -673,21 +677,28 @@ def _sync_integrations_after_uninstall(
                     _entry = _dispatch.get(_prim_name)
                     if not _entry or _entry.multi_target:
                         continue
-                    getattr(_integrators[_prim_name], _entry.integrate_method)(
+                    integration_result = getattr(_integrators[_prim_name], _entry.integrate_method)(
                         _target,
                         pkg_info,
                         project_root,
                     )
-            _integrators["skills"].integrate_package_skill(
+                    deployed_files.extend(
+                        _deployed_path_entry(path, project_root, _targets)
+                        for path in integration_result.target_paths
+                    )
+            skill_result = _integrators["skills"].integrate_package_skill(
                 pkg_info,
                 project_root,
                 targets=_targets,
             )
+            for path in skill_result.target_paths:
+                deployed_files.append(_deployed_path_entry(path, project_root, _targets))
+                deployed_files.extend(_skill_bundle_file_entries(path, project_root, _targets))
         except Exception:
             pkg_id = dep_ref.get_identity() if hasattr(dep_ref, "get_identity") else str(dep_ref)
             logger.warning(f"Best-effort re-integration skipped for {pkg_id}")
 
-    return counts
+    return counts, package_deployed_files
 
 
 def _cleanup_stale_mcp(

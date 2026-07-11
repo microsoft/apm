@@ -244,13 +244,37 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
         }
         try:
             apm_package = APMPackage.from_apm_yml(manifest_path)
-            cleaned = _sync_integrations_after_uninstall(
+            cleaned, surviving_deployed_files = _sync_integrations_after_uninstall(
                 apm_package,
                 deploy_root,
                 all_deployed_files,
                 logger,
                 user_scope=scope is InstallScope.USER,
             )
+            if lockfile and surviving_deployed_files:
+                from ...install.phases.lockfile import (
+                    compute_deployed_hashes,
+                    reconcile_cross_package_deployed_files,
+                )
+
+                reconcile_cross_package_deployed_files(surviving_deployed_files)
+                ownership_transferred = False
+                for dep_key, deployed_files in surviving_deployed_files.items():
+                    surviving_dep = lockfile.get_dependency(dep_key)
+                    if surviving_dep is None:
+                        continue
+                    transferred = sorted(all_deployed_files.intersection(deployed_files))
+                    if not transferred:
+                        continue
+                    surviving_dep.deployed_files = list(
+                        dict.fromkeys([*surviving_dep.deployed_files, *transferred])
+                    )
+                    surviving_dep.deployed_file_hashes.update(
+                        compute_deployed_hashes(transferred, deploy_root)
+                    )
+                    ownership_transferred = True
+                if ownership_transferred:
+                    lockfile.write(lockfile_path)
         except Exception as _sync_err:
             # Surface why integration cleanup failed instead of swallowing
             # silently. Previously a bare `except: pass` here masked
