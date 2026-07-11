@@ -14,6 +14,7 @@ from typing import Any
 import yaml
 
 from ..core.deployment_state import DeploymentLedger
+from ..core.host_providers import accepted_host_types
 from ..models.apm_package import DependencyReference
 from ..models.dependency.identity import normalize_package_repo_url
 from ..models.dependency.reference import (
@@ -24,8 +25,58 @@ from ..models.dependency.reference import (
 logger = logging.getLogger(__name__)
 
 _SELF_KEY = "."
-_ALLOWED_HOST_TYPES = {"gitlab"}
+_ALLOWED_HOST_TYPES = set(accepted_host_types())
 _ALLOWED_EXEC_STATUS = {"deployed", "gated_pending_approval", "denied", "absent"}
+SUPPORTED_LOCKFILE_VERSIONS = frozenset({"1", "2"})
+
+
+class LockfileFormatError(ValueError):
+    """Raised when a lockfile container does not match its schema."""
+
+
+class UnsupportedLockfileVersionError(LockfileFormatError):
+    """Raised when a lockfile declares a version this client cannot read."""
+
+
+def _validate_lockfile_container(data: object) -> dict[str, Any]:
+    """Validate version and top-level container shapes before construction."""
+    if not isinstance(data, dict):
+        raise LockfileFormatError("Lockfile root must be a mapping")
+    version = data.get("lockfile_version", "1")
+    if not isinstance(version, str) or version not in SUPPORTED_LOCKFILE_VERSIONS:
+        supported = ", ".join(sorted(SUPPORTED_LOCKFILE_VERSIONS))
+        raise UnsupportedLockfileVersionError(
+            f"Unsupported lockfile version {version!r}; supported versions: {supported}"
+        )
+    list_fields = (
+        "dependencies",
+        "deployments",
+        "mcp_servers",
+        "lsp_servers",
+        "local_deployed_files",
+    )
+    mapping_fields = (
+        "mcp_configs",
+        "mcp_target_servers",
+        "mcp_config_provenance",
+        "lsp_configs",
+        "local_deployed_file_hashes",
+    )
+    for field_name in list_fields:
+        if field_name in data and not isinstance(data[field_name], list):
+            raise LockfileFormatError(f"Lockfile field {field_name!r} must be a list")
+    for field_name in mapping_fields:
+        if field_name in data and not isinstance(data[field_name], dict):
+            raise LockfileFormatError(f"Lockfile field {field_name!r} must be a mapping")
+    for index, dependency in enumerate(data.get("dependencies", [])):
+        if not isinstance(dependency, dict):
+            raise LockfileFormatError(f"Lockfile dependency at index {index} must be a mapping")
+    for target, servers in (data.get("mcp_target_servers") or {}).items():
+        if not isinstance(target, str) or not isinstance(servers, list):
+            raise LockfileFormatError(
+                "Lockfile mcp_target_servers values must be string-to-list mappings"
+            )
+    return data
 
 
 def _normalize_lockfile_host_type(raw: Any) -> str | None:
@@ -698,11 +749,11 @@ class LockFile:
         # parser with a merge-key bomb (the surrounding LockFile.read guard
         # cannot catch a non-terminating safe_load loop -- it can catch the
         # YAMLError this raises instead).
-        data = load_yaml_str(yaml_str)
-        if not data:
-            return cls()
-        if not isinstance(data, dict):
-            return cls()
+        try:
+            loaded = load_yaml_str(yaml_str)
+        except (yaml.YAMLError, ValueError) as exc:
+            raise LockfileFormatError(f"Invalid lockfile YAML: {exc}") from exc
+        data = _validate_lockfile_container(loaded)
         lock = cls(
             lockfile_version=data.get("lockfile_version", "1"),
             generated_at=data.get("generated_at", ""),
@@ -760,8 +811,10 @@ class LockFile:
             return None
         try:
             return cls.from_yaml(path.read_text(encoding="utf-8"))
-        except (yaml.YAMLError, ValueError, KeyError):
-            return None
+        except (LockfileFormatError, UnsupportedLockfileVersionError):
+            raise
+        except (yaml.YAMLError, ValueError, KeyError, TypeError) as exc:
+            raise LockfileFormatError(f"Invalid lockfile at {path}: {exc}") from exc
 
     @classmethod
     def load_or_create(cls, path: Path) -> LockFile:

@@ -1204,6 +1204,23 @@ class HookIntegrator(BaseIntegrator):
                         package=package_name,
                         detail="; ".join(validation.errors),
                     )
+                from apm_cli.integration.targets import KNOWN_TARGETS
+
+                materializations.append(
+                    MaterializationResult(
+                        locator=DeploymentLedgerCodec.locator_for_path(
+                            target_path,
+                            project_root=project_root,
+                            target=KNOWN_TARGETS["copilot"],
+                            scope=InstallScope.PROJECT,
+                        ),
+                        owners=frozenset({package_info.get_canonical_dependency_string()}),
+                        status=MaterializationStatus.FAILED,
+                        content_hash=None,
+                        validation=validation,
+                    )
+                )
+                continue
 
             # Write rewritten JSON
             with open(target_path, "w", encoding="utf-8") as f:

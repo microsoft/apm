@@ -22,7 +22,6 @@ from ..core.target_detection import (
 )
 from ..primitives.discovery import discover_primitives
 from ..primitives.models import PrimitiveCollection
-from ..utils.atomic_io import write_text_lf
 from ..utils.path_security import PathTraversalError, ensure_path_within
 from ..utils.paths import portable_relpath
 from ..version import get_version
@@ -674,12 +673,22 @@ class AgentsCompiler:
         successful_writes = 0
         total_content_entries = len(distributed_result.content_map)  # noqa: F841
 
+        pending_outputs: dict[Path, str] = {}
         for agents_path, content in distributed_result.content_map.items():
             try:
-                self._write_distributed_file(agents_path, content, config)
-                successful_writes += 1
+                pending_outputs[agents_path] = self._prepare_distributed_file(
+                    agents_path, content, config
+                )
             except (OSError, ValueError) as e:
                 self.errors.append(f"Failed to write {agents_path}: {e!s}")
+        if pending_outputs:
+            from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
+
+            try:
+                CompiledOutputWriter().write_many(pending_outputs)
+                successful_writes = len(pending_outputs)
+            except (OSError, CompiledOutputPolicyError) as exc:
+                self.errors.append(f"Failed to write distributed output batch: {exc}")
 
         # Update stats with actual files written
         if distributed_result.stats:
@@ -958,42 +967,36 @@ class AgentsCompiler:
         # Write CLAUDE.md files
         files_written = 0
         critical_security_found = False
-        from ..security.gate import WARN_POLICY, SecurityGate
-        from .output_writer import CompiledOutputWriter
+        from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
 
         writer = CompiledOutputWriter()
+        pending_outputs: dict[Path, str] = {}
         for claude_path, content in claude_result.content_map.items():
-            try:
-                # Handle constitution injection if enabled
-                final_content = content
-                if config.with_constitution:
-                    try:
-                        from .injector import ConstitutionInjector
+            final_content = content
+            if config.with_constitution:
+                try:
+                    from .injector import ConstitutionInjector
 
-                        injector = ConstitutionInjector(str(claude_path.parent))
-                        final_content, _, _ = injector.inject(
-                            content, with_constitution=True, output_path=claude_path
-                        )
-                    except Exception as exc:
-                        _logger.debug("Constitution injection failed for %s: %s", claude_path, exc)
-
-                # Defense-in-depth: scan compiled output before writing
-                verdict = SecurityGate.scan_text(
-                    final_content, str(claude_path), policy=WARN_POLICY
-                )
-                actionable = verdict.critical_count + verdict.warning_count
-                if actionable:
-                    if verdict.has_critical:
-                        critical_security_found = True
-                    all_warnings.append(
-                        f"CLAUDE.md contains {actionable} hidden character(s) "
-                        f"— run 'apm audit --file {claude_path}' to inspect"
+                    injector = ConstitutionInjector(str(claude_path.parent))
+                    final_content, _, _ = injector.inject(
+                        content, with_constitution=True, output_path=claude_path
                     )
-
-                writer.write(claude_path, final_content)
-                files_written += 1
-            except OSError as e:
-                all_errors.append(f"Failed to write {claude_path}: {e!s}")
+                except Exception as exc:
+                    _logger.debug("Constitution injection failed for %s: %s", claude_path, exc)
+            pending_outputs[claude_path] = final_content
+        try:
+            verdict = writer.write_many(pending_outputs)
+            files_written = len(pending_outputs)
+            for filename, findings in verdict.findings_by_file.items():
+                all_warnings.append(
+                    f"CLAUDE.md contains {len(findings)} hidden character(s) "
+                    f"-- run 'apm audit --file {filename}' to inspect"
+                )
+        except CompiledOutputPolicyError as exc:
+            critical_security_found = True
+            all_errors.append(str(exc))
+        except OSError as exc:
+            all_errors.append(f"Failed to write CLAUDE.md output batch: {exc!s}")
 
         # Update stats
         stats = claude_result.stats.copy()
@@ -1147,15 +1150,14 @@ class AgentsCompiler:
             )
 
         files_written = 0
-        from .output_writer import CompiledOutputWriter
+        from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
 
         writer = CompiledOutputWriter()
-        for gemini_path, content in gemini_result.content_map.items():
-            try:
-                writer.write(gemini_path, content)
-                files_written += 1
-            except OSError as e:
-                all_errors.append(f"Failed to write {gemini_path}: {e!s}")
+        try:
+            writer.write_many(gemini_result.content_map)
+            files_written = len(gemini_result.content_map)
+        except (OSError, CompiledOutputPolicyError) as exc:
+            all_errors.append(f"Failed to write GEMINI.md output batch: {exc!s}")
 
         stats = gemini_result.stats.copy()
         stats["gemini_files_written"] = files_written
@@ -1409,23 +1411,26 @@ class AgentsCompiler:
         if config.dry_run:
             return result
 
-        from ..security.gate import WARN_POLICY, SecurityGate
-
-        verdict = SecurityGate.scan_text(content, str(output_path), policy=WARN_POLICY)
-        actionable = verdict.critical_count + verdict.warning_count
-        if actionable:
-            if verdict.has_critical:
-                result.has_critical_security = True
-            result.warnings.append(
-                f"copilot-instructions.md contains {actionable} hidden character(s) "
-                f"-- run 'apm audit --file {output_path}' to inspect"
-            )
-
         try:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            write_text_lf(output_path, content)
+            from .output_writer import CompiledOutputPolicyError, CompiledOutputWriter
+
+            verdict = CompiledOutputWriter().write(output_path, content)
+            actionable = verdict.critical_count + verdict.warning_count
+            if actionable:
+                result.warnings.append(
+                    f"copilot-instructions.md contains {actionable} hidden character(s) "
+                    f"-- run 'apm audit --file {output_path}' to inspect"
+                )
             result.stats["copilot_root_instructions_written"] = 1
             result.stats["copilot_root_instructions_unchanged"] = 0
+            return result
+        except CompiledOutputPolicyError as exc:
+            result.has_critical_security = True
+            message = str(exc)
+            self.errors.append(message)
+            result.errors.append(message)
+            result.success = False
+            result.stats["copilot_root_instructions_written"] = 0
             return result
         except OSError as exc:
             message = f"Failed to write {output_path}: {exc}"
@@ -1544,8 +1549,19 @@ class AgentsCompiler:
             content (str): Generated content for this compilation.
             config (CompilationConfig): Compilation configuration.
         """
-        from .managed_section import ManagedSectionError, apply_managed_section
         from .output_writer import CompiledOutputWriter
+
+        content = self._prepare_output_content_with_config(output_path, content, config)
+        try:
+            CompiledOutputWriter().write(Path(output_path), content)
+        except OSError as e:
+            self.errors.append(f"Failed to write output file {output_path}: {e!s}")
+
+    def _prepare_output_content_with_config(
+        self, output_path: str, content: str, config: "CompilationConfig"
+    ) -> str:
+        """Build managed-section or full content without mutating disk."""
+        from .managed_section import ManagedSectionError, apply_managed_section
 
         if config.agents_md_mode == "managed_section":
             target = Path(output_path)
@@ -1571,10 +1587,7 @@ class AgentsCompiler:
                 "Supported values: 'full', 'managed_section'."
             )
 
-        try:
-            CompiledOutputWriter().write(Path(output_path), content)
-        except OSError as e:
-            self.errors.append(f"Failed to write output file {output_path}: {e!s}")
+        return content
 
     def _compile_stats(
         self, primitives: PrimitiveCollection, template_data: TemplateData
@@ -1598,10 +1611,10 @@ class AgentsCompiler:
             "version": template_data.version,
         }
 
-    def _write_distributed_file(
+    def _prepare_distributed_file(
         self, agents_path: Path, content: str, config: CompilationConfig
-    ) -> None:
-        """Write a distributed AGENTS.md file with constitution injection support.
+    ) -> str:
+        """Build one distributed AGENTS.md output without mutating disk.
 
         Args:
             agents_path (Path): Path to write the AGENTS.md file.
@@ -1628,15 +1641,22 @@ class AgentsCompiler:
             # Sub-directory files are fully APM-generated and always overwritten.
             is_root = agents_path.parent.resolve() == self.base_dir.resolve()
             if is_root and config.agents_md_mode == "managed_section":
-                self._write_output_file_with_config(str(agents_path), final_content, config)
-                return
-
-            from .output_writer import CompiledOutputWriter
-
-            CompiledOutputWriter().write(agents_path, final_content)
+                return self._prepare_output_content_with_config(
+                    str(agents_path), final_content, config
+                )
+            return final_content
 
         except OSError as e:
-            raise OSError(f"Failed to write distributed AGENTS.md file {agents_path}: {e!s}")  # noqa: B904
+            raise OSError(f"Failed to prepare distributed AGENTS.md file {agents_path}: {e!s}")  # noqa: B904
+
+    def _write_distributed_file(
+        self, agents_path: Path, content: str, config: CompilationConfig
+    ) -> None:
+        """Write one distributed file through the canonical writer."""
+        from .output_writer import CompiledOutputWriter
+
+        final_content = self._prepare_distributed_file(agents_path, content, config)
+        CompiledOutputWriter().write(agents_path, final_content)
 
     def _display_placement_preview(self, distributed_result) -> None:
         """Display placement preview for --show-placement mode.

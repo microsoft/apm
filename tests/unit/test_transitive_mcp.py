@@ -353,8 +353,10 @@ class TestCollectTransitiveMCPDeps:
         assert len(result) == 1
         assert result[0].name == "ghcr.io/locked/server"
 
-    def test_invalid_lockfile_falls_back_to_rglob_scan(self, tmp_path):
-        """If lock parsing fails, function falls back to scanning all apm.yml files."""
+    def test_invalid_lockfile_fails_closed(self, tmp_path):
+        """A malformed lock graph must not broaden discovery to every package."""
+        from apm_cli.deps.lockfile import LockfileFormatError
+
         apm_modules = tmp_path / "apm_modules"
         pkg_dir = apm_modules / "org" / "pkg-a"
         pkg_dir.mkdir(parents=True)
@@ -371,9 +373,8 @@ class TestCollectTransitiveMCPDeps:
         lock_path = tmp_path / "apm.lock.yaml"
         lock_path.write_text("dependencies: [")
 
-        result = MCPIntegrator.collect_transitive(apm_modules, lock_path)
-        assert len(result) == 1
-        assert result[0].name == "ghcr.io/a/server"
+        with pytest.raises(LockfileFormatError):
+            MCPIntegrator.collect_transitive(apm_modules, lock_path)
 
     def test_skips_self_defined_by_default(self, tmp_path):
         """Self-defined servers from transitive packages are skipped without the flag."""

@@ -449,19 +449,14 @@ class TestSectionCEdgeCases:
     def test_c3_corrupt_lockfile_yaml_skips_drift(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Bad YAML in lockfile -> ``LockFile.read`` returns ``None``.
-
-        The audit command then skips drift silently. Pinning this so a
-        future ``raise`` doesn't surprise users.
-        """
+        """Bad YAML fails closed with a stable audit diagnostic."""
         project = _make_apm_project(tmp_path)
         _install(project, monkeypatch)
         (project / "apm.lock.yaml").write_bytes(b"!!!{not valid yaml: [\n")
 
         result = _audit(project, monkeypatch)
-        # Either passes silently (no parseable lockfile -> nothing to
-        # scan) or emits a warning -- both acceptable, but no traceback.
-        assert result.exit_code in {0, 1}
+        assert result.exit_code == 1
+        assert "Cannot audit invalid apm.lock.yaml" in result.output
         assert "Traceback" not in result.stdout
         assert "Traceback" not in result.stderr
 

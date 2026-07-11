@@ -523,7 +523,7 @@ class TestAuditContentScanPackage:
         from apm_cli.commands.audit import _audit_content_scan
 
         lock = tmp_path / "apm.lock.yaml"
-        lock.write_text("lock_version: '1'\ndependencies: {}\n", encoding="utf-8")
+        lock.write_text("lock_version: '1'\ndependencies: []\n", encoding="utf-8")
 
         cfg = self._make_cfg(tmp_path)
 
@@ -547,7 +547,7 @@ class TestAuditContentScanPackage:
         from apm_cli.commands.audit import _audit_content_scan
 
         lock = tmp_path / "apm.lock.yaml"
-        lock.write_text("lock_version: '1'\ndependencies: {}\n", encoding="utf-8")
+        lock.write_text("lock_version: '1'\ndependencies: []\n", encoding="utf-8")
         cfg = self._make_cfg(tmp_path)
 
         with (

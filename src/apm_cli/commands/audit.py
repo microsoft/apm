@@ -858,10 +858,16 @@ def _audit_content_scan(
             else:
                 logger.start("Scanning all installed packages...")
 
-            findings_by_file, files_scanned = scan_lockfile_packages(
-                project_root,
-                package_filter=package,
-            )
+            from apm_cli.deps.lockfile import LockfileFormatError
+
+            try:
+                findings_by_file, files_scanned = scan_lockfile_packages(
+                    project_root,
+                    package_filter=package,
+                )
+            except LockfileFormatError as exc:
+                logger.error(f"Cannot audit invalid apm.lock.yaml: {exc}")
+                sys.exit(1)
 
             if files_scanned == 0 and not external:
                 if package:

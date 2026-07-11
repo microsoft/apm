@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from apm_cli.core.deployment_state import MaterializationStatus
 from apm_cli.integration.hook_integrator import (
     HookIntegrationResult,  # noqa: F401
     HookIntegrator,
@@ -292,8 +293,8 @@ class TestVSCodeIntegration:
         config = json.loads(hooks_path.read_text())
         assert config["version"] == 1
 
-    def test_copilot_existing_source_version_preserved(self, temp_project):
-        """An explicit source version must not be overwritten."""
+    def test_copilot_unsupported_source_version_writes_nothing(self, temp_project):
+        """An unsupported native payload must fail before mutation."""
         pkg_info = self._setup_hookify_package(temp_project)
         source_path = pkg_info.install_path / "hooks" / "hooks.json"
         source_config = json.loads(source_path.read_text())
@@ -301,11 +302,12 @@ class TestVSCodeIntegration:
         source_path.write_text(json.dumps(source_config))
 
         integrator = HookIntegrator()
-        integrator.integrate_package_hooks(pkg_info, temp_project)
+        result = integrator.integrate_package_hooks(pkg_info, temp_project)
 
         hooks_path = temp_project / ".github" / "hooks" / "hookify-hooks.json"
-        config = json.loads(hooks_path.read_text())
-        assert config["version"] == 3
+        assert not hooks_path.exists()
+        assert result.files_integrated == 0
+        assert result.materializations[0].status is MaterializationStatus.FAILED
 
     def test_integrate_learning_output_style_vscode(self, temp_project):
         """Test VSCode integration of learning-output-style plugin (different script dir)."""
