@@ -72,7 +72,7 @@ class TestRunMcpIntegrationInstallBranch:
     """``should_install=True`` and ``mcp_deps`` non-empty."""
 
     @patch(_PATCH_TARGET)
-    def test_installs_and_updates_lockfile(self, mock_mcp):
+    def test_installs_and_updates_lockfile(self, mock_mcp, tmp_path: Path):
         dep = MCPDependency(name="io.github.acme/server", transport="stdio")
         mock_mcp.deduplicate.side_effect = lambda x: x
         mock_mcp.install.return_value = 1
@@ -82,7 +82,9 @@ class TestRunMcpIntegrationInstallBranch:
             "io.github.acme/server": "io.github.acme/package"
         }
 
-        count, apm_config = run_mcp_integration(**_base_kwargs(mcp_deps=[dep]))
+        count, apm_config = run_mcp_integration(
+            **_base_kwargs(mcp_deps=[dep], project_root=tmp_path)
+        )
 
         assert count == 1
         assert apm_config == {"scripts": {}}
@@ -98,7 +100,7 @@ class TestRunMcpIntegrationInstallBranch:
         mock_mcp.remove_stale.assert_not_called()
 
     @patch(_PATCH_TARGET)
-    def test_removes_stale_servers_no_longer_declared(self, mock_mcp):
+    def test_removes_stale_servers_no_longer_declared(self, mock_mcp, tmp_path: Path):
         dep = MCPDependency(name="io.github.acme/new-server", transport="stdio")
         mock_mcp.deduplicate.side_effect = lambda x: x
         mock_mcp.install.return_value = 1
@@ -111,6 +113,7 @@ class TestRunMcpIntegrationInstallBranch:
                 mcp_deps=[dep],
                 old_mcp_servers={"io.github.acme/orphan-server"},
                 old_mcp_configs={"io.github.acme/orphan-server": {"name": "orphan"}},
+                project_root=tmp_path,
             )
         )
 
@@ -119,7 +122,7 @@ class TestRunMcpIntegrationInstallBranch:
         assert stale_arg == {"io.github.acme/orphan-server"}
 
     @patch(_PATCH_TARGET)
-    def test_forwards_apm_config_targets_key_when_declared(self, mock_mcp):
+    def test_forwards_apm_config_targets_key_when_declared(self, mock_mcp, tmp_path: Path):
         """#1335: only the targets-key the user actually declared is
         forwarded, matching the original inline block's behaviour."""
         dep = MCPDependency(name="io.github.acme/server", transport="stdio")
@@ -130,14 +133,16 @@ class TestRunMcpIntegrationInstallBranch:
         mock_mcp.get_server_provenance.return_value = {}
 
         pkg = _make_apm_package(scripts={"build": "echo hi"}, targets=["claude", "copilot"])
-        _count, apm_config = run_mcp_integration(**_base_kwargs(apm_package=pkg, mcp_deps=[dep]))
+        _count, apm_config = run_mcp_integration(
+            **_base_kwargs(apm_package=pkg, mcp_deps=[dep], project_root=tmp_path)
+        )
 
         assert apm_config == {"scripts": {"build": "echo hi"}, "targets": ["claude", "copilot"]}
         install_kwargs = mock_mcp.install.call_args.kwargs
         assert install_kwargs["apm_config"] == apm_config
 
     @patch(_PATCH_TARGET)
-    def test_forwards_singular_target_key_when_declared(self, mock_mcp):
+    def test_forwards_singular_target_key_when_declared(self, mock_mcp, tmp_path: Path):
         dep = MCPDependency(name="io.github.acme/server", transport="stdio")
         mock_mcp.deduplicate.side_effect = lambda x: x
         mock_mcp.install.return_value = 1
@@ -146,7 +151,9 @@ class TestRunMcpIntegrationInstallBranch:
         mock_mcp.get_server_provenance.return_value = {}
 
         pkg = _make_apm_package(target="claude")
-        _count, apm_config = run_mcp_integration(**_base_kwargs(apm_package=pkg, mcp_deps=[dep]))
+        _count, apm_config = run_mcp_integration(
+            **_base_kwargs(apm_package=pkg, mcp_deps=[dep], project_root=tmp_path)
+        )
 
         assert apm_config == {"scripts": {}, "target": "claude"}
         assert "targets" not in apm_config

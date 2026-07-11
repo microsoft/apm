@@ -1,6 +1,6 @@
 """Lockfile (apm.lock.yaml) conformance tests -- sec.5.
 
-Covers req-lk-001..019. The integrity sub-cluster (req-lk-012..017)
+Covers req-lk-001..020. The integrity sub-cluster (req-lk-012..017)
 now drives REAL fail-closed oracles against the committed binary
 fixture pair under `integrity/`.
 """
@@ -258,4 +258,72 @@ def test_lockfile_inventory_metadata_is_non_trust_anchor():
         "MUST NOT derive any\nidentity or deduplication decision",
         "registry-resolved `version` MAY remain the exact\nregistry selection",
         "MUST NOT change `lockfile_version`",
+    )
+
+
+@pytest.mark.req("req-lk-020")
+def test_lockfile_reconciles_inactive_target_paths_fail_safe():
+    from types import SimpleNamespace
+
+    from apm_cli.install.manifest_reconcile import union_preserving
+    from apm_cli.integration.targets import KNOWN_TARGETS
+
+    def target(name: str, root_dir: str | None = None):
+        return SimpleNamespace(name=name, root_dir=root_dir, primitives={})
+
+    ghost = ".windsurf/rules/demo.md"
+    dynamic = "copilot-app-db://workflows/demo"
+    prior = [ghost, dynamic]
+    prior_hashes = {ghost: "sha256:" + "a" * 64, dynamic: "sha256:" + "b" * 64}
+    active = [target("copilot", ".github")]
+    legitimate = [*active, target("copilot-app")]
+
+    reconciled, hashes = union_preserving(
+        current_files=[],
+        current_hashes={},
+        prior_files=prior,
+        prior_hashes=prior_hashes,
+        targets=active,
+        declared_targets=legitimate,
+    )
+    assert reconciled == [dynamic]
+    assert hashes == {dynamic: prior_hashes[dynamic]}
+
+    indeterminate, indeterminate_hashes = union_preserving(
+        current_files=[],
+        current_hashes={},
+        prior_files=prior,
+        prior_hashes=prior_hashes,
+        targets=active,
+        declared_targets=None,
+    )
+    assert indeterminate == prior
+    assert indeterminate_hashes == prior_hashes
+
+    shared_rule = ".agents/rules/keep.md"
+    shared_files, shared_hashes = union_preserving(
+        current_files=[".agents/skills/demo/SKILL.md"],
+        current_hashes={},
+        prior_files=[shared_rule],
+        prior_hashes={shared_rule: "sha256:" + "c" * 64},
+        targets=[KNOWN_TARGETS["copilot"]],
+        declared_targets=[KNOWN_TARGETS["copilot"], KNOWN_TARGETS["antigravity"]],
+    )
+    assert shared_rule in shared_files
+    assert shared_rule in shared_hashes
+
+    indeterminate_path = ".agents/hooks.json.bak"
+    declared_indeterminate, _ = union_preserving(
+        current_files=[],
+        current_hashes={},
+        prior_files=[indeterminate_path],
+        prior_hashes={},
+        targets=[KNOWN_TARGETS["antigravity"]],
+        declared_targets=[KNOWN_TARGETS["antigravity"]],
+    )
+    assert declared_indeterminate == [indeterminate_path]
+
+    assert_spec_contains(
+        "MUST remove a prior path attributable",
+        "MUST preserve that path and its corresponding hash entry",
     )
