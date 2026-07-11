@@ -252,28 +252,62 @@ def uninstall(ctx, packages, dry_run, verbose, global_):
                 user_scope=scope is InstallScope.USER,
             )
             if lockfile and surviving_deployed_files:
-                from ...install.phases.lockfile import (
-                    compute_deployed_hashes,
-                    reconcile_cross_package_deployed_files,
+                from ...core.deployment_ledger import DeploymentLedgerCodec
+                from ...core.deployment_state import (
+                    DeploymentIntent,
+                    DeploymentReconciler,
+                    MaterializationResult,
+                    MaterializationStatus,
+                    NativePayloadValidation,
                 )
+                from ...install.phases.lockfile import compute_deployed_hashes
+                from ...integration.targets import KNOWN_TARGETS
+                from ...utils.diagnostics import DiagnosticCollector
 
-                reconcile_cross_package_deployed_files(surviving_deployed_files)
-                ownership_transferred = False
+                previous_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+                materializations: list[MaterializationResult] = []
                 for dep_key, deployed_files in surviving_deployed_files.items():
-                    surviving_dep = lockfile.get_dependency(dep_key)
-                    if surviving_dep is None:
-                        continue
                     transferred = sorted(all_deployed_files.intersection(deployed_files))
-                    if not transferred:
-                        continue
-                    surviving_dep.deployed_files = list(
-                        dict.fromkeys([*surviving_dep.deployed_files, *transferred])
-                    )
-                    surviving_dep.deployed_file_hashes.update(
-                        compute_deployed_hashes(transferred, deploy_root)
-                    )
-                    ownership_transferred = True
-                if ownership_transferred:
+                    hashes = compute_deployed_hashes(transferred, deploy_root)
+                    for path in transferred:
+                        prior = next(
+                            (
+                                record
+                                for record in previous_ledger.records.values()
+                                if record.locator.value == path
+                            ),
+                            None,
+                        )
+                        if prior is None:
+                            continue
+                        materializations.append(
+                            MaterializationResult(
+                                locator=prior.locator,
+                                owners=frozenset({dep_key}),
+                                status=MaterializationStatus.UNCHANGED,
+                                content_hash=hashes.get(path),
+                                validation=NativePayloadValidation(
+                                    valid=True,
+                                    contract="uninstall-survivor",
+                                ),
+                            )
+                        )
+                reconciled = DeploymentReconciler(
+                    deploy_root,
+                    KNOWN_TARGETS,
+                    diagnostics=DiagnosticCollector(),
+                ).reconcile(
+                    previous_ledger,
+                    materializations,
+                    DeploymentIntent(
+                        active_targets=frozenset(),
+                        declared_targets=None,
+                        desired_owners=frozenset({".", *lockfile.dependencies}),
+                        authoritative_targets=False,
+                    ),
+                )
+                if reconciled.changed:
+                    DeploymentLedgerCodec.apply_to_lockfile(reconciled.ledger, lockfile)
                     lockfile.write(lockfile_path)
         except Exception as _sync_err:
             # Surface why integration cleanup failed instead of swallowing
