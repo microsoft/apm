@@ -20,10 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from pathlib import Path
 
 RULE_FORMATS: frozenset[str] = frozenset(
     {"cursor_rules", "claude_rules", "windsurf_rules", "kiro_steering", "antigravity_rules"}
@@ -295,6 +292,14 @@ class TargetProfile:
             return self.user_root_dir
         return self.root_dir
 
+    @property
+    def managed_deploy_root(self) -> Path | None:
+        """Return the resolved or absolute static deployment root."""
+        if self.resolved_deploy_root is not None:
+            return self.resolved_deploy_root
+        root = Path(self.root_dir)
+        return root if root.is_absolute() else None
+
     def supports_at_user_scope(self, primitive: str) -> bool:
         """Return ``True`` if *primitive* can be deployed at user scope."""
         if not self.user_supported:
@@ -407,14 +412,8 @@ class TargetProfile:
                     # Fallback: when CLAUDE_CONFIG_DIR points outside $HOME we
                     # store an absolute path. ``pathlib.Path / <absolute>`` is
                     # ``<absolute>`` so deploy + cleanup write to the right
-                    # place. Caveat: the lockfile path translator
-                    # (``install/services._deployed_path_entry``) calls
-                    # ``relative_to(project_root)`` and raises ``RuntimeError``
-                    # for out-of-tree paths that are not dynamic-root targets.
-                    # Today this is unreachable because user-scope CLAUDE
-                    # installs do not flow through that translator, but any
-                    # future refactor that lockfiles user-scope deploys must
-                    # treat absolute ``root_dir`` as a dynamic-root case.
+                    # place. The lockfile path translator treats an absolute
+                    # ``root_dir`` as a dynamic root.
                     new_root = str(abs_path)
 
         if self.unsupported_user_primitives:

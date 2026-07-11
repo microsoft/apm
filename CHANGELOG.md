@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apm install --target intellij` now configures JetBrains Copilot MCP support
   while routing package file primitives through the Copilot profile.
   (by @sergio-sisternes-epam; closes #1957) (#2041)
+- Global Claude installs now support an absolute `CLAUDE_CONFIG_DIR` outside
+  `HOME` without leaving a partial deployment. (closes #2129) (#2135)
 
 ### Fixed
 
