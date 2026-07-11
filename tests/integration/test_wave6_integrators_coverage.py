@@ -15,8 +15,10 @@ Strategy:
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.integration.hook_integrator import (
     HookIntegrationResult,
     HookIntegrator,
@@ -992,7 +994,12 @@ class TestIntegrateHooksForTarget:
 
         # Create a target with a name not in _MERGE_HOOK_TARGETS
         dummy_target = TargetProfile(
-            name="unknown-target",
+            capability=replace(
+                TARGET_CAPABILITIES["copilot"],
+                name="unknown-target",
+                aliases=(),
+                runtimes=(),
+            ),
             root_dir=".unknown",
             primitives={"hooks": PrimitiveMapping("hooks", ".json", "hooks")},
         )

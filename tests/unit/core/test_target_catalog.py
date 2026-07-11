@@ -1,7 +1,7 @@
 """Characterization tests for target capability metadata."""
 
 from contextlib import nullcontext
-from dataclasses import astuple
+from dataclasses import FrozenInstanceError, astuple
 from types import MappingProxyType
 
 import pytest
@@ -269,8 +269,13 @@ def test_alias_runtime_profile_and_compile_projections_match_catalog() -> None:
     assert catalog_runtime_map == RUNTIME_TO_CANONICAL_TARGET
     for name, profile in KNOWN_TARGETS.items():
         capability = TARGET_CAPABILITIES[name]
+        assert profile.capability is capability
+        assert profile.name == capability.name
         assert capability.primitive_profile == name
         assert capability.compile_family == profile.compile_family
+        assert capability.experimental_flag == profile.requires_flag
+        with pytest.raises(FrozenInstanceError):
+            profile.name = "changed"
 
 
 def test_all_excludes_explicit_experimental_and_mcp_only_targets() -> None:

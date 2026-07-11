@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.integration.targets import (
     KNOWN_TARGETS,
     TargetProfile,
@@ -96,7 +97,12 @@ class TestTargetProfileForScope:
         self,
     ) -> None:
         unsupported = TargetProfile(
-            name="dummy",
+            capability=replace(
+                TARGET_CAPABILITIES["copilot"],
+                name="dummy",
+                aliases=(),
+                runtimes=(),
+            ),
             root_dir=".dummy",
             primitives={},
             user_supported=False,

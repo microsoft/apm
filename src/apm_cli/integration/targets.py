@@ -22,6 +22,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES, TargetCapability
+
 RULE_FORMATS: frozenset[str] = frozenset(
     {"cursor_rules", "claude_rules", "windsurf_rules", "kiro_steering", "antigravity_rules"}
 )
@@ -115,8 +117,8 @@ class PrimitiveMapping:
 class TargetProfile:
     """Capabilities and layout of a single target tool."""
 
-    name: str
-    """Short unique identifier (``"copilot"``, ``"claude"``, ``"cursor"``)."""
+    capability: TargetCapability
+    """Command-facing metadata for this native deployment profile."""
 
     root_dir: str
     """Top-level directory in the workspace (e.g. ``".github"``)."""
@@ -192,13 +194,6 @@ class TargetProfile:
     through this root instead of ``project_root / root_dir``.
     """
 
-    requires_flag: str | None = None
-    """When set, the target is only returned by ``active_targets`` /
-    ``active_targets_user_scope`` / ``resolve_targets`` when the named
-    experimental flag is enabled.  The target entry is always visible
-    in ``KNOWN_TARGETS`` for tooling introspection.
-    """
-
     scope_invariant_resolver: bool = False
     """When True, ``user_root_resolver`` runs in BOTH project and user
     scope (the resolved deploy root does not depend on install intent).
@@ -238,21 +233,6 @@ class TargetProfile:
     ``.agents/``).
     """
 
-    compile_family: str | None = None
-    """Compiler family this target belongs to for ``apm compile`` routing.
-
-    Recognised values:
-
-    * ``"vscode"`` -- emits ``.github/copilot-instructions.md`` *and* AGENTS.md.
-    * ``"claude"`` -- emits ``CLAUDE.md`` and ``.claude/rules/`` files.
-    * ``"gemini"`` -- emits ``GEMINI.md``.
-    * ``"agents"`` -- emits AGENTS.md only (cursor, opencode, codex, windsurf).
-    * ``None`` -- target has no compile output (agent-skills, copilot-cowork).
-
-    Used by :func:`apm_cli.commands.compile.cli._resolve_compile_target` to
-    derive multi-target routing from the registry instead of hard-coded sets.
-    """
-
     hooks_config_display: str | None = None
     """Human-readable path shown in the install log for hooks integration.
 
@@ -260,6 +240,21 @@ class TargetProfile:
     file rather than landing in their own subdir).  When ``None``, the
     install log falls back to the generic ``"{root}/{subdir}/"`` formula.
     """
+
+    @property
+    def name(self) -> str:
+        """Return the canonical native target name."""
+        return self.capability.name
+
+    @property
+    def compile_family(self) -> str | None:
+        """Return the compiler family declared by the capability catalog."""
+        return self.capability.compile_family
+
+    @property
+    def requires_flag(self) -> str | None:
+        """Return the experimental feature flag declared by the catalog."""
+        return self.capability.experimental_flag
 
     @property
     def prefix(self) -> str:
@@ -446,9 +441,10 @@ class TargetProfile:
 # strip a runtime even when its canonical target is active (the same class
 # of bug as #1335).
 RUNTIME_TO_CANONICAL_TARGET: dict[str, str] = {
-    "vscode": "copilot",
-    "agents": "copilot",
-    "intellij": "copilot",
+    runtime: capability.primitive_profile
+    for capability in TARGET_CAPABILITIES.values()
+    if capability.primitive_profile is not None
+    for runtime in capability.runtimes
 }
 
 
@@ -463,7 +459,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # that single file at user scope (not individual *.instructions.md).
     # Ref: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-custom-agents-for-cli
     "copilot": TargetProfile(
-        name="copilot",
+        capability=TARGET_CAPABILITIES["copilot"],
         root_dir=".github",
         primitives={
             "instructions": PrimitiveMapping(
@@ -488,7 +484,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
             "instructions": PrimitiveMapping("", ".md", "copilot_user_instructions"),
         },
         generated_files=("copilot-instructions.md",),
-        compile_family="vscode",
     ),
     # Claude Code -- the user-level config directory is whatever
     # ``CLAUDE_CONFIG_DIR`` points to (default ``~/.claude``).  The env
@@ -498,7 +493,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Instructions deploy to <root>/rules/*.md with paths: frontmatter.
     # Ref: https://code.claude.com/docs/en/memory#organize-rules-with-claude%2Frules%2F
     "claude": TargetProfile(
-        name="claude",
+        capability=TARGET_CAPABILITIES["claude"],
         root_dir=".claude",
         primitives={
             "instructions": PrimitiveMapping(
@@ -515,7 +510,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         auto_create=False,
         detect_by_dir=True,
         user_supported=True,
-        compile_family="claude",
         hooks_config_display=".claude/settings.json",
     ),
     # Cursor -- at user scope, ~/.cursor/ supports skills, agents, hooks,
@@ -523,7 +517,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # (not file-based), so "instructions" is excluded from user scope.
     # Ref: https://cursor.com/docs/rules
     "cursor": TargetProfile(
-        name="cursor",
+        capability=TARGET_CAPABILITIES["cursor"],
         root_dir=".cursor",
         primitives={
             "instructions": PrimitiveMapping(
@@ -558,7 +552,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported="partial",
         user_root_dir=".cursor",
         unsupported_user_primitives=("instructions",),
-        compile_family="agents",
         hooks_config_display=".cursor/hooks.json",
     ),
     # Kiro IDE -- spec-driven development editor.
@@ -571,7 +564,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Ref: https://kiro.dev/docs/skills/
     # Ref: https://kiro.dev/docs/hooks/
     "kiro": TargetProfile(
-        name="kiro",
+        capability=TARGET_CAPABILITIES["kiro"],
         root_dir=".kiro",
         primitives={
             "instructions": PrimitiveMapping(
@@ -587,12 +580,11 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported=True,
         user_root_dir=".kiro",
-        compile_family="agents",
     ),
     # OpenCode -- at user scope, ~/.config/opencode/ supports skills, agents,
     # and commands.  OpenCode has no hooks concept, so "hooks" is excluded.
     "opencode": TargetProfile(
-        name="opencode",
+        capability=TARGET_CAPABILITIES["opencode"],
         root_dir=".opencode",
         primitives={
             "agents": PrimitiveMapping("agents", ".md", "opencode_agent"),
@@ -609,7 +601,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported="partial",
         user_root_dir=".config/opencode",
         unsupported_user_primitives=("hooks",),
-        compile_family="agents",
     ),
     # Gemini CLI -- ~/.gemini/ is the documented user-level config directory.
     # Instructions are compile-only (GEMINI.md) -- Gemini CLI does not read
@@ -619,7 +610,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Ref: https://geminicli.com/docs/cli/gemini-md/
     # Ref: https://geminicli.com/docs/reference/configuration/
     "gemini": TargetProfile(
-        name="gemini",
+        capability=TARGET_CAPABILITIES["gemini"],
         root_dir=".gemini",
         primitives={
             "commands": PrimitiveMapping("commands", ".toml", "gemini_command"),
@@ -635,7 +626,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported=True,
         user_root_dir=".gemini",
-        compile_family="gemini",
         hooks_config_display=".gemini/settings.json",
     ),
     # Antigravity CLI (agy) -- Google's Gemini-derived agentic CLI.
@@ -664,7 +654,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Ref: https://antigravity.google/docs/hooks
     # Ref: https://antigravity.google/docs/mcp
     "antigravity": TargetProfile(
-        name="antigravity",
+        capability=TARGET_CAPABILITIES["antigravity"],
         root_dir=".agents",
         primitives={
             "instructions": PrimitiveMapping(
@@ -682,14 +672,13 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_supported="partial",
         user_root_dir=".gemini/antigravity-cli",
         unsupported_user_primitives=("instructions", "hooks"),
-        compile_family="agents",
         hooks_config_display=".agents/hooks.json",
     ),
     # Codex CLI: skills use the cross-tool .agents/ dir (agent skills standard),
     # agents are TOML under .codex/agents/, hooks merge into .codex/hooks.json.
     # Instructions are compile-only (AGENTS.md) -- not installed.
     "codex": TargetProfile(
-        name="codex",
+        capability=TARGET_CAPABILITIES["codex"],
         root_dir=".codex",
         primitives={
             "agents": PrimitiveMapping("agents", ".toml", "codex_agent"),
@@ -705,7 +694,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=True,
         user_supported="partial",
         pack_prefixes=(".codex/", ".agents/"),
-        compile_family="agents",
         hooks_config_display=".codex/hooks.json",
     ),
     # Windsurf/Cascade (now Devin Desktop) -- .windsurf/ is the workspace
@@ -729,7 +717,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Ref: https://docs.windsurf.com/windsurf/cascade/memories
     # Ref: https://docs.windsurf.com/windsurf/cascade/mcp
     "windsurf": TargetProfile(
-        name="windsurf",
+        capability=TARGET_CAPABILITIES["windsurf"],
         root_dir=".windsurf",
         primitives={
             "instructions": PrimitiveMapping(
@@ -753,7 +741,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         user_root_dir=".codeium/windsurf",
         unsupported_user_primitives=("instructions",),
         pack_prefixes=(".windsurf/", ".agents/"),
-        compile_family="agents",
         hooks_config_display=".windsurf/hooks.json",
     ),
     # Agent-skills: cross-client shared skills directory (.agents/skills/).
@@ -761,7 +748,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # Not auto-detected (detect_by_dir=False) because .agents/ is shared by
     # multiple tools (Codex, etc.). Explicit --target agent-skills only.
     "agent-skills": TargetProfile(
-        name="agent-skills",
+        capability=TARGET_CAPABILITIES["agent-skills"],
         root_dir=".agents",
         primitives={
             "skills": PrimitiveMapping(
@@ -786,7 +773,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # the --global user path is the distinguishing capability.
     # Ref: https://docs.openclaw.ai/tools/skills
     "openclaw": TargetProfile(
-        name="openclaw",
+        capability=TARGET_CAPABILITIES["openclaw"],
         root_dir=".agents",
         primitives={
             "skills": PrimitiveMapping(
@@ -799,7 +786,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=False,
         user_supported=True,
         user_root_dir=".openclaw",
-        requires_flag="openclaw",
     ),
     # Hermes agent (Nous Research) -- experimental.  Hermes natively reads
     # the agentskills.io SKILL.md format and the AGENTS.md context-file
@@ -810,7 +796,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # are written separately by HermesClientAdapter to ~/.hermes/config.yaml.
     # $HERMES_HOME overrides the user-scope root (handled in for_scope).
     "hermes": TargetProfile(
-        name="hermes",
+        capability=TARGET_CAPABILITIES["hermes"],
         root_dir=".agents",
         primitives={
             "skills": PrimitiveMapping(
@@ -823,8 +809,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=False,
         user_supported=True,
         user_root_dir=".hermes",
-        compile_family="agents",
-        requires_flag="hermes",
     ),
     # Microsoft 365 Copilot (Cowork) -- experimental, user-scope only.
     # Skills are deployed to <OneDrive>/Documents/Cowork/skills/.
@@ -832,7 +816,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # copilot_cowork_paths.resolve_copilot_cowork_skills_dir().
     # Non-skill primitives are not supported.
     "copilot-cowork": TargetProfile(
-        name="copilot-cowork",
+        capability=TARGET_CAPABILITIES["copilot-cowork"],
         root_dir="copilot-cowork",  # display grouping placeholder only
         primitives={
             "skills": PrimitiveMapping(
@@ -845,7 +829,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=False,
         user_supported=True,
         user_root_resolver=lambda: _resolve_copilot_cowork_root(),
-        requires_flag="copilot_cowork",
     ),
     # GitHub Copilot desktop App -- experimental, user-scope only.
     # Prompts whose frontmatter carries workflow-shape keys (``interval``,
@@ -858,7 +841,7 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
     # the existing target machinery can address rows via the
     # ``copilot-app-db://workflows/<id>`` lockfile URI scheme.
     "copilot-app": TargetProfile(
-        name="copilot-app",
+        capability=TARGET_CAPABILITIES["copilot-app"],
         root_dir="copilot-app",  # display grouping placeholder only
         primitives={
             "prompts": PrimitiveMapping(
@@ -871,7 +854,6 @@ KNOWN_TARGETS: dict[str, TargetProfile] = {
         detect_by_dir=False,
         user_supported=True,
         user_root_resolver=lambda: _resolve_copilot_app_root(),
-        requires_flag="copilot_app",
         scope_invariant_resolver=True,
     ),
 }

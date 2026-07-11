@@ -12,13 +12,18 @@ from apm_cli.core.deployment_state import (
     MaterializationStatus,
     NativePayloadValidation,
 )
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.policy.ci_checks import _check_content_integrity
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
 def test_install_update_compile_uninstall_share_one_owner(tmp_path: Path) -> None:
-    target = TargetProfile(name="copilot", root_dir=".github", primitives={})
+    target = TargetProfile(
+        capability=TARGET_CAPABILITIES["copilot"],
+        root_dir=".github",
+        primitives={},
+    )
     reconciler = DeploymentReconciler(
         tmp_path,
         {"copilot": target},

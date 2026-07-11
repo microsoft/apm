@@ -1,5 +1,6 @@
 """Tests for canonical deployment state and lockfile encoding."""
 
+from dataclasses import replace
 from pathlib import Path
 
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
@@ -15,6 +16,7 @@ from apm_cli.core.deployment_state import (
     NativePayloadValidation,
 )
 from apm_cli.core.scope import InstallScope
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.deps.lockfile import LockedDependency, LockFile
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.utils.diagnostics import DiagnosticCollector
@@ -23,8 +25,16 @@ VALID = NativePayloadValidation(valid=True, contract="file")
 
 
 def _target(name: str, root: str, managed: Path | None = None) -> TargetProfile:
+    capability = TARGET_CAPABILITIES.get(name)
+    if capability is None:
+        capability = replace(
+            TARGET_CAPABILITIES["copilot"],
+            name=name,
+            aliases=(),
+            runtimes=(),
+        )
     return TargetProfile(
-        name=name,
+        capability=capability,
         root_dir=str(managed or root),
         primitives={},
         resolved_deploy_root=managed,

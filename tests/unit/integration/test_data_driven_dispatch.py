@@ -9,10 +9,12 @@ Validates that:
 
 import shutil
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
 from apm_cli.commands.install import _integrate_package_primitives
+from apm_cli.core.target_catalog import TARGET_CAPABILITIES
 from apm_cli.install.services import IntegratorBundle
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.targets import KNOWN_TARGETS, PrimitiveMapping, TargetProfile
@@ -357,7 +359,12 @@ class TestSyntheticTargetProfile:
         from apm_cli.integration.command_integrator import CommandIntegrator
 
         synthetic = TargetProfile(
-            name="newcode",
+            capability=replace(
+                TARGET_CAPABILITIES["copilot"],
+                name="newcode",
+                aliases=(),
+                runtimes=(),
+            ),
             root_dir=".newcode",
             primitives={
                 "commands": PrimitiveMapping("cmds", ".md", "newcode_cmd"),
@@ -405,7 +412,12 @@ class TestSyntheticTargetProfile:
         from apm_cli.integration.command_integrator import CommandIntegrator
 
         synthetic = TargetProfile(
-            name="newcode",
+            capability=replace(
+                TARGET_CAPABILITIES["copilot"],
+                name="newcode",
+                aliases=(),
+                runtimes=(),
+            ),
             root_dir=".newcode",
             primitives={
                 "commands": PrimitiveMapping("cmds", ".md", "newcode_cmd"),
