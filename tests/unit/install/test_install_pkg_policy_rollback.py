@@ -473,7 +473,7 @@ class TestRestoreManifestFromSnapshot:
 
     def test_atomic_restore_byte_exact(self, tmp_path):
         """Restored file is byte-identical to snapshot."""
-        from apm_cli.commands.install import _restore_manifest_from_snapshot
+        from apm_cli.install.transaction import _restore_manifest_from_snapshot
 
         target = tmp_path / "apm.yml"
         original = b"name: test\nversion: 1.0.0\n"
@@ -485,7 +485,7 @@ class TestRestoreManifestFromSnapshot:
 
     def test_atomic_restore_no_temp_file_left(self, tmp_path):
         """No temporary files remain after successful restore."""
-        from apm_cli.commands.install import _restore_manifest_from_snapshot
+        from apm_cli.install.transaction import _restore_manifest_from_snapshot
 
         target = tmp_path / "apm.yml"
         target.write_bytes(b"mutated")
@@ -498,7 +498,7 @@ class TestRestoreManifestFromSnapshot:
 
     def test_atomic_restore_replaces_existing(self, tmp_path):
         """Restore replaces the mutated file, not appends."""
-        from apm_cli.commands.install import _restore_manifest_from_snapshot
+        from apm_cli.install.transaction import _restore_manifest_from_snapshot
 
         target = tmp_path / "apm.yml"
         original = b"short"
@@ -514,7 +514,7 @@ class TestMaybeRollbackManifest:
 
     def test_noop_when_snapshot_is_none(self, tmp_path):
         """No-op when snapshot is None (not an ``install <pkg>`` invocation)."""
-        from apm_cli.commands.install import _maybe_rollback_manifest
+        from apm_cli.install.transaction import _maybe_rollback_manifest
 
         target = tmp_path / "apm.yml"
         target.write_bytes(b"should not change")
@@ -528,7 +528,7 @@ class TestMaybeRollbackManifest:
 
     def test_restores_and_logs_when_snapshot_present(self, tmp_path):
         """Restores apm.yml and emits info message."""
-        from apm_cli.commands.install import _maybe_rollback_manifest
+        from apm_cli.install.transaction import _maybe_rollback_manifest
 
         target = tmp_path / "apm.yml"
         target.write_bytes(b"mutated")
@@ -541,7 +541,7 @@ class TestMaybeRollbackManifest:
 
     def test_warns_on_restore_failure(self, tmp_path):
         """If restore fails, warn but don't mask the original error."""
-        from apm_cli.commands.install import _maybe_rollback_manifest
+        from apm_cli.install.transaction import _maybe_rollback_manifest
 
         # Point at a non-existent directory so tempfile.mkstemp fails
         bad_path = tmp_path / "nonexistent" / "apm.yml"

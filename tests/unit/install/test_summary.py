@@ -102,21 +102,15 @@ class TestRenderPostInstallSummary:
     def test_error_count_forwarded_to_install_summary(self) -> None:
         logger = _make_logger()
         diag = _make_diag(has_diagnostics=True, error_count=2)
-        # error_count > 0 hard-fails with exit 1 (npm/pip/cargo convention,
-        # Bug 2 fix on #1496). The install_summary call still fires before
-        # the SystemExit, so the forwarded counter assertion still holds.
-        with (
-            patch("apm_cli.install.summary._rich_blank_line"),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            render_post_install_summary(
+        with patch("apm_cli.install.summary._rich_blank_line"):
+            result = render_post_install_summary(
                 logger=logger,
                 apm_count=1,
                 mcp_count=0,
                 apm_diagnostics=diag,
                 force=False,
             )
-        assert exc_info.value.code == 1
+        assert result.exit_code == 1
         call_kwargs = logger.install_summary.call_args[1]
         assert call_kwargs["errors"] == 2
 
@@ -130,18 +124,15 @@ class TestRenderPostInstallSummary:
         """
         logger = _make_logger()
         diag = _make_diag(has_diagnostics=True, error_count=1, has_critical_security=False)
-        with (
-            patch("apm_cli.install.summary._rich_blank_line"),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            render_post_install_summary(
+        with patch("apm_cli.install.summary._rich_blank_line"):
+            result = render_post_install_summary(
                 logger=logger,
                 apm_count=0,
                 mcp_count=0,
                 apm_diagnostics=diag,
                 force=False,
             )
-        assert exc_info.value.code == 1
+        assert result.exit_code == 1
 
     def test_force_does_not_suppress_reported_errors(self) -> None:
         """``--force`` overrides only the critical-security hard-fail; a
@@ -149,18 +140,15 @@ class TestRenderPostInstallSummary:
         cannot mask a "failed to download dep" by passing ``--force``."""
         logger = _make_logger()
         diag = _make_diag(has_diagnostics=True, error_count=1, has_critical_security=False)
-        with (
-            patch("apm_cli.install.summary._rich_blank_line"),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            render_post_install_summary(
+        with patch("apm_cli.install.summary._rich_blank_line"):
+            result = render_post_install_summary(
                 logger=logger,
                 apm_count=0,
                 mcp_count=0,
                 apm_diagnostics=diag,
                 force=True,
             )
-        assert exc_info.value.code == 1
+        assert result.exit_code == 1
 
     def test_elapsed_seconds_forwarded(self) -> None:
         logger = _make_logger()
@@ -179,18 +167,15 @@ class TestRenderPostInstallSummary:
     def test_hard_fail_on_critical_security_without_force(self) -> None:
         logger = _make_logger()
         diag = _make_diag(has_diagnostics=True, has_critical_security=True)
-        with (
-            patch("apm_cli.install.summary._rich_blank_line"),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            render_post_install_summary(
+        with patch("apm_cli.install.summary._rich_blank_line"):
+            result = render_post_install_summary(
                 logger=logger,
                 apm_count=1,
                 mcp_count=0,
                 apm_diagnostics=diag,
                 force=False,
             )
-        assert exc_info.value.code == 1
+        assert result.exit_code == 1
 
     def test_no_hard_fail_when_force_is_true(self) -> None:
         logger = _make_logger()

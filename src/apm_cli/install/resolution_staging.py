@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import threading
 import uuid
-from collections.abc import Callable
-from functools import wraps
 from pathlib import Path
-from typing import Any
 
 from apm_cli.utils.path_security import ensure_path_within, safe_rmtree
 
@@ -60,22 +57,3 @@ class ResolutionStagingSession:
         staging_parent = self._staging_root.parent
         if staging_parent.exists() and not any(staging_parent.iterdir()):
             staging_parent.rmdir()
-
-
-ResolveFunction = Callable[[Any, ResolutionStagingSession], None]
-
-
-def transactional_resolution(resolve: ResolveFunction) -> Callable[[Any], None]:
-    """Wrap a resolve operation in a rollback-scoped staging session."""
-
-    @wraps(resolve)
-    def wrapped(ctx: Any) -> None:
-        session = ResolutionStagingSession(ctx.apm_modules_dir)
-        try:
-            resolve(ctx, session)
-        except BaseException:
-            session.rollback()
-            raise
-        session.commit()
-
-    return wrapped

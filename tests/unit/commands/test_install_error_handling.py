@@ -296,9 +296,10 @@ class TestInstallApmPackagesUnavailable:
         ctx.trust_transitive_mcp = False
         return ctx
 
-    def test_apm_unavailable_exits(self, tmp_path: Path) -> None:
-        """APM_DEPS_AVAILABLE=False -> logger.error + sys.exit(1)."""
+    def test_apm_unavailable_raises_structured_failure(self, tmp_path: Path) -> None:
+        """An unavailable dependency engine raises after rendering the error."""
         from apm_cli.commands.install import _install_apm_packages
+        from apm_cli.install.errors import InstallFailureAlreadyRendered
 
         ctx = self._make_ctx(tmp_path)
         (tmp_path / "apm.yml").write_text("name: test\n", encoding="utf-8")
@@ -325,10 +326,9 @@ class TestInstallApmPackagesUnavailable:
             mock_apm.from_apm_yml.return_value = mock_pkg
             mock_lf.read.return_value = None
 
-            with pytest.raises(SystemExit) as exc_info:
+            with pytest.raises(InstallFailureAlreadyRendered):
                 _install_apm_packages(ctx, None)
 
-        assert exc_info.value.code == 1
         ctx.logger.error.assert_called()
 
 
@@ -338,7 +338,7 @@ class TestInstallApmPackagesUnavailable:
 
 
 class TestInstallErrorHandlers:
-    """install() catches specific exceptions and exits with code 1."""
+    """Install helpers propagate typed failures to the command boundary."""
 
     def _make_ctx(self, tmp_path: Path):
         from apm_cli.constants import InstallMode
@@ -386,8 +386,8 @@ class TestInstallErrorHandlers:
         mock_pkg.target = None
         return mock_pkg
 
-    def test_insecure_policy_error_exits_1(self, tmp_path: Path) -> None:
-        """InsecureDependencyPolicyError during install triggers rollback + exit(1)."""
+    def test_insecure_policy_error_propagates(self, tmp_path: Path) -> None:
+        """InsecureDependencyPolicyError propagates to the transaction boundary."""
         from apm_cli.commands.install import _install_apm_packages
         from apm_cli.install.insecure_policy import InsecureDependencyPolicyError
 
@@ -408,19 +408,17 @@ class TestInstallErrorHandlers:
                 "apm_cli.commands.install._install_apm_dependencies",
                 side_effect=InsecureDependencyPolicyError("blocked"),
             ),
-            patch("apm_cli.commands.install._maybe_rollback_manifest"),
         ):
             mock_apm.from_apm_yml.return_value = mock_pkg
             mock_lf.read.return_value = None
 
-            with pytest.raises(SystemExit) as exc_info:
+            with pytest.raises(InsecureDependencyPolicyError, match="blocked"):
                 _install_apm_packages(ctx, None)
-        assert exc_info.value.code == 1
 
-    def test_authentication_error_with_diagnostic_context(self, tmp_path: Path) -> None:
-        """AuthenticationError with diagnostic_context emits it."""
+    def test_authentication_error_with_diagnostic_context_propagates(self, tmp_path: Path) -> None:
+        """AuthenticationError retains diagnostic context at the command boundary."""
         from apm_cli.commands.install import _install_apm_packages
-        from apm_cli.install.errors import AuthenticationError
+        from apm_cli.install.errors import AuthenticationError, InstallFailureAlreadyRendered
 
         ctx = self._make_ctx(tmp_path)
         (tmp_path / "apm.yml").write_text("name: test\n", encoding="utf-8")
@@ -439,22 +437,21 @@ class TestInstallErrorHandlers:
             patch("apm_cli.commands.install._project_has_root_primitives", return_value=False),
             patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True),
             patch("apm_cli.commands.install._install_apm_dependencies", side_effect=err),
-            patch("apm_cli.commands.install._maybe_rollback_manifest"),
-            patch("apm_cli.commands.install._rich_error"),
-            patch("apm_cli.commands.install._rich_echo") as mock_echo,
         ):
             mock_apm.from_apm_yml.return_value = mock_pkg
             mock_lf.read.return_value = None
 
-            with pytest.raises(SystemExit) as exc_info:
+            with pytest.raises(InstallFailureAlreadyRendered) as exc_info:
                 _install_apm_packages(ctx, None)
-        assert exc_info.value.code == 1
-        mock_echo.assert_called_once_with("hint: check token")
+        assert exc_info.value.__cause__ is err
+        assert err.diagnostic_context == "hint: check token"
 
-    def test_authentication_error_no_diagnostic_context(self, tmp_path: Path) -> None:
-        """AuthenticationError without diagnostic_context exits without echo."""
+    def test_authentication_error_without_diagnostic_context_propagates(
+        self, tmp_path: Path
+    ) -> None:
+        """AuthenticationError without diagnostic context propagates unchanged."""
         from apm_cli.commands.install import _install_apm_packages
-        from apm_cli.install.errors import AuthenticationError
+        from apm_cli.install.errors import AuthenticationError, InstallFailureAlreadyRendered
 
         ctx = self._make_ctx(tmp_path)
         (tmp_path / "apm.yml").write_text("name: test\n", encoding="utf-8")
@@ -473,22 +470,18 @@ class TestInstallErrorHandlers:
             patch("apm_cli.commands.install._project_has_root_primitives", return_value=False),
             patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True),
             patch("apm_cli.commands.install._install_apm_dependencies", side_effect=err),
-            patch("apm_cli.commands.install._maybe_rollback_manifest"),
-            patch("apm_cli.commands.install._rich_error"),
-            patch("apm_cli.commands.install._rich_echo") as mock_echo,
         ):
             mock_apm.from_apm_yml.return_value = mock_pkg
             mock_lf.read.return_value = None
 
-            with pytest.raises(SystemExit) as exc_info:
+            with pytest.raises(InstallFailureAlreadyRendered) as exc_info:
                 _install_apm_packages(ctx, None)
-        assert exc_info.value.code == 1
-        mock_echo.assert_not_called()
+        assert exc_info.value.__cause__ is err
 
-    def test_frozen_install_error_echoes_reasons(self, tmp_path: Path) -> None:
-        """FrozenInstallError emits each reason line."""
+    def test_frozen_install_error_propagates_reasons(self, tmp_path: Path) -> None:
+        """FrozenInstallError retains reasons for command-boundary rendering."""
         from apm_cli.commands.install import _install_apm_packages
-        from apm_cli.install.errors import FrozenInstallError
+        from apm_cli.install.errors import FrozenInstallError, InstallFailureAlreadyRendered
 
         ctx = self._make_ctx(tmp_path)
         (tmp_path / "apm.yml").write_text("name: test\n", encoding="utf-8")
@@ -507,17 +500,14 @@ class TestInstallErrorHandlers:
             patch("apm_cli.commands.install._project_has_root_primitives", return_value=False),
             patch("apm_cli.commands.install.APM_DEPS_AVAILABLE", True),
             patch("apm_cli.commands.install._install_apm_dependencies", side_effect=err),
-            patch("apm_cli.commands.install._maybe_rollback_manifest"),
-            patch("apm_cli.commands.install._rich_error"),
-            patch("apm_cli.commands.install._rich_echo") as mock_echo,
         ):
             mock_apm.from_apm_yml.return_value = mock_pkg
             mock_lf.read.return_value = None
 
-            with pytest.raises(SystemExit) as exc_info:
+            with pytest.raises(InstallFailureAlreadyRendered) as exc_info:
                 _install_apm_packages(ctx, None)
-        assert exc_info.value.code == 1
-        assert mock_echo.call_count == 2
+        assert exc_info.value.__cause__ is err
+        assert err.reasons == ["reason A", "reason B"]
 
 
 # ---------------------------------------------------------------------------

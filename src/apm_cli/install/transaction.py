@@ -7,13 +7,48 @@ import os
 import tempfile
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apm_cli.install.resolution_staging import ResolutionStagingSession
 from apm_cli.models.results import InstallDisposition, InstallResult
 
 if TYPE_CHECKING:
     from apm_cli.core.command_logger import InstallLogger, _ValidationOutcome
+
+
+def _restore_manifest_from_snapshot(manifest_path: Path, snapshot: bytes) -> None:
+    """Atomically replace *manifest_path* with byte-exact *snapshot*."""
+    fd, temporary_name = tempfile.mkstemp(
+        prefix="apm-restore-",
+        dir=str(manifest_path.parent),
+    )
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(snapshot)
+        os.replace(temporary_name, manifest_path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary_name)
+        raise
+
+
+def _maybe_rollback_manifest(
+    manifest_path: Path,
+    snapshot: bytes | None,
+    logger: InstallLogger,
+) -> None:
+    """Best-effort restore of a captured manifest snapshot."""
+    if snapshot is None:
+        return
+    try:
+        if manifest_path.exists() and manifest_path.read_bytes() == snapshot:
+            return
+        _restore_manifest_from_snapshot(manifest_path, snapshot)
+        if logger is not None:
+            logger.progress("apm.yml restored to its previous state.")
+    except Exception:
+        if logger is not None:
+            logger.warning("Failed to restore apm.yml to its previous state.")
 
 
 class InstallTransaction:
@@ -108,28 +143,20 @@ class InstallTransaction:
 
     def _restore_manifest(self) -> None:
         """Atomically restore the byte-exact manifest snapshot when present."""
-        if self._manifest_snapshot is None:
-            return
-        try:
-            self._atomic_restore(self._manifest_snapshot)
-            if self._logger is not None:
-                self._logger.progress("apm.yml restored to its previous state.")
-        except Exception:
-            if self._logger is not None:
-                self._logger.warning("Failed to restore apm.yml to its previous state.")
-
-    def _atomic_restore(self, snapshot: bytes) -> None:
-        """Replace the manifest atomically with *snapshot*."""
-        self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary_name = tempfile.mkstemp(
-            prefix="apm-restore-",
-            dir=str(self.manifest_path.parent),
+        _maybe_rollback_manifest(
+            self.manifest_path,
+            self._manifest_snapshot,
+            self._logger,
         )
-        try:
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(snapshot)
-            os.replace(temporary_name, self.manifest_path)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(temporary_name)
-            raise
+
+
+def resolution_for_context(ctx: Any) -> ResolutionStagingSession:
+    """Return the context transaction's journal, creating a legacy adapter."""
+    if ctx.transaction is None:
+        ctx.transaction = InstallTransaction(
+            manifest_path=ctx.source_root / "apm.yml",
+            apm_modules_dir=ctx.apm_modules_dir,
+            validation=None,
+            logger=ctx.logger,
+        )
+    return ctx.transaction.resolution

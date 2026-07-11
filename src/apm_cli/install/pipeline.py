@@ -42,15 +42,16 @@ from __future__ import annotations
 
 import builtins
 import contextlib
-import sys
 import time
+from functools import wraps
 from typing import TYPE_CHECKING
 
-from ..models.results import InstallResult
+from ..models.results import InstallDisposition, InstallResult
 from ..utils.console import _rich_error
 from ..utils.diagnostics import DiagnosticCollector
 from ..utils.path_security import PathTraversalError
-from .errors import AuthenticationError, DirectDependencyError
+from .errors import AuthenticationError, DirectDependencyError, InstallFailureAlreadyRendered
+from .transaction import InstallTransaction
 
 if TYPE_CHECKING:
     from ..core.auth import AuthResolver
@@ -394,6 +395,53 @@ def _is_no_work_install(
     return True
 
 
+def _transactional_pipeline(run):
+    """Supply a compatibility transaction and rollback every exceptional exit."""
+
+    @wraps(run)
+    def wrapped(*args, **kwargs):
+        transaction = kwargs.get("transaction")
+        owns_transaction = transaction is None
+        if transaction is None:
+            from ..core.scope import InstallScope, get_manifest_path, get_modules_dir
+
+            scope = kwargs.get("scope") or InstallScope.PROJECT
+            try:
+                manifest_path = get_manifest_path(scope)
+                modules_dir = get_modules_dir(scope)
+            except (AttributeError, TypeError):
+                from pathlib import Path
+
+                manifest_path = Path.cwd() / "apm.yml"
+                modules_dir = Path.cwd() / "apm_modules"
+            transaction = InstallTransaction(
+                manifest_path=manifest_path,
+                apm_modules_dir=modules_dir,
+                validation=None,
+                logger=kwargs.get("logger"),
+            )
+            kwargs["transaction"] = transaction
+        try:
+            result = run(*args, **kwargs)
+        except BaseException:
+            transaction.rollback()
+            raise
+        if result is None:
+            result = InstallResult()
+        if owns_transaction:
+            if result.disposition in {
+                InstallDisposition.CANCELLED,
+                InstallDisposition.DRY_RUN,
+            }:
+                transaction.rollback()
+            else:
+                result = transaction.commit(result)
+        return result
+
+    return wrapped
+
+
+@_transactional_pipeline
 def run_install_pipeline(  # noqa: PLR0913, RUF100
     apm_package: APMPackage,
     update_refs: bool = False,
@@ -418,6 +466,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     plan_callback=None,
     refresh: bool = False,
     lockfile_only: bool = False,
+    transaction: InstallTransaction | None = None,
 ):
     """Install APM package dependencies.
 
@@ -547,6 +596,7 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         legacy_skill_paths=legacy_skill_paths,
         refresh=refresh,
         lockfile_only=lockfile_only,
+        transaction=transaction,
     )
 
     # ------------------------------------------------------------------
@@ -598,7 +648,8 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
         plan = build_update_plan(_early_lockfile, ctx.deps_to_install)
         proceed = plan_callback(plan)
         if not proceed:
-            return InstallResult()
+            transaction.rollback()
+            return InstallResult(disposition=InstallDisposition.CANCELLED)
 
     ctx.tui.__enter__()
     try:
@@ -718,7 +769,9 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
                         "Re-run with 'apm install --update' to re-resolve "
                         "through the registry, or unset PROXY_REGISTRY_ONLY."
                     )
-                    sys.exit(1)
+                    raise InstallFailureAlreadyRendered(
+                        "Proxy-only lockfile contains direct VCS dependencies"
+                    )
 
             # Supply chain warning: registry-proxy entries without a
             # content_hash cannot be verified on re-install.
@@ -921,6 +974,8 @@ def run_install_pipeline(  # noqa: PLR0913, RUF100
     except DirectDependencyError:
         # #946: same pattern -- surface the message as-is instead of
         # double-wrapping it through the generic RuntimeError below.
+        raise
+    except InstallFailureAlreadyRendered:
         raise
     except PathTraversalError:
         # Path-safety violation in SKILL_BUNDLE or other nested

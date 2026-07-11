@@ -8,7 +8,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -17,6 +17,7 @@ from apm_cli.install.errors import (
     AuthenticationError,
     DirectDependencyError,
     FrozenInstallError,
+    InstallFailureAlreadyRendered,
     PolicyViolationError,
 )
 from apm_cli.install.gitlab_resolver import _try_resolve_gitlab_direct_shorthand
@@ -77,6 +78,7 @@ from apm_cli.install.services import (
     _integrate_local_content,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _integrate_package_primitives,  # noqa: F401 -- re-exported; tests import/patch from apm_cli.commands.install
 )
+from apm_cli.install.transaction import InstallTransaction
 
 # Re-export validation leaf helpers so that existing test patches like
 # @patch("apm_cli.commands.install._validate_package_exists") keep working.
@@ -89,6 +91,7 @@ from apm_cli.install.validation import (
     _local_path_no_markers_hint,  # noqa: F401 -- re-exported; test_architecture_invariants checks importability
     _validate_package_exists,
 )
+from apm_cli.models.results import InstallDisposition, InstallResult
 from apm_cli.utils.diagnostics import DiagnosticCollector  # noqa: F401
 
 from ..constants import (
@@ -122,58 +125,6 @@ from ._helpers import (
     _create_minimal_apm_yml,
     _get_default_config,
 )
-
-# ---------------------------------------------------------------------------
-# Manifest snapshot + rollback (W2-pkg-rollback, #827)
-# ---------------------------------------------------------------------------
-
-
-def _restore_manifest_from_snapshot(
-    manifest_path: "Path",
-    snapshot: bytes,
-) -> None:
-    """Atomically restore ``apm.yml`` from a raw-bytes snapshot.
-
-    Uses temp-file + ``os.replace`` to avoid torn writes, mirroring the
-    W1 cache atomic-write pattern (``discovery.py``).
-    """
-    import os
-    import tempfile
-
-    fd, tmp_name = tempfile.mkstemp(
-        prefix="apm-restore-",
-        dir=str(manifest_path.parent),
-    )
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(snapshot)
-        os.replace(tmp_name, str(manifest_path))
-    except Exception:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp_name)
-        raise
-
-
-def _maybe_rollback_manifest(
-    manifest_path: "Path",
-    snapshot: "bytes | None",
-    logger: "InstallLogger",
-) -> None:
-    """Restore ``apm.yml`` from *snapshot* if one was captured, then log.
-
-    No-op when *snapshot* is ``None`` (i.e. the command was not
-    ``apm install <pkg>`` or the manifest did not exist before mutation).
-    """
-    if snapshot is None:
-        return
-    try:
-        _restore_manifest_from_snapshot(manifest_path, snapshot)
-        logger.progress("apm.yml restored to its previous state.")
-    except Exception:
-        # Best-effort: if the restore itself fails, warn but don't mask
-        # the original exception that triggered the rollback.
-        logger.warning("Failed to restore apm.yml to its previous state.")
-
 
 # CRITICAL: Shadow Python builtins that share names with Click commands
 set = builtins.set
@@ -219,10 +170,9 @@ class InstallContext:
     no_policy: bool
     install_mode: Any  # InstallMode
     packages: tuple  # Original Click packages
+    transaction: Any = None  # InstallTransaction; default preserves direct-call compatibility
     refresh: bool = False
     only_packages: builtins.list | None = None
-    manifest_snapshot: bytes | None = None
-    snapshot_manifest_path: Optional["Path"] = None
     legacy_skill_paths: bool = False
     frozen: bool = False
     plan_callback: "Callable[[UpdatePlan], bool] | None" = None
@@ -1215,6 +1165,8 @@ def install(  # noqa: PLR0913
     install_started_at = time.perf_counter()
     summary_rendered = False
     logger = None
+    command_result: InstallResult | None = None
+    transaction: InstallTransaction | None = None
     if frozen and update:
         raise click.UsageError(
             "--frozen and --update are mutually exclusive. "
@@ -1247,19 +1199,6 @@ def install(  # noqa: PLR0913
         # scope initialisation below throws).
         is_partial = bool(packages)
         logger = InstallLogger(verbose=verbose, dry_run=dry_run, partial=is_partial)
-
-        # W2-pkg-rollback (#827): snapshot bytes captured BEFORE
-        # _validate_and_add_packages_to_apm_yml mutates apm.yml. Initialised
-        # to None here -- BEFORE any branch that might raise (e.g. the local
-        # bundle early-exit path below) -- so the `except` handlers at the
-        # bottom of this function can always reference both names without
-        # UnboundLocalError. The bug this prevents: an exception raised in
-        # the local-bundle branch (e.g. a click.Abort from integrity-verify
-        # failure on Windows) would otherwise be masked by an
-        # UnboundLocalError inside the handler that calls
-        # _maybe_rollback_manifest(_snapshot_manifest_path, ...).
-        _manifest_snapshot: bytes | None = None
-        _snapshot_manifest_path: Path | None = None
 
         # Resolve --legacy-skill-paths: CLI flag wins, then env var fallback.
         if not legacy_skill_paths:
@@ -1364,12 +1303,6 @@ def install(  # noqa: PLR0913
         if verbose:
             os.environ["APM_VERBOSE"] = "1"
 
-        # W2-pkg-rollback (#827): snapshot bytes captured BEFORE
-        # _validate_and_add_packages_to_apm_yml mutates apm.yml.
-        # NOTE: variables are initialised at the top of the try block
-        # (above the local-bundle early-exit) so exception handlers can
-        # always reference them without UnboundLocalError.
-
         # ----------------------------------------------------------------
         # --mcp branch (W3): when --mcp is set, route to the dedicated
         # MCP-add path.  We compute the post-`--` argv here BEFORE Click's
@@ -1461,6 +1394,7 @@ def install(  # noqa: PLR0913
             ensure_user_dirs,
             get_apm_dir,
             get_manifest_path,
+            get_modules_dir,
             warn_unsupported_user_scope,
         )
 
@@ -1516,17 +1450,14 @@ def install(  # noqa: PLR0913
                 logger.progress("  apm install <org/repo> to auto-create + install")
             sys.exit(1)
 
+        transaction = InstallTransaction(
+            manifest_path=manifest_path,
+            apm_modules_dir=get_modules_dir(scope),
+            validation=None,
+            logger=logger,
+        )
         outcome = None
         if packages:
-            # -- W2-pkg-rollback (#827): snapshot raw bytes BEFORE mutation --
-            # _validate_and_add_packages_to_apm_yml does a YAML round-trip
-            # (load + dump) which may alter whitespace, key ordering, or
-            # trailing newlines.  We snapshot the raw bytes so rollback is
-            # byte-exact -- no YAML drift.
-            if manifest_path.exists():
-                _manifest_snapshot = manifest_path.read_bytes()
-                _snapshot_manifest_path = manifest_path
-
             _validated_packages, outcome = _validate_and_add_packages_to_apm_yml(
                 packages,
                 dry_run,
@@ -1539,111 +1470,146 @@ def install(  # noqa: PLR0913
                 skill_subset=_skill_subset,
                 skill_subset_from_cli=bool(skill_names),
             )
-            # Short-circuit: all packages failed validation -- nothing to install
-            if outcome.all_failed:
+            transaction.record_validation(outcome)
+            command_result = transaction.validation_result()
+            if command_result is not None:
                 summary_rendered = True
-                sys.exit(1)
             # Note: Empty validated_packages is OK if packages are already in apm.yml;
             # only_packages is derived from validation outcomes below.
 
-        # Build install context
-        install_ctx = InstallContext(
-            scope=scope,
-            manifest_path=manifest_path,
-            manifest_display=manifest_display,
-            apm_dir=apm_dir,
-            project_root=project_root,
-            logger=logger,
-            auth_resolver=auth_resolver,
-            verbose=verbose,
-            force=force,
-            dry_run=dry_run,
-            update=update,
-            dev=dev,
-            runtime=runtime,
-            exclude=exclude,
-            target=target,
-            parallel_downloads=parallel_downloads,
-            allow_insecure=allow_insecure,
-            allow_insecure_hosts=allow_insecure_hosts,
-            protocol_pref=protocol_pref,
-            allow_protocol_fallback=allow_protocol_fallback,
-            trust_transitive_mcp=trust_transitive_mcp,
-            no_policy=no_policy,
-            audit_override=audit_override,
-            install_mode=InstallMode(only) if only else InstallMode.ALL,
-            packages=packages,
-            refresh=refresh,
-            only_packages=only_packages_from_validation(packages, outcome),
-            manifest_snapshot=_manifest_snapshot,
-            snapshot_manifest_path=_snapshot_manifest_path,
-            legacy_skill_paths=legacy_skill_paths,
-            frozen=frozen,
-            plan_callback=None,
-            skill_subset=_skill_subset,
-            skill_subset_from_cli=bool(skill_names),
-        )
-
-        apm_count, mcp_count, lsp_count, apm_diagnostics = _install_apm_packages(
-            install_ctx,
-            outcome,
-        )
-
-        _post_install_summary(
-            logger=logger,
-            apm_count=apm_count,
-            mcp_count=mcp_count,
-            lsp_count=lsp_count,
-            apm_diagnostics=apm_diagnostics,
-            force=force,
-            elapsed_seconds=time.perf_counter() - install_started_at,
-        )
-        summary_rendered = True
-
-        if frozen and apm_count > 0:
-            # --frozen verifies LOCKFILE STRUCTURE (every apm.yml dep
-            # has a lock entry), not on-disk content integrity. Make
-            # the scope explicit so a CI pipeline that skips
-            # 'apm audit' on the assumption that --frozen covers SHA
-            # verification is corrected at the moment of use.
-            _rich_info(
-                "Lockfile presence verified. Run 'apm audit' for on-disk content integrity.",
-                symbol="info",
+        if command_result is None:
+            install_ctx = InstallContext(
+                scope=scope,
+                manifest_path=manifest_path,
+                manifest_display=manifest_display,
+                apm_dir=apm_dir,
+                project_root=project_root,
+                logger=logger,
+                auth_resolver=auth_resolver,
+                verbose=verbose,
+                force=force,
+                dry_run=dry_run,
+                update=update,
+                dev=dev,
+                runtime=runtime,
+                exclude=exclude,
+                target=target,
+                parallel_downloads=parallel_downloads,
+                allow_insecure=allow_insecure,
+                allow_insecure_hosts=allow_insecure_hosts,
+                protocol_pref=protocol_pref,
+                allow_protocol_fallback=allow_protocol_fallback,
+                trust_transitive_mcp=trust_transitive_mcp,
+                no_policy=no_policy,
+                audit_override=audit_override,
+                install_mode=InstallMode(only) if only else InstallMode.ALL,
+                packages=packages,
+                transaction=transaction,
+                refresh=refresh,
+                only_packages=only_packages_from_validation(packages, outcome),
+                legacy_skill_paths=legacy_skill_paths,
+                frozen=frozen,
+                plan_callback=None,
+                skill_subset=_skill_subset,
+                skill_subset_from_cli=bool(skill_names),
             )
 
-    except InsecureDependencyPolicyError:
-        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
-        sys.exit(1)
+            apm_count, mcp_count, lsp_count, apm_diagnostics = _install_apm_packages(
+                install_ctx,
+                outcome,
+            )
+
+            command_result = _post_install_summary(
+                logger=logger,
+                apm_count=apm_count,
+                mcp_count=mcp_count,
+                lsp_count=lsp_count,
+                apm_diagnostics=apm_diagnostics,
+                force=force,
+                elapsed_seconds=time.perf_counter() - install_started_at,
+            )
+            summary_rendered = True
+            if dry_run:
+                command_result.disposition = InstallDisposition.DRY_RUN
+                transaction.rollback()
+            elif command_result.disposition is InstallDisposition.FAILED:
+                transaction.rollback()
+            else:
+                command_result = transaction.commit(command_result)
+
+            if frozen and apm_count > 0:
+                # --frozen verifies lockfile structure, not content integrity.
+                _rich_info(
+                    "Lockfile presence verified. Run 'apm audit' for on-disk content integrity.",
+                    symbol="info",
+                )
+
+    except InsecureDependencyPolicyError as e:
+        command_result = (
+            transaction.fail(e)
+            if transaction is not None
+            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
+        )
+    except InstallFailureAlreadyRendered as e:
+        command_result = (
+            transaction.fail(e)
+            if transaction is not None
+            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
+        )
     except AuthenticationError as e:
-        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
         _rich_error(str(e))
         if e.diagnostic_context:
             _rich_echo(e.diagnostic_context)
         _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
-        sys.exit(1)
+        command_result = (
+            transaction.fail(e)
+            if transaction is not None
+            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
+        )
+    except FrozenInstallError as e:
+        _rich_error(str(e))
+        for reason in e.reasons:
+            _rich_echo(reason)
+        _rich_info(
+            "Tip: run 'apm outdated' to see what changed, then 'apm update'.",
+            symbol="info",
+        )
+        command_result = (
+            transaction.fail(e)
+            if transaction is not None
+            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
+        )
     except DirectDependencyError as e:
-        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
         logger.error(str(e))
-        sys.exit(1)
+        command_result = (
+            transaction.fail(e)
+            if transaction is not None
+            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
+        )
     except click.UsageError:
         # Conflict matrix / argv parser raises UsageError -- let Click
         # render with exit code 2 and the standard "Usage: ..." prefix.
         raise
     except Exception as e:
-        _maybe_rollback_manifest(_snapshot_manifest_path, _manifest_snapshot, logger)
         if logger:
             logger.error(f"Error installing dependencies: {e}")
             if not verbose:
                 logger.progress("Run with --verbose for detailed diagnostics")
         else:
             _rich_error(f"Error installing dependencies: {e}")
-        sys.exit(1)
+        command_result = (
+            transaction.fail(e)
+            if transaction is not None
+            else InstallResult(disposition=InstallDisposition.FAILED, exit_code=1, error=e)
+        )
     finally:
         # --root: restore cwd + clear the source-root override regardless
         # of how the handler exits (return, sys.exit -> SystemExit,
         # exception). Done first so cwd is back to $PWD before any
         # best-effort summary rendering below.
         _root_redirect.__exit__(None, None, None)
+        if transaction is not None:
+            transaction.__exit__(*sys.exc_info())
         # F5 (#1116): render minimal elapsed-time line on exit paths that
         # did not already render the full install summary. Best-effort:
         # never let a render failure mask the original exception/exit.
@@ -1655,6 +1621,9 @@ def install(  # noqa: PLR0913
             os.environ.pop("APM_VERBOSE", None)
         else:
             os.environ["APM_VERBOSE"] = _apm_verbose_prev
+
+    if command_result is not None:
+        ctx.exit(command_result.exit_code)
 
 
 # ---------------------------------------------------------------------------
@@ -1688,7 +1657,7 @@ def _install_apm_packages(ctx, outcome):
         apm_package = APMPackage.from_apm_yml(ctx.manifest_path)
     except Exception as e:
         logger.error(f"Failed to parse {ctx.manifest_display}: {e}")
-        sys.exit(1)
+        raise InstallFailureAlreadyRendered("Failed to parse install manifest") from e
 
     apm_deps = apm_package.get_apm_dependencies()
     dev_apm_deps = apm_package.get_dev_apm_dependencies()
@@ -1791,7 +1760,7 @@ def _install_apm_packages(ctx, outcome):
         if not APM_DEPS_AVAILABLE:
             logger.error("APM dependency system not available")
             logger.progress(f"Import error: {_APM_IMPORT_ERROR}")
-            sys.exit(1)
+            raise InstallFailureAlreadyRendered("APM dependency system not available")
 
         try:
             # If specific packages were requested, only install those
@@ -1824,22 +1793,20 @@ def _install_apm_packages(ctx, outcome):
                 skill_subset=ctx.skill_subset,
                 skill_subset_from_cli=ctx.skill_subset_from_cli,
                 refresh=ctx.refresh,
+                transaction=ctx.transaction,
             )
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics
         except InsecureDependencyPolicyError:
-            _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
-            sys.exit(1)
+            raise
         except AuthenticationError as e:
             # #1015: render auth diagnostics on the DEFAULT path (not --verbose).
-            _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
             _rich_error(str(e))
             if e.diagnostic_context:
                 _rich_echo(e.diagnostic_context)
             _rich_info("Tip: run 'apm doctor' to diagnose auth and connectivity.", symbol="info")
-            sys.exit(1)
+            raise InstallFailureAlreadyRendered(str(e)) from e
         except FrozenInstallError as e:
-            _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
             _rich_error(str(e))
             for reason in e.reasons:
                 _rich_echo(reason)
@@ -1847,9 +1814,10 @@ def _install_apm_packages(ctx, outcome):
                 "Tip: run 'apm outdated' to see what changed, then 'apm update'.",
                 symbol="info",
             )
-            sys.exit(1)
+            raise InstallFailureAlreadyRendered(str(e)) from e
+        except InstallFailureAlreadyRendered:
+            raise
         except Exception as e:
-            _maybe_rollback_manifest(ctx.snapshot_manifest_path, ctx.manifest_snapshot, logger)
             # #832: surface PolicyViolationError verbatim (no double-nesting).
             msg = (
                 str(e)
@@ -1859,7 +1827,7 @@ def _install_apm_packages(ctx, outcome):
             logger.error(msg)
             if not ctx.verbose:
                 logger.progress("Run with --verbose for detailed diagnostics")
-            sys.exit(1)
+            raise InstallFailureAlreadyRendered(msg) from e
     elif should_install_apm and not has_any_apm_deps:
         logger.verbose_detail("No APM dependencies found in apm.yml")
 
@@ -1909,7 +1877,7 @@ def _install_apm_packages(ctx, outcome):
             "APM packages remain installed; MCP configs were NOT written."
         )
         logger.render_summary()
-        sys.exit(1)
+        raise InstallFailureAlreadyRendered("MCP server(s) blocked by org policy") from None
 
     # -------------------------------------------------------------------------
     # LSP integration (extracted to install/lsp/integration.py)
@@ -1949,7 +1917,7 @@ def _post_install_summary(
     """
     from apm_cli.install.summary import render_post_install_summary
 
-    render_post_install_summary(
+    return render_post_install_summary(
         logger=logger,
         apm_count=apm_count,
         mcp_count=mcp_count,
@@ -2005,6 +1973,7 @@ def _install_apm_dependencies(  # noqa: PLR0913
     plan_callback=None,
     refresh: bool = False,
     lockfile_only: bool = False,
+    transaction: "InstallTransaction | None" = None,
 ):
     """Thin wrapper -- builds an :class:`InstallRequest` and delegates to
     :class:`apm_cli.install.service.InstallService`.
@@ -2045,5 +2014,6 @@ def _install_apm_dependencies(  # noqa: PLR0913
         plan_callback=plan_callback,
         refresh=refresh,
         lockfile_only=lockfile_only,
+        transaction=transaction,
     )
     return InstallService().run(request)

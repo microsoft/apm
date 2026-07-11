@@ -1230,7 +1230,7 @@ class TestInstallInternalHelpers:
 
     def test_restore_manifest_from_snapshot(self, tmp_path: Path) -> None:
         """_restore_manifest_from_snapshot writes bytes atomically."""
-        from apm_cli.commands.install import _restore_manifest_from_snapshot
+        from apm_cli.install.transaction import _restore_manifest_from_snapshot
 
         target = tmp_path / "apm.yml"
         target.write_bytes(b"original content")
@@ -1240,7 +1240,7 @@ class TestInstallInternalHelpers:
 
     def test_maybe_rollback_manifest_no_snapshot(self) -> None:
         """_maybe_rollback_manifest is a no-op when snapshot is None."""
-        from apm_cli.commands.install import _maybe_rollback_manifest
+        from apm_cli.install.transaction import _maybe_rollback_manifest
 
         logger = MagicMock()
         _maybe_rollback_manifest(Path("/does/not/exist"), None, logger)

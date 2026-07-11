@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from apm_cli.install.helpers.ref_seed import seed_ref_resolver_from_lockfile
-from apm_cli.install.resolution_staging import transactional_resolution
+from apm_cli.install.transaction import resolution_for_context
 from apm_cli.models.apm_package import GitReferenceType, ResolvedReference
 from apm_cli.utils.short_sha import format_short_sha
 
@@ -183,6 +183,7 @@ def _purge_cached_semver_paths_for_update(
     all_apm_deps,
     apm_modules_dir,
     logger,
+    staging_session: ResolutionStagingSession,
 ) -> None:
     """Pre-purge on-disk install paths for direct git-source and registry semver deps
     when ``--update`` / ``--refresh`` is set.
@@ -219,6 +220,7 @@ def _purge_cached_semver_paths_for_update(
             # here -- the resolver will surface a real error downstream.
             continue
         if _ip.exists():
+            staging_session.prepare_path(_ip)
             with suppress(Exception):
                 _rrm(_ip, ignore_errors=True)
             if logger:
@@ -378,7 +380,6 @@ def _fail_on_resolution_errors(ctx: InstallContext, dependency_graph) -> None:
     raise RuntimeError(f"Dependency resolution failed: {joined_errors}")
 
 
-@transactional_resolution
 def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagingSession) -> None:
     """Resolve dependencies and populate the resolution fields on ``ctx``."""
     import threading as _threading
@@ -762,6 +763,7 @@ def _resolve_dependencies(ctx: InstallContext, staging_session: ResolutionStagin
             all_apm_deps=ctx.all_apm_deps,
             apm_modules_dir=ctx.apm_modules_dir,
             logger=ctx.logger,
+            staging_session=staging_session,
         )
 
     resolver = APMDependencyResolver(
@@ -992,7 +994,7 @@ def run(ctx: InstallContext) -> None:
     _ensure_modules_dir(ctx)
     _setup_downloader(ctx)
     seed_ref_resolver_from_lockfile(ctx)
-    _resolve_dependencies(ctx)
+    _resolve_dependencies(ctx, resolution_for_context(ctx))
     if ctx.only_packages:
         _apply_only_filter(ctx)
     _compute_intended_dep_keys(ctx)
