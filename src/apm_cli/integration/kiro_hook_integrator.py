@@ -3,6 +3,11 @@
 Kiro stores each hook as its own JSON document under ``.kiro/hooks/``.
 This module keeps the target-specific expansion out of ``hook_integrator.py``
 so the shared integrator stays under the source-length guardrail.
+
+Design: the Kiro target consumes APM's declared hook input *directly* into a
+Kiro-native result. Native Kiro v1 documents are read and re-emitted without
+round-tripping through any foreign (Claude-shaped) event map, and no internal
+side-channel keys are used to smuggle Kiro fields across a normalization step.
 """
 
 from __future__ import annotations
@@ -11,6 +16,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,8 +37,24 @@ if TYPE_CHECKING:
 _KIRO_EVENT_MAP = _HOOK_EVENT_MAP["kiro"]
 _log = logging.getLogger(__name__)
 
-# Internal _kiro_* transport keys are injected during normalization and
-# consumed by _kiro_hook_document before serialization.
+
+@dataclass
+class _ResolvedKiroHook:
+    """One fully-resolved Kiro v1 hook, ready to serialize.
+
+    Every field already holds its final Kiro-native value (commands are
+    path-rewritten, triggers canonicalized). There is no side channel: what
+    is stored here is exactly what is written to disk.
+    """
+
+    trigger: str
+    action: dict
+    source_action: dict
+    name: str | None = None
+    matcher: str | None = None
+    description: str | None = None
+    timeout: int | float | None = None
+    enabled: bool | None = None
 
 
 def _safe_hook_slug(value: str, fallback: str = "hook") -> str:
@@ -55,38 +77,32 @@ def _kiro_matcher_from_matcher(matcher: dict) -> str | None:
     return None
 
 
-def _with_kiro_hook_fields(converted: dict, source: dict) -> dict:
-    """Carry hook-level Kiro fields beside an internal action."""
-    timeout = source.get("timeout", source.get("timeoutSec"))
-    if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
-        converted["_kiro_timeout"] = timeout
-    for field in ("description", "enabled"):
-        if field in source:
-            converted[f"_kiro_{field}"] = source[field]
-    # Native v1 normalization has already namespaced these hook-level fields.
-    for field in ("_kiro_description", "_kiro_timeout", "_kiro_enabled"):
-        if field in source:
-            converted[field] = source[field]
-    return converted
+def _numeric_timeout(value: object) -> int | float | None:
+    """Return a numeric timeout, or None when absent/non-numeric."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    return None
 
 
 def _kiro_action_from_action(action: dict, command_keys: tuple[str, ...]) -> dict | None:
-    """Convert one APM hook action to a Kiro v1 action."""
+    """Convert one APM hook action to a Kiro v1 action.
+
+    Pure mapping: it produces the Kiro-native ``{"type": ...}`` action and
+    never mutates or annotates the input. Command path rewriting is the
+    caller's responsibility (it happens before this call for native input and
+    inside ``_rewrite_hooks_data`` for portable input).
+    """
     prompt = action.get("prompt")
     if action.get("type") in {"agent", "askAgent"} or isinstance(prompt, str):
         prompt_text = prompt if isinstance(prompt, str) else action.get("command")
         if isinstance(prompt_text, str) and prompt_text.strip():
-            return _with_kiro_hook_fields(
-                {"type": "agent", "prompt": prompt_text},
-                action,
-            )
+            return {"type": "agent", "prompt": prompt_text}
         return None
 
     for key in command_keys:
         command = action.get(key)
         if isinstance(command, str) and command.strip():
-            converted = {"type": "command", "command": command}
-            return _with_kiro_hook_fields(converted, action)
+            return {"type": "command", "command": command}
     return None
 
 
@@ -106,58 +122,130 @@ def _kiro_actions_from_matcher(matcher: dict, command_keys: tuple[str, ...]) -> 
 def _kiro_hook_document(
     *,
     name: str,
-    event_name: str,
-    matcher: str | None,
+    trigger: str,
     action: dict,
+    matcher: str | None = None,
+    description: str | None = None,
+    timeout: int | float | None = None,
+    enabled: bool | None = None,
 ) -> dict:
-    """Build one Kiro v1 hook JSON document."""
-    action = dict(action)
-    hook = {
-        "name": name,
-        "trigger": event_name,
-        "action": action,
-    }
-    for field in ("description", "timeout", "enabled"):
-        value = action.pop(f"_kiro_{field}", None)
-        if value is not None:
-            hook[field] = value
+    """Build one Kiro v1 hook JSON document from explicit native fields."""
+    hook: dict[str, object] = {"name": name, "trigger": trigger}
+    if description is not None:
+        hook["description"] = description
     if matcher:
         hook["matcher"] = matcher
+    if timeout is not None:
+        hook["timeout"] = timeout
+    if enabled is not None:
+        hook["enabled"] = enabled
+    hook["action"] = dict(action)
     return {"version": "v1", "hooks": [hook]}
 
 
-def _normalize_kiro_v1(data: dict) -> dict:
-    """Convert a native Kiro v1 document to the internal event-map shape."""
-    events: dict[str, list[dict]] = {}
-    for hook in data.get("hooks", []):
-        if not isinstance(hook, dict):
+def _resolve_native_v1_hooks(
+    integrator: HookIntegrator,
+    hooks: list,
+    *,
+    package_path: Path,
+    package_name: str,
+    root_dir: str | None,
+    deploy_root: Path | None,
+    hook_file_dir: Path,
+) -> tuple[list[_ResolvedKiroHook], list[tuple[Path, str]]]:
+    """Resolve native Kiro v1 hooks directly into Kiro-native results."""
+    resolved: list[_ResolvedKiroHook] = []
+    scripts: list[tuple[Path, str]] = []
+    for raw in hooks:
+        if not isinstance(raw, dict):
             continue
-        trigger = hook.get("trigger")
-        action = hook.get("action")
+        trigger = raw.get("trigger")
+        action = raw.get("action")
         if not isinstance(trigger, str) or not isinstance(action, dict):
             continue
-        native_action = dict(action)
-        if isinstance(hook.get("name"), str):
-            native_action["_kiro_name"] = hook["name"]
-        if isinstance(hook.get("description"), str):
-            native_action["_kiro_description"] = hook["description"]
-        timeout = hook.get("timeout")
-        if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
-            native_action["_kiro_timeout"] = timeout
-        if isinstance(hook.get("enabled"), bool):
-            native_action["_kiro_enabled"] = hook["enabled"]
-        matcher: dict[str, object] = {"hooks": [native_action]}
-        if isinstance(hook.get("matcher"), str):
-            matcher["matcher"] = hook["matcher"]
-        canonical_trigger = _KIRO_EVENT_MAP.get(trigger, trigger)
-        events.setdefault(canonical_trigger, []).append(matcher)
-    return {"hooks": events}
+        kiro_action = _kiro_action_from_action(action, integrator.HOOK_COMMAND_KEYS)
+        if kiro_action is None:
+            continue
+        if kiro_action["type"] == "command":
+            new_cmd, act_scripts = integrator._rewrite_command_for_target(
+                kiro_action["command"],
+                package_path,
+                package_name,
+                "kiro",
+                hook_file_dir=hook_file_dir,
+                root_dir=root_dir,
+                deploy_root=deploy_root,
+            )
+            kiro_action = {"type": "command", "command": new_cmd}
+            scripts.extend(act_scripts)
+        resolved.append(
+            _ResolvedKiroHook(
+                trigger=_KIRO_EVENT_MAP.get(trigger, trigger),
+                action=kiro_action,
+                source_action=action,
+                name=raw.get("name") if isinstance(raw.get("name"), str) else None,
+                matcher=raw.get("matcher") if isinstance(raw.get("matcher"), str) else None,
+                description=(
+                    raw.get("description") if isinstance(raw.get("description"), str) else None
+                ),
+                timeout=_numeric_timeout(raw.get("timeout")),
+                enabled=raw.get("enabled") if isinstance(raw.get("enabled"), bool) else None,
+            )
+        )
+    return resolved, _dedup_scripts(scripts)
 
 
-def _write_kiro_hook_docs(
+def _dedup_scripts(scripts: list[tuple[Path, str]]) -> list[tuple[Path, str]]:
+    """Drop duplicate (source, target) script pairs, preserving order."""
+    seen: set[tuple[str, str]] = set()
+    unique: list[tuple[Path, str]] = []
+    for source, target_rel in scripts:
+        key = (str(source), target_rel)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append((source, target_rel))
+    return unique
+
+
+def _resolve_portable_hooks(
     integrator: HookIntegrator,
-    hook_file: Path,
     rewritten: dict,
+) -> list[_ResolvedKiroHook]:
+    """Resolve APM's portable (path-rewritten) hook map into Kiro-native results."""
+    resolved: list[_ResolvedKiroHook] = []
+    hooks = rewritten.get("hooks", {})
+    _emit_hook_event_diagnostics(list(hooks.keys()), "kiro", _KIRO_EVENT_MAP)
+    for raw_event_name, matchers in hooks.items():
+        if not isinstance(matchers, list):
+            continue
+        trigger = _KIRO_EVENT_MAP.get(raw_event_name, raw_event_name)
+        for matcher in matchers:
+            if not isinstance(matcher, dict):
+                continue
+            kiro_matcher = _kiro_matcher_from_matcher(matcher)
+            for action in _kiro_actions_from_matcher(matcher, integrator.HOOK_COMMAND_KEYS):
+                kiro_action = _kiro_action_from_action(action, integrator.HOOK_COMMAND_KEYS)
+                if kiro_action is None:
+                    continue
+                resolved.append(
+                    _ResolvedKiroHook(
+                        trigger=trigger,
+                        action=kiro_action,
+                        source_action=action,
+                        matcher=kiro_matcher,
+                        timeout=_numeric_timeout(
+                            action.get("timeout", action.get("timeoutSec"))
+                        ),
+                    )
+                )
+    return resolved
+
+
+def _write_resolved_hooks(
+    integrator: HookIntegrator,
+    resolved: list[_ResolvedKiroHook],
+    hook_file: Path,
     hooks_dir: Path,
     project_root: Path,
     package_name: str,
@@ -167,77 +255,63 @@ def _write_kiro_hook_docs(
     target_paths: list[Path],
     display_payloads: list,
 ) -> tuple[int, int, int]:
-    """Write Kiro hook docs from one source hook file."""
+    """Serialize resolved Kiro hooks to one v1 document per hook."""
     files_integrated = 0
     files_skipped = 0
     files_adopted = 0
-    hooks = rewritten.get("hooks", {})
-    _emit_hook_event_diagnostics(list(hooks.keys()), "kiro", _KIRO_EVENT_MAP)
     per_event_counts: dict[str, int] = {}
-    for raw_event_name, matchers in hooks.items():
-        if not isinstance(matchers, list):
+    for hook in resolved:
+        per_event_counts[hook.trigger] = per_event_counts.get(hook.trigger, 0) + 1
+        index = per_event_counts[hook.trigger]
+        event_slug = _safe_hook_slug(hook.trigger)
+        doc = _kiro_hook_document(
+            name=hook.name or f"{package_name} {hook.trigger} {index}",
+            trigger=hook.trigger,
+            action=hook.action,
+            matcher=hook.matcher,
+            description=hook.description,
+            timeout=hook.timeout,
+            enabled=hook.enabled,
+        )
+        target_filename = (
+            f"{_safe_hook_slug(package_name)}-{_safe_hook_slug(hook_file.stem)}-"
+            f"{event_slug}-{index}.json"
+        )
+        target_path = hooks_dir / target_filename
+        ensure_path_within(target_path, hooks_dir)
+        rel_path = portable_relpath(target_path, project_root)
+        rendered = json.dumps(doc, indent=2) + "\n"
+
+        if target_path.exists() and target_path.read_text(encoding="utf-8") == rendered:
+            os.chmod(target_path, 0o600)
+            files_adopted += 1
+            target_paths.append(target_path)
             continue
-        event_name = _KIRO_EVENT_MAP.get(raw_event_name, raw_event_name)
-        event_slug = _safe_hook_slug(event_name)
-        for matcher in matchers:
-            if not isinstance(matcher, dict):
-                continue
-            kiro_matcher = _kiro_matcher_from_matcher(matcher)
-            for action in _kiro_actions_from_matcher(matcher, integrator.HOOK_COMMAND_KEYS):
-                kiro_action = _kiro_action_from_action(action, integrator.HOOK_COMMAND_KEYS)
-                if kiro_action is None:
-                    _log.debug(
-                        "Skipping unsupported Kiro hook action from %s",
-                        hook_file.name,
-                    )
-                    continue
-                per_event_counts[event_name] = per_event_counts.get(event_name, 0) + 1
-                index = per_event_counts[event_name]
-                doc = _kiro_hook_document(
-                    name=action.get("_kiro_name", f"{package_name} {event_name} {index}"),
-                    event_name=event_name,
-                    matcher=kiro_matcher,
-                    action=kiro_action,
-                )
-                target_filename = (
-                    f"{_safe_hook_slug(package_name)}-{_safe_hook_slug(hook_file.stem)}-"
-                    f"{event_slug}-{index}.json"
-                )
-                target_path = hooks_dir / target_filename
-                ensure_path_within(target_path, hooks_dir)
-                rel_path = portable_relpath(target_path, project_root)
-                rendered = json.dumps(doc, indent=2) + "\n"
+        if integrator.check_collision(
+            target_path,
+            rel_path,
+            managed_files,
+            force,
+            diagnostics=diagnostics,
+        ):
+            files_skipped += 1
+            continue
 
-                if target_path.exists() and target_path.read_text(encoding="utf-8") == rendered:
-                    os.chmod(target_path, 0o600)
-                    files_adopted += 1
-                    target_paths.append(target_path)
-                    continue
-                if integrator.check_collision(
-                    target_path,
-                    rel_path,
-                    managed_files,
-                    force,
-                    diagnostics=diagnostics,
-                ):
-                    files_skipped += 1
-                    continue
-
-                atomic_write_text(target_path, rendered, new_file_mode=0o600)
-                # Keep existing hook files private after updates too.
-                os.chmod(target_path, 0o600)
-                files_integrated += 1
-                target_paths.append(target_path)
-                display_payloads.append(
-                    _display_payload(
-                        integrator,
-                        target_filename,
-                        hook_file,
-                        event_name,
-                        kiro_action,
-                        rendered,
-                    )
-                )
+        atomic_write_text(target_path, rendered, new_file_mode=0o600)
+        # Keep existing hook files private after updates too.
+        os.chmod(target_path, 0o600)
+        files_integrated += 1
+        target_paths.append(target_path)
+        display_payloads.append(
+            _display_payload(
+                integrator,
+                target_filename,
+                hook_file,
+                hook.trigger,
+                hook.action,
+                rendered,
+            )
+        )
     return files_integrated, files_skipped, files_adopted
 
 
@@ -292,6 +366,45 @@ def _copy_scripts(
     return copy_result.scripts_copied, copy_result.files_adopted
 
 
+def _resolve_hooks_for_file(
+    integrator: HookIntegrator,
+    data: dict,
+    *,
+    package_path: Path,
+    package_name: str,
+    root_dir: str | None,
+    deploy_root: Path | None,
+    hook_file_dir: Path,
+) -> tuple[list[_ResolvedKiroHook], list[tuple[Path, str]]]:
+    """Resolve one parsed hook file into Kiro-native hooks plus scripts to copy."""
+    if isinstance(data.get("hooks"), list):
+        _log.debug(
+            "Consuming %d native Kiro v1 hook(s) from %s",
+            len(data["hooks"]),
+            hook_file_dir.name,
+        )
+        return _resolve_native_v1_hooks(
+            integrator,
+            data["hooks"],
+            package_path=package_path,
+            package_name=package_name,
+            root_dir=root_dir,
+            deploy_root=deploy_root,
+            hook_file_dir=hook_file_dir,
+        )
+
+    rewritten, scripts = integrator._rewrite_hooks_data(
+        data,
+        package_path,
+        package_name,
+        "kiro",
+        hook_file_dir=hook_file_dir,
+        root_dir=root_dir,
+        deploy_root=deploy_root,
+    )
+    return _resolve_portable_hooks(integrator, rewritten), scripts
+
+
 def integrate_kiro_hooks(
     integrator: HookIntegrator,
     package_info,
@@ -339,27 +452,20 @@ def integrate_kiro_hooks(
         data = integrator._parse_hook_json(hook_file, allow_kiro_v1=True)
         if data is None:
             continue
-        if isinstance(data.get("hooks"), list):
-            _log.debug(
-                "Normalizing %d native Kiro v1 hook(s) from %s",
-                len(data["hooks"]),
-                hook_file.name,
-            )
-            data = _normalize_kiro_v1(data)
 
-        rewritten, scripts = integrator._rewrite_hooks_data(
+        resolved, scripts = _resolve_hooks_for_file(
+            integrator,
             data,
-            package_info.install_path,
-            package_name,
-            "kiro",
-            hook_file_dir=hook_file.parent,
+            package_path=package_info.install_path,
+            package_name=package_name,
             root_dir=root_dir,
             deploy_root=deploy_root_for_rewrite,
+            hook_file_dir=hook_file.parent,
         )
-        written, skipped, adopted = _write_kiro_hook_docs(
+        written, skipped, adopted = _write_resolved_hooks(
             integrator,
+            resolved,
             hook_file,
-            rewritten,
             hooks_dir,
             project_root,
             package_name,

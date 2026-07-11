@@ -194,13 +194,10 @@ class TestKiroHookDocument:
 
         doc = _kiro_hook_document(
             name="my-pkg PreToolUse 1",
-            event_name="PreToolUse",
+            trigger="PreToolUse",
             matcher="**/*.py",
-            action={
-                "type": "command",
-                "command": "echo hi",
-                "_kiro_description": "A description",
-            },
+            description="A description",
+            action={"type": "command", "command": "echo hi"},
         )
         assert doc == {
             "version": "v1",
@@ -208,8 +205,8 @@ class TestKiroHookDocument:
                 {
                     "name": "my-pkg PreToolUse 1",
                     "trigger": "PreToolUse",
-                    "matcher": "**/*.py",
                     "description": "A description",
+                    "matcher": "**/*.py",
                     "action": {"type": "command", "command": "echo hi"},
                 }
             ],
@@ -221,23 +218,39 @@ class TestKiroHookDocument:
 
         doc = _kiro_hook_document(
             name="pkg hook 1",
-            event_name="PostToolUse",
+            trigger="PostToolUse",
             matcher=None,
             action={"type": "agent", "prompt": "Check"},
         )
         assert "matcher" not in doc["hooks"][0]
 
     def test_no_description_omitted(self) -> None:
-        """An absent namespaced description is omitted."""
+        """An absent description is omitted."""
         from apm_cli.integration.kiro_hook_integrator import _kiro_hook_document
 
         doc = _kiro_hook_document(
             name="x",
-            event_name="Event",
+            trigger="Event",
             matcher=None,
             action={"type": "command", "command": "ls"},
         )
         assert "description" not in doc["hooks"][0]
+
+    def test_preserves_native_hook_fields(self) -> None:
+        """Native timeout and enabled fields serialize beside the action."""
+        from apm_cli.integration.kiro_hook_integrator import _kiro_hook_document
+
+        doc = _kiro_hook_document(
+            name="native 1",
+            trigger="PreTaskExec",
+            matcher="build",
+            timeout=15,
+            enabled=False,
+            action={"type": "command", "command": "make"},
+        )
+        hook = doc["hooks"][0]
+        assert hook["timeout"] == 15
+        assert hook["enabled"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +368,7 @@ class TestIntegrateKiroHooksFlow:
 
         doc = _kiro_hook_document(
             name="my-pkg PreToolUse 1",
-            event_name="PreToolUse",
+            trigger="PreToolUse",
             matcher=None,
             action={"type": "command", "command": "make test"},
         )
