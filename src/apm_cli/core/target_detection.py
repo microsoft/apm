@@ -731,7 +731,8 @@ class TargetParamType(click.ParamType):
             err_msg = str(e)
             if "is not a valid target" in err_msg:
                 target_name = value if isinstance(value, str) else ",".join(value or [])
-                rendered = render_unknown_target_error(target_name, sorted(VALID_TARGET_VALUES))
+                advertised = set(CANONICAL_TARGETS_ORDERED) | MCP_ONLY_TARGETS | {"all"}
+                rendered = render_unknown_target_error(target_name, sorted(advertised))
                 raise UnknownTargetError(rendered) from None
             # Click idiom: route validation errors through self.fail so the
             # user sees a clean "Invalid value for '--target': ..." message

@@ -67,7 +67,7 @@ and emit a one-line warning. `--target all` also emits a deprecation
 warning -- prefer `--all`.
 
 `agent-skills` is a no-op for `compile` (skills-only deployment target);
-`antigravity` and `intellij` are explicit-only and are not included in `all`.
+`antigravity` is explicit-only and `intellij` is MCP-only. Neither is included in `all`.
 For `intellij`, file primitives use the Copilot profile and produce `AGENTS.md`;
 IntelliJ-specific integration remains MCP-only. Use `apm install` or
 `apm deps update` when you want shared `.agents/skills/` output.
