@@ -236,7 +236,7 @@ class LockfileBuilder:
 
             diagnostics = DiagnosticCollector()
         ghost_count = 0
-        for dep_key, locked_dep in lockfile.dependencies.items():
+        for dep_key in lockfile.dependencies:
             current = list(self.ctx.package_deployed_files.get(dep_key, []))
             current_hashes = compute_deployed_hashes(current, self.ctx.project_root)
             prev = existing.get_dependency(dep_key) if existing is not None else None
@@ -270,8 +270,9 @@ class LockfileBuilder:
                 # leave deployed_files untouched so the whole-dep
                 # _merge_existing path can preserve it intact.
                 continue
-            locked_dep.deployed_files = files
-            locked_dep.deployed_file_hashes = hashes
+            from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+            DeploymentLedgerCodec.replace_legacy_owner(lockfile, dep_key, files, hashes)
         logger = getattr(self.ctx, "logger", None)
         if logger and ghost_count:
             noun = "entry" if ghost_count == 1 else "entries"
@@ -406,9 +407,13 @@ class LockfileBuilder:
     def _preserve_existing_local_state(self, lockfile: LockFile) -> None:
         """Keep local fields until post_deps_local reconciles content hashes."""
         if self.ctx.existing_lockfile:
-            lockfile.local_deployed_files = list(self.ctx.existing_lockfile.local_deployed_files)
-            lockfile.local_deployed_file_hashes = copy.deepcopy(
-                self.ctx.existing_lockfile.local_deployed_file_hashes
+            from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+            DeploymentLedgerCodec.replace_legacy_owner(
+                lockfile,
+                ".",
+                list(self.ctx.existing_lockfile.local_deployed_files),
+                copy.deepcopy(self.ctx.existing_lockfile.local_deployed_file_hashes),
             )
             if "." in self.ctx.existing_lockfile.dependencies:
                 lockfile.dependencies["."] = copy.deepcopy(

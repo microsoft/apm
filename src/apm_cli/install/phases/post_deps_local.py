@@ -139,8 +139,9 @@ def run(ctx: InstallContext) -> None:
         diagnostics=ctx.diagnostics,
         on_ghost_drop=_log_local_ghost_drop,
     )
-    _persist_lock.local_deployed_files = sorted(_files)
-    _persist_lock.local_deployed_file_hashes = _hashes
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+    DeploymentLedgerCodec.replace_legacy_owner(_persist_lock, ".", sorted(_files), _hashes)
     if logger and _ghost_count:
         noun = "entry" if _ghost_count == 1 else "entries"
         logger.info(f"Repaired {_ghost_count} inactive-target local lockfile {noun}")
