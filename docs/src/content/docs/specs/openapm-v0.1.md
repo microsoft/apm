@@ -2080,7 +2080,7 @@ MUST NOT emit a superseded schema. Each generated document MUST contain a
 top-level `"version": "v1"` field and an array-valued `"hooks"` field. Each
 hook entry MUST contain `name`, a PascalCase `trigger`, and an `action`; it MAY
 contain a `matcher`, `description`, numeric `timeout`, and boolean `enabled`.
-A Kiro consumer MUST NOT emit the superseded `when`/`then` hook shape. The
+The consumer MUST NOT emit the superseded `when`/`then` hook shape. The
 consumer MUST accept native Kiro v1 hook documents for Kiro-targeted packages
 and preserve their supported names, descriptions, triggers, matchers, command or
 agent actions, timeouts, and enabled state while applying the same path rewriting
