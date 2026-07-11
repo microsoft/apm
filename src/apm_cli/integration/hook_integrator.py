@@ -1283,6 +1283,8 @@ class HookIntegrator(BaseIntegrator):
                     renamed_hooks[event_name] = entries
                 rewritten["hooks"] = renamed_hooks
 
+            rewritten.setdefault("version", 1)
+
             # Write rewritten JSON
             with open(target_path, "w", encoding="utf-8") as f:
                 json.dump(rewritten, f, indent=2)
