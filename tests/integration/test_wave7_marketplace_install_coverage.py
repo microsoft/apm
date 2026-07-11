@@ -1056,8 +1056,8 @@ class TestInstallErrorPaths:
                 ),
             ):
                 result = runner.invoke(cli, ["install", "owner/nonexistent"])
-        # All validations failed → exit
-        assert result.exit_code != 0 or "not accessible" in result.output
+        # All validations failed, so the command must report failure.
+        assert result.exit_code == 1
 
 
 # ===========================================================================
