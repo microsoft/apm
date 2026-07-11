@@ -38,9 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (by @sergio-sisternes-epam; closes #1957) (#2041)
 - Global Claude installs now support an absolute `CLAUDE_CONFIG_DIR` outside
   `HOME` without leaving a partial deployment. (closes #2129) (#2135)
-
-### Fixed
-
 - Azure DevOps marketplace checks now preserve suffix-free `/_git/<repo>` URLs
   and pass Azure CLI bearer authentication through to `git ls-remote`. (closes #2119)
 
