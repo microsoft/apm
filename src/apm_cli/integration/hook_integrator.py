@@ -53,6 +53,13 @@ from typing import Any
 
 import yaml
 
+from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+from apm_cli.core.deployment_state import (
+    MaterializationResult,
+    MaterializationStatus,
+    NativePayloadValidation,
+)
+from apm_cli.core.scope import InstallScope
 from apm_cli.integration.base_integrator import BaseIntegrator, IntegrationResult
 from apm_cli.integration.hook_bundle import copy_deployed_hook_bundle
 from apm_cli.integration.hook_file_routing import filter_hook_files_for_target
@@ -1242,6 +1249,7 @@ class HookIntegrator(BaseIntegrator):
         scripts_adopted = 0
         target_paths: list[Path] = []
         display_payloads: list = []
+        materializations: list[MaterializationResult] = []
 
         for hook_file in hook_files:
             data = self._parse_hook_json(hook_file)
@@ -1284,6 +1292,23 @@ class HookIntegrator(BaseIntegrator):
                 rewritten["hooks"] = renamed_hooks
 
             rewritten.setdefault("version", 1)
+            errors: list[str] = []
+            if rewritten.get("version") != 1:
+                errors.append("top-level version must equal 1")
+            if not isinstance(rewritten.get("hooks"), dict):
+                errors.append("top-level hooks must be an object")
+            validation = NativePayloadValidation(
+                valid=not errors,
+                contract="copilot-hooks-v1",
+                errors=tuple(errors),
+            )
+            if not validation.valid:
+                if diagnostics is not None:
+                    diagnostics.error(
+                        f"Invalid Copilot hook payload for {rel_path}",
+                        package=package_name,
+                        detail="; ".join(validation.errors),
+                    )
 
             # Write rewritten JSON
             with open(target_path, "w", encoding="utf-8") as f:
@@ -1292,6 +1317,27 @@ class HookIntegrator(BaseIntegrator):
 
             hooks_integrated += 1
             target_paths.append(target_path)
+            from apm_cli.integration.targets import KNOWN_TARGETS
+            from apm_cli.utils.content_hash import compute_file_hash
+
+            materializations.append(
+                MaterializationResult(
+                    locator=DeploymentLedgerCodec.locator_for_path(
+                        target_path,
+                        project_root=project_root,
+                        target=KNOWN_TARGETS["copilot"],
+                        scope=InstallScope.PROJECT,
+                    ),
+                    owners=frozenset({package_info.get_canonical_dependency_string()}),
+                    status=(
+                        MaterializationStatus.WRITTEN
+                        if validation.valid
+                        else MaterializationStatus.FAILED
+                    ),
+                    content_hash=compute_file_hash(target_path),
+                    validation=validation,
+                )
+            )
             display_payloads.append(
                 self._build_display_payload(
                     f"{root_dir}/hooks/",
@@ -1324,6 +1370,7 @@ class HookIntegrator(BaseIntegrator):
             scripts_copied=scripts_copied,
             files_adopted=scripts_adopted,
             display_payloads=display_payloads,
+            materializations=tuple(materializations),
         )
 
     # ------------------------------------------------------------------

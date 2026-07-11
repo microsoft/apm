@@ -234,6 +234,10 @@ def execute_migration(
 
         _update_lockfile_entry(lockfile, plan, result)
 
+    if result.updated_deps:
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+        DeploymentLedgerCodec.refresh_from_legacy(lockfile)
     return result
 
 

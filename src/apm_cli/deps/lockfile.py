@@ -563,6 +563,7 @@ class LockFile:
     deployment_ledger: DeploymentLedger = field(
         default_factory=lambda: DeploymentLedger(records={})
     )
+    _deployments_present: bool = field(default=False, repr=False, compare=False)
 
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file.
@@ -574,6 +575,9 @@ class LockFile:
         """
         dep.deployed_files = _dedupe_preserving_order(dep.deployed_files)
         self.dependencies[dep.get_unique_key()] = dep
+        if dep.deployed_files or dep.deployed_file_hashes:
+            self.deployment_ledger = DeploymentLedger(records={})
+            self._deployments_present = False
         if self.lockfile_version == "1" and (
             dep.source == "registry" or dep.constraint or dep.resolved_tag or dep.resolved_at
         ):
@@ -718,6 +722,7 @@ class LockFile:
 
         if "deployments" in data:
             lock.deployment_ledger = DeploymentLedgerCodec.from_rows(data["deployments"])
+            lock._deployments_present = True
         else:
             lock.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lock)
         return lock

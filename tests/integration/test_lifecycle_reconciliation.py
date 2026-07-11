@@ -13,6 +13,7 @@ from apm_cli.core.deployment_state import (
     NativePayloadValidation,
 )
 from apm_cli.integration.targets import TargetProfile
+from apm_cli.policy.ci_checks import _check_content_integrity
 from apm_cli.utils.diagnostics import DiagnosticCollector
 
 
@@ -73,3 +74,23 @@ def test_install_update_compile_uninstall_share_one_owner(tmp_path: Path) -> Non
 
     assert uninstall.ledger.records == {}
     assert uninstall.removed == (locator,)
+
+
+def test_content_integrity_fails_when_ownership_row_is_absent(
+    tmp_path: Path,
+) -> None:
+    from apm_cli.deps.lockfile import LockFile
+
+    path = tmp_path / ".github" / "agents" / "demo.agent.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("demo", encoding="utf-8")
+    lockfile = LockFile(
+        local_deployed_files=[".github/agents/demo.agent.md"],
+        local_deployed_file_hashes={".github/agents/demo.agent.md": "sha256:missing"},
+    )
+    lockfile._deployments_present = True
+
+    result = _check_content_integrity(tmp_path, lockfile)
+
+    assert result.passed is False
+    assert result.details == ["missing-ownership: .github/agents/demo.agent.md"]

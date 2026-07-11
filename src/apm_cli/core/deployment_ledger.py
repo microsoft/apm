@@ -40,7 +40,9 @@ class DeploymentLedgerCodec:
     def from_lockfile(lockfile: LockFile) -> DeploymentLedger:
         """Read canonical rows or synthesize them from legacy ownership views."""
         current = getattr(lockfile, "deployment_ledger", None)
-        if current is not None and current.records:
+        if current is not None and (
+            current.records or getattr(lockfile, "_deployments_present", False)
+        ):
             return current
 
         records: dict[str, DeploymentRecord] = {}
@@ -59,7 +61,7 @@ class DeploymentLedgerCodec:
             lockfile.local_deployed_files,
             lockfile.local_deployed_file_hashes,
         )
-        for runtime, servers in lockfile.mcp_target_servers.items():
+        for runtime, servers in getattr(lockfile, "mcp_target_servers", {}).items():
             for server in servers:
                 locator = DeploymentLocator(
                     kind=LocatorKind.URI,
@@ -85,6 +87,7 @@ class DeploymentLedgerCodec:
     ) -> None:
         """Apply the ledger once and optionally maintain one-cycle legacy views."""
         lockfile.deployment_ledger = ledger
+        lockfile._deployments_present = True
         if not write_legacy_views:
             return
 
@@ -142,6 +145,9 @@ class DeploymentLedgerCodec:
             dependency.deployed_files = list(files)
             dependency.deployed_file_hashes = dict(hashes)
         lockfile.deployment_ledger = DeploymentLedger(records={})
+        lockfile._deployments_present = False
+        lockfile.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+        lockfile._deployments_present = True
 
     @staticmethod
     def replace_mcp_target_servers(
@@ -153,11 +159,22 @@ class DeploymentLedgerCodec:
             runtime: list(servers) for runtime, servers in target_servers.items()
         }
         lockfile.deployment_ledger = DeploymentLedger(records={})
+        lockfile._deployments_present = False
+        lockfile.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+        lockfile._deployments_present = True
 
     @staticmethod
     def replace_context_local_files(context: Any, files: list[str]) -> None:
         """Route transitional install-context ownership mutation through one owner."""
         context.local_deployed_files = list(files)
+
+    @staticmethod
+    def refresh_from_legacy(lockfile: LockFile) -> None:
+        """Rebuild canonical rows after a compatibility view mutates in place."""
+        lockfile.deployment_ledger = DeploymentLedger(records={})
+        lockfile._deployments_present = False
+        lockfile.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
+        lockfile._deployments_present = True
 
     @staticmethod
     def locator_for_path(
