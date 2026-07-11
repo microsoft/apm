@@ -6,7 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-  
+
+### Added
+
+- New `apm export-patch` command exports local edits to APM-managed files
+  as unified diffs against the packages that deployed them, one
+  `git apply`-ready `.patch` file per package with the locked base recorded
+  in the header. Verbatim-deployed files only; transformed deployments are
+  listed as skipped with the reason. (by @edenfunf; closes #2118) (#2162)
+
 ### Fixed
 
 - Fresh checkouts with declared consumer targets no longer remain

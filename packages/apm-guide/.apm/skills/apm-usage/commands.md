@@ -14,6 +14,7 @@
 | `apm targets` | Show resolved deployment targets for the current project (Click group; reads filesystem signals; works with or without `apm.yml`) | `--all` also include the `agent-skills` meta-target (only meaningful with `--json`), `--json` machine-readable output. No provenance line is printed (the table is the provenance). |
 | `apm uninstall PKGS...` | Remove packages (accepts `owner/repo` or `name@marketplace`) | `--dry-run`, `-g` global |
 | `apm prune` | Remove orphaned packages | `--dry-run` |
+| `apm export-patch` | Export local edits to APM-managed files as `git apply`-ready patches against their source packages (one `.patch` per package, locked base in the header; verbatim-deployed files only -- transformed deployments are listed as skipped with the reason) | `-o/--out DIR` output dir (default `apm-patches`; must not point inside `apm_modules/`), `--dry-run` preview, `-v` verbose |
 | `apm deps list` | List installed packages | `-g` global, `--all` both scopes, `--insecure` |
 | `apm deps tree` | Show dependency tree | -- |
 | `apm deps why PKG` | Explain why a package is installed (walks lockfile bottom-up to direct deps; analogue of `npm why` / `yarn why`) | `-g` global, `--json` |
