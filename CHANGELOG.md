@@ -20,9 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (by @sergio-sisternes-epam; closes #1957) (#2041)
 - Azure DevOps marketplace checks now preserve suffix-free `/_git/<repo>` URLs
   and pass Azure CLI bearer authentication through to `git ls-remote`. (closes #2119)
-- Kiro hooks now support matchers, hook-level timeouts, and `enabled` toggles
-  through the official v1 runtime shape, while native v1 files preserve their
-  supported fields. The contract is recorded in the OpenAPM v0.1
+- Kiro hooks now emit the official Kiro v1 runtime shape
+  (`{"version": "v1", "hooks": [...]}`) that Kiro 1.0 reads natively, replacing
+  the superseded pre-1.0 schema that Kiro could not consume. Portable hooks gain
+  matchers, hook-level timeouts, and `enabled` toggles, and native v1 files
+  preserve their supported fields. The contract is recorded in the OpenAPM v0.1
   specification. (closes #2071) (#2095)
 
 ## [0.24.1] - 2026-07-10

@@ -81,16 +81,19 @@ authors notice empty merges during development.
 
 Kiro-targeted packages may also use the native Kiro v1 shape. APM accepts
 `{"version": "v1", "hooks": [...]}` and deploys each array entry as a
-standalone v1 document. Portable Claude and Copilot events are translated to
+standalone v1 document. Portable Claude and Copilot events map to
 Kiro's PascalCase `trigger` names, matcher groups become `matcher`, and command
 actions become `action: {"type": "command", ...}`. In Kiro v1, `timeout` is a
 hook-level field alongside `action`. Native `description`, `timeout`, and
 `enabled` fields are preserved. Portable `askAgent` actions become Kiro v1
-`agent` actions with the prompt preserved. Native-only triggers such as `PreTaskExec`,
-`PostTaskExec`, `PostFileCreate`, `PostFileSave`, and `PostFileDelete` pass
-through for Kiro. Native v1 inputs support Kiro's `command` and `agent` action
-types; files with no supported actions emit a warning. For example, this
-Kiro-only hook runs the Ruff Python linter after a file is saved:
+`agent` actions with the prompt preserved. `PreTaskExec` and `PostTaskExec`
+also pass through from portable input; `PostFileCreate`, `PostFileSave`,
+`PostFileDelete`, and `SessionStart` are Kiro-only triggers that require the
+native v1 shape. Native v1 inputs support Kiro's `command` and `agent` action
+types; files with no supported actions emit a warning. Kiro matchers are regex
+patterns (for example `\\.py$`), unlike the glob patterns used in portable hook
+matchers. For example, this Kiro-only hook runs the Ruff Python linter after a
+file is saved:
 
 ```json
 {

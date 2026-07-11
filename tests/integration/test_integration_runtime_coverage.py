@@ -134,6 +134,16 @@ class TestKiroActionFromAction:
         )
         assert result == {"type": "agent", "prompt": "Do something"}
 
+    def test_native_agent_type(self) -> None:
+        """Native Kiro v1 type=agent input passes through unchanged."""
+        from apm_cli.integration.kiro_hook_integrator import _kiro_action_from_action
+
+        result = _kiro_action_from_action(
+            {"type": "agent", "prompt": "Do X"},
+            command_keys=("command",),
+        )
+        assert result == {"type": "agent", "prompt": "Do X"}
+
     def test_prompt_string_shorthand(self) -> None:
         """Dict with 'prompt' key (no type) maps to an agent action."""
         from apm_cli.integration.kiro_hook_integrator import _kiro_action_from_action

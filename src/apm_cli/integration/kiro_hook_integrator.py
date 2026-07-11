@@ -38,18 +38,18 @@ _KIRO_EVENT_MAP = _HOOK_EVENT_MAP["kiro"]
 _log = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True)
 class _ResolvedKiroHook:
     """One fully-resolved Kiro v1 hook, ready to serialize.
 
     Every field already holds its final Kiro-native value (commands are
     path-rewritten, triggers canonicalized). There is no side channel: what
-    is stored here is exactly what is written to disk.
+    is stored here is exactly what is written to disk. Frozen because a
+    resolver builds it once and the writer only ever reads it.
     """
 
     trigger: str
     action: dict
-    source_action: dict
     name: str | None = None
     matcher: str | None = None
     description: str | None = None
@@ -180,9 +180,12 @@ def _resolve_native_v1_hooks(
             scripts.extend(act_scripts)
         resolved.append(
             _ResolvedKiroHook(
+                # Native triggers pass through unchanged when unmapped. This is
+                # safe: _safe_hook_slug sanitizes the value for the filename,
+                # ensure_path_within bounds the output path, and the trigger is
+                # data-only in the emitted JSON (no execution semantics).
                 trigger=_KIRO_EVENT_MAP.get(trigger, trigger),
                 action=kiro_action,
-                source_action=action,
                 name=raw.get("name") if isinstance(raw.get("name"), str) else None,
                 matcher=raw.get("matcher") if isinstance(raw.get("matcher"), str) else None,
                 description=(
@@ -232,7 +235,6 @@ def _resolve_portable_hooks(
                     _ResolvedKiroHook(
                         trigger=trigger,
                         action=kiro_action,
-                        source_action=action,
                         matcher=kiro_matcher,
                         timeout=_numeric_timeout(action.get("timeout", action.get("timeoutSec"))),
                     )
@@ -373,13 +375,14 @@ def _resolve_hooks_for_file(
     root_dir: str | None,
     deploy_root: Path | None,
     hook_file_dir: Path,
+    hook_file_name: str,
 ) -> tuple[list[_ResolvedKiroHook], list[tuple[Path, str]]]:
     """Resolve one parsed hook file into Kiro-native hooks plus scripts to copy."""
     if isinstance(data.get("hooks"), list):
         _log.debug(
             "Consuming %d native Kiro v1 hook(s) from %s",
             len(data["hooks"]),
-            hook_file_dir.name,
+            hook_file_name,
         )
         return _resolve_native_v1_hooks(
             integrator,
@@ -459,6 +462,7 @@ def integrate_kiro_hooks(
             root_dir=root_dir,
             deploy_root=deploy_root_for_rewrite,
             hook_file_dir=hook_file.parent,
+            hook_file_name=hook_file.name,
         )
         written, skipped, adopted = _write_resolved_hooks(
             integrator,
@@ -478,7 +482,8 @@ def integrate_kiro_hooks(
         files_adopted += adopted
         if written + skipped + adopted == 0:
             _log.warning(
-                "Kiro hook file %s contributed no supported command or agent actions",
+                "Kiro hook file %s contributed no supported command or agent "
+                'actions (supported: type "command" or type "agent")',
                 hook_file.name,
             )
         copied, adopted_scripts = _copy_scripts(
