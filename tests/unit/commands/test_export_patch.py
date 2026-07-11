@@ -212,6 +212,37 @@ def test_header_values_cannot_inject_diff_lines():
         assert line.startswith("#"), line
 
 
+def test_header_strips_url_userinfo_credentials():
+    # Private-registry URLs can embed credentials (user:token@host); a
+    # patch file is made to be shared, so they must never reach the header.
+    dep = LockedDependency(
+        repo_url="org/pkg",
+        source="registry",
+        version="1.0.0",
+        source_url="https://alice:s3cret@registry.example/org/pkg",
+        resolved_url="https://alice:s3cret@registry.example/org/pkg/1.0.0.tar.gz",
+    )
+    header = _patch_header("org/pkg", dep)
+    assert "s3cret" not in header
+    assert "alice" not in header
+    assert "# source: https://registry.example/org/pkg" in header
+    assert "(https://registry.example/org/pkg/1.0.0.tar.gz)" in header
+
+
+def test_header_leaves_urls_without_userinfo_intact():
+    dep = LockedDependency(
+        repo_url="org/pkg",
+        source="registry",
+        version="1.0.0",
+        resolved_url="https://registry.example/org/pkg?ref=a@b",
+    )
+    # The '@' in the query string is not userinfo and must survive.
+    assert "https://registry.example/org/pkg?ref=a@b" in _base_label(dep)
+    # Non-URL sources (plain owner/repo keys) pass through untouched.
+    plain = LockedDependency(repo_url="owner/repo", resolved_commit="c" * 40)
+    assert "# source: owner/repo" in _patch_header("owner/repo", plain)
+
+
 # ---------------------------------------------------------------------------
 # build_patch_export
 # ---------------------------------------------------------------------------

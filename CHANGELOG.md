@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as unified diffs against the packages that deployed them, one
   `git apply`-ready `.patch` file per package with the locked base recorded
   in the header. Verbatim-deployed files only; transformed deployments are
-  listed as skipped with the reason. (by @edenfunf; closes #2118)
+  listed as skipped with the reason. (by @edenfunf; closes #2118) (#2162)
 
 ### Fixed
 

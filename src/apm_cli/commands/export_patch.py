@@ -220,12 +220,24 @@ def _header_value(value: object) -> str:
     return re.sub(r"[\x00-\x1f\x7f]+", " ", str(value)).strip()
 
 
+def _strip_userinfo(url: str) -> str:
+    """Drop URL userinfo (``user:token@host``) before it reaches a header.
+
+    Private-registry and authenticated-source URLs can legally embed
+    credentials; a patch file is made to be shared, so they must never
+    be written into it.
+    """
+    if "://" not in url:
+        return url
+    return re.sub(r"(?<=//)[^/@]*@", "", url)
+
+
 def _base_label(dep: LockedDependency) -> str:
     """Human-readable description of the snapshot the patch applies to."""
     if dep.source == "registry":
         parts = [f"version {_header_value(dep.version or 'unknown')}"]
         if dep.resolved_url:
-            parts.append(f"({_header_value(dep.resolved_url)})")
+            parts.append(f"({_header_value(_strip_userinfo(dep.resolved_url))})")
         return " ".join(parts)
     if dep.resolved_commit:
         label = f"commit {_header_value(dep.resolved_commit)}"
@@ -244,7 +256,7 @@ def _patch_header(dep_key: str, dep: LockedDependency) -> str:
     lines = [
         "# Exported by 'apm export-patch'",
         f"# package: {_header_value(dep_key)}",
-        f"# source: {_header_value(dep.source_url or dep.repo_url)}",
+        f"# source: {_header_value(_strip_userinfo(dep.source_url or dep.repo_url))}",
         f"# base: {_base_label(dep)}",
         "# Apply from the package repository root, checked out at the",
         "# base above:  git apply <this file>",
