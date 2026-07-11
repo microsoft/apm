@@ -216,12 +216,17 @@ class LockfileBuilder:
         committed lockfile and they stay covered by the audit gates (issue
         #1716). See :mod:`apm_cli.install.manifest_reconcile`.
         """
-        from apm_cli.install.manifest_reconcile import union_preserving
+        from apm_cli.install.manifest_reconcile import reconcile_deployed_block
         from apm_cli.install.phases.targets import declared_target_profiles
 
         self._reconcile_cross_package_deployed_files()
         existing = self.ctx.existing_lockfile
         declared = declared_target_profiles(self.ctx)
+        diagnostics = getattr(self.ctx, "diagnostics", None)
+        if diagnostics is None:
+            from apm_cli.utils.diagnostics import DiagnosticCollector
+
+            diagnostics = DiagnosticCollector()
         ghost_count = 0
         for dep_key, locked_dep in lockfile.dependencies.items():
             current = list(self.ctx.package_deployed_files.get(dep_key, []))
@@ -240,13 +245,16 @@ class LockfileBuilder:
                         f"(target not declared in apm.yml) for {package_key}"
                     )
 
-            files, hashes = union_preserving(
-                current,
-                current_hashes,
-                prior_files,
-                prior_hashes,
-                self.ctx.targets,
+            files, hashes = reconcile_deployed_block(
+                project_root=self.ctx.project_root,
+                dep_key=dep_key,
+                current_files=current,
+                current_hashes=current_hashes,
+                prior_files=prior_files,
+                prior_hashes=prior_hashes,
+                active_targets=self.ctx.targets,
                 declared_targets=declared,
+                diagnostics=diagnostics,
                 on_ghost_drop=_log_ghost_drop,
             )
             if not files:

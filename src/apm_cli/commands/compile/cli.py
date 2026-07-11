@@ -894,6 +894,17 @@ def _run_compilation(
         perf_stats.render_summary(logger, project_root=str(_src))
         sys.exit(1)
 
+    if result.success and not dry_run:
+        from ...install.manifest_reconcile import reconcile_project_deployed_state
+
+        reconcile_project_deployed_state(
+            Path(_src).resolve(),
+            explicit_target=target,
+            deploy_root=Path(".").resolve(),
+            lock_root=Path(".").resolve(),
+            verbose=verbose,
+        )
+
     perf_stats.render_summary(logger, project_root=str(_src))
 
 

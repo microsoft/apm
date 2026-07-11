@@ -675,6 +675,19 @@ def _run_dep_update(
     if plan is None or not isinstance(plan, UpdatePlan):
         return
 
+    reconcile_noop = not dry_run and not plan.has_changes and not revision_pin_updates
+    if plan_state.proceeded or reconcile_noop:
+        from apm_cli.install.manifest_reconcile import reconcile_project_deployed_state
+
+        reconcile_project_deployed_state(
+            Path.cwd(),
+            explicit_target=target,
+            deploy_root=_mcp_lsp_project_root,
+            lock_root=_apm_dir,
+            user_scope=scope is InstallScope.USER,
+            verbose=verbose,
+        )
+
     if plan_state.proceeded:
         if revision_pin_updates:
             try:
