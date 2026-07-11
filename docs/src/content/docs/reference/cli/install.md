@@ -31,7 +31,7 @@ With no arguments it installs everything from `apm.yml`. With one or more `PACKA
 |---|---|---|
 | `--update` | off | Re-resolve dependencies to the latest version or Git ref allowed by `apm.yml` and rewrite `apm.lock.yaml`. Mutually exclusive with `--frozen`. Prefer the dedicated [`apm update`](../update/) command for the consent-gated workflow. |
 | `--frozen` | off | Lockfile-only install: refuse to resolve anything new and fail if `apm.yml` and `apm.lock.yaml` have drifted. Mirrors `npm ci`. Mutually exclusive with `--update`. |
-| `--dry-run` | off | Print the install plan without touching the filesystem. |
+| `--dry-run` | off | Print the install plan without deployment writes. If a positional package bootstraps a project, the new `apm.yml` and any explicit `--target` selection are kept for the next run. |
 | `--force` | off | Overwrite locally-authored files on collision **and** bypass the security scan's critical-finding block. Does **not** suppress general install errors (any reported error still exits `1`, matching npm / pip / cargo). Does **not** refresh remote refs -- use `apm update` for that. Use only after independent verification. |
 | `--verbose`, `-v` | off | Show per-file paths and full error context in the diagnostic summary. |
 | `--dev` | off | Add new packages to `devDependencies`. Dev deps install locally but are excluded from `apm pack` output. |

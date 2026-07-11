@@ -290,6 +290,14 @@ def _resolve_compile_target(
             and name in target_set
         ):
             return name
+    if families == {"agents"}:
+        return frozenset(families)
+    for requested in requested_targets:
+        if requested == "all":
+            continue
+        capability = get_target_capability(requested)
+        if capability.compile_family is None:
+            return capability.name
     raise click.UsageError("No compile-capable target was selected.")
 
 

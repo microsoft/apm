@@ -429,13 +429,7 @@ def _transactional_pipeline(run):
         if result is None:
             result = InstallResult()
         if owns_transaction:
-            if result.disposition in {
-                InstallDisposition.CANCELLED,
-                InstallDisposition.DRY_RUN,
-            }:
-                transaction.rollback()
-            else:
-                result = transaction.commit(result)
+            result = transaction.complete(result)
         return result
 
     return wrapped

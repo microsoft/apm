@@ -15,7 +15,6 @@ import shutil
 import tempfile
 from pathlib import Path
 
-import click
 import pytest
 from click.testing import CliRunner
 
@@ -988,12 +987,12 @@ Use type hints in Python code.
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_help_does_not_advertise_install_only_intellij_target(self, runner):
-        """Compile help excludes known targets that cannot produce compile output."""
+    def test_help_advertises_intellij_target(self, runner):
+        """Compile help lists every accepted target, including IntelliJ."""
         result = runner.invoke(cli, ["compile", "--help"])
 
         assert result.exit_code == 0
-        assert "intellij" not in result.output.lower()
+        assert "intellij" in result.output.lower()
 
     def test_invalid_target_error_uses_structured_rendering(self, runner):
         """Unknown-target guidance keeps the three-section rendering."""
@@ -1004,18 +1003,15 @@ Use type hints in Python code.
         assert "Valid targets:" in result.output
         assert "Fix with one of:" in result.output
 
-    def test_target_flag_rejects_intellij_as_non_compile_target(self, runner, temp_project):
-        """Compile rejects a known install-only target instead of auto-detecting."""
+    def test_target_flag_accepts_intellij(self, runner, temp_project):
+        """Compile accepts IntelliJ and generates its native context artifact."""
         original_dir = os.getcwd()
         try:
             os.chdir(temp_project)
             result = runner.invoke(cli, ["compile", "--target", "intellij"])
 
-            assert result.exit_code == 2
-            assert "Target 'intellij' is not a compile target." in result.output
-            assert "apm compile --target copilot" in result.output
-            assert "apm compile --dry-run" in result.output
-            assert not (temp_project / "AGENTS.md").exists()
+            assert result.exit_code == 0, result.output
+            assert (temp_project / "AGENTS.md").is_file()
         finally:
             os.chdir(original_dir)
 
@@ -1623,15 +1619,12 @@ class TestResolveCompileTarget:
             ["hermes"],
         ],
     )
-    def test_non_compile_target_scalar_and_list_forms_raise_identically(self, target):
-        """Known non-compile targets fail before detection in either input shape."""
+    def test_accepted_target_scalar_and_list_forms_resolve_identically(self, target):
+        """Every accepted target uses the same resolver path for both input shapes."""
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
-        expected_name = target if isinstance(target, str) else target[0]
-        with pytest.raises(click.UsageError) as exc_info:
-            _resolve_compile_target(target)
-        assert getattr(exc_info.value, "exit_code", None) == 2
-        assert f"Target '{expected_name}' is not a compile target." in str(exc_info.value)
+        target_name = target if isinstance(target, str) else target[0]
+        assert _resolve_compile_target(target) == _resolve_compile_target(target_name)
 
     def test_windsurf_routes_via_agents_family(self):
         """Regression: windsurf must route through the 'agents' compile_family

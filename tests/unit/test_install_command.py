@@ -402,8 +402,8 @@ class TestInstallCommandAutoBootstrap:
             # Should show what would be added
             assert result.exit_code == 0
             assert "Would add" in result.output or "Dry run" in result.output
-            # Dry-run rolls back the temporary bootstrap manifest.
-            assert not Path("apm.yml").exists()
+            # Dry-run preserves the bootstrap configuration for the next run.
+            assert Path("apm.yml").exists()
 
 
 class TestValidationFailureReasonMessages:

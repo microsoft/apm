@@ -24,7 +24,7 @@ class TargetCapability:
     commands: frozenset[str]
 
 
-_DEPLOY_COMMANDS = frozenset({"install", "update"})
+_TARGET_COMMANDS = frozenset({"compile", "install", "update"})
 
 
 def _capability(
@@ -38,11 +38,9 @@ def _capability(
     mcp_only: bool = False,
     primitive_profile: str | None = None,
     compile_family: str | None = None,
-    compilable: bool = False,
     runtimes: tuple[str, ...] = (),
 ) -> TargetCapability:
     """Create catalog data shared by all target-selecting commands."""
-    commands = _DEPLOY_COMMANDS | ({"compile"} if compilable else set())
     return TargetCapability(
         name=name,
         aliases=aliases,
@@ -54,7 +52,7 @@ def _capability(
         primitive_profile=primitive_profile,
         compile_family=compile_family,
         runtimes=runtimes,
-        commands=frozenset(commands),
+        commands=_TARGET_COMMANDS,
     )
 
 
@@ -112,7 +110,6 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             in_all=True,
             primitive_profile="copilot",
             compile_family="vscode",
-            compilable=True,
             runtimes=("vscode", "agents"),
         ),
         _capability(
@@ -121,7 +118,6 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             in_all=True,
             primitive_profile="claude",
             compile_family="claude",
-            compilable=True,
         ),
         _capability(
             "cursor",
@@ -136,7 +132,6 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             in_all=True,
             primitive_profile="kiro",
             compile_family="agents",
-            compilable=True,
         ),
         _capability(
             "opencode",
@@ -144,7 +139,6 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             in_all=True,
             primitive_profile="opencode",
             compile_family="agents",
-            compilable=True,
         ),
         _capability(
             "gemini",
@@ -152,7 +146,6 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             in_all=True,
             primitive_profile="gemini",
             compile_family="gemini",
-            compilable=True,
         ),
         _capability(
             "antigravity",
@@ -161,7 +154,6 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             explicit_only=True,
             primitive_profile="antigravity",
             compile_family="agents",
-            compilable=True,
         ),
         _capability(
             "codex",
@@ -169,7 +161,6 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             in_all=True,
             primitive_profile="codex",
             compile_family="agents",
-            compilable=True,
         ),
         _capability(
             "windsurf",
@@ -177,7 +168,6 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             in_all=True,
             primitive_profile="windsurf",
             compile_family="agents",
-            compilable=True,
         ),
         _capability(
             "agent-skills",
@@ -215,6 +205,7 @@ TARGET_CAPABILITIES: Mapping[str, TargetCapability] = _build_target_catalog(
             "IntelliJ MCP integration using the Copilot primitive profile",
             mcp_only=True,
             primitive_profile="copilot",
+            compile_family="agents",
             runtimes=("intellij",),
         ),
     )

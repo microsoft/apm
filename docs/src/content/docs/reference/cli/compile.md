@@ -39,8 +39,8 @@ cleaned up with the same hash and user-edit safeguards as `apm install`.
 `copilot` target** -- GitHub Copilot natively reads
 `.github/instructions/*.instructions.md` (with their `applyTo:`
 frontmatter) that `apm install` already deploys. Compile is
-**recommended for every other compile target** (`claude`, `cursor`, `codex`,
-`gemini`, `opencode`, `antigravity`, `windsurf`, `kiro`), which load instructions through a
+**recommended for every other context-producing target** (`claude`, `cursor`, `codex`,
+`gemini`, `opencode`, `antigravity`, `windsurf`, `kiro`, `hermes`, `intellij`), which load instructions through a
 root context file or harness-specific rules folder that compile
 generates.
 
@@ -71,7 +71,8 @@ written. Critical findings cause the command to exit non-zero. See
 and emit a one-line warning. `--target all` also emits a deprecation
 warning -- prefer `--all`.
 
-`agent-skills` is a no-op for `compile` (skills-only deployment target);
+Every accepted project target is also accepted by `compile`. Targets without
+root-context output, including `agent-skills`, are successful no-ops.
 `antigravity` is explicit-only and `intellij` is MCP-only. Neither is included in `all`.
 For `intellij`, file primitives use the Copilot profile and produce `AGENTS.md`;
 IntelliJ-specific integration remains MCP-only. Use `apm install` or
@@ -274,6 +275,8 @@ one-shot `apm compile`; `--output` only applies in single-file mode.
 | `antigravity` | `AGENTS.md` |
 | `windsurf` | `AGENTS.md` |
 | `kiro` | `AGENTS.md` |
+| `hermes` | `AGENTS.md` |
+| `intellij` | `AGENTS.md` |
 | `agent-skills` | none |
 | `all` | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md` |
 

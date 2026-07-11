@@ -55,7 +55,7 @@ Order of operations is deterministic and worth memorizing:
 4. **Integrate** -- write primitives into each target harness's native directory (`.github/`, `.claude/`, etc.) and merge MCP server configs into the harness-specific config files.
 5. **Lockfile** -- write `apm.lock.yaml` with pinned versions, content hashes, and the resolved MCP server set.
 
-`apm install` with no arguments installs from the existing manifest. `apm install <package>` adds a new dependency, re-runs the full pipeline, and updates both `apm.yml` and `apm.lock.yaml`. `--dry-run` runs steps 1 and 2 only and prints the plan.
+`apm install` with no arguments installs from the existing manifest. `apm install <package>` adds a new dependency, re-runs the full pipeline, and updates both `apm.yml` and `apm.lock.yaml`. `--dry-run` runs steps 1 and 2 only and prints the plan. If that command bootstraps a new project, it keeps the generated `apm.yml` and explicit target selection while rolling back package and deployment writes.
 
 :::note[Coming from npm?]
 `apm install` mirrors `npm install` deliberately. The big difference: APM also runs a security scan and, if present, an org policy gate before writing deployed files.

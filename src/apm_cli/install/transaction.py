@@ -50,7 +50,7 @@ def _maybe_rollback_manifest(
                 logger.progress("Removed apm.yml created by the failed install.")
         except Exception as exc:
             if logger is not None:
-                logger.error(
+                logger.warning(
                     "Failed to remove apm.yml created by this install. "
                     "Delete apm.yml manually before retrying."
                 )
@@ -66,7 +66,7 @@ def _maybe_rollback_manifest(
             logger.progress("apm.yml restored to its previous state.")
     except Exception as exc:
         if logger is not None:
-            logger.error("Failed to restore apm.yml. Inspect apm.yml before retrying.")
+            logger.warning("Failed to restore apm.yml. Inspect apm.yml before retrying.")
             logger.verbose_detail(f"Manifest rollback error: {exc}")
 
 
@@ -95,6 +95,7 @@ class InstallTransaction:
         self._resolution = ResolutionStagingSession(apm_modules_dir)
         self._lock = threading.RLock()
         self.committed = False
+        self._completed = False
         self._rolled_back = False
 
     @property
@@ -124,6 +125,7 @@ class InstallTransaction:
             if not self.committed:
                 self._resolution.commit()
                 self.committed = True
+                self._completed = True
             if (
                 self._validation is not None
                 and self._validation.has_failures
@@ -133,6 +135,24 @@ class InstallTransaction:
             result.committed = True
             return result
 
+    def complete(self, result: InstallResult) -> InstallResult:
+        """Finalize one result according to its canonical disposition."""
+        if result.disposition is InstallDisposition.DRY_RUN:
+            with self._lock:
+                if self._rolled_back:
+                    raise RuntimeError("Cannot complete an install transaction after rollback")
+                self._resolution.rollback()
+                self._completed = True
+            return result
+        if result.disposition in {
+            InstallDisposition.CANCELLED,
+            InstallDisposition.FAILED,
+            InstallDisposition.VALIDATION_FAILED,
+        }:
+            self.rollback()
+            return result
+        return self.commit(result)
+
     def rollback(self) -> None:
         """Restore the manifest and only resolution paths prepared here."""
         with self._lock:
@@ -141,6 +161,7 @@ class InstallTransaction:
             self._resolution.rollback()
             self._restore_manifest()
             self._rolled_back = True
+            self._completed = True
 
     def fail(self, error: BaseException) -> InstallResult:
         """Rollback and return a structured failed install result."""
@@ -157,7 +178,7 @@ class InstallTransaction:
 
     def __exit__(self, exc_type, exc, tb) -> bool:
         """Rollback every uncommitted exit and preserve exception semantics."""
-        if exc is not None or not self.committed:
+        if exc is not None or not self._completed:
             self.rollback()
         return False
 

@@ -1525,11 +1525,7 @@ def install(  # noqa: PLR0913
             )
             if dry_run:
                 command_result.disposition = InstallDisposition.DRY_RUN
-                transaction.rollback()
-            elif command_result.disposition is InstallDisposition.FAILED:
-                transaction.rollback()
-            else:
-                command_result = transaction.commit(command_result)
+            command_result = transaction.complete(command_result)
 
             command_result = _post_install_summary(
                 logger=logger,

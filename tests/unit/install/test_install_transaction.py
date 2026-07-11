@@ -68,7 +68,7 @@ def test_mixed_validation_commits_as_partial_success(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "disposition",
-    [InstallDisposition.CANCELLED, InstallDisposition.DRY_RUN],
+    [InstallDisposition.CANCELLED],
 )
 def test_non_mutating_dispositions_remain_uncommitted(
     tmp_path: Path,
@@ -82,6 +82,32 @@ def test_non_mutating_dispositions_remain_uncommitted(
 
     assert result.exit_code == 0
     assert result.committed is False
+
+
+def test_dry_run_completion_preserves_auto_created_manifest(tmp_path: Path) -> None:
+    """A successful dry-run keeps bootstrap configuration but rolls back modules."""
+    manifest = tmp_path / "apm.yml"
+    modules = tmp_path / "apm_modules"
+    modules.mkdir()
+    transaction = InstallTransaction(
+        manifest_path=manifest,
+        apm_modules_dir=modules,
+        validation=None,
+        logger=MagicMock(),
+    )
+    package = modules / "new-package"
+    transaction.resolution.prepare_path(package)
+    package.mkdir()
+    manifest.write_text("name: created\n", encoding="ascii")
+    result = InstallResult(disposition=InstallDisposition.DRY_RUN)
+
+    completed = transaction.complete(result)
+    transaction.__exit__(None, None, None)
+
+    assert completed is result
+    assert completed.committed is False
+    assert manifest.read_text(encoding="ascii") == "name: created\n"
+    assert not package.exists()
 
 
 def test_success_commit_finalizes_resolution(tmp_path: Path) -> None:
@@ -148,7 +174,7 @@ def test_rollback_reports_action_when_created_manifest_cannot_be_removed(
     with patch.object(Path, "unlink", side_effect=OSError("permission denied")):
         transaction.rollback()
 
-    logger.error.assert_called_once_with(
+    logger.warning.assert_called_once_with(
         "Failed to remove apm.yml created by this install. Delete apm.yml manually before retrying."
     )
     assert "permission denied" in logger.verbose_detail.call_args[0][0]
