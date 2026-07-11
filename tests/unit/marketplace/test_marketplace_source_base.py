@@ -45,7 +45,7 @@ class _RecordingAuthResolver:
 
     def resolve(self, host: str, org: str | None = None):
         self.calls.append((host, org))
-        return SimpleNamespace(token="token", source="test-auth")
+        return SimpleNamespace(token="token", source="test-auth", auth_scheme="basic")
 
 
 def _write(path: Path, content: str) -> Path:
