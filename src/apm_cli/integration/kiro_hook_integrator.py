@@ -234,9 +234,7 @@ def _resolve_portable_hooks(
                         action=kiro_action,
                         source_action=action,
                         matcher=kiro_matcher,
-                        timeout=_numeric_timeout(
-                            action.get("timeout", action.get("timeoutSec"))
-                        ),
+                        timeout=_numeric_timeout(action.get("timeout", action.get("timeoutSec"))),
                     )
                 )
     return resolved
