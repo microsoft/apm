@@ -776,11 +776,16 @@ class MCPIntegrator:
             if mcp_configs is not None:
                 lockfile.mcp_configs = mcp_configs
             if mcp_target_servers is not None:
-                lockfile.mcp_target_servers = {
-                    target: sorted(servers)
-                    for target, servers in sorted(mcp_target_servers.items())
-                    if servers
-                }
+                from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+                DeploymentLedgerCodec.replace_mcp_target_servers(
+                    lockfile,
+                    {
+                        target: sorted(servers)
+                        for target, servers in sorted(mcp_target_servers.items())
+                        if servers
+                    },
+                )
             if mcp_config_provenance is not None:
                 lockfile.mcp_config_provenance = mcp_config_provenance
             # Invariant: provenance only carries entries that still have a live
