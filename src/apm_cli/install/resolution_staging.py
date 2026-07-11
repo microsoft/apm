@@ -30,7 +30,8 @@ class ResolutionStagingSession:
                 return
             backup: Path | None = None
             if resolved.exists():
-                relative = resolved.relative_to(self._modules_dir.resolve())
+                resolved_base = ensure_path_within(self._modules_dir, self._modules_dir)
+                relative = resolved.relative_to(resolved_base)
                 backup = self._staging_root / relative
                 backup.parent.mkdir(parents=True, exist_ok=True)
                 resolved.replace(backup)

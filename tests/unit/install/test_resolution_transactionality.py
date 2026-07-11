@@ -78,6 +78,7 @@ def test_corrected_local_cycle_resumes_without_manual_cache_deletion(
     )
 
     assert rejected.exit_code != 0, rejected.output
+    assert "Circular dependencies detected" in rejected.output
     modules = project / "apm_modules"
     assert not (modules / "_local" / "package-a").exists()
     assert not (modules / "_local" / "package-b").exists()
