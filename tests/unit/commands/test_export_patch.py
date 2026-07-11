@@ -91,7 +91,7 @@ def test_patch_filename_never_empty():
 
 def test_patch_filename_ascii_only_and_reserved_stems():
     # Unicode letters must not survive: repo sanitizers are ASCII-only (#1217).
-    assert all(ord(c) < 128 for c in patch_filename("café/päck"))
+    assert all(ord(c) < 128 for c in patch_filename("caf\u00e9/p\u00e4ck"))
     # Windows reserved device names cannot be file stems.
     assert patch_filename("nul") == "pkg-nul.patch"
     assert patch_filename("CON") == "pkg-CON.patch"
