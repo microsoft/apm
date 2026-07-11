@@ -41,10 +41,10 @@ your-package/
 Each file is a JSON document keyed by lifecycle event. APM accepts the
 Claude (`PreToolUse`, `PostToolUse`) and Copilot (`preToolUse`,
 `postToolUse`) shapes; events are renamed per target during merge. Flat
-Copilot command entries (entries without an outer `matcher` and `hooks` group)
-are also portable: when the target is Claude, APM wraps each one in Claude's
-required group. The generated `matcher: "*"` preserves the flat entry's global
-scope by matching all tools.
+Copilot hook entries (entries without an outer `matcher` and `hooks` group)
+are also portable: Copilot consumes the flat entry as-is, while for Claude
+APM wraps each one in Claude's required group. The generated `matcher: "*"`
+preserves the flat entry's global scope by matching all tools.
 
 **Portable source (Copilot and Claude):**
 

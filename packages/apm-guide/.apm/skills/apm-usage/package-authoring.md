@@ -131,7 +131,7 @@ becomes `PostToolUse` in Claude) and rewrites path variables
 the correct target-specific form. Kiro materializes one JSON document per
 hook action under `.kiro/hooks/`.
 
-Authors may use flat Copilot command entries for portable manifests:
+Authors may use flat Copilot hook entries for portable manifests:
 
 ```json
 {
