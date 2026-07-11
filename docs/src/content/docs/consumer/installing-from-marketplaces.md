@@ -97,6 +97,11 @@ browse / install / update workflow works against:
   `git:` and `path:` entry to `apm.yml`. HTTPS registrations likewise remain
   HTTPS.
 
+Marketplace publishers can route an entry through a configured APM package
+registry with the entry's `registry` and semver `version` fields. APM honors
+that route through the package-registry resolver. Missing or malformed registry
+intent fails closed instead of silently falling back to the plugin's Git source.
+
 :::note[Hosted JSON is public HTTPS]
 Hosted `marketplace.json` URLs are public HTTPS sources: APM does not
 send custom auth headers. Use git-backed marketplaces for private

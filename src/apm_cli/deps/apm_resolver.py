@@ -532,7 +532,9 @@ class APMDependencyResolver:
             deque()
         )
 
-        # Set to track queued unique keys for O(1) lookup instead of O(n) list comprehension
+        # Track full edge constraints, not package identity alone. Different
+        # refs for one package must survive until the flattening phase reports
+        # the conflict.
         queued_keys: set[str] = set()
 
         # Add root dependencies to queue
@@ -551,7 +553,7 @@ class APMDependencyResolver:
                 else:
                     continue
             processing_queue.append((dep_ref, 1, None, False))
-            queued_keys.add(dep_ref.get_unique_key())
+            queued_keys.add(dep_ref.get_resolution_key())
 
         # Add root devDependencies to queue (marked is_dev=True)
         root_dev_deps = root_package.get_dev_apm_dependencies()
@@ -568,7 +570,7 @@ class APMDependencyResolver:
                     dep_ref = resolved
                 else:
                     continue
-            key = dep_ref.get_unique_key()
+            key = dep_ref.get_resolution_key()
             if key not in queued_keys:
                 processing_queue.append((dep_ref, 1, None, True))
                 queued_keys.add(key)
@@ -607,21 +609,23 @@ class APMDependencyResolver:
             work_items = []
             for dep_ref, depth, parent_node, is_dev in level_items:
                 # Remove from queued set since we're now processing this dependency
-                queued_keys.discard(dep_ref.get_unique_key())
+                queued_keys.discard(dep_ref.get_resolution_key())
 
                 # Check maximum depth to prevent infinite recursion
                 if depth > self.max_depth:
                     continue
 
                 # Check if we already processed this dependency at this level or higher
-                existing_node = tree.get_node(dep_ref.get_unique_key())
+                existing_node = tree.nodes.get(dep_ref.get_resolution_key())
                 if existing_node and existing_node.depth <= depth:
                     # Prod wins over dev: if existing was dev and this is prod, promote it
                     if existing_node.is_dev and not is_dev:
                         existing_node.is_dev = False
                     # We've already processed this dependency at a shallower or equal depth
                     # Create parent-child relationship if parent exists
-                    if parent_node and existing_node not in parent_node.children:
+                    if parent_node and all(
+                        child is not existing_node for child in parent_node.children
+                    ):
                         parent_node.children.append(existing_node)
                     continue
 
@@ -708,6 +712,35 @@ class APMDependencyResolver:
                         )
                         if sub_dep is None:
                             continue
+                        if (
+                            sub_dep.is_local
+                            and sub_dep.local_path
+                            and node.package.source_path is not None
+                        ):
+                            local_path = Path(sub_dep.local_path).expanduser()
+                            anchored = (
+                                local_path.resolve()
+                                if local_path.is_absolute()
+                                else (node.package.source_path / local_path).resolve()
+                            )
+                            sub_dep = replace(
+                                sub_dep,
+                                declaring_parent=node.get_id(),
+                                anchored_local_path=str(anchored),
+                            )
+                            ancestor: DependencyNode | None = node
+                            while ancestor is not None:
+                                if (
+                                    ancestor.dependency_ref.get_cycle_key()
+                                    == sub_dep.get_cycle_key()
+                                ):
+                                    if all(child is not ancestor for child in node.children):
+                                        node.children.append(ancestor)
+                                    sub_dep = None
+                                    break
+                                ancestor = ancestor.parent
+                            if sub_dep is None:
+                                continue
                         if sub_dep.is_marketplace:
                             resolved = self._resolve_marketplace_or_record_error(
                                 sub_dep, tree, f"required by {node.dependency_ref.repo_url}"
@@ -718,9 +751,10 @@ class APMDependencyResolver:
                                 continue
                         # Avoid infinite recursion by checking if we're already processing this dep
                         # Use O(1) set lookup instead of O(n) list comprehension
-                        if sub_dep.get_unique_key() not in queued_keys:
+                        queue_key = sub_dep.get_resolution_key()
+                        if queue_key not in queued_keys:
                             processing_queue.append((sub_dep, node.depth + 1, node, is_dev))
-                            queued_keys.add(sub_dep.get_unique_key())
+                            queued_keys.add(queue_key)
 
         return tree
 
@@ -748,7 +782,7 @@ class APMDependencyResolver:
             node_id = node.get_id()
             # Use unique key (includes subdirectory path) to distinguish monorepo packages
             # e.g., vineethsoma/agent-packages/agents/X vs vineethsoma/agent-packages/skills/Y
-            unique_key = node.dependency_ref.get_unique_key()
+            unique_key = node.dependency_ref.get_cycle_key()
 
             # Check if this unique key is already in our current path (cycle detected)
             if unique_key in current_path_set:
@@ -772,7 +806,7 @@ class APMDependencyResolver:
                 # Only recurse if we haven't processed this subtree completely
                 if (
                     child_id not in visited
-                    or child.dependency_ref.get_unique_key() in current_path_set
+                    or child.dependency_ref.get_cycle_key() in current_path_set
                 ):
                     dfs_detect_cycles(child)
 

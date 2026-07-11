@@ -99,6 +99,26 @@ if ! grep -q 'incomplete_chain' src/apm_cli/policy/discovery.py \
     violations=$((violations + 1))
 fi
 
+echo "[*] AC4: declared-intent preservation"
+check_pattern \
+    "Resolver queue dedup must preserve ref constraints" \
+    'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \
+    src/apm_cli/deps/apm_resolver.py
+if ! grep -A12 'if source == "local"' src/apm_cli/models/dependency/identity.py \
+    | grep -q 'declaring_parent'; then
+    echo "[x] Local dependency identity must include its declaring parent"
+    violations=$((violations + 1))
+fi
+check_pattern \
+    "MCP commands must pass the resolved URL into RegistryIntegration" \
+    'RegistryIntegration\(\)' \
+    src/apm_cli/commands/mcp.py
+if ! grep -A25 'if plugin.registry:' src/apm_cli/marketplace/resolver.py \
+    | grep -q 'source="registry"'; then
+    echo "[x] Marketplace registry intent must create a registry dependency"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

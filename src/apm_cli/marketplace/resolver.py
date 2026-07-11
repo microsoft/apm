@@ -792,6 +792,25 @@ def resolve_marketplace_plugin(
     if plugin is None:
         raise PluginNotFoundError(plugin_name, marketplace_name)
 
+    if plugin.registry:
+        selector = version_spec or plugin.version
+        if not selector:
+            raise ValueError(f"Registry-routed plugin {plugin.name!r} has no version selector")
+        dep_ref = DependencyReference(
+            repo_url=plugin.name,
+            reference=selector,
+            source="registry",
+            registry_name=plugin.registry,
+        )
+        return MarketplacePluginResolution(
+            canonical=dep_ref.to_canonical(),
+            plugin=plugin,
+            dependency_reference=dep_ref,
+            cross_repo_misconfig_risk=None,
+            source_url=manifest.source_url,
+            source_digest=manifest.source_digest,
+        )
+
     source_kind = source.kind
 
     # ---- Local marketplace fast-path ----

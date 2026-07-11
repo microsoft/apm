@@ -138,6 +138,8 @@ class LockedDependency:
     # the project root (``./packages/foo``). Transitive deps: relative to the
     # package that declared them (``../sibling``), anchored via ``resolved_by``
     # (issue #857; see apm_cli.deps.path_anchoring).
+    declaring_parent: str | None = None
+    anchored_local_path: str | None = None
     content_hash: str | None = None  # SHA-256 of package file tree
     is_dev: bool = False  # True for devDependencies
     discovered_via: str | None = None  # Marketplace name (provenance)
@@ -210,6 +212,8 @@ class LockedDependency:
             is_virtual=self.is_virtual,
             virtual_path=self.virtual_path,
             registry_prefix=self.registry_prefix,
+            declaring_parent=self.declaring_parent,
+            anchored_local_path=self.anchored_local_path,
         )
 
     def get_canonical_dependency_string(self) -> str:
@@ -265,6 +269,10 @@ class LockedDependency:
             result["source"] = self.source
         if self.local_path:
             result["local_path"] = self.local_path
+        if self.declaring_parent:
+            result["declaring_parent"] = self.declaring_parent
+        if self.anchored_local_path:
+            result["anchored_local_path"] = self.anchored_local_path
         if self.content_hash:
             result["content_hash"] = self.content_hash
         if self.is_dev:
@@ -358,6 +366,8 @@ class LockedDependency:
             "deployed_file_hashes",
             "source",
             "local_path",
+            "declaring_parent",
+            "anchored_local_path",
             "content_hash",
             "is_dev",
             "discovered_via",
@@ -399,6 +409,8 @@ class LockedDependency:
             deployed_file_hashes=dict(data.get("deployed_file_hashes") or {}),
             source=data.get("source"),
             local_path=data.get("local_path"),
+            declaring_parent=data.get("declaring_parent"),
+            anchored_local_path=data.get("anchored_local_path"),
             content_hash=data.get("content_hash"),
             is_dev=data.get("is_dev", False),
             discovered_via=data.get("discovered_via"),
@@ -530,6 +542,8 @@ class LockedDependency:
             resolved_by=resolved_by,
             source=source,
             local_path=dep_ref.local_path if dep_ref.is_local else None,
+            declaring_parent=dep_ref.declaring_parent if dep_ref.is_local else None,
+            anchored_local_path=dep_ref.anchored_local_path if dep_ref.is_local else None,
             is_dev=is_dev,
             is_insecure=dep_ref.is_insecure,
             allow_insecure=dep_ref.allow_insecure,
@@ -582,6 +596,8 @@ class LockedDependency:
             artifactory_prefix=self.registry_prefix,
             is_local=(self.source == "local"),
             local_path=self.local_path,
+            declaring_parent=self.declaring_parent,
+            anchored_local_path=self.anchored_local_path,
             is_insecure=self.is_insecure,
             allow_insecure=self.allow_insecure,
             source=self.source,

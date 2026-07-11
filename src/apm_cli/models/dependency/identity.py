@@ -71,6 +71,8 @@ def build_dependency_unique_key(
     is_virtual: bool = False,
     virtual_path: str | None = None,
     registry_prefix: str | None = None,
+    declaring_parent: str | None = None,
+    anchored_local_path: str | None = None,
 ) -> str:
     """Return the lockfile/dedup key for a dependency identity.
 
@@ -88,6 +90,9 @@ def build_dependency_unique_key(
     lockfile key correspondence used by re-install and orphan detection.
     """
     if source == "local" and local_path:
+        if declaring_parent:
+            anchor = anchored_local_path or local_path
+            return f"local:{declaring_parent}:{anchor}"
         return local_path
 
     key = repo_url

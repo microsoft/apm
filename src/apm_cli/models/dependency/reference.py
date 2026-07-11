@@ -77,6 +77,8 @@ class DependencyReference:
     # Local path dependency fields
     is_local: bool = False  # True if this is a local filesystem dependency
     local_path: str | None = None  # Original local path string (e.g., "./packages/my-pkg")
+    declaring_parent: str | None = None
+    anchored_local_path: str | None = None
 
     # Monorepo inheritance: { git: parent, path: ... } — expanded in resolver
     is_parent_repo_inheritance: bool = False
@@ -316,7 +318,21 @@ class DependencyReference:
             is_virtual=self.is_virtual,
             virtual_path=self.virtual_path,
             registry_prefix=self.artifactory_prefix,
+            declaring_parent=self.declaring_parent,
+            anchored_local_path=self.anchored_local_path,
         )
+
+    def get_resolution_key(self) -> str:
+        """Return identity plus the declared ref constraint."""
+        if self.reference:
+            return f"{self.get_unique_key()}#{self.reference}"
+        return self.get_unique_key()
+
+    def get_cycle_key(self) -> str:
+        """Return physical local identity for recursion detection."""
+        if self.is_local and self.anchored_local_path:
+            return f"local:{self.anchored_local_path}"
+        return self.get_unique_key()
 
     def to_canonical(self) -> str:
         """Return the canonical scheme-free identity string for this dependency.
@@ -467,7 +483,14 @@ class DependencyReference:
                 context="local package path",
                 reject_empty=True,
             )
-            result = apm_modules_dir / "_local" / pkg_dir_name
+            if self.declaring_parent:
+                import hashlib
+
+                identity = f"{self.declaring_parent}:{self.anchored_local_path or self.local_path}"
+                parent_slot = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+                result = apm_modules_dir / "_local" / parent_slot / pkg_dir_name
+            else:
+                result = apm_modules_dir / "_local" / pkg_dir_name
             ensure_path_within(result, apm_modules_dir)
             return result
 

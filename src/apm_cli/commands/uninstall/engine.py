@@ -446,7 +446,7 @@ def _cleanup_transitive_orphans(
         if not orphan_dep:
             continue
         try:
-            orphan_ref = DependencyReference.parse(orphan_key)
+            orphan_ref = orphan_dep.to_dependency_ref()
             orphan_path = orphan_ref.get_install_path(apm_modules_dir)
         except ValueError:
             parts = orphan_key.split("/")

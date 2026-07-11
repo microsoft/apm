@@ -26,23 +26,29 @@ def _build_registry_with_diag(console, logger):
     """
     from ..registry.integration import RegistryIntegration
 
-    registry = RegistryIntegration()
     override = os.environ.get(MCP_REGISTRY_ENV)
+    config_url = None
+    if not override:
+        from ..config import get_mcp_registry_url as _get_mcp_registry_url
+
+        config_url = _get_mcp_registry_url()
+    registry = (
+        RegistryIntegration(config_url)
+        if config_url
+        else RegistryIntegration()  # architecture-authority-exempt: env/default fallback
+    )
     if override:
         url = registry.client.registry_url
         if console:
             console.print(f"[muted]Registry: {url} (from MCP_REGISTRY_URL)[/muted]")
         else:
             logger.progress(f"Registry: {url} (from MCP_REGISTRY_URL)")
-    else:
-        from ..config import get_mcp_registry_url as _get_mcp_registry_url
-
-        config_url = _get_mcp_registry_url()
-        if config_url:
-            if console:
-                console.print(f"[muted]Registry: {config_url} (from apm config)[/muted]")
-            else:
-                logger.progress(f"Registry: {config_url} (from apm config)")
+    elif config_url:
+        url = registry.client.registry_url
+        if console:
+            console.print(f"[muted]Registry: {url} (from apm config)[/muted]")
+        else:
+            logger.progress(f"Registry: {url} (from apm config)")
     return registry
 
 
