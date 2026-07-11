@@ -48,6 +48,20 @@ def compute_deployed_hashes(rel_paths, project_root: Path) -> dict:
     return out
 
 
+def reconcile_cross_package_deployed_files(
+    package_deployed_files: dict[str, list[str]],
+) -> None:
+    """Keep each deployed path on only its last reporting package."""
+    last_owner: dict[str, str] = {}
+    for dep_key, files in package_deployed_files.items():
+        for deployed_file in files:
+            last_owner[deployed_file] = dep_key
+    for dep_key, files in package_deployed_files.items():
+        package_deployed_files[dep_key] = [
+            deployed_file for deployed_file in files if last_owner[deployed_file] == dep_key
+        ]
+
+
 class LockfileBuilder:
     """Assembles a ``LockFile`` from :class:`InstallContext` state.
 
@@ -198,13 +212,7 @@ class LockfileBuilder:
         ``apm uninstall``/``apm audit`` on a "losing" dep would act on a file
         it does not control.
         """
-        package_deployed_files = self.ctx.package_deployed_files
-        last_owner: dict[str, str] = {}
-        for dep_key, files in package_deployed_files.items():
-            for f in files:
-                last_owner[f] = dep_key  # dict iteration is insertion order -> last write wins
-        for dep_key, files in package_deployed_files.items():
-            package_deployed_files[dep_key] = [f for f in files if last_owner[f] == dep_key]
+        reconcile_cross_package_deployed_files(self.ctx.package_deployed_files)
 
     def _attach_deployed_files(self, lockfile: LockFile) -> None:
         """Attach per-dependency deployed-file manifests, unioning targets.

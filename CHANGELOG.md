@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   
 ### Fixed
 
+- `apm uninstall` now transfers shared deployed-file ownership to a surviving
+  package, preserving lockfile content-integrity coverage. (#2148)
 - Fresh checkouts with declared consumer targets no longer remain
   `apm audit --ci`-red for files those targets cannot restore: `apm install`
   now removes stale `deployed_files` entries outside the legitimate target
