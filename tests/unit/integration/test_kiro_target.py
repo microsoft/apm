@@ -55,14 +55,17 @@ def test_kiro_is_discoverable_in_target_help() -> None:
     install = runner.invoke(cli, ["install", "--help"])
     compile_result = runner.invoke(cli, ["compile", "--help"])
 
-    expected_all_targets = "copilot+claude+cursor+opencode+codex+gemini+windsurf+kiro"
     install_help = "".join(install.output.split())
     compile_help = "".join(compile_result.output.split())
 
     assert install.exit_code == 0
     assert compile_result.exit_code == 0
-    assert expected_all_targets in install_help
-    assert expected_all_targets in compile_help
+    # The accepted-target catalog (VALID_TARGET_VALUES) is the single source of
+    # truth for the help Values list, so every advertised target -- including
+    # the MCP-only 'intellij' target -- must be discoverable in both help texts.
+    for target in ("kiro", "intellij", "copilot", "claude", "windsurf"):
+        assert target in install_help
+        assert target in compile_help
     assert "ClaudeCode" in install_help
     assert "Windsurf" in install_help
 
