@@ -511,6 +511,65 @@ class TestConfigConsistency:
 
         assert result.passed, result.details
 
+    @pytest.mark.parametrize(
+        ("dependency", "locked_dependency", "package_parts", "expected_detail"),
+        [
+            (
+                "./packages/broken",
+                """\
+                  - repo_url: _local/broken
+                    source: local
+                    local_path: ./packages/broken
+                    deployed_files: []
+                """,
+                ("packages", "broken"),
+                "cannot parse local package manifest at",
+            ),
+            (
+                "owner/broken",
+                """\
+                  - repo_url: owner/broken
+                    package_type: apm_package
+                    deployed_files: []
+                """,
+                ("apm_modules", "owner", "broken"),
+                "cannot parse manifest for installed package owner/broken",
+            ),
+        ],
+    )
+    def test_manifest_parse_error_identifies_package_source(
+        self,
+        tmp_path,
+        dependency,
+        locked_dependency,
+        package_parts,
+        expected_detail,
+    ):
+        """Manifest parse failures identify local and installed package sources."""
+        package = tmp_path.joinpath(*package_parts)
+        package.mkdir(parents=True)
+        (package / "apm.yml").write_text("name: [invalid\n", encoding="utf-8")
+        _write_apm_yml(tmp_path, deps=[dependency])
+        lock_dependency = textwrap.indent(textwrap.dedent(locked_dependency).strip(), "  ")
+        _write_lockfile(
+            tmp_path,
+            "lockfile_version: '1'\n"
+            "generated_at: '2025-01-01T00:00:00Z'\n"
+            f"dependencies:\n{lock_dependency}\n",
+        )
+        from apm_cli.deps.lockfile import LockFile, get_lockfile_path
+        from apm_cli.models.apm_package import APMPackage
+
+        manifest = APMPackage.from_apm_yml(tmp_path / "apm.yml")
+        lock = LockFile.read(get_lockfile_path(tmp_path))
+        result = _check_config_consistency(manifest, lock)
+
+        assert not result.passed
+        assert len(result.details) == 1
+        assert expected_detail in result.details[0]
+        if dependency.startswith("."):
+            assert str(package / "apm.yml") in result.details[0]
+
     def test_manifestless_local_skill_does_not_fail_mcp_consistency(self, tmp_path):
         """A locked manifestless skill cannot contribute MCP declarations."""
         package = tmp_path / "skills" / "example"

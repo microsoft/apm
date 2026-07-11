@@ -249,10 +249,12 @@ def _check_config_consistency(
                     "fix the resolved_by chain or re-run 'apm install'"
                 )
                 continue
+            manifest_description = f"local package manifest at {package_dir / 'apm.yml'}"
         else:
             package_dir = locked_dep.to_dependency_ref().get_install_path(
                 manifest.package_path / APM_MODULES_DIR
             )
+            manifest_description = f"manifest for installed package {locked_dep.repo_url}"
 
         package_manifest = package_dir / "apm.yml"
         if not package_manifest.exists():
@@ -261,7 +263,7 @@ def _check_config_consistency(
             package = APMPackage.from_apm_yml(package_manifest)
         except (OSError, ValueError) as exc:
             details.append(
-                f"{locked_dep.repo_url}: cannot parse local package manifest ({exc}) -- "
+                f"{locked_dep.repo_url}: cannot parse {manifest_description} ({exc}) -- "
                 "fix the manifest or re-run 'apm install'"
             )
             continue
