@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   
 ### Fixed
 
+- Contracting the active target set now removes APM-managed MCP server
+  entries from dropped targets while preserving user-authored servers and
+  unrelated native config. (#2149)
 - Fresh checkouts with declared consumer targets no longer remain
   `apm audit --ci`-red for files those targets cannot restore: `apm install`
   now removes stale `deployed_files` entries outside the legitimate target

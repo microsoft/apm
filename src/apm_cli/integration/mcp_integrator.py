@@ -808,6 +808,7 @@ class MCPIntegrator:
         lock_path: Path | None = None,
         *,
         mcp_configs: builtins.dict | None = None,
+        mcp_target_servers: builtins.dict | None = None,
         mcp_config_provenance: builtins.dict | None = None,
     ) -> None:
         """Update the lockfile with the current set of APM-managed MCP server names.
@@ -820,6 +821,7 @@ class MCPIntegrator:
             lock_path: Path to the lockfile.  Defaults to ``apm.lock.yaml`` in CWD.
             mcp_configs: Keyword-only.  When provided, overwrites ``mcp_configs``
                          in the lockfile (used for drift-detection baseline).
+            mcp_target_servers: Keyword-only. Per-target APM-owned server names.
             mcp_config_provenance: Keyword-only.  When provided, overwrites
                          ``mcp_config_provenance`` (name -> declaring package for
                          transitively-contributed servers). Passed in lockstep
@@ -838,6 +840,12 @@ class MCPIntegrator:
             lockfile.mcp_servers = sorted(mcp_server_names)
             if mcp_configs is not None:
                 lockfile.mcp_configs = mcp_configs
+            if mcp_target_servers is not None:
+                lockfile.mcp_target_servers = {
+                    target: sorted(servers)
+                    for target, servers in sorted(mcp_target_servers.items())
+                    if servers
+                }
             if mcp_config_provenance is not None:
                 lockfile.mcp_config_provenance = mcp_config_provenance
             # Invariant: provenance only carries entries that still have a live
@@ -1214,6 +1222,7 @@ class MCPIntegrator:
         logger=None,
         diagnostics=None,
         scope=None,
+        managed_target_servers: builtins.dict | None = None,
     ) -> int:
         """Install MCP dependencies.
 
@@ -1234,6 +1243,9 @@ class MCPIntegrator:
             scope: InstallScope (PROJECT or USER). When USER, only
                 runtimes whose adapter declares ``supports_user_scope``
                 are targeted; workspace-only runtimes are skipped.
+            managed_target_servers: Mutable per-target ownership state. Existing
+                entries are reconciled to active targets and successful writes
+                are recorded in place.
 
         Returns:
             Number of MCP servers newly configured or updated.
@@ -1253,4 +1265,5 @@ class MCPIntegrator:
             logger=logger,
             diagnostics=diagnostics,
             scope=scope,
+            managed_target_servers=managed_target_servers,
         )

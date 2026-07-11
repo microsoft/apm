@@ -1749,12 +1749,14 @@ def _install_apm_packages(ctx, outcome):
     old_mcp_servers: builtins.set = builtins.set()
     old_mcp_configs: builtins.dict = {}
     old_mcp_provenance: builtins.dict = {}
+    old_mcp_target_servers: builtins.dict = {}
     _lock_path = get_lockfile_path(ctx.apm_dir)
     _existing_lock = LockFile.read(_lock_path)
     if _existing_lock:
         old_mcp_servers = builtins.set(_existing_lock.mcp_servers)
         old_mcp_configs = builtins.dict(_existing_lock.mcp_configs)
         old_mcp_provenance = builtins.dict(_existing_lock.mcp_config_provenance)
+        old_mcp_target_servers = builtins.dict(_existing_lock.mcp_target_servers)
 
     # Enter the APM install path when there are deps, local .apm/ primitives
     # (#714), OR orphan deps in the lockfile to clean up (manifest emptied).
@@ -1875,6 +1877,7 @@ def _install_apm_packages(ctx, outcome):
             old_mcp_servers=old_mcp_servers,
             old_mcp_configs=old_mcp_configs,
             old_mcp_provenance=old_mcp_provenance,
+            old_mcp_target_servers=old_mcp_target_servers,
             project_root=ctx.project_root,
             user_scope=(ctx.scope is InstallScope.USER),
             should_install=should_install_mcp,

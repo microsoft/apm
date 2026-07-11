@@ -12,6 +12,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+import tomlkit
 import yaml
 from click.testing import CliRunner
 
@@ -92,6 +93,71 @@ def test_install_restores_dev_mcp_dependencies_to_lockfile_and_config(tmp_path, 
     assert lockfile is not None
     assert lockfile.mcp_servers == ["dev-server"]
     assert lockfile.mcp_configs["dev-server"]["command"] == "python"
+
+
+def test_install_target_contraction_removes_only_apm_managed_mcp_servers(tmp_path, monkeypatch):
+    """Reinstalling with fewer targets purges APM-owned entries from dropped targets."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    LockFile().write(tmp_path / "apm.lock.yaml")
+    manifest = {
+        "name": "mcp-target-contraction",
+        "version": "0.0.1",
+        "targets": ["copilot", "codex"],
+        "dependencies": {
+            "mcp": [
+                {
+                    "name": "apm-managed",
+                    "registry": False,
+                    "transport": "stdio",
+                    "command": "echo",
+                    "args": ["managed"],
+                }
+            ]
+        },
+    }
+    (tmp_path / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    codex_config = tmp_path / ".codex" / "config.toml"
+    codex_config.parent.mkdir()
+    codex_config.write_text(
+        "[projects.'c:\\src\\project']\n"
+        'trust_level = "trusted"\n'
+        "\n"
+        "[mcp_servers.user-authored]\n"
+        'command = "user-command"\n',
+        encoding="utf-8",
+    )
+
+    broad = CliRunner().invoke(
+        cli,
+        ["install", "--target", "copilot,codex", "--no-policy"],
+    )
+    assert broad.exit_code == 0, broad.output
+    broad_config = tomlkit.parse(codex_config.read_text(encoding="utf-8"))
+    assert broad_config["mcp_servers"]["apm-managed"]["command"] == "echo"
+    broad_lock = LockFile.read(tmp_path / "apm.lock.yaml")
+    assert broad_lock is not None
+    assert broad_lock.mcp_target_servers == {
+        "codex": ["apm-managed"],
+        "vscode": ["apm-managed"],
+    }
+
+    manifest["targets"] = ["copilot"]
+    (tmp_path / "apm.yml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    contracted = CliRunner().invoke(
+        cli,
+        ["install", "--target", "copilot", "--no-policy"],
+    )
+
+    assert contracted.exit_code == 0, contracted.output
+    updated_text = codex_config.read_text(encoding="utf-8")
+    updated = tomlkit.parse(updated_text)
+    assert "apm-managed" not in updated["mcp_servers"]
+    assert updated["mcp_servers"]["user-authored"]["command"] == "user-command"
+    assert updated["projects"][r"c:\src\project"]["trust_level"] == "trusted"
+    contracted_lock = LockFile.read(tmp_path / "apm.lock.yaml")
+    assert contracted_lock is not None
+    assert contracted_lock.mcp_target_servers == {"copilot": ["apm-managed"]}
 
 
 # ---------------------------------------------------------------------------

@@ -224,10 +224,12 @@ def _run_mcp_lsp_integration(
     old_mcp_servers: set = set()
     old_mcp_configs: dict = {}
     old_mcp_provenance: dict = {}
+    old_mcp_target_servers: dict = {}
     if existing_lock:
         old_mcp_servers = set(existing_lock.mcp_servers)
         old_mcp_configs = dict(existing_lock.mcp_configs)
         old_mcp_provenance = dict(existing_lock.mcp_config_provenance)
+        old_mcp_target_servers = dict(existing_lock.mcp_target_servers)
 
     apm_modules_path = get_modules_dir(scope)
     user_scope = scope is InstallScope.USER
@@ -241,6 +243,7 @@ def _run_mcp_lsp_integration(
             old_mcp_servers=old_mcp_servers,
             old_mcp_configs=old_mcp_configs,
             old_mcp_provenance=old_mcp_provenance,
+            old_mcp_target_servers=old_mcp_target_servers,
             project_root=project_root,
             user_scope=user_scope,
             should_install=True,
