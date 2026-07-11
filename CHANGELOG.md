@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Regenerating the lockfile now records each transitive local dependency's
+  identity as a project-root-relative POSIX path instead of an absolute machine
+  path, so a committed `apm.lock.yaml` stays portable and deterministic across
+  machines and CI. (#2155)
 - Positional `apm install <url>` now exits non-zero when all packages fail
   validation, matching manifest installs for reliable CI scripting. (#2131)
 - A failed first `apm install` no longer leaves behind an `apm.yml` it created,

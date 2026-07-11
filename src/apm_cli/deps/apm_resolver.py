@@ -12,6 +12,7 @@ from typing import Optional, Protocol
 
 from ..models.apm_package import APMPackage, DependencyReference
 from ..utils.path_security import PathTraversalError, ensure_path_within, validate_path_segments
+from ..utils.paths import portable_relpath
 from .dependency_graph import (
     CircularRef,
     DependencyGraph,
@@ -307,6 +308,31 @@ class APMDependencyResolver:
         """Return True for POSIX, home-expanded, or Windows absolute paths."""
         raw = local_path.strip()
         return Path(raw).expanduser().is_absolute() or PureWindowsPath(raw).is_absolute()
+
+    @staticmethod
+    def _portable_anchor_identity(anchored: Path, base: Path | None) -> str:
+        """Return a machine-independent identity string for a resolved local dep.
+
+        ``anchored`` is the absolute, resolved on-disk location of a local
+        package. The returned value is the package's stable identity only --
+        it feeds the ``local:`` cycle key, the lockfile
+        ``dependencies[].anchored_local_path`` field, and (via that same owner
+        identity) the deployment-ledger owner rows. It is never re-opened as a
+        filesystem path.
+
+        A lockfile is a committed, cross-machine artifact, so this identity
+        MUST NOT carry a developer's home directory or any absolute prefix.
+        Packages inside ``base`` (the project root) are recorded relative to
+        it in forward-slash POSIX form -- matching how directly-declared local
+        owners already serialize -- which keeps a regenerated lockfile
+        deterministic across machines and CI. Packages outside ``base`` (or
+        when ``base`` is unknown) fall back to the resolved absolute POSIX
+        path: such out-of-project local deps are inherently non-committable,
+        and the fallback preserves a unique identity without inventing one.
+        """
+        if base is None:
+            return anchored.resolve().as_posix()
+        return portable_relpath(anchored, base)
 
     def _remote_repo_root_for_parent(
         self,
@@ -726,7 +752,9 @@ class APMDependencyResolver:
                             sub_dep = replace(
                                 sub_dep,
                                 declaring_parent=node.get_id(),
-                                anchored_local_path=str(anchored),
+                                anchored_local_path=self._portable_anchor_identity(
+                                    anchored, root_package.source_path
+                                ),
                             )
                             ancestor: DependencyNode | None = node
                             while ancestor is not None:
