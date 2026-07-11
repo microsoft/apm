@@ -13,6 +13,7 @@ from typing import Any
 
 import yaml
 
+from ..core.deployment_state import DeploymentLedger
 from ..models.apm_package import DependencyReference
 from ..models.dependency.identity import normalize_package_repo_url
 from ..models.dependency.reference import (
@@ -559,6 +560,9 @@ class LockFile:
     lsp_configs: dict[str, dict] = field(default_factory=dict)
     local_deployed_files: list[str] = field(default_factory=list)
     local_deployed_file_hashes: dict[str, str] = field(default_factory=dict)
+    deployment_ledger: DeploymentLedger = field(
+        default_factory=lambda: DeploymentLedger(records={})
+    )
 
     def add_dependency(self, dep: LockedDependency) -> None:
         """Add a dependency to the lock file.
@@ -610,6 +614,11 @@ class LockFile:
 
     def to_yaml(self) -> str:
         """Serialize to YAML string."""
+        from ..core.deployment_ledger import DeploymentLedgerCodec
+
+        if not self.deployment_ledger.records:
+            self.deployment_ledger = DeploymentLedgerCodec.from_lockfile(self)
+        DeploymentLedgerCodec.apply_to_lockfile(self.deployment_ledger, self)
         # Opportunistic v1<->v2 derivation (design §6.1, invariant §2.1.4):
         # the lockfile_version field always reflects current content at
         # emit time. ``add_dependency`` bumps to "2" eagerly, but callers
@@ -631,6 +640,7 @@ class LockFile:
             if self.apm_version:
                 data["apm_version"] = self.apm_version
             data["dependencies"] = [dep.to_dict() for dep in self.get_all_dependencies()]
+            data["deployments"] = DeploymentLedgerCodec.rows(self.deployment_ledger)
             if self.mcp_servers:
                 data["mcp_servers"] = sorted(self.mcp_servers)
             if self.mcp_configs:
@@ -704,11 +714,19 @@ class LockFile:
                 deployed_files=list(lock.local_deployed_files),
                 deployed_file_hashes=dict(lock.local_deployed_file_hashes),
             )
+        from ..core.deployment_ledger import DeploymentLedgerCodec
+
+        if "deployments" in data:
+            lock.deployment_ledger = DeploymentLedgerCodec.from_rows(data["deployments"])
+        else:
+            lock.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lock)
         return lock
 
     def write(self, path: Path) -> None:
         """Write lock file to disk."""
-        path.write_text(self.to_yaml(), encoding="utf-8")
+        from ..utils.atomic_io import atomic_write_text
+
+        atomic_write_text(path, self.to_yaml())
 
     @classmethod
     def read(cls, path: Path) -> LockFile | None:
@@ -832,9 +850,12 @@ class LockFile:
         """
         if self.lockfile_version != other.lockfile_version:
             return False
-        if set(self.dependencies.keys()) != set(other.dependencies.keys()):
+        self_dependency_keys = set(self.dependencies).difference({_SELF_KEY})
+        other_dependency_keys = set(other.dependencies).difference({_SELF_KEY})
+        if self_dependency_keys != other_dependency_keys:
             return False
-        for key, dep in self.dependencies.items():
+        for key in self_dependency_keys:
+            dep = self.dependencies[key]
             other_dep = other.dependencies[key]
             if dep.to_dict() != other_dep.to_dict():
                 return False
@@ -842,7 +863,9 @@ class LockFile:
             return False
         if self.mcp_configs != other.mcp_configs:
             return False
-        if self.mcp_target_servers != other.mcp_target_servers:
+        if self.mcp_target_servers != other.mcp_target_servers or dict(
+            self.deployment_ledger.records
+        ) != dict(other.deployment_ledger.records):
             return False
         if self.mcp_config_provenance != other.mcp_config_provenance:
             return False

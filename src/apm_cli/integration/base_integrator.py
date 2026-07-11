@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from apm_cli.compilation.link_resolver import UnifiedLinkResolver
+from apm_cli.core.deployment_state import MaterializationResult
 from apm_cli.primitives.discovery import discover_primitives
 from apm_cli.utils.atomic_io import normalize_crlf_to_lf
 from apm_cli.utils.console import _rich_warning
@@ -75,6 +76,7 @@ class IntegrationResult:
     files_skipped: int
     target_paths: list[Path]
     links_resolved: int = 0
+    materializations: tuple[MaterializationResult, ...] = ()
 
     # Hook-specific (default 0 when not applicable)
     scripts_copied: int = 0

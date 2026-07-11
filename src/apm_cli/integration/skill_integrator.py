@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from apm_cli.core.deployment_state import MaterializationResult
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.targets import TargetProfile
 from apm_cli.utils.atomic_io import write_text_lf
@@ -60,6 +61,7 @@ class SkillIntegrationResult:
     # layer can surface an actionable hint: "project_scope" | "no_claude_target".
     bin_skipped_reason: str | None = None
     target_paths: list[Path] = None  # All deployed directories (for deployed_files manifest)
+    materializations: tuple[MaterializationResult, ...] = ()
 
     def __post_init__(self):
         if self.target_paths is None:

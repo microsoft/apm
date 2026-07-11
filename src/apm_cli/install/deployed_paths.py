@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from apm_cli.utils.path_security import ensure_path_within
 from apm_cli.utils.paths import portable_relpath
 
 
@@ -14,42 +13,40 @@ def deployed_path_entry(
     project_root: Path,
     targets: Any,
 ) -> str:
-    """Return the lockfile-safe path string for a deployed file."""
+    """Return the compatibility path view produced by the canonical codec."""
+    from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+    from apm_cli.core.scope import InstallScope
 
-    def _try_dynamic_root(tgts, *, strict: bool = False) -> str | None:
+    def _try_target(tgts) -> str | None:
         for _t in tgts:
-            deploy_root = _t.managed_deploy_root
-            absolute_static_root = _t.resolved_deploy_root is None and deploy_root is not None
-            if deploy_root is None:
+            try:
+                locator = DeploymentLedgerCodec.locator_for_path(
+                    target_path,
+                    project_root=project_root,
+                    target=_t,
+                    scope=InstallScope.PROJECT,
+                )
+            except RuntimeError:
                 continue
-            if not strict or absolute_static_root:
-                try:
-                    target_path.relative_to(deploy_root)
-                except ValueError:
-                    continue
-            if absolute_static_root:
-                resolved_target = ensure_path_within(target_path, deploy_root)
-                return portable_relpath(resolved_target, project_root)
-            if _t.name == "copilot-app":
-                from apm_cli.integration.copilot_app_db import to_lockfile_uri
+            if locator.kind.value == "target-relative":
+                if _t.name == "copilot-app":
+                    from apm_cli.integration.copilot_app_db import to_lockfile_uri
 
-                return to_lockfile_uri(target_path.name)
-            from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
+                    return to_lockfile_uri(target_path.name)
+                if _t.name == "copilot-cowork":
+                    from apm_cli.integration.copilot_cowork_paths import to_lockfile_path
 
-            return to_lockfile_path(target_path, deploy_root)
+                    return to_lockfile_path(target_path, _t.managed_deploy_root)
+            return locator.value
         return None
 
     if targets:
-        result = _try_dynamic_root(targets)
+        result = _try_target(targets)
         if result is not None:
             return result
     try:
-        return target_path.relative_to(project_root).as_posix()
+        return portable_relpath(target_path, project_root)
     except ValueError:
-        if targets:
-            result = _try_dynamic_root(targets, strict=True)
-            if result is not None:
-                return result
         raise RuntimeError(  # noqa: B904
             f"Cannot translate {target_path!r} to a lockfile path: "
             f"path is outside the project tree and no dynamic-root "
