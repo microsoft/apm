@@ -247,6 +247,8 @@ def discover_policy_with_chain(
     project_root: Path,
     *,
     expected_hash: str | None = None,
+    policy_override: str | None = None,
+    no_cache: bool = False,
 ) -> PolicyFetchResult:
     """Discover policy with full inheritance chain resolution.
 
@@ -307,7 +309,12 @@ def discover_policy_with_chain(
             expected_hash = pin.normalized
 
     # -- Base discovery ------------------------------------------------
-    fetch_result = discover_policy(project_root, expected_hash=expected_hash)
+    fetch_result = discover_policy(
+        project_root,
+        policy_override=policy_override,
+        no_cache=no_cache,
+        expected_hash=expected_hash,
+    )
 
     # -- Chain resolution if leaf has extends: -------------------------
     if (
@@ -444,15 +451,13 @@ def _resolve_and_persist_chain(
     refs and ``MAX_CHAIN_DEPTH`` enforcement protect against runaway or
     self-referential chains.
 
-    Partial-chain policy: if any parent fetch fails, emit a warning via
-    ``_rich_warning`` and merge whatever was resolved so far -- never
-    silently drop ancestors.
+    If any parent fetch fails, mark the chain incomplete and clear the
+    partial policy so enforcement cannot proceed with weaker constraints.
 
     Mutates *fetch_result*.policy in-place with the merged effective policy.
     Called by :func:`discover_policy_with_chain` -- not intended for direct
     use.
     """
-    from ..utils.console import _rich_warning
     from . import inheritance as _inheritance_mod
 
     leaf_policy = fetch_result.policy
@@ -474,7 +479,7 @@ def _resolve_and_persist_chain(
     visited: list[str] = [_strip_source_prefix(leaf_source)] if leaf_source else []
 
     current = leaf_policy
-    partial_warning: tuple[str, int, int] | None = None
+    incomplete_chain: tuple[str, int, int] | None = None
 
     while current.extends:
         next_ref = current.extends
@@ -506,10 +511,10 @@ def _resolve_and_persist_chain(
         fetch_result.warnings.extend(parent_result.warnings)
 
         if parent_result.policy is None:
-            # Parent fetch failed -- merge what we have so far and warn.
+            # Parent fetch failed -- never enforce the weaker partial chain.
             attempted = len(chain_policies) + 1
             resolved = len(chain_policies)
-            partial_warning = (next_ref, resolved, attempted)
+            incomplete_chain = (next_ref, resolved, attempted)
             break
 
         chain_policies.append(parent_result.policy)
@@ -519,13 +524,14 @@ def _resolve_and_persist_chain(
 
     # No actual ancestors fetched -- nothing to merge or re-cache.
     if len(chain_policies) == 1:
-        if partial_warning is not None:
-            ref, resolved, attempted = partial_warning
-            _rich_warning(
-                f"Policy chain incomplete: {ref} unreachable, "
-                f"using {resolved} of {attempted} policies",
-                symbol="warning",
+        if incomplete_chain is not None:
+            ref, resolved, attempted = incomplete_chain
+            fetch_result.outcome = "incomplete_chain"
+            fetch_result.error = (
+                f"Policy chain incomplete: {ref} unreachable "
+                f"({resolved} of {attempted} policies resolved)"
             )
+            fetch_result.policy = None
         return
 
     # Merge in [root, ..., leaf] order.  We collected leaf-first, so reverse.
@@ -542,7 +548,7 @@ def _resolve_and_persist_chain(
     chain_refs: list[str] = [_strip_source_prefix(src) for src in ordered_sources if src]
 
     cache_key = _strip_source_prefix(leaf_source) if leaf_source else ""
-    if cache_key:
+    if cache_key and incomplete_chain is None:
         _write_cache(
             cache_key,
             merged,
@@ -551,14 +557,17 @@ def _resolve_and_persist_chain(
             warnings=fetch_result.warnings,
         )
 
-    fetch_result.policy = merged
-
-    if partial_warning is not None:
-        ref, resolved, attempted = partial_warning
-        _rich_warning(
-            f"Policy chain incomplete: {ref} unreachable, using {resolved} of {attempted} policies",
-            symbol="warning",
+    if incomplete_chain is not None:
+        ref, resolved, attempted = incomplete_chain
+        fetch_result.outcome = "incomplete_chain"
+        fetch_result.error = (
+            f"Policy chain incomplete: {ref} unreachable "
+            f"({resolved} of {attempted} policies resolved)"
         )
+        fetch_result.policy = None
+        return
+
+    fetch_result.policy = merged
 
 
 def discover_policy(

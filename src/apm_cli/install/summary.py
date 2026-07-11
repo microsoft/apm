@@ -14,17 +14,16 @@ sources, locks, or filesystem fixtures.
 from __future__ import annotations
 
 from apm_cli.commands._helpers import _rich_blank_line
-from apm_cli.models.results import InstallDisposition, InstallResult
+from apm_cli.install.outcome import (
+    diagnostic_error_count,
+    finalize_install_result,
+)
+from apm_cli.models.results import InstallResult
 
 
 def _error_count(apm_diagnostics) -> int:
     """Return a defensive integer count from optional diagnostics."""
-    if not apm_diagnostics:
-        return 0
-    try:
-        return int(apm_diagnostics.error_count)
-    except (TypeError, ValueError):
-        return 0
+    return diagnostic_error_count(apm_diagnostics)
 
 
 def classify_post_install_result(
@@ -34,18 +33,12 @@ def classify_post_install_result(
     force: bool,
 ) -> InstallResult:
     """Classify completion without rendering user-facing output."""
-    error_count = _error_count(apm_diagnostics)
-    failed_security = not force and apm_diagnostics and apm_diagnostics.has_critical_security
-    if failed_security or error_count > 0:
-        return InstallResult(
+    return finalize_install_result(
+        InstallResult(
             installed_count=apm_count,
             diagnostics=apm_diagnostics,
-            disposition=InstallDisposition.FAILED,
-            exit_code=1,
-        )
-    return InstallResult(
-        installed_count=apm_count,
-        diagnostics=apm_diagnostics,
+        ),
+        force=force,
     )
 
 

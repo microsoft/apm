@@ -299,8 +299,8 @@ class TestResolveAndPersistChain:
         mock_warn.assert_not_called()
         assert fetch_result.policy is original_policy
 
-    def test_single_policy_parent_fetch_fails_emits_warning(self, tmp_path: Path) -> None:
-        """Parent fetch failure when chain has 1 entry emits partial_warning."""
+    def test_single_policy_parent_fetch_fails_closed(self, tmp_path: Path) -> None:
+        """Parent fetch failure clears the weaker leaf policy."""
 
         extends_yaml = "name: leaf\nversion: '1.0'\nenforcement: warn\nextends: owner/.parent\n"
         leaf_policy, _ = load_policy(extends_yaml)
@@ -311,13 +311,12 @@ class TestResolveAndPersistChain:
         failed_parent = PolicyFetchResult(source="org:owner/.parent", outcome="absent")
         failed_parent.policy = None
 
-        with (
-            patch("apm_cli.policy.discovery.discover_policy", return_value=failed_parent),
-            patch("apm_cli.utils.console._rich_warning") as mock_warn,
-        ):
+        with patch("apm_cli.policy.discovery.discover_policy", return_value=failed_parent):
             _resolve_and_persist_chain(fetch_result, tmp_path)
 
-        mock_warn.assert_called_once()
+        assert fetch_result.policy is None
+        assert fetch_result.outcome == "incomplete_chain"
+        assert "owner/.parent" in (fetch_result.error or "")
 
 
 # ---------------------------------------------------------------------------

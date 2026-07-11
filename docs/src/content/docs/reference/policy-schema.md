@@ -268,6 +268,8 @@ turned them on.
 - `https://...` -- a direct URL.
 
 For supply-chain safety, `extends:` references are pinned to the **leaf policy's host** -- a policy fetched from `github.com` cannot extend one on `evil.example.com`.
+If any parent is unreachable, the chain is incomplete and enforcement fails
+closed. APM never applies the weaker subset that happened to resolve.
 
 ### Merge rules
 
@@ -283,6 +285,7 @@ inherited list (see the tri-state table below).
 | `*.allow` lists             | Set intersection. `null` is transparent (no opinion).                            |
 | `*.deny` / `require` lists  | Union, deduplicated, parent order preserved. Omitting the field (or setting it to `null`) is transparent  --  the parent value passes through unchanged. `[]` is an explicit empty override. |
 | `dependencies.max_depth`    | `min(parent, child)`.                                                            |
+| `manifest.require_explicit_includes` | Logical OR; once enabled, descendants cannot relax it.                 |
 | `dependencies.require_resolution` | Stricter wins (`block` > `policy-wins` > `project-wins`).                  |
 | `dependencies.require_pinned_constraint` | Logical OR -- once a parent enables it, child cannot relax.            |
 | `mcp.self_defined`          | Stricter wins (`deny` > `warn` > `allow`).                                       |

@@ -152,10 +152,15 @@ def run(ctx: InstallContext) -> InstallResult:
     if ctx.scope is InstallScope.USER:
         _hint_global_root_context(ctx)
 
-    return InstallResult(
-        ctx.installed_count,
-        ctx.total_prompts_integrated,
-        ctx.total_agents_integrated,
-        ctx.diagnostics,
-        package_types=dict(ctx.package_types),
+    from apm_cli.install.outcome import finalize_install_result
+
+    return finalize_install_result(
+        InstallResult(
+            ctx.installed_count,
+            ctx.total_prompts_integrated,
+            ctx.total_agents_integrated,
+            ctx.diagnostics,
+            package_types=dict(ctx.package_types),
+        ),
+        force=bool(getattr(ctx, "force", False)),
     )

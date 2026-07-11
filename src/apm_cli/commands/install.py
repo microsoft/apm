@@ -176,6 +176,7 @@ class InstallContext:
     skill_subset: "builtins.tuple[str, ...] | None" = None
     skill_subset_from_cli: bool = False
     audit_override: str | None = None
+    install_result: InstallResult | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1510,15 +1511,20 @@ def install(  # noqa: PLR0913
                 outcome,
             )
 
-            from apm_cli.install.summary import classify_post_install_result
+            from apm_cli.install.outcome import finalize_install_result
 
-            command_result = classify_post_install_result(
-                apm_count=apm_count,
-                apm_diagnostics=apm_diagnostics,
-                force=force,
+            command_result = install_ctx.install_result or InstallResult(
+                installed_count=apm_count,
+                diagnostics=apm_diagnostics,
             )
+            command_result.installed_count = apm_count
+            command_result.diagnostics = apm_diagnostics
             if dry_run:
                 command_result.disposition = InstallDisposition.DRY_RUN
+            command_result = finalize_install_result(
+                command_result,
+                force=force,
+            )
             command_result = transaction.complete(command_result)
 
             command_result = _post_install_summary(
@@ -1744,6 +1750,7 @@ def _install_apm_packages(ctx, outcome):
         and any(k != _LOCK_SELF_KEY for k in _existing_lock.dependencies)
     )
     apm_diagnostics = None
+    install_result = None
     if should_install_apm and (
         has_any_apm_deps
         or _project_has_root_primitives(_cli_project_root)
@@ -1787,8 +1794,16 @@ def _install_apm_packages(ctx, outcome):
                 refresh=ctx.refresh,
                 transaction=ctx.transaction,
             )
+            if not isinstance(install_result, InstallResult):
+                install_result = InstallResult(
+                    installed_count=int(getattr(install_result, "installed_count", 0)),
+                    diagnostics=getattr(install_result, "diagnostics", None),
+                )
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics
+            if install_result.disposition is InstallDisposition.FAILED:
+                ctx.install_result = install_result
+                return apm_count, 0, 0, apm_diagnostics
         except InsecureDependencyPolicyError:
             raise
         except AuthenticationError as e:
@@ -1893,6 +1908,12 @@ def _install_apm_packages(ctx, outcome):
     # initialization, and inline stale-cleanup block that lived here
     # have been removed.
 
+    from apm_cli.install.outcome import finalize_install_result
+
+    command_result = install_result or InstallResult()
+    command_result.installed_count = apm_count
+    command_result.diagnostics = apm_diagnostics
+    ctx.install_result = finalize_install_result(command_result, force=ctx.force)
     return apm_count, mcp_count, lsp_count, apm_diagnostics
 
 

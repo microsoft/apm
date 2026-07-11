@@ -79,6 +79,26 @@ check_pattern \
     'SUPPORTED_LOCKFILE_VERSIONS|lockfile_version[[:space:]]+(==|!=|in)' \
     $(find src/apm_cli -name '*.py' ! -path 'src/apm_cli/deps/lockfile.py')
 
+echo "[*] AC3: outcome and policy enforcement authorities"
+check_pattern \
+    "Install adapters must not classify diagnostics" \
+    'classify_post_install_result' \
+    src/apm_cli/commands/install.py
+check_pattern \
+    "Audit policy sources must use chain-aware discovery" \
+    'discover_policy\(' \
+    src/apm_cli/commands/audit.py
+if ! grep -A20 'def _merge_manifest' src/apm_cli/policy/inheritance.py \
+    | grep -q 'require_explicit_includes'; then
+    echo "[x] Manifest inheritance must merge require_explicit_includes"
+    violations=$((violations + 1))
+fi
+if ! grep -q 'incomplete_chain' src/apm_cli/policy/discovery.py \
+    || ! grep -q 'incomplete_chain' src/apm_cli/policy/outcome_routing.py; then
+    echo "[x] Incomplete policy chains must route through fail-closed outcome handling"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

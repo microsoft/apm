@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from apm_cli.install.request import InstallRequest
+from apm_cli.models.results import InstallDisposition
 
 if TYPE_CHECKING:
     from apm_cli.core.lifecycle_scripts import LifecycleEvent, LifecycleScriptRunner
@@ -104,8 +105,12 @@ class InstallService:
             transaction=request.transaction,
         )
 
-        post_event = self._build_event("post-install", request)
-        runner.fire("post-install", post_event)
+        if result.disposition in {
+            InstallDisposition.SUCCESS,
+            InstallDisposition.PARTIAL_SUCCESS,
+        }:
+            post_event = self._build_event("post-install", request)
+            runner.fire("post-install", post_event)
 
         return result
 

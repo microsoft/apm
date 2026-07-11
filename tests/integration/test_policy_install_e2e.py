@@ -535,6 +535,15 @@ class TestI8TransitiveMCPDenied:
         fetch = _make_fetch_result("found", policy=policy)
         mock_gate.return_value = fetch
         mock_preflight.return_value = fetch
+        downloaded = mock_dl.return_value.download_package.return_value
+        downloaded.resolved_reference.resolved_commit = "0" * 40
+        downloaded.resolved_reference.ref_name = "main"
+        downloaded.resolved_reference.is_branch = True
+        downloaded.resolved_reference.is_tag = False
+        downloaded.resolved_reference.is_sha = False
+        downloaded.package_type.value = "apm_package"
+        downloaded.package.name = "carrier-pkg"
+        downloaded.package.version = "1.0.0"
 
         result = _invoke_install(runner, ["--trust-transitive-mcp"])
 
