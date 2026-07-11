@@ -134,43 +134,101 @@ def union_preserving(
     legacy preserve-all behaviour is kept so a genuine multi-target deploy is
     never clobbered (issue #1716).
     """
-    file_prefixes, uri_schemes = install_governance(targets)
-    allowed_prefixes: set[str] | None = None
-    allowed_schemes: set[str] | None = None
-    known_prefixes: set[str] | None = None
-    known_schemes: set[str] | None = None
-    if declared_targets is not None:
-        from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.core.deployment_state import (
+        DeploymentIntent,
+        DeploymentLedger,
+        DeploymentLocator,
+        DeploymentReconciler,
+        DeploymentRecord,
+        LocatorKind,
+        MaterializationResult,
+        MaterializationStatus,
+        NativePayloadValidation,
+    )
+    from apm_cli.integration.targets import KNOWN_TARGETS
+    from apm_cli.utils.diagnostics import DiagnosticCollector
 
-        declared_prefixes, d_schemes = install_governance(declared_targets)
-        known_prefixes, known_schemes = install_governance(list(KNOWN_TARGETS.values()))
-        # Active targets are always legitimate (this run selected them), so a
-        # ``--target`` that reaches outside the declared set is still honoured.
-        allowed_prefixes = file_prefixes | declared_prefixes
-        allowed_schemes = uri_schemes | d_schemes
-    current_set = set(current_files or ())
-    merged_hashes = dict(current_hashes or {})
-    preserved: list[str] = []
+    active_by_name = {target.name: target for target in targets}
+    declared_by_name = (
+        {target.name: target for target in declared_targets}
+        if declared_targets is not None
+        else None
+    )
+
+    def _target_for(path: str) -> str:
+        ordered = [
+            *targets,
+            *(declared_targets or []),
+            *KNOWN_TARGETS.values(),
+        ]
+        seen_names: set[str] = set()
+        for profile in ordered:
+            if profile.name in seen_names:
+                continue
+            seen_names.add(profile.name)
+            prefixes, schemes = install_governance([profile])
+            if is_governed_by_install(path, prefixes, schemes):
+                return profile.name
+        return "legacy"
+
+    def _locator(path: str) -> DeploymentLocator:
+        return DeploymentLocator(
+            kind=LocatorKind.URI if "://" in path else LocatorKind.PROJECT_RELATIVE,
+            target=_target_for(path),
+            value=path,
+            runtime=None,
+            scope="project",
+        )
+
+    prior_records: dict[str, DeploymentRecord] = {}
     for path in prior_files or ():
-        if path in current_set:
-            continue
-        if is_governed_by_install(path, file_prefixes, uri_schemes):
-            continue
-        if (
-            allowed_prefixes is not None
-            and allowed_schemes is not None
-            and not is_governed_by_install(path, allowed_prefixes, allowed_schemes)
-            and known_prefixes is not None
-            and known_schemes is not None
-            and is_governed_by_install(path, known_prefixes, known_schemes)
-        ):
-            # Ghost: attributable to a known target the consumer does not
-            # declare. Unknown patterns are indeterminate and stay preserved.
-            if on_ghost_drop is not None:
-                on_ghost_drop(path)
-            continue
-        preserved.append(path)
-        if prior_hashes and path in prior_hashes:
+        locator = _locator(path)
+        prior_records[locator.key] = DeploymentRecord(
+            locator=locator,
+            owners=("legacy",),
+            active_owner="legacy",
+            content_hash=prior_hashes.get(path),
+        )
+    current_results = [
+        MaterializationResult(
+            locator=_locator(path),
+            owners=frozenset({"legacy"}),
+            status=MaterializationStatus.UNCHANGED,
+            content_hash=current_hashes.get(path),
+            validation=NativePayloadValidation(valid=True, contract="legacy-file"),
+        )
+        for path in current_files or ()
+    ]
+    reconciled = DeploymentReconciler(
+        Path.cwd(),
+        KNOWN_TARGETS,
+        diagnostics=DiagnosticCollector(),
+    ).reconcile(
+        DeploymentLedger(records=prior_records),
+        current_results,
+        DeploymentIntent(
+            active_targets=frozenset(active_by_name),
+            declared_targets=(
+                frozenset(declared_by_name) if declared_by_name is not None else None
+            ),
+            desired_owners=frozenset({"legacy"}),
+            authoritative_targets=True,
+        ),
+    )
+    retained_values = {record.locator.value for record in reconciled.ledger.records.values()}
+    if on_ghost_drop is not None:
+        current_set = set(current_files or ())
+        for locator in reconciled.removed:
+            if locator.value not in current_set and locator.target not in active_by_name:
+                on_ghost_drop(locator.value)
+    preserved = [
+        path
+        for path in prior_files or ()
+        if path not in set(current_files or ()) and path in retained_values
+    ]
+    merged_hashes = dict(current_hashes or {})
+    for path in preserved:
+        if path in prior_hashes:
             merged_hashes[path] = prior_hashes[path]
     return list(current_files or ()) + preserved, merged_hashes
 
@@ -313,8 +371,9 @@ def reconcile_deployed_state(
             diagnostics=diagnostics,
         )
         if files != prior_files or hashes != prior_hashes:
-            dependency.deployed_files = files
-            dependency.deployed_file_hashes = hashes
+            from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+            DeploymentLedgerCodec.replace_legacy_owner(lockfile, dep_key, files, hashes)
             changed = True
 
     prior_local = list(lockfile.local_deployed_files)
@@ -335,8 +394,9 @@ def reconcile_deployed_state(
         diagnostics=diagnostics,
     )
     if local_files != prior_local or local_hashes != prior_local_hashes:
-        lockfile.local_deployed_files = local_files
-        lockfile.local_deployed_file_hashes = local_hashes
+        from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+        DeploymentLedgerCodec.replace_legacy_owner(lockfile, ".", local_files, local_hashes)
         changed = True
     return changed
 

@@ -127,6 +127,39 @@ class DeploymentLedgerCodec:
         }
 
     @staticmethod
+    def replace_legacy_owner(
+        lockfile: LockFile,
+        owner: str,
+        files: list[str],
+        hashes: dict[str, str],
+    ) -> None:
+        """Update one compatibility ownership view and invalidate its projection."""
+        if owner == ".":
+            lockfile.local_deployed_files = list(files)
+            lockfile.local_deployed_file_hashes = dict(hashes)
+        else:
+            dependency = lockfile.dependencies[owner]
+            dependency.deployed_files = list(files)
+            dependency.deployed_file_hashes = dict(hashes)
+        lockfile.deployment_ledger = DeploymentLedger(records={})
+
+    @staticmethod
+    def replace_mcp_target_servers(
+        lockfile: LockFile,
+        target_servers: dict[str, list[str]],
+    ) -> None:
+        """Update the MCP compatibility view and invalidate its projection."""
+        lockfile.mcp_target_servers = {
+            runtime: list(servers) for runtime, servers in target_servers.items()
+        }
+        lockfile.deployment_ledger = DeploymentLedger(records={})
+
+    @staticmethod
+    def replace_context_local_files(context: Any, files: list[str]) -> None:
+        """Route transitional install-context ownership mutation through one owner."""
+        context.local_deployed_files = list(files)
+
+    @staticmethod
     def locator_for_path(
         path: Path | str,
         *,
