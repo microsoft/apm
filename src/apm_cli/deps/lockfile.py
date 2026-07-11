@@ -587,6 +587,21 @@ class LockFile:
         """Get a dependency by its unique key."""
         return self.dependencies.get(key)
 
+    def rename_local_deployed_path(self, old_value: str, new_value: str) -> None:
+        """Rename one locally deployed path and carry its content hash."""
+        if old_value not in self.local_deployed_files:
+            return
+        self.local_deployed_files = [
+            value for value in self.local_deployed_files if value != old_value
+        ]
+        if new_value not in self.local_deployed_files:
+            self.local_deployed_files.append(new_value)
+        if old_value in self.local_deployed_file_hashes:
+            old_hash = self.local_deployed_file_hashes.pop(old_value)
+            self.local_deployed_file_hashes.setdefault(new_value, old_hash)
+        self.deployment_ledger = DeploymentLedger(records={})
+        self._deployments_present = False
+
     def has_dependency(self, key: str) -> bool:
         """Check if a dependency exists."""
         return key in self.dependencies
@@ -721,8 +736,11 @@ class LockFile:
         from ..core.deployment_ledger import DeploymentLedgerCodec
 
         if "deployments" in data:
-            lock.deployment_ledger = DeploymentLedgerCodec.from_rows(data["deployments"])
-            lock._deployments_present = True
+            deployment_rows = data["deployments"]
+            lock.deployment_ledger = DeploymentLedgerCodec.from_rows(deployment_rows)
+            lock._deployments_present = isinstance(deployment_rows, list) and (
+                not deployment_rows or bool(lock.deployment_ledger.records)
+            )
         else:
             lock.deployment_ledger = DeploymentLedgerCodec.from_lockfile(lock)
         return lock

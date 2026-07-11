@@ -77,6 +77,11 @@ class DeploymentRecord:
     active_owner: str
     content_hash: str | None
 
+    def __post_init__(self) -> None:
+        """Reject records whose active owner has no ownership claim."""
+        if self.active_owner not in self.owners:
+            raise ValueError("active_owner must be present in owners")
+
 
 @dataclass(frozen=True)
 class DeploymentLedger:
@@ -273,10 +278,13 @@ class DeploymentReconciler:
             return None
         if survivors == prior.owners:
             return prior
+        active_owner = (
+            prior.active_owner if prior.active_owner in survivors else sorted(survivors)[-1]
+        )
         return DeploymentRecord(
             locator=prior.locator,
             owners=survivors,
-            active_owner=prior.active_owner,
+            active_owner=active_owner,
             content_hash=prior.content_hash,
         )
 

@@ -281,7 +281,7 @@ class DeploymentLedgerCodec:
                 continue
             owners = tuple(str(owner) for owner in row.get("owners", ()) if owner)
             active_owner = str(row.get("active_owner") or "")
-            if not owners or not active_owner:
+            if not owners or not active_owner or active_owner not in owners:
                 continue
             try:
                 locator = DeploymentLocator(
@@ -292,6 +292,8 @@ class DeploymentLedgerCodec:
                     scope=str(row["scope"]),
                 )
             except (KeyError, TypeError, ValueError):
+                continue
+            if locator.kind != LocatorKind.URI and row.get("content_hash") is None:
                 continue
             records[locator.key] = DeploymentRecord(
                 locator=locator,

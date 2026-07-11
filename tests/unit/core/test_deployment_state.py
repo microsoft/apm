@@ -3,6 +3,8 @@
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
 from apm_cli.core.deployment_state import (
     DeploymentIntent,
@@ -146,6 +148,40 @@ def test_uninstall_handoff_requires_successful_survivor(tmp_path: Path) -> None:
     assert reconciled.owner_handoffs == ((locator.key, "removed", "survivor"),)
 
 
+def test_uninstall_without_new_proof_transfers_active_owner_to_survivor(
+    tmp_path: Path,
+) -> None:
+    locator = _locator()
+    prior = DeploymentLedger(
+        records={
+            locator.key: _record(
+                locator,
+                owners=("zeta", "alpha", "removed"),
+                active="removed",
+            )
+        }
+    )
+
+    reconciled = _reconciler(tmp_path).reconcile(
+        prior,
+        [],
+        _intent(
+            owners=frozenset({"alpha", "zeta"}),
+            authoritative=False,
+        ),
+    )
+
+    record = reconciled.ledger.records[locator.key]
+    assert record.owners == ("zeta", "alpha")
+    assert record.active_owner == "zeta"
+    assert record.active_owner in record.owners
+
+
+def test_deployment_record_rejects_active_owner_outside_owners() -> None:
+    with pytest.raises(ValueError, match="active_owner must be present in owners"):
+        _record(_locator(), owners=("survivor",), active="removed")
+
+
 def test_no_handoff_without_successful_survivor(tmp_path: Path) -> None:
     locator = _locator()
     prior = DeploymentLedger(
@@ -286,6 +322,7 @@ def test_legacy_import_and_dual_write_are_semantically_equivalent() -> None:
     lockfile = LockFile()
     lockfile.add_dependency(dependency)
     lockfile.local_deployed_files = [".claude/rules/local.md"]
+    lockfile.local_deployed_file_hashes = {".claude/rules/local.md": "sha256:local"}
     lockfile.mcp_target_servers = {"vscode": ["demo"]}
 
     ledger = DeploymentLedgerCodec.from_lockfile(lockfile)
@@ -294,3 +331,34 @@ def test_legacy_import_and_dual_write_are_semantically_equivalent() -> None:
 
     assert rebuilt.deployment_ledger == ledger
     assert rebuilt.is_semantically_equivalent(lockfile)
+
+
+def test_from_rows_skips_hashless_additive_ownership_row() -> None:
+    rows = [
+        {
+            "kind": "project-relative",
+            "target": "copilot",
+            "value": ".github/agents/verified.agent.md",
+            "runtime": None,
+            "scope": "project",
+            "owners": ["verified"],
+            "active_owner": "verified",
+            "content_hash": "sha256:verified",
+        },
+        {
+            "kind": "project-relative",
+            "target": "copilot",
+            "value": ".github/agents/unverified.agent.md",
+            "runtime": None,
+            "scope": "project",
+            "owners": ["unverified"],
+            "active_owner": "unverified",
+            "content_hash": None,
+        },
+    ]
+
+    ledger = DeploymentLedgerCodec.from_rows(rows)
+
+    assert tuple(record.locator.value for record in ledger.records.values()) == (
+        ".github/agents/verified.agent.md",
+    )

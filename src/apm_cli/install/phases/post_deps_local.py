@@ -86,7 +86,12 @@ def run(ctx: InstallContext) -> None:
                 recorded_hashes=_prev_hashes,
             )
             # Failed paths stay in lockfile so we retry next time.
-            ctx.local_deployed_files.extend(_cleanup_result.failed)
+            from apm_cli.core.deployment_ledger import DeploymentLedgerCodec
+
+            DeploymentLedgerCodec.replace_context_local_files(
+                ctx,
+                [*ctx.local_deployed_files, *_cleanup_result.failed],
+            )
             if _cleanup_result.deleted_targets:
                 BaseIntegrator.cleanup_empty_parents(
                     _cleanup_result.deleted_targets, ctx.project_root
