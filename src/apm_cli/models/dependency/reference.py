@@ -446,21 +446,6 @@ class DependencyReference:
 
         This is the single source of truth for where a package lives in apm_modules/.
 
-        For regular packages:
-            - GitHub: apm_modules/owner/repo/
-            - ADO: apm_modules/org/project/repo/
-
-        For virtual file/collection packages:
-            - GitHub: apm_modules/owner/<virtual-package-name>/
-            - ADO: apm_modules/org/project/<virtual-package-name>/
-
-        For subdirectory packages (Claude Skills, nested APM packages):
-            - GitHub: apm_modules/owner/repo/subdir/path/
-            - ADO: apm_modules/org/project/repo/subdir/path/
-
-        For local packages:
-            - apm_modules/_local/<directory-name>/
-
         Args:
             apm_modules_dir: Path to the apm_modules directory
 
