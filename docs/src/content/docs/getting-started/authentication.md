@@ -15,7 +15,7 @@ APM resolves tokens per `(host, port, org)` pair. For each dependency, it walks 
 3. **Generic hosts** (other FQDNs such as Bitbucket): host-specific **git credential helper** or unauthenticated/public access -- **no** GitHub or GitLab platform env vars.
 
 Azure DevOps uses its own chain (`ADO_APM_PAT` -> Azure CLI bearer). See [Azure DevOps](#azure-devops).
-If the resolved token fails for the target host, APM retries with git credential helpers on paths that support it. If nothing matches, APM attempts unauthenticated access where the host exposes public repos (not *ghe.com* Data Residency).
+If the resolved token fails for the target host, APM retries with git credential helpers on paths that support it. If nothing matches, APM attempts unauthenticated access where the host exposes public repos (not *ghe.com* Data Residency). Before an unauthenticated attempt, APM removes inherited Git token and authorization-header environment settings.
 
 Results are cached per-process for each `(host, port, org)` key. All token-bearing requests use HTTPS.
 

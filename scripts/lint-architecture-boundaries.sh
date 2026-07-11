@@ -119,6 +119,25 @@ if ! grep -A25 'if plugin.registry:' src/apm_cli/marketplace/resolver.py \
     violations=$((violations + 1))
 fi
 
+echo "[*] AC5: process-wide I/O boundaries"
+check_pattern \
+    "Machine-output routing belongs at the root CLI" \
+    'set_console_stderr' \
+    $(find src/apm_cli/commands -name '*.py')
+check_pattern \
+    "Secret redaction must attach to handlers, not package loggers" \
+    'apm_logger\.addFilter|logging\.getLogger\("apm_cli"\)\.addFilter' \
+    src/apm_cli/cli.py
+if ! grep -q 'detect_output_mode' src/apm_cli/cli.py \
+    || ! grep -q 'handler.addFilter' src/apm_cli/cli.py; then
+    echo "[x] Root CLI must establish machine mode and handler-level redaction"
+    violations=$((violations + 1))
+fi
+if ! grep -q '_clear_git_auth_env(env)' src/apm_cli/core/auth.py; then
+    echo "[x] AuthResolver must scrub inherited Git authorization state"
+    violations=$((violations + 1))
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo "[x] $violations architecture boundary rule(s) failed"
     exit 1

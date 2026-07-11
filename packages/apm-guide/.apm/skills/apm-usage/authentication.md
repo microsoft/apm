@@ -16,6 +16,9 @@ APM checks these sources in order, using the first valid token found:
 
 APM checks the active `gh` CLI account before invoking OS credential helpers. This reduces ambiguous multi-account prompts on hosts like github.com. If the `gh` CLI is not installed or no account is active, APM skips this step silently and continues to `git credential fill`.
 
+Unauthenticated public-repository retries use a fresh Git environment with
+inherited token and authorization-header settings removed.
+
 For multi-account Git Credential Manager setups, see the [Multi-account Git Credential Manager](https://microsoft.github.io/apm/getting-started/authentication/#multi-account-git-credential-manager) section in the main authentication guide.
 
 ## Marketplace transport

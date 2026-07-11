@@ -438,6 +438,7 @@ class AuthResolver:
         auth_ctx = self.resolve(host, org, port=port)
         host_info = auth_ctx.host_info
         git_env = auth_ctx.git_env
+        unauth_env = self._build_git_env(None, host_kind=host_info.kind)
 
         def _log(msg: str) -> None:
             if verbose_callback:
@@ -565,7 +566,7 @@ class AuthResolver:
             # Validation path: save rate limits, EMU-safe
             try:
                 _log(f"Trying unauthenticated access to {host_info.display_name}")
-                return operation(None, git_env)
+                return operation(None, unauth_env)
             except Exception as exc:
                 # operation is caller-provided; broad catch required -- cannot narrow
                 # without restricting the caller API.  Use %r so the type is visible.
@@ -606,7 +607,7 @@ class AuthResolver:
                 if host_info.has_public_repos:
                     _log("Authenticated failed, retrying without token")
                     try:
-                        return operation(None, git_env)
+                        return operation(None, unauth_env)
                     except Exception as unauth_exc:
                         # operation is caller-provided; broad catch required.
                         logger.debug(
@@ -618,7 +619,7 @@ class AuthResolver:
                 return _try_credential_fallback(exc)
         else:
             _log(f"No token available, trying unauthenticated access to {host_info.display_name}")
-            return operation(None, git_env)
+            return operation(None, unauth_env)
 
     # -- error context ------------------------------------------------------
 
@@ -933,6 +934,7 @@ class AuthResolver:
         For all other cases, behavior is unchanged.
         """
         env = os.environ.copy()
+        AuthResolver._clear_git_auth_env(env)
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_ASKPASS"] = "echo"
         if scheme == "bearer" and token and host_kind == "ado":
@@ -940,17 +942,22 @@ class AuthResolver:
             # GIT_CONFIG_VALUE_0 only; GIT_TOKEN here would leak it into every
             # child-process env (visible in /proc/<pid>/environ, ps eww).
             #
-            # #1214 follow-up: a stale GIT_TOKEN already in the parent env
-            # (set by a prior shell, CI step, or another tool) would survive
-            # the os.environ.copy() above and defeat the isolation guarantee.
-            # Drop it explicitly so the bearer env is clean by construction.
-            env.pop("GIT_TOKEN", None)
             from apm_cli.utils.github_host import build_ado_bearer_git_env
 
             env.update(build_ado_bearer_git_env(token))
         elif token:
             env["GIT_TOKEN"] = token
         return env
+
+    @staticmethod
+    def _clear_git_auth_env(env: dict) -> None:
+        """Remove inherited Git authorization channels before an attempt."""
+        env.pop("GIT_TOKEN", None)
+        env.pop("GIT_HTTP_EXTRAHEADER", None)
+        env.pop("GIT_CONFIG_COUNT", None)
+        for key in tuple(env):
+            if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
+                env.pop(key, None)
 
     def emit_stale_pat_diagnostic(self, host_display: str) -> None:
         """Emit a [!] warning when PAT was rejected but bearer succeeded.
