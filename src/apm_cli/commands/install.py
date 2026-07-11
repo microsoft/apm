@@ -1611,7 +1611,14 @@ def install(  # noqa: PLR0913
         # never let a render failure mask the original exception/exit.
         if not summary_rendered and logger is not None:
             with contextlib.suppress(Exception):
-                logger.install_interrupted(elapsed_seconds=time.perf_counter() - install_started_at)
+                elapsed = time.perf_counter() - install_started_at
+                if (
+                    command_result is not None
+                    and command_result.disposition is InstallDisposition.FAILED
+                ):
+                    logger.install_failed(elapsed_seconds=elapsed)
+                else:
+                    logger.install_interrupted(elapsed_seconds=elapsed)
         # HACK(#852) cleanup: restore APM_VERBOSE so it stays scoped to this call.
         if _apm_verbose_prev is None:
             os.environ.pop("APM_VERBOSE", None)
@@ -1801,7 +1808,10 @@ def _install_apm_packages(ctx, outcome):
                 )
             apm_count = install_result.installed_count
             apm_diagnostics = install_result.diagnostics
-            if install_result.disposition is InstallDisposition.FAILED:
+            if install_result.disposition not in {
+                InstallDisposition.SUCCESS,
+                InstallDisposition.PARTIAL_SUCCESS,
+            }:
                 ctx.install_result = install_result
                 return apm_count, 0, 0, apm_diagnostics
         except InsecureDependencyPolicyError:

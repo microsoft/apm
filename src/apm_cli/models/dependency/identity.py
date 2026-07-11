@@ -90,9 +90,8 @@ def build_dependency_unique_key(
     lockfile key correspondence used by re-install and orphan detection.
     """
     if source == "local" and local_path:
-        if declaring_parent:
-            anchor = anchored_local_path or local_path
-            return f"local:{declaring_parent}:{anchor}"
+        if anchored_local_path:
+            return f"local:{anchored_local_path}"
         return local_path
 
     key = repo_url

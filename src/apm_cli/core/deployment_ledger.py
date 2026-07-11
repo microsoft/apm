@@ -274,28 +274,18 @@ class DeploymentLedgerCodec:
     @staticmethod
     def from_rows(rows: Any) -> DeploymentLedger:
         """Parse additive rows, rejecting malformed entries."""
+        DeploymentLedgerCodec.validate_rows(rows)
         records: dict[str, DeploymentRecord] = {}
-        if not isinstance(rows, list):
-            return DeploymentLedger(records={})
         for row in rows:
-            if not isinstance(row, dict):
-                continue
             owners = tuple(str(owner) for owner in row.get("owners", ()) if owner)
             active_owner = str(row.get("active_owner") or "")
-            if not owners or not active_owner or active_owner not in owners:
-                continue
-            try:
-                locator = DeploymentLocator(
-                    kind=LocatorKind(str(row["kind"])),
-                    target=str(row["target"]),
-                    value=str(row["value"]),
-                    runtime=str(row["runtime"]) if row.get("runtime") is not None else None,
-                    scope=str(row["scope"]),
-                )
-            except (KeyError, TypeError, ValueError):
-                continue
-            if locator.kind != LocatorKind.URI and row.get("content_hash") is None:
-                continue
+            locator = DeploymentLocator(
+                kind=LocatorKind(str(row["kind"])),
+                target=str(row["target"]),
+                value=str(row["value"]),
+                runtime=str(row["runtime"]) if row.get("runtime") is not None else None,
+                scope=str(row["scope"]),
+            )
             records[locator.key] = DeploymentRecord(
                 locator=locator,
                 owners=owners,
@@ -305,6 +295,41 @@ class DeploymentLedgerCodec:
                 ),
             )
         return DeploymentLedger(records=records)
+
+    @staticmethod
+    def validate_rows(rows: Any) -> None:
+        """Reject any malformed deployment row before ledger construction."""
+        if not isinstance(rows, list):
+            raise ValueError("Lockfile deployments must be a list")
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                raise ValueError(f"Lockfile deployment row {index} must be a mapping")
+            try:
+                LocatorKind(str(row["kind"]))
+                target = row["target"]
+                value = row["value"]
+                scope = row["scope"]
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f"Lockfile deployment row {index} has invalid locator") from exc
+            if not all(isinstance(item, str) and item for item in (target, value, scope)):
+                raise ValueError(
+                    f"Lockfile deployment row {index} locator fields must be non-empty strings"
+                )
+            owners = row.get("owners")
+            active_owner = row.get("active_owner")
+            if (
+                not isinstance(owners, list)
+                or not owners
+                or not all(isinstance(owner, str) and owner for owner in owners)
+                or not isinstance(active_owner, str)
+                or active_owner not in owners
+            ):
+                raise ValueError(f"Lockfile deployment row {index} has invalid owners")
+            content_hash = row.get("content_hash")
+            if content_hash is not None and not isinstance(content_hash, str):
+                raise ValueError(
+                    f"Lockfile deployment row {index} content_hash must be a string or null"
+                )
 
     @staticmethod
     def _add_legacy_paths(

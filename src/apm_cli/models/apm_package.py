@@ -74,7 +74,7 @@ def clear_apm_yml_cache() -> None:
 def _parse_v01_registries_block(
     data: dict,
     apm_yml_path: Path,
-) -> tuple[dict[str, str] | None, None]:
+) -> tuple[dict[str, str] | None, str | None]:
     """Parse the normative OpenAPM v0.1 registry map."""
     raw = data.get("registries")
     if raw is None:
@@ -82,7 +82,10 @@ def _parse_v01_registries_block(
     if not isinstance(raw, dict):
         raise ValueError(f"OpenAPM v0.1 'registries:' in {apm_yml_path} must be a mapping")
     registries: dict[str, str] = {}
+    default_name = raw.get("default")
     for name, value in raw.items():
+        if name == "default":
+            continue
         body = {"url": value} if isinstance(value, str) else value
         if not isinstance(name, str) or not isinstance(body, dict):
             raise ValueError("OpenAPM v0.1 registry entries must be named strings or objects")
@@ -97,7 +100,11 @@ def _parse_v01_registries_block(
             if not isinstance(alias, str) or not alias:
                 raise ValueError(f"OpenAPM v0.1 registry {name!r} has an invalid alias")
             registries[alias] = url
-    return registries or None, None
+    if default_name is not None and (
+        not isinstance(default_name, str) or default_name not in registries
+    ):
+        raise ValueError("OpenAPM v0.1 registries.default must name a declared registry")
+    return registries or None, default_name
 
 
 def _parse_registries_block(data: dict, apm_yml_path: Path, manifest_contract):

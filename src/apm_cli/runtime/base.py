@@ -62,28 +62,44 @@ def _stream_subprocess_output(
     )
 
     output_lines: list[str] = []
-    stream_queue: queue.Queue[str | None] = queue.Queue()
+    stream_queue: queue.Queue[str | None] = queue.Queue(maxsize=1024)
+    cancelled = threading.Event()
+
+    def _queue_item(item: str | None) -> None:
+        while not cancelled.is_set():
+            try:
+                stream_queue.put(item, timeout=0.1)
+                return
+            except queue.Full:
+                continue
 
     def _read_output() -> None:
         try:
             if process.stdout is not None:
                 for line in iter(process.stdout.readline, ""):
-                    stream_queue.put(line)
+                    _queue_item(line)
         finally:
-            stream_queue.put(None)
+            _queue_item(None)
 
-    threading.Thread(target=_read_output, daemon=True).start()
+    reader = threading.Thread(target=_read_output, daemon=True)
+    reader.start()
+
+    def _expire() -> None:
+        cancelled.set()
+        _terminate_and_reap(process)
+        reader.join(timeout=1)
+
     deadline = time.monotonic() + timeout if timeout is not None else None
     stream_closed = False
     while not stream_closed:
         remaining = None if deadline is None else deadline - time.monotonic()
         if remaining is not None and remaining <= 0:
-            _terminate_and_reap(process)
+            _expire()
             raise subprocess.TimeoutExpired(cmd, timeout, output="".join(output_lines))
         try:
             item = stream_queue.get(timeout=remaining)
         except queue.Empty:
-            _terminate_and_reap(process)
+            _expire()
             raise subprocess.TimeoutExpired(cmd, timeout, output="".join(output_lines)) from None
         if item is None:
             stream_closed = True
@@ -91,11 +107,12 @@ def _stream_subprocess_output(
         print(item, end="", flush=True)
         output_lines.append(item)
 
+    reader.join(timeout=1)
     remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
     try:
         return_code = process.wait(timeout=remaining)
     except subprocess.TimeoutExpired:
-        _terminate_and_reap(process)
+        _expire()
         raise subprocess.TimeoutExpired(cmd, timeout, output="".join(output_lines)) from None
     return output_lines, return_code
 

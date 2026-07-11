@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Hardened command behavior: invalid lockfiles and incomplete policy chains
+  fail closed before mutation; failed installs skip post-install hooks;
+  registry routes do not fall back to Git; machine output keeps notices on
+  stderr; unauthenticated Git retries scrub inherited credentials; `$schema`
+  selects the manifest contract; and timed-out runtimes are reaped. (#2155)
 - MCP audit, install, and uninstall now share one lockfile-bounded current-source
   view, so `config-consistency` detects changed or removed transitive declarations
   and fails on unreadable package manifests. (#2155)

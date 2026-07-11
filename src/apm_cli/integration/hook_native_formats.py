@@ -55,7 +55,6 @@ def _entries_to_ir(entries: list, event: str = "") -> HookDocument:
         matcher = data.pop("matcher", None)
         provenance = data.pop("_apm_source", None)
         if isinstance(nested, list):
-            data["_source_container"] = entry
             handlers = tuple(
                 _handler_to_ir(handler, provenance)
                 for handler in nested
@@ -112,11 +111,7 @@ def _to_gemini_hook_entries(entries: list) -> list:
         if "raw_entry" in binding.metadata:
             result.append(binding.metadata["raw_entry"])
             continue
-        metadata = dict(binding.metadata)
-        source_container = metadata.pop("_source_container", None)
-        outer = source_container if isinstance(source_container, dict) else {}
-        outer.clear()
-        outer.update(metadata)
+        outer = dict(binding.metadata)
         if binding.matcher is not None:
             outer["matcher"] = binding.matcher
         outer["hooks"] = [
@@ -143,11 +138,7 @@ def _to_antigravity_hook_entries(entries: list, event_name: str) -> list:
             if "raw_entry" in binding.metadata:
                 result.append(binding.metadata["raw_entry"])
                 continue
-            metadata = dict(binding.metadata)
-            source_container = metadata.pop("_source_container", None)
-            outer = source_container if isinstance(source_container, dict) else {}
-            outer.clear()
-            outer.update(metadata)
+            outer = dict(binding.metadata)
             outer["matcher"] = binding.matcher or "*"
             outer["hooks"] = [
                 _handler_from_ir(handler, timeout_milliseconds=False)

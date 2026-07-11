@@ -98,9 +98,11 @@ browse / install / update workflow works against:
   HTTPS.
 
 Marketplace publishers can route an entry through a configured APM package
-registry with the entry's `registry` and semver `version` fields. APM honors
-that route through the package-registry resolver. Missing or malformed registry
-intent fails closed instead of silently falling back to the plugin's Git source.
+registry with the entry's `registry` and semver `version` fields. Enable the
+feature first with `apm experimental enable registries`; see
+[Registries](../../guides/registries/). APM honors that route through the
+package-registry resolver. Missing or malformed registry intent fails closed
+instead of silently falling back to the plugin's Git source.
 
 :::note[Hosted JSON is public HTTPS]
 Hosted `marketplace.json` URLs are public HTTPS sources: APM does not
@@ -114,7 +116,7 @@ not forward `GITHUB_APM_PAT` or `GITLAB_APM_PAT` to non-GitHub /
 non-GitLab hosts. Authentication falls through to the host's matching
 `*_APM_PAT` variable (such as `ADO_APM_PAT`) or local git credential
 helper when one is configured. See
-[Authentication](../authentication/).
+[Authentication](../../getting-started/authentication/).
 
 **Lockfile note.** Installs from a local marketplace record a
 local-path source in `apm.lock.yaml`. Lockfiles produced this way

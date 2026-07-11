@@ -112,7 +112,7 @@ When `apm install --target copilot` has already deployed instructions to `.githu
 | `apm lifecycle trust` | Trust `apm.yml` `lifecycle:` at its current contents so project scripts run on install | -- |
 | `apm lifecycle untrust` | Revoke trust for `apm.yml` `lifecycle:`; project scripts will stop running | -- |
 
-Lifecycle scripts fire on six events: `pre-install`, `post-install`, `pre-update`, `post-update`, `pre-uninstall`, `post-uninstall`. Script files are discovered from three sources (additive): policy (`/etc/apm/policy.d/*.json`, JSON), user (`~/.apm/apm.yml`, YAML), project (`apm.yml` `lifecycle:` at repo root, YAML). Two script types: `command` (shell via subprocess, event JSON on stdin) and `http` (HTTPS POST). Script output is appended to `~/.apm/logs/scripts.log`. See the [Lifecycle scripts](/apm/enterprise/lifecycle-scripts/) guide for full documentation.
+Lifecycle scripts fire on six events: `pre-install`, `post-install`, `pre-update`, `post-update`, `pre-uninstall`, `post-uninstall`. `post-install` fires only after success or partial success; failed and dry-run installs skip it. Script files are discovered from three sources (additive): policy (`/etc/apm/policy.d/*.json`, JSON), user (`~/.apm/apm.yml`, YAML), project (`apm.yml` `lifecycle:` at repo root, YAML). Two script types: `command` (shell via subprocess, event JSON on stdin) and `http` (HTTPS POST). Script output is appended to `~/.apm/logs/scripts.log`. See the [Lifecycle scripts](/apm/enterprise/lifecycle-scripts/) guide for full documentation.
 
 ## Distribution
 
@@ -201,10 +201,13 @@ Set `MCP_REGISTRY_URL` (default `https://api.mcp.github.com`) to point all `apm 
 
 | Command | Purpose | Key flags |
 |---------|---------|-----------|
-| `apm runtime setup {copilot\|codex\|llm\|gemini\|windsurf}` | Install a runtime. Codex verifies the GitHub Releases SHA-256 digest before extracting and fails on missing or mismatched digests. | `--version`, `--vanilla` |
+| `apm runtime setup {copilot\|codex\|gemini\|llm}` | Install a runtime. Codex verifies the GitHub Releases SHA-256 digest before extracting and fails on missing or mismatched digests. | `--version`, `--vanilla` |
 | `apm runtime list` | Show installed runtimes | -- |
-| `apm runtime remove {copilot\|codex\|llm\|gemini\|windsurf}` | Remove a runtime | `-y`, `--yes` |
+| `apm runtime remove {copilot\|codex\|gemini\|llm}` | Remove a runtime | `-y`, `--yes` |
 | `apm runtime status` | Show active runtime | -- |
+
+Workflow adapters enforce streaming wall-clock deadlines for Copilot (600s)
+and Codex (300s), terminating and reaping the child process on expiry.
 
 ## Experimental features
 
@@ -244,7 +247,7 @@ Experimental flags MUST NOT gate security-critical behaviour (content scanning, 
 | `apm config set KEY VALUE` | Set a config value (`auto-integrate`, `target`, `self-update.channel`, `self-update.install-dir`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `mcp-registry-url`; `copilot-cowork-skills-dir` requires `apm experimental enable copilot-cowork`) | -- |
 | `apm config unset KEY` | Remove a stored config value (`target`, `self-update.channel`, `self-update.install-dir`, `temp-dir`, `allow-protocol-fallback`, `prefer-ssh`, `copilot-cowork-skills-dir`, `mcp-registry-url`) | -- |
 | `apm lock` | Resolve all dependencies in `apm.yml` and write `apm.lock.yaml` **without** deploying any files to agent targets. Mirrors `cargo generate-lockfile` / `pnpm lock`. Use to bootstrap or refresh the lockfile before reviewing and applying changes. | `--update` re-resolve to latest SHAs, `--verbose`, `-g/--global`, `--no-policy`, `--target` (comma-separated), `--parallel-downloads N` |
-| `apm lock export` | Export an SBOM/inventory from the **existing** `apm.lock.yaml` -- reads the lockfile only (no re-resolve, no re-hash, no network). Emits component identity (purl), recorded hashes, and the declared license. Output is deterministic (components sorted by purl, pinned timestamp) for byte-identical reproducibility. This is an inventory export, not a security attestation. | `-f/--format [cyclonedx\|spdx]` (default `cyclonedx`), `-o/--output FILE` (default stdout), `-g/--global` read user-scope lockfile, `--timestamp ISO8601` pin the document timestamp (falls back to `SOURCE_DATE_EPOCH`, then the lockfile's `generated_at`) |
+| `apm lock export` | Export an SBOM/inventory from the **existing** `apm.lock.yaml` -- reads the lockfile only (no re-resolve, no re-hash, no network). Emits component identity (purl), recorded hashes, and the declared license. Output is deterministic (components sorted by purl, pinned timestamp) for byte-identical reproducibility. Diagnostics and startup notices use stderr so stdout stays machine-readable. This is an inventory export, not a security attestation. | `-f/--format [cyclonedx\|spdx]` (default `cyclonedx`), `-o/--output FILE` (default stdout), `-g/--global` read user-scope lockfile, `--timestamp ISO8601` pin the document timestamp (falls back to `SOURCE_DATE_EPOCH`, then the lockfile's `generated_at`) |
 | `apm update [PKGS...]` | Refresh APM dependencies: resolves `apm.yml` against the latest refs, prints a structured plan (added/updated/removed/unchanged), and prompts before mutating anything (default `[y/N]`). Full-SHA pins are resolved against the latest annotated semver tag, rewritten to that tag's SHA, and annotated as `# <tag>` in `apm.yml`. Pass `[PKGS...]` to refresh only those deps, or `-g` for user scope (`~/.apm/`). Successful no-op updates still reconcile deployed artifacts and lockfile ownership when the declared target set contracts. Strict superset of the deprecated `apm deps update`. Skips the prompt with `--yes`; previews with `--dry-run`. | `--yes`, `--dry-run`, `--verbose`, `-g/--global`, `--force`, `--parallel-downloads N`, `--target` (comma-separated) |
 | `apm self-update` | Update the APM CLI itself (or show distributor guidance when self-update is disabled at build time). | `--check` only check |
 

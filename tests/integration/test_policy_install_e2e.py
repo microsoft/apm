@@ -131,7 +131,7 @@ def _write_apm_yml(
     deps: list | None = None,
     mcp: list | None = None,
     target: str | None = None,
-) -> None:
+) -> Path:
     """Write a minimal apm.yml."""
     data: dict = {"name": name, "version": "1.0.0", "dependencies": {}}
     if deps:
@@ -162,6 +162,7 @@ def _make_pkg(
         deps=apm_deps,
         mcp=mcp,
     )
+    return pkg_dir
 
 
 def _seed_lockfile(path: Path, locked_deps: list, mcp_servers: list | None = None):
@@ -510,7 +511,7 @@ class TestI8TransitiveMCPDenied:
 
         # Root depends on carrier-pkg, which has a denied MCP dep
         _write_apm_yml(project_dir / "apm.yml", deps=["acme/carrier-pkg"])
-        _make_pkg(
+        carrier_dir = _make_pkg(
             apm_modules,
             "acme/carrier-pkg",
             mcp=["io.github.untrusted/evil-mcp-server"],
@@ -542,8 +543,10 @@ class TestI8TransitiveMCPDenied:
         downloaded.resolved_reference.is_tag = False
         downloaded.resolved_reference.is_sha = False
         downloaded.package_type.value = "apm_package"
-        downloaded.package.name = "carrier-pkg"
-        downloaded.package.version = "1.0.0"
+        from apm_cli.models.apm_package import APMPackage
+
+        downloaded.package = APMPackage.from_apm_yml(carrier_dir / "apm.yml")
+        downloaded.install_path = carrier_dir
 
         result = _invoke_install(runner, ["--trust-transitive-mcp"])
 

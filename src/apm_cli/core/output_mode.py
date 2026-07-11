@@ -18,9 +18,19 @@ def detect_output_mode(argv: Sequence[str]) -> OutputMode:
     args = tuple(argv)
     if "--json" in args:
         return OutputMode(machine_readable=True)
+    for index, arg in enumerate(args[:-1]):
+        if arg in {"--format", "-f"} and args[index + 1].lower() in {
+            "json",
+            "sarif",
+        }:
+            return OutputMode(machine_readable=True)
     command_tokens = tuple(arg for arg in args if not arg.startswith("-"))
     if len(command_tokens) >= 2 and command_tokens[:2] == ("lock", "export"):
         return OutputMode(machine_readable=True)
+    if len(args) >= 2 and args[:2] == ("policy", "status"):
+        for index, arg in enumerate(args[:-1]):
+            if arg in {"--output", "-o"} and args[index + 1].lower() == "json":
+                return OutputMode(machine_readable=True)
     return OutputMode()
 
 

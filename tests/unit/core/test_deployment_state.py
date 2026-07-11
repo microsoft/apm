@@ -333,7 +333,7 @@ def test_legacy_import_and_dual_write_are_semantically_equivalent() -> None:
     assert rebuilt.is_semantically_equivalent(lockfile)
 
 
-def test_from_rows_skips_hashless_additive_ownership_row() -> None:
+def test_from_rows_preserves_hashless_legacy_ownership_row() -> None:
     rows = [
         {
             "kind": "project-relative",
@@ -361,4 +361,5 @@ def test_from_rows_skips_hashless_additive_ownership_row() -> None:
 
     assert tuple(record.locator.value for record in ledger.records.values()) == (
         ".github/agents/verified.agent.md",
+        ".github/agents/unverified.agent.md",
     )

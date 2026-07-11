@@ -21,7 +21,7 @@ lifecycle:
 
 Run `apm lifecycle init` to scaffold this block in the current project.
 Project scripts require explicit trust before they run: `apm lifecycle trust`.
-See the [CLI reference](../reference/cli/lifecycle/) for all subcommands.
+See the [CLI reference](../../reference/cli/lifecycle/) for all subcommands.
 
 A failing script never aborts the CLI operation. HTTP scripts dispatch in a
 background thread (fire-and-forget), while command scripts run synchronously
@@ -38,7 +38,7 @@ and fleet-managed deployment.
 | Event            | Fires when                           |
 |------------------|--------------------------------------|
 | `pre-install`    | Before the install pipeline runs     |
-| `post-install`   | After a successful install completes |
+| `post-install`   | After success or partial success; not after failure or dry run |
 | `pre-update`     | Before the update pipeline runs      |
 | `post-update`    | After a successful update completes  |
 | `pre-uninstall`  | Before uninstall begins              |

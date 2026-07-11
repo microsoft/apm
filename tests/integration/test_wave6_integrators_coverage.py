@@ -610,7 +610,8 @@ class TestToGeminiHookEntries:
     def test_passes_through_already_nested_entry(self):
         entry = {"hooks": [{"type": "command", "command": "echo bye"}]}
         result = _to_gemini_hook_entries([entry])
-        assert result[0] is entry
+        assert result[0] == entry
+        assert result[0] is not entry
 
     def test_propagates_apm_source(self):
         entry = {"type": "command", "bash": "x", "_apm_source": "my-pkg"}

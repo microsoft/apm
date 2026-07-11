@@ -33,6 +33,7 @@ import os
 import re
 import sys
 import threading
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple, TypeVar
@@ -106,6 +107,10 @@ class SecretRedactionFilter(logging.Filter):
             if redacted != msg:
                 record.msg = redacted
                 record.args = ()
+            if record.exc_info is not None:
+                formatted = "".join(traceback.format_exception(*record.exc_info))
+                record.exc_text = _redact_secrets(formatted)
+                record.exc_info = None
         except Exception:
             pass
         return True
@@ -954,10 +959,28 @@ class AuthResolver:
         """Remove inherited Git authorization channels before an attempt."""
         env.pop("GIT_TOKEN", None)
         env.pop("GIT_HTTP_EXTRAHEADER", None)
-        env.pop("GIT_CONFIG_COUNT", None)
+        env.pop("GIT_CONFIG_PARAMETERS", None)
+        try:
+            count = int(env.pop("GIT_CONFIG_COUNT", "0"))
+        except ValueError:
+            count = 0
+        retained: list[tuple[str, str]] = []
+        for index in range(max(0, count)):
+            key = env.pop(f"GIT_CONFIG_KEY_{index}", "")
+            value = env.pop(f"GIT_CONFIG_VALUE_{index}", "")
+            normalized = key.lower()
+            if "extraheader" in normalized or "authorization" in value.lower():
+                continue
+            if key:
+                retained.append((key, value))
         for key in tuple(env):
             if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
                 env.pop(key, None)
+        if retained:
+            env["GIT_CONFIG_COUNT"] = str(len(retained))
+            for index, (key, value) in enumerate(retained):
+                env[f"GIT_CONFIG_KEY_{index}"] = key
+                env[f"GIT_CONFIG_VALUE_{index}"] = value
 
     def emit_stale_pat_diagnostic(self, host_display: str) -> None:
         """Emit a [!] warning when PAT was rejected but bearer succeeded.

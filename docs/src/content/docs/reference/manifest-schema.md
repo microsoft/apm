@@ -43,6 +43,7 @@ A conforming manifest MUST be a YAML mapping at the top level with the following
 
 ```yaml
 # apm.yml
+$schema:       <uri>                     # OPTIONAL contract selector
 name:          <string>                  # REQUIRED
 version:       <string>                  # REQUIRED
 description:   <string>
@@ -465,7 +466,7 @@ Marketplace dependency (resolved at install time):
 | `marketplace` | `string` | REQUIRED | `^[a-zA-Z0-9._-]+$` | Registered marketplace name. |
 | `version` | `string` | OPTIONAL | Semver range or exact version (e.g. `~2.1.0`, `^2.0`, `>=1.4`, `2.1.0`) | Version constraint resolved against git tags on the marketplace repository. When omitted the marketplace entry's default ref is used. |
 
-The `marketplace` key is mutually exclusive with `git`, `path`, `registry`, and `id`; combining them raises a parse error. Unknown keys in a marketplace entry are rejected. During dependency resolution the resolver calls `resolve_marketplace_plugin()` to look up the plugin in the marketplace's `marketplace.json` and replace the entry with a concrete git reference (owner/repo, ref, and optional virtual path).
+The `marketplace` key is mutually exclusive with `git`, `path`, `registry`, and `id`; combining them raises a parse error. Unknown keys in a marketplace entry are rejected. During dependency resolution the resolver calls `resolve_marketplace_plugin()`. A plugin entry that declares `registry` plus a semver `version` becomes a registry-sourced dependency using its declared owner/repo repository identity. Other entries become concrete Git coordinates (owner/repo, ref, and optional virtual path).
 
 When `version` is specified and is a semver range or bare version number (e.g. `~2.1.0`, `^2.0`, `2.1.0`), the resolver lists git tags on the marketplace repository matching the `{name}--v{version}` convention, filters to those satisfying the constraint, and resolves to the highest matching tag. If no tag satisfies an explicit semver range, resolution fails with a `NoMatchingVersionError`. A bare version with no matching tag falls back to using the value as a raw git ref. Pre-release versions (e.g. `2.0.0-beta.1`) are excluded from semver-range resolution; target them explicitly as raw git refs. When `version` is a raw git ref (e.g. `v2.0.0`, `main`, or a commit SHA), it is used as a direct ref override without tag resolution.
 

@@ -474,7 +474,7 @@ def _check_and_notify_updates():
             _rich_echo(get_update_hint_message(), color="yellow", bold=True)
 
             # Add a blank line for visual separation
-            click.echo()
+            _rich_echo("")
     except Exception:
         # Silently fail - version checking should never block CLI usage
         pass

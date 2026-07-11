@@ -53,9 +53,21 @@ def test_transitive_local_identity_includes_parent_and_anchor(tmp_path: Path) ->
         declaring_parent="owner/parent-b#main",
         anchored_local_path=str(tmp_path / "b" / "shared"),
     )
+    same_physical = DependencyReference(
+        repo_url="_local/shared",
+        is_local=True,
+        local_path="../shared",
+        source="local",
+        declaring_parent="owner/parent-c#main",
+        anchored_local_path=str(tmp_path / "a" / "shared"),
+    )
 
     assert first.get_unique_key() != second.get_unique_key()
     assert first.get_install_path(tmp_path / "apm_modules") != second.get_install_path(
+        tmp_path / "apm_modules"
+    )
+    assert first.get_unique_key() == same_physical.get_unique_key()
+    assert first.get_install_path(tmp_path / "apm_modules") == same_physical.get_install_path(
         tmp_path / "apm_modules"
     )
 
@@ -96,7 +108,7 @@ def test_marketplace_registry_routing_returns_registry_dependency(monkeypatch) -
         plugins=(
             MarketplacePlugin(
                 name="owner/tool",
-                source="ignored/git/path",
+                source={"type": "github", "repo": "owner/registry-tool"},
                 version="^1.2.0",
                 registry="internal",
             ),
@@ -112,5 +124,6 @@ def test_marketplace_registry_routing_returns_registry_dependency(monkeypatch) -
     dep = resolution.dependency_reference
     assert dep is not None
     assert dep.source == "registry"
+    assert dep.repo_url == "owner/registry-tool"
     assert dep.registry_name == "internal"
     assert dep.reference == "^1.2.0"

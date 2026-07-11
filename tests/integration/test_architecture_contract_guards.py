@@ -23,6 +23,19 @@ def test_neutral_hook_intent_translates_at_native_edges() -> None:
     assert antigravity[0]["timeout"] == 3
 
 
+def test_neutral_hook_ir_snapshots_metadata() -> None:
+    """Frozen portable intent must not alias mutable native dictionaries."""
+    from apm_cli.integration.hook_ir import HookHandler
+
+    metadata = {"args": ["one"]}
+    handler = HookHandler(command="echo ok", metadata=metadata)
+    metadata["args"].append("two")
+
+    assert handler.metadata["args"] == ("one",)
+    with pytest.raises(TypeError):
+        handler.metadata["new"] = "value"
+
+
 def test_manifest_schema_negotiates_normative_v01_registry_shape(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -42,7 +55,8 @@ def test_manifest_schema_negotiates_normative_v01_registry_shape(
                 "name: demo",
                 "version: 1.0.0",
                 "registries:",
-                "  corp: https://registry.example.test/apm",
+                "  default: internal",
+                "  internal: https://registry.example.test/apm",
             )
         )
         + "\n",
@@ -52,8 +66,8 @@ def test_manifest_schema_negotiates_normative_v01_registry_shape(
     package = APMPackage.from_apm_yml(manifest)
 
     assert package.manifest_contract == "openapm-v0.1"
-    assert package.registries == {"corp": "https://registry.example.test/apm"}
-    assert package.default_registry is None
+    assert package.registries == {"internal": "https://registry.example.test/apm"}
+    assert package.default_registry == "internal"
 
 
 def test_unknown_manifest_schema_identity_fails_closed(tmp_path: Path) -> None:

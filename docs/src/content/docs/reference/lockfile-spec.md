@@ -317,10 +317,11 @@ Orphan detection works in two directions:
   `lockfile_version`. APM refuses to operate on a lockfile whose version it
   does not recognize, and will instruct the user to upgrade or regenerate.
 
-A lockfile with an unsupported version or malformed container shape fails
-closed before any in-memory lock state is constructed. Fix or remove the
-invalid file explicitly; APM does not silently downgrade it to an empty
-lockfile.
+Invalid YAML, an unsupported explicit version, an empty or non-mapping root,
+malformed container fields, and invalid deployment rows fail closed before APM
+constructs lock state. Pre-versioned legacy files migrate as v1 inputs. Fix or
+remove other invalid files explicitly; APM does not silently replace them with
+an empty lockfile.
 
 ## Example
 

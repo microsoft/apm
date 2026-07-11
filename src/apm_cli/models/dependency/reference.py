@@ -486,7 +486,7 @@ class DependencyReference:
             if self.declaring_parent:
                 import hashlib
 
-                identity = f"{self.declaring_parent}:{self.anchored_local_path or self.local_path}"
+                identity = self.anchored_local_path or self.local_path
                 parent_slot = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
                 result = apm_modules_dir / "_local" / parent_slot / pkg_dir_name
             else:

@@ -796,8 +796,15 @@ def resolve_marketplace_plugin(
         selector = version_spec or plugin.version
         if not selector:
             raise ValueError(f"Registry-routed plugin {plugin.name!r} has no version selector")
+        source_data = plugin.source if isinstance(plugin.source, dict) else {}
+        package_id = source_data.get("repo") or source_data.get("repository")
+        if not isinstance(package_id, str) or package_id.count("/") != 1:
+            raise ValueError(
+                f"Registry-routed plugin {plugin.name!r} must declare an "
+                "owner/repo repository identity"
+            )
         dep_ref = DependencyReference(
-            repo_url=plugin.name,
+            repo_url=package_id,
             reference=selector,
             source="registry",
             registry_name=plugin.registry,

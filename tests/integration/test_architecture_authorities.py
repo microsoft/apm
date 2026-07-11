@@ -71,6 +71,19 @@ def test_host_provider_registry_drives_auth_and_backends() -> None:
     assert set(samples).issubset(HOST_PROVIDERS)
 
 
+def test_host_type_hint_cannot_override_recognized_provider() -> None:
+    """Manifest hints must not redirect credentials across known hosts."""
+    from apm_cli.core.auth import AuthResolver
+
+    for host in ("github.com", "tenant.ghe.com", "dev.azure.com"):
+        try:
+            AuthResolver.classify_host(host, host_type="gitlab")
+        except ValueError as exc:
+            assert "conflicts" in str(exc)
+        else:
+            raise AssertionError(f"host type override unexpectedly accepted for {host}")
+
+
 def test_runtime_registry_drives_factory_manager_cli_and_runner() -> None:
     """Every runtime consumer must project the canonical descriptors."""
     from apm_cli.commands.runtime import setup

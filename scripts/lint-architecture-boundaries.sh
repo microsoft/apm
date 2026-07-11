@@ -105,8 +105,9 @@ check_pattern \
     'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \
     src/apm_cli/deps/apm_resolver.py
 if ! grep -A12 'if source == "local"' src/apm_cli/models/dependency/identity.py \
-    | grep -q 'declaring_parent'; then
-    echo "[x] Local dependency identity must include its declaring parent"
+    | grep -q 'anchored_local_path' \
+    || ! grep -q 'declaring_parent' src/apm_cli/deps/lockfile.py; then
+    echo "[x] Local identity must use its anchor and persist declaring-parent provenance"
     violations=$((violations + 1))
 fi
 check_pattern \

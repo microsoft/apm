@@ -866,3 +866,10 @@ class InstallLogger(CommandLogger):
             f"Install interrupted after {elapsed_seconds:.1f}s.",
             symbol="warning",
         )
+
+    def install_failed(self, elapsed_seconds: float) -> None:
+        """Render a handled terminal failure when no full summary ran."""
+        _rich_error(
+            f"Install failed after {elapsed_seconds:.1f}s.",
+            symbol="error",
+        )

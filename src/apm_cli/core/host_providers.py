@@ -147,6 +147,21 @@ def classify_host_provider(
     """Classify one host through the canonical provider registry."""
     normalized_host = host.lower()
     normalized_type = host_type.strip().lower() if isinstance(host_type, str) else ""
+    recognized = next(
+        (
+            provider
+            for provider in _HOST_PROVIDERS
+            if provider.kind != "generic" and provider.matcher(normalized_host)
+        ),
+        None,
+    )
+    if recognized is not None:
+        if normalized_type and normalized_type not in recognized.manifest_types:
+            raise ValueError(
+                f"Dependency host type {normalized_type!r} conflicts with "
+                f"recognized {recognized.kind!r} host {host!r}"
+            )
+        return recognized
     if normalized_type:
         for provider in _HOST_PROVIDERS:
             if normalized_type in provider.manifest_types:

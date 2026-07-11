@@ -31,6 +31,7 @@ def test_sbom_stdout_stays_machine_pure_when_update_is_available(
 
     assert result.exit_code == 0, result.output
     document = json.loads(result.stdout)
+    assert result.stdout.startswith("{")
     assert document["bomFormat"] == "CycloneDX"
     assert "A new version is available" not in result.stdout
     assert "A new version is available" in result.stderr
@@ -48,9 +49,14 @@ def test_descendant_logger_records_are_redacted(monkeypatch) -> None:
 
     _configure_logging(verbose=True)
     logging.getLogger("apm_cli.integration.mcp_integrator").warning("authorization: secret-value")
+    try:
+        raise RuntimeError("authorization: traceback-secret")
+    except RuntimeError:
+        logging.getLogger("apm_cli.core.auth").exception("request failed")
 
     rendered = stream.getvalue()
     assert "secret-value" not in rendered
+    assert "traceback-secret" not in rendered
     assert "[REDACTED]" in rendered
     root.handlers = previous_handlers
 
@@ -63,9 +69,15 @@ def test_unauthenticated_retry_receives_credential_free_environment(
 
     monkeypatch.setenv("GIT_TOKEN", "stale-token")
     monkeypatch.setenv("GIT_HTTP_EXTRAHEADER", "Authorization: secret")
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "http.extraHeader")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", "Authorization: secret")
+    monkeypatch.setenv("GIT_CONFIG_KEY_1", "http.sslCAInfo")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_1", "/corporate/ca.pem")
+    monkeypatch.setenv(
+        "GIT_CONFIG_PARAMETERS",
+        "'http.extraHeader=Authorization: inherited-secret'",
+    )
     resolver = AuthResolver()
     host_info = resolver.classify_host("github.com")
     auth_env = resolver._build_git_env("active-token", host_kind=host_info.kind)
@@ -93,4 +105,21 @@ def test_unauthenticated_retry_receives_credential_free_environment(
     assert token is None
     assert "GIT_TOKEN" not in retry_env
     assert "GIT_HTTP_EXTRAHEADER" not in retry_env
-    assert not any(key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")) for key in retry_env)
+    assert "GIT_CONFIG_PARAMETERS" not in retry_env
+    assert retry_env["GIT_CONFIG_COUNT"] == "1"
+    assert retry_env["GIT_CONFIG_KEY_0"] == "http.sslCAInfo"
+    assert retry_env["GIT_CONFIG_VALUE_0"] == "/corporate/ca.pem"
+
+
+def test_machine_output_aliases_are_detected() -> None:
+    """Documented JSON and SARIF spellings must reserve stdout at the root."""
+    from apm_cli.core.output_mode import detect_output_mode
+
+    machine_argv = (
+        ("policy", "status", "-o", "json"),
+        ("policy", "status", "--output", "json"),
+        ("audit", "-f", "json"),
+        ("audit", "--format", "sarif"),
+    )
+
+    assert all(detect_output_mode(argv).machine_readable for argv in machine_argv)

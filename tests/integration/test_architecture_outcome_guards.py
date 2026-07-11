@@ -23,6 +23,121 @@ def test_install_result_disposition_owns_cli_exit_code() -> None:
     assert result.exit_code == 1
 
 
+def test_pipeline_diagnostics_make_install_exit_one(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real CLI adapter must use the service-owned disposition."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+    from apm_cli.utils.diagnostics import DiagnosticCollector
+
+    (tmp_path / "apm.yml").write_text(
+        "name: demo\nversion: 1.0.0\ntargets: [copilot]\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".github").mkdir()
+    diagnostics = DiagnosticCollector()
+    diagnostics.error("integration failed")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+    monkeypatch.setattr(
+        "apm_cli.commands.install._install_apm_packages",
+        lambda *_a, **_k: (0, 0, 0, diagnostics),
+    )
+
+    result = CliRunner().invoke(cli, ["install"])
+
+    assert result.exit_code == 1
+    assert "Installation failed" in result.output
+    assert "Install interrupted" not in result.output
+
+
+def test_handled_install_error_uses_failure_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Handled errors must not be mislabeled as interruptions."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+
+    (tmp_path / "apm.yml").write_text("name: demo\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+
+    result = CliRunner().invoke(cli, ["install"])
+
+    assert result.exit_code == 1
+    assert "Install failed after" in result.output
+    assert "Install interrupted" not in result.output
+
+
+def test_failed_install_does_not_fire_post_install_hook(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Service lifecycle hooks must observe the classified result."""
+    from apm_cli.install.request import InstallRequest
+    from apm_cli.install.service import InstallService
+    from apm_cli.models.apm_package import APMPackage
+    from apm_cli.models.results import InstallDisposition, InstallResult
+
+    runner = MagicMock()
+    monkeypatch.setattr(
+        InstallService,
+        "_build_script_runner",
+        staticmethod(lambda _request: runner),
+    )
+    monkeypatch.setattr(
+        "apm_cli.install.pipeline.run_install_pipeline",
+        lambda *_a, **_k: InstallResult(
+            disposition=InstallDisposition.FAILED,
+            exit_code=1,
+        ),
+    )
+
+    result = InstallService().run(
+        InstallRequest(apm_package=APMPackage(name="demo", version="1.0.0"))
+    )
+
+    assert result.disposition is InstallDisposition.FAILED
+    assert [call.args[0] for call in runner.fire.call_args_list] == ["pre-install"]
+
+
+def test_cancelled_install_skips_mcp_and_lsp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Declining a plan must terminate all downstream mutation phases."""
+    from click.testing import CliRunner
+
+    from apm_cli.cli import cli
+    from apm_cli.models.results import InstallDisposition, InstallResult
+
+    (tmp_path / "apm.yml").write_text(
+        "name: demo\nversion: 1.0.0\ntargets: [copilot]\ndependencies:\n  apm:\n    - owner/repo\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".github").mkdir()
+    mcp_install = MagicMock()
+    lsp_install = MagicMock()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("apm_cli.cli._check_and_notify_updates", lambda: None)
+    monkeypatch.setattr(
+        "apm_cli.commands.install._install_apm_dependencies",
+        lambda *_a, **_k: InstallResult(disposition=InstallDisposition.CANCELLED),
+    )
+    monkeypatch.setattr("apm_cli.install.mcp.run_mcp_integration", mcp_install)
+    monkeypatch.setattr("apm_cli.install.lsp.run_lsp_integration", lsp_install)
+
+    result = CliRunner().invoke(cli, ["install"])
+
+    assert result.exit_code == 0, result.output
+    mcp_install.assert_not_called()
+    lsp_install.assert_not_called()
+
+
 def test_manifest_inheritance_cannot_relax_explicit_includes() -> None:
     """Either ancestor or child may tighten explicit-include enforcement."""
     from apm_cli.policy.inheritance import merge_policies

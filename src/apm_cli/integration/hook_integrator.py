@@ -255,6 +255,31 @@ def _emit_hook_event_diagnostics(
         )
 
 
+def _validate_copilot_payload(payload: dict) -> list[str]:
+    """Return native payload shape errors before any filesystem mutation."""
+    errors: list[str] = []
+    if payload.get("version") != 1:
+        errors.append("top-level version must equal 1")
+    hooks = payload.get("hooks")
+    if not isinstance(hooks, dict):
+        return [*errors, "top-level hooks must be an object"]
+    for event, entries in hooks.items():
+        if not isinstance(entries, list):
+            errors.append(f"hook event {event!r} must contain a list")
+            continue
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                errors.append(f"hook event {event!r} entry {index} must be an object")
+                continue
+            handlers = entry.get("hooks")
+            if handlers is not None and (
+                not isinstance(handlers, list)
+                or not all(isinstance(handler, dict) for handler in handlers)
+            ):
+                errors.append(f"hook event {event!r} entry {index} handlers must be objects")
+    return errors
+
+
 _MERGE_HOOK_TARGETS: dict[str, _MergeHookConfig] = {
     "claude": _MergeHookConfig(
         config_filename="settings.json",
@@ -1187,11 +1212,7 @@ class HookIntegrator(BaseIntegrator):
                 rewritten["hooks"] = renamed_hooks
 
             rewritten.setdefault("version", 1)
-            errors: list[str] = []
-            if rewritten.get("version") != 1:
-                errors.append("top-level version must equal 1")
-            if not isinstance(rewritten.get("hooks"), dict):
-                errors.append("top-level hooks must be an object")
+            errors = _validate_copilot_payload(rewritten)
             validation = NativePayloadValidation(
                 valid=not errors,
                 contract="copilot-hooks-v1",
