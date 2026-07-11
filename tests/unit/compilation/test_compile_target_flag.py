@@ -15,6 +15,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -501,8 +502,8 @@ Use type hints in Python code.
         )
         assert result.stats["copilot_root_instructions_generated"] == 1
 
-    def test_frozenset_cursor_opencode_codex_does_not_emit_copilot_instructions(self, temp_project):
-        """Round-3 regression: -t cursor,opencode,codex (no copilot family)
+    def test_agents_only_targets_do_not_emit_copilot_instructions(self, temp_project):
+        """Round-3 regression: -t opencode,codex (no copilot family)
         must NOT emit .github/copilot-instructions.md.
 
         Previously the 'agents' family token was overloaded for AGENTS.md AND
@@ -523,34 +524,32 @@ Use type hints in Python code.
         )
 
         compiler = AgentsCompiler(str(temp_project))
-        # Simulate what _resolve_compile_target(["cursor","opencode","codex"]) returns
+        # Simulate what _resolve_compile_target(["opencode","codex"]) returns
         # under the new semantics: a single 'agents'-only family collapses to
-        # the bare cursor target, which routes correctly via the string path.
+        # the bare opencode target, which routes correctly via the string path.
         result = compiler.compile(
-            CompilationConfig(target="cursor", dry_run=False, single_agents=True),
+            CompilationConfig(target="opencode", dry_run=False, single_agents=True),
             primitives,
         )
 
         assert result.success
         root_file = temp_project / ".github" / "copilot-instructions.md"
         assert not root_file.exists(), (
-            "copilot-instructions.md must NOT be generated for cursor/opencode/codex"
+            "copilot-instructions.md must NOT be generated for opencode/codex"
         )
         assert result.stats.get("copilot_root_instructions_generated", 0) == 0
 
-    def test_resolve_compile_target_cursor_opencode_codex_does_not_route_to_vscode(self):
-        """Round-3 regression at the resolver: cursor/opencode/codex multi-target
+    def test_resolve_compile_target_opencode_codex_does_not_route_to_vscode(self):
+        """Round-3 regression at the resolver: opencode/codex multi-target
         list must not collapse to 'vscode' (which would wrongly route
         copilot-instructions.md generation)."""
         from apm_cli.commands.compile.cli import _resolve_compile_target
         from apm_cli.core.target_detection import should_compile_copilot_instructions_md
 
         for target_list in (
-            ["cursor"],
             ["opencode"],
             ["codex"],
-            ["cursor", "opencode"],
-            ["cursor", "opencode", "codex"],
+            ["opencode", "codex"],
         ):
             resolved = _resolve_compile_target(target_list)
             assert resolved != "vscode", (
@@ -573,7 +572,7 @@ Use type hints in Python code.
             ["claude", "copilot"],
             ["claude", "vscode"],
             ["gemini", "vscode"],
-            ["cursor", "vscode"],
+            ["codex", "vscode"],
             ["claude", "vscode", "gemini"],
         ):
             resolved = _resolve_compile_target(target_list)
@@ -989,12 +988,12 @@ Use type hints in Python code.
         yield temp_path
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_help_advertises_intellij_target(self, runner):
-        """Compile help lists every accepted target, including IntelliJ."""
+    def test_help_does_not_advertise_install_only_intellij_target(self, runner):
+        """Compile help excludes known targets that cannot produce compile output."""
         result = runner.invoke(cli, ["compile", "--help"])
 
         assert result.exit_code == 0
-        assert "intellij" in result.output.lower()
+        assert "intellij" not in result.output.lower()
 
     def test_invalid_target_error_uses_structured_rendering(self, runner):
         """Unknown-target guidance keeps the three-section rendering."""
@@ -1005,15 +1004,18 @@ Use type hints in Python code.
         assert "Valid targets:" in result.output
         assert "Fix with one of:" in result.output
 
-    def test_target_flag_accepts_intellij(self, runner, temp_project):
-        """Compile accepts IntelliJ and generates the Copilot-profile AGENTS.md."""
+    def test_target_flag_rejects_intellij_as_non_compile_target(self, runner, temp_project):
+        """Compile rejects a known install-only target instead of auto-detecting."""
         original_dir = os.getcwd()
         try:
             os.chdir(temp_project)
             result = runner.invoke(cli, ["compile", "--target", "intellij"])
 
-            assert result.exit_code == 0, result.output
-            assert (temp_project / "AGENTS.md").is_file()
+            assert result.exit_code == 2
+            assert "Target 'intellij' is not a compile target." in result.output
+            assert "apm compile --target copilot" in result.output
+            assert "apm compile --dry-run" in result.output
+            assert not (temp_project / "AGENTS.md").exists()
         finally:
             os.chdir(original_dir)
 
@@ -1569,7 +1571,7 @@ class TestResolveCompileTarget:
         assert _resolve_compile_target("claude") == "claude"
         assert _resolve_compile_target("vscode") == "vscode"
         assert _resolve_compile_target("all") == "all"
-        assert _resolve_compile_target("copilot") == "copilot"
+        assert _resolve_compile_target("copilot") == "vscode"
 
     def test_list_claude_and_copilot_returns_full_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
@@ -1595,24 +1597,45 @@ class TestResolveCompileTarget:
         assert _resolve_compile_target(["copilot"]) == "vscode"
 
     def test_list_agents_md_only_family_preserves_bare_target(self):
-        """cursor/opencode/codex/windsurf must NOT collapse to 'vscode' (which would
+        """opencode/codex/windsurf must NOT collapse to 'vscode' (which would
         wrongly route copilot-instructions.md). Single-element lists keep the
         bare target name; multi-element lists pick the first present."""
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
-        assert _resolve_compile_target(["cursor"]) == "cursor"
         assert _resolve_compile_target(["opencode"]) == "opencode"
         assert _resolve_compile_target(["codex"]) == "codex"
         assert _resolve_compile_target(["windsurf"]) == "windsurf"
         # Multi-element AGENTS.md-only list collapses to a representative bare
-        # target (cursor wins by deterministic ordering).
-        assert _resolve_compile_target(["cursor", "opencode"]) == "cursor"
+        # target according to deterministic catalog ordering.
         assert _resolve_compile_target(["opencode", "codex"]) == "opencode"
         assert _resolve_compile_target(["codex", "windsurf"]) == "codex"
 
+    @pytest.mark.parametrize(
+        "target",
+        [
+            "cursor",
+            ["cursor"],
+            "agent-skills",
+            ["agent-skills"],
+            "intellij",
+            ["intellij"],
+            "hermes",
+            ["hermes"],
+        ],
+    )
+    def test_non_compile_target_scalar_and_list_forms_raise_identically(self, target):
+        """Known non-compile targets fail before detection in either input shape."""
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+
+        expected_name = target if isinstance(target, str) else target[0]
+        with pytest.raises(click.UsageError) as exc_info:
+            _resolve_compile_target(target)
+        assert getattr(exc_info.value, "exit_code", None) == 2
+        assert f"Target '{expected_name}' is not a compile target." in str(exc_info.value)
+
     def test_windsurf_routes_via_agents_family(self):
         """Regression: windsurf must route through the 'agents' compile_family
-        the same way cursor/opencode/codex do.  Before the registry-driven
+        the same way opencode/codex do.  Before the registry-driven
         refactor, windsurf was missing from agents_md_family and would have
         silently collapsed to the 'vscode' fallback (emitting copilot-
         instructions.md by mistake)."""
@@ -1626,12 +1649,11 @@ class TestResolveCompileTarget:
         # AGENTS.md (issue #1678 -- dedup must not fire for mixed targets).
         assert _resolve_compile_target(["windsurf", "copilot"]) == frozenset({"agents", "vscode"})
 
-    def test_list_cursor_and_claude_returns_agents_claude_set(self):
+    def test_list_codex_and_claude_returns_agents_claude_set(self):
         from apm_cli.commands.compile.cli import _resolve_compile_target
 
         # No 'vscode' family because copilot/vscode/agents was not requested;
-        # cursor/codex contribute only the 'agents' (AGENTS.md) family.
-        assert _resolve_compile_target(["cursor", "claude"]) == frozenset({"agents", "claude"})
+        # codex contributes only the 'agents' (AGENTS.md) family.
         assert _resolve_compile_target(["codex", "claude"]) == frozenset({"agents", "claude"})
 
     def test_list_gemini_only_returns_gemini(self):
@@ -1657,8 +1679,19 @@ class TestResolveCompileTarget:
         assert _resolve_compile_target(["claude", "vscode", "gemini"]) == frozenset(
             {"vscode", "agents", "claude", "gemini"}
         )
-        assert _resolve_compile_target(["claude", "vscode", "cursor"]) == frozenset(
+        assert _resolve_compile_target(["claude", "vscode", "codex"]) == frozenset(
             {"vscode", "agents", "claude"}
+        )
+
+    def test_all_plus_explicit_compile_target_excludes_non_compile_expansion(self):
+        """Generic all expansion must not inject install-only targets into compile."""
+        from apm_cli.commands.compile.cli import _resolve_compile_target
+        from apm_cli.core.target_detection import parse_target_field
+
+        parsed = parse_target_field("all,antigravity")
+
+        assert _resolve_compile_target(parsed) == frozenset(
+            {"vscode", "agents", "claude", "gemini"}
         )
 
 
@@ -1674,19 +1707,6 @@ class TestMultiTargetDoesNotGenerateUnrequestedFiles:
         )
 
         resolved = _resolve_compile_target(["claude", "codex"])
-        assert should_compile_agents_md(resolved) is True
-        assert should_compile_claude_md(resolved) is True
-        assert should_compile_gemini_md(resolved) is False
-
-    def test_claude_cursor_does_not_compile_gemini(self):
-        from apm_cli.commands.compile.cli import _resolve_compile_target
-        from apm_cli.core.target_detection import (
-            should_compile_agents_md,
-            should_compile_claude_md,
-            should_compile_gemini_md,
-        )
-
-        resolved = _resolve_compile_target(["claude", "cursor"])
         assert should_compile_agents_md(resolved) is True
         assert should_compile_claude_md(resolved) is True
         assert should_compile_gemini_md(resolved) is False

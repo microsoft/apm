@@ -71,6 +71,19 @@ def test_unknown_target_error_lists_valid():
     assert "claude" in text
 
 
+def test_unknown_target_error_uses_compile_recovery_commands():
+    text = render_unknown_target_error(
+        "foo",
+        ["claude", "copilot"],
+        command="compile",
+    )
+
+    assert "apm compile --target copilot" in text
+    assert "apm compile --dry-run" in text
+    assert "apm install" not in text
+    assert "Or declare in apm.yml:" not in text
+
+
 def test_unknown_target_error_suggests_copilot_not_first_alphabetical():
     """Suggestion must be a sensible default (#1188), not sorted-first."""
     valid = ["agent-skills", "claude", "copilot", "cursor"]

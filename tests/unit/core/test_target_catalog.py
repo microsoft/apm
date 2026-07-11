@@ -241,8 +241,24 @@ def test_catalog_is_immutable_and_projects_accepted_values() -> None:
     """The catalog owns every accepted target value."""
     assert isinstance(TARGET_CAPABILITIES, MappingProxyType)
     assert accepted_target_values() == VALID_TARGET_VALUES
-    for command in COMMANDS:
-        assert accepted_target_values(command) == VALID_TARGET_VALUES
+    assert accepted_target_values("install") == VALID_TARGET_VALUES
+    assert accepted_target_values("update") == VALID_TARGET_VALUES
+    assert accepted_target_values("compile") == frozenset(
+        {
+            "agents",
+            "agy",
+            "all",
+            "antigravity",
+            "claude",
+            "codex",
+            "copilot",
+            "gemini",
+            "kiro",
+            "opencode",
+            "vscode",
+            "windsurf",
+        }
+    )
 
 
 def test_every_accepted_value_is_advertised_and_parses() -> None:
@@ -305,9 +321,13 @@ def test_alias_runtime_profile_and_compile_projections_match_catalog() -> None:
 
 def test_all_excludes_explicit_experimental_and_mcp_only_targets() -> None:
     """The all expansion preserves the stable implicit target set."""
+    assert frozenset(expand_all("install")) == ALL_CANONICAL_TARGETS
+    assert frozenset(expand_all("update")) == ALL_CANONICAL_TARGETS
+    assert frozenset(expand_all("compile")) == frozenset(
+        {"claude", "codex", "gemini", "kiro", "opencode", "vscode", "windsurf"}
+    )
     for command in COMMANDS:
         expanded = frozenset(expand_all(command))
-        assert expanded == ALL_CANONICAL_TARGETS
         assert not expanded & EXPERIMENTAL_TARGETS
         assert not expanded & EXPLICIT_ONLY_TARGETS
         assert not expanded & MCP_ONLY_TARGETS

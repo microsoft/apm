@@ -761,6 +761,7 @@ class TargetParamType(click.ParamType):
                 rendered = render_unknown_target_error(
                     target_name,
                     list(target_error_values(command)),
+                    command=command,
                 )
                 raise UnknownTargetError(rendered) from None
             # Click idiom: route validation errors through self.fail so the

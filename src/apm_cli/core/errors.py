@@ -116,7 +116,12 @@ def render_ambiguous_error(project_root: Path | None, detected: list[str]) -> st
     )
 
 
-def render_unknown_target_error(value: str, valid: list[str]) -> str:
+def render_unknown_target_error(
+    value: str,
+    valid: list[str],
+    *,
+    command: str = "install",
+) -> str:
     """Render the 3-section error for unknown target token."""
     visible_sorted = sorted(valid)
     suggestion = (
@@ -131,6 +136,18 @@ def render_unknown_target_error(value: str, valid: list[str]) -> str:
     # back to the raw value (or "<empty>") if stripping consumes
     # everything, so the headline remains actionable.
     display_value = value.strip("[]'\" ") or value or "<empty>"
+    if command == "compile":
+        return (
+            f"[x] Unknown target '{display_value}'\n"
+            "\n"
+            f"Valid targets: {valid_csv}\n"
+            "\n"
+            "Fix with one of:\n"
+            "\n"
+            "  apm targets                            # see all supported harnesses\n"
+            f"  apm compile --target {suggestion}\n"
+            "  apm compile --dry-run"
+        )
     return (
         f"[x] Unknown target '{display_value}'\n"
         "\n"

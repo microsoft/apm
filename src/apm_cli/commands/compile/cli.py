@@ -17,6 +17,7 @@ from ...constants import AGENTS_MD_FILENAME, APM_DIR, APM_MODULES_DIR, APM_YML_F
 from ...core.command_logger import CommandLogger
 from ...core.target_catalog import (
     TARGET_CAPABILITIES,
+    expand_all,
     get_target_capability,
     target_help_fragment,
 )
@@ -174,7 +175,9 @@ def _get_validation_suggestion(error_msg):
         return "Check primitive structure and frontmatter"
 
 
-def _resolve_compile_target(target):
+def _resolve_compile_target(
+    target: str | list[str] | None,
+) -> CompileTargetType | None:
     """Map CLI target input to a compiler-understood target.
 
     The compiler understands single-string targets (``"vscode"``,
@@ -200,94 +203,94 @@ def _resolve_compile_target(target):
     """
     if target is None:
         return None  # will trigger detect_target() auto-detection
-    if isinstance(target, list):
-        target_set = set(target)
-        # Strip targets with no compile output (compile_family is None);
-        # they would silently fall through the family resolution otherwise.
-        # ``vscode`` is a CLI alias for ``copilot`` and shares its profile.
-        skip = {
-            capability.name
-            for capability in TARGET_CAPABILITIES.values()
-            if capability.compile_family is None and capability.primitive_profile == capability.name
+    requested_targets = [target] if isinstance(target, str) else target
+    if len(requested_targets) > 1:
+        deployment_all = {get_target_capability(name).name for name in expand_all("install")}
+        requested_canonical = {
+            get_target_capability(name).name for name in requested_targets if name != "all"
         }
-        target_set -= skip
-        if not target_set:
-            # Solo agent-skills (or another no-compile target) in a list --
-            # pass through as a string so the compiler's no-op path fires.
-            for sentinel in target:
-                if sentinel in skip:
-                    return sentinel
-            return None
+        if "all" in requested_targets or deployment_all <= requested_canonical:
+            explicit_targets = [
+                name
+                for name in requested_targets
+                if name != "all" and get_target_capability(name).name not in deployment_all
+            ]
+            requested_targets = [*expand_all("compile"), *explicit_targets]
 
-        # The "vscode" family handles copilot AND emits AGENTS.md as a
-        # bonus; the "agents" family emits AGENTS.md only.  When both
-        # appear in a multi-target compile we still need both family
-        # tokens so the agents compiler routes correctly.
-        def _family_of(name: str) -> str | None:
-            if name == "vscode":
+    target_set: set[str] = set()
+    for requested in requested_targets:
+        if requested == "all":
+            target_set.add(requested)
+            continue
+        capability = get_target_capability(requested)
+        if "compile" not in capability.commands:
+            raise click.UsageError(
+                f"Target '{requested}' is not a compile target.\n\n"
+                "Fix with one of:\n\n"
+                "  apm compile --target copilot\n"
+                "  apm compile --dry-run"
+            )
+        target_set.add(capability.name)
+
+    if target_set == {"all"}:
+        return "all"
+
+    # The "vscode" family handles copilot AND emits AGENTS.md as a
+    # bonus; the "agents" family emits AGENTS.md only.  When both
+    # appear in a multi-target compile we still need both family
+    # tokens so the agents compiler routes correctly.
+    def _family_of(name: str) -> str | None:
+        return get_target_capability(name).compile_family
+
+    families: set[str] = set()
+    for name in target_set:
+        family = _family_of(name)
+        if family is None:
+            continue
+        families.add(family)
+        if family == "vscode":
+            # copilot also emits AGENTS.md; mirror legacy behavior.
+            families.add("agents")
+
+    if len(families) >= 2:
+        # Collapse {"vscode","agents"} to bare "vscode" ONLY when the
+        # original target list contains no non-Copilot agents-family
+        # targets (e.g. codex, opencode, windsurf).  When mixed targets
+        # like [copilot, codex] are requested, keep the frozenset so
+        # downstream dedup logic knows non-Copilot targets also consume
+        # AGENTS.md (issue #1678).
+        if families == {"vscode", "agents"}:
+            has_non_vscode_agents = any(
+                name in target_set
+                for name, capability in TARGET_CAPABILITIES.items()
+                if capability.compile_family == "agents" and capability.primitive_profile == name
+            )
+            if not has_non_vscode_agents:
                 return "vscode"
-            try:
-                return get_target_capability(name).compile_family
-            except KeyError:
-                return None
-
-        families: set[str] = set()
-        for name in target_set:
-            family = _family_of(name)
-            if family is None:
-                continue
-            families.add(family)
-            if family == "vscode":
-                # copilot also emits AGENTS.md; mirror legacy behavior.
-                families.add("agents")
-
-        if len(families) >= 2:
-            # Collapse {"vscode","agents"} to bare "vscode" ONLY when the
-            # original target list contains no non-Copilot agents-family
-            # targets (e.g. codex, opencode, windsurf).  When mixed targets
-            # like [copilot, codex] are requested, keep the frozenset so
-            # downstream dedup logic knows non-Copilot targets also consume
-            # AGENTS.md (issue #1678).
-            if families == {"vscode", "agents"}:
-                _vscode_names = {"copilot", "vscode", "agents"}
-                has_non_vscode_agents = any(
-                    name in target_set
-                    for name, capability in TARGET_CAPABILITIES.items()
-                    if capability.compile_family == "agents"
-                    and capability.primitive_profile == name
-                    and name not in _vscode_names
-                )
-                if not has_non_vscode_agents:
-                    return "vscode"
-            return frozenset(families)
-        if families == {"agents"} and "antigravity" in target_set and len(target_set) > 1:
-            # Mixed Antigravity + AGENTS.md-only consumers share AGENTS.md but
-            # do not all read .agents/rules/. Preserve mixed-target context so
-            # downstream dedup stays disabled for AGENTS.md-only consumers.
-            return frozenset({"agents"})
-        if "claude" in families:
-            return "claude"
-        if "gemini" in families:
-            return "gemini"
-        if "vscode" in families:
-            return "vscode"
-        # Bare agents-family target: preserve the original target name so
-        # single-element list routing matches single-string semantics
-        # (-t cursor and -t [cursor] both end up as "cursor").  Iterate
-        # TARGET_CAPABILITIES in insertion order so priority ties (e.g.
-        # ["opencode","codex"]) resolve deterministically to the
-        # earliest-registered target.  Adding a new agents-family
-        # target (e.g. zed, cline) costs zero edits here -- it inherits
-        # whatever priority position it occupies in the registry.
-        for name, capability in TARGET_CAPABILITIES.items():
-            if (
-                capability.compile_family == "agents"
-                and capability.primitive_profile == name
-                and name in target_set
-            ):
-                return name
-        return "vscode"  # defensive fallback (unreachable)
-    return target  # single string pass-through
+        return frozenset(families)
+    if families == {"agents"} and "antigravity" in target_set and len(target_set) > 1:
+        # Mixed Antigravity + AGENTS.md-only consumers share AGENTS.md but
+        # do not all read .agents/rules/. Preserve mixed-target context so
+        # downstream dedup stays disabled for AGENTS.md-only consumers.
+        return frozenset({"agents"})
+    if "claude" in families:
+        return "claude"
+    if "gemini" in families:
+        return "gemini"
+    if "vscode" in families:
+        return "vscode"
+    # Bare agents-family target: preserve the original target name so
+    # single-element list routing matches single-string semantics. Iterate
+    # TARGET_CAPABILITIES in insertion order so priority ties resolve
+    # deterministically to the earliest-registered target.
+    for name, capability in TARGET_CAPABILITIES.items():
+        if (
+            capability.compile_family == "agents"
+            and capability.primitive_profile == name
+            and name in target_set
+        ):
+            return name
+    raise click.UsageError("No compile-capable target was selected.")
 
 
 def _resolve_effective_target(
@@ -935,10 +938,8 @@ def _run_compilation(
     type=TargetParamType(),
     default=None,
     help=f"Target platform (comma-separated). {target_help_fragment('compile')} "
-    "'agent-skills' deploys to .agents/skills/ (cross-client). "
     "'antigravity' (alias 'agy') deploys to .agents/ and is explicit-only -- not part of 'all'. "
-    "'intellij' is MCP-only; file primitives use the Copilot profile. "
-    "'all' excludes agent-skills, antigravity, experimental targets, and intellij; "
+    "'all' excludes antigravity and experimental targets; "
     "combine explicit-only targets when needed.",
 )
 @click.option(
@@ -1216,6 +1217,8 @@ def compile(  # noqa: PLR0913 -- Click handler
         logger.error(f"Compilation module not available: {e}")
         logger.progress("This might be a development environment issue.")
         sys.exit(1)
+    except click.ClickException:
+        raise
     except Exception as e:
         logger.error(f"Error during compilation: {e}")
         sys.exit(1)
