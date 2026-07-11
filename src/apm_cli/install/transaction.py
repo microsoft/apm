@@ -36,19 +36,38 @@ def _maybe_rollback_manifest(
     manifest_path: Path,
     snapshot: bytes | None,
     logger: InstallLogger,
+    manifest_existed: bool | None = None,
 ) -> None:
-    """Best-effort restore of a captured manifest snapshot."""
-    if snapshot is None:
+    """Best-effort restore or removal of the attempt's manifest."""
+    if manifest_existed is None:
+        manifest_existed = snapshot is not None or manifest_path.exists()
+    if not manifest_existed:
+        if not manifest_path.exists():
+            return
+        try:
+            manifest_path.unlink()
+            if logger is not None:
+                logger.progress("Removed apm.yml created by the failed install.")
+        except Exception as exc:
+            if logger is not None:
+                logger.error(
+                    "Failed to remove apm.yml created by this install. "
+                    "Delete apm.yml manually before retrying."
+                )
+                logger.verbose_detail(f"Manifest rollback error: {exc}")
         return
     try:
+        if snapshot is None:
+            return
         if manifest_path.exists() and manifest_path.read_bytes() == snapshot:
             return
         _restore_manifest_from_snapshot(manifest_path, snapshot)
         if logger is not None:
             logger.progress("apm.yml restored to its previous state.")
-    except Exception:
+    except Exception as exc:
         if logger is not None:
-            logger.warning("Failed to restore apm.yml to its previous state.")
+            logger.error("Failed to restore apm.yml. Inspect apm.yml before retrying.")
+            logger.verbose_detail(f"Manifest rollback error: {exc}")
 
 
 class InstallTransaction:
@@ -71,7 +90,8 @@ class InstallTransaction:
         self.apm_modules_dir = apm_modules_dir
         self._validation = validation
         self._logger = logger
-        self._manifest_snapshot = manifest_path.read_bytes() if manifest_path.exists() else None
+        self._manifest_existed = manifest_path.exists()
+        self._manifest_snapshot = manifest_path.read_bytes() if self._manifest_existed else None
         self._resolution = ResolutionStagingSession(apm_modules_dir)
         self._lock = threading.RLock()
         self.committed = False
@@ -147,6 +167,7 @@ class InstallTransaction:
             self.manifest_path,
             self._manifest_snapshot,
             self._logger,
+            self._manifest_existed,
         )
 
 

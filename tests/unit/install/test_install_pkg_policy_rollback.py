@@ -539,8 +539,8 @@ class TestMaybeRollbackManifest:
         assert target.read_bytes() == b"original"
         logger.progress.assert_called_once_with("apm.yml restored to its previous state.")
 
-    def test_warns_on_restore_failure(self, tmp_path):
-        """If restore fails, warn but don't mask the original error."""
+    def test_reports_actionable_error_on_restore_failure(self, tmp_path):
+        """Restore failures name the file, next action, and verbose detail."""
         from apm_cli.install.transaction import _maybe_rollback_manifest
 
         # Point at a non-existent directory so tempfile.mkstemp fails
@@ -550,8 +550,12 @@ class TestMaybeRollbackManifest:
         # Should not raise -- best-effort
         _maybe_rollback_manifest(bad_path, b"data", logger)
 
-        logger.warning.assert_called_once()
-        assert "Failed to restore" in logger.warning.call_args[0][0]
+        logger.error.assert_called_once_with(
+            "Failed to restore apm.yml. Inspect apm.yml before retrying."
+        )
+        logger.verbose_detail.assert_called_once()
+        assert "Manifest rollback error:" in logger.verbose_detail.call_args[0][0]
+        logger.warning.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

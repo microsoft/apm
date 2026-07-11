@@ -1423,8 +1423,14 @@ def install(  # noqa: PLR0913
         # CommandLogger / DiagnosticCollector instead of stderr/inline writes.
         auth_resolver.set_logger(logger)
 
-        # Check if apm.yml exists
+        # Capture manifest state before this attempt can auto-create apm.yml.
         apm_yml_exists = manifest_path.exists()
+        transaction = InstallTransaction(
+            manifest_path=manifest_path,
+            apm_modules_dir=get_modules_dir(scope),
+            validation=None,
+            logger=logger,
+        )
 
         if not apm_yml_exists and packages:
             project_name = Path.cwd().name if scope is InstallScope.PROJECT else Path.home().name
@@ -1447,12 +1453,6 @@ def install(  # noqa: PLR0913
                 logger.progress("  apm install <org/repo> to auto-create + install")
             sys.exit(1)
 
-        transaction = InstallTransaction(
-            manifest_path=manifest_path,
-            apm_modules_dir=get_modules_dir(scope),
-            validation=None,
-            logger=logger,
-        )
         outcome = None
         if packages:
             _validated_packages, outcome = _validate_and_add_packages_to_apm_yml(
@@ -1516,6 +1516,21 @@ def install(  # noqa: PLR0913
                 outcome,
             )
 
+            from apm_cli.install.summary import classify_post_install_result
+
+            command_result = classify_post_install_result(
+                apm_count=apm_count,
+                apm_diagnostics=apm_diagnostics,
+                force=force,
+            )
+            if dry_run:
+                command_result.disposition = InstallDisposition.DRY_RUN
+                transaction.rollback()
+            elif command_result.disposition is InstallDisposition.FAILED:
+                transaction.rollback()
+            else:
+                command_result = transaction.commit(command_result)
+
             command_result = _post_install_summary(
                 logger=logger,
                 apm_count=apm_count,
@@ -1524,15 +1539,9 @@ def install(  # noqa: PLR0913
                 apm_diagnostics=apm_diagnostics,
                 force=force,
                 elapsed_seconds=time.perf_counter() - install_started_at,
+                result=command_result,
             )
             summary_rendered = True
-            if dry_run:
-                command_result.disposition = InstallDisposition.DRY_RUN
-                transaction.rollback()
-            elif command_result.disposition is InstallDisposition.FAILED:
-                transaction.rollback()
-            else:
-                command_result = transaction.commit(command_result)
 
             if frozen and apm_count > 0:
                 # --frozen verifies lockfile structure, not content integrity.
@@ -1904,7 +1913,15 @@ def _install_apm_packages(ctx, outcome):
 
 
 def _post_install_summary(
-    *, logger, apm_count, mcp_count, lsp_count=0, apm_diagnostics, force, elapsed_seconds=None
+    *,
+    logger,
+    apm_count,
+    mcp_count,
+    lsp_count=0,
+    apm_diagnostics,
+    force,
+    elapsed_seconds=None,
+    result=None,
 ):
     """Thin shim forwarding to :func:`apm_cli.install.summary.render_post_install_summary`.
 
@@ -1922,6 +1939,7 @@ def _post_install_summary(
         apm_diagnostics=apm_diagnostics,
         force=force,
         elapsed_seconds=elapsed_seconds,
+        result=result,
     )
 
 

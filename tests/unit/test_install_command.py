@@ -346,6 +346,7 @@ class TestInstallCommandAutoBootstrap:
             assert result.exit_code == 1
             assert "All packages failed validation" in result.output
             assert "Install interrupted" not in result.output
+            assert not Path("apm.yml").exists()
             mock_validate.assert_called()
 
     @patch("apm_cli.commands.install._validate_package_exists")
@@ -355,8 +356,8 @@ class TestInstallCommandAutoBootstrap:
             # Don't mock validation - let it handle invalid format
             result = self.runner.invoke(cli, ["install", "invalid-package"])
 
-            # Should create apm.yml but fail to add invalid package
-            assert Path("apm.yml").exists()
+            # Failed first installs must not leave the bootstrap manifest.
+            assert not Path("apm.yml").exists()
             assert "invalid format" in result.output
 
     @patch("apm_cli.commands.install._validate_package_exists")
@@ -401,8 +402,8 @@ class TestInstallCommandAutoBootstrap:
             # Should show what would be added
             assert result.exit_code == 0
             assert "Would add" in result.output or "Dry run" in result.output
-            # apm.yml should still be created (for dry-run to work)
-            assert Path("apm.yml").exists()
+            # Dry-run rolls back the temporary bootstrap manifest.
+            assert not Path("apm.yml").exists()
 
 
 class TestValidationFailureReasonMessages:

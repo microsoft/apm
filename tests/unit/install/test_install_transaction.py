@@ -107,7 +107,51 @@ def test_manifest_restore_is_byte_exact(tmp_path: Path) -> None:
 
     transaction.rollback()
 
+    assert transaction.manifest_path.exists()
     assert transaction.manifest_path.read_bytes() == original
+
+
+def test_rollback_removes_manifest_created_by_first_install(tmp_path: Path) -> None:
+    """Rollback removes apm.yml when this attempt created it."""
+    manifest = tmp_path / "apm.yml"
+    modules = tmp_path / "apm_modules"
+    modules.mkdir()
+    transaction = InstallTransaction(
+        manifest_path=manifest,
+        apm_modules_dir=modules,
+        validation=None,
+        logger=MagicMock(),
+    )
+    manifest.write_text("name: created\n", encoding="ascii")
+
+    transaction.rollback()
+
+    assert not manifest.exists()
+
+
+def test_rollback_reports_action_when_created_manifest_cannot_be_removed(
+    tmp_path: Path,
+) -> None:
+    """A failed removal tells the user how to complete rollback."""
+    manifest = tmp_path / "apm.yml"
+    modules = tmp_path / "apm_modules"
+    modules.mkdir()
+    logger = MagicMock()
+    transaction = InstallTransaction(
+        manifest_path=manifest,
+        apm_modules_dir=modules,
+        validation=None,
+        logger=logger,
+    )
+    manifest.write_text("name: created\n", encoding="ascii")
+
+    with patch.object(Path, "unlink", side_effect=OSError("permission denied")):
+        transaction.rollback()
+
+    logger.error.assert_called_once_with(
+        "Failed to remove apm.yml created by this install. Delete apm.yml manually before retrying."
+    )
+    assert "permission denied" in logger.verbose_detail.call_args[0][0]
 
 
 def test_rollback_removes_new_path_and_restores_existing_path(tmp_path: Path) -> None:
@@ -225,3 +269,27 @@ def test_positional_url_total_failure_exits_one(tmp_path: Path, monkeypatch) -> 
         )
 
     assert result.exit_code == 1
+
+
+def test_failed_first_install_removes_auto_created_manifest(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The transaction observes absence before the command creates apm.yml."""
+    monkeypatch.chdir(tmp_path)
+    outcome = _ValidationOutcome(
+        valid=[],
+        invalid=[("https://example.invalid/missing", "not found")],
+    )
+
+    with patch(
+        "apm_cli.commands.install._validate_and_add_packages_to_apm_yml",
+        return_value=([], outcome),
+    ):
+        result = CliRunner().invoke(
+            cli,
+            ["install", "https://example.invalid/missing"],
+        )
+
+    assert result.exit_code == 1
+    assert not (tmp_path / "apm.yml").exists()

@@ -2,10 +2,9 @@
 
 Extracted from ``apm_cli.commands.install`` to keep the command file
 under its architectural LOC budget while we layer on the perf+UX
-findings F1-F7 (microsoft/apm#1116). This module is a *pure* renderer:
-it takes already-collected diagnostics, formats them through the
-``InstallLogger``, and decides whether the command should hard-fail on
-critical security findings.
+findings F1-F7 (microsoft/apm#1116). This module classifies the result
+without output, then renders already-collected diagnostics through the
+``InstallLogger`` after transaction completion.
 
 Keeping it free of the install pipeline state (no ``InstallContext``)
 lets the unit tests exercise summary behaviour without spinning up
@@ -18,6 +17,38 @@ from apm_cli.commands._helpers import _rich_blank_line
 from apm_cli.models.results import InstallDisposition, InstallResult
 
 
+def _error_count(apm_diagnostics) -> int:
+    """Return a defensive integer count from optional diagnostics."""
+    if not apm_diagnostics:
+        return 0
+    try:
+        return int(apm_diagnostics.error_count)
+    except (TypeError, ValueError):
+        return 0
+
+
+def classify_post_install_result(
+    *,
+    apm_count: int,
+    apm_diagnostics=None,
+    force: bool,
+) -> InstallResult:
+    """Classify completion without rendering user-facing output."""
+    error_count = _error_count(apm_diagnostics)
+    failed_security = not force and apm_diagnostics and apm_diagnostics.has_critical_security
+    if failed_security or error_count > 0:
+        return InstallResult(
+            installed_count=apm_count,
+            diagnostics=apm_diagnostics,
+            disposition=InstallDisposition.FAILED,
+            exit_code=1,
+        )
+    return InstallResult(
+        installed_count=apm_count,
+        diagnostics=apm_diagnostics,
+    )
+
+
 def render_post_install_summary(
     *,
     logger,
@@ -27,9 +58,9 @@ def render_post_install_summary(
     apm_diagnostics=None,
     force: bool,
     elapsed_seconds: float | None = None,
+    result: InstallResult | None = None,
 ) -> InstallResult:
-    """Render diagnostics, the final summary line, and (optionally)
-    hard-fail on critical security findings.
+    """Render diagnostics and the final disposition-aware summary line.
 
     Args:
         logger: An ``InstallLogger`` instance.
@@ -44,6 +75,8 @@ def render_post_install_summary(
             command, captured by the caller immediately after logger
             construction. ``None`` keeps the legacy "... ." suffix; a
             float appends `` in {x:.1f}s`` before the period (F5).
+        result: Final result after commit or rollback. When omitted,
+            classify from diagnostics for backward-compatible callers.
 
     Returns:
         Structured completion state for the command adapter.
@@ -53,12 +86,13 @@ def render_post_install_summary(
     else:
         _rich_blank_line()
 
-    error_count = 0
-    if apm_diagnostics:
-        try:
-            error_count = int(apm_diagnostics.error_count)
-        except (TypeError, ValueError):
-            error_count = 0
+    error_count = _error_count(apm_diagnostics)
+    if result is None:
+        result = classify_post_install_result(
+            apm_count=apm_count,
+            apm_diagnostics=apm_diagnostics,
+            force=force,
+        )
     logger.install_summary(
         apm_count=apm_count,
         mcp_count=mcp_count,
@@ -66,32 +100,6 @@ def render_post_install_summary(
         errors=error_count,
         stale_cleaned=logger.stale_cleaned_total,
         elapsed_seconds=elapsed_seconds,
+        disposition=result.disposition,
     )
-
-    # Hard-fail when critical security findings blocked any package
-    # (consistent with ``apm unpack``). ``--force`` overrides.
-    if not force and apm_diagnostics and apm_diagnostics.has_critical_security:
-        return InstallResult(
-            installed_count=apm_count,
-            diagnostics=apm_diagnostics,
-            disposition=InstallDisposition.FAILED,
-            exit_code=1,
-        )
-
-    # Hard-fail when ANY per-dep install error was reported. Matches
-    # the npm / pip / cargo convention: any install failure -> non-zero
-    # exit so CI scripts can detect failure without parsing stderr.
-    # ``--force`` covers critical-security overrides only; it does NOT
-    # suppress this hard-fail (Bug 2 fix on #1496, where the CLI used
-    # to exit 0 even after printing "Installation failed with N error(s)").
-    if error_count > 0:
-        return InstallResult(
-            installed_count=apm_count,
-            diagnostics=apm_diagnostics,
-            disposition=InstallDisposition.FAILED,
-            exit_code=1,
-        )
-    return InstallResult(
-        installed_count=apm_count,
-        diagnostics=apm_diagnostics,
-    )
+    return result
