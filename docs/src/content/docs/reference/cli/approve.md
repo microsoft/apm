@@ -1,6 +1,6 @@
 ---
-title: apm approve / apm deny
-description: Manage the executable approval gate for dependency packages.
+title: apm approve
+description: Approve executable primitives from dependency packages.
 sidebar:
   order: 25
 ---
@@ -9,7 +9,6 @@ sidebar:
 
 ```bash
 apm approve [PACKAGE_REF...] [OPTIONS]
-apm deny [PACKAGE_REF...] [OPTIONS]
 apm policy explain <PACKAGE_REF>
 ```
 
@@ -25,10 +24,11 @@ expressed through one noun, `executables`, across three layers:
 | User | `~/.apm/config.json` `executables.{allow,deny}` | `apm approve --user` / `apm deny --user` | No | Lowest; can only narrow |
 | Org | `apm-policy.yml` `executables:` | Org admin | Yes (policy repo) | Ceiling on deny |
 
-`apm approve` adds a grant; `apm deny` adds a block. By default both write the
-**project** `apm.yml` (committed, so the whole team inherits the decision).
-`--user` writes your personal `~/.apm/config.json` instead -- a machine-local
-override that can only narrow trust, never widen past an org or project deny.
+`apm approve` adds a grant; [`apm deny`](../deny/) adds a block. By default,
+both commands write the **project** `apm.yml` (committed, so the whole team
+inherits the decision). `--user` writes your personal
+`~/.apm/config.json` instead -- a machine-local override that can only narrow
+trust, never widen past an org or project deny.
 
 Text primitives (skills, agents, instructions) are never gated. Local project
 content (the root `.apm/` directory) is always trusted.
@@ -87,13 +87,6 @@ The gate is enabled when any layer opts in: the project declares an
 | `--recommended` | Bulk-accept the org `executables.recommend` set. |
 | `--list` | Show the fleet-level effective trust decision and deciding layer per installed package. |
 | `--user` | Write the grant to `~/.apm/config.json` instead of `apm.yml`. |
-
-### `apm deny`
-
-| Flag | Description |
-|------|-------------|
-| `PACKAGE_REF` | One or more packages to deny. Denying a not-yet-installed package is allowed (a pre-emptive block). |
-| `--user` | Write the block to `~/.apm/config.json` instead of `apm.yml`. |
 
 ### `apm policy explain`
 
@@ -185,11 +178,7 @@ Inspect effective trust state across installed packages:
 apm approve --list
 ```
 
-Block a package (deny always wins):
-
-```bash
-apm deny evil/pkg
-```
+To block a package instead, see [`apm deny`](../deny/).
 
 ## Non-interactive / CI usage
 
@@ -211,6 +200,7 @@ executables:
 
 ## See also
 
+- [`apm deny`](../deny/) -- block executable primitives for packages
 - [`apm install`](../install/) -- the install command that enforces the gate
 - [`apm audit`](../audit/) -- audit installed packages
 - [apm-policy.yml schema](../../policy-schema/) -- the org `executables:` ceiling

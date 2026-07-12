@@ -39,6 +39,7 @@ instead of re-deriving the answer locally.
 | Install success / failure outcome | the canonical install-outcome path |
 | Neutral hook shape -> per-target native | the neutral hook IR + per-target integrators |
 | File-level deploy / sync / cleanup | BaseIntegrator (see integrators.instructions.md) |
+| Windows stable executable path | install.ps1 ($currentDir / $currentExe) |
 
 If you are about to compute one of these locally, stop and call the
 owner. If the owner is missing a case you need, EXTEND the owner --

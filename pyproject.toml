@@ -171,6 +171,7 @@ markers = [
     "requires_ado_pat: requires ADO_APM_PAT",
     "requires_ado_bearer: requires az CLI logged in + APM_TEST_ADO_BEARER=1",
     "requires_network_integration: requires APM_RUN_INTEGRATION_TESTS=1",
+    "requires_windows: requires a Windows host",
     "requires_apm_binary: requires built apm binary on PATH (or APM_BINARY_PATH)",
     "requires_runtime_codex: requires codex runtime installed",
     "requires_runtime_copilot: requires GitHub Copilot CLI runtime installed",

@@ -393,10 +393,11 @@ Each locked dependency records its resolved state in the `exec_status` field of
 For CI, `apm install` succeeds when a required package is present-but-parked and
 prints a one-command remedy (e.g. `apm approve <pkg>`); a separate audit signal,
 `required-executable-untrusted`, hard-fails when a required package's
-executables are untrusted. Manage trust with [`apm approve` / `apm
-deny`](../../reference/cli/approve/), inspect the deciding layer for one
-package with `apm policy explain <pkg>`, and surface fleet-wide layer
-conflicts with `apm doctor`.
+executables are untrusted. Manage trust with
+[`apm approve`](../../reference/cli/approve/) and
+[`apm deny`](../../reference/cli/deny/), inspect the deciding layer for one package
+with `apm policy explain <pkg>`, and surface fleet-wide layer conflicts with
+`apm doctor`.
 
 ## MCP server trust model
 

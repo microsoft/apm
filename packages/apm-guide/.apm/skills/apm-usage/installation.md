@@ -52,13 +52,13 @@ GITHUB_URL=https://github.corp.com VERSION=v1.2.3 sh install.sh
 
 ## Installer options (Windows PowerShell)
 
-Uses the same variables as `install.sh` where applicable (`GITHUB_URL`, `APM_REPO`, `VERSION`, `APM_INSTALL_DIR`). See the full variable table, Actions example, and checksum rules in [installation.md](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md).
+Uses the same variables as `install.sh` where applicable (`GITHUB_URL`, `APM_REPO`, `VERSION`, `APM_INSTALL_DIR`). See the full variable table, Actions example, checksum rules, and canonical Windows `PATH` layout in [installation.md](https://github.com/microsoft/apm/blob/main/docs/src/content/docs/getting-started/installation.md).
 
 ```powershell
 # Pin a version (skips releases/latest API). Requires .sha256 on the release unless APM_SKIP_CHECKSUM=1 (emergency).
 $env:VERSION = "v1.2.3"; irm https://aka.ms/apm-windows | iex
 
-# Custom shim directory (directory that will contain apm.cmd)
+# Custom shim directory (contains apm.cmd; sibling current contains apm.exe)
 $env:APM_INSTALL_DIR = "$env:LOCALAPPDATA\Programs\apm\bin"; irm https://aka.ms/apm-windows | iex
 
 $env:GITHUB_URL = "https://github.corp.com"

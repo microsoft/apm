@@ -32,6 +32,28 @@ here. Every wave honors all of these.
   greenfield FIX subagent runs this gate before opening its PR (see
   `assets/fix-prompt.md`); inside the drive loop shepherd-driver
   re-runs it on every folded regression-trap test.
+- **Canonical-owner gate (enforced by shepherd-driver).** Every fix
+  receives exactly one architecture classification against
+  `.github/instructions/architecture.instructions.md`
+  (`ordinary-fix` / `owner-extension` / `new-owner` /
+  `split-authority-repair` / `not-applicable`), and each durable
+  decision it touches records its one canonical owner plus the evidence
+  that every consumer routes through that owner. A new owner, a
+  centralization, or a split-authority repair cannot become
+  `ready-to-merge` without the full dual guardrail: a behavioral
+  regression test, a static boundary guard in
+  `scripts/lint-architecture-boundaries.sh`, a matching
+  `tests/integration/test_architecture_*.py` assertion, and
+  mutation-break evidence. Enforcement is OWNED by the composed
+  shepherd-driver (`../shepherd-driver/assets/shepherd-driver-prompt.md`
+  Step X.2.5) and returned in `completion_return.architecture_evidence`;
+  the greenfield FIX subagent applies the same classification before it
+  opens an authority-affecting PR (see `assets/fix-prompt.md`). The
+  orchestrator does NOT re-run the classification -- it reads the
+  driver's evidence into the table and final report. Missing or
+  uncertain evidence stays in the driver loop or returns `blocked`; it
+  is never deferred as out of scope when the PR itself changes an
+  authority.
 - **Superseding-PR fallback (inherited from shepherd-driver).** When
   push to the contributor fork fails (no `maintainerCanModify`, branch
   protection, or fork deleted), shepherd-driver opens a new PR under
@@ -118,7 +140,7 @@ here. Every wave honors all of these.
   infrastructure failure would hide real defects. See
   `references/strategic-alignment-gate.md`.
 
-## 17. Worktree isolation
+## 18. Worktree isolation
 
 Every mutating child -- each greenfield FIX subagent (Phase 3) and
 each shepherd-driver DRIVE subagent (Phase 4), plus any Phase 5
