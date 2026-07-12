@@ -110,7 +110,7 @@ For end-to-end auth setup see [Authentication](../../getting-started/authenticat
 [!] TLS verification failed
 ```
 
-Behind a corporate proxy, set `REQUESTS_CA_BUNDLE` to your org's CA bundle (PEM file). Full walkthrough: [SSL / TLS issues](../ssl-issues/).
+APM verifies HTTPS against the OS trust store by default. Behind a corporate proxy, install your org's CA into the OS trust store; for a per-shell override, set `REQUESTS_CA_BUNDLE` to a readable PEM bundle. Full walkthrough: [SSL / TLS issues](../ssl-issues/).
 
 ### Timeouts and proxies
 

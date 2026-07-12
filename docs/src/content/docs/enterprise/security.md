@@ -39,6 +39,17 @@ APM has no runtime footprint. Once `apm install` or `apm compile` completes, the
 - **No persistent background processes.** APM does not install daemons, services, or scheduled tasks.
 - **No telemetry or data collection.** APM collects no usage data, analytics, or diagnostics. Nothing is transmitted to Microsoft or any third party.
 
+## HTTPS transport trust
+
+APM keeps certificate verification enabled for every HTTPS request. Python-based paths verify against the operating-system trust store by default through `truststore`, so corporate roots trusted by `git` and `curl` are also trusted by `apm install`.
+
+- `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE` replace the OS store with an explicitly selected PEM bundle for APM's HTTP layer.
+- `APM_DISABLE_TRUSTSTORE=1` restores the previous bundled-`certifi` behavior.
+- If `truststore` is unavailable or injection fails, APM falls back to `certifi`; it does not disable verification.
+- The Python-based `llm` runtime receives a shipped, self-contained `.pth` bootstrap in its managed virtual environment. The bootstrap imports only `truststore`; it does not execute dependency-provided package content.
+
+Node-based (Copilot) and Rust-based (Codex) child runtimes retain their own trust configuration for now. See [SSL / TLS issues](../troubleshooting/ssl-issues/) for scope, overrides, and recovery steps.
+
 ## Dependency provenance
 
 APM resolves dependencies directly from git repositories. There is no intermediary registry, proxy, or mirror.

@@ -156,6 +156,12 @@ if ! grep -q '_clear_git_auth_env(env)' src/apm_cli/core/auth.py; then
     echo "[x] AuthResolver must scrub inherited Git authorization state"
     violations=$((violations + 1))
 fi
+check_pattern \
+    "TLS trust injection belongs to canonical owners" \
+    'truststore\.inject_into_ssl\(' \
+    $(find src/apm_cli -name '*.py' \
+        ! -path 'src/apm_cli/core/tls_trust.py' \
+        ! -path 'src/apm_cli/core/_child_tls/_apm_tls_bootstrap.py')
 
 echo "[*] AC6: neutral IR and schema contracts"
 check_pattern \
