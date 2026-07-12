@@ -112,7 +112,7 @@ apm config unset self-update.install-dir
 
 ## Where the new binary lands
 
-The installer writes to the same location the install script uses -- by default `/usr/local/bin/apm` on macOS/Linux. On Windows it writes `%LOCALAPPDATA%\Programs\apm\bin\apm.cmd` and updates the `%LOCALAPPDATA%\Programs\apm\current` junction containing `apm.exe`; both locations are added to `PATH`. Existing configuration under `~/.apm/` and your project files are untouched.
+The installer writes to the same location the install script uses -- by default `/usr/local/bin/apm` on macOS/Linux. On Windows, self-update advances the stable executable path described in [Installation](../../getting-started/installation/). Existing configuration under `~/.apm/` and your project files are untouched.
 
 ## After update
 

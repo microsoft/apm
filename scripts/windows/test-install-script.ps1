@@ -115,7 +115,7 @@ function Test-MoveThenTestOrdering {
     if ($errors -and $errors.Count -gt 0) { return }
 
     # Find every Move-Item invocation that mentions $packageDir and $stagingDir
-    # (either as -Path/-Destination args or as positional values) — that's our
+    # (either as -Path/-Destination args or as positional values) -- that's our
     # staging move.
     $moveCalls = $ast.FindAll({
         param($n)
@@ -327,9 +327,26 @@ function Test-EndToEndInstall {
         Assert-True (Test-Path $stableExe) "Stable apm.exe is available at $stableExe"
 
         if (Test-Path $stableExe) {
+            $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+            $userPathEntries = @()
+            if ($userPath) {
+                $userPathEntries = $userPath.Split(";", [System.StringSplitOptions]::RemoveEmptyEntries)
+            }
+            $currentPathIndex = [Array]::IndexOf($userPathEntries, $currentDir)
+            $binPathIndex = [Array]::IndexOf($userPathEntries, $prefix.BinDir)
+            Assert-True ($currentPathIndex -ge 0) "Stable executable directory is present in user PATH"
+            Assert-True ($binPathIndex -ge 0) "Command shim directory is present in user PATH"
+            Assert-True (($currentPathIndex -ge 0) -and ($currentPathIndex -lt $binPathIndex)) "Stable executable directory precedes command shim directory in user PATH"
+
             $savedPath = $env:Path
             try {
                 $env:Path = "$currentDir;$env:Path"
+                $env:APM_LAUNCH_TEST_PATH = "$currentDir;$($prefix.BinDir);$savedPath"
+                $cmdOutput = & cmd.exe /d /c 'set "PATH=%APM_LAUNCH_TEST_PATH%" && apm --version' 2>&1
+                $cmdExit = $LASTEXITCODE
+                Assert-True ($cmdExit -eq 0) "cmd.exe resolves bare apm (got $cmdExit; output: $cmdOutput)"
+                Assert-True (($cmdOutput | Out-String) -match [regex]::Escape($PinnedVersion.TrimStart("v"))) "cmd.exe reports $PinnedVersion"
+
                 $pythonScript = @'
 import os
 import subprocess
@@ -362,12 +379,40 @@ sys.exit(result.returncode)
                 }
             } finally {
                 Remove-Item Env:APM_LAUNCH_TEST_CWD -ErrorAction SilentlyContinue
+                Remove-Item Env:APM_LAUNCH_TEST_PATH -ErrorAction SilentlyContinue
                 $env:Path = $savedPath
             }
         }
 
         $leftover = Get-ChildItem -Path $prefix.TmpDir -Filter "apm-install-*" -Directory -ErrorAction SilentlyContinue
         Assert-True (-not $leftover) "No leftover apm-install-* directory in APM_TEMP_DIR"
+    } finally {
+        Remove-Item -Recurse -Force $prefix.Root -ErrorAction SilentlyContinue
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Test 3b: A real directory at current is user-owned data, not an installer
+# junction. The installer must fail closed without deleting its contents.
+# ---------------------------------------------------------------------------
+
+function Test-NonJunctionCollision {
+    Write-Step "Test 3b: non-junction current path is preserved"
+
+    $prefix = New-IsolatedPrefix
+    try {
+        $currentDir = Join-Path $prefix.Root "current"
+        $canary = Join-Path $currentDir "user-data.txt"
+        New-Item -ItemType Directory -Force -Path $currentDir | Out-Null
+        Set-Content -Path $canary -Value "preserve me" -Encoding ASCII
+
+        $exitCode = Invoke-InstallScript -Version $PinnedVersion -BinDir $prefix.BinDir -TmpDir $prefix.TmpDir
+        Assert-True ($exitCode -eq 1) "Installer refuses a non-junction current path (got $exitCode)"
+        Assert-True (Test-Path $canary -PathType Leaf) "Non-junction current path preserves its canary file"
+
+        $junctionLeftover = Get-ChildItem -Path $prefix.Root -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "current.new-*" -or $_.Name -like "current.old-*" }
+        Assert-True (-not $junctionLeftover) "Collision failure leaves no current.new-* / current.old-* junction temps"
     } finally {
         Remove-Item -Recurse -Force $prefix.Root -ErrorAction SilentlyContinue
     }
@@ -566,6 +611,7 @@ Test-Sha256Fallback
 Test-MoveThenTestOrdering
 Test-AntivirusDetector
 Test-EndToEndInstall
+Test-NonJunctionCollision
 Test-CrossVersionUpgrade
 Test-SameVersionReinstall
 Test-SelfUpdateCommand

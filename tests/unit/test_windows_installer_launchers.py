@@ -37,6 +37,18 @@ def test_windows_installer_e2e_covers_bare_subprocess_resolution() -> None:
     assert 'cwd=os.environ["APM_LAUNCH_TEST_CWD"]' in test_script
     assert 'PATH="$2:$PATH"' in test_script
     assert "command -v apm && apm --version" in test_script
+    assert "cmd.exe /d /c" in test_script
+    assert "Stable executable directory precedes command shim directory in user PATH" in test_script
+
+
+def test_windows_installer_e2e_covers_non_junction_collision() -> None:
+    """The Windows release gate must prove collision failures preserve data."""
+    test_script = (ROOT / "scripts/windows/test-install-script.ps1").read_text(encoding="utf-8")
+
+    assert "function Test-NonJunctionCollision" in test_script
+    assert "Installer refuses a non-junction current path" in test_script
+    assert "Non-junction current path preserves its canary file" in test_script
+    assert "Test-NonJunctionCollision" in test_script[test_script.index("# Runner") :]
 
 
 def test_windows_e2e_verifies_junction_resolution_after_upgrade() -> None:
