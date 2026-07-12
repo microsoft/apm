@@ -138,13 +138,13 @@ def user_scope_rejection_reason(dep_ref: Any, scope: Any) -> str | None:
     return None
 
 
-def get_existing_skill_subset(
+def get_existing_dep_ref_for_identity(
     current_deps: builtins.list,
     identity: str,
     *,
     dependency_reference_cls: Any,
-) -> builtins.list[str] | None:
-    """Return the persisted ``skills:`` list for *identity*, or None."""
+) -> Any | None:
+    """Return the parsed existing manifest entry matching *identity*, or None."""
     for dep_entry in current_deps:
         try:
             if isinstance(dep_entry, builtins.str):
@@ -156,9 +156,24 @@ def get_existing_skill_subset(
         except (ValueError, TypeError, AttributeError, KeyError):
             continue
         if existing_ref.get_identity() == identity:
-            subset = getattr(existing_ref, "skill_subset", None)
-            return list(subset) if subset else None
+            return existing_ref
     return None
+
+
+def get_existing_skill_subset(
+    current_deps: builtins.list,
+    identity: str,
+    *,
+    dependency_reference_cls: Any,
+) -> builtins.list[str] | None:
+    """Return the persisted ``skills:`` list for *identity*, or None."""
+    existing_ref = get_existing_dep_ref_for_identity(
+        current_deps, identity, dependency_reference_cls=dependency_reference_cls
+    )
+    if existing_ref is None:
+        return None
+    subset = getattr(existing_ref, "skill_subset", None)
+    return list(subset) if subset else None
 
 
 def normalize_and_merge_skill_subset(
@@ -351,11 +366,22 @@ def merge_structured_entry_into_current_deps(
         except (ValueError, TypeError, AttributeError, KeyError):
             continue
         if existing_ref.get_identity() == identity:
+            if getattr(existing_ref, "source", None) == "registry" and not (
+                isinstance(structured_entry, dict)
+                and ("id" in structured_entry or "registry" in structured_entry)
+            ):
+                raise ValueError(
+                    f"'{identity}' is already declared as a registry dependency; "
+                    f"refusing to silently convert it to a git dependency. Use the "
+                    f"object form ('- id: ...' / '- registry: ...') to change its "
+                    f"version, or an explicit '- git:' entry to intentionally "
+                    f"switch resolvers."
+                )
             current_deps[idx] = structured_entry
             replaced = True
             if logger:
                 logger.verbose_detail(
-                    f"Updated existing dependency entry to structured git+path form: {canonical}"
+                    f"Updated existing dependency entry to structured form: {canonical}"
                 )
             break
     if not replaced:
