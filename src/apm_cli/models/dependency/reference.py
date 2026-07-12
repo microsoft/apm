@@ -45,6 +45,7 @@ from .object_fields import (
     reject_unknown_git_fields,
 )
 from .provider_coordinates import ProviderCoordinateMixin
+from .subsets import parse_skill_subset
 from .types import VirtualPackageType
 
 _REF_VERSION_SUFFIX_RE = re.compile(r"^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9][A-Za-z0-9._-]*)?$")
@@ -1160,6 +1161,7 @@ class DependencyReference(ProviderCoordinateMixin):
             registry: <name>           # routes to named registry; omit to use default
             path:     prompts/foo.md   # virtual sub-path; omit to install the whole package
             alias:    <name>           # same meaning as in other object forms
+            skills:   [x, y, z]        # same meaning as in other object forms
         """
         from ...deps.registry.feature_gate import require_package_registry_enabled
 
@@ -1214,8 +1216,11 @@ class DependencyReference(ProviderCoordinateMixin):
                     f"letters, numbers, dots, underscores, and hyphens"
                 )
 
+        skills_raw = entry.get("skills")
+        skill_subset = parse_skill_subset(skills_raw) if skills_raw is not None else None
+
         # Reject any unknown keys to catch typos early.
-        known = {"registry", "id", "path", "version", "alias"}
+        known = {"registry", "id", "path", "version", "alias", "skills"}
         unknown = set(entry.keys()) - known
         if unknown:
             raise ValueError(
@@ -1238,6 +1243,7 @@ class DependencyReference(ProviderCoordinateMixin):
             alias=alias,
             source="registry",
             registry_name=registry_name,
+            skill_subset=skill_subset,
         )
 
     @classmethod
@@ -1992,11 +1998,13 @@ class DependencyReference(ProviderCoordinateMixin):
         - HTTP (insecure) git deps: returns a dict with 'git' and 'allow_insecure' keys.
         - Git deps with skill_subset or target_subset: returns a dict with 'git' plus
           the applicable optional keys.
+        - Registry deps (object-form ``id:``/``registry:``): always returns a dict
+          with 'id', 'version', plus the applicable optional keys.
         - All other deps: returns the canonical string (same as to_canonical()).
 
         Returns:
-            str or dict: String for simple deps; dict for local-with-subsets, HTTP, or
-            skill/target-subset deps.
+            str or dict: String for simple deps; dict for local-with-subsets, HTTP,
+            registry, or skill/target-subset deps.
 
         Raises:
             ValueError: If this is an unresolved marketplace dependency.
@@ -2006,6 +2014,18 @@ class DependencyReference(ProviderCoordinateMixin):
                 f"Cannot serialize unresolved marketplace dependency "
                 f"'{self.marketplace_plugin_name}@{self.marketplace_name}'"
             )
+        if self.source == "registry":
+            entry: dict[str, object] = {"id": self.repo_url}
+            if self.registry_name:
+                entry["registry"] = self.registry_name
+            if self.virtual_path:
+                entry["path"] = self.virtual_path
+            entry["version"] = self.reference
+            if self.alias:
+                entry["alias"] = self.alias
+            if self.skill_subset:
+                entry["skills"] = sorted(self.skill_subset)
+            return entry
         if self.is_local and self.local_path:
             if self.skill_subset or self.target_subset or self.alias:
                 return local_path_apm_yml_entry(

@@ -370,6 +370,63 @@ class TestObjectFormRegistry:
         assert d.is_local
         assert d.source == "local"
 
+    def test_with_skills(self):
+        d = DependencyReference.parse_from_dict(
+            {
+                "registry": "corp",
+                "id": "a/b",
+                "path": "x.prompt.md",
+                "version": "1.0.0",
+                "skills": ["beta", "alpha", "alpha"],
+            }
+        )
+        assert d.skill_subset == ["alpha", "beta"]
+
+    def test_skills_empty_list_rejected(self):
+        with pytest.raises(ValueError, match="must contain at least one"):
+            DependencyReference.parse_from_dict(
+                {"registry": "corp", "id": "a/b", "version": "1.0.0", "skills": []}
+            )
+
+    def test_skills_path_traversal_rejected(self):
+        with pytest.raises(ValueError, match="traversal"):
+            DependencyReference.parse_from_dict(
+                {"registry": "corp", "id": "a/b", "version": "1.0.0", "skills": ["../evil"]}
+            )
+
+    def test_to_apm_yml_entry_with_skills(self):
+        """Registry entries serialize back to dict form (id/registry/version/skills)."""
+        entry = {"registry": "corp", "id": "a/b", "version": "1.0.0", "skills": ["alpha"]}
+        d = DependencyReference.parse_from_dict(entry)
+        emitted = d.to_apm_yml_entry()
+        assert emitted == {
+            "id": "a/b",
+            "registry": "corp",
+            "version": "1.0.0",
+            "skills": ["alpha"],
+        }
+
+    def test_skills_round_trip(self):
+        entry = {"registry": "corp", "id": "a/b", "version": "1.0.0", "skills": ["alpha"]}
+        emitted = DependencyReference.parse_from_dict(entry).to_apm_yml_entry()
+        d2 = DependencyReference.parse_from_dict(emitted)
+        assert d2.skill_subset == ["alpha"]
+        assert d2.source == "registry"
+        assert d2.registry_name == "corp"
+
+    def test_to_apm_yml_entry_without_skills_preserves_registry_shape(self):
+        """A registry entry with no skills: still serializes as a dict, not a
+        collapsed canonical string (which would drop 'registry'/'id'/'version')."""
+        entry = {"registry": "corp", "id": "a/b", "version": "1.0.0", "alias": "x"}
+        d = DependencyReference.parse_from_dict(entry)
+        emitted = d.to_apm_yml_entry()
+        assert emitted == {
+            "id": "a/b",
+            "registry": "corp",
+            "version": "1.0.0",
+            "alias": "x",
+        }
+
 
 @pytest.mark.xfail(reason="@registry shorthand deferred to v2", strict=True)
 class TestRegistryFieldsRoundTrip:
