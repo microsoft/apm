@@ -2,7 +2,35 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from pathlib import PurePosixPath
+
 from apm_cli.utils.path_security import validate_path_segments
+
+
+def skill_subset_filter_tokens(skill_subset: Iterable[object] | None) -> set[str] | None:
+    """Return match tokens for declared and flattened skill subset names.
+
+    Skill selection accepts source-relative names such as
+    ``productivity/grill-me``, while deployment promotes each selected skill
+    under its leaf name (``grill-me``). Consumers of deployed skill names must
+    use these tokens so install and pack apply the same matching rule.
+    """
+    if not skill_subset:
+        return None
+
+    tokens: set[str] = set()
+    for skill_name in skill_subset:
+        raw_name = str(skill_name).strip()
+        if not raw_name:
+            continue
+        normalized_path = raw_name.replace("\\", "/")
+        leaf_name = PurePosixPath(normalized_path).name
+        tokens.add(raw_name)
+        tokens.add(normalized_path)
+        if leaf_name:
+            tokens.add(leaf_name)
+    return tokens or None
 
 
 def parse_skill_subset(skills_raw: object) -> list[str]:

@@ -22,6 +22,7 @@ from ..deps.lockfile import (
     migrate_lockfile_if_needed,
 )
 from ..models.apm_package import APMPackage, DependencyReference
+from ..models.dependency.subsets import skill_subset_filter_tokens
 from ..utils.archive import (
     projected_archive_path,
     validate_archive_format,
@@ -641,7 +642,7 @@ def _collect_deployed_components(
     components: list[tuple[Path, str]] = []
     missing: list[str] = []
     seen_outputs: set[str] = set()
-    skill_subset = set(dep.skill_subset) if dep.skill_subset else None
+    skill_subset = skill_subset_filter_tokens(dep.skill_subset)
 
     for rel_path in dep.deployed_files:
         try:

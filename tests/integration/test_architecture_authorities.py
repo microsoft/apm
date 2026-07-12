@@ -201,6 +201,21 @@ def test_dependency_winner_selection_has_one_algorithm() -> None:
         assert duplicate not in source
 
 
+def test_skill_subset_filtering_has_one_canonical_owner() -> None:
+    """Install and pack must share one flattened skill-subset matcher."""
+    root = Path(__file__).parents[2]
+    owner = (root / "src/apm_cli/models/dependency/subsets.py").read_text()
+    integrator = (root / "src/apm_cli/integration/skill_integrator.py").read_text()
+    exporter = (root / "src/apm_cli/bundle/plugin_exporter.py").read_text()
+    guard = (root / "scripts/lint-architecture-boundaries.sh").read_text()
+
+    assert "def skill_subset_filter_tokens(" in owner
+    assert "skill_subset_filter_tokens(skill_subset)" in integrator
+    assert "skill_subset_filter_tokens(dep.skill_subset)" in exporter
+    assert "Skill subset filter tokens must come from models/dependency/subsets.py" in guard
+    assert "def _skill_subset_name_filter" not in integrator
+
+
 def test_tls_injection_has_one_canonical_authority() -> None:
     """Only the parent TLS owner and standalone child bootstrap may inject."""
     root = Path(__file__).parents[2]

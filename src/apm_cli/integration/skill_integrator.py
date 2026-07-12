@@ -13,6 +13,7 @@ from pathlib import Path
 from apm_cli.core.deployment_state import MaterializationResult
 from apm_cli.integration.base_integrator import BaseIntegrator
 from apm_cli.integration.targets import TargetProfile
+from apm_cli.models.dependency.subsets import skill_subset_filter_tokens
 from apm_cli.utils.atomic_io import write_text_lf
 
 
@@ -601,25 +602,6 @@ class SkillIntegrator(BaseIntegrator):
         return links_resolved
 
     @staticmethod
-    def _skill_subset_name_filter(skill_subset: tuple[str, ...] | None) -> set[str] | None:
-        """Return promotion filter tokens for --skill subset values."""
-        if not skill_subset:
-            return None
-
-        name_filter: set[str] = set()
-        for skill_name in skill_subset:
-            raw_name = str(skill_name).strip()
-            if not raw_name:
-                continue
-            normalized_path = raw_name.replace("\\", "/")
-            leaf_name = Path(normalized_path).name
-            name_filter.add(raw_name)
-            name_filter.add(normalized_path)
-            if leaf_name:
-                name_filter.add(leaf_name)
-        return name_filter or None
-
-    @staticmethod
     def available_skill_names(package_info) -> frozenset[str] | None:
         """Return names selectable through ``--skill`` for one package."""
         package_path = package_info.install_path
@@ -880,7 +862,7 @@ class SkillIntegrator(BaseIntegrator):
         _dep_ref = getattr(package_info, "dependency_ref", None)
         parent_name = _dep_ref.get_unique_key() if _dep_ref is not None else package_path.name
         owned_by = self._build_skill_ownership_map(project_root)
-        name_filter = self._skill_subset_name_filter(skill_subset)
+        name_filter = skill_subset_filter_tokens(skill_subset)
         count = 0
         all_deployed: list[Path] = []
         seen_skill_dirs: set[Path] = set()
@@ -1217,7 +1199,7 @@ class SkillIntegrator(BaseIntegrator):
         seen_skill_dirs: set[Path] = set()
 
         # Convert skill_subset tuple to promotion filter tokens for O(1) lookup.
-        _name_filter = self._skill_subset_name_filter(skill_subset)
+        _name_filter = skill_subset_filter_tokens(skill_subset)
 
         for idx, target in enumerate(targets):
             if not target.supports("skills"):

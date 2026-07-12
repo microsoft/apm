@@ -119,6 +119,11 @@ if [ "$winner_selector_calls" -ne 3 ]; then
     violations=$((violations + 1))
 fi
 check_pattern \
+    "Skill subset filter tokens must come from models/dependency/subsets.py" \
+    'def _skill_subset_name_filter|set\(dep\.skill_subset\)|Path\(normalized_path\)\.name' \
+    src/apm_cli/integration/skill_integrator.py \
+    src/apm_cli/bundle/plugin_exporter.py
+check_pattern \
     "Resolver queue dedup must preserve ref constraints" \
     'queued_keys.*get_unique_key|get_unique_key.*queued_keys' \
     src/apm_cli/deps/apm_resolver.py
