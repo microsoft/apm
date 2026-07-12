@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   certifi-only behavior. Node (Copilot) and Rust (Codex) children are not yet covered
   and retain their own trust configuration; tracked in #2034.
   (closes #2004) (#2005)
+
 ## [0.25.0] - 2026-07-12
 
 ### Added
