@@ -220,16 +220,12 @@ def build_update_plan(
         ):
             new_ref = old.resolved_ref
 
-        # Cached git-semver dep already at its locked tag: the resolver rewrote
-        # ``dep.reference`` to the concrete tag but stashed the resolved SHA in
-        # ``ctx.git_semver_resolutions`` without attaching it to
-        # ``dep.resolved_reference``, so ``new_commit`` is None here. Borrow the
-        # locked commit when the ref is unchanged AND the locked entry pins an
-        # immutable tag (``resolved_tag`` set) -- otherwise every ``apm update``
-        # would compare the locked SHA against None and emit a spurious UPDATE
-        # that never converges (git-source parity with the registry fix in
-        # #1908). Scoped to tags: a branch tip can advance under a stable ref
-        # name, so branch deps (no ``resolved_tag``) must still surface updates.
+        # Cached git-semver dep at its locked tag: the resolver rewrote
+        # ``dep.reference`` but did not attach the resolved SHA to
+        # ``dep.resolved_reference``, so ``new_commit`` is None. If the ref still
+        # matches a tag-pinned lock entry, borrow its locked SHA, which remains
+        # the integrity anchor. ``resolved_tag`` distinguishes tag resolutions
+        # from movable branches, whose freshly resolved SHAs must remain visible.
         if (
             new_commit is None
             and old is not None

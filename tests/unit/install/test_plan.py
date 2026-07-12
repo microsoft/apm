@@ -247,8 +247,8 @@ class TestBuildUpdatePlan:
         locked SHA against ``None`` and emits a spurious UPDATE on every run -- the
         lockfile then rewrites the identical SHA, so ``apm update`` never converges.
 
-        The locked entry carries a concrete ``resolved_tag`` (immutable), so the
-        matching-ref case is safe to treat as unchanged.
+        The locked entry carries the concrete ``resolved_tag`` produced by semver
+        resolution, so the matching-ref case is safe to treat as unchanged.
         """
         lock = _new_lockfile()
         lock.add_dependency(
@@ -285,10 +285,11 @@ class TestBuildUpdatePlan:
     def test_git_branch_dep_tip_advance_still_shows_update(self):
         """A branch dep whose tip advanced must NOT be masked as unchanged.
 
-        Guards the locked-commit fallback: it applies only to immutable tag refs
-        (locked entry carries ``resolved_tag``). A branch dep has no ``resolved_tag``
-        and its tip can move under a stable ref name, so a freshly-resolved commit
-        that differs from the lockfile must still surface as an update.
+        Guards the locked-commit fallback: it applies only when no fresh SHA exists
+        and the locked entry carries ``resolved_tag``. A branch dep has no
+        ``resolved_tag`` and its tip can move under a stable ref name, so a freshly
+        resolved commit that differs from the lockfile must still surface as an
+        update.
         """
         lock = _new_lockfile()
         lock.add_dependency(
